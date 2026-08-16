@@ -33,8 +33,8 @@ export function Sidebar() {
   return (
     <aside className="w-60 shrink-0 bg-navy-950 text-slate-300 flex flex-col h-full">
       <div className="flex items-center gap-2.5 px-5 h-16 border-b border-white/10">
-        <div className="w-8 h-8 rounded-lg bg-gold-500 text-navy-950 flex items-center justify-center font-bold text-sm shrink-0">
-          BF
+        <div className="w-8 h-8 rounded-full border border-gold-500 flex items-center justify-center shrink-0">
+          <span className="text-white font-semibold text-[13px] tracking-tighter">BF</span>
         </div>
         <span className="font-semibold text-white text-[15px] tracking-tight">Bredell Ferreira</span>
       </div>
