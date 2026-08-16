@@ -127,7 +127,7 @@ function ProfileTab() {
             Save Changes
           </button>
           {saved && (
-            <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600">
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-[#406d58]">
               <Check size={13} /> Saved
             </span>
           )}
@@ -174,7 +174,7 @@ function UsersTab() {
                 <td className="px-3 py-2.5">
                   <button
                     onClick={() => setList((prev) => prev.map((x) => (x.id === u.id ? { ...x, status: x.status === 'Active' ? 'Inactive' : 'Active' } : x)))}
-                    className={`badge ${u.status === 'Active' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'}`}
+                    className={`badge ${u.status === 'Active' ? 'bg-[#eef4f1] text-[#406d58]' : 'bg-slate-100 text-slate-500'}`}
                   >
                     {u.status}
                   </button>
@@ -192,7 +192,7 @@ function UsersTab() {
       {addOpen && (
         <AddUserModal
           onClose={() => setAddOpen(false)}
-          onSave={(u) => setList((prev) => [...prev, { ...u, id: `u${prev.length + 1 + Date.now()}`, status: 'Active', avatarColor: '#3b5bdb' }])}
+          onSave={(u) => setList((prev) => [...prev, { ...u, id: `u${prev.length + 1 + Date.now()}`, status: 'Active', avatarColor: '#6086a9' }])}
         />
       )}
     </Card>
@@ -348,7 +348,7 @@ function CustomFieldsTab() {
                 <td className="px-3 py-2.5 text-slate-500">{f.relatedTo}</td>
                 <td className="px-3 py-2.5 text-slate-500">{f.type}</td>
                 <td className="px-3 py-2.5">
-                  <span className={`badge ${f.status === 'Active' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'}`}>{f.status}</span>
+                  <span className={`badge ${f.status === 'Active' ? 'bg-[#eef4f1] text-[#406d58]' : 'bg-slate-100 text-slate-500'}`}>{f.status}</span>
                 </td>
                 <td className="px-3 py-2.5">
                   <button onClick={() => setFields((prev) => prev.filter((x) => x.id !== f.id))} className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50">
@@ -513,7 +513,7 @@ function IntegrationsTab() {
             </div>
             <button
               onClick={() => setConnected((prev) => ({ ...prev, [i.name]: !prev[i.name] }))}
-              className={`text-xs font-medium px-3 py-1.5 rounded-lg shrink-0 ${connected[i.name] ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+              className={`text-xs font-medium px-3 py-1.5 rounded-lg shrink-0 ${connected[i.name] ? 'bg-[#eef4f1] text-[#406d58]' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
             >
               {connected[i.name] ? 'Connected' : 'Connect'}
             </button>

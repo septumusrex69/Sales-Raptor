@@ -25,18 +25,18 @@ const ICONS: Record<ActivityType, typeof Phone> = {
 }
 
 const ICON_COLORS: Record<ActivityType, string> = {
-  Call: 'bg-blue-50 text-blue-600',
-  Email: 'bg-purple-50 text-purple-600',
-  WhatsApp: 'bg-emerald-50 text-emerald-600',
-  Meeting: 'bg-amber-50 text-amber-600',
+  Call: 'bg-[#edf1f5] text-[#6086a9]',
+  Email: 'bg-[#edf1f5] text-[#416281]',
+  WhatsApp: 'bg-[#eef4f1] text-[#406d58]',
+  Meeting: 'bg-[#f7f4eb] text-[#b28e34]',
   Note: 'bg-slate-100 text-slate-500',
-  Proposal: 'bg-indigo-50 text-indigo-600',
-  Task: 'bg-cyan-50 text-cyan-600',
+  Proposal: 'bg-[#edf1f5] text-[#2b4055]',
+  Task: 'bg-[#f5eeed] text-[#ad6452]',
   'Status change': 'bg-slate-100 text-slate-500',
   'Deal update': 'bg-slate-100 text-slate-500',
-  'Deal Stage Change': 'bg-orange-50 text-orange-600',
-  'Deal Won': 'bg-emerald-50 text-emerald-600',
-  'Deal Lost': 'bg-red-50 text-red-600',
+  'Deal Stage Change': 'bg-[#edf1f5] text-[#416281]',
+  'Deal Won': 'bg-[#f7f3eb] text-[#957323]',
+  'Deal Lost': 'bg-[#f6eeec] text-[#794234]',
 }
 
 const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')

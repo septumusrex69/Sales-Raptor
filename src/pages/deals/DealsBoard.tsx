@@ -14,13 +14,13 @@ import type { WonDealDetails } from '../../store/AppStore'
 
 const OPEN_STAGES = DEAL_STAGES.filter((s) => s !== 'Won' && s !== 'Lost')
 const STAGE_COLORS: Record<DealStage, string> = {
-  'New Lead': '#3b5bdb',
-  Contacted: '#0e9aa7',
-  Qualified: '#2f9e6e',
-  'Proposal Sent': '#c9a227',
-  Negotiation: '#e0673f',
-  Won: '#22c55e',
-  Lost: '#ef4444',
+  'New Lead': '#6086a9',
+  Contacted: '#416281',
+  Qualified: '#406d58',
+  'Proposal Sent': '#b28e34',
+  Negotiation: '#2b4055',
+  Won: '#957323',
+  Lost: '#794234',
 }
 const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')
 
@@ -69,7 +69,7 @@ export function DealsBoard() {
         </Card>
         <Card className="p-4">
           <p className="text-xs text-slate-400">Revenue Won</p>
-          <p className="text-xl font-bold text-emerald-600 mt-1">{formatCurrency(totals.won)}</p>
+          <p className="text-xl font-bold text-[#957323] mt-1">{formatCurrency(totals.won)}</p>
         </Card>
       </div>
 

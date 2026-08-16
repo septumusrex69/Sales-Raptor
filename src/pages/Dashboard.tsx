@@ -10,19 +10,19 @@ import { companyById, formatCurrency, formatDate, timeAgo, TODAY } from '../data
 import type { DealStage } from '../types'
 
 const FUNNEL_STAGES: DealStage[] = ['New Lead', 'Contacted', 'Qualified', 'Proposal Sent', 'Negotiation', 'Won']
-const FUNNEL_COLORS = ['#3b5bdb', '#2f9e6e', '#0e9aa7', '#c9a227', '#e0673f', '#22c55e']
+const FUNNEL_COLORS = ['#6086a9', '#416281', '#406d58', '#b28e34', '#2b4055', '#957323']
 
 const SOURCE_COLORS: Record<string, string> = {
-  Website: '#3b5bdb',
-  Referral: '#2f9e6e',
-  'Google Ads': '#c9a227',
-  LinkedIn: '#8a4fd3',
-  Facebook: '#e0673f',
-  Direct: '#0e9aa7',
-  Email: '#f59e0b',
-  'Existing Client': '#ef4444',
-  'Sales Rep': '#64748b',
-  Event: '#ec4899',
+  Website: '#5f86ab',
+  Referral: '#406d58',
+  'Google Ads': '#b28e34',
+  LinkedIn: '#a1b8ce',
+  Facebook: '#957323',
+  Direct: '#799ab9',
+  Email: '#ad6452',
+  'Existing Client': '#794234',
+  'Sales Rep': '#4d7193',
+  Event: '#30465a',
   Other: '#94a3b8',
 }
 
@@ -241,7 +241,7 @@ export function Dashboard() {
         <div className="px-5 pb-5 divide-y divide-slate-50">
           {tasksDue.map((t) => (
             <div key={t.id} className="flex items-center gap-3 py-2.5">
-              <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: new Date().toISOString() })} className="text-slate-300 hover:text-emerald-500 shrink-0">
+              <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: new Date().toISOString() })} className="text-slate-300 hover:text-[#406d58] shrink-0">
                 <Circle size={18} />
               </button>
               <div className="min-w-0 flex-1">
@@ -249,7 +249,7 @@ export function Dashboard() {
                 <p className="text-[11px] text-slate-400">{t.relatedToLabel ?? t.type}</p>
               </div>
               <PriorityBadge priority={t.priority} />
-              <span className={`text-xs font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-red-500' : 'text-slate-500'}`}>
+              <span className={`text-xs font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[#794234]' : 'text-slate-500'}`}>
                 {daysAgoLabel(t.dueDate)}
               </span>
               <UserAvatar userId={t.ownerId} size={24} />
@@ -257,7 +257,7 @@ export function Dashboard() {
           ))}
           {tasksDue.length === 0 && (
             <div className="py-6 text-center text-sm text-slate-400 flex flex-col items-center gap-2">
-              <CheckCircle2 size={22} className="text-emerald-400" />
+              <CheckCircle2 size={22} className="text-[#406d58]" />
               All caught up — no tasks due.
             </div>
           )}
@@ -273,7 +273,7 @@ function KpiCard({ label, value, delta, small }: { label: string; value: string;
     <Card className={small ? 'p-4' : undefined}>
       <p className="text-xs font-medium text-slate-400">{label}</p>
       <p className={`font-bold text-slate-800 mt-1 ${small ? 'text-xl' : 'text-2xl'}`}>{value}</p>
-      <p className={`flex items-center gap-1 text-xs font-medium mt-1.5 ${positive ? 'text-emerald-600' : 'text-red-500'}`}>
+      <p className={`flex items-center gap-1 text-xs font-medium mt-1.5 ${positive ? 'text-[#406d58]' : 'text-[#794234]'}`}>
         {positive ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
         {Math.abs(delta)}% <span className="text-slate-400 font-normal">vs last month</span>
       </p>

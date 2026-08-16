@@ -232,7 +232,7 @@ function QuickIcon({ icon: Icon, title, onClick }: { icon: typeof Phone; title: 
 }
 
 function ScorePill({ score }: { score: number }) {
-  const tone = score >= 81 ? 'bg-red-100 text-red-700' : score >= 61 ? 'bg-amber-100 text-amber-700' : score >= 31 ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'
+  const tone = score >= 81 ? 'bg-[#f6eeec] text-[#794234]' : score >= 61 ? 'bg-[#f7f4eb] text-[#b28e34]' : score >= 31 ? 'bg-[#edf1f5] text-[#6086a9]' : 'bg-slate-100 text-slate-500'
   return <span className={`inline-flex items-center justify-center w-9 h-6 rounded-md text-xs font-semibold ${tone}`}>{score}</span>
 }
 

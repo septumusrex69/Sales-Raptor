@@ -46,11 +46,11 @@ function daysFromToday(offset: number, hour = 9, minute = 0) {
 // ---------- Users & Teams ----------
 export const users: User[] = [
   { id: 'u1', name: 'Stephan Ferreira', email: 'stephan@bredellferreira.co.za', role: 'Administrator', teamId: 't5', status: 'Active', phone: '082 123 4567', avatarColor: '#c9a227' },
-  { id: 'u2', name: 'Rinda Marais', email: 'rinda@bredellferreira.co.za', role: 'Sales Manager', teamId: 't2', status: 'Active', phone: '082 234 5678', avatarColor: '#3b5bdb' },
-  { id: 'u3', name: 'Nicole Loder', email: 'nicole@bredellferreira.co.za', role: 'Sales Representative', teamId: 't2', status: 'Active', phone: '082 345 6789', avatarColor: '#2f9e6e' },
-  { id: 'u4', name: 'Kea Mokoena', email: 'kea@bredellferreira.co.za', role: 'Sales Representative', teamId: 't3', status: 'Active', phone: '082 456 7890', avatarColor: '#e0673f' },
-  { id: 'u5', name: 'Vusi Nkosi', email: 'vusi@bredellferreira.co.za', role: 'Sales Representative', teamId: 't4', status: 'Active', phone: '082 567 8901', avatarColor: '#8a4fd3' },
-  { id: 'u6', name: 'Thandiwe Zulu', email: 'thandiwe@bredellferreira.co.za', role: 'Sales Representative', teamId: 't3', status: 'Active', phone: '082 678 9012', avatarColor: '#0e9aa7' },
+  { id: 'u2', name: 'Rinda Marais', email: 'rinda@bredellferreira.co.za', role: 'Sales Manager', teamId: 't2', status: 'Active', phone: '082 234 5678', avatarColor: '#416281' },
+  { id: 'u3', name: 'Nicole Loder', email: 'nicole@bredellferreira.co.za', role: 'Sales Representative', teamId: 't2', status: 'Active', phone: '082 345 6789', avatarColor: '#406d58' },
+  { id: 'u4', name: 'Kea Mokoena', email: 'kea@bredellferreira.co.za', role: 'Sales Representative', teamId: 't3', status: 'Active', phone: '082 456 7890', avatarColor: '#ad6452' },
+  { id: 'u5', name: 'Vusi Nkosi', email: 'vusi@bredellferreira.co.za', role: 'Sales Representative', teamId: 't4', status: 'Active', phone: '082 567 8901', avatarColor: '#2b4055' },
+  { id: 'u6', name: 'Thandiwe Zulu', email: 'thandiwe@bredellferreira.co.za', role: 'Sales Representative', teamId: 't3', status: 'Active', phone: '082 678 9012', avatarColor: '#6086a9' },
   { id: 'u7', name: 'Pieter van Wyk', email: 'pieter@bredellferreira.co.za', role: 'Read Only', teamId: 't5', status: 'Inactive', phone: '082 789 0123', avatarColor: '#6b7280' },
 ]
 

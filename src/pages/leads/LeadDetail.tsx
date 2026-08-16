@@ -44,7 +44,7 @@ export function LeadDetail() {
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-3.5">
-            <Avatar name={`${lead.firstName} ${lead.lastName}`} color="#3b5bdb" size={48} />
+            <Avatar name={`${lead.firstName} ${lead.lastName}`} color="#6086a9" size={48} />
             <div>
               <h2 className="text-lg font-semibold text-slate-800">{lead.firstName} {lead.lastName}</h2>
               <p className="text-sm text-slate-500">{lead.jobTitle ? `${lead.jobTitle} at ` : ''}{lead.companyName}</p>

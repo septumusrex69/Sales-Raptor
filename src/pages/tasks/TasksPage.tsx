@@ -74,7 +74,7 @@ export function TasksPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="p-4">
           <p className="text-xs text-slate-400">Overdue</p>
-          <p className="text-xl font-bold text-red-500 mt-1">{counts.overdue}</p>
+          <p className="text-xl font-bold text-[#794234] mt-1">{counts.overdue}</p>
         </Card>
         <Card className="p-4">
           <p className="text-xs text-slate-400">Due Today</p>
@@ -86,7 +86,7 @@ export function TasksPage() {
         </Card>
         <Card className="p-4">
           <p className="text-xs text-slate-400">Completed</p>
-          <p className="text-xl font-bold text-emerald-600 mt-1">{tasks.filter((t) => t.status === 'Completed').length}</p>
+          <p className="text-xl font-bold text-[#406d58] mt-1">{tasks.filter((t) => t.status === 'Completed').length}</p>
         </Card>
       </div>
 
@@ -133,7 +133,7 @@ export function TasksPage() {
                 </div>
                 <PriorityBadge priority={t.priority} />
                 <TaskStatusBadge status={t.status} />
-                <span className={`text-xs font-medium w-24 text-right shrink-0 ${overdue ? 'text-red-500' : 'text-slate-500'}`}>{formatDate(t.dueDate)}</span>
+                <span className={`text-xs font-medium w-24 text-right shrink-0 ${overdue ? 'text-[#794234]' : 'text-slate-500'}`}>{formatDate(t.dueDate)}</span>
                 <UserAvatar userId={t.ownerId} size={24} />
                 <button onClick={() => setRescheduleTask(t)} className="text-xs font-medium text-brand-600 hover:underline shrink-0">
                   Reschedule

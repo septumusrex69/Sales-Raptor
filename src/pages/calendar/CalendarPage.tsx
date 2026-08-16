@@ -19,12 +19,12 @@ interface CalEvent {
 }
 
 const TYPE_COLORS: Record<string, string> = {
-  Call: '#3b5bdb',
-  'Follow-up': '#0e9aa7',
-  Email: '#8a4fd3',
-  Proposal: '#c9a227',
-  Meeting: '#2f9e6e',
-  WhatsApp: '#22c55e',
+  Call: '#6086a9',
+  'Follow-up': '#416281',
+  Email: '#2b4055',
+  Proposal: '#b28e34',
+  Meeting: '#406d58',
+  WhatsApp: '#957323',
   Research: '#64748b',
   'Internal task': '#64748b',
   Other: '#94a3b8',
@@ -45,7 +45,7 @@ export function CalendarPage() {
       .map((t) => ({ id: `t-${t.id}`, title: t.title, date: new Date(t.dueDate), color: TYPE_COLORS[t.type] ?? '#94a3b8', ownerId: t.ownerId, sub: t.relatedToLabel }))
     const closeEvents = deals
       .filter((d) => d.stage !== 'Won' && d.stage !== 'Lost')
-      .map((d) => ({ id: `d-${d.id}`, title: `${d.name} — Expected Close`, date: new Date(d.expectedCloseDate), color: '#e0673f', ownerId: d.ownerId, sub: companyById(d.companyId)?.name }))
+      .map((d) => ({ id: `d-${d.id}`, title: `${d.name} — Expected Close`, date: new Date(d.expectedCloseDate), color: '#ad6452', ownerId: d.ownerId, sub: companyById(d.companyId)?.name }))
     return [...taskEvents, ...closeEvents]
   }, [tasks, deals])
 

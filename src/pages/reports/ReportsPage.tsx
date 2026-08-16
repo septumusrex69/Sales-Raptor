@@ -9,7 +9,7 @@ import { DEAL_STAGES } from '../../types'
 const TABS = ['Overview', 'Leads', 'Pipeline', 'Salespeople', 'Sources', 'Lost Deals'] as const
 type Tab = (typeof TABS)[number]
 const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')
-const BAR_COLOR = '#3b5bdb'
+const BAR_COLOR = '#2b4055'
 
 export function ReportsPage() {
   const { leads, deals, activities, tasks } = useAppStore()
@@ -128,7 +128,7 @@ export function ReportsPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Stat label="Pipeline Value" value={formatCurrency(stats.pipelineValue)} />
             <Stat label="Weighted Pipeline" value={formatCurrency(Math.round(stats.weightedPipeline))} />
-            <Stat label="Revenue Won" value={formatCurrency(stats.revenueWon)} tone="text-emerald-600" />
+            <Stat label="Revenue Won" value={formatCurrency(stats.revenueWon)} tone="text-[#957323]" />
             <Stat label="Win Rate" value={`${stats.winRate}%`} />
             <Stat label="Total Leads" value={String(stats.totalLeads)} />
             <Stat label="Qualified Leads" value={String(stats.qualified)} />
@@ -152,8 +152,8 @@ export function ReportsPage() {
         <div className="space-y-5">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Stat label="Leads Created" value={String(stats.totalLeads)} />
-            <Stat label="Qualified" value={String(stats.qualified)} tone="text-emerald-600" />
-            <Stat label="Unqualified" value={String(stats.unqualified)} tone="text-red-500" />
+            <Stat label="Qualified" value={String(stats.qualified)} tone="text-[#406d58]" />
+            <Stat label="Unqualified" value={String(stats.unqualified)} tone="text-[#794234]" />
             <Stat label="Conversion Rate" value={`${stats.conversionRate}%`} />
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -299,7 +299,7 @@ export function ReportsPage() {
                     <PieChart>
                       <Pie data={lostByReason} dataKey="value" nameKey="name" innerRadius={45} outerRadius={80} paddingAngle={2} isAnimationActive={false}>
                         {lostByReason.map((_, i) => (
-                          <Cell key={i} fill={['#ef4444', '#f59e0b', '#8a4fd3', '#3b5bdb', '#64748b', '#0e9aa7', '#e0673f', '#c9a227', '#2f9e6e', '#ec4899'][i % 10]} />
+                          <Cell key={i} fill={['#794234', '#b28e34', '#5f86ab', '#406d58', '#ad6452', '#3f5d78', '#957323', '#94a3b8', '#799ab9', '#a1b8ce'][i % 10]} />
                         ))}
                       </Pie>
                       <Tooltip />
