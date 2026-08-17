@@ -233,19 +233,31 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       fetchTable<Proposal>('proposals', 'created_at'),
       fetchTable<User>('profiles', 'created_at'),
       fetchTable<{ id: ID; name: string }>('teams', 'created_at'),
-    ]).then(([l, d, ct, co, tk, ac, pr, us, tm]) => {
-      if (!active) return
-      setLeads(l)
-      setDeals(d)
-      setContacts(ct)
-      setCompanies(co)
-      setTasks(rollOverMissedTasks(tk))
-      setActivities(ac)
-      setProposals(pr)
-      setUsers(us)
-      setTeamRows(tm)
-      setDataLoading(false)
-    })
+    ])
+      .then(([l, d, ct, co, tk, ac, pr, us, tm]) => {
+        if (!active) return
+        setLeads(l)
+        setDeals(d)
+        setContacts(ct)
+        setCompanies(co)
+        setTasks(rollOverMissedTasks(tk))
+        setActivities(ac)
+        setProposals(pr)
+        setUsers(us)
+        setTeamRows(tm)
+        setDataLoading(false)
+      })
+      .catch((err: unknown) => {
+        if (!active) return
+        // A single table throwing (vs. returning a Postgrest error field, which
+        // fetchTable already swallows) would otherwise silently abort this
+        // Promise.all and leave every entity stuck at its empty initial state
+        // with no indication anything went wrong — surface it instead.
+        const message = err instanceof Error ? err.message : String(err)
+        console.error('[AppStore] initial data load failed:', message)
+        showError(`Failed to load your data: ${message}`)
+        setDataLoading(false)
+      })
     return () => {
       active = false
     }
