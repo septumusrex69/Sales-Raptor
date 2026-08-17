@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, X } from 'lucide-react'
-import { companies, contacts, deals, leads } from '../../data/mockData'
+import { companies, contacts, deals, formatLeadNumber, leads } from '../../data/mockData'
 
 interface Result {
   id: string
@@ -31,8 +31,9 @@ export function GlobalSearch() {
     const out: Result[] = []
     for (const l of leads) {
       const label = `${l.firstName} ${l.lastName}`
-      if (label.toLowerCase().includes(q) || l.companyName.toLowerCase().includes(q)) {
-        out.push({ id: l.id, label, sub: `Lead · ${l.companyName}`, path: `/leads/${l.id}`, kind: 'Lead' })
+      const leadNumber = formatLeadNumber(l.leadNumber)
+      if (label.toLowerCase().includes(q) || l.companyName.toLowerCase().includes(q) || leadNumber.toLowerCase().includes(q)) {
+        out.push({ id: l.id, label, sub: `Lead ${leadNumber} · ${l.companyName}`, path: `/leads/${l.id}`, kind: 'Lead' })
       }
     }
     for (const c of contacts) {

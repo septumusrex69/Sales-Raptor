@@ -7,7 +7,7 @@ import { StatusBadge, ServiceBadge } from '../../components/ui/Badge'
 import { Avatar, UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
-import { formatCurrency, formatDate, formatDateTime, industries, leadSources, userById, users } from '../../data/mockData'
+import { formatCurrency, formatDate, formatDateTime, formatLeadNumber, industries, leadSources, userById, users } from '../../data/mockData'
 import type { ActivityType, LeadStatus, TaskType } from '../../types'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, estimatedProjectValueLabel } from '../../components/leads/LeadOpportunityFields'
 
@@ -49,6 +49,7 @@ export function LeadDetail() {
           <div className="flex items-start gap-3.5">
             <Avatar name={`${lead.firstName} ${lead.lastName}`} color="#6086a9" size={48} />
             <div>
+              <p className="text-xs font-medium text-slate-400 tracking-wide">{formatLeadNumber(lead.leadNumber)}</p>
               <h2 className="text-lg font-semibold text-slate-800">{lead.firstName} {lead.lastName}</h2>
               <p className="text-sm text-slate-500">{lead.jobTitle ? `${lead.jobTitle} at ` : ''}{lead.companyName}</p>
               <div className="flex items-center gap-2 mt-2">

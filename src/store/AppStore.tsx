@@ -19,6 +19,13 @@ function nextId(prefix: string) {
   return `${prefix}${idCounter}`
 }
 
+/** Dedicated, never-reused counter for Lead.leadNumber — kept separate from idCounter so it stays gap-free. */
+let leadNumberCounter = initialLeads.length
+function nextLeadNumber() {
+  leadNumberCounter += 1
+  return leadNumberCounter
+}
+
 function startOfDay(d: Date) {
   const x = new Date(d)
   x.setHours(0, 0, 0, 0)
@@ -131,6 +138,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const addLead = useCallback<AppActions['addLead']>((input) => {
     const lead: Lead = {
       id: nextId('l'),
+      leadNumber: nextLeadNumber(),
       status: 'New',
       source: 'Direct',
       score: 10,

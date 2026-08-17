@@ -45,6 +45,8 @@ export type ProductService =
 
 export interface Lead {
   id: ID
+  /** Permanent, sequential, never-reused display number (formatted via formatLeadNumber → "SR-00001"). */
+  leadNumber: number
   firstName: string
   lastName: string
   jobTitle?: string

@@ -201,6 +201,7 @@ export const leads: Lead[] = Array.from({ length: 110 }).map((_, i) => {
   const hasOther = leadServices.includes('Other')
   return {
     id: `l${i + 1}`,
+    leadNumber: i + 1,
     firstName: first,
     lastName: last,
     jobTitle: pick(['Owner', 'Manager', 'Director', 'Buyer', 'Coordinator']),
@@ -422,6 +423,19 @@ export function formatCurrency(value: number) {
 export function formatDate(iso?: string) {
   if (!iso) return '—'
   return new Intl.DateTimeFormat('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(iso))
+}
+
+export function formatLeadNumber(n: number) {
+  return `SR-${String(n).padStart(5, '0')}`
+}
+
+/** Day-grained relative label for Last Contact ("Today"/"Yesterday"/"N days ago") — distinct from timeAgo's minute/hour granularity used in activity feeds. */
+export function daysAgoLabel(iso?: string) {
+  if (!iso) return undefined
+  const diffDays = Math.floor((TODAY.getTime() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24))
+  if (diffDays <= 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  return `${diffDays} days ago`
 }
 
 export function formatDateTime(iso?: string) {

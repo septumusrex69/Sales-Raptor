@@ -1,4 +1,4 @@
-import type { ActivityType, DealStage, LeadSource, ProductService, TaskType } from '../types'
+import type { ActivityType, DealStage, LeadClassification, LeadSource, ProductService, TaskType } from '../types'
 
 /**
  * Single source of truth for the navy/gold-minimal categorical palette
@@ -102,6 +102,20 @@ export const TASK_TYPE_COLORS: Record<TaskType, string> = {
   Research: '#64748b',
   'Internal task': '#64748b',
   Other: '#94a3b8',
+}
+
+export const CLASSIFICATION_COLORS: Record<LeadClassification, string> = {
+  A: '#957323',
+  B: '#6086a9',
+  C: '#b28e34',
+  D: '#64748b',
+}
+
+export const CLASSIFICATION_TAILWIND: Record<LeadClassification, string> = {
+  A: 'bg-[#f7f3eb] text-[#957323]',
+  B: 'bg-[#edf1f5] text-[#6086a9]',
+  C: 'bg-[#f7f4eb] text-[#b28e34]',
+  D: 'bg-slate-100 text-slate-500',
 }
 
 export const DEAL_CLOSE_EVENT_COLOR = '#ad6452'
