@@ -44,7 +44,7 @@ export function SettingsPage() {
 }
 
 function ProfileTab() {
-  const { currentUser } = useAuth()
+  const { currentUser, updateCurrentUserLocal } = useAuth()
   const { updateUser } = useAppStore()
   const [form, setForm] = useState({
     fullName: currentUser?.name ?? '',
@@ -70,7 +70,11 @@ function ProfileTab() {
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          if (currentUser) updateUser(currentUser.id, { name: form.fullName, phone: form.phone || undefined })
+          if (currentUser) {
+            const patch = { name: form.fullName, phone: form.phone || undefined }
+            updateUser(currentUser.id, patch)
+            updateCurrentUserLocal(patch)
+          }
           setSaved(true)
           setTimeout(() => setSaved(false), 2000)
         }}

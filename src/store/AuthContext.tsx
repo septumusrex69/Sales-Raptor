@@ -34,6 +34,8 @@ interface AuthContextValue {
   loading: boolean
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
+  /** Patches the locally-held profile immediately (e.g. after Settings → Profile saves a name/phone change), so the UI doesn't wait on a refetch to reflect it. */
+  updateCurrentUserLocal: (patch: Partial<User>) => void
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -80,7 +82,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut()
   }
 
-  return <AuthContext.Provider value={{ session, currentUser, loading, signIn, signOut }}>{children}</AuthContext.Provider>
+  function updateCurrentUserLocal(patch: Partial<User>) {
+    setCurrentUser((prev) => (prev ? { ...prev, ...patch } : prev))
+  }
+
+  return (
+    <AuthContext.Provider value={{ session, currentUser, loading, signIn, signOut, updateCurrentUserLocal }}>{children}</AuthContext.Provider>
+  )
 }
 
 export function useAuth() {
