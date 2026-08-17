@@ -3,12 +3,13 @@ import { useNavigate, useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Pencil, ArrowRightLeft, StickyNote, CheckSquare, Calendar, XCircle, Phone, Mail, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card, CardHeader } from '../../components/ui/Card'
-import { StatusBadge } from '../../components/ui/Badge'
+import { StatusBadge, ServiceBadge } from '../../components/ui/Badge'
 import { Avatar, UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
-import { formatCurrency, formatDate, formatDateTime, industries, leadSources, provinces, services, userById, users } from '../../data/mockData'
+import { formatCurrency, formatDate, formatDateTime, industries, leadSources, userById, users } from '../../data/mockData'
 import type { ActivityType, LeadStatus, TaskType } from '../../types'
+import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, estimatedProjectValueLabel } from '../../components/leads/LeadOpportunityFields'
 
 const ALL_STATUSES: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Qualified', 'Unqualified', 'Proposal Required', 'Converted', 'Lost']
 const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')
@@ -54,6 +55,13 @@ export function LeadDetail() {
                 <StatusBadge status={lead.status} />
                 <span className="text-xs text-slate-400">Source: {lead.source}</span>
               </div>
+              {lead.services && lead.services.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2.5">
+                  {lead.services.map((s) => (
+                    <ServiceBadge key={s} service={s} />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
           <div className="text-right">
@@ -98,8 +106,9 @@ export function LeadDetail() {
               <Field label="Mobile Number" value={lead.mobile} icon={Phone} href={lead.mobile ? `tel:${lead.mobile}` : undefined} />
               <Field label="Office Number" value={lead.phone} icon={Phone} href={lead.phone ? `tel:${lead.phone}` : undefined} />
               <Field label="Industry" value={lead.industry} />
+              <Field label="Country" value={lead.country} />
               <Field label="Province" value={lead.province} />
-              <Field label="City" value={lead.city} />
+              <Field label="City / Town" value={lead.city} />
               <Field label="Address" value={lead.address} />
             </dl>
           </Card>
@@ -113,7 +122,7 @@ export function LeadDetail() {
               <Field label="Lead Status" value={lead.status} />
               <Field label="Lead Score" value={`${lead.score} / 100`} />
               <Field label="Estimated Value" value={formatCurrency(lead.estimatedValue)} />
-              <Field label="Service Interested In" value={lead.serviceInterested} />
+              <Field label="Classification" value={lead.classification ? `Class ${lead.classification}` : undefined} />
               <Field label="Date Created" value={formatDate(lead.createdAt)} />
               <Field label="Last Contact" value={formatDate(lead.lastContactAt)} />
               <Field label="Next Follow-up" value={formatDate(lead.nextFollowUpAt)} />
@@ -123,6 +132,23 @@ export function LeadDetail() {
                 <p className="text-xs font-medium text-slate-400 mb-1">Notes</p>
                 <p className="text-sm text-slate-600">{lead.notes}</p>
               </div>
+            )}
+          </Card>
+
+          <Card>
+            <CardHeader title="Opportunity Information" />
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
+              <Field label={estimatedProjectValueLabel(lead.services ?? [])} value={lead.estimatedProjectValue != null ? formatCurrency(lead.estimatedProjectValue) : undefined} />
+              {lead.services?.includes('Debt Collection') && (
+                <>
+                  <Field label="Estimated Handover Amount" value={lead.estimatedHandoverAmount != null ? formatCurrency(lead.estimatedHandoverAmount) : undefined} />
+                  <Field label="Estimated Number of Accounts / Matters" value={lead.estimatedAccountsCount != null ? String(lead.estimatedAccountsCount) : undefined} />
+                </>
+              )}
+              {lead.services?.includes('Other') && <Field label="Other Service — Please Specify" value={lead.otherServiceDetail} />}
+            </dl>
+            {(!lead.services || lead.services.length === 0) && !lead.estimatedProjectValue && (
+              <p className="text-xs text-slate-400">No products or services captured yet. Use Edit to add opportunity details.</p>
             )}
           </Card>
         </div>
@@ -209,12 +235,13 @@ function Field({ label, value, icon: Icon, href }: { label: string; value?: stri
 
 function EditLeadModal({ lead, onClose, onSave }: { lead: ReturnType<typeof useAppStore>['leads'][number]; onClose: () => void; onSave: (patch: Partial<typeof lead>) => void }) {
   const [form, setForm] = useState({ ...lead })
+  const [opportunity, setOpportunity] = useState(() => leadOpportunityValueFromLead(lead))
   return (
     <Modal title="Edit Lead" onClose={onClose} width={560}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          onSave(form)
+          onSave({ ...form, ...leadOpportunityPatch(opportunity) })
           onClose()
         }}
       >
@@ -257,14 +284,6 @@ function EditLeadModal({ lead, onClose, onSave }: { lead: ReturnType<typeof useA
           <FormField label="Lead Score">
             <input type="number" min={0} max={100} className={inputClass} value={form.score} onChange={(e) => setForm({ ...form, score: Number(e.target.value) })} />
           </FormField>
-          <FormField label="Service Interested In">
-            <select className={inputClass} value={form.serviceInterested ?? ''} onChange={(e) => setForm({ ...form, serviceInterested: e.target.value })}>
-              <option value="">—</option>
-              {services.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
-          </FormField>
           <FormField label="Owner">
             <select className={inputClass} value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>
               {reps.map((r) => (
@@ -282,15 +301,8 @@ function EditLeadModal({ lead, onClose, onSave }: { lead: ReturnType<typeof useA
               ))}
             </select>
           </FormField>
-          <FormField label="Province">
-            <select className={inputClass} value={form.province ?? ''} onChange={(e) => setForm({ ...form, province: e.target.value })}>
-              <option value="">—</option>
-              {provinces.map((p) => (
-                <option key={p}>{p}</option>
-              ))}
-            </select>
-          </FormField>
         </div>
+        <LeadOpportunityFields value={opportunity} onChange={setOpportunity} />
         <FormField label="Notes">
           <textarea className={inputClass} rows={3} value={form.notes ?? ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
         </FormField>

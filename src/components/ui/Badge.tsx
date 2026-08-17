@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 import clsx from 'clsx'
+import type { ProductService } from '../../types'
+import { SERVICE_TAILWIND } from '../../lib/colors'
 
 const TONES = {
   slate: 'bg-slate-100 text-slate-600',
@@ -68,4 +70,8 @@ export function PriorityBadge({ priority }: { priority: string }) {
 
 export function TaskStatusBadge({ status }: { status: string }) {
   return <Badge tone={TASK_STATUS_TONE[status] ?? 'slate'}>{status}</Badge>
+}
+
+export function ServiceBadge({ service, className }: { service: ProductService; className?: string }) {
+  return <span className={clsx('badge', SERVICE_TAILWIND[service] ?? SERVICE_TAILWIND.Other, className)}>{service}</span>
 }

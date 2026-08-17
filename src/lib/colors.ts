@@ -1,4 +1,4 @@
-import type { ActivityType, DealStage, LeadSource, TaskType } from '../types'
+import type { ActivityType, DealStage, LeadSource, ProductService, TaskType } from '../types'
 
 /**
  * Single source of truth for the navy/gold-minimal categorical palette
@@ -28,7 +28,38 @@ export const SOURCE_COLORS: Record<LeadSource, string> = {
   'Existing Client': '#794234',
   'Sales Rep': '#4d7193',
   Event: '#30465a',
+  ChatGPT: '#5c7d5f',
+  Claude: '#b28e34',
+  Gemini: '#4d7193',
   Other: '#94a3b8',
+}
+
+export const SERVICE_COLORS: Record<ProductService, string> = {
+  'Debt Collection': '#957323',
+  Litigation: '#2b4055',
+  'Executive Listing': '#6086a9',
+  iCollect: '#b28e34',
+  'Contract Drafting': '#4d7193',
+  'In-Person Debt Collection': '#794234',
+  'Credit Check': '#416281',
+  Tracing: '#406d58',
+  NovaCall: '#355069',
+  'Labour Law': '#ad6452',
+  Other: '#64748b',
+}
+
+export const SERVICE_TAILWIND: Record<ProductService, string> = {
+  'Debt Collection': 'bg-[#f7f3eb] text-[#957323]',
+  Litigation: 'bg-[#edf1f5] text-[#2b4055]',
+  'Executive Listing': 'bg-[#edf1f5] text-[#6086a9]',
+  iCollect: 'bg-[#f7f4eb] text-[#b28e34]',
+  'Contract Drafting': 'bg-[#edf1f5] text-[#4d7193]',
+  'In-Person Debt Collection': 'bg-[#f6eeec] text-[#794234]',
+  'Credit Check': 'bg-[#edf1f5] text-[#416281]',
+  Tracing: 'bg-[#eef4f1] text-[#406d58]',
+  NovaCall: 'bg-[#edf1f5] text-[#355069]',
+  'Labour Law': 'bg-[#f5eeed] text-[#ad6452]',
+  Other: 'bg-slate-100 text-slate-500',
 }
 
 export const ACTIVITY_TYPE_COLORS: Record<ActivityType, string> = {

@@ -9,11 +9,11 @@ import { RowMenu } from '../../components/ui/RowMenu'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { LeadForm } from '../../components/layout/QuickAdd'
-import { formatCurrency, formatDate, industries, leadSources, provinces, userById, users } from '../../data/mockData'
+import { formatCurrency, formatDate, industries, leadClassifications, leadSources, provinces, services, userById, users } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
 import { decodeSalesMonthParam, isWithinPeriod } from '../../lib/salesMonth'
 import { isMeaningfulActivity } from '../../lib/meaningfulActivity'
-import type { Lead, LeadStatus } from '../../types'
+import type { Lead, LeadClassification, LeadStatus, ProductService } from '../../types'
 
 const ALL_STATUSES: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Qualified', 'Unqualified', 'Proposal Required', 'Converted', 'Lost']
 const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')
@@ -30,16 +30,20 @@ export function LeadsList() {
   const [owner, setOwner] = useState<'All' | string>(() => readParam(searchParams, 'owner') ?? 'All')
   const [showFilters, setShowFilters] = useState(false)
   const [industry, setIndustry] = useState('All')
-  const [province, setProvince] = useState('All')
+  const [province, setProvince] = useState(() => readParam(searchParams, 'province') ?? 'All')
   const [minScore, setMinScore] = useState('')
+  const [service, setService] = useState<'All' | ProductService>(() => (readParam(searchParams, 'service') as ProductService) ?? 'All')
+  const [classification, setClassification] = useState<'All' | LeadClassification>(() => (readParam(searchParams, 'classification') as LeadClassification) ?? 'All')
   const [addOpen, setAddOpen] = useState(false)
   const [reassignLead, setReassignLead] = useState<Lead | null>(null)
   const [deleteLeadTarget, setDeleteLeadTarget] = useState<Lead | null>(null)
 
-  // One-time drill-down filters carried in from Dashboard links — not exposed as UI controls.
+  // One-time drill-down filters carried in from Dashboard/Reports links — not exposed as UI controls.
   const [salesMonthFilter] = useState(() => decodeSalesMonthParam(searchParams.get('salesMonth')))
   const [noNextActionFilter] = useState(() => readParam(searchParams, 'noNextAction') === '1')
   const [touchedFilter] = useState(() => readParam(searchParams, 'touched'))
+  const [countryFilter] = useState(() => readParam(searchParams, 'country'))
+  const [cityFilter] = useState(() => readParam(searchParams, 'city'))
 
   const filtered = useMemo(() => {
     const touchedLeadIds = touchedFilter
@@ -56,6 +60,10 @@ export function LeadsList() {
       if (industry !== 'All' && l.industry !== industry) return false
       if (province !== 'All' && l.province !== province) return false
       if (minScore && l.score < Number(minScore)) return false
+      if (service !== 'All' && !l.services?.includes(service)) return false
+      if (classification !== 'All' && l.classification !== classification) return false
+      if (countryFilter && l.country !== countryFilter) return false
+      if (cityFilter && l.city !== cityFilter) return false
       if (salesMonthFilter && !isWithinPeriod(l.createdAt, salesMonthFilter)) return false
       if (noNextActionFilter && l.nextFollowUpAt) return false
       if (touchedFilter && touchedLeadIds) {
@@ -70,7 +78,24 @@ export function LeadsList() {
       }
       return true
     })
-  }, [leads, activities, status, source, owner, industry, province, minScore, search, salesMonthFilter, noNextActionFilter, touchedFilter])
+  }, [
+    leads,
+    activities,
+    status,
+    source,
+    owner,
+    industry,
+    province,
+    minScore,
+    service,
+    classification,
+    countryFilter,
+    cityFilter,
+    search,
+    salesMonthFilter,
+    noNextActionFilter,
+    touchedFilter,
+  ])
 
   function logQuickAction(lead: Lead, type: 'Call' | 'Email' | 'WhatsApp') {
     addActivity({ type, subject: `${type} with ${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId })
@@ -127,12 +152,30 @@ export function LeadsList() {
             <FormField label="Min Lead Score">
               <input type="number" className={inputClass} value={minScore} onChange={(e) => setMinScore(e.target.value)} placeholder="0" />
             </FormField>
+            <FormField label="Service">
+              <select className={inputClass} value={service} onChange={(e) => setService(e.target.value as typeof service)}>
+                <option>All</option>
+                {services.map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+            </FormField>
+            <FormField label="Classification">
+              <select className={inputClass} value={classification} onChange={(e) => setClassification(e.target.value as typeof classification)}>
+                <option>All</option>
+                {leadClassifications.map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+            </FormField>
             <div className="flex items-end">
               <button
                 onClick={() => {
                   setIndustry('All')
                   setProvince('All')
                   setMinScore('')
+                  setService('All')
+                  setClassification('All')
                 }}
                 className="text-sm font-medium text-slate-500 hover:text-slate-700"
               >

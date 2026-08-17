@@ -9,9 +9,11 @@ import type {
   DealStage,
   ID,
   Lead,
+  LeadClassification,
   LeadSource,
   LeadStatus,
   LossReason,
+  ProductService,
   Proposal,
   Task,
   TaskPriority,
@@ -66,7 +68,7 @@ export const currentUser = users[0]
 
 // ---------- Reference data ----------
 export const leadSources: LeadSource[] = [
-  'Website', 'Google Ads', 'Referral', 'LinkedIn', 'Facebook', 'Direct', 'Email', 'Existing Client', 'Sales Rep', 'Event', 'Other',
+  'Website', 'Google Ads', 'Referral', 'LinkedIn', 'Facebook', 'Direct', 'Email', 'Existing Client', 'Sales Rep', 'Event', 'ChatGPT', 'Claude', 'Gemini', 'Other',
 ]
 
 export const lossReasons: LossReason[] = [
@@ -75,17 +77,25 @@ export const lossReasons: LossReason[] = [
 
 export const industries = ['Construction', 'Legal', 'Education', 'Property', 'IT Services', 'Retail', 'Manufacturing', 'Healthcare', 'Hospitality', 'Financial Services']
 export const provinces = ['Gauteng', 'Western Cape', 'KwaZulu-Natal', 'Eastern Cape', 'Free State', 'Mpumalanga']
-export const services = [
+export const countries = ['South Africa']
+export const leadClassifications: LeadClassification[] = ['A', 'B', 'C', 'D']
+
+/** Canonical product/service list — shared by Lead.services (multi-select) and Deal.service. */
+export const services: ProductService[] = [
   'Debt Collection',
   'Litigation',
   'Executive Listing',
-  'Letter of Demand / iCollect',
+  'iCollect',
   'Contract Drafting',
-  'Tracing',
-  'Credit Checks',
   'In-Person Debt Collection',
+  'Credit Check',
+  'Tracing',
+  'NovaCall',
   'Labour Law',
+  'Other',
 ]
+/** Services offered for pick() weighting — excludes 'Other' so seeded leads mostly land on a real service. */
+const pickableServices = services.filter((s) => s !== 'Other')
 
 export const customFields: CustomField[] = [
   { id: 'cf1', name: 'Lead Source', relatedTo: 'Leads', type: 'Dropdown', status: 'Active' },
@@ -167,6 +177,18 @@ export const contacts: Contact[] = contactSeed.map(([first, last, companyId], i)
 const leadStatuses: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Qualified', 'Unqualified', 'Proposal Required', 'Converted', 'Lost']
 const leadFirstNames = ['John', 'Nomsa', 'Michael', 'Sarah', 'David', 'Thabo', 'Lisa', 'James', 'Amanda', 'Sipho', 'Emma', 'Themba', 'Chantelle', 'Werner', 'Precious', 'Karabo', 'Zanele', 'Riaan', 'Fatima', 'Andile', 'Cindy', 'Bongani', 'Melissa', 'Sizwe', 'Hannah', 'Kagiso', 'Tumi', 'Wayne', 'Noluthando', 'Christo']
 const leadLastNames = ['Smith', 'Dlamini', 'Brown', 'Johnson', 'Wilson', 'Mokoena', 'van der Merwe', 'Naidoo', 'Peters', 'Khumalo', 'Botha', 'Ngcobo', 'Adams', 'Kruger', 'Mahlangu', 'Sithole', 'Coetzee', 'Pillay', 'Abrahams', 'Mnguni']
+const otherServiceExamples = ['Custom compliance audit', 'Skip tracing for international debtor', 'Ad hoc legal consultation', 'Fleet recovery assistance']
+
+/** Mostly 1 service, occasionally 2, rarely also/only 'Other' — mirrors how reps actually tag leads. */
+function pickLeadServices(): ProductService[] {
+  const result: ProductService[] = [pick(pickableServices)]
+  if (rand() < 0.25) {
+    const second = pick(pickableServices.filter((s) => s !== result[0]))
+    result.push(second)
+  }
+  if (rand() < 0.08) result.push('Other')
+  return result
+}
 
 export const leads: Lead[] = Array.from({ length: 110 }).map((_, i) => {
   const first = pick(leadFirstNames)
@@ -174,6 +196,9 @@ export const leads: Lead[] = Array.from({ length: 110 }).map((_, i) => {
   const company = pick(companies)
   const status = pick(leadStatuses)
   const created = -int(0, 240)
+  const leadServices = pickLeadServices()
+  const hasDebtCollection = leadServices.includes('Debt Collection')
+  const hasOther = leadServices.includes('Other')
   return {
     id: `l${i + 1}`,
     firstName: first,
@@ -191,10 +216,16 @@ export const leads: Lead[] = Array.from({ length: 110 }).map((_, i) => {
     estimatedValue: int(8, 180) * 1000,
     ownerId: pick(users.filter((u) => u.role.includes('Sales'))).id,
     industry: company.industry,
+    country: 'South Africa',
     province: company.province,
     city: company.city,
     address: company.address,
-    serviceInterested: pick(services),
+    services: leadServices,
+    otherServiceDetail: hasOther ? pick(otherServiceExamples) : undefined,
+    classification: pick(leadClassifications),
+    estimatedProjectValue: int(15, 450) * 1000,
+    estimatedHandoverAmount: hasDebtCollection ? int(50, 1200) * 1000 : undefined,
+    estimatedAccountsCount: hasDebtCollection ? int(5, 120) : undefined,
     notes: 'Initial enquiry captured, awaiting qualification.',
     lastContactAt: daysFromToday(-int(0, 45)),
     nextFollowUpAt: daysFromToday(int(-2, 10)),
