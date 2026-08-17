@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { LayoutGrid, List, Plus, Search } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card } from '../../components/ui/Card'
@@ -7,30 +7,37 @@ import { StageBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { DealForm } from '../../components/layout/QuickAdd'
 import { MarkLostModal, MarkWonModal } from './DealStageModals'
-import { companyById, contactById, formatCurrency, formatDate, userById, users } from '../../data/mockData'
+import { companyById, contactById, formatCurrency, formatDate, TODAY, userById, users } from '../../data/mockData'
+import { FUNNEL_STAGES, STAGE_COLORS } from '../../lib/colors'
+import { readParam } from '../../lib/drilldown'
+import { decodeSalesMonthParam, isWithinPeriod } from '../../lib/salesMonth'
 import { DEAL_STAGES } from '../../types'
 import type { Deal, DealStage, LossReason } from '../../types'
 import type { WonDealDetails } from '../../store/AppStore'
 
 const OPEN_STAGES = DEAL_STAGES.filter((s) => s !== 'Won' && s !== 'Lost')
-const STAGE_COLORS: Record<DealStage, string> = {
-  'New Lead': '#3b5bdb',
-  Contacted: '#0e9aa7',
-  Qualified: '#2f9e6e',
-  'Proposal Sent': '#c9a227',
-  Negotiation: '#e0673f',
-  Won: '#22c55e',
-  Lost: '#ef4444',
-}
 const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')
 
 export function DealsBoard() {
   const store = useAppStore()
   const { deals, moveDealStage, markDealWon, markDealLost } = store
   const navigate = useNavigate()
-  const [view, setView] = useState<'kanban' | 'table'>('kanban')
+  const [searchParams] = useSearchParams()
+
+  // One-time drill-down filters carried in from Dashboard links — not exposed as UI controls.
+  const [stageFilter] = useState(() => readParam(searchParams, 'stage'))
+  // "atLeast" matches the Sales Funnel's "at this stage or further" framing (deals pile up
+  // further down the pipeline in a snapshot, so an exact-stage match would undercount).
+  const [stageAtLeast] = useState(() => readParam(searchParams, 'atLeast') === '1')
+  const [noNextActionFilter] = useState(() => readParam(searchParams, 'noNextAction') === '1')
+  const [overdueFilter] = useState(() => readParam(searchParams, 'overdue') === '1')
+  const [salesMonthFilter] = useState(() => decodeSalesMonthParam(searchParams.get('salesMonth')))
+
+  const [view, setView] = useState<'kanban' | 'table'>(() =>
+    readParam(searchParams, 'view') === 'table' || stageFilter || noNextActionFilter || overdueFilter ? 'table' : 'kanban',
+  )
   const [search, setSearch] = useState('')
-  const [owner, setOwner] = useState('All')
+  const [owner, setOwner] = useState(() => readParam(searchParams, 'owner') ?? 'All')
   const [addOpen, setAddOpen] = useState(false)
   const [dragging, setDragging] = useState<string | null>(null)
   const [wonModalFor, setWonModalFor] = useState<Deal | null>(null)
@@ -47,6 +54,28 @@ export function DealsBoard() {
       return true
     })
   }, [deals, owner, search])
+
+  // Further-restricted rows for Table view drill-down links — Kanban always shows the full board.
+  const tableRows = useMemo(() => {
+    if (view !== 'table') return filtered
+    const stageFilterIndex = stageFilter ? FUNNEL_STAGES.indexOf(stageFilter as (typeof FUNNEL_STAGES)[number]) : -1
+    return filtered.filter((d) => {
+      if (stageFilter) {
+        if (stageAtLeast && stageFilterIndex >= 0) {
+          if (FUNNEL_STAGES.indexOf(d.stage as (typeof FUNNEL_STAGES)[number]) < stageFilterIndex) return false
+        } else if (d.stage !== stageFilter) {
+          return false
+        }
+      }
+      if (noNextActionFilter && (d.stage === 'Won' || d.stage === 'Lost' || d.nextActionAt)) return false
+      if (overdueFilter && (d.stage === 'Won' || d.stage === 'Lost' || new Date(d.expectedCloseDate) >= TODAY)) return false
+      if (salesMonthFilter) {
+        const dateField = d.stage === 'Won' ? d.wonAt : d.stage === 'Lost' ? d.lostAt : d.createdAt
+        if (!isWithinPeriod(dateField, salesMonthFilter)) return false
+      }
+      return true
+    })
+  }, [filtered, view, stageFilter, stageAtLeast, noNextActionFilter, overdueFilter, salesMonthFilter])
 
   const columns = [...OPEN_STAGES, 'Won', 'Lost'] as DealStage[]
 
@@ -69,7 +98,7 @@ export function DealsBoard() {
         </Card>
         <Card className="p-4">
           <p className="text-xs text-slate-400">Revenue Won</p>
-          <p className="text-xl font-bold text-emerald-600 mt-1">{formatCurrency(totals.won)}</p>
+          <p className="text-xl font-bold text-[#957323] mt-1">{formatCurrency(totals.won)}</p>
         </Card>
       </div>
 
@@ -156,7 +185,7 @@ export function DealsBoard() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((deal) => (
+                {tableRows.map((deal) => (
                   <tr key={deal.id} onClick={() => navigate(`/deals/${deal.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
                     <td className="px-5 py-3">
                       <Link to={`/deals/${deal.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">

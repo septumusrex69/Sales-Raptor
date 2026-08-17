@@ -4,7 +4,8 @@ import { Plus, Target, Users, Building2, Handshake, CheckSquare, Calendar, FileT
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { useAppStore } from '../../store/AppStore'
 import { companies, leadSources, services } from '../../data/mockData'
-import type { LeadSource } from '../../types'
+import type { LeadSource, ProductService } from '../../types'
+import { LeadOpportunityFields, emptyLeadOpportunityValue, leadOpportunityPatch } from '../leads/LeadOpportunityFields'
 
 type QuickAddType = 'lead' | 'contact' | 'company' | 'deal' | 'task' | 'meeting' | 'note'
 
@@ -87,8 +88,9 @@ export type Store = ReturnType<typeof useAppStore>
 
 export function LeadForm({ onClose, store, navigate }: { onClose: () => void; store: Store; navigate: ReturnType<typeof useNavigate> }) {
   const [form, setForm] = useState({ firstName: '', lastName: '', companyName: '', phone: '', email: '', source: 'Website' as LeadSource, estimatedValue: '' })
+  const [opportunity, setOpportunity] = useState(emptyLeadOpportunityValue())
   return (
-    <Modal title="Add Lead" onClose={onClose}>
+    <Modal title="Add Lead" onClose={onClose} width={560}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
@@ -101,6 +103,7 @@ export function LeadForm({ onClose, store, navigate }: { onClose: () => void; st
             email: form.email || undefined,
             source: form.source,
             estimatedValue: Number(form.estimatedValue) || 0,
+            ...leadOpportunityPatch(opportunity),
           })
           onClose()
           navigate(`/leads/${lead.id}`)
@@ -137,6 +140,7 @@ export function LeadForm({ onClose, store, navigate }: { onClose: () => void; st
             <input type="number" className={inputClass} value={form.estimatedValue} onChange={(e) => setForm({ ...form, estimatedValue: e.target.value })} />
           </FormField>
         </div>
+        <LeadOpportunityFields value={opportunity} onChange={setOpportunity} />
         <SubmitRow onClose={onClose} label="Add Lead" />
       </form>
     </Modal>
@@ -264,7 +268,7 @@ export function DealForm({ onClose, store, navigate }: { onClose: () => void; st
           </FormField>
         </div>
         <FormField label="Service">
-          <select className={inputClass} value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value })}>
+          <select className={inputClass} value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value as ProductService })}>
             {services.map((s) => (
               <option key={s}>{s}</option>
             ))}

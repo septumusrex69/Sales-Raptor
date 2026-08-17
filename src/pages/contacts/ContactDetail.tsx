@@ -41,7 +41,7 @@ export function ContactDetail() {
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-3.5">
-            <Avatar name={`${contact.firstName} ${contact.lastName}`} color="#8a4fd3" size={48} />
+            <Avatar name={`${contact.firstName} ${contact.lastName}`} color="#416281" size={48} />
             <div>
               <h2 className="text-lg font-semibold text-slate-800">{contact.firstName} {contact.lastName}</h2>
               <p className="text-sm text-slate-500">{contact.jobTitle}{company ? ` at ${company.name}` : ''}</p>
@@ -109,7 +109,7 @@ export function ContactDetail() {
             ) : (
               <div className="space-y-2.5">
                 {notes.map((n) => (
-                  <div key={n.id} className="bg-amber-50/60 border border-amber-100 rounded-lg p-3">
+                  <div key={n.id} className="bg-[#f7f4eb] border border-[#e7dbb2] rounded-lg p-3">
                     <p className="text-sm text-slate-700">{n.notes || n.subject}</p>
                     <p className="text-[11px] text-slate-400 mt-1">{formatDateTime(n.activityDate)}</p>
                   </div>

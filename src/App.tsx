@@ -15,6 +15,7 @@ import { CalendarPage } from './pages/calendar/CalendarPage'
 import { ActivitiesPage } from './pages/activities/ActivitiesPage'
 import { ReportsPage } from './pages/reports/ReportsPage'
 import { SettingsPage } from './pages/settings/SettingsPage'
+import { RepDetailPage } from './pages/reps/RepDetailPage'
 
 function App() {
   return (
@@ -35,6 +36,7 @@ function App() {
           <Route path="/activities" element={<ActivitiesPage />} handle={{ title: 'Activities' }} />
           <Route path="/reports" element={<ReportsPage />} handle={{ title: 'Reports' }} />
           <Route path="/settings" element={<SettingsPage />} handle={{ title: 'Settings' }} />
+          <Route path="/reps/:id" element={<RepDetailPage />} handle={{ title: 'Rep Performance' }} />
         </Route>
       </Routes>
     </AppStoreProvider>

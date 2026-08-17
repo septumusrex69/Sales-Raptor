@@ -1,56 +1,32 @@
 import type {
   Activity,
-  ActivityType,
   CalendarEvent,
   Company,
   Contact,
   CustomField,
   Deal,
-  DealStage,
   ID,
   Lead,
+  LeadClassification,
   LeadSource,
-  LeadStatus,
   LossReason,
+  ProductService,
   Proposal,
   Task,
-  TaskPriority,
-  TaskStatus,
-  TaskType,
   Team,
   User,
 } from '../types'
 
-// ---------- Seeded RNG for stable "random" data across reloads ----------
-function mulberry32(seed: number) {
-  return function () {
-    seed |= 0
-    seed = (seed + 0x6d2b79f5) | 0
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-const rand = mulberry32(42)
-const pick = <T,>(arr: T[]) => arr[Math.floor(rand() * arr.length)]
-const int = (min: number, max: number) => Math.floor(rand() * (max - min + 1)) + min
-
 const TODAY = new Date('2026-08-16T09:00:00')
-function daysFromToday(offset: number, hour = 9, minute = 0) {
-  const d = new Date(TODAY)
-  d.setDate(d.getDate() + offset)
-  d.setHours(hour, minute, 0, 0)
-  return d.toISOString()
-}
 
 // ---------- Users & Teams ----------
 export const users: User[] = [
   { id: 'u1', name: 'Stephan Ferreira', email: 'stephan@bredellferreira.co.za', role: 'Administrator', teamId: 't5', status: 'Active', phone: '082 123 4567', avatarColor: '#c9a227' },
-  { id: 'u2', name: 'Rinda Marais', email: 'rinda@bredellferreira.co.za', role: 'Sales Manager', teamId: 't2', status: 'Active', phone: '082 234 5678', avatarColor: '#3b5bdb' },
-  { id: 'u3', name: 'Nicole Loder', email: 'nicole@bredellferreira.co.za', role: 'Sales Representative', teamId: 't2', status: 'Active', phone: '082 345 6789', avatarColor: '#2f9e6e' },
-  { id: 'u4', name: 'Kea Mokoena', email: 'kea@bredellferreira.co.za', role: 'Sales Representative', teamId: 't3', status: 'Active', phone: '082 456 7890', avatarColor: '#e0673f' },
-  { id: 'u5', name: 'Vusi Nkosi', email: 'vusi@bredellferreira.co.za', role: 'Sales Representative', teamId: 't4', status: 'Active', phone: '082 567 8901', avatarColor: '#8a4fd3' },
-  { id: 'u6', name: 'Thandiwe Zulu', email: 'thandiwe@bredellferreira.co.za', role: 'Sales Representative', teamId: 't3', status: 'Active', phone: '082 678 9012', avatarColor: '#0e9aa7' },
+  { id: 'u2', name: 'Rinda Marais', email: 'rinda@bredellferreira.co.za', role: 'Sales Manager', teamId: 't2', status: 'Active', phone: '082 234 5678', avatarColor: '#416281' },
+  { id: 'u3', name: 'Nicole Loder', email: 'nicole@bredellferreira.co.za', role: 'Sales Representative', teamId: 't2', status: 'Active', phone: '082 345 6789', avatarColor: '#406d58' },
+  { id: 'u4', name: 'Kea Mokoena', email: 'kea@bredellferreira.co.za', role: 'Sales Representative', teamId: 't3', status: 'Active', phone: '082 456 7890', avatarColor: '#ad6452' },
+  { id: 'u5', name: 'Vusi Nkosi', email: 'vusi@bredellferreira.co.za', role: 'Sales Representative', teamId: 't4', status: 'Active', phone: '082 567 8901', avatarColor: '#2b4055' },
+  { id: 'u6', name: 'Thandiwe Zulu', email: 'thandiwe@bredellferreira.co.za', role: 'Sales Representative', teamId: 't3', status: 'Active', phone: '082 678 9012', avatarColor: '#6086a9' },
   { id: 'u7', name: 'Pieter van Wyk', email: 'pieter@bredellferreira.co.za', role: 'Read Only', teamId: 't5', status: 'Inactive', phone: '082 789 0123', avatarColor: '#6b7280' },
 ]
 
@@ -66,7 +42,7 @@ export const currentUser = users[0]
 
 // ---------- Reference data ----------
 export const leadSources: LeadSource[] = [
-  'Website', 'Google Ads', 'Referral', 'LinkedIn', 'Facebook', 'Direct', 'Email', 'Existing Client', 'Sales Rep', 'Event', 'Other',
+  'Website', 'Google Ads', 'Referral', 'LinkedIn', 'Facebook', 'Direct', 'Email', 'Existing Client', 'Sales Rep', 'Event', 'ChatGPT', 'Claude', 'Gemini', 'Other',
 ]
 
 export const lossReasons: LossReason[] = [
@@ -75,7 +51,23 @@ export const lossReasons: LossReason[] = [
 
 export const industries = ['Construction', 'Legal', 'Education', 'Property', 'IT Services', 'Retail', 'Manufacturing', 'Healthcare', 'Hospitality', 'Financial Services']
 export const provinces = ['Gauteng', 'Western Cape', 'KwaZulu-Natal', 'Eastern Cape', 'Free State', 'Mpumalanga']
-export const services = ['Consulting', 'Software Implementation', 'Managed Services', 'Support Contract', 'Training', 'Hardware Supply']
+export const countries = ['South Africa']
+export const leadClassifications: LeadClassification[] = ['A', 'B', 'C', 'D']
+
+/** Canonical product/service list — shared by Lead.services (multi-select) and Deal.service. */
+export const services: ProductService[] = [
+  'Debt Collection',
+  'Litigation',
+  'Executive Listing',
+  'iCollect',
+  'Contract Drafting',
+  'In-Person Debt Collection',
+  'Credit Check',
+  'Tracing',
+  'NovaCall',
+  'Labour Law',
+  'Other',
+]
 
 export const customFields: CustomField[] = [
   { id: 'cf1', name: 'Lead Source', relatedTo: 'Leads', type: 'Dropdown', status: 'Active' },
@@ -88,270 +80,15 @@ export const customFields: CustomField[] = [
   { id: 'cf8', name: 'Competitor', relatedTo: 'Deals', type: 'Text', status: 'Active' },
 ]
 
-// ---------- Companies ----------
-const companySeed: Array<[string, string, string]> = [
-  ['ABC (Pty) Ltd', 'Construction', 'Gauteng'],
-  ['Dlamini Attorneys', 'Legal', 'Gauteng'],
-  ['Metro School', 'Education', 'Western Cape'],
-  ['Greenleaf (Pty) Ltd', 'Property', 'Gauteng'],
-  ['Bright Holdings', 'Construction', 'KwaZulu-Natal'],
-  ['Tech Solutions SA', 'IT Services', 'Gauteng'],
-  ['Alpha Retail (Pty) Ltd', 'Retail', 'Western Cape'],
-  ['Coastal Manufacturing', 'Manufacturing', 'Eastern Cape'],
-  ['Sunrise Hospitality Group', 'Hospitality', 'Western Cape'],
-  ['Highveld Financial Services', 'Financial Services', 'Gauteng'],
-  ['Karoo Health Partners', 'Healthcare', 'Free State'],
-  ['Riverstone Logistics', 'Manufacturing', 'Mpumalanga'],
-  ['Delta Property Group', 'Property', 'Gauteng'],
-  ['Century IT Consulting', 'IT Services', 'Western Cape'],
-]
-
-export const companies: Company[] = companySeed.map(([name, industry, province], i) => ({
-  id: `co${i + 1}`,
-  name,
-  industry,
-  phone: `012 ${int(100, 999)} ${int(1000, 9999)}`,
-  email: `info@${name.toLowerCase().replace(/[^a-z]+/g, '')}.co.za`,
-  website: `www.${name.toLowerCase().replace(/[^a-z]+/g, '')}.co.za`,
-  province,
-  city: pick(['Johannesburg', 'Pretoria', 'Cape Town', 'Durban', 'Gqeberha', 'Bloemfontein']),
-  address: `${int(1, 200)} Main Road`,
-  accountOwnerId: pick(users.filter((u) => u.role !== 'Read Only')).id,
-  createdAt: daysFromToday(-int(30, 400)),
-}))
-
-// ---------- Contacts ----------
-const contactSeed: Array<[string, string, string]> = [
-  ['John', 'Smith', 'co1'],
-  ['Nomsa', 'Dlamini', 'co2'],
-  ['Michael', 'Brown', 'co3'],
-  ['Sarah', 'Johnson', 'co4'],
-  ['David', 'Wilson', 'co5'],
-  ['Thabo', 'Mokoena', 'co6'],
-  ['Lisa', 'van der Merwe', 'co7'],
-  ['James', 'Naidoo', 'co8'],
-  ['Amanda', 'Peters', 'co9'],
-  ['Sipho', 'Khumalo', 'co10'],
-  ['Emma', 'Botha', 'co11'],
-  ['Themba', 'Ngcobo', 'co12'],
-  ['Chantelle', 'Adams', 'co13'],
-  ['Werner', 'Kruger', 'co14'],
-  ['Precious', 'Mahlangu', 'co1'],
-]
-
-export const contacts: Contact[] = contactSeed.map(([first, last, companyId], i) => ({
-  id: `ct${i + 1}`,
-  firstName: first,
-  lastName: last,
-  jobTitle: pick(['Owner', 'Procurement Manager', 'Operations Director', 'CEO', 'Office Manager', 'Financial Manager']),
-  companyId,
-  email: `${first.toLowerCase()}.${last.toLowerCase().replace(/[^a-z]/g, '')}@${companies.find((c) => c.id === companyId)?.name.toLowerCase().replace(/[^a-z]+/g, '')}.co.za`,
-  phone: `012 ${int(100, 999)} ${int(1000, 9999)}`,
-  mobile: `08${int(1, 9)} ${int(100, 999)} ${int(1000, 9999)}`,
-  ownerId: pick(users.filter((u) => u.role.includes('Sales'))).id,
-  lastContactAt: daysFromToday(-int(0, 20)),
-  createdAt: daysFromToday(-int(30, 400)),
-}))
-
-// ---------- Leads ----------
-const leadStatuses: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Qualified', 'Unqualified', 'Proposal Required', 'Converted', 'Lost']
-const leadFirstNames = ['John', 'Nomsa', 'Michael', 'Sarah', 'David', 'Thabo', 'Lisa', 'James', 'Amanda', 'Sipho', 'Emma', 'Themba', 'Chantelle', 'Werner', 'Precious', 'Karabo', 'Zanele', 'Riaan', 'Fatima', 'Andile', 'Cindy', 'Bongani', 'Melissa', 'Sizwe', 'Hannah', 'Kagiso', 'Tumi', 'Wayne', 'Noluthando', 'Christo']
-const leadLastNames = ['Smith', 'Dlamini', 'Brown', 'Johnson', 'Wilson', 'Mokoena', 'van der Merwe', 'Naidoo', 'Peters', 'Khumalo', 'Botha', 'Ngcobo', 'Adams', 'Kruger', 'Mahlangu', 'Sithole', 'Coetzee', 'Pillay', 'Abrahams', 'Mnguni']
-
-export const leads: Lead[] = Array.from({ length: 32 }).map((_, i) => {
-  const first = pick(leadFirstNames)
-  const last = pick(leadLastNames)
-  const company = pick(companies)
-  const status = pick(leadStatuses)
-  const created = -int(0, 60)
-  return {
-    id: `l${i + 1}`,
-    firstName: first,
-    lastName: last,
-    jobTitle: pick(['Owner', 'Manager', 'Director', 'Buyer', 'Coordinator']),
-    companyId: company.id,
-    companyName: company.name,
-    phone: `012 ${int(100, 999)} ${int(1000, 9999)}`,
-    mobile: `08${int(1, 9)} ${int(100, 999)} ${int(1000, 9999)}`,
-    email: `${first.toLowerCase()}.${last.toLowerCase().replace(/[^a-z]/g, '')}@${company.name.toLowerCase().replace(/[^a-z]+/g, '')}.co.za`,
-    source: pick(leadSources),
-    campaign: pick(['Winter Promo', 'Q3 Outreach', 'Referral Drive', undefined, undefined]),
-    status,
-    score: int(5, 98),
-    estimatedValue: int(8, 180) * 1000,
-    ownerId: pick(users.filter((u) => u.role.includes('Sales'))).id,
-    industry: company.industry,
-    province: company.province,
-    city: company.city,
-    address: company.address,
-    serviceInterested: pick(services),
-    notes: 'Initial enquiry captured, awaiting qualification.',
-    lastContactAt: daysFromToday(-int(0, 15)),
-    nextFollowUpAt: daysFromToday(int(-2, 10)),
-    createdAt: daysFromToday(created),
-    updatedAt: daysFromToday(created + int(0, 5)),
-  }
-})
-
-// ---------- Deals ----------
-const dealStages: DealStage[] = ['New Lead', 'Contacted', 'Qualified', 'Proposal Sent', 'Negotiation', 'Won', 'Lost']
-const stageProbability: Record<DealStage, number> = {
-  'New Lead': 10,
-  Contacted: 20,
-  Qualified: 40,
-  'Proposal Sent': 55,
-  Negotiation: 75,
-  Won: 100,
-  Lost: 0,
-}
-
-const dealNameSeed = [
-  'Metro School Account', 'Greenleaf Property', 'Bright Holdings Rollout', 'Alpha Retail Refresh', 'Tech Solutions SA Contract',
-  'ABC Construction Package', 'Dlamini Attorneys Retainer', 'Coastal Manufacturing Upgrade', 'Sunrise Hospitality Support',
-  'Highveld Financial Onboarding', 'Karoo Health Systems', 'Riverstone Logistics Deal', 'Delta Property Expansion',
-  'Century IT Partnership', 'ABC Phase 2', 'Greenleaf Maintenance', 'Bright Holdings Support Renewal', 'Tech Solutions Upsell',
-]
-
-export const deals: Deal[] = dealNameSeed.map((name, i) => {
-  const company = companies[i % companies.length]
-  const stage = i < 8 ? dealStages[i % 5] : pick(dealStages)
-  const created = -int(5, 90)
-  const isWon = stage === 'Won'
-  const isLost = stage === 'Lost'
-  return {
-    id: `d${i + 1}`,
-    name,
-    companyId: company.id,
-    contactId: contacts.find((c) => c.companyId === company.id)?.id,
-    ownerId: pick(users.filter((u) => u.role.includes('Sales'))).id,
-    stage,
-    value: int(15, 220) * 1000,
-    probability: stageProbability[stage],
-    expectedCloseDate: daysFromToday(int(-5, 45)),
-    service: pick(services),
-    source: pick(leadSources),
-    competitor: pick([undefined, undefined, 'Competitor A', 'Competitor B']),
-    notes: 'Deal progressing through pipeline.',
-    lossReason: isLost ? pick(lossReasons) : undefined,
-    createdAt: daysFromToday(created),
-    wonAt: isWon ? daysFromToday(int(created + 5, 0)) : undefined,
-    lostAt: isLost ? daysFromToday(int(created + 5, 0)) : undefined,
-    nextActionAt: isWon || isLost ? undefined : daysFromToday(int(-1, 12)),
-  }
-})
-
-// ---------- Tasks ----------
-const taskTypes: TaskType[] = ['Call', 'Follow-up', 'Email', 'Proposal', 'Meeting', 'WhatsApp', 'Research', 'Internal task', 'Other']
-const taskStatuses: TaskStatus[] = ['Not Started', 'In Progress', 'Completed', 'Cancelled']
-const taskPriorities: TaskPriority[] = ['Low', 'Medium', 'High', 'Urgent']
-
-export const tasks: Task[] = Array.from({ length: 40 }).map((_, i) => {
-  const useDeal = rand() > 0.5
-  const deal = useDeal ? pick(deals) : undefined
-  const lead = !useDeal ? pick(leads) : undefined
-  const dueOffset = int(-4, 12)
-  const status: TaskStatus = dueOffset < 0 ? pick(['Completed', 'Not Started', 'Cancelled']) : pick(taskStatuses)
-  return {
-    id: `tk${i + 1}`,
-    title: pick([
-      'Follow up with client', 'Call back regarding proposal', 'Send proposal', 'Prepare quote', 'Check in on requirements',
-      'Confirm meeting time', 'Send contract for signature', 'Discovery call', 'Renewal discussion', 'Introduce new service',
-    ]) + (deal ? ` — ${companies.find((c) => c.id === deal.companyId)?.name}` : lead ? ` — ${lead.firstName} ${lead.lastName}` : ''),
-    type: pick(taskTypes),
-    status,
-    priority: pick(taskPriorities),
-    ownerId: pick(users.filter((u) => u.role.includes('Sales'))).id,
-    dueDate: daysFromToday(dueOffset, int(8, 16), pick([0, 15, 30, 45])),
-    dealId: deal?.id,
-    leadId: lead?.id,
-    companyId: deal ? deal.companyId : lead?.companyId,
-    relatedToLabel: deal ? deal.name : lead ? `${lead.firstName} ${lead.lastName}` : undefined,
-    createdAt: daysFromToday(dueOffset - int(1, 5)),
-    completedAt: status === 'Completed' ? daysFromToday(dueOffset) : undefined,
-  }
-})
-
-// ---------- Activities ----------
-const activityTypes: ActivityType[] = ['Call', 'Email', 'WhatsApp', 'Meeting', 'Note', 'Proposal', 'Task', 'Status change', 'Deal update', 'Deal Stage Change', 'Deal Won', 'Deal Lost']
-const activitySubjects: Record<ActivityType, string[]> = {
-  Call: ['Call with {name}', 'Discovery call completed', 'Follow-up call'],
-  Email: ['Email sent to {name}', 'Proposal emailed', 'Introduction email sent'],
-  WhatsApp: ['WhatsApp message sent', 'WhatsApp follow-up'],
-  Meeting: ['Meeting with {name}', 'Site visit scheduled', 'Meeting completed'],
-  Note: ['Note added', 'Internal note logged'],
-  Proposal: ['Proposal sent to {name}', 'Proposal drafted'],
-  Task: ['Task created', 'Task completed'],
-  'Status change': ['Lead status changed', 'Marked as Qualified'],
-  'Deal update': ['Deal details updated'],
-  'Deal Stage Change': ['Deal moved to Negotiation', 'Deal moved to Proposal Sent'],
-  'Deal Won': ['Deal marked Won'],
-  'Deal Lost': ['Deal marked Lost'],
-}
-
-export const activities: Activity[] = Array.from({ length: 60 }).map((_, i) => {
-  const type = pick(activityTypes)
-  const useLead = rand() > 0.5
-  const lead = useLead ? pick(leads) : undefined
-  const deal = !useLead ? pick(deals) : undefined
-  const name = lead ? `${lead.firstName} ${lead.lastName}` : deal ? companies.find((c) => c.id === deal.companyId)?.name ?? '' : ''
-  const subjectTemplate = pick(activitySubjects[type])
-  return {
-    id: `a${i + 1}`,
-    type,
-    userId: pick(users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')).id,
-    leadId: lead?.id,
-    companyId: lead?.companyId ?? deal?.companyId,
-    dealId: deal?.id,
-    subject: subjectTemplate.replace('{name}', name),
-    notes: pick(['Client requested pricing.', 'Discussed requirements and timeline.', 'Left voicemail, will retry.', 'Positive response, moving forward.', undefined]),
-    activityDate: daysFromToday(-int(0, 20), int(8, 17), pick([0, 10, 20, 30, 40, 50])),
-    createdAt: daysFromToday(-int(0, 20)),
-  }
-}).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime())
-
-// ---------- Proposals ----------
-export const proposals: Proposal[] = deals
-  .filter((d) => ['Proposal Sent', 'Negotiation', 'Won', 'Lost'].includes(d.stage))
-  .map((d, i) => ({
-    id: `p${i + 1}`,
-    dealId: d.id,
-    companyId: d.companyId,
-    contactId: d.contactId,
-    service: d.service ?? pick(services),
-    pricing: d.value,
-    description: `Proposal for ${d.service ?? 'services'} covering agreed scope of work.`,
-    terms: 'Net 30 days. Valid for 30 days from issue date.',
-    validityDate: daysFromToday(int(5, 30)),
-    status: d.stage === 'Won' ? 'Accepted' : d.stage === 'Lost' ? 'Declined' : pick(['Sent', 'Viewed', 'Draft']),
-    createdAt: d.createdAt,
-  }))
-
-// ---------- Calendar Events ----------
-export const calendarEvents: CalendarEvent[] = [
-  ...tasks
-    .filter((t) => t.status !== 'Cancelled')
-    .map((t, i) => ({
-      id: `ce-task-${i}`,
-      title: t.title,
-      type: (t.type === 'Meeting' ? 'Meeting' : t.type === 'Call' ? 'Call' : 'Follow-up') as CalendarEvent['type'],
-      start: t.dueDate,
-      end: t.dueDate,
-      ownerId: t.ownerId,
-      relatedToLabel: t.relatedToLabel,
-    })),
-  ...deals
-    .filter((d) => d.stage !== 'Won' && d.stage !== 'Lost')
-    .slice(0, 10)
-    .map((d, i) => ({
-      id: `ce-close-${i}`,
-      title: `${d.name} — Expected Close`,
-      type: 'Deal Close' as const,
-      start: d.expectedCloseDate,
-      end: d.expectedCloseDate,
-      ownerId: d.ownerId,
-      relatedToLabel: d.name,
-    })),
-]
+// ---------- Business records — starts empty; populated by real usage from here on ----------
+export const companies: Company[] = []
+export const contacts: Contact[] = []
+export const leads: Lead[] = []
+export const deals: Deal[] = []
+export const tasks: Task[] = []
+export const activities: Activity[] = []
+export const proposals: Proposal[] = []
+export const calendarEvents: CalendarEvent[] = []
 
 // ---------- Helpers ----------
 export const userById = (id?: ID) => users.find((u) => u.id === id)
@@ -367,6 +104,19 @@ export function formatCurrency(value: number) {
 export function formatDate(iso?: string) {
   if (!iso) return '—'
   return new Intl.DateTimeFormat('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(iso))
+}
+
+export function formatLeadNumber(n: number) {
+  return `SR-${String(n).padStart(5, '0')}`
+}
+
+/** Day-grained relative label for Last Contact ("Today"/"Yesterday"/"N days ago") — distinct from timeAgo's minute/hour granularity used in activity feeds. */
+export function daysAgoLabel(iso?: string) {
+  if (!iso) return undefined
+  const diffDays = Math.floor((TODAY.getTime() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24))
+  if (diffDays <= 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  return `${diffDays} days ago`
 }
 
 export function formatDateTime(iso?: string) {

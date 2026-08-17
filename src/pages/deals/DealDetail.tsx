@@ -288,7 +288,7 @@ export function DealDetail() {
           <div className="px-5 pb-5 space-y-3">
             {dealNotes.length === 0 && <p className="text-sm text-slate-400">No notes yet.</p>}
             {dealNotes.map((n) => (
-              <div key={n.id} className="bg-amber-50/60 border border-amber-100 rounded-lg p-3">
+              <div key={n.id} className="bg-[#f7f4eb] border border-[#e7dbb2] rounded-lg p-3">
                 <p className="text-sm text-slate-700">{n.notes || n.subject}</p>
                 <p className="text-[11px] text-slate-400 mt-1">{formatDateTime(n.activityDate)} · {userById(n.userId)?.name}</p>
               </div>
@@ -348,11 +348,11 @@ function HistoryRow({ label, date }: { label: string; date: string }) {
 function ProposalStatusBadge({ status }: { status: ProposalStatus }) {
   const tone: Record<ProposalStatus, string> = {
     Draft: 'bg-slate-100 text-slate-600',
-    Sent: 'bg-blue-50 text-blue-600',
-    Viewed: 'bg-purple-50 text-purple-600',
-    Accepted: 'bg-emerald-50 text-emerald-600',
-    Declined: 'bg-red-50 text-red-600',
-    Expired: 'bg-amber-50 text-amber-600',
+    Sent: 'bg-[#edf1f5] text-[#6086a9]',
+    Viewed: 'bg-[#edf1f5] text-[#2b4055]',
+    Accepted: 'bg-[#f7f3eb] text-[#957323]',
+    Declined: 'bg-[#f6eeec] text-[#794234]',
+    Expired: 'bg-[#f5eeed] text-[#ad6452]',
   }
   return <span className={`badge ${tone[status]}`}>{status}</span>
 }

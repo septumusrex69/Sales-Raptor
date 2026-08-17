@@ -21,12 +21,32 @@ export type LeadSource =
   | 'Existing Client'
   | 'Sales Rep'
   | 'Event'
+  | 'ChatGPT'
+  | 'Claude'
+  | 'Gemini'
   | 'Other'
 
 export type LeadCategory = 'Cold' | 'Warm' | 'Hot' | 'Priority'
 
+export type LeadClassification = 'A' | 'B' | 'C' | 'D'
+
+export type ProductService =
+  | 'Debt Collection'
+  | 'Litigation'
+  | 'Executive Listing'
+  | 'iCollect'
+  | 'Contract Drafting'
+  | 'In-Person Debt Collection'
+  | 'Credit Check'
+  | 'Tracing'
+  | 'NovaCall'
+  | 'Labour Law'
+  | 'Other'
+
 export interface Lead {
   id: ID
+  /** Permanent, sequential, never-reused display number (formatted via formatLeadNumber → "SR-00001"). */
+  leadNumber: number
   firstName: string
   lastName: string
   jobTitle?: string
@@ -43,10 +63,22 @@ export interface Lead {
   estimatedValue: number
   ownerId: ID
   industry?: string
+  country?: string
   province?: string
   city?: string
   address?: string
+  /** @deprecated superseded by `services` (multi-select); kept so existing records still read fine */
   serviceInterested?: string
+  services?: ProductService[]
+  /** Free-text detail when 'Other' is among `services` */
+  otherServiceDetail?: string
+  classification?: LeadClassification
+  /** General opportunity value; label adapts per selected service (see LeadOpportunityFields) */
+  estimatedProjectValue?: number
+  /** Debt Collection specific — combined outstanding balance of accounts being handed over */
+  estimatedHandoverAmount?: number
+  /** Debt Collection specific — number of accounts/matters in the handover */
+  estimatedAccountsCount?: number
   notes?: string
   lastContactAt?: string
   nextFollowUpAt?: string
@@ -166,6 +198,8 @@ export interface Task {
   relatedToLabel?: string
   createdAt: string
   completedAt?: string
+  /** Set when this task's due date was auto-rolled forward because it was missed; cleared once completed. */
+  autoRescheduledFrom?: string
 }
 
 export type ActivityType =

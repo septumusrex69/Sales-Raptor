@@ -1,10 +1,13 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Phone, Mail, MessageCircle, Calendar, StickyNote, FileText, CheckSquare, ArrowRightLeft, Trophy, XOctagon } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { companyById, formatDateTime, leadById, users } from '../../data/mockData'
+import { ACTIVITY_TYPE_TAILWIND } from '../../lib/colors'
+import { readParam } from '../../lib/drilldown'
+import { decodeSalesMonthParam, isWithinPeriod } from '../../lib/salesMonth'
 import type { ActivityType } from '../../types'
 
 const ACTIVITY_TYPES: ActivityType[] = ['Call', 'Email', 'WhatsApp', 'Meeting', 'Note', 'Proposal', 'Task', 'Status change', 'Deal update', 'Deal Stage Change', 'Deal Won', 'Deal Lost']
@@ -24,37 +27,29 @@ const ICONS: Record<ActivityType, typeof Phone> = {
   'Deal Lost': XOctagon,
 }
 
-const ICON_COLORS: Record<ActivityType, string> = {
-  Call: 'bg-blue-50 text-blue-600',
-  Email: 'bg-purple-50 text-purple-600',
-  WhatsApp: 'bg-emerald-50 text-emerald-600',
-  Meeting: 'bg-amber-50 text-amber-600',
-  Note: 'bg-slate-100 text-slate-500',
-  Proposal: 'bg-indigo-50 text-indigo-600',
-  Task: 'bg-cyan-50 text-cyan-600',
-  'Status change': 'bg-slate-100 text-slate-500',
-  'Deal update': 'bg-slate-100 text-slate-500',
-  'Deal Stage Change': 'bg-orange-50 text-orange-600',
-  'Deal Won': 'bg-emerald-50 text-emerald-600',
-  'Deal Lost': 'bg-red-50 text-red-600',
-}
+const ICON_COLORS = ACTIVITY_TYPE_TAILWIND
 
 const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')
 
 export function ActivitiesPage() {
   const { activities, deals, companies } = useAppStore()
-  const [user, setUser] = useState('All')
-  const [type, setType] = useState('All')
+  const [searchParams] = useSearchParams()
+  const [user, setUser] = useState(() => readParam(searchParams, 'owner') ?? 'All')
+  const [type, setType] = useState(() => readParam(searchParams, 'type') ?? 'All')
   const [company, setCompany] = useState('All')
+
+  // One-time drill-down filter carried in from Dashboard links — not exposed as a UI control.
+  const [salesMonthFilter] = useState(() => decodeSalesMonthParam(searchParams.get('salesMonth')))
 
   const filtered = useMemo(() => {
     return activities.filter((a) => {
       if (user !== 'All' && a.userId !== user) return false
       if (type !== 'All' && a.type !== type) return false
       if (company !== 'All' && a.companyId !== company) return false
+      if (salesMonthFilter && !isWithinPeriod(a.activityDate, salesMonthFilter)) return false
       return true
     })
-  }, [activities, user, type, company])
+  }, [activities, user, type, company, salesMonthFilter])
 
   const grouped = useMemo(() => {
     const groups: Record<string, typeof filtered> = {}

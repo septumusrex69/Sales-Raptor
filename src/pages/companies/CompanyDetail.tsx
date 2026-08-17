@@ -104,7 +104,7 @@ export function CompanyDetail() {
                 {wonDeals.map((d) => (
                   <Link key={d.id} to={`/deals/${d.id}`} className="flex items-center justify-between py-2.5 hover:bg-slate-50/60 -mx-1 px-1 rounded-lg">
                     <span className="text-sm font-medium text-slate-700">{d.name}</span>
-                    <span className="text-sm font-semibold text-emerald-600">{formatCurrency(d.value)}</span>
+                    <span className="text-sm font-semibold text-[#957323]">{formatCurrency(d.value)}</span>
                   </Link>
                 ))}
               </div>
@@ -199,7 +199,7 @@ export function CompanyDetail() {
             ) : (
               <div className="space-y-2.5">
                 {notes.map((n) => (
-                  <div key={n.id} className="bg-amber-50/60 border border-amber-100 rounded-lg p-3">
+                  <div key={n.id} className="bg-[#f7f4eb] border border-[#e7dbb2] rounded-lg p-3">
                     <p className="text-sm text-slate-700">{n.notes || n.subject}</p>
                     <p className="text-[11px] text-slate-400 mt-1">{formatDateTime(n.activityDate)}</p>
                   </div>

@@ -1,14 +1,18 @@
 import type { ReactNode } from 'react'
 import clsx from 'clsx'
+import type { LeadClassification, ProductService } from '../../types'
+import { CLASSIFICATION_TAILWIND, SERVICE_TAILWIND } from '../../lib/colors'
 
 const TONES = {
   slate: 'bg-slate-100 text-slate-600',
-  blue: 'bg-blue-50 text-blue-600',
-  amber: 'bg-amber-50 text-amber-600',
-  green: 'bg-emerald-50 text-emerald-600',
-  red: 'bg-red-50 text-red-600',
-  purple: 'bg-purple-50 text-purple-600',
-  gold: 'bg-amber-100 text-amber-700',
+  new: 'bg-[#edf1f5] text-[#6086a9]',
+  contacted: 'bg-[#edf1f5] text-[#416281]',
+  attempting: 'bg-[#f5eeed] text-[#ad6452]',
+  qualified: 'bg-[#eef4f1] text-[#406d58]',
+  proposal: 'bg-[#f7f4eb] text-[#b28e34]',
+  negotiation: 'bg-[#edf1f5] text-[#2b4055]',
+  won: 'bg-[#f7f3eb] text-[#957323]',
+  lost: 'bg-[#f6eeec] text-[#794234]',
 } as const
 
 export type BadgeTone = keyof typeof TONES
@@ -18,38 +22,38 @@ export function Badge({ children, tone = 'slate', className }: { children: React
 }
 
 const LEAD_STATUS_TONE: Record<string, BadgeTone> = {
-  New: 'blue',
-  'Attempting Contact': 'amber',
-  Contacted: 'amber',
-  Qualified: 'green',
+  New: 'new',
+  'Attempting Contact': 'attempting',
+  Contacted: 'contacted',
+  Qualified: 'qualified',
   Unqualified: 'slate',
-  'Proposal Required': 'purple',
-  Converted: 'green',
-  Lost: 'red',
+  'Proposal Required': 'proposal',
+  Converted: 'won',
+  Lost: 'lost',
 }
 
 const DEAL_STAGE_TONE: Record<string, BadgeTone> = {
-  'New Lead': 'blue',
-  Contacted: 'amber',
-  Qualified: 'green',
-  'Proposal Sent': 'purple',
-  Negotiation: 'gold',
-  Won: 'green',
-  Lost: 'red',
+  'New Lead': 'new',
+  Contacted: 'contacted',
+  Qualified: 'qualified',
+  'Proposal Sent': 'proposal',
+  Negotiation: 'negotiation',
+  Won: 'won',
+  Lost: 'lost',
 }
 
 const PRIORITY_TONE: Record<string, BadgeTone> = {
   Low: 'slate',
-  Medium: 'blue',
-  High: 'amber',
-  Urgent: 'red',
+  Medium: 'new',
+  High: 'attempting',
+  Urgent: 'lost',
 }
 
 const TASK_STATUS_TONE: Record<string, BadgeTone> = {
   'Not Started': 'slate',
-  'In Progress': 'blue',
-  Completed: 'green',
-  Cancelled: 'red',
+  'In Progress': 'new',
+  Completed: 'won',
+  Cancelled: 'lost',
 }
 
 export function StatusBadge({ status }: { status: string }) {
@@ -66,4 +70,23 @@ export function PriorityBadge({ priority }: { priority: string }) {
 
 export function TaskStatusBadge({ status }: { status: string }) {
   return <Badge tone={TASK_STATUS_TONE[status] ?? 'slate'}>{status}</Badge>
+}
+
+export function ServiceBadge({ service, className }: { service: ProductService; className?: string }) {
+  return <span className={clsx('badge', SERVICE_TAILWIND[service] ?? SERVICE_TAILWIND.Other, className)}>{service}</span>
+}
+
+export function ClassificationBadge({ classification, className }: { classification: LeadClassification; className?: string }) {
+  return (
+    <span
+      className={clsx(
+        'inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold shrink-0',
+        CLASSIFICATION_TAILWIND[classification] ?? CLASSIFICATION_TAILWIND.D,
+        className,
+      )}
+      title={`Class ${classification}`}
+    >
+      {classification}
+    </span>
+  )
 }
