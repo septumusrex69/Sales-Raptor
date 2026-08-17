@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -11,9 +12,10 @@ import {
   BarChart3,
   Settings,
   ChevronDown,
+  LogOut,
 } from 'lucide-react'
 import clsx from 'clsx'
-import { currentUser } from '../../data/mockData'
+import { useAuth } from '../../store/AuthContext'
 import { UserAvatar } from '../ui/Avatar'
 
 const NAV = [
@@ -30,6 +32,18 @@ const NAV = [
 ]
 
 export function Sidebar() {
+  const { currentUser, signOut } = useAuth()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [])
+
   return (
     <aside className="w-60 shrink-0 bg-navy-950 text-slate-300 flex flex-col h-full">
       <div className="flex items-center gap-2.5 px-5 h-16 border-b border-white/10">
@@ -58,12 +72,25 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="border-t border-white/10 p-3">
-        <button className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-white/5 transition-colors text-left">
-          <UserAvatar userId={currentUser.id} size={32} />
+      <div ref={menuRef} className="relative border-t border-white/10 p-3">
+        {menuOpen && (
+          <div className="absolute bottom-full left-3 right-3 mb-1.5 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-50">
+            <button
+              onClick={() => {
+                setMenuOpen(false)
+                signOut()
+              }}
+              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-red-600 hover:bg-red-50"
+            >
+              <LogOut size={14} /> Log out
+            </button>
+          </div>
+        )}
+        <button onClick={() => setMenuOpen((o) => !o)} className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-white/5 transition-colors text-left">
+          <UserAvatar userId={currentUser?.id} size={32} />
           <span className="flex-1 min-w-0">
-            <span className="block text-[13px] font-semibold text-white truncate">{currentUser.name}</span>
-            <span className="block text-[11px] text-slate-400 truncate">{currentUser.role}</span>
+            <span className="block text-[13px] font-semibold text-white truncate">{currentUser?.name ?? 'Loading…'}</span>
+            <span className="block text-[11px] text-slate-400 truncate">{currentUser?.role ?? ''}</span>
           </span>
           <ChevronDown size={14} className="text-slate-500 shrink-0" />
         </button>

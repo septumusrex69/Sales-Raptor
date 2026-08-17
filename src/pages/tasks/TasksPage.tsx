@@ -2,18 +2,18 @@ import { useMemo, useState } from 'react'
 import { Plus, Search } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../../store/AppStore'
+import { useAuth } from '../../store/AuthContext'
 import { Card } from '../../components/ui/Card'
 import { PriorityBadge, TaskStatusBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { RescheduleTaskModal } from '../../components/ui/RescheduleTaskModal'
-import { currentUser, formatDate, TODAY, users } from '../../data/mockData'
+import { formatDate, TODAY } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
-import type { Task, TaskPriority, TaskType } from '../../types'
+import type { Task, TaskPriority, TaskType, User } from '../../types'
 
 const VIEWS = ['My Tasks', 'Team Tasks', 'Overdue', 'Today', 'Tomorrow', 'This Week', 'Completed'] as const
 type View = (typeof VIEWS)[number]
-const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')
 
 function startOfDay(d: Date) {
   const x = new Date(d)
@@ -22,7 +22,9 @@ function startOfDay(d: Date) {
 }
 
 export function TasksPage() {
-  const { tasks, updateTask, addTask } = useAppStore()
+  const { tasks, users, updateTask, addTask } = useAppStore()
+  const { currentUser } = useAuth()
+  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const [searchParams] = useSearchParams()
   const [view, setView] = useState<View>(() => {
     const fromUrl = readParam(searchParams, 'view')
@@ -42,7 +44,7 @@ export function TasksPage() {
     let list = [...tasks]
     switch (view) {
       case 'My Tasks':
-        list = list.filter((t) => t.ownerId === currentUser.id && t.status !== 'Completed' && t.status !== 'Cancelled')
+        list = list.filter((t) => t.ownerId === currentUser?.id && t.status !== 'Completed' && t.status !== 'Cancelled')
         break
       case 'Team Tasks':
         list = list.filter((t) => t.status !== 'Completed' && t.status !== 'Cancelled')
@@ -68,7 +70,7 @@ export function TasksPage() {
       list = list.filter((t) => t.title.toLowerCase().includes(q) || (t.relatedToLabel ?? '').toLowerCase().includes(q))
     }
     return list.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
-  }, [tasks, view, search, today, tomorrow, weekEnd])
+  }, [tasks, view, search, today, tomorrow, weekEnd, currentUser])
 
   const counts = useMemo(() => {
     const overdue = tasks.filter((t) => new Date(t.dueDate) < today && t.status !== 'Completed' && t.status !== 'Cancelled').length
@@ -162,7 +164,7 @@ export function TasksPage() {
         </div>
       </Card>
 
-      {addOpen && <AddTaskModal onClose={() => setAddOpen(false)} onSave={(input) => addTask(input)} />}
+      {addOpen && <AddTaskModal reps={reps} defaultOwnerId={currentUser?.id ?? ''} onClose={() => setAddOpen(false)} onSave={(input) => addTask(input)} />}
       {rescheduleTask && (
         <RescheduleTaskModal
           task={rescheduleTask}
@@ -174,8 +176,18 @@ export function TasksPage() {
   )
 }
 
-function AddTaskModal({ onClose, onSave }: { onClose: () => void; onSave: (input: Partial<Task> & { title: string; dueDate: string }) => void }) {
-  const [form, setForm] = useState({ title: '', type: 'Follow-up' as TaskType, priority: 'Medium' as TaskPriority, ownerId: currentUser.id, date: '', time: '09:00' })
+function AddTaskModal({
+  reps,
+  defaultOwnerId,
+  onClose,
+  onSave,
+}: {
+  reps: User[]
+  defaultOwnerId: string
+  onClose: () => void
+  onSave: (input: Partial<Task> & { title: string; dueDate: string }) => void
+}) {
+  const [form, setForm] = useState({ title: '', type: 'Follow-up' as TaskType, priority: 'Medium' as TaskPriority, ownerId: defaultOwnerId, date: '', time: '09:00' })
   return (
     <Modal title="Add Task" onClose={onClose} width={420}>
       <form

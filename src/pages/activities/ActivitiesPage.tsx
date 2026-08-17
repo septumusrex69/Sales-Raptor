@@ -4,7 +4,7 @@ import { Phone, Mail, MessageCircle, Calendar, StickyNote, FileText, CheckSquare
 import { useAppStore } from '../../store/AppStore'
 import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
-import { companyById, formatDateTime, leadById, users } from '../../data/mockData'
+import { formatDateTime } from '../../data/mockData'
 import { ACTIVITY_TYPE_TAILWIND } from '../../lib/colors'
 import { readParam } from '../../lib/drilldown'
 import { decodeSalesMonthParam, isWithinPeriod } from '../../lib/salesMonth'
@@ -29,10 +29,9 @@ const ICONS: Record<ActivityType, typeof Phone> = {
 
 const ICON_COLORS = ACTIVITY_TYPE_TAILWIND
 
-const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')
-
 export function ActivitiesPage() {
-  const { activities, deals, companies } = useAppStore()
+  const { activities, deals, companies, users, companyById, leadById } = useAppStore()
+  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const [searchParams] = useSearchParams()
   const [user, setUser] = useState(() => readParam(searchParams, 'owner') ?? 'All')
   const [type, setType] = useState(() => readParam(searchParams, 'type') ?? 'All')

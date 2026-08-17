@@ -9,7 +9,7 @@ import { StatTile } from '../../components/ui/StatTile'
 import { SalesMonthPicker } from '../../components/ui/SalesMonthPicker'
 import { CompareSelector, type CompareMode } from '../../components/ui/CompareSelector'
 import { FormField, inputClass } from '../../components/ui/Modal'
-import { countries, formatCurrency, leadClassifications, leadSources, provinces, services, TODAY, users } from '../../data/mockData'
+import { countries, formatCurrency, leadClassifications, leadSources, provinces, services, TODAY } from '../../data/mockData'
 import { DEAL_STAGES } from '../../types'
 import type { Deal, Lead, LeadClassification, LeadSource, LeadStatus, ProductService } from '../../types'
 import { getCurrentSalesMonth, getPreviousSalesMonth, isWithinPeriod, encodeSalesMonthParam, type SalesMonthPeriod } from '../../lib/salesMonth'
@@ -20,7 +20,6 @@ import { STAGE_COLORS } from '../../lib/colors'
 const TABS = ['Overview', 'Leads', 'Pipeline', 'Products & Services', 'Debt Collection', 'Sales Team', 'Lead Sources', 'Geography', 'Lost Deals'] as const
 type Tab = (typeof TABS)[number]
 const ALL_STATUSES: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Qualified', 'Unqualified', 'Proposal Required', 'Converted', 'Lost']
-const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')
 const BAR_COLOR = STAGE_COLORS.Negotiation
 
 function pctDelta(curr: number, prev: number): number {
@@ -29,7 +28,8 @@ function pctDelta(curr: number, prev: number): number {
 }
 
 export function ReportsPage() {
-  const { leads, deals, activities } = useAppStore()
+  const { leads, deals, activities, users } = useAppStore()
+  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const [tab, setTab] = useState<Tab>('Overview')
   const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(TODAY))
   const [compareMode, setCompareMode] = useState<CompareMode>('previous')
@@ -141,7 +141,7 @@ export function ReportsPage() {
     return Array.from(map.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
   }, [leadsInPeriod])
 
-  const leadsByRep = useMemo(() => reps.map((r) => ({ name: r.name.split(' ')[0], value: leadsInPeriod.filter((l) => l.ownerId === r.id).length })), [leadsInPeriod])
+  const leadsByRep = useMemo(() => reps.map((r) => ({ name: r.name.split(' ')[0], value: leadsInPeriod.filter((l) => l.ownerId === r.id).length })), [leadsInPeriod, reps])
 
   const dealsByStage = useMemo(() => DEAL_STAGES.map((s) => ({ name: s, value: allDealsFiltered.filter((d) => d.stage === s).length })), [allDealsFiltered])
 
@@ -225,7 +225,7 @@ export function ReportsPage() {
           conversionRate: closed ? Math.round((won.length / closed) * 100) : 0,
         }
       }),
-    [leadsInPeriod, wonDealsInPeriod, lostDealsInPeriod, activities, period, rep],
+    [leadsInPeriod, wonDealsInPeriod, lostDealsInPeriod, activities, period, rep, reps],
   )
 
   const sourcePerformance = useMemo(

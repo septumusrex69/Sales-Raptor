@@ -30,7 +30,7 @@ import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { LeadForm } from '../../components/layout/QuickAdd'
 import { LeadsPeriodBar } from '../../components/leads/LeadsPeriodBar'
 import { LeadsKpiRow, type LeadsKpiValues } from '../../components/leads/LeadsKpiRow'
-import { formatCurrency, formatDate, formatLeadNumber, daysAgoLabel, industries, leadClassifications, leadSources, provinces, services, TODAY, userById, users } from '../../data/mockData'
+import { formatCurrency, formatDate, formatLeadNumber, daysAgoLabel, industries, leadClassifications, leadSources, provinces, services, TODAY } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
 import { decodeSalesMonthParam, isWithinPeriod, type SalesMonthPeriod } from '../../lib/salesMonth'
 import { getPreviousEquivalentRange, getThisCalendarMonth } from '../../lib/dateRange'
@@ -39,7 +39,6 @@ import { ALL_COLUMNS, defaultVisibleColumns, SORTABLE_COLUMN_KEYS, type ColumnKe
 import type { Lead, LeadClassification, LeadStatus, ProductService } from '../../types'
 
 const ALL_STATUSES: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Qualified', 'Unqualified', 'Proposal Required', 'Converted', 'Lost']
-const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')
 const SCORE_THRESHOLDS = ['All', '80', '60', '40', '20'] as const
 const PAGE_SIZES = [10, 25, 50, 100]
 
@@ -67,7 +66,8 @@ function isStaleClassAContact(lead: Lead) {
 
 export function LeadsList() {
   const store = useAppStore()
-  const { leads, activities, updateLead, markLeadLost, deleteLead, convertLeadToDeal, addActivity } = store
+  const { leads, activities, users, userById, updateLead, markLeadLost, deleteLead, convertLeadToDeal, addActivity } = store
+  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 

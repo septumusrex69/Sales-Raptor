@@ -7,14 +7,13 @@ import { StageBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { MarkLostModal, MarkWonModal } from './DealStageModals'
-import { companyById, contactById, formatCurrency, formatDate, formatDateTime, services, userById, users } from '../../data/mockData'
+import { formatCurrency, formatDate, formatDateTime, services } from '../../data/mockData'
 import { DEAL_STAGES } from '../../types'
 import type { ActivityType, DealStage, LossReason, ProposalStatus, TaskType } from '../../types'
 import type { WonDealDetails } from '../../store/AppStore'
 
 const TABS = ['Overview', 'Activities', 'Tasks', 'Documents', 'Proposals', 'Notes', 'History'] as const
 type Tab = (typeof TABS)[number]
-const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')
 
 interface MockDocument {
   id: string
@@ -26,7 +25,26 @@ interface MockDocument {
 export function DealDetail() {
   const { id } = useParams()
   const store = useAppStore()
-  const { deals, activities, tasks, proposals, updateDeal, moveDealStage, markDealWon, markDealLost, addActivity, addTask, updateTask, addProposal, updateProposal } = store
+  const {
+    deals,
+    activities,
+    tasks,
+    proposals,
+    users,
+    companyById,
+    contactById,
+    userById,
+    updateDeal,
+    moveDealStage,
+    markDealWon,
+    markDealLost,
+    addActivity,
+    addTask,
+    updateTask,
+    addProposal,
+    updateProposal,
+  } = store
+  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const deal = deals.find((d) => d.id === id)
 
   const [tab, setTab] = useState<Tab>('Overview')
@@ -315,7 +333,7 @@ export function DealDetail() {
         </Card>
       )}
 
-      {editOpen && <EditDealModal deal={deal} onClose={() => setEditOpen(false)} onSave={(patch) => updateDeal(deal.id, patch)} />}
+      {editOpen && <EditDealModal deal={deal} reps={reps} onClose={() => setEditOpen(false)} onSave={(patch) => updateDeal(deal.id, patch)} />}
       {wonOpen && <MarkWonModal defaultValue={deal.value} defaultService={deal.service} onClose={() => setWonOpen(false)} onSave={(details: WonDealDetails) => markDealWon(deal.id, details)} />}
       {lostOpen && <MarkLostModal onClose={() => setLostOpen(false)} onSave={(reason: LossReason) => markDealLost(deal.id, reason)} />}
       {activityOpen && (
@@ -375,7 +393,17 @@ function Field({ label, value }: { label: string; value?: string }) {
   )
 }
 
-function EditDealModal({ deal, onClose, onSave }: { deal: ReturnType<typeof useAppStore>['deals'][number]; onClose: () => void; onSave: (patch: Partial<typeof deal>) => void }) {
+function EditDealModal({
+  deal,
+  reps,
+  onClose,
+  onSave,
+}: {
+  deal: ReturnType<typeof useAppStore>['deals'][number]
+  reps: ReturnType<typeof useAppStore>['users']
+  onClose: () => void
+  onSave: (patch: Partial<typeof deal>) => void
+}) {
   const [form, setForm] = useState({ ...deal, expectedCloseDate: deal.expectedCloseDate.slice(0, 10) })
   return (
     <Modal title="Edit Deal" onClose={onClose} width={520}>

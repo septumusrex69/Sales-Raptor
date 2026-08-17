@@ -1,4 +1,4 @@
-import { userById } from '../../data/mockData'
+import { useAppStore } from '../../store/AppStore'
 import type { ID } from '../../types'
 
 function initials(name: string) {
@@ -23,6 +23,7 @@ export function Avatar({ name, color, size = 28 }: { name: string; color: string
 }
 
 export function UserAvatar({ userId, size = 28 }: { userId?: ID; size?: number }) {
+  const { userById } = useAppStore()
   const user = userById(userId)
   if (!user) return <Avatar name="?" color="#94a3b8" size={size} />
   return <Avatar name={user.name} color={user.avatarColor} size={size} />
