@@ -42,30 +42,56 @@ function reportError(action: string, message: string) {
   console.error(`[AppStore] ${action} failed:`, message)
 }
 
-function insertRow<T extends object>(table: string, row: T, action: string) {
+/** Turns raw Postgrest/RLS errors into something worth showing a user. */
+function friendlyError(message: string): string {
+  if (message.includes('row-level security') || message.includes('JSON object requested')) {
+    return "You don't have permission to do that."
+  }
+  return message
+}
+
+function insertRow<T extends object>(table: string, row: T, action: string, onError?: (message: string) => void) {
   supabase
     .from(table)
     .insert(appToRow(row))
     .then(({ error }) => {
-      if (error) reportError(action, error.message)
+      if (error) {
+        reportError(action, error.message)
+        onError?.(error.message)
+      }
     })
 }
-function updateRow<T extends object>(table: string, id: ID, patch: T, action: string) {
+// RLS policies restrict UPDATE/DELETE via their `using` clause, and when a
+// row is excluded that way Postgrest just reports "0 rows changed" — not an
+// error. Chaining .select().single() forces an error when nothing matched
+// (0 rows changed and 0 rows returned), which is how a permission-denied
+// write actually gets surfaced back to the caller.
+function updateRow<T extends object>(table: string, id: ID, patch: T, action: string, onError?: (message: string) => void) {
   supabase
     .from(table)
     .update(appToRow(patch))
     .eq('id', id)
+    .select('id')
+    .single()
     .then(({ error }) => {
-      if (error) reportError(action, error.message)
+      if (error) {
+        reportError(action, error.message)
+        onError?.(error.message)
+      }
     })
 }
-function deleteRow(table: string, id: ID, action: string) {
+function deleteRow(table: string, id: ID, action: string, onError?: (message: string) => void) {
   supabase
     .from(table)
     .delete()
     .eq('id', id)
+    .select('id')
+    .single()
     .then(({ error }) => {
-      if (error) reportError(action, error.message)
+      if (error) {
+        reportError(action, error.message)
+        onError?.(error.message)
+      }
     })
 }
 
@@ -110,6 +136,8 @@ interface AppState {
   users: User[]
   teams: Team[]
   dataLoading: boolean
+  /** Message from the most recent failed write (e.g. permission denied). Null when nothing to show. */
+  toast: string | null
 }
 
 export interface WonDealDetails {
@@ -144,6 +172,8 @@ interface AppActions {
   updateUser: (id: ID, patch: Partial<User>) => void
   addTeam: (input: Partial<Team> & { name: string }) => Team
 
+  dismissToast: () => void
+
   companyById: (id?: ID) => Company | undefined
   contactById: (id?: ID) => Contact | undefined
   dealById: (id?: ID) => Deal | undefined
@@ -166,6 +196,16 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [users, setUsers] = useState<User[]>([])
   const [teamRows, setTeamRows] = useState<{ id: ID; name: string }[]>([])
   const [dataLoading, setDataLoading] = useState(true)
+  const [toast, setToast] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!toast) return
+    const timer = setTimeout(() => setToast(null), 5000)
+    return () => clearTimeout(timer)
+  }, [toast])
+
+  const showError = useCallback((message: string) => setToast(friendlyError(message)), [])
+  const dismissToast = useCallback(() => setToast(null), [])
 
   useEffect(() => {
     if (!session) {
@@ -275,11 +315,21 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [ownerId, leads, addActivity],
   )
 
-  const updateLead = useCallback<AppActions['updateLead']>((id, patch) => {
-    const fullPatch = { ...patch, updatedAt: TODAY.toISOString() }
-    setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...fullPatch } : l)))
-    updateRow('leads', id, fullPatch, 'updateLead')
-  }, [])
+  const updateLead = useCallback<AppActions['updateLead']>(
+    (id, patch) => {
+      const fullPatch = { ...patch, updatedAt: TODAY.toISOString() }
+      let previous: Lead | undefined
+      setLeads((prev) => {
+        previous = prev.find((l) => l.id === id)
+        return prev.map((l) => (l.id === id ? { ...l, ...fullPatch } : l))
+      })
+      updateRow('leads', id, fullPatch, 'updateLead', (message) => {
+        if (previous) setLeads((prev) => prev.map((l) => (l.id === id ? previous! : l)))
+        showError(message)
+      })
+    },
+    [showError],
+  )
 
   const markLeadLost = useCallback<AppActions['markLeadLost']>(
     (leadId) => {
@@ -289,10 +339,20 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [updateLead, addActivity],
   )
 
-  const deleteLead = useCallback<AppActions['deleteLead']>((leadId) => {
-    setLeads((prev) => prev.filter((l) => l.id !== leadId))
-    deleteRow('leads', leadId, 'deleteLead')
-  }, [])
+  const deleteLead = useCallback<AppActions['deleteLead']>(
+    (leadId) => {
+      let previous: Lead | undefined
+      setLeads((prev) => {
+        previous = prev.find((l) => l.id === leadId)
+        return prev.filter((l) => l.id !== leadId)
+      })
+      deleteRow('leads', leadId, 'deleteLead', (message) => {
+        if (previous) setLeads((prev) => [previous!, ...prev])
+        showError(message)
+      })
+    },
+    [showError],
+  )
 
   const addDeal = useCallback<AppActions['addDeal']>(
     (input) => {
@@ -315,18 +375,35 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [ownerId, addActivity],
   )
 
-  const updateDeal = useCallback<AppActions['updateDeal']>((id, patch) => {
-    setDeals((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)))
-    updateRow('deals', id, patch, 'updateDeal')
-  }, [])
+  const updateDeal = useCallback<AppActions['updateDeal']>(
+    (id, patch) => {
+      let previous: Deal | undefined
+      setDeals((prev) => {
+        previous = prev.find((d) => d.id === id)
+        return prev.map((d) => (d.id === id ? { ...d, ...patch } : d))
+      })
+      updateRow('deals', id, patch, 'updateDeal', (message) => {
+        if (previous) setDeals((prev) => prev.map((d) => (d.id === id ? previous! : d)))
+        showError(message)
+      })
+    },
+    [showError],
+  )
 
   const moveDealStage = useCallback<AppActions['moveDealStage']>(
     (id, stage) => {
       const patch: Partial<Deal> = { stage }
       if (stage === 'Won') patch.wonAt = TODAY.toISOString()
       if (stage === 'Lost') patch.lostAt = TODAY.toISOString()
-      setDeals((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)))
-      updateRow('deals', id, patch, 'moveDealStage')
+      let previous: Deal | undefined
+      setDeals((prev) => {
+        previous = prev.find((d) => d.id === id)
+        return prev.map((d) => (d.id === id ? { ...d, ...patch } : d))
+      })
+      updateRow('deals', id, patch, 'moveDealStage', (message) => {
+        if (previous) setDeals((prev) => prev.map((d) => (d.id === id ? previous! : d)))
+        showError(message)
+      })
       const deal = deals.find((d) => d.id === id)
       addActivity({
         type: stage === 'Won' ? 'Deal Won' : stage === 'Lost' ? 'Deal Lost' : 'Deal Stage Change',
@@ -335,7 +412,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         companyId: deal?.companyId,
       })
     },
-    [deals, addActivity],
+    [deals, addActivity, showError],
   )
 
   const markDealWon = useCallback<AppActions['markDealWon']>(
@@ -348,22 +425,36 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         wonAt: TODAY.toISOString(),
         notes: `${deal?.notes ?? ''}\nContract start: ${details.startDate}. Duration: ${details.contractDuration}.`.trim(),
       }
-      setDeals((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)))
-      updateRow('deals', id, patch, 'markDealWon')
+      let previous: Deal | undefined
+      setDeals((prev) => {
+        previous = prev.find((d) => d.id === id)
+        return prev.map((d) => (d.id === id ? { ...d, ...patch } : d))
+      })
+      updateRow('deals', id, patch, 'markDealWon', (message) => {
+        if (previous) setDeals((prev) => prev.map((d) => (d.id === id ? previous! : d)))
+        showError(message)
+      })
       addActivity({ type: 'Deal Won', subject: `${deal?.name ?? 'Deal'} marked Won — ${details.service}, starting ${details.startDate}`, dealId: id, companyId: deal?.companyId })
     },
-    [deals, addActivity],
+    [deals, addActivity, showError],
   )
 
   const markDealLost = useCallback<AppActions['markDealLost']>(
     (id, reason) => {
       const patch: Partial<Deal> = { stage: 'Lost' as DealStage, lossReason: reason, lostAt: TODAY.toISOString() }
-      setDeals((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)))
-      updateRow('deals', id, patch, 'markDealLost')
+      let previous: Deal | undefined
+      setDeals((prev) => {
+        previous = prev.find((d) => d.id === id)
+        return prev.map((d) => (d.id === id ? { ...d, ...patch } : d))
+      })
+      updateRow('deals', id, patch, 'markDealLost', (message) => {
+        if (previous) setDeals((prev) => prev.map((d) => (d.id === id ? previous! : d)))
+        showError(message)
+      })
       const deal = deals.find((d) => d.id === id)
       addActivity({ type: 'Deal Lost', subject: `${deal?.name ?? 'Deal'} marked Lost — reason: ${reason}`, dealId: id, companyId: deal?.companyId })
     },
-    [deals, addActivity],
+    [deals, addActivity, showError],
   )
 
   const addProposal = useCallback<AppActions['addProposal']>(
@@ -383,10 +474,20 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [addActivity],
   )
 
-  const updateProposal = useCallback<AppActions['updateProposal']>((id, patch) => {
-    setProposals((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)))
-    updateRow('proposals', id, patch, 'updateProposal')
-  }, [])
+  const updateProposal = useCallback<AppActions['updateProposal']>(
+    (id, patch) => {
+      let previous: Proposal | undefined
+      setProposals((prev) => {
+        previous = prev.find((p) => p.id === id)
+        return prev.map((p) => (p.id === id ? { ...p, ...patch } : p))
+      })
+      updateRow('proposals', id, patch, 'updateProposal', (message) => {
+        if (previous) setProposals((prev) => prev.map((p) => (p.id === id ? previous! : p)))
+        showError(message)
+      })
+    },
+    [showError],
+  )
 
   function addCompanyInternal(input: Partial<Company> & { name: string }): Company {
     const company: Company = {
@@ -436,10 +537,20 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [ownerId, addActivity],
   )
 
-  const updateTask = useCallback<AppActions['updateTask']>((id, patch) => {
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
-    updateRow('tasks', id, patch, 'updateTask')
-  }, [])
+  const updateTask = useCallback<AppActions['updateTask']>(
+    (id, patch) => {
+      let previous: Task | undefined
+      setTasks((prev) => {
+        previous = prev.find((t) => t.id === id)
+        return prev.map((t) => (t.id === id ? { ...t, ...patch } : t))
+      })
+      updateRow('tasks', id, patch, 'updateTask', (message) => {
+        if (previous) setTasks((prev) => prev.map((t) => (t.id === id ? previous! : t)))
+        showError(message)
+      })
+    },
+    [showError],
+  )
 
   const convertLeadToDeal = useCallback<AppActions['convertLeadToDeal']>(
     (leadId, dealValue) => {
@@ -499,18 +610,34 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [leads, contacts, updateLead, addActivity],
   )
 
-  const updateUser = useCallback<AppActions['updateUser']>((id, patch) => {
-    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)))
-    updateRow('profiles', id, patch, 'updateUser')
-  }, [])
+  const updateUser = useCallback<AppActions['updateUser']>(
+    (id, patch) => {
+      let previous: User | undefined
+      setUsers((prev) => {
+        previous = prev.find((u) => u.id === id)
+        return prev.map((u) => (u.id === id ? { ...u, ...patch } : u))
+      })
+      updateRow('profiles', id, patch, 'updateUser', (message) => {
+        if (previous) setUsers((prev) => prev.map((u) => (u.id === id ? previous! : u)))
+        showError(message)
+      })
+    },
+    [showError],
+  )
 
-  const addTeam = useCallback<AppActions['addTeam']>((input) => {
-    const id = crypto.randomUUID()
-    const team: Team = { memberIds: [], ...input, id }
-    setTeamRows((prev) => [...prev, { id, name: team.name }])
-    insertRow('teams', { id, name: team.name }, 'addTeam')
-    return team
-  }, [])
+  const addTeam = useCallback<AppActions['addTeam']>(
+    (input) => {
+      const id = crypto.randomUUID()
+      const team: Team = { memberIds: [], ...input, id }
+      setTeamRows((prev) => [...prev, { id, name: team.name }])
+      insertRow('teams', { id, name: team.name }, 'addTeam', (message) => {
+        setTeamRows((prev) => prev.filter((t) => t.id !== id))
+        showError(message)
+      })
+      return team
+    },
+    [showError],
+  )
 
   const companyById = useCallback<AppActions['companyById']>((id) => companies.find((c) => c.id === id), [companies])
   const contactById = useCallback<AppActions['contactById']>((id) => contacts.find((c) => c.id === id), [contacts])
@@ -530,6 +657,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       users,
       teams,
       dataLoading,
+      toast,
       addLead,
       updateLead,
       convertLeadToDeal,
@@ -549,6 +677,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateProposal,
       updateUser,
       addTeam,
+      dismissToast,
       companyById,
       contactById,
       dealById,
@@ -566,6 +695,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       users,
       teams,
       dataLoading,
+      toast,
       addLead,
       updateLead,
       convertLeadToDeal,
@@ -585,6 +715,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateProposal,
       updateUser,
       addTeam,
+      dismissToast,
       companyById,
       contactById,
       dealById,
@@ -593,7 +724,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     ],
   )
 
-  return <AppContext.Provider value={value}>{children}</AppContext.Provider>
+  return (
+    <AppContext.Provider value={value}>
+      {children}
+      {toast && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[100] bg-navy-950 text-white text-sm font-medium px-4 py-2.5 rounded-lg shadow-lg flex items-center gap-3">
+          <span>{toast}</span>
+          <button onClick={dismissToast} className="text-slate-300 hover:text-white text-xs font-semibold">
+            Dismiss
+          </button>
+        </div>
+      )}
+    </AppContext.Provider>
+  )
 }
 
 export function useAppStore() {

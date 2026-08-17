@@ -59,6 +59,46 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
+-- Looks up the calling user's role. security definer + a fixed search_path
+-- let this be called from RLS policies on profiles itself without infinite
+-- recursion (it reads through the function's own privileges, not the
+-- caller's, so it doesn't re-trigger the calling policy).
+create or replace function public.current_user_role()
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select role from public.profiles where id = auth.uid();
+$$;
+
+-- Only an Administrator may change someone's role/status/team via the
+-- profiles table. Non-admin updates (e.g. editing your own name/phone from
+-- Settings → Profile) silently keep these three fields at their prior
+-- value no matter what the client sends, so a crafted request can't
+-- self-escalate to Administrator.
+create or replace function public.protect_profile_privileged_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if public.current_user_role() <> 'Administrator' then
+    new.role := old.role;
+    new.status := old.status;
+    new.team_id := old.team_id;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_profile_privileged_fields on public.profiles;
+create trigger protect_profile_privileged_fields
+  before update on public.profiles
+  for each row execute function public.protect_profile_privileged_fields();
+
 -- ---------- Companies ----------
 create table if not exists public.companies (
   id uuid primary key default gen_random_uuid(),
@@ -202,10 +242,11 @@ create table if not exists public.proposals (
 );
 
 -- ---------- Row Level Security ----------
--- Phase 1 policy: any authenticated team member can read/write everything,
--- matching the app's current behavior exactly (there is no per-rep
--- restriction anywhere in the UI today). Tightening this by role is a
--- deliberate later step, not done here.
+-- Phase 2 policy: everyone can still SEE everything (team-wide leaderboards,
+-- reports, and search all depend on that and haven't changed). Writes are
+-- narrower: a Sales Representative can only edit/delete records they own;
+-- an Administrator or Sales Manager can edit/delete anyone's. Team and user
+-- management (roles, statuses, teams) is Administrator-only.
 alter table public.teams enable row level security;
 alter table public.profiles enable row level security;
 alter table public.companies enable row level security;
@@ -216,16 +257,99 @@ alter table public.tasks enable row level security;
 alter table public.activities enable row level security;
 alter table public.proposals enable row level security;
 
+-- companies/contacts/leads/deals/tasks/activities all follow the same
+-- shape: open read, open insert, and update/delete gated to the row's
+-- owner column (or an Administrator/Sales Manager).
 do $$
 declare
+  pair text[];
   t text;
+  owner_col text;
 begin
-  foreach t in array array['teams', 'profiles', 'companies', 'contacts', 'leads', 'deals', 'tasks', 'activities', 'proposals']
+  foreach pair slice 1 in array array[
+    array['companies', 'account_owner_id'],
+    array['contacts', 'owner_id'],
+    array['leads', 'owner_id'],
+    array['deals', 'owner_id'],
+    array['tasks', 'owner_id'],
+    array['activities', 'user_id']
+  ]
   loop
+    t := pair[1];
+    owner_col := pair[2];
+
     execute format('drop policy if exists "authenticated_all" on public.%I;', t);
+
+    execute format('drop policy if exists "%s_select" on public.%I;', t, t);
+    execute format('create policy "%s_select" on public.%I for select using (auth.uid() is not null);', t, t);
+
+    execute format('drop policy if exists "%s_insert" on public.%I;', t, t);
+    execute format('create policy "%s_insert" on public.%I for insert with check (auth.uid() is not null);', t, t);
+
+    execute format('drop policy if exists "%s_update" on public.%I;', t, t);
     execute format(
-      'create policy "authenticated_all" on public.%I for all using (auth.uid() is not null) with check (auth.uid() is not null);',
-      t
+      'create policy "%s_update" on public.%I for update using (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager'')) with check (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager''));',
+      t, t, owner_col, owner_col
+    );
+
+    execute format('drop policy if exists "%s_delete" on public.%I;', t, t);
+    execute format(
+      'create policy "%s_delete" on public.%I for delete using (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager''));',
+      t, t, owner_col
     );
   end loop;
 end $$;
+
+-- proposals have no owner column of their own — ownership follows the
+-- parent deal's owner.
+drop policy if exists "authenticated_all" on public.proposals;
+
+drop policy if exists "proposals_select" on public.proposals;
+create policy "proposals_select" on public.proposals for select using (auth.uid() is not null);
+
+drop policy if exists "proposals_insert" on public.proposals;
+create policy "proposals_insert" on public.proposals for insert with check (auth.uid() is not null);
+
+drop policy if exists "proposals_update" on public.proposals;
+create policy "proposals_update" on public.proposals for update
+  using (
+    public.current_user_role() in ('Administrator', 'Sales Manager')
+    or exists (select 1 from public.deals d where d.id = proposals.deal_id and d.owner_id = auth.uid())
+  )
+  with check (
+    public.current_user_role() in ('Administrator', 'Sales Manager')
+    or exists (select 1 from public.deals d where d.id = proposals.deal_id and d.owner_id = auth.uid())
+  );
+
+drop policy if exists "proposals_delete" on public.proposals;
+create policy "proposals_delete" on public.proposals for delete
+  using (
+    public.current_user_role() in ('Administrator', 'Sales Manager')
+    or exists (select 1 from public.deals d where d.id = proposals.deal_id and d.owner_id = auth.uid())
+  );
+
+-- profiles: anyone can view the directory; you can edit your own row (name,
+-- phone), and an Administrator can edit anyone's. The
+-- protect_profile_privileged_fields trigger above stops a non-admin from
+-- smuggling a role/status/team change through their own self-edit.
+drop policy if exists "authenticated_all" on public.profiles;
+
+drop policy if exists "profiles_select" on public.profiles;
+create policy "profiles_select" on public.profiles for select using (auth.uid() is not null);
+
+drop policy if exists "profiles_update" on public.profiles;
+create policy "profiles_update" on public.profiles for update
+  using (auth.uid() = id or public.current_user_role() = 'Administrator')
+  with check (auth.uid() = id or public.current_user_role() = 'Administrator');
+
+-- teams: anyone can view them; only an Administrator can create/rename/
+-- delete one.
+drop policy if exists "authenticated_all" on public.teams;
+
+drop policy if exists "teams_select" on public.teams;
+create policy "teams_select" on public.teams for select using (auth.uid() is not null);
+
+drop policy if exists "teams_write" on public.teams;
+create policy "teams_write" on public.teams for all
+  using (public.current_user_role() = 'Administrator')
+  with check (public.current_user_role() = 'Administrator');

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Plus, Trash2, Check, X } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
@@ -136,15 +136,19 @@ function ProfileTab() {
 
 function UsersTab() {
   const { users, updateUser } = useAppStore()
+  const { currentUser, session } = useAuth()
+  const isAdmin = currentUser?.role === 'Administrator'
   const [addOpen, setAddOpen] = useState(false)
 
   return (
     <Card padded={false}>
       <div className="p-5 flex items-center justify-between">
         <CardHeader title="Users" subtitle={`${users.length} team members`} />
-        <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 h-fit">
-          <Plus size={15} /> Add User
-        </button>
+        {isAdmin && (
+          <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 h-fit">
+            <Plus size={15} /> Add User
+          </button>
+        )}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -166,54 +170,117 @@ function UsersTab() {
                   </div>
                 </td>
                 <td className="px-3 py-2.5">
-                  <select
-                    className="text-sm text-slate-600 border border-slate-200 rounded-lg px-2 py-1 bg-white outline-none"
-                    value={u.role}
-                    onChange={(e) => updateUser(u.id, { role: e.target.value as UserRole })}
-                  >
-                    {(['Administrator', 'Sales Manager', 'Sales Representative', 'Read Only'] as UserRole[]).map((r) => (
-                      <option key={r}>{r}</option>
-                    ))}
-                  </select>
+                  {isAdmin ? (
+                    <select
+                      className="text-sm text-slate-600 border border-slate-200 rounded-lg px-2 py-1 bg-white outline-none"
+                      value={u.role}
+                      onChange={(e) => updateUser(u.id, { role: e.target.value as UserRole })}
+                    >
+                      {(['Administrator', 'Sales Manager', 'Sales Representative', 'Read Only'] as UserRole[]).map((r) => (
+                        <option key={r}>{r}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="text-slate-500">{u.role}</span>
+                  )}
                 </td>
                 <td className="px-3 py-2.5 text-slate-500">{u.email}</td>
                 <td className="px-3 py-2.5">
-                  <button
-                    onClick={() => updateUser(u.id, { status: u.status === 'Active' ? 'Inactive' : 'Active' })}
-                    className={`badge ${u.status === 'Active' ? 'bg-[#eef4f1] text-[#406d58]' : 'bg-slate-100 text-slate-500'}`}
-                  >
-                    {u.status}
-                  </button>
+                  {isAdmin ? (
+                    <button
+                      onClick={() => updateUser(u.id, { status: u.status === 'Active' ? 'Inactive' : 'Active' })}
+                      className={`badge ${u.status === 'Active' ? 'bg-[#eef4f1] text-[#406d58]' : 'bg-slate-100 text-slate-500'}`}
+                    >
+                      {u.status}
+                    </button>
+                  ) : (
+                    <span className={`badge ${u.status === 'Active' ? 'bg-[#eef4f1] text-[#406d58]' : 'bg-slate-100 text-slate-500'}`}>{u.status}</span>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      {addOpen && <InviteUserModal onClose={() => setAddOpen(false)} />}
+      {addOpen && session && <InviteUserModal accessToken={session.access_token} onClose={() => setAddOpen(false)} />}
     </Card>
   )
 }
 
-function InviteUserModal({ onClose }: { onClose: () => void }) {
+function InviteUserModal({ accessToken, onClose }: { accessToken: string; onClose: () => void }) {
+  const [email, setEmail] = useState('')
+  const [name, setName] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [sent, setSent] = useState(false)
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!email) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/invite-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ email, name: name || undefined }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(body.error ?? 'Something went wrong sending the invite.')
+        return
+      }
+      setSent(true)
+    } catch {
+      setError('Could not reach the server. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (sent) {
+    return (
+      <Modal title="Add User" onClose={onClose} width={420}>
+        <p className="text-sm text-slate-600 leading-relaxed">
+          Invite sent to <span className="font-medium text-slate-800">{email}</span>. They'll get an email to set their password, and will appear in this
+          list automatically once they accept — just set their role and team here.
+        </p>
+        <div className="flex justify-end mt-4 pt-3 border-t border-slate-100">
+          <button onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
+            Done
+          </button>
+        </div>
+      </Modal>
+    )
+  }
+
   return (
     <Modal title="Add User" onClose={onClose} width={420}>
-      <p className="text-sm text-slate-600 leading-relaxed">
-        New team members are invited from the Supabase Dashboard, not from here. Go to{' '}
-        <span className="font-medium text-slate-800">Authentication → Users → Invite User</span>, enter their email, and they'll get an email to set their own
-        password. Once they accept, they'll appear in this list automatically — just set their role and team here.
-      </p>
-      <div className="flex justify-end mt-4 pt-3 border-t border-slate-100">
-        <button onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
-          Got it
-        </button>
-      </div>
+      <form onSubmit={handleSubmit}>
+        <FormField label="Email" required>
+          <input type="email" className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
+        </FormField>
+        <FormField label="Full Name (optional)">
+          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+        </FormField>
+        {error && <p className="text-sm text-[#794234] mb-3.5">{error}</p>}
+        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
+          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting} className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed">
+            {submitting ? 'Sending…' : 'Send Invite'}
+          </button>
+        </div>
+      </form>
     </Modal>
   )
 }
 
 function TeamsTab() {
   const { teams, addTeam } = useAppStore()
+  const { currentUser } = useAuth()
+  const isAdmin = currentUser?.role === 'Administrator'
   const [name, setName] = useState('')
 
   return (
@@ -236,20 +303,22 @@ function TeamsTab() {
           </div>
         ))}
       </div>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (!name.trim()) return
-          addTeam({ name })
-          setName('')
-        }}
-        className="flex gap-2 mt-4 pt-4 border-t border-slate-100"
-      >
-        <input className={inputClass} placeholder="New team name" value={name} onChange={(e) => setName(e.target.value)} />
-        <button type="submit" className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 shrink-0">
-          <Plus size={15} /> Add Team
-        </button>
-      </form>
+      {isAdmin && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!name.trim()) return
+            addTeam({ name })
+            setName('')
+          }}
+          className="flex gap-2 mt-4 pt-4 border-t border-slate-100"
+        >
+          <input className={inputClass} placeholder="New team name" value={name} onChange={(e) => setName(e.target.value)} />
+          <button type="submit" className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 shrink-0">
+            <Plus size={15} /> Add Team
+          </button>
+        </form>
+      )}
     </Card>
   )
 }
