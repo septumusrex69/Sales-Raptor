@@ -75,7 +75,17 @@ export const lossReasons: LossReason[] = [
 
 export const industries = ['Construction', 'Legal', 'Education', 'Property', 'IT Services', 'Retail', 'Manufacturing', 'Healthcare', 'Hospitality', 'Financial Services']
 export const provinces = ['Gauteng', 'Western Cape', 'KwaZulu-Natal', 'Eastern Cape', 'Free State', 'Mpumalanga']
-export const services = ['Consulting', 'Software Implementation', 'Managed Services', 'Support Contract', 'Training', 'Hardware Supply']
+export const services = [
+  'Debt Collection',
+  'Litigation',
+  'Executive Listing',
+  'Letter of Demand / iCollect',
+  'Contract Drafting',
+  'Tracing',
+  'Credit Checks',
+  'In-Person Debt Collection',
+  'Labour Law',
+]
 
 export const customFields: CustomField[] = [
   { id: 'cf1', name: 'Lead Source', relatedTo: 'Leads', type: 'Dropdown', status: 'Active' },
@@ -158,12 +168,12 @@ const leadStatuses: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Q
 const leadFirstNames = ['John', 'Nomsa', 'Michael', 'Sarah', 'David', 'Thabo', 'Lisa', 'James', 'Amanda', 'Sipho', 'Emma', 'Themba', 'Chantelle', 'Werner', 'Precious', 'Karabo', 'Zanele', 'Riaan', 'Fatima', 'Andile', 'Cindy', 'Bongani', 'Melissa', 'Sizwe', 'Hannah', 'Kagiso', 'Tumi', 'Wayne', 'Noluthando', 'Christo']
 const leadLastNames = ['Smith', 'Dlamini', 'Brown', 'Johnson', 'Wilson', 'Mokoena', 'van der Merwe', 'Naidoo', 'Peters', 'Khumalo', 'Botha', 'Ngcobo', 'Adams', 'Kruger', 'Mahlangu', 'Sithole', 'Coetzee', 'Pillay', 'Abrahams', 'Mnguni']
 
-export const leads: Lead[] = Array.from({ length: 32 }).map((_, i) => {
+export const leads: Lead[] = Array.from({ length: 110 }).map((_, i) => {
   const first = pick(leadFirstNames)
   const last = pick(leadLastNames)
   const company = pick(companies)
   const status = pick(leadStatuses)
-  const created = -int(0, 60)
+  const created = -int(0, 240)
   return {
     id: `l${i + 1}`,
     firstName: first,
@@ -186,7 +196,7 @@ export const leads: Lead[] = Array.from({ length: 32 }).map((_, i) => {
     address: company.address,
     serviceInterested: pick(services),
     notes: 'Initial enquiry captured, awaiting qualification.',
-    lastContactAt: daysFromToday(-int(0, 15)),
+    lastContactAt: daysFromToday(-int(0, 45)),
     nextFollowUpAt: daysFromToday(int(-2, 10)),
     createdAt: daysFromToday(created),
     updatedAt: daysFromToday(created + int(0, 5)),
@@ -210,12 +220,20 @@ const dealNameSeed = [
   'ABC Construction Package', 'Dlamini Attorneys Retainer', 'Coastal Manufacturing Upgrade', 'Sunrise Hospitality Support',
   'Highveld Financial Onboarding', 'Karoo Health Systems', 'Riverstone Logistics Deal', 'Delta Property Expansion',
   'Century IT Partnership', 'ABC Phase 2', 'Greenleaf Maintenance', 'Bright Holdings Support Renewal', 'Tech Solutions Upsell',
+  'Bright Holdings Debt Recovery Mandate', 'Tech Solutions SA Collections Contract', 'Alpha Retail Litigation Support',
+  'Coastal Manufacturing Collections Package', 'Sunrise Hospitality New Mandate', 'Highveld Financial Tracing Engagement',
+  'Karoo Health Credit Check Retainer', 'Riverstone Logistics Debt Recovery', 'Delta Property Executive Listing',
+  'Century IT Contract Drafting', 'ABC Labour Law Engagement', 'Dlamini Attorneys Referral Partnership',
+  'Metro School Collections Renewal', 'Greenleaf Litigation Mandate', 'Bright Holdings iCollect Rollout',
+  'Tech Solutions SA Debt Recovery Phase 2', 'Alpha Retail Tracing Support', 'Coastal Manufacturing New Retainer',
+  'Sunrise Hospitality Litigation Package', 'Highveld Financial Executive Search', 'Karoo Health Debt Collection Renewal',
+  'Riverstone Logistics Contract Extension',
 ]
 
 export const deals: Deal[] = dealNameSeed.map((name, i) => {
   const company = companies[i % companies.length]
   const stage = i < 8 ? dealStages[i % 5] : pick(dealStages)
-  const created = -int(5, 90)
+  const created = -int(5, 240)
   const isWon = stage === 'Won'
   const isLost = stage === 'Lost'
   return {
@@ -245,12 +263,17 @@ const taskTypes: TaskType[] = ['Call', 'Follow-up', 'Email', 'Proposal', 'Meetin
 const taskStatuses: TaskStatus[] = ['Not Started', 'In Progress', 'Completed', 'Cancelled']
 const taskPriorities: TaskPriority[] = ['Low', 'Medium', 'High', 'Urgent']
 
-export const tasks: Task[] = Array.from({ length: 40 }).map((_, i) => {
+export const tasks: Task[] = Array.from({ length: 90 }).map((_, i) => {
   const useDeal = rand() > 0.5
   const deal = useDeal ? pick(deals) : undefined
   const lead = !useDeal ? pick(leads) : undefined
-  const dueOffset = int(-4, 12)
-  const status: TaskStatus = dueOffset < 0 ? pick(['Completed', 'Not Started', 'Cancelled']) : pick(taskStatuses)
+  const dueOffset = int(-240, 12)
+  const status: TaskStatus =
+    dueOffset < -14
+      ? pick(['Completed', 'Completed', 'Completed', 'Completed', 'Not Started', 'Cancelled'])
+      : dueOffset < 0
+        ? pick(['Completed', 'Not Started', 'Cancelled'])
+        : pick(taskStatuses)
   return {
     id: `tk${i + 1}`,
     title: pick([
@@ -288,13 +311,14 @@ const activitySubjects: Record<ActivityType, string[]> = {
   'Deal Lost': ['Deal marked Lost'],
 }
 
-export const activities: Activity[] = Array.from({ length: 60 }).map((_, i) => {
+export const activities: Activity[] = Array.from({ length: 260 }).map((_, i) => {
   const type = pick(activityTypes)
   const useLead = rand() > 0.5
   const lead = useLead ? pick(leads) : undefined
   const deal = !useLead ? pick(deals) : undefined
   const name = lead ? `${lead.firstName} ${lead.lastName}` : deal ? companies.find((c) => c.id === deal.companyId)?.name ?? '' : ''
   const subjectTemplate = pick(activitySubjects[type])
+  const offset = -int(0, 240)
   return {
     id: `a${i + 1}`,
     type,
@@ -304,8 +328,8 @@ export const activities: Activity[] = Array.from({ length: 60 }).map((_, i) => {
     dealId: deal?.id,
     subject: subjectTemplate.replace('{name}', name),
     notes: pick(['Client requested pricing.', 'Discussed requirements and timeline.', 'Left voicemail, will retry.', 'Positive response, moving forward.', undefined]),
-    activityDate: daysFromToday(-int(0, 20), int(8, 17), pick([0, 10, 20, 30, 40, 50])),
-    createdAt: daysFromToday(-int(0, 20)),
+    activityDate: daysFromToday(offset, int(8, 17), pick([0, 10, 20, 30, 40, 50])),
+    createdAt: daysFromToday(offset),
   }
 }).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime())
 

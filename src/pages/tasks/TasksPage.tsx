@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react'
 import { Plus, Search } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../../store/AppStore'
 import { Card } from '../../components/ui/Card'
 import { PriorityBadge, TaskStatusBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { currentUser, formatDate, TODAY, users } from '../../data/mockData'
+import { readParam } from '../../lib/drilldown'
 import type { Task, TaskPriority, TaskType } from '../../types'
 
 const VIEWS = ['My Tasks', 'Team Tasks', 'Overdue', 'Today', 'Tomorrow', 'This Week', 'Completed'] as const
@@ -20,7 +22,11 @@ function startOfDay(d: Date) {
 
 export function TasksPage() {
   const { tasks, updateTask, addTask } = useAppStore()
-  const [view, setView] = useState<View>('My Tasks')
+  const [searchParams] = useSearchParams()
+  const [view, setView] = useState<View>(() => {
+    const fromUrl = readParam(searchParams, 'view')
+    return (VIEWS as readonly string[]).includes(fromUrl ?? '') ? (fromUrl as View) : 'My Tasks'
+  })
   const [search, setSearch] = useState('')
   const [addOpen, setAddOpen] = useState(false)
   const [rescheduleTask, setRescheduleTask] = useState<Task | null>(null)

@@ -4,6 +4,7 @@ import { useAppStore } from '../../store/AppStore'
 import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { companyById, formatDate, TODAY } from '../../data/mockData'
+import { DEAL_CLOSE_EVENT_COLOR, TASK_TYPE_COLORS } from '../../lib/colors'
 import type { Task } from '../../types'
 
 type ViewMode = 'Month' | 'Week' | 'Day'
@@ -18,18 +19,6 @@ interface CalEvent {
   sub?: string
 }
 
-const TYPE_COLORS: Record<string, string> = {
-  Call: '#6086a9',
-  'Follow-up': '#416281',
-  Email: '#2b4055',
-  Proposal: '#b28e34',
-  Meeting: '#406d58',
-  WhatsApp: '#957323',
-  Research: '#64748b',
-  'Internal task': '#64748b',
-  Other: '#94a3b8',
-}
-
 function sameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 }
@@ -42,10 +31,10 @@ export function CalendarPage() {
   const events = useMemo<CalEvent[]>(() => {
     const taskEvents = tasks
       .filter((t: Task) => t.status !== 'Cancelled')
-      .map((t) => ({ id: `t-${t.id}`, title: t.title, date: new Date(t.dueDate), color: TYPE_COLORS[t.type] ?? '#94a3b8', ownerId: t.ownerId, sub: t.relatedToLabel }))
+      .map((t) => ({ id: `t-${t.id}`, title: t.title, date: new Date(t.dueDate), color: TASK_TYPE_COLORS[t.type] ?? '#94a3b8', ownerId: t.ownerId, sub: t.relatedToLabel }))
     const closeEvents = deals
       .filter((d) => d.stage !== 'Won' && d.stage !== 'Lost')
-      .map((d) => ({ id: `d-${d.id}`, title: `${d.name} — Expected Close`, date: new Date(d.expectedCloseDate), color: '#ad6452', ownerId: d.ownerId, sub: companyById(d.companyId)?.name }))
+      .map((d) => ({ id: `d-${d.id}`, title: `${d.name} — Expected Close`, date: new Date(d.expectedCloseDate), color: DEAL_CLOSE_EVENT_COLOR, ownerId: d.ownerId, sub: companyById(d.companyId)?.name }))
     return [...taskEvents, ...closeEvents]
   }, [tasks, deals])
 

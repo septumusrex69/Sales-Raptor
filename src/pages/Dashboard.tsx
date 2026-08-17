@@ -1,30 +1,26 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
-import { ArrowUpRight, ArrowDownRight, CheckCircle2, Circle } from 'lucide-react'
+import { Download, CheckCircle2, Circle } from 'lucide-react'
 import { useAppStore } from '../store/AppStore'
 import { Card, CardHeader } from '../components/ui/Card'
 import { StageBadge, PriorityBadge } from '../components/ui/Badge'
 import { UserAvatar } from '../components/ui/Avatar'
-import { companyById, formatCurrency, formatDate, timeAgo, TODAY } from '../data/mockData'
-import type { DealStage } from '../types'
+import { StatTile } from '../components/ui/StatTile'
+import { SalesMonthPicker } from '../components/ui/SalesMonthPicker'
+import { CompareSelector, type CompareMode } from '../components/ui/CompareSelector'
+import { SalesFunnelChart } from '../components/dashboard/SalesFunnelChart'
+import { RevenueTrendChart } from '../components/dashboard/RevenueTrendChart'
+import { ActivityBreakdownChart } from '../components/dashboard/ActivityBreakdownChart'
+import { RepLeaderboard, type LeaderboardRow } from '../components/dashboard/RepLeaderboard'
+import { companyById, formatCurrency, formatDate, teams, timeAgo, TODAY, userById, users } from '../data/mockData'
+import { getCurrentSalesMonth, getPreviousSalesMonth, isWithinPeriod, encodeSalesMonthParam, type SalesMonthPeriod } from '../lib/salesMonth'
+import { isMeaningfulActivity, isContactActivity } from '../lib/meaningfulActivity'
+import { computeAllRepScorecards } from '../lib/repScore'
+import { buildDrilldownUrl, SALES_MONTH_PARAM } from '../lib/drilldown'
+import { downloadCsv } from '../lib/csvExport'
+import type { ID } from '../types'
 
-const FUNNEL_STAGES: DealStage[] = ['New Lead', 'Contacted', 'Qualified', 'Proposal Sent', 'Negotiation', 'Won']
-const FUNNEL_COLORS = ['#6086a9', '#416281', '#406d58', '#b28e34', '#2b4055', '#957323']
-
-const SOURCE_COLORS: Record<string, string> = {
-  Website: '#5f86ab',
-  Referral: '#406d58',
-  'Google Ads': '#b28e34',
-  LinkedIn: '#a1b8ce',
-  Facebook: '#957323',
-  Direct: '#799ab9',
-  Email: '#ad6452',
-  'Existing Client': '#794234',
-  'Sales Rep': '#4d7193',
-  Event: '#30465a',
-  Other: '#94a3b8',
-}
+const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')
 
 function daysAgoLabel(dateIso: string) {
   const diff = Math.round((new Date(dateIso).getTime() - TODAY.getTime()) / (1000 * 60 * 60 * 24))
@@ -34,150 +30,305 @@ function daysAgoLabel(dateIso: string) {
   return `In ${diff}d`
 }
 
+type Scope = 'all' | `rep:${string}` | `team:${string}`
+
+function repIdsForScope(scope: Scope): ID[] {
+  if (scope === 'all') return reps.map((r) => r.id)
+  if (scope.startsWith('rep:')) return [scope.slice(4)]
+  if (scope.startsWith('team:')) {
+    const team = teams.find((t) => t.id === scope.slice(5))
+    return team ? reps.filter((r) => team.memberIds.includes(r.id)).map((r) => r.id) : []
+  }
+  return reps.map((r) => r.id)
+}
+
+function pctDelta(curr: number, prev: number): number {
+  if (prev === 0) return curr === 0 ? 0 : 100
+  return Math.round(((curr - prev) / prev) * 100)
+}
+
+function minutesToLabel(mins: number): string {
+  if (mins < 60) return `${Math.round(mins)}m`
+  if (mins < 60 * 24) return `${Math.round(mins / 60)}h`
+  return `${Math.round(mins / (60 * 24))}d`
+}
+
 export function Dashboard() {
   const { leads, deals, tasks, activities, updateTask } = useAppStore()
-  const [period, setPeriod] = useState<'This Month' | 'Last Month' | 'This Quarter'>('This Month')
+  const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(TODAY))
+  const [compareMode, setCompareMode] = useState<CompareMode>('previous')
+  const [scope, setScope] = useState<Scope>('all')
+
+  const repIds = useMemo(() => repIdsForScope(scope), [scope])
+  const repIdSet = useMemo(() => new Set(repIds), [repIds])
+
+  const scopedLeads = useMemo(() => leads.filter((l) => repIdSet.has(l.ownerId)), [leads, repIdSet])
+  const scopedDeals = useMemo(() => deals.filter((d) => repIdSet.has(d.ownerId)), [deals, repIdSet])
+  const scopedActivities = useMemo(() => activities.filter((a) => repIdSet.has(a.userId)), [activities, repIdSet])
+  const scopedTasks = useMemo(() => tasks.filter((t) => repIdSet.has(t.ownerId)), [tasks, repIdSet])
+
+  const previousPeriod = useMemo(() => getPreviousSalesMonth(period), [period])
 
   const kpis = useMemo(() => {
-    const openDeals = deals.filter((d) => d.stage !== 'Won' && d.stage !== 'Lost')
-    const wonDeals = deals.filter((d) => d.stage === 'Won')
-    const lostDeals = deals.filter((d) => d.stage === 'Lost')
-    const revenueWon = wonDeals.reduce((sum, d) => sum + d.value, 0)
-    const pipelineValue = openDeals.reduce((sum, d) => sum + d.value, 0)
-    const conversionRate = wonDeals.length + lostDeals.length > 0 ? Math.round((wonDeals.length / (wonDeals.length + lostDeals.length)) * 100) : 0
-    return {
-      totalLeads: leads.length,
-      newLeads: leads.filter((l) => l.status === 'New').length,
-      openDeals: openDeals.length,
-      wonDeals: wonDeals.length,
-      lostDeals: lostDeals.length,
-      revenueWon,
-      pipelineValue,
-      conversionRate,
+    function compute(p: SalesMonthPeriod) {
+      const newLeads = scopedLeads.filter((l) => isWithinPeriod(l.createdAt, p))
+      const meaningfulActivities = scopedActivities.filter((a) => isMeaningfulActivity(a) && isWithinPeriod(a.activityDate, p))
+      const qualified = scopedLeads.filter(
+        (l) => isWithinPeriod(l.createdAt, p) && ['Qualified', 'Proposal Required', 'Converted'].includes(l.status),
+      )
+      const won = scopedDeals.filter((d) => d.wonAt && isWithinPeriod(d.wonAt, p))
+      const lost = scopedDeals.filter((d) => d.lostAt && isWithinPeriod(d.lostAt, p))
+      const revenueWon = won.reduce((s, d) => s + d.value, 0)
+      const closed = won.length + lost.length
+      const winRate = closed > 0 ? Math.round((won.length / closed) * 100) : 0
+      return { newLeads: newLeads.length, activities: meaningfulActivities.length, qualified: qualified.length, won: won.length, revenueWon, winRate }
     }
-  }, [leads, deals])
+    const curr = compute(period)
+    const prev = compareMode === 'previous' ? compute(previousPeriod) : undefined
+    return { curr, prev }
+  }, [scopedLeads, scopedDeals, scopedActivities, period, previousPeriod, compareMode])
 
-  const funnelCounts = useMemo(() => {
-    const counts = FUNNEL_STAGES.map((stage) => deals.filter((d) => d.stage === stage).length)
-    const total = deals.length || 1
-    const max = Math.max(...counts, 1)
-    return FUNNEL_STAGES.map((stage, i) => ({
-      stage,
-      count: counts[i],
-      pct: Math.round((counts[i] / max) * 100),
-      shareOfTotal: Math.round((counts[i] / total) * 100),
-    }))
-  }, [deals])
+  const secondary = useMemo(() => {
+    const activeLeads = scopedLeads.filter((l) => l.status !== 'Converted' && l.status !== 'Lost')
+    const newLeadsThisPeriod = scopedLeads.filter((l) => isWithinPeriod(l.createdAt, period))
+    const touchedLeadIds = new Set(
+      scopedActivities.filter((a) => a.leadId && isMeaningfulActivity(a) && isWithinPeriod(a.activityDate, period)).map((a) => a.leadId as string),
+    )
+    const touched = activeLeads.filter((l) => touchedLeadIds.has(l.id) || (l.lastContactAt && isWithinPeriod(l.lastContactAt, period)))
+    const touchedPct = activeLeads.length > 0 ? Math.round((touched.length / activeLeads.length) * 100) : 0
 
-  const leadsBySource = useMemo(() => {
-    const map = new Map<string, number>()
-    for (const l of leads) map.set(l.source, (map.get(l.source) ?? 0) + 1)
-    return Array.from(map.entries())
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-  }, [leads])
+    const responseTimes: number[] = []
+    for (const lead of newLeadsThisPeriod) {
+      const firstContact = scopedActivities
+        .filter((a) => a.leadId === lead.id && isContactActivity(a) && new Date(a.activityDate) >= new Date(lead.createdAt))
+        .sort((a, b) => new Date(a.activityDate).getTime() - new Date(b.activityDate).getTime())[0]
+      if (firstContact) {
+        responseTimes.push((new Date(firstContact.activityDate).getTime() - new Date(lead.createdAt).getTime()) / 60000)
+      }
+    }
+    const avgResponseMins = responseTimes.length > 0 ? responseTimes.reduce((s, v) => s + v, 0) / responseTimes.length : undefined
 
-  const recentActivities = activities.slice(0, 6)
+    const tasksDueInPeriod = scopedTasks.filter((t) => t.status !== 'Cancelled' && isWithinPeriod(t.dueDate, period))
+    const completedOnTime = tasksDueInPeriod.filter((t) => t.completedAt && new Date(t.completedAt) <= new Date(t.dueDate))
+    const onTimePct = tasksDueInPeriod.length > 0 ? Math.round((completedOnTime.length / tasksDueInPeriod.length) * 100) : 0
+    const overdueTasks = scopedTasks.filter((t) => t.status !== 'Completed' && t.status !== 'Cancelled' && new Date(t.dueDate) < TODAY)
 
-  const topDeals = useMemo(
+    const leadsNoNextAction = activeLeads.filter((l) => !l.nextFollowUpAt)
+    const openDeals = scopedDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Lost')
+    const dealsNoNextAction = openDeals.filter((d) => !d.nextActionAt)
+    const dealsOverdue = openDeals.filter((d) => new Date(d.expectedCloseDate) < TODAY)
+
+    return {
+      avgResponseMins,
+      touchedPct,
+      untouchedCount: activeLeads.length - touched.length,
+      onTimePct,
+      overdueTasksCount: overdueTasks.length,
+      leadsNoNextActionCount: leadsNoNextAction.length,
+      dealsNoNextActionCount: dealsNoNextAction.length,
+      dealsOverdueCount: dealsOverdue.length,
+    }
+  }, [scopedLeads, scopedActivities, scopedTasks, scopedDeals, period])
+
+  const scorecards = useMemo(() => computeAllRepScorecards(repIds, period, { leads, deals, activities, tasks }, TODAY), [repIds, period, leads, deals, activities, tasks])
+
+  const leaderboardRows: LeaderboardRow[] = useMemo(
     () =>
-      [...deals]
-        .filter((d) => d.stage !== 'Lost')
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 5),
-    [deals],
+      repIds.map((repId) => {
+        const rep = userById(repId)
+        const ownLeads = leads.filter((l) => l.ownerId === repId)
+        const activeOwnLeads = ownLeads.filter((l) => l.status !== 'Converted' && l.status !== 'Lost')
+        const touchedIds = new Set(
+          activities.filter((a) => a.userId === repId && a.leadId && isMeaningfulActivity(a) && isWithinPeriod(a.activityDate, period)).map((a) => a.leadId as string),
+        )
+        const touched = activeOwnLeads.filter((l) => touchedIds.has(l.id) || (l.lastContactAt && isWithinPeriod(l.lastContactAt, period)))
+        const repActivities = activities.filter((a) => a.userId === repId && isMeaningfulActivity(a) && isWithinPeriod(a.activityDate, period))
+        const won = deals.filter((d) => d.ownerId === repId && d.wonAt && isWithinPeriod(d.wonAt, period))
+        const lost = deals.filter((d) => d.ownerId === repId && d.lostAt && isWithinPeriod(d.lostAt, period))
+        const closed = won.length + lost.length
+        const scorecard = scorecards.find((s) => s.repId === repId)
+        return {
+          repId,
+          name: rep?.name ?? repId,
+          leadsAssigned: activeOwnLeads.length,
+          leadsTouched: touched.length,
+          totalActivities: repActivities.length,
+          dealsWon: won.length,
+          revenueWon: won.reduce((s, d) => s + d.value, 0),
+          winRate: closed > 0 ? Math.round((won.length / closed) * 100) : 0,
+          overallScore: scorecard?.overall ?? 0,
+        }
+      }),
+    [repIds, leads, deals, activities, period, scorecards],
   )
 
-  const tasksDue = useMemo(
-    () =>
-      tasks
-        .filter((t) => t.status !== 'Completed' && t.status !== 'Cancelled')
-        .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
-        .slice(0, 6),
-    [tasks],
-  )
+  const periodParam = encodeSalesMonthParam(period)
+
+  const recentActivities = scopedActivities.slice(0, 6)
+  const topDeals = useMemo(() => [...scopedDeals].filter((d) => d.stage !== 'Lost').sort((a, b) => b.value - a.value).slice(0, 5), [scopedDeals])
+  const tasksDue = useMemo(() => {
+    const recentOverdueFloor = new Date(TODAY.getTime() - 14 * 24 * 60 * 60 * 1000)
+    return scopedTasks
+      .filter((t) => t.status !== 'Completed' && t.status !== 'Cancelled' && new Date(t.dueDate) >= recentOverdueFloor)
+      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+      .slice(0, 6)
+  }, [scopedTasks])
+
+  function handleExport() {
+    downloadCsv(`sales-dashboard-${period.key}`, [
+      { metric: 'Sales Month', value: period.label },
+      { metric: 'Range', value: period.rangeLabel },
+      { metric: 'New Leads', value: kpis.curr.newLeads },
+      { metric: 'Total Activities', value: kpis.curr.activities },
+      { metric: 'Qualified Leads', value: kpis.curr.qualified },
+      { metric: 'Deals Won', value: kpis.curr.won },
+      { metric: 'Revenue Won', value: kpis.curr.revenueWon },
+      { metric: 'Win Rate %', value: kpis.curr.winRate },
+    ])
+    downloadCsv(
+      `sales-leaderboard-${period.key}`,
+      leaderboardRows.map((r) => ({
+        rep: r.name,
+        leadsAssigned: r.leadsAssigned,
+        leadsTouched: r.leadsTouched,
+        activities: r.totalActivities,
+        dealsWon: r.dealsWon,
+        revenueWon: r.revenueWon,
+        winRatePct: r.winRate,
+        overallScore: r.overallScore,
+      })),
+    )
+  }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 className="text-xl font-semibold text-slate-800">Welcome back, Stephan Ferreira</h2>
-          <p className="text-sm text-slate-400 mt-0.5">Here's what's happening with your sales today.</p>
+          <h2 className="text-xl font-semibold text-slate-800">Sales Dashboard</h2>
+          <p className="text-sm text-slate-400 mt-0.5">Real-time overview of your sales performance</p>
         </div>
-        <select
-          value={period}
-          onChange={(e) => setPeriod(e.target.value as typeof period)}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none"
-        >
-          <option>This Month</option>
-          <option>Last Month</option>
-          <option>This Quarter</option>
-        </select>
+        <div className="flex flex-wrap items-center gap-2">
+          <SalesMonthPicker value={period} onChange={setPeriod} referenceDate={TODAY} />
+          <CompareSelector value={compareMode} onChange={setCompareMode} />
+          <select
+            value={scope}
+            onChange={(e) => setScope(e.target.value as Scope)}
+            className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 outline-none"
+          >
+            <option value="all">All Sales Reps</option>
+            <optgroup label="Representatives">
+              {reps.map((r) => (
+                <option key={r.id} value={`rep:${r.id}`}>
+                  {r.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Teams">
+              {teams.map((t) => (
+                <option key={t.id} value={`team:${t.id}`}>
+                  {t.name}
+                </option>
+              ))}
+            </optgroup>
+          </select>
+          <button
+            onClick={handleExport}
+            className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700"
+          >
+            <Download size={15} /> Export
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <StatTile
+          label="New Leads"
+          value={kpis.curr.newLeads.toString()}
+          pctChange={kpis.prev ? pctDelta(kpis.curr.newLeads, kpis.prev.newLeads) : undefined}
+          to={buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          label="Total Activities"
+          value={kpis.curr.activities.toString()}
+          pctChange={kpis.prev ? pctDelta(kpis.curr.activities, kpis.prev.activities) : undefined}
+          to={buildDrilldownUrl('/activities', { [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          label="Qualified Leads"
+          value={kpis.curr.qualified.toString()}
+          pctChange={kpis.prev ? pctDelta(kpis.curr.qualified, kpis.prev.qualified) : undefined}
+          to={buildDrilldownUrl('/leads', { status: 'Qualified', [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          label="Deals Won"
+          value={kpis.curr.won.toString()}
+          pctChange={kpis.prev ? pctDelta(kpis.curr.won, kpis.prev.won) : undefined}
+          to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          label="Revenue Won"
+          value={formatCurrency(kpis.curr.revenueWon)}
+          pctChange={kpis.prev ? pctDelta(kpis.curr.revenueWon, kpis.prev.revenueWon) : undefined}
+          to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          label="Win Rate"
+          value={`${kpis.curr.winRate}%`}
+          pctChange={kpis.prev ? pctDelta(kpis.curr.winRate, kpis.prev.winRate) : undefined}
+        />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <KpiCard label="Total Leads" value={kpis.totalLeads.toString()} delta={18} />
-        <KpiCard label="Open Deals" value={kpis.openDeals.toString()} delta={12} />
-        <KpiCard label="Won Deals" value={kpis.wonDeals.toString()} delta={25} />
-        <KpiCard label="Revenue Won" value={formatCurrency(kpis.revenueWon)} delta={30} />
-      </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <KpiCard label="New Leads" value={kpis.newLeads.toString()} delta={9} small />
-        <KpiCard label="Lost Deals" value={kpis.lostDeals.toString()} delta={-4} small />
-        <KpiCard label="Pipeline Value" value={formatCurrency(kpis.pipelineValue)} delta={14} small />
-        <KpiCard label="Conversion Rate" value={`${kpis.conversionRate}%`} delta={5} small />
+        <StatTile
+          label="Avg Response Time"
+          value={secondary.avgResponseMins !== undefined ? minutesToLabel(secondary.avgResponseMins) : '—'}
+          size="secondary"
+          to={buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          label="Leads Touched"
+          value={`${secondary.touchedPct}%`}
+          size="secondary"
+          to={buildDrilldownUrl('/leads', { touched: '1', [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          label="Tasks Completed On Time"
+          value={`${secondary.onTimePct}%`}
+          size="secondary"
+          to={buildDrilldownUrl('/tasks', { view: 'Completed' })}
+        />
+        <StatTile label="Overdue Tasks" value={secondary.overdueTasksCount.toString()} size="secondary" to={buildDrilldownUrl('/tasks', { view: 'Overdue' })} />
+        <StatTile
+          label="Leads With No Next Action"
+          value={secondary.leadsNoNextActionCount.toString()}
+          size="secondary"
+          to={buildDrilldownUrl('/leads', { noNextAction: '1' })}
+        />
+        <StatTile
+          label="Deals With No Next Action"
+          value={secondary.dealsNoNextActionCount.toString()}
+          size="secondary"
+          to={buildDrilldownUrl('/deals', { noNextAction: '1', view: 'table' })}
+        />
+        <StatTile label="Deals Overdue" value={secondary.dealsOverdueCount.toString()} size="secondary" to={buildDrilldownUrl('/deals', { overdue: '1', view: 'table' })} />
+        <StatTile
+          label="Leads Untouched"
+          value={secondary.untouchedCount.toString()}
+          size="secondary"
+          to={buildDrilldownUrl('/leads', { touched: '0', [SALES_MONTH_PARAM]: periodParam })}
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <Card className="lg:col-span-2">
-          <CardHeader title="Sales Pipeline" subtitle="Deals currently at each stage" />
-          <div className="space-y-2">
-            {funnelCounts.map((f, i) => (
-              <div key={f.stage} className="flex items-center gap-3">
-                <span className="w-28 text-xs font-medium text-slate-500 shrink-0">{f.stage}</span>
-                <div className="flex-1 bg-slate-50 rounded-md h-8 relative overflow-hidden">
-                  <div
-                    className="h-full rounded-md flex items-center justify-end px-2.5 transition-all"
-                    style={{ width: `${Math.max(f.pct, 8)}%`, backgroundColor: FUNNEL_COLORS[i] }}
-                  >
-                    <span className="text-white text-xs font-semibold">{f.count}</span>
-                  </div>
-                </div>
-                <span className="w-10 text-xs text-slate-400 text-right shrink-0">{f.shareOfTotal}%</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card>
-          <CardHeader title="Leads by Source" />
-          <div className="h-44 relative">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={leadsBySource} dataKey="value" nameKey="name" innerRadius={48} outerRadius={70} paddingAngle={2} isAnimationActive={false}>
-                  {leadsBySource.map((entry) => (
-                    <Cell key={entry.name} fill={SOURCE_COLORS[entry.name] ?? '#94a3b8'} stroke="none" />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value, name) => [`${value} leads`, name]} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-xl font-bold text-slate-800">{leads.length}</span>
-              <span className="text-[11px] text-slate-400">Total</span>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mt-2">
-            {leadsBySource.slice(0, 6).map((s) => (
-              <div key={s.name} className="flex items-center gap-1.5 text-xs text-slate-500">
-                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: SOURCE_COLORS[s.name] ?? '#94a3b8' }} />
-                <span className="truncate">{s.name}</span>
-                <span className="ml-auto text-slate-400 shrink-0">{Math.round((s.value / leads.length) * 100)}%</span>
-              </div>
-            ))}
-          </div>
-        </Card>
+        <div className="lg:col-span-2">
+          <SalesFunnelChart deals={scopedDeals} />
+        </div>
+        <ActivityBreakdownChart activities={scopedActivities.filter((a) => isWithinPeriod(a.activityDate, period))} />
       </div>
+
+      <RevenueTrendChart deals={scopedDeals} referenceDate={TODAY} />
+
+      <RepLeaderboard rows={leaderboardRows} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <Card className="lg:col-span-2" padded={false}>
@@ -264,19 +415,5 @@ export function Dashboard() {
         </div>
       </Card>
     </div>
-  )
-}
-
-function KpiCard({ label, value, delta, small }: { label: string; value: string; delta: number; small?: boolean }) {
-  const positive = delta >= 0
-  return (
-    <Card className={small ? 'p-4' : undefined}>
-      <p className="text-xs font-medium text-slate-400">{label}</p>
-      <p className={`font-bold text-slate-800 mt-1 ${small ? 'text-xl' : 'text-2xl'}`}>{value}</p>
-      <p className={`flex items-center gap-1 text-xs font-medium mt-1.5 ${positive ? 'text-[#406d58]' : 'text-[#794234]'}`}>
-        {positive ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
-        {Math.abs(delta)}% <span className="text-slate-400 font-normal">vs last month</span>
-      </p>
-    </Card>
   )
 }

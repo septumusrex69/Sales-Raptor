@@ -21,6 +21,9 @@
 
   --color-surface: #f4f6fb;
   --color-card: #ffffff;
+
+  --color-positive: #406d58;
+  --color-negative: #794234;
 }
 
 html,

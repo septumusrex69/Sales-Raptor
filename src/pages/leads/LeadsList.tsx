@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Phone, Mail, MessageCircle, StickyNote, CheckSquare, Calendar, ArrowRightLeft, UserCog, XCircle, Search, SlidersHorizontal, Plus } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card } from '../../components/ui/Card'
@@ -9,6 +9,9 @@ import { RowMenu } from '../../components/ui/RowMenu'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { LeadForm } from '../../components/layout/QuickAdd'
 import { formatCurrency, formatDate, industries, leadSources, provinces, userById, users } from '../../data/mockData'
+import { readParam } from '../../lib/drilldown'
+import { decodeSalesMonthParam, isWithinPeriod } from '../../lib/salesMonth'
+import { isMeaningfulActivity } from '../../lib/meaningfulActivity'
 import type { Lead, LeadStatus } from '../../types'
 
 const ALL_STATUSES: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Qualified', 'Unqualified', 'Proposal Required', 'Converted', 'Lost']
@@ -16,13 +19,14 @@ const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Adminis
 
 export function LeadsList() {
   const store = useAppStore()
-  const { leads, updateLead, markLeadLost, convertLeadToDeal, addActivity } = store
+  const { leads, activities, updateLead, markLeadLost, convertLeadToDeal, addActivity } = store
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   const [search, setSearch] = useState('')
-  const [status, setStatus] = useState<'All' | LeadStatus>('All')
-  const [source, setSource] = useState<'All' | string>('All')
-  const [owner, setOwner] = useState<'All' | string>('All')
+  const [status, setStatus] = useState<'All' | LeadStatus>(() => (readParam(searchParams, 'status') as LeadStatus) ?? 'All')
+  const [source, setSource] = useState<'All' | string>(() => readParam(searchParams, 'source') ?? 'All')
+  const [owner, setOwner] = useState<'All' | string>(() => readParam(searchParams, 'owner') ?? 'All')
   const [showFilters, setShowFilters] = useState(false)
   const [industry, setIndustry] = useState('All')
   const [province, setProvince] = useState('All')
@@ -30,7 +34,19 @@ export function LeadsList() {
   const [addOpen, setAddOpen] = useState(false)
   const [reassignLead, setReassignLead] = useState<Lead | null>(null)
 
+  // One-time drill-down filters carried in from Dashboard links — not exposed as UI controls.
+  const [salesMonthFilter] = useState(() => decodeSalesMonthParam(searchParams.get('salesMonth')))
+  const [noNextActionFilter] = useState(() => readParam(searchParams, 'noNextAction') === '1')
+  const [touchedFilter] = useState(() => readParam(searchParams, 'touched'))
+
   const filtered = useMemo(() => {
+    const touchedLeadIds = touchedFilter
+      ? new Set(
+          activities
+            .filter((a) => a.leadId && isMeaningfulActivity(a) && (!salesMonthFilter || isWithinPeriod(a.activityDate, salesMonthFilter)))
+            .map((a) => a.leadId as string),
+        )
+      : undefined
     return leads.filter((l) => {
       if (status !== 'All' && l.status !== status) return false
       if (source !== 'All' && l.source !== source) return false
@@ -38,6 +54,13 @@ export function LeadsList() {
       if (industry !== 'All' && l.industry !== industry) return false
       if (province !== 'All' && l.province !== province) return false
       if (minScore && l.score < Number(minScore)) return false
+      if (salesMonthFilter && !isWithinPeriod(l.createdAt, salesMonthFilter)) return false
+      if (noNextActionFilter && l.nextFollowUpAt) return false
+      if (touchedFilter && touchedLeadIds) {
+        const isTouched = touchedLeadIds.has(l.id) || (l.lastContactAt && salesMonthFilter && isWithinPeriod(l.lastContactAt, salesMonthFilter))
+        if (touchedFilter === '1' && !isTouched) return false
+        if (touchedFilter === '0' && isTouched) return false
+      }
       if (search) {
         const q = search.toLowerCase()
         const hay = `${l.firstName} ${l.lastName} ${l.companyName} ${l.email ?? ''}`.toLowerCase()
@@ -45,7 +68,7 @@ export function LeadsList() {
       }
       return true
     })
-  }, [leads, status, source, owner, industry, province, minScore, search])
+  }, [leads, activities, status, source, owner, industry, province, minScore, search, salesMonthFilter, noNextActionFilter, touchedFilter])
 
   function logQuickAction(lead: Lead, type: 'Call' | 'Email' | 'WhatsApp') {
     addActivity({ type, subject: `${type} with ${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId })
