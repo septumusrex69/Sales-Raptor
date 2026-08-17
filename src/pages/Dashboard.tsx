@@ -5,6 +5,7 @@ import { useAppStore } from '../store/AppStore'
 import { Card, CardHeader } from '../components/ui/Card'
 import { StageBadge, PriorityBadge } from '../components/ui/Badge'
 import { UserAvatar } from '../components/ui/Avatar'
+import { RescheduleTaskModal } from '../components/ui/RescheduleTaskModal'
 import { StatTile } from '../components/ui/StatTile'
 import { SalesMonthPicker } from '../components/ui/SalesMonthPicker'
 import { CompareSelector, type CompareMode } from '../components/ui/CompareSelector'
@@ -18,7 +19,7 @@ import { isMeaningfulActivity, isContactActivity } from '../lib/meaningfulActivi
 import { computeAllRepScorecards } from '../lib/repScore'
 import { buildDrilldownUrl, SALES_MONTH_PARAM } from '../lib/drilldown'
 import { downloadCsv } from '../lib/csvExport'
-import type { ID } from '../types'
+import type { ID, Task } from '../types'
 
 const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')
 
@@ -58,6 +59,7 @@ export function Dashboard() {
   const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(TODAY))
   const [compareMode, setCompareMode] = useState<CompareMode>('previous')
   const [scope, setScope] = useState<Scope>('all')
+  const [rescheduleTask, setRescheduleTask] = useState<Task | null>(null)
 
   const repIds = useMemo(() => repIdsForScope(scope), [scope])
   const repIdSet = useMemo(() => new Set(repIds), [repIds])
@@ -396,7 +398,14 @@ export function Dashboard() {
                 <Circle size={18} />
               </button>
               <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-medium text-slate-700 truncate">{t.title}</p>
+                <p className="text-[13px] font-medium text-slate-700 truncate flex items-center gap-1.5">
+                  {t.title}
+                  {t.autoRescheduledFrom && (
+                    <span title={`Missed — originally due ${formatDate(t.autoRescheduledFrom)}`} className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-[#b28e34] bg-[#f7f4eb] px-1 py-0.5 rounded">
+                      Auto-moved
+                    </span>
+                  )}
+                </p>
                 <p className="text-[11px] text-slate-400">{t.relatedToLabel ?? t.type}</p>
               </div>
               <PriorityBadge priority={t.priority} />
@@ -404,6 +413,9 @@ export function Dashboard() {
                 {daysAgoLabel(t.dueDate)}
               </span>
               <UserAvatar userId={t.ownerId} size={24} />
+              <button onClick={() => setRescheduleTask(t)} className="text-xs font-medium text-brand-600 hover:underline shrink-0">
+                Reschedule
+              </button>
             </div>
           ))}
           {tasksDue.length === 0 && (
@@ -414,6 +426,14 @@ export function Dashboard() {
           )}
         </div>
       </Card>
+
+      {rescheduleTask && (
+        <RescheduleTaskModal
+          task={rescheduleTask}
+          onClose={() => setRescheduleTask(null)}
+          onSave={(dueDate) => updateTask(rescheduleTask.id, { dueDate, autoRescheduledFrom: undefined })}
+        />
+      )}
     </div>
   )
 }

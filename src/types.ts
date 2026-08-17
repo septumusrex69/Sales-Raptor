@@ -166,6 +166,8 @@ export interface Task {
   relatedToLabel?: string
   createdAt: string
   completedAt?: string
+  /** Set when this task's due date was auto-rolled forward because it was missed; cleared once completed. */
+  autoRescheduledFrom?: string
 }
 
 export type ActivityType =

@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Phone, Mail, MessageCircle, StickyNote, CheckSquare, Calendar, ArrowRightLeft, UserCog, XCircle, Search, SlidersHorizontal, Plus } from 'lucide-react'
+import { Phone, Mail, MessageCircle, StickyNote, CheckSquare, Calendar, ArrowRightLeft, UserCog, XCircle, Search, SlidersHorizontal, Plus, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card } from '../../components/ui/Card'
 import { StatusBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { RowMenu } from '../../components/ui/RowMenu'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
+import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { LeadForm } from '../../components/layout/QuickAdd'
 import { formatCurrency, formatDate, industries, leadSources, provinces, userById, users } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
@@ -19,7 +20,7 @@ const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Adminis
 
 export function LeadsList() {
   const store = useAppStore()
-  const { leads, activities, updateLead, markLeadLost, convertLeadToDeal, addActivity } = store
+  const { leads, activities, updateLead, markLeadLost, deleteLead, convertLeadToDeal, addActivity } = store
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
@@ -33,6 +34,7 @@ export function LeadsList() {
   const [minScore, setMinScore] = useState('')
   const [addOpen, setAddOpen] = useState(false)
   const [reassignLead, setReassignLead] = useState<Lead | null>(null)
+  const [deleteLeadTarget, setDeleteLeadTarget] = useState<Lead | null>(null)
 
   // One-time drill-down filters carried in from Dashboard links — not exposed as UI controls.
   const [salesMonthFilter] = useState(() => decodeSalesMonthParam(searchParams.get('salesMonth')))
@@ -201,6 +203,7 @@ export function LeadsList() {
                         } },
                         { label: 'Reassign', icon: <UserCog size={14} />, onClick: () => setReassignLead(lead) },
                         { label: 'Mark lost', icon: <XCircle size={14} />, danger: true, onClick: () => markLeadLost(lead.id) },
+                        { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onClick: () => setDeleteLeadTarget(lead) },
                       ]}
                     />
                   </td>
@@ -241,6 +244,14 @@ export function LeadsList() {
             ))}
           </div>
         </Modal>
+      )}
+      {deleteLeadTarget && (
+        <ConfirmDeleteModal
+          title="Delete Lead"
+          itemLabel={`${deleteLeadTarget.firstName} ${deleteLeadTarget.lastName}`}
+          onClose={() => setDeleteLeadTarget(null)}
+          onConfirm={() => deleteLead(deleteLeadTarget.id)}
+        />
       )}
     </div>
   )

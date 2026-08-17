@@ -6,6 +6,7 @@ import { Card } from '../../components/ui/Card'
 import { PriorityBadge, TaskStatusBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
+import { RescheduleTaskModal } from '../../components/ui/RescheduleTaskModal'
 import { currentUser, formatDate, TODAY, users } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
 import type { Task, TaskPriority, TaskType } from '../../types'
@@ -132,7 +133,17 @@ export function TasksPage() {
                   className="w-4 h-4 accent-brand-600 shrink-0"
                 />
                 <div className="min-w-0 flex-1">
-                  <p className={`text-sm font-medium truncate ${t.status === 'Completed' ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{t.title}</p>
+                  <p className={`text-sm font-medium truncate flex items-center gap-1.5 ${t.status === 'Completed' ? 'text-slate-400 line-through' : 'text-slate-700'}`}>
+                    {t.title}
+                    {t.autoRescheduledFrom && t.status !== 'Completed' && (
+                      <span
+                        title={`Originally due ${formatDate(t.autoRescheduledFrom)} — missed and auto-moved to today`}
+                        className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[#b28e34] bg-[#f7f4eb] px-1.5 py-0.5 rounded normal-case"
+                      >
+                        Auto-moved from {formatDate(t.autoRescheduledFrom)}
+                      </span>
+                    )}
+                  </p>
                   <p className="text-xs text-slate-400">
                     {t.type} {t.relatedToLabel ? `· ${t.relatedToLabel}` : ''}
                   </p>
@@ -153,7 +164,11 @@ export function TasksPage() {
 
       {addOpen && <AddTaskModal onClose={() => setAddOpen(false)} onSave={(input) => addTask(input)} />}
       {rescheduleTask && (
-        <RescheduleModal task={rescheduleTask} onClose={() => setRescheduleTask(null)} onSave={(dueDate) => updateTask(rescheduleTask.id, { dueDate })} />
+        <RescheduleTaskModal
+          task={rescheduleTask}
+          onClose={() => setRescheduleTask(null)}
+          onSave={(dueDate) => updateTask(rescheduleTask.id, { dueDate, autoRescheduledFrom: undefined })}
+        />
       )}
     </div>
   )
@@ -218,37 +233,3 @@ function AddTaskModal({ onClose, onSave }: { onClose: () => void; onSave: (input
   )
 }
 
-function RescheduleModal({ task, onClose, onSave }: { task: Task; onClose: () => void; onSave: (dueDate: string) => void }) {
-  const d = new Date(task.dueDate)
-  const [date, setDate] = useState(d.toISOString().slice(0, 10))
-  const [time, setTime] = useState(d.toTimeString().slice(0, 5))
-  return (
-    <Modal title="Reschedule Task" onClose={onClose} width={360}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          onSave(new Date(`${date}T${time}`).toISOString())
-          onClose()
-        }}
-      >
-        <p className="text-sm text-slate-600 mb-3">{task.title}</p>
-        <div className="grid grid-cols-2 gap-3">
-          <FormField label="New Date" required>
-            <input type="date" className={inputClass} value={date} onChange={(e) => setDate(e.target.value)} required />
-          </FormField>
-          <FormField label="Time">
-            <input type="time" className={inputClass} value={time} onChange={(e) => setTime(e.target.value)} />
-          </FormField>
-        </div>
-        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
-          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
-            Cancel
-          </button>
-          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
-            Save
-          </button>
-        </div>
-      </form>
-    </Modal>
-  )
-}

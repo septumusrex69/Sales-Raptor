@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Pencil, ArrowRightLeft, StickyNote, CheckSquare, Calendar, XCircle, Phone, Mail } from 'lucide-react'
+import { ArrowLeft, Pencil, ArrowRightLeft, StickyNote, CheckSquare, Calendar, XCircle, Phone, Mail, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { StatusBadge } from '../../components/ui/Badge'
 import { Avatar, UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
+import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { formatCurrency, formatDate, formatDateTime, industries, leadSources, provinces, services, userById, users } from '../../data/mockData'
 import type { ActivityType, LeadStatus, TaskType } from '../../types'
 
@@ -15,12 +16,13 @@ const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Adminis
 export function LeadDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { leads, activities, updateLead, convertLeadToDeal, markLeadLost, addActivity, addTask } = useAppStore()
+  const { leads, activities, updateLead, convertLeadToDeal, markLeadLost, deleteLead, addActivity, addTask } = useAppStore()
   const lead = leads.find((l) => l.id === id)
 
   const [editOpen, setEditOpen] = useState(false)
   const [activityOpen, setActivityOpen] = useState(false)
   const [taskOpen, setTaskOpen] = useState<'task' | 'meeting' | null>(null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   const timeline = useMemo(
     () => activities.filter((a) => a.leadId === id).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()),
@@ -79,6 +81,7 @@ export function LeadDetail() {
           <ActionButton icon={CheckSquare} label="Create Task" onClick={() => setTaskOpen('task')} />
           <ActionButton icon={Calendar} label="Schedule Meeting" onClick={() => setTaskOpen('meeting')} />
           <ActionButton icon={XCircle} label="Mark Lost" tone="danger" onClick={() => markLeadLost(lead.id)} disabled={lead.status === 'Lost'} />
+          <ActionButton icon={Trash2} label="Delete" tone="danger" onClick={() => setDeleteOpen(true)} />
         </div>
       </Card>
 
@@ -155,6 +158,17 @@ export function LeadDetail() {
           isMeeting={taskOpen === 'meeting'}
           onClose={() => setTaskOpen(null)}
           onSave={(title, dueDate, type) => addTask({ title, dueDate, type, leadId: lead.id, companyId: lead.companyId, relatedToLabel: `${lead.firstName} ${lead.lastName}` })}
+        />
+      )}
+      {deleteOpen && (
+        <ConfirmDeleteModal
+          title="Delete Lead"
+          itemLabel={`${lead.firstName} ${lead.lastName}`}
+          onClose={() => setDeleteOpen(false)}
+          onConfirm={() => {
+            deleteLead(lead.id)
+            navigate('/leads')
+          }}
         />
       )}
     </div>

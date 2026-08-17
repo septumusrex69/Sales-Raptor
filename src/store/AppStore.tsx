@@ -5,6 +5,7 @@ import {
   contacts as initialContacts,
   currentUser,
   deals as initialDeals,
+  formatDate,
   leads as initialLeads,
   proposals as initialProposals,
   tasks as initialTasks,
@@ -17,6 +18,50 @@ function nextId(prefix: string) {
   idCounter += 1
   return `${prefix}${idCounter}`
 }
+
+function startOfDay(d: Date) {
+  const x = new Date(d)
+  x.setHours(0, 0, 0, 0)
+  return x
+}
+
+/**
+ * There's no backend/cron in this app to run a real daily rollover, so this
+ * simulates "missed tasks automatically move to the next day" by catching
+ * up once when a session starts: any open task whose due date has already
+ * passed gets moved to today (same time-of-day), which is the steady state
+ * a day-by-day rollover would converge to by the time you're looking at it.
+ * The original due date is kept on `autoRescheduledFrom` so the UI can
+ * show it was missed rather than silently rewriting history.
+ */
+function rollOverMissedTasks(tasks: Task[]) {
+  const todayStart = startOfDay(TODAY)
+  const rolled: { task: Task; from: string }[] = []
+  const nextTasks = tasks.map((t) => {
+    if (t.status === 'Completed' || t.status === 'Cancelled') return t
+    if (new Date(t.dueDate) >= todayStart) return t
+    const newDue = new Date(t.dueDate)
+    newDue.setFullYear(todayStart.getFullYear(), todayStart.getMonth(), todayStart.getDate())
+    const updated: Task = { ...t, dueDate: newDue.toISOString(), autoRescheduledFrom: t.dueDate }
+    rolled.push({ task: updated, from: t.dueDate })
+    return updated
+  })
+  return { tasks: nextTasks, rolled }
+}
+
+const TASK_ROLLOVER = rollOverMissedTasks(initialTasks)
+const ROLLOVER_ACTIVITIES: Activity[] = TASK_ROLLOVER.rolled.map((r, i) => ({
+  id: `rollover-${i}`,
+  type: 'Status change',
+  userId: r.task.ownerId,
+  leadId: r.task.leadId,
+  dealId: r.task.dealId,
+  companyId: r.task.companyId,
+  subject: `Task auto-rescheduled: ${r.task.title}`,
+  notes: `Missed due date ${formatDate(r.from)} — automatically moved to today.`,
+  activityDate: TODAY.toISOString(),
+  createdAt: TODAY.toISOString(),
+}))
 
 interface AppState {
   leads: Lead[]
@@ -40,6 +85,7 @@ interface AppActions {
   updateLead: (id: ID, patch: Partial<Lead>) => void
   convertLeadToDeal: (leadId: ID, dealValue?: number) => Deal | undefined
   markLeadLost: (leadId: ID) => void
+  deleteLead: (leadId: ID) => void
 
   addDeal: (input: Partial<Deal> & { name: string; companyId: ID }) => Deal
   updateDeal: (id: ID, patch: Partial<Deal>) => void
@@ -64,8 +110,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [deals, setDeals] = useState<Deal[]>(initialDeals)
   const [contacts, setContacts] = useState<Contact[]>(initialContacts)
   const [companies, setCompanies] = useState<Company[]>(initialCompanies)
-  const [tasks, setTasks] = useState<Task[]>(initialTasks)
-  const [activities, setActivities] = useState<Activity[]>(initialActivities)
+  const [tasks, setTasks] = useState<Task[]>(TASK_ROLLOVER.tasks)
+  const [activities, setActivities] = useState<Activity[]>(() => [...ROLLOVER_ACTIVITIES, ...initialActivities])
   const [proposals, setProposals] = useState<Proposal[]>(initialProposals)
 
   const nowIso = () => new Date().toISOString()
@@ -107,6 +153,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     updateLead(leadId, { status: 'Lost' as LeadStatus })
     addActivity({ type: 'Status change', subject: 'Lead marked as Lost', leadId })
   }, [updateLead, addActivity])
+
+  const deleteLead = useCallback<AppActions['deleteLead']>((leadId) => {
+    setLeads((prev) => prev.filter((l) => l.id !== leadId))
+  }, [])
 
   const addDeal = useCallback<AppActions['addDeal']>((input) => {
     const deal: Deal = {
@@ -292,6 +342,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateLead,
       convertLeadToDeal,
       markLeadLost,
+      deleteLead,
       addDeal,
       updateDeal,
       moveDealStage,
@@ -317,6 +368,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateLead,
       convertLeadToDeal,
       markLeadLost,
+      deleteLead,
       addDeal,
       updateDeal,
       moveDealStage,
