@@ -3,16 +3,10 @@ import { Plus, Trash2, Check, X } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
-import {
-  currentUser,
-  customFields as initialCustomFields,
-  industries,
-  leadSources as initialLeadSources,
-  lossReasons as initialLossReasons,
-  teams as initialTeams,
-  users as initialUsers,
-} from '../../data/mockData'
-import type { CustomField, CustomFieldType, Team, User, UserRole } from '../../types'
+import { customFields as initialCustomFields, industries, leadSources as initialLeadSources, lossReasons as initialLossReasons } from '../../data/mockData'
+import { useAuth } from '../../store/AuthContext'
+import { useAppStore } from '../../store/AppStore'
+import type { CustomField, CustomFieldType, UserRole } from '../../types'
 import { DEAL_STAGES } from '../../types'
 
 const TABS = ['Profile', 'Users', 'Teams', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Lost Reasons', 'Notifications', 'Integrations'] as const
@@ -50,10 +44,12 @@ export function SettingsPage() {
 }
 
 function ProfileTab() {
+  const { currentUser } = useAuth()
+  const { updateUser } = useAppStore()
   const [form, setForm] = useState({
-    fullName: currentUser.name,
-    email: currentUser.email,
-    phone: currentUser.phone ?? '',
+    fullName: currentUser?.name ?? '',
+    email: currentUser?.email ?? '',
+    phone: currentUser?.phone ?? '',
     language: 'English',
     timezone: '(GMT+02:00) Johannesburg',
     dateFormat: 'DD MMM YYYY',
@@ -65,15 +61,16 @@ function ProfileTab() {
     <Card>
       <CardHeader title="Profile" subtitle="Your personal account settings" />
       <div className="flex items-center gap-4 mb-6">
-        <Avatar name={form.fullName} color={currentUser.avatarColor} size={64} />
+        <Avatar name={form.fullName} color={currentUser?.avatarColor ?? '#355069'} size={64} />
         <div>
           <p className="font-semibold text-slate-800">{form.fullName}</p>
-          <p className="text-sm text-slate-400">{currentUser.role}</p>
+          <p className="text-sm text-slate-400">{currentUser?.role}</p>
         </div>
       </div>
       <form
         onSubmit={(e) => {
           e.preventDefault()
+          if (currentUser) updateUser(currentUser.id, { name: form.fullName, phone: form.phone || undefined })
           setSaved(true)
           setTimeout(() => setSaved(false), 2000)
         }}
@@ -85,13 +82,13 @@ function ProfileTab() {
               <input className={inputClass} value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} />
             </FormField>
             <FormField label="Email">
-              <input type="email" className={inputClass} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+              <input type="email" className={inputClass} value={form.email} disabled />
             </FormField>
             <FormField label="Phone">
               <input className={inputClass} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
             </FormField>
             <FormField label="Role">
-              <input className={inputClass} value={currentUser.role} disabled />
+              <input className={inputClass} value={currentUser?.role ?? ''} disabled />
             </FormField>
           </div>
           <div>
@@ -138,13 +135,13 @@ function ProfileTab() {
 }
 
 function UsersTab() {
-  const [list, setList] = useState<User[]>(initialUsers)
+  const { users, updateUser } = useAppStore()
   const [addOpen, setAddOpen] = useState(false)
 
   return (
     <Card padded={false}>
       <div className="p-5 flex items-center justify-between">
-        <CardHeader title="Users" subtitle={`${list.length} team members`} />
+        <CardHeader title="Users" subtitle={`${users.length} team members`} />
         <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 h-fit">
           <Plus size={15} /> Add User
         </button>
@@ -157,11 +154,10 @@ function UsersTab() {
               <th className="font-medium px-3 py-2.5">Role</th>
               <th className="font-medium px-3 py-2.5">Email</th>
               <th className="font-medium px-3 py-2.5">Status</th>
-              <th className="font-medium px-3 py-2.5 w-10"></th>
             </tr>
           </thead>
           <tbody>
-            {list.map((u) => (
+            {users.map((u) => (
               <tr key={u.id} className="border-t border-slate-50">
                 <td className="px-5 py-2.5">
                   <div className="flex items-center gap-2.5">
@@ -169,19 +165,24 @@ function UsersTab() {
                     <span className="font-medium text-slate-700">{u.name}</span>
                   </div>
                 </td>
-                <td className="px-3 py-2.5 text-slate-500">{u.role}</td>
+                <td className="px-3 py-2.5">
+                  <select
+                    className="text-sm text-slate-600 border border-slate-200 rounded-lg px-2 py-1 bg-white outline-none"
+                    value={u.role}
+                    onChange={(e) => updateUser(u.id, { role: e.target.value as UserRole })}
+                  >
+                    {(['Administrator', 'Sales Manager', 'Sales Representative', 'Read Only'] as UserRole[]).map((r) => (
+                      <option key={r}>{r}</option>
+                    ))}
+                  </select>
+                </td>
                 <td className="px-3 py-2.5 text-slate-500">{u.email}</td>
                 <td className="px-3 py-2.5">
                   <button
-                    onClick={() => setList((prev) => prev.map((x) => (x.id === u.id ? { ...x, status: x.status === 'Active' ? 'Inactive' : 'Active' } : x)))}
+                    onClick={() => updateUser(u.id, { status: u.status === 'Active' ? 'Inactive' : 'Active' })}
                     className={`badge ${u.status === 'Active' ? 'bg-[#eef4f1] text-[#406d58]' : 'bg-slate-100 text-slate-500'}`}
                   >
                     {u.status}
-                  </button>
-                </td>
-                <td className="px-3 py-2.5">
-                  <button onClick={() => setList((prev) => prev.filter((x) => x.id !== u.id))} className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50">
-                    <Trash2 size={14} />
                   </button>
                 </td>
               </tr>
@@ -189,56 +190,30 @@ function UsersTab() {
           </tbody>
         </table>
       </div>
-      {addOpen && (
-        <AddUserModal
-          onClose={() => setAddOpen(false)}
-          onSave={(u) => setList((prev) => [...prev, { ...u, id: `u${prev.length + 1 + Date.now()}`, status: 'Active', avatarColor: '#6086a9' }])}
-        />
-      )}
+      {addOpen && <InviteUserModal onClose={() => setAddOpen(false)} />}
     </Card>
   )
 }
 
-function AddUserModal({ onClose, onSave }: { onClose: () => void; onSave: (u: { name: string; email: string; role: UserRole }) => void }) {
-  const [form, setForm] = useState({ name: '', email: '', role: 'Sales Representative' as UserRole })
+function InviteUserModal({ onClose }: { onClose: () => void }) {
   return (
-    <Modal title="Add User" onClose={onClose} width={400}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (!form.name || !form.email) return
-          onSave(form)
-          onClose()
-        }}
-      >
-        <FormField label="Full Name" required>
-          <input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required autoFocus />
-        </FormField>
-        <FormField label="Email" required>
-          <input type="email" className={inputClass} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
-        </FormField>
-        <FormField label="Role">
-          <select className={inputClass} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as UserRole })}>
-            {(['Administrator', 'Sales Manager', 'Sales Representative', 'Read Only'] as UserRole[]).map((r) => (
-              <option key={r}>{r}</option>
-            ))}
-          </select>
-        </FormField>
-        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
-          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
-            Cancel
-          </button>
-          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
-            Add User
-          </button>
-        </div>
-      </form>
+    <Modal title="Add User" onClose={onClose} width={420}>
+      <p className="text-sm text-slate-600 leading-relaxed">
+        New team members are invited from the Supabase Dashboard, not from here. Go to{' '}
+        <span className="font-medium text-slate-800">Authentication → Users → Invite User</span>, enter their email, and they'll get an email to set their own
+        password. Once they accept, they'll appear in this list automatically — just set their role and team here.
+      </p>
+      <div className="flex justify-end mt-4 pt-3 border-t border-slate-100">
+        <button onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
+          Got it
+        </button>
+      </div>
     </Modal>
   )
 }
 
 function TeamsTab() {
-  const [teams, setTeams] = useState<Team[]>(initialTeams)
+  const { teams, addTeam } = useAppStore()
   const [name, setName] = useState('')
 
   return (
@@ -265,7 +240,7 @@ function TeamsTab() {
         onSubmit={(e) => {
           e.preventDefault()
           if (!name.trim()) return
-          setTeams((prev) => [...prev, { id: `t${prev.length + 1}`, name, memberIds: [] }])
+          addTeam({ name })
           setName('')
         }}
         className="flex gap-2 mt-4 pt-4 border-t border-slate-100"

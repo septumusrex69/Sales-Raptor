@@ -7,7 +7,7 @@ import { StageBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { DealForm } from '../../components/layout/QuickAdd'
 import { MarkLostModal, MarkWonModal } from './DealStageModals'
-import { companyById, contactById, formatCurrency, formatDate, TODAY, userById, users } from '../../data/mockData'
+import { formatCurrency, formatDate, TODAY } from '../../data/mockData'
 import { FUNNEL_STAGES, STAGE_COLORS } from '../../lib/colors'
 import { readParam } from '../../lib/drilldown'
 import { decodeSalesMonthParam, isWithinPeriod } from '../../lib/salesMonth'
@@ -16,11 +16,11 @@ import type { Deal, DealStage, LossReason } from '../../types'
 import type { WonDealDetails } from '../../store/AppStore'
 
 const OPEN_STAGES = DEAL_STAGES.filter((s) => s !== 'Won' && s !== 'Lost')
-const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')
 
 export function DealsBoard() {
   const store = useAppStore()
-  const { deals, moveDealStage, markDealWon, markDealLost } = store
+  const { deals, users, companyById, userById, moveDealStage, markDealWon, markDealLost } = store
+  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
@@ -228,6 +228,7 @@ export function DealsBoard() {
 }
 
 function DealCard({ deal, onDragStart, onOpen }: { deal: Deal; onDragStart: () => void; onOpen: () => void }) {
+  const { companyById, contactById } = useAppStore()
   const company = companyById(deal.companyId)
   const contact = contactById(deal.contactId)
   return (

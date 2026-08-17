@@ -7,17 +7,17 @@ import { StatusBadge, ServiceBadge } from '../../components/ui/Badge'
 import { Avatar, UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
-import { formatCurrency, formatDate, formatDateTime, formatLeadNumber, industries, leadSources, userById, users } from '../../data/mockData'
+import { formatCurrency, formatDate, formatDateTime, formatLeadNumber, industries, leadSources } from '../../data/mockData'
 import type { ActivityType, LeadStatus, TaskType } from '../../types'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, estimatedProjectValueLabel } from '../../components/leads/LeadOpportunityFields'
 
 const ALL_STATUSES: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Qualified', 'Unqualified', 'Proposal Required', 'Converted', 'Lost']
-const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')
 
 export function LeadDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { leads, activities, updateLead, convertLeadToDeal, markLeadLost, deleteLead, addActivity, addTask } = useAppStore()
+  const { leads, activities, users, userById, updateLead, convertLeadToDeal, markLeadLost, deleteLead, addActivity, addTask } = useAppStore()
+  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const lead = leads.find((l) => l.id === id)
 
   const [editOpen, setEditOpen] = useState(false)
@@ -173,7 +173,7 @@ export function LeadDetail() {
         </Card>
       </div>
 
-      {editOpen && <EditLeadModal lead={lead} onClose={() => setEditOpen(false)} onSave={(patch) => updateLead(lead.id, patch)} />}
+      {editOpen && <EditLeadModal lead={lead} reps={reps} onClose={() => setEditOpen(false)} onSave={(patch) => updateLead(lead.id, patch)} />}
       {activityOpen && (
         <AddActivityModal
           onClose={() => setActivityOpen(false)}
@@ -234,7 +234,17 @@ function Field({ label, value, icon: Icon, href }: { label: string; value?: stri
   )
 }
 
-function EditLeadModal({ lead, onClose, onSave }: { lead: ReturnType<typeof useAppStore>['leads'][number]; onClose: () => void; onSave: (patch: Partial<typeof lead>) => void }) {
+function EditLeadModal({
+  lead,
+  reps,
+  onClose,
+  onSave,
+}: {
+  lead: ReturnType<typeof useAppStore>['leads'][number]
+  reps: ReturnType<typeof useAppStore>['users']
+  onClose: () => void
+  onSave: (patch: Partial<typeof lead>) => void
+}) {
   const [form, setForm] = useState({ ...lead })
   const [opportunity, setOpportunity] = useState(() => leadOpportunityValueFromLead(lead))
   return (

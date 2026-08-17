@@ -17,7 +17,8 @@ import type {
   User,
 } from '../types'
 
-const TODAY = new Date('2026-08-16T09:00:00')
+/** The app's notion of "now" — was a fixed demo-data anchor date; real usage needs the real current time. */
+const TODAY = new Date()
 
 // ---------- Users & Teams ----------
 export const users: User[] = [

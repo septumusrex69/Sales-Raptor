@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, X } from 'lucide-react'
-import { companies, contacts, deals, formatLeadNumber, leads } from '../../data/mockData'
+import { formatLeadNumber } from '../../data/mockData'
+import { useAppStore } from '../../store/AppStore'
 
 interface Result {
   id: string
@@ -12,6 +13,7 @@ interface Result {
 }
 
 export function GlobalSearch() {
+  const { leads, contacts, companies, deals } = useAppStore()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)
@@ -53,7 +55,7 @@ export function GlobalSearch() {
       }
     }
     return out.slice(0, 8)
-  }, [query])
+  }, [query, leads, contacts, companies, deals])
 
   return (
     <div ref={ref} className="relative w-full max-w-sm">

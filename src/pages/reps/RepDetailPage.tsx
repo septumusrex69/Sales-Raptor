@@ -6,7 +6,7 @@ import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { SalesMonthPicker } from '../../components/ui/SalesMonthPicker'
 import { RepScorecardCard } from '../../components/dashboard/RepScorecard'
-import { formatCurrency, teams, TODAY, userById } from '../../data/mockData'
+import { formatCurrency, TODAY } from '../../data/mockData'
 import { decodeSalesMonthParam, getCurrentSalesMonth, isWithinPeriod, type SalesMonthPeriod } from '../../lib/salesMonth'
 import { isContactActivity, isMeaningfulActivity, MEANINGFUL_ACTIVITY_TYPES } from '../../lib/meaningfulActivity'
 import { computeRepScorecard } from '../../lib/repScore'
@@ -32,7 +32,7 @@ function Field({ label, value }: { label: string; value?: string }) {
 export function RepDetailPage() {
   const { id } = useParams()
   const [searchParams] = useSearchParams()
-  const { leads, deals, activities, tasks } = useAppStore()
+  const { leads, deals, activities, tasks, teams, userById } = useAppStore()
   const [tab, setTab] = useState<Tab>('Workload')
   const [period, setPeriod] = useState<SalesMonthPeriod>(() => decodeSalesMonthParam(searchParams.get('salesMonth')) ?? getCurrentSalesMonth(TODAY))
 

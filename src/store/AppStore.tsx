@@ -1,29 +1,72 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
-import {
-  activities as initialActivities,
-  companies as initialCompanies,
-  contacts as initialContacts,
-  currentUser,
-  deals as initialDeals,
-  formatDate,
-  leads as initialLeads,
-  proposals as initialProposals,
-  tasks as initialTasks,
-  TODAY,
-} from '../data/mockData'
-import type { Activity, ActivityType, Company, Contact, Deal, DealStage, ID, Lead, LeadStatus, LossReason, Proposal, Task } from '../types'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { supabase } from '../lib/supabase'
+import { useAuth } from './AuthContext'
+import { TODAY } from '../data/mockData'
+import type { Activity, ActivityType, Company, Contact, Deal, DealStage, ID, Lead, LeadStatus, LossReason, Proposal, Task, Team, User } from '../types'
 
-let idCounter = 1000
-function nextId(prefix: string) {
-  idCounter += 1
-  return `${prefix}${idCounter}`
+/**
+ * Generic camelCase(app) <-> snake_case(Postgres) row mapping. The SQL
+ * schema (supabase/schema.sql) deliberately names every column as the
+ * exact snake_case transform of its types.ts field name, so one pair of
+ * generic converters covers every entity — no per-table boilerplate.
+ * `null` (DB) <-> `undefined` (TS optional fields) on the way in;
+ * `undefined` (an explicit "clear this field") <-> `null` on the way out.
+ */
+function camelToSnake(key: string): string {
+  return key.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`)
+}
+function snakeToCamel(key: string): string {
+  return key.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase())
+}
+function rowToApp<T>(row: Record<string, unknown>): T {
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(row)) out[snakeToCamel(key)] = value === null ? undefined : value
+  return out as T
+}
+function appToRow<T extends object>(patch: T): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(patch)) out[camelToSnake(key)] = value === undefined ? null : value
+  return out
 }
 
-/** Dedicated, never-reused counter for Lead.leadNumber — kept separate from idCounter so it stays gap-free. */
-let leadNumberCounter = initialLeads.length
-function nextLeadNumber() {
-  leadNumberCounter += 1
-  return leadNumberCounter
+async function fetchTable<T>(table: string, orderBy: string): Promise<T[]> {
+  const { data, error } = await supabase.from(table).select('*').order(orderBy, { ascending: false })
+  if (error) {
+    console.error(`[AppStore] failed to load ${table}:`, error.message)
+    return []
+  }
+  return (data ?? []).map((row) => rowToApp<T>(row as Record<string, unknown>))
+}
+
+function reportError(action: string, message: string) {
+  console.error(`[AppStore] ${action} failed:`, message)
+}
+
+function insertRow<T extends object>(table: string, row: T, action: string) {
+  supabase
+    .from(table)
+    .insert(appToRow(row))
+    .then(({ error }) => {
+      if (error) reportError(action, error.message)
+    })
+}
+function updateRow<T extends object>(table: string, id: ID, patch: T, action: string) {
+  supabase
+    .from(table)
+    .update(appToRow(patch))
+    .eq('id', id)
+    .then(({ error }) => {
+      if (error) reportError(action, error.message)
+    })
+}
+function deleteRow(table: string, id: ID, action: string) {
+  supabase
+    .from(table)
+    .delete()
+    .eq('id', id)
+    .then(({ error }) => {
+      if (error) reportError(action, error.message)
+    })
 }
 
 function startOfDay(d: Date) {
@@ -33,42 +76,28 @@ function startOfDay(d: Date) {
 }
 
 /**
- * There's no backend/cron in this app to run a real daily rollover, so this
- * simulates "missed tasks automatically move to the next day" by catching
- * up once when a session starts: any open task whose due date has already
- * passed gets moved to today (same time-of-day), which is the steady state
- * a day-by-day rollover would converge to by the time you're looking at it.
- * The original due date is kept on `autoRescheduledFrom` so the UI can
- * show it was missed rather than silently rewriting history.
+ * There's no server-side cron in this app to run a real daily rollover, so
+ * this simulates "missed tasks automatically move to the next day" once
+ * per load: any open task whose due date has already passed gets moved to
+ * today (same time-of-day) and persisted. The original due date is kept
+ * on `autoRescheduledFrom` so the UI can show it was missed. Tasks already
+ * carrying `autoRescheduledFrom` are skipped, which also makes this
+ * safely idempotent if two people's sessions both load around the same
+ * time.
  */
-function rollOverMissedTasks(tasks: Task[]) {
+function rollOverMissedTasks(tasks: Task[]): Task[] {
   const todayStart = startOfDay(TODAY)
-  const rolled: { task: Task; from: string }[] = []
-  const nextTasks = tasks.map((t) => {
+  return tasks.map((t) => {
     if (t.status === 'Completed' || t.status === 'Cancelled') return t
+    if (t.autoRescheduledFrom) return t
     if (new Date(t.dueDate) >= todayStart) return t
     const newDue = new Date(t.dueDate)
     newDue.setFullYear(todayStart.getFullYear(), todayStart.getMonth(), todayStart.getDate())
     const updated: Task = { ...t, dueDate: newDue.toISOString(), autoRescheduledFrom: t.dueDate }
-    rolled.push({ task: updated, from: t.dueDate })
+    updateRow('tasks', t.id, { dueDate: updated.dueDate, autoRescheduledFrom: updated.autoRescheduledFrom }, 'taskRollover')
     return updated
   })
-  return { tasks: nextTasks, rolled }
 }
-
-const TASK_ROLLOVER = rollOverMissedTasks(initialTasks)
-const ROLLOVER_ACTIVITIES: Activity[] = TASK_ROLLOVER.rolled.map((r, i) => ({
-  id: `rollover-${i}`,
-  type: 'Status change',
-  userId: r.task.ownerId,
-  leadId: r.task.leadId,
-  dealId: r.task.dealId,
-  companyId: r.task.companyId,
-  subject: `Task auto-rescheduled: ${r.task.title}`,
-  notes: `Missed due date ${formatDate(r.from)} — automatically moved to today.`,
-  activityDate: TODAY.toISOString(),
-  createdAt: TODAY.toISOString(),
-}))
 
 interface AppState {
   leads: Lead[]
@@ -78,6 +107,9 @@ interface AppState {
   tasks: Task[]
   activities: Activity[]
   proposals: Proposal[]
+  users: User[]
+  teams: Team[]
+  dataLoading: boolean
 }
 
 export interface WonDealDetails {
@@ -108,234 +140,383 @@ interface AppActions {
 
   addProposal: (input: Partial<Proposal> & { dealId: ID; companyId: ID; service: string; pricing: number }) => Proposal
   updateProposal: (id: ID, patch: Partial<Proposal>) => void
+
+  updateUser: (id: ID, patch: Partial<User>) => void
+  addTeam: (input: Partial<Team> & { name: string }) => Team
+
+  companyById: (id?: ID) => Company | undefined
+  contactById: (id?: ID) => Contact | undefined
+  dealById: (id?: ID) => Deal | undefined
+  leadById: (id?: ID) => Lead | undefined
+  userById: (id?: ID) => User | undefined
 }
 
 const AppContext = createContext<(AppState & AppActions) | null>(null)
 
 export function AppStoreProvider({ children }: { children: ReactNode }) {
-  const [leads, setLeads] = useState<Lead[]>(initialLeads)
-  const [deals, setDeals] = useState<Deal[]>(initialDeals)
-  const [contacts, setContacts] = useState<Contact[]>(initialContacts)
-  const [companies, setCompanies] = useState<Company[]>(initialCompanies)
-  const [tasks, setTasks] = useState<Task[]>(TASK_ROLLOVER.tasks)
-  const [activities, setActivities] = useState<Activity[]>(() => [...ROLLOVER_ACTIVITIES, ...initialActivities])
-  const [proposals, setProposals] = useState<Proposal[]>(initialProposals)
+  const { session, currentUser: authUser } = useAuth()
 
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [deals, setDeals] = useState<Deal[]>([])
+  const [contacts, setContacts] = useState<Contact[]>([])
+  const [companies, setCompanies] = useState<Company[]>([])
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [activities, setActivities] = useState<Activity[]>([])
+  const [proposals, setProposals] = useState<Proposal[]>([])
+  const [users, setUsers] = useState<User[]>([])
+  const [teamRows, setTeamRows] = useState<{ id: ID; name: string }[]>([])
+  const [dataLoading, setDataLoading] = useState(true)
+
+  useEffect(() => {
+    if (!session) {
+      setLeads([])
+      setDeals([])
+      setContacts([])
+      setCompanies([])
+      setTasks([])
+      setActivities([])
+      setProposals([])
+      setUsers([])
+      setTeamRows([])
+      setDataLoading(false)
+      return
+    }
+    let active = true
+    setDataLoading(true)
+    Promise.all([
+      fetchTable<Lead>('leads', 'created_at'),
+      fetchTable<Deal>('deals', 'created_at'),
+      fetchTable<Contact>('contacts', 'created_at'),
+      fetchTable<Company>('companies', 'created_at'),
+      fetchTable<Task>('tasks', 'created_at'),
+      fetchTable<Activity>('activities', 'activity_date'),
+      fetchTable<Proposal>('proposals', 'created_at'),
+      fetchTable<User>('profiles', 'created_at'),
+      fetchTable<{ id: ID; name: string }>('teams', 'created_at'),
+    ]).then(([l, d, ct, co, tk, ac, pr, us, tm]) => {
+      if (!active) return
+      setLeads(l)
+      setDeals(d)
+      setContacts(ct)
+      setCompanies(co)
+      setTasks(rollOverMissedTasks(tk))
+      setActivities(ac)
+      setProposals(pr)
+      setUsers(us)
+      setTeamRows(tm)
+      setDataLoading(false)
+    })
+    return () => {
+      active = false
+    }
+  }, [session])
+
+  const teams = useMemo<Team[]>(
+    () => teamRows.map((t) => ({ id: t.id, name: t.name, memberIds: users.filter((u) => u.teamId === t.id).map((u) => u.id) })),
+    [teamRows, users],
+  )
+
+  const ownerId = authUser?.id ?? ''
   const nowIso = () => new Date().toISOString()
 
-  const addActivity = useCallback<AppActions['addActivity']>((input) => {
-    const activity: Activity = {
-      id: nextId('a'),
-      userId: currentUser.id,
-      activityDate: TODAY.toISOString(),
-      createdAt: nowIso(),
-      ...input,
-    }
-    setActivities((prev) => [activity, ...prev])
-    return activity
-  }, [])
+  const addActivity = useCallback<AppActions['addActivity']>(
+    (input) => {
+      const activity: Activity = {
+        id: crypto.randomUUID(),
+        userId: ownerId,
+        activityDate: TODAY.toISOString(),
+        createdAt: nowIso(),
+        ...input,
+      }
+      setActivities((prev) => [activity, ...prev])
+      insertRow('activities', activity, 'addActivity')
+      return activity
+    },
+    [ownerId],
+  )
 
-  const addLead = useCallback<AppActions['addLead']>((input) => {
-    const lead: Lead = {
-      id: nextId('l'),
-      leadNumber: nextLeadNumber(),
-      status: 'New',
-      source: 'Direct',
-      score: 10,
-      estimatedValue: 0,
-      ownerId: currentUser.id,
-      createdAt: TODAY.toISOString(),
-      updatedAt: TODAY.toISOString(),
-      ...input,
-    }
-    setLeads((prev) => [lead, ...prev])
-    addActivity({ type: 'Note', subject: `New lead created: ${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId })
-    return lead
-  }, [addActivity])
+  const addLead = useCallback<AppActions['addLead']>(
+    (input) => {
+      const id = crypto.randomUUID()
+      const optimisticLeadNumber = leads.reduce((max, l) => Math.max(max, l.leadNumber), 0) + 1
+      const lead: Lead = {
+        id,
+        leadNumber: optimisticLeadNumber,
+        status: 'New',
+        source: 'Direct',
+        score: 10,
+        estimatedValue: 0,
+        ownerId,
+        createdAt: TODAY.toISOString(),
+        updatedAt: TODAY.toISOString(),
+        ...input,
+      }
+      setLeads((prev) => [lead, ...prev])
+      addActivity({ type: 'Note', subject: `New lead created: ${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId })
+
+      const row = appToRow(lead)
+      delete row.lead_number // DB identity column assigns the real, gap-free number
+      supabase
+        .from('leads')
+        .insert(row)
+        .select('id, lead_number')
+        .single()
+        .then(({ data, error }) => {
+          if (error) {
+            reportError('addLead', error.message)
+            return
+          }
+          if (data && data.lead_number !== optimisticLeadNumber) {
+            setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, leadNumber: data.lead_number as number } : l)))
+          }
+        })
+      return lead
+    },
+    [ownerId, leads, addActivity],
+  )
 
   const updateLead = useCallback<AppActions['updateLead']>((id, patch) => {
-    setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch, updatedAt: TODAY.toISOString() } : l)))
+    const fullPatch = { ...patch, updatedAt: TODAY.toISOString() }
+    setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...fullPatch } : l)))
+    updateRow('leads', id, fullPatch, 'updateLead')
   }, [])
 
-  const markLeadLost = useCallback<AppActions['markLeadLost']>((leadId) => {
-    updateLead(leadId, { status: 'Lost' as LeadStatus })
-    addActivity({ type: 'Status change', subject: 'Lead marked as Lost', leadId })
-  }, [updateLead, addActivity])
+  const markLeadLost = useCallback<AppActions['markLeadLost']>(
+    (leadId) => {
+      updateLead(leadId, { status: 'Lost' as LeadStatus })
+      addActivity({ type: 'Status change', subject: 'Lead marked as Lost', leadId })
+    },
+    [updateLead, addActivity],
+  )
 
   const deleteLead = useCallback<AppActions['deleteLead']>((leadId) => {
     setLeads((prev) => prev.filter((l) => l.id !== leadId))
+    deleteRow('leads', leadId, 'deleteLead')
   }, [])
 
-  const addDeal = useCallback<AppActions['addDeal']>((input) => {
-    const deal: Deal = {
-      id: nextId('d'),
-      ownerId: currentUser.id,
-      stage: 'New Lead',
-      value: 0,
-      probability: 10,
-      expectedCloseDate: TODAY.toISOString(),
-      source: 'Direct',
-      createdAt: TODAY.toISOString(),
-      ...input,
-    }
-    setDeals((prev) => [deal, ...prev])
-    addActivity({ type: 'Deal update', subject: `New deal created: ${deal.name}`, dealId: deal.id, companyId: deal.companyId })
-    return deal
-  }, [addActivity])
+  const addDeal = useCallback<AppActions['addDeal']>(
+    (input) => {
+      const deal: Deal = {
+        id: crypto.randomUUID(),
+        ownerId,
+        stage: 'New Lead',
+        value: 0,
+        probability: 10,
+        expectedCloseDate: TODAY.toISOString(),
+        source: 'Direct',
+        createdAt: TODAY.toISOString(),
+        ...input,
+      }
+      setDeals((prev) => [deal, ...prev])
+      insertRow('deals', deal, 'addDeal')
+      addActivity({ type: 'Deal update', subject: `New deal created: ${deal.name}`, dealId: deal.id, companyId: deal.companyId })
+      return deal
+    },
+    [ownerId, addActivity],
+  )
 
   const updateDeal = useCallback<AppActions['updateDeal']>((id, patch) => {
     setDeals((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)))
+    updateRow('deals', id, patch, 'updateDeal')
   }, [])
 
-  const moveDealStage = useCallback<AppActions['moveDealStage']>((id, stage) => {
-    setDeals((prev) =>
-      prev.map((d) => {
-        if (d.id !== id) return d
-        const patch: Partial<Deal> = { stage }
-        if (stage === 'Won') patch.wonAt = TODAY.toISOString()
-        if (stage === 'Lost') patch.lostAt = TODAY.toISOString()
-        return { ...d, ...patch }
-      }),
-    )
-    const deal = deals.find((d) => d.id === id)
-    addActivity({
-      type: stage === 'Won' ? 'Deal Won' : stage === 'Lost' ? 'Deal Lost' : 'Deal Stage Change',
-      subject: `${deal?.name ?? 'Deal'} moved to ${stage}`,
-      dealId: id,
-      companyId: deal?.companyId,
-    })
-  }, [deals, addActivity])
+  const moveDealStage = useCallback<AppActions['moveDealStage']>(
+    (id, stage) => {
+      const patch: Partial<Deal> = { stage }
+      if (stage === 'Won') patch.wonAt = TODAY.toISOString()
+      if (stage === 'Lost') patch.lostAt = TODAY.toISOString()
+      setDeals((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)))
+      updateRow('deals', id, patch, 'moveDealStage')
+      const deal = deals.find((d) => d.id === id)
+      addActivity({
+        type: stage === 'Won' ? 'Deal Won' : stage === 'Lost' ? 'Deal Lost' : 'Deal Stage Change',
+        subject: `${deal?.name ?? 'Deal'} moved to ${stage}`,
+        dealId: id,
+        companyId: deal?.companyId,
+      })
+    },
+    [deals, addActivity],
+  )
 
-  const markDealWon = useCallback<AppActions['markDealWon']>((id, details) => {
-    setDeals((prev) =>
-      prev.map((d) =>
-        d.id === id
-          ? { ...d, stage: 'Won' as DealStage, value: details.finalValue, service: details.service, wonAt: TODAY.toISOString(), notes: `${d.notes ?? ''}\nContract start: ${details.startDate}. Duration: ${details.contractDuration}.`.trim() }
-          : d,
-      ),
-    )
-    const deal = deals.find((d) => d.id === id)
-    addActivity({ type: 'Deal Won', subject: `${deal?.name ?? 'Deal'} marked Won — ${details.service}, starting ${details.startDate}`, dealId: id, companyId: deal?.companyId })
-  }, [deals, addActivity])
+  const markDealWon = useCallback<AppActions['markDealWon']>(
+    (id, details) => {
+      const deal = deals.find((d) => d.id === id)
+      const patch: Partial<Deal> = {
+        stage: 'Won' as DealStage,
+        value: details.finalValue,
+        service: details.service,
+        wonAt: TODAY.toISOString(),
+        notes: `${deal?.notes ?? ''}\nContract start: ${details.startDate}. Duration: ${details.contractDuration}.`.trim(),
+      }
+      setDeals((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)))
+      updateRow('deals', id, patch, 'markDealWon')
+      addActivity({ type: 'Deal Won', subject: `${deal?.name ?? 'Deal'} marked Won — ${details.service}, starting ${details.startDate}`, dealId: id, companyId: deal?.companyId })
+    },
+    [deals, addActivity],
+  )
 
-  const markDealLost = useCallback<AppActions['markDealLost']>((id, reason) => {
-    setDeals((prev) => prev.map((d) => (d.id === id ? { ...d, stage: 'Lost' as DealStage, lossReason: reason, lostAt: TODAY.toISOString() } : d)))
-    const deal = deals.find((d) => d.id === id)
-    addActivity({ type: 'Deal Lost', subject: `${deal?.name ?? 'Deal'} marked Lost — reason: ${reason}`, dealId: id, companyId: deal?.companyId })
-  }, [deals, addActivity])
+  const markDealLost = useCallback<AppActions['markDealLost']>(
+    (id, reason) => {
+      const patch: Partial<Deal> = { stage: 'Lost' as DealStage, lossReason: reason, lostAt: TODAY.toISOString() }
+      setDeals((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)))
+      updateRow('deals', id, patch, 'markDealLost')
+      const deal = deals.find((d) => d.id === id)
+      addActivity({ type: 'Deal Lost', subject: `${deal?.name ?? 'Deal'} marked Lost — reason: ${reason}`, dealId: id, companyId: deal?.companyId })
+    },
+    [deals, addActivity],
+  )
 
-  const addProposal = useCallback<AppActions['addProposal']>((input) => {
-    const proposal: Proposal = {
-      id: nextId('p'),
-      status: 'Draft',
-      validityDate: new Date(TODAY.getTime() + 1000 * 60 * 60 * 24 * 30).toISOString(),
-      createdAt: TODAY.toISOString(),
-      ...input,
-    }
-    setProposals((prev) => [proposal, ...prev])
-    addActivity({ type: 'Proposal', subject: `Proposal created: ${proposal.service}`, dealId: proposal.dealId, companyId: proposal.companyId })
-    return proposal
-  }, [addActivity])
+  const addProposal = useCallback<AppActions['addProposal']>(
+    (input) => {
+      const proposal: Proposal = {
+        id: crypto.randomUUID(),
+        status: 'Draft',
+        validityDate: new Date(TODAY.getTime() + 1000 * 60 * 60 * 24 * 30).toISOString(),
+        createdAt: TODAY.toISOString(),
+        ...input,
+      }
+      setProposals((prev) => [proposal, ...prev])
+      insertRow('proposals', proposal, 'addProposal')
+      addActivity({ type: 'Proposal', subject: `Proposal created: ${proposal.service}`, dealId: proposal.dealId, companyId: proposal.companyId })
+      return proposal
+    },
+    [addActivity],
+  )
 
   const updateProposal = useCallback<AppActions['updateProposal']>((id, patch) => {
     setProposals((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)))
+    updateRow('proposals', id, patch, 'updateProposal')
   }, [])
-
-  const convertLeadToDeal = useCallback<AppActions['convertLeadToDeal']>((leadId, dealValue) => {
-    const lead = leads.find((l) => l.id === leadId)
-    if (!lead) return undefined
-
-    let companyId = lead.companyId
-    if (!companyId) {
-      const company = addCompanyInternal({ name: lead.companyName, industry: lead.industry, province: lead.province, city: lead.city })
-      companyId = company.id
-    }
-
-    let contactId: ID | undefined
-    const existingContact = contacts.find((c) => c.companyId === companyId && c.firstName === lead.firstName && c.lastName === lead.lastName)
-    if (existingContact) {
-      contactId = existingContact.id
-    } else {
-      const contact: Contact = {
-        id: nextId('ct'),
-        firstName: lead.firstName,
-        lastName: lead.lastName,
-        jobTitle: lead.jobTitle,
-        companyId,
-        email: lead.email,
-        phone: lead.phone,
-        mobile: lead.mobile,
-        ownerId: lead.ownerId,
-        createdAt: TODAY.toISOString(),
-      }
-      setContacts((prev) => [contact, ...prev])
-      contactId = contact.id
-    }
-
-    const deal: Deal = {
-      id: nextId('d'),
-      name: `${lead.companyName} Deal`,
-      companyId,
-      contactId,
-      ownerId: lead.ownerId,
-      stage: 'Qualified',
-      value: dealValue ?? lead.estimatedValue,
-      probability: 40,
-      expectedCloseDate: new Date(TODAY.getTime() + 1000 * 60 * 60 * 24 * 30).toISOString(),
-      service: lead.serviceInterested,
-      source: lead.source,
-      createdAt: TODAY.toISOString(),
-      leadId: lead.id,
-    }
-    setDeals((prev) => [deal, ...prev])
-
-    setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status: 'Converted' as LeadStatus, convertedDealId: deal.id, updatedAt: TODAY.toISOString() } : l)))
-    addActivity({ type: 'Status change', subject: `Lead converted to deal: ${deal.name}`, leadId, dealId: deal.id, companyId })
-    return deal
-  }, [leads, contacts])
 
   function addCompanyInternal(input: Partial<Company> & { name: string }): Company {
     const company: Company = {
-      id: nextId('co'),
-      accountOwnerId: currentUser.id,
+      id: crypto.randomUUID(),
+      accountOwnerId: ownerId,
       createdAt: TODAY.toISOString(),
       ...input,
     }
     setCompanies((prev) => [company, ...prev])
+    insertRow('companies', company, 'addCompany')
     return company
   }
 
-  const addCompany = useCallback<AppActions['addCompany']>((input) => addCompanyInternal(input), [])
+  const addCompany = useCallback<AppActions['addCompany']>((input) => addCompanyInternal(input), [ownerId])
 
-  const addContact = useCallback<AppActions['addContact']>((input) => {
-    const contact: Contact = {
-      id: nextId('ct'),
-      ownerId: currentUser.id,
-      createdAt: TODAY.toISOString(),
-      ...input,
-    }
-    setContacts((prev) => [contact, ...prev])
-    return contact
-  }, [])
+  const addContact = useCallback<AppActions['addContact']>(
+    (input) => {
+      const contact: Contact = {
+        id: crypto.randomUUID(),
+        ownerId,
+        createdAt: TODAY.toISOString(),
+        ...input,
+      }
+      setContacts((prev) => [contact, ...prev])
+      insertRow('contacts', contact, 'addContact')
+      return contact
+    },
+    [ownerId],
+  )
 
-  const addTask = useCallback<AppActions['addTask']>((input) => {
-    const task: Task = {
-      id: nextId('tk'),
-      type: 'Follow-up',
-      status: 'Not Started',
-      priority: 'Medium',
-      ownerId: currentUser.id,
-      createdAt: TODAY.toISOString(),
-      ...input,
-    }
-    setTasks((prev) => [task, ...prev])
-    addActivity({ type: 'Task', subject: `Task created: ${task.title}`, leadId: task.leadId, dealId: task.dealId, companyId: task.companyId })
-    return task
-  }, [addActivity])
+  const addTask = useCallback<AppActions['addTask']>(
+    (input) => {
+      const task: Task = {
+        id: crypto.randomUUID(),
+        type: 'Follow-up',
+        status: 'Not Started',
+        priority: 'Medium',
+        ownerId,
+        createdAt: TODAY.toISOString(),
+        ...input,
+      }
+      setTasks((prev) => [task, ...prev])
+      insertRow('tasks', task, 'addTask')
+      addActivity({ type: 'Task', subject: `Task created: ${task.title}`, leadId: task.leadId, dealId: task.dealId, companyId: task.companyId })
+      return task
+    },
+    [ownerId, addActivity],
+  )
 
   const updateTask = useCallback<AppActions['updateTask']>((id, patch) => {
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+    updateRow('tasks', id, patch, 'updateTask')
   }, [])
+
+  const convertLeadToDeal = useCallback<AppActions['convertLeadToDeal']>(
+    (leadId, dealValue) => {
+      const lead = leads.find((l) => l.id === leadId)
+      if (!lead) return undefined
+
+      let companyId = lead.companyId
+      if (!companyId) {
+        const company = addCompanyInternal({ name: lead.companyName, industry: lead.industry, province: lead.province, city: lead.city })
+        companyId = company.id
+      }
+
+      let contactId: ID | undefined
+      const existingContact = contacts.find((c) => c.companyId === companyId && c.firstName === lead.firstName && c.lastName === lead.lastName)
+      if (existingContact) {
+        contactId = existingContact.id
+      } else {
+        const contact: Contact = {
+          id: crypto.randomUUID(),
+          firstName: lead.firstName,
+          lastName: lead.lastName,
+          jobTitle: lead.jobTitle,
+          companyId,
+          email: lead.email,
+          phone: lead.phone,
+          mobile: lead.mobile,
+          ownerId: lead.ownerId,
+          createdAt: TODAY.toISOString(),
+        }
+        setContacts((prev) => [contact, ...prev])
+        insertRow('contacts', contact, 'convertLeadToDeal:contact')
+        contactId = contact.id
+      }
+
+      const deal: Deal = {
+        id: crypto.randomUUID(),
+        name: `${lead.companyName} Deal`,
+        companyId,
+        contactId,
+        ownerId: lead.ownerId,
+        stage: 'Qualified',
+        value: dealValue ?? lead.estimatedValue,
+        probability: 40,
+        expectedCloseDate: new Date(TODAY.getTime() + 1000 * 60 * 60 * 24 * 30).toISOString(),
+        service: lead.serviceInterested,
+        source: lead.source,
+        createdAt: TODAY.toISOString(),
+        leadId: lead.id,
+      }
+      setDeals((prev) => [deal, ...prev])
+      insertRow('deals', deal, 'convertLeadToDeal:deal')
+
+      updateLead(leadId, { status: 'Converted' as LeadStatus, convertedDealId: deal.id })
+      addActivity({ type: 'Status change', subject: `Lead converted to deal: ${deal.name}`, leadId, dealId: deal.id, companyId })
+      return deal
+    },
+    [leads, contacts, updateLead, addActivity],
+  )
+
+  const updateUser = useCallback<AppActions['updateUser']>((id, patch) => {
+    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)))
+    updateRow('profiles', id, patch, 'updateUser')
+  }, [])
+
+  const addTeam = useCallback<AppActions['addTeam']>((input) => {
+    const id = crypto.randomUUID()
+    const team: Team = { memberIds: [], ...input, id }
+    setTeamRows((prev) => [...prev, { id, name: team.name }])
+    insertRow('teams', { id, name: team.name }, 'addTeam')
+    return team
+  }, [])
+
+  const companyById = useCallback<AppActions['companyById']>((id) => companies.find((c) => c.id === id), [companies])
+  const contactById = useCallback<AppActions['contactById']>((id) => contacts.find((c) => c.id === id), [contacts])
+  const dealById = useCallback<AppActions['dealById']>((id) => deals.find((d) => d.id === id), [deals])
+  const leadById = useCallback<AppActions['leadById']>((id) => leads.find((l) => l.id === id), [leads])
+  const userById = useCallback<AppActions['userById']>((id) => users.find((u) => u.id === id), [users])
 
   const value = useMemo<AppState & AppActions>(
     () => ({
@@ -346,6 +527,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       tasks,
       activities,
       proposals,
+      users,
+      teams,
+      dataLoading,
       addLead,
       updateLead,
       convertLeadToDeal,
@@ -363,6 +547,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       addActivity,
       addProposal,
       updateProposal,
+      updateUser,
+      addTeam,
+      companyById,
+      contactById,
+      dealById,
+      leadById,
+      userById,
     }),
     [
       leads,
@@ -372,6 +563,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       tasks,
       activities,
       proposals,
+      users,
+      teams,
+      dataLoading,
       addLead,
       updateLead,
       convertLeadToDeal,
@@ -389,6 +583,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       addActivity,
       addProposal,
       updateProposal,
+      updateUser,
+      addTeam,
+      companyById,
+      contactById,
+      dealById,
+      leadById,
+      userById,
     ],
   )
 

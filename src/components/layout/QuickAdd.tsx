@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Plus, Target, Users, Building2, Handshake, CheckSquare, Calendar, FileText, ChevronDown } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { useAppStore } from '../../store/AppStore'
-import { companies, leadSources, services } from '../../data/mockData'
+import { leadSources, services } from '../../data/mockData'
 import type { LeadSource, ProductService } from '../../types'
 import { LeadOpportunityFields, emptyLeadOpportunityValue, leadOpportunityPatch } from '../leads/LeadOpportunityFields'
 
@@ -148,7 +148,7 @@ export function LeadForm({ onClose, store, navigate }: { onClose: () => void; st
 }
 
 export function ContactForm({ onClose, store }: { onClose: () => void; store: Store }) {
-  const [form, setForm] = useState({ firstName: '', lastName: '', jobTitle: '', companyId: companies[0]?.id ?? '', email: '', phone: '' })
+  const [form, setForm] = useState({ firstName: '', lastName: '', jobTitle: '', companyId: store.companies[0]?.id ?? '', email: '', phone: '' })
   return (
     <Modal title="Add Contact" onClose={onClose}>
       <form
@@ -172,7 +172,7 @@ export function ContactForm({ onClose, store }: { onClose: () => void; store: St
         </FormField>
         <FormField label="Company">
           <select className={inputClass} value={form.companyId} onChange={(e) => setForm({ ...form, companyId: e.target.value })}>
-            {companies.map((c) => (
+            {store.companies.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
               </option>
@@ -229,7 +229,7 @@ export function CompanyForm({ onClose, store }: { onClose: () => void; store: St
 }
 
 export function DealForm({ onClose, store, navigate }: { onClose: () => void; store: Store; navigate: ReturnType<typeof useNavigate> }) {
-  const [form, setForm] = useState({ name: '', companyId: companies[0]?.id ?? '', value: '', service: services[0], expectedCloseDate: '' })
+  const [form, setForm] = useState({ name: '', companyId: store.companies[0]?.id ?? '', value: '', service: services[0], expectedCloseDate: '' })
   return (
     <Modal title="Add Deal" onClose={onClose}>
       <form
@@ -252,7 +252,7 @@ export function DealForm({ onClose, store, navigate }: { onClose: () => void; st
         </FormField>
         <FormField label="Company" required>
           <select className={inputClass} value={form.companyId} onChange={(e) => setForm({ ...form, companyId: e.target.value })}>
-            {companies.map((c) => (
+            {store.companies.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
               </option>

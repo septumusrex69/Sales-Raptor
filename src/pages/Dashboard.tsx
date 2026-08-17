@@ -13,15 +13,13 @@ import { SalesFunnelChart } from '../components/dashboard/SalesFunnelChart'
 import { RevenueTrendChart } from '../components/dashboard/RevenueTrendChart'
 import { ActivityBreakdownChart } from '../components/dashboard/ActivityBreakdownChart'
 import { RepLeaderboard, type LeaderboardRow } from '../components/dashboard/RepLeaderboard'
-import { companyById, formatCurrency, formatDate, teams, timeAgo, TODAY, userById, users } from '../data/mockData'
+import { formatCurrency, formatDate, timeAgo, TODAY } from '../data/mockData'
 import { getCurrentSalesMonth, getPreviousSalesMonth, isWithinPeriod, encodeSalesMonthParam, type SalesMonthPeriod } from '../lib/salesMonth'
 import { isMeaningfulActivity, isContactActivity } from '../lib/meaningfulActivity'
 import { computeAllRepScorecards } from '../lib/repScore'
 import { buildDrilldownUrl, SALES_MONTH_PARAM } from '../lib/drilldown'
 import { downloadCsv } from '../lib/csvExport'
-import type { ID, Task } from '../types'
-
-const reps = users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator')
+import type { ID, Task, Team, User } from '../types'
 
 function daysAgoLabel(dateIso: string) {
   const diff = Math.round((new Date(dateIso).getTime() - TODAY.getTime()) / (1000 * 60 * 60 * 24))
@@ -33,7 +31,7 @@ function daysAgoLabel(dateIso: string) {
 
 type Scope = 'all' | `rep:${string}` | `team:${string}`
 
-function repIdsForScope(scope: Scope): ID[] {
+function repIdsForScope(scope: Scope, reps: User[], teams: Team[]): ID[] {
   if (scope === 'all') return reps.map((r) => r.id)
   if (scope.startsWith('rep:')) return [scope.slice(4)]
   if (scope.startsWith('team:')) {
@@ -55,13 +53,14 @@ function minutesToLabel(mins: number): string {
 }
 
 export function Dashboard() {
-  const { leads, deals, tasks, activities, updateTask } = useAppStore()
+  const { leads, deals, tasks, activities, users, teams, userById, companyById, updateTask } = useAppStore()
+  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(TODAY))
   const [compareMode, setCompareMode] = useState<CompareMode>('previous')
   const [scope, setScope] = useState<Scope>('all')
   const [rescheduleTask, setRescheduleTask] = useState<Task | null>(null)
 
-  const repIds = useMemo(() => repIdsForScope(scope), [scope])
+  const repIds = useMemo(() => repIdsForScope(scope, reps, teams), [scope, reps, teams])
   const repIdSet = useMemo(() => new Set(repIds), [repIds])
 
   const scopedLeads = useMemo(() => leads.filter((l) => repIdSet.has(l.ownerId)), [leads, repIdSet])
@@ -161,7 +160,7 @@ export function Dashboard() {
           overallScore: scorecard?.overall ?? 0,
         }
       }),
-    [repIds, leads, deals, activities, period, scorecards],
+    [repIds, leads, deals, activities, period, scorecards, userById],
   )
 
   const periodParam = encodeSalesMonthParam(period)
