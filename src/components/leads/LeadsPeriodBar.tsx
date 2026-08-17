@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Calendar, ChevronLeft, ChevronRight, Columns3 } from 'lucide-react'
 import {
   getAdjacentCalendarMonth,
+  getAllTime,
   getLastCalendarMonth,
   getLastNCalendarMonths,
   getThisCalendarMonth,
@@ -14,9 +15,10 @@ import type { SalesMonthPeriod } from '../../lib/salesMonth'
 import type { ColumnKey } from '../../lib/leadColumns'
 import { LeadsColumnsMenu } from './LeadsColumnsMenu'
 
-type PresetKey = 'today' | 'this-week' | 'this-month' | 'last-month' | 'last-3-months' | 'this-year' | 'custom'
+type PresetKey = 'all-time' | 'today' | 'this-week' | 'this-month' | 'last-month' | 'last-3-months' | 'this-year' | 'custom'
 
 const PRESETS: { key: PresetKey; label: string }[] = [
+  { key: 'all-time', label: 'All Time' },
   { key: 'today', label: 'Today' },
   { key: 'this-week', label: 'This Week' },
   { key: 'this-month', label: 'This Month' },
@@ -49,7 +51,8 @@ export function LeadsPeriodBar({
 
   function applyPreset(next: PresetKey) {
     setPreset(next)
-    if (next === 'today') onChange(getToday(referenceDate))
+    if (next === 'all-time') onChange(getAllTime(referenceDate))
+    else if (next === 'today') onChange(getToday(referenceDate))
     else if (next === 'this-week') onChange(getThisWeek(referenceDate))
     else if (next === 'this-month') onChange(getThisCalendarMonth(referenceDate))
     else if (next === 'last-month') onChange(getLastCalendarMonth(referenceDate))

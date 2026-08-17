@@ -18,6 +18,10 @@ function buildRange(start: Date, end: Date, label: string, key: string): SalesMo
   }
 }
 
+export function getAllTime(ref: Date): SalesMonthPeriod {
+  return { start: new Date(0), end: endOfDay(ref), label: 'All Time', rangeLabel: 'Every lead, any date', key: 'all-time' }
+}
+
 export function getToday(ref: Date): SalesMonthPeriod {
   return buildRange(startOfDay(ref), endOfDay(ref), 'Today', `today-${format(ref, 'yyyy-MM-dd')}`)
 }

@@ -323,7 +323,7 @@ export function LeadsList() {
 
       <LeadsPeriodBar period={period} onChange={setPeriod} referenceDate={TODAY} visibleColumns={visibleColumns} onChangeColumns={setVisibleColumns} />
 
-      <LeadsKpiRow current={kpiCurrent} previous={kpiPrevious} compareLabel="vs previous period" />
+      <LeadsKpiRow current={kpiCurrent} previous={period.key === 'all-time' ? undefined : kpiPrevious} compareLabel="vs previous period" />
 
       <Card padded={false}>
         <div className="overflow-x-auto">
