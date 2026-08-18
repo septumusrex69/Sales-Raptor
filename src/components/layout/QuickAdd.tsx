@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Target, Users, Building2, Handshake, CheckSquare, Calendar, FileText, ChevronDown } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { useAppStore } from '../../store/AppStore'
+import { useAuth } from '../../store/AuthContext'
 import { leadSources, services } from '../../data/mockData'
 import type { LeadSource, ProductService } from '../../types'
 import { LeadOpportunityFields, emptyLeadOpportunityValue, leadOpportunityPatch } from '../leads/LeadOpportunityFields'
@@ -87,7 +88,18 @@ function QuickAddModal({ type, onClose }: { type: QuickAddType; onClose: () => v
 export type Store = ReturnType<typeof useAppStore>
 
 export function LeadForm({ onClose, store, navigate }: { onClose: () => void; store: Store; navigate: ReturnType<typeof useNavigate> }) {
-  const [form, setForm] = useState({ firstName: '', lastName: '', companyName: '', phone: '', email: '', source: 'Website' as LeadSource, estimatedValue: '' })
+  const { currentUser } = useAuth()
+  const reps = useMemo(() => store.users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [store.users])
+  const [form, setForm] = useState({
+    firstName: '',
+    lastName: '',
+    companyName: '',
+    phone: '',
+    email: '',
+    source: 'Website' as LeadSource,
+    estimatedValue: '',
+    ownerId: currentUser?.id ?? '',
+  })
   const [opportunity, setOpportunity] = useState(emptyLeadOpportunityValue())
   return (
     <Modal title="Add Lead" onClose={onClose} width={560}>
@@ -103,6 +115,7 @@ export function LeadForm({ onClose, store, navigate }: { onClose: () => void; st
             email: form.email || undefined,
             source: form.source,
             estimatedValue: Number(form.estimatedValue) || 0,
+            ownerId: form.ownerId || undefined,
             ...leadOpportunityPatch(opportunity),
           })
           onClose()
@@ -140,6 +153,15 @@ export function LeadForm({ onClose, store, navigate }: { onClose: () => void; st
             <input type="number" className={inputClass} value={form.estimatedValue} onChange={(e) => setForm({ ...form, estimatedValue: e.target.value })} />
           </FormField>
         </div>
+        <FormField label="Owner">
+          <select className={inputClass} value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>
+            {reps.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+        </FormField>
         <LeadOpportunityFields value={opportunity} onChange={setOpportunity} />
         <SubmitRow onClose={onClose} label="Add Lead" />
       </form>
