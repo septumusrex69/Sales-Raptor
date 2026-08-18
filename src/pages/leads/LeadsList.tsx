@@ -104,6 +104,11 @@ export function LeadsList() {
   const cityOptions = useMemo(() => Array.from(new Set(leads.map((l) => l.city).filter((c): c is string => Boolean(c)))).sort(), [leads])
 
   function matchesLeadFilters(l: Lead) {
+    // Once converted, a lead is no longer an active thing to chase — it's
+    // tracked as a Deal from here on. The default (no explicit status
+    // chosen) view excludes them so the working list stays about leads
+    // still worth pursuing; picking "Converted" explicitly still shows them.
+    if (status === 'All' && l.status === 'Converted') return false
     if (status !== 'All' && l.status !== status) return false
     if (source !== 'All' && l.source !== source) return false
     if (owner !== 'All' && l.ownerId !== owner) return false

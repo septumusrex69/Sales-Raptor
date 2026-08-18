@@ -1,43 +1,38 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Plus, Search } from 'lucide-react'
+import { Search } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
-import { CompanyForm } from '../../components/layout/QuickAdd'
-import { formatCurrency, userById } from '../../data/mockData'
+import { formatCurrency } from '../../data/mockData'
 
 export function CompaniesList() {
-  const store = useAppStore()
-  const { companies, deals, contacts } = store
+  const { companies, deals, contacts, users } = useAppStore()
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
-  const [addOpen, setAddOpen] = useState(false)
+
+  const wonDealsFor = (companyId: string) => deals.filter((d) => d.companyId === companyId && d.stage === 'Won')
+
+  const clients = useMemo(() => companies.filter((c) => wonDealsFor(c.id).length > 0), [companies, deals])
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
-    if (!q) return companies
-    return companies.filter((c) => c.name.toLowerCase().includes(q))
-  }, [companies, search])
+    if (!q) return clients
+    return clients.filter((c) => c.name.toLowerCase().includes(q))
+  }, [clients, search])
 
   const mainContactFor = (companyId: string) => contacts.find((c) => c.companyId === companyId)
   const activeDealsFor = (companyId: string) => deals.filter((d) => d.companyId === companyId && d.stage !== 'Won' && d.stage !== 'Lost')
-  const lifetimeValueFor = (companyId: string) => deals.filter((d) => d.companyId === companyId && d.stage === 'Won').reduce((s, d) => s + d.value, 0)
+  const lifetimeValueFor = (companyId: string) => wonDealsFor(companyId).reduce((s, d) => s + d.value, 0)
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2.5">
         <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 w-64">
           <Search size={15} className="text-slate-400" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search companies..." className="text-sm outline-none flex-1 min-w-0" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search clients..." className="text-sm outline-none flex-1 min-w-0" />
         </div>
-        <span className="text-xs text-slate-400">{filtered.length} companies</span>
-        <button
-          onClick={() => setAddOpen(true)}
-          className="ml-auto inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700"
-        >
-          <Plus size={15} /> Add Company
-        </button>
+        <span className="text-xs text-slate-400">{filtered.length} clients</span>
       </div>
 
       <Card padded={false}>
@@ -45,7 +40,7 @@ export function CompaniesList() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-slate-400">
-                <th className="font-medium px-5 py-3">Company Name</th>
+                <th className="font-medium px-5 py-3">Client Name</th>
                 <th className="font-medium px-3 py-3">Industry</th>
                 <th className="font-medium px-3 py-3">Main Contact</th>
                 <th className="font-medium px-3 py-3">Phone</th>
@@ -72,7 +67,7 @@ export function CompaniesList() {
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-1.5">
                         <UserAvatar userId={c.accountOwnerId} size={22} />
-                        <span className="text-slate-500 text-xs">{userById(c.accountOwnerId)?.name.split(' ')[0]}</span>
+                        <span className="text-slate-500 text-xs">{users.find((u) => u.id === c.accountOwnerId)?.name.split(' ')[0]}</span>
                       </div>
                     </td>
                     <td className="px-3 py-3 text-center text-slate-600 font-medium">{activeDealsFor(c.id).length}</td>
@@ -83,7 +78,7 @@ export function CompaniesList() {
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={8} className="text-center text-slate-400 text-sm py-10">
-                    No companies found.
+                    No clients yet — a company shows up here once one of its deals is marked Won.
                   </td>
                 </tr>
               )}
@@ -91,8 +86,6 @@ export function CompaniesList() {
           </table>
         </div>
       </Card>
-
-      {addOpen && <CompanyForm onClose={() => setAddOpen(false)} store={store} />}
     </div>
   )
 }
