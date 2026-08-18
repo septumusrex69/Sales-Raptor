@@ -189,7 +189,9 @@ create table if not exists public.deals (
   won_at timestamptz,
   lost_at timestamptz,
   next_action_at timestamptz,
-  lead_id uuid references public.leads (id) on delete set null
+  -- cascade: a converted lead's Deal is that lead's outcome, not an
+  -- independent record — deleting the lead removes the Deal it produced.
+  lead_id uuid references public.leads (id) on delete cascade
 );
 
 -- ---------- Tasks ----------
@@ -201,8 +203,11 @@ create table if not exists public.tasks (
   priority text not null default 'Medium' check (priority in ('Low', 'Medium', 'High', 'Urgent')),
   owner_id uuid not null references public.profiles (id),
   due_date timestamptz not null,
-  lead_id uuid references public.leads (id) on delete set null,
-  deal_id uuid references public.deals (id) on delete set null,
+  -- cascade on lead/deal (a task tied to a lead or deal is that record's
+  -- follow-up, not standalone); set null on contact/company, which stay
+  -- as reusable records that don't get deleted.
+  lead_id uuid references public.leads (id) on delete cascade,
+  deal_id uuid references public.deals (id) on delete cascade,
   contact_id uuid references public.contacts (id) on delete set null,
   company_id uuid references public.companies (id) on delete set null,
   related_to_label text,
@@ -222,7 +227,8 @@ create table if not exists public.activities (
   lead_id uuid references public.leads (id) on delete cascade,
   contact_id uuid references public.contacts (id) on delete set null,
   company_id uuid references public.companies (id) on delete set null,
-  deal_id uuid references public.deals (id) on delete set null,
+  -- cascade: an activity logged against a deal is that deal's history.
+  deal_id uuid references public.deals (id) on delete cascade,
   subject text not null,
   notes text,
   activity_date timestamptz not null default now(),
