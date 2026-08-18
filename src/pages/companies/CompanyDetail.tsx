@@ -1,24 +1,30 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Mail, Phone, Globe, StickyNote } from 'lucide-react'
+import { ArrowLeft, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { StatusBadge, StageBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
-import { formatCurrency, formatDate, formatDateTime, userById } from '../../data/mockData'
+import { formatCurrency, formatDate, formatDateTime, services } from '../../data/mockData'
+import type { ProductService } from '../../types'
 
 export function CompanyDetail() {
   const { id } = useParams()
-  const { companies, contacts, leads, deals, activities, tasks, addActivity } = useAppStore()
+  const { companies, contacts, leads, deals, activities, tasks, users, addActivity, updateCompany, addDeal, addTask } = useAppStore()
   const company = companies.find((c) => c.id === id)
+  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const [noteOpen, setNoteOpen] = useState(false)
+  const [ownerOpen, setOwnerOpen] = useState(false)
+  const [dealOpen, setDealOpen] = useState(false)
+  const [followUpOpen, setFollowUpOpen] = useState(false)
 
   const companyContacts = useMemo(() => contacts.filter((c) => c.companyId === id), [contacts, id])
   const companyLeads = useMemo(() => leads.filter((l) => l.companyId === id), [leads, id])
   const companyDeals = useMemo(() => deals.filter((d) => d.companyId === id), [deals, id])
   const openDeals = companyDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Lost')
   const wonDeals = companyDeals.filter((d) => d.stage === 'Won')
+  const isClient = wonDeals.length > 0
   const companyActivities = useMemo(
     () => activities.filter((a) => a.companyId === id).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()),
     [activities, id],
@@ -30,7 +36,7 @@ export function CompanyDetail() {
   if (!company) {
     return (
       <div className="text-center py-16 text-slate-400">
-        Company not found. <Link to="/companies" className="text-brand-600 hover:underline">Back to companies</Link>
+        Client not found. <Link to="/companies" className="text-brand-600 hover:underline">Back to clients</Link>
       </div>
     )
   }
@@ -38,7 +44,7 @@ export function CompanyDetail() {
   return (
     <div className="space-y-5">
       <Link to="/companies" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700">
-        <ArrowLeft size={15} /> Back to Companies
+        <ArrowLeft size={15} /> Back to Clients
       </Link>
 
       <Card>
@@ -67,9 +73,21 @@ export function CompanyDetail() {
           <div className="text-right">
             <p className="text-xs text-slate-400">Lifetime Value</p>
             <p className="text-xl font-bold text-slate-800">{formatCurrency(lifetimeValue)}</p>
-            <button onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 mt-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              <StickyNote size={13} /> Add Note
-            </button>
+            <div className="flex items-center gap-2 mt-2">
+              {isClient && (
+                <button onClick={() => setDealOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+                  <Handshake size={13} /> Add Deal
+                </button>
+              )}
+              {isClient && (
+                <button onClick={() => setFollowUpOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+                  <CalendarClock size={13} /> Schedule Follow-up
+                </button>
+              )}
+              <button onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+                <StickyNote size={13} /> Add Note
+              </button>
+            </div>
           </div>
         </div>
       </Card>
@@ -152,7 +170,15 @@ export function CompanyDetail() {
               <Field label="Province" value={company.province} />
               <Field label="City" value={company.city} />
               <Field label="Address" value={company.address} />
-              <Field label="Account Owner" value={userById(company.accountOwnerId)?.name} />
+              <div className="flex justify-between gap-3 items-center">
+                <dt className="text-slate-400">Account Owner</dt>
+                <dd className="flex items-center gap-1.5">
+                  <span className="text-slate-700 font-medium">{users.find((u) => u.id === company.accountOwnerId)?.name ?? '—'}</span>
+                  <button onClick={() => setOwnerOpen(true)} className="p-1 rounded-lg text-slate-300 hover:text-slate-600 hover:bg-slate-100">
+                    <Pencil size={12} />
+                  </button>
+                </dd>
+              </div>
               <Field label="Created" value={formatDate(company.createdAt)} />
             </dl>
           </Card>
@@ -213,6 +239,21 @@ export function CompanyDetail() {
       {noteOpen && (
         <NoteModal onClose={() => setNoteOpen(false)} onSave={(text) => addActivity({ type: 'Note', subject: 'Note added', notes: text, companyId: company.id })} />
       )}
+      {ownerOpen && (
+        <EditOwnerModal
+          currentOwnerId={company.accountOwnerId}
+          reps={reps}
+          onClose={() => setOwnerOpen(false)}
+          onSave={(accountOwnerId) => updateCompany(company.id, { accountOwnerId })}
+        />
+      )}
+      {dealOpen && <AddClientDealModal onClose={() => setDealOpen(false)} onSave={(input) => addDeal({ ...input, companyId: company.id })} />}
+      {followUpOpen && (
+        <ScheduleFollowUpModal
+          onClose={() => setFollowUpOpen(false)}
+          onSave={(input) => addTask({ ...input, companyId: company.id })}
+        />
+      )}
     </div>
   )
 }
@@ -247,6 +288,134 @@ function NoteModal({ onClose, onSave }: { onClose: () => void; onSave: (text: st
           </button>
           <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
             Add Note
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function EditOwnerModal({
+  currentOwnerId,
+  reps,
+  onClose,
+  onSave,
+}: {
+  currentOwnerId: string
+  reps: ReturnType<typeof useAppStore>['users']
+  onClose: () => void
+  onSave: (ownerId: string) => void
+}) {
+  const [ownerId, setOwnerId] = useState(currentOwnerId)
+  return (
+    <Modal title="Reassign Account Owner" onClose={onClose} width={380}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          onSave(ownerId)
+          onClose()
+        }}
+      >
+        <FormField label="Account Owner" required>
+          <select className={inputClass} value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
+            {reps.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+        </FormField>
+        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
+          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
+            Cancel
+          </button>
+          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
+            Save
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function AddClientDealModal({ onClose, onSave }: { onClose: () => void; onSave: (input: { name: string; value: number; service: ProductService; expectedCloseDate: string }) => void }) {
+  const [form, setForm] = useState({ name: '', value: '', service: services[0], expectedCloseDate: '' })
+  return (
+    <Modal title="Add Deal" onClose={onClose} width={420}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (!form.name) return
+          onSave({
+            name: form.name,
+            value: Number(form.value) || 0,
+            service: form.service,
+            expectedCloseDate: form.expectedCloseDate ? new Date(form.expectedCloseDate).toISOString() : new Date().toISOString(),
+          })
+          onClose()
+        }}
+      >
+        <FormField label="Deal Name" required>
+          <input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required autoFocus placeholder="e.g. Annual renewal" />
+        </FormField>
+        <div className="grid grid-cols-2 gap-3">
+          <FormField label="Value (R)">
+            <input type="number" className={inputClass} value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
+          </FormField>
+          <FormField label="Expected Close Date">
+            <input type="date" className={inputClass} value={form.expectedCloseDate} onChange={(e) => setForm({ ...form, expectedCloseDate: e.target.value })} />
+          </FormField>
+        </div>
+        <FormField label="Service">
+          <select className={inputClass} value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value as ProductService })}>
+            {services.map((s) => (
+              <option key={s}>{s}</option>
+            ))}
+          </select>
+        </FormField>
+        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
+          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
+            Cancel
+          </button>
+          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
+            Add Deal
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function ScheduleFollowUpModal({ onClose, onSave }: { onClose: () => void; onSave: (input: { title: string; dueDate: string }) => void }) {
+  const [form, setForm] = useState({ title: '', dueDate: '', dueTime: '09:00' })
+  return (
+    <Modal title="Schedule Follow-up" onClose={onClose} width={380}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (!form.title || !form.dueDate) return
+          const due = new Date(`${form.dueDate}T${form.dueTime}`)
+          onSave({ title: form.title, dueDate: due.toISOString() })
+          onClose()
+        }}
+      >
+        <FormField label="Title" required>
+          <input className={inputClass} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required autoFocus placeholder="e.g. Quarterly check-in call" />
+        </FormField>
+        <div className="grid grid-cols-2 gap-3">
+          <FormField label="Date" required>
+            <input type="date" className={inputClass} value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} required />
+          </FormField>
+          <FormField label="Time">
+            <input type="time" className={inputClass} value={form.dueTime} onChange={(e) => setForm({ ...form, dueTime: e.target.value })} />
+          </FormField>
+        </div>
+        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
+          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
+            Cancel
+          </button>
+          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
+            Schedule
           </button>
         </div>
       </form>

@@ -23,7 +23,7 @@ const NAV = [
   { to: '/leads', label: 'Leads', icon: Target },
   { to: '/deals', label: 'Deals', icon: Handshake },
   { to: '/contacts', label: 'Contacts', icon: Users },
-  { to: '/companies', label: 'Companies', icon: Building2 },
+  { to: '/companies', label: 'Clients', icon: Building2 },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   { to: '/calendar', label: 'Calendar', icon: Calendar },
   { to: '/activities', label: 'Activities', icon: Activity },

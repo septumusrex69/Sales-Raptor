@@ -40,8 +40,8 @@ function App() {
             <Route path="/deals/:id" element={<DealDetail />} handle={{ title: 'Deal Details' }} />
             <Route path="/contacts" element={<ContactsList />} handle={{ title: 'Contacts' }} />
             <Route path="/contacts/:id" element={<ContactDetail />} handle={{ title: 'Contact Details' }} />
-            <Route path="/companies" element={<CompaniesList />} handle={{ title: 'Companies' }} />
-            <Route path="/companies/:id" element={<CompanyDetail />} handle={{ title: 'Company Details' }} />
+            <Route path="/companies" element={<CompaniesList />} handle={{ title: 'Clients' }} />
+            <Route path="/companies/:id" element={<CompanyDetail />} handle={{ title: 'Client Details' }} />
             <Route path="/tasks" element={<TasksPage />} handle={{ title: 'Tasks' }} />
             <Route path="/calendar" element={<CalendarPage />} handle={{ title: 'Calendar' }} />
             <Route path="/activities" element={<ActivitiesPage />} handle={{ title: 'Activities' }} />
