@@ -50,16 +50,14 @@ function friendlyError(message: string): string {
   return message
 }
 
-function insertRow<T extends object>(table: string, row: T, action: string, onError?: (message: string) => void) {
-  supabase
-    .from(table)
-    .insert(appToRow(row))
-    .then(({ error }) => {
-      if (error) {
-        reportError(action, error.message)
-        onError?.(error.message)
-      }
-    })
+async function insertRow<T extends object>(table: string, row: T, action: string, onError?: (message: string) => void): Promise<string | null> {
+  const { error } = await supabase.from(table).insert(appToRow(row))
+  if (error) {
+    reportError(action, error.message)
+    onError?.(error.message)
+    return error.message
+  }
+  return null
 }
 // RLS policies restrict UPDATE/DELETE via their `using` clause, and when a
 // row is excluded that way Postgrest just reports "0 rows changed" — not an
@@ -570,17 +568,20 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!lead) return undefined
 
       let companyId = lead.companyId
+      let newCompany: Company | undefined
       if (!companyId) {
-        const company = addCompanyInternal({ name: lead.companyName, industry: lead.industry, province: lead.province, city: lead.city })
-        companyId = company.id
+        newCompany = { id: crypto.randomUUID(), accountOwnerId: ownerId, createdAt: TODAY.toISOString(), name: lead.companyName, industry: lead.industry, province: lead.province, city: lead.city }
+        companyId = newCompany.id
+        setCompanies((prev) => [newCompany!, ...prev])
       }
 
       let contactId: ID | undefined
+      let newContact: Contact | undefined
       const existingContact = contacts.find((c) => c.companyId === companyId && c.firstName === lead.firstName && c.lastName === lead.lastName)
       if (existingContact) {
         contactId = existingContact.id
       } else {
-        const contact: Contact = {
+        newContact = {
           id: crypto.randomUUID(),
           firstName: lead.firstName,
           lastName: lead.lastName,
@@ -592,9 +593,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           ownerId: lead.ownerId,
           createdAt: TODAY.toISOString(),
         }
-        setContacts((prev) => [contact, ...prev])
-        insertRow('contacts', contact, 'convertLeadToDeal:contact')
-        contactId = contact.id
+        contactId = newContact.id
+        setContacts((prev) => [newContact!, ...prev])
       }
 
       const deal: Deal = {
@@ -613,13 +613,48 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         leadId: lead.id,
       }
       setDeals((prev) => [deal, ...prev])
-      insertRow('deals', deal, 'convertLeadToDeal:deal')
 
       updateLead(leadId, { status: 'Converted' as LeadStatus, convertedDealId: deal.id })
       addActivity({ type: 'Status change', subject: `Lead converted to deal: ${deal.name}`, leadId, dealId: deal.id, companyId })
+
+      // Persist strictly in dependency order: contacts/deals reference
+      // company_id, so if a new company is being created here, its insert
+      // must actually land before the contact/deal inserts that point at
+      // it fire — otherwise the faster contact/deal request can race ahead
+      // of the still-in-flight company request and get rejected with a
+      // foreign-key violation (the company it references doesn't exist
+      // yet). That row then only ever existed in local state and silently
+      // vanishes on the next reload, with no error shown anywhere.
+      void (async () => {
+        if (newCompany) {
+          const companyError = await insertRow('companies', newCompany, 'addCompany')
+          if (companyError) {
+            setCompanies((prev) => prev.filter((c) => c.id !== newCompany!.id))
+            setDeals((prev) => prev.filter((d) => d.id !== deal.id))
+            if (newContact) setContacts((prev) => prev.filter((c) => c.id !== newContact!.id))
+            showError(companyError)
+            return
+          }
+        }
+        if (newContact) {
+          const contactError = await insertRow('contacts', newContact, 'convertLeadToDeal:contact')
+          if (contactError) {
+            setContacts((prev) => prev.filter((c) => c.id !== newContact!.id))
+            setDeals((prev) => prev.filter((d) => d.id !== deal.id))
+            showError(contactError)
+            return
+          }
+        }
+        const dealError = await insertRow('deals', deal, 'convertLeadToDeal:deal')
+        if (dealError) {
+          setDeals((prev) => prev.filter((d) => d.id !== deal.id))
+          showError(dealError)
+        }
+      })()
+
       return deal
     },
-    [leads, contacts, updateLead, addActivity],
+    [leads, contacts, updateLead, addActivity, showError, ownerId],
   )
 
   const updateUser = useCallback<AppActions['updateUser']>(
