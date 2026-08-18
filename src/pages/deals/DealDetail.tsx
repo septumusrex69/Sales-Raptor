@@ -162,6 +162,8 @@ export function DealDetail() {
             <Field label="Competitor" value={deal.competitor} />
             {deal.lossReason && <Field label="Loss Reason" value={deal.lossReason} />}
             <Field label="Weighted Value" value={formatCurrency(Math.round((deal.value * deal.probability) / 100))} />
+            {deal.handoverAmount != null && <Field label="Handover Amount" value={formatCurrency(deal.handoverAmount)} />}
+            {deal.contractStartDate && <Field label="Starting Date" value={formatDate(deal.contractStartDate)} />}
           </dl>
           {deal.notes && (
             <div className="mt-4 pt-4 border-t border-slate-100">
@@ -334,7 +336,7 @@ export function DealDetail() {
       )}
 
       {editOpen && <EditDealModal deal={deal} reps={reps} onClose={() => setEditOpen(false)} onSave={(patch) => updateDeal(deal.id, patch)} />}
-      {wonOpen && <MarkWonModal defaultValue={deal.value} defaultService={deal.service} onClose={() => setWonOpen(false)} onSave={(details: WonDealDetails) => markDealWon(deal.id, details)} />}
+      {wonOpen && <MarkWonModal defaultService={deal.service} onClose={() => setWonOpen(false)} onSave={(details: WonDealDetails) => markDealWon(deal.id, details)} />}
       {lostOpen && <MarkLostModal onClose={() => setLostOpen(false)} onSave={(reason: LossReason) => markDealLost(deal.id, reason)} />}
       {activityOpen && (
         <AddActivityModal onClose={() => setActivityOpen(false)} onSave={(type, notes) => addActivity({ type, subject: `${type} logged on ${deal.name}`, notes, dealId: deal.id, companyId: deal.companyId })} />

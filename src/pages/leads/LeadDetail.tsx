@@ -3,22 +3,23 @@ import { useNavigate, useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Pencil, ArrowRightLeft, StickyNote, CheckSquare, Calendar, XCircle, Phone, Mail, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card, CardHeader } from '../../components/ui/Card'
-import { StatusBadge, ServiceBadge } from '../../components/ui/Badge'
+import { StatusBadge, ServiceBadge, StageBadge } from '../../components/ui/Badge'
 import { Avatar, UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { formatCurrency, formatDate, formatDateTime, formatLeadNumber, industries, leadSources } from '../../data/mockData'
 import type { ActivityType, LeadStatus, TaskType } from '../../types'
-import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, estimatedProjectValueLabel } from '../../components/leads/LeadOpportunityFields'
+import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, serviceValueLabel, leadServiceValueList } from '../../components/leads/LeadOpportunityFields'
 
 const ALL_STATUSES: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Qualified', 'Unqualified', 'Proposal Required', 'Converted', 'Lost']
 
 export function LeadDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { leads, activities, users, userById, updateLead, convertLeadToDeal, markLeadLost, deleteLead, addActivity, addTask } = useAppStore()
+  const { leads, deals, activities, users, userById, updateLead, convertLeadToDeal, markLeadLost, deleteLead, addActivity, addTask } = useAppStore()
   const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const lead = leads.find((l) => l.id === id)
+  const resultingDeals = useMemo(() => deals.filter((d) => d.leadId === id), [deals, id])
 
   const [editOpen, setEditOpen] = useState(false)
   const [activityOpen, setActivityOpen] = useState(false)
@@ -139,12 +140,19 @@ export function LeadDetail() {
           <Card>
             <CardHeader title="Opportunity Information" />
             <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
-              <Field label={estimatedProjectValueLabel(lead.services ?? [])} value={lead.estimatedProjectValue != null ? formatCurrency(lead.estimatedProjectValue) : undefined} />
-              {lead.services?.includes('Debt Collection') && (
-                <>
-                  <Field label="Estimated Handover Amount" value={lead.estimatedHandoverAmount != null ? formatCurrency(lead.estimatedHandoverAmount) : undefined} />
-                  <Field label="Estimated Number of Accounts / Matters" value={lead.estimatedAccountsCount != null ? String(lead.estimatedAccountsCount) : undefined} />
-                </>
+              {leadServiceValueList(lead).map((sv) =>
+                sv.service === 'Debt Collection' ? (
+                  <div key={sv.service} className="col-span-2 grid grid-cols-2 gap-x-6 gap-y-3.5">
+                    <Field label="Estimated Handover Amount" value={sv.handoverAmount != null ? formatCurrency(sv.handoverAmount) : undefined} />
+                    <Field label="Estimated Number of Accounts / Matters" value={sv.accountsCount != null ? String(sv.accountsCount) : undefined} />
+                  </div>
+                ) : (
+                  <Field
+                    key={sv.service}
+                    label={lead.services && lead.services.length > 1 ? `${sv.service} — ${serviceValueLabel(sv.service)}` : serviceValueLabel(sv.service)}
+                    value={sv.value != null ? formatCurrency(sv.value) : undefined}
+                  />
+                ),
               )}
               {lead.services?.includes('Other') && <Field label="Other Service — Please Specify" value={lead.otherServiceDetail} />}
             </dl>
@@ -152,6 +160,30 @@ export function LeadDetail() {
               <p className="text-xs text-slate-400">No products or services captured yet. Use Edit to add opportunity details.</p>
             )}
           </Card>
+
+          {resultingDeals.length > 0 && (
+            <Card>
+              <CardHeader title="Resulting Deal(s)" />
+              <div className="space-y-2">
+                {resultingDeals.map((d) => (
+                  <Link
+                    key={d.id}
+                    to={`/deals/${d.id}`}
+                    className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">{d.name}</p>
+                      {d.service && <p className="text-xs text-slate-400">{d.service}</p>}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-semibold text-slate-700">{formatCurrency(d.value)}</span>
+                      <StageBadge stage={d.stage} />
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </Card>
+          )}
         </div>
 
         <Card padded={false} className="h-fit">
@@ -288,9 +320,6 @@ function EditLeadModal({
                 <option key={s}>{s}</option>
               ))}
             </select>
-          </FormField>
-          <FormField label="Estimated Value (R)">
-            <input type="number" className={inputClass} value={form.estimatedValue} onChange={(e) => setForm({ ...form, estimatedValue: Number(e.target.value) })} />
           </FormField>
           <FormField label="Lead Score">
             <input type="number" min={0} max={100} className={inputClass} value={form.score} onChange={(e) => setForm({ ...form, score: Number(e.target.value) })} />

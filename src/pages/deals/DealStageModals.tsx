@@ -4,27 +4,44 @@ import { lossReasons, services } from '../../data/mockData'
 import type { LossReason } from '../../types'
 import type { WonDealDetails } from '../../store/AppStore'
 
-export function MarkWonModal({ defaultValue, defaultService, onClose, onSave }: { defaultValue: number; defaultService?: string; onClose: () => void; onSave: (details: WonDealDetails) => void }) {
+const HANDOVER_SERVICES = ['Debt Collection']
+
+export function MarkWonModal({ defaultService, onClose, onSave }: { defaultService?: string; onClose: () => void; onSave: (details: WonDealDetails) => void }) {
   const [form, setForm] = useState({
-    finalValue: String(defaultValue),
+    finalValue: '',
     startDate: '',
     service: defaultService ?? services[0],
     contractDuration: '12 months',
+    handoverAmount: '',
   })
+  const isHandover = HANDOVER_SERVICES.includes(form.service)
   return (
     <Modal title="Mark Deal Won 🎉" onClose={onClose} width={420}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
           if (!form.startDate) return
-          onSave({ finalValue: Number(form.finalValue) || 0, startDate: form.startDate, service: form.service, contractDuration: form.contractDuration })
+          onSave({
+            finalValue: Number(form.finalValue) || 0,
+            startDate: form.startDate,
+            service: form.service,
+            contractDuration: form.contractDuration,
+            handoverAmount: isHandover && form.handoverAmount !== '' ? Number(form.handoverAmount) : undefined,
+          })
           onClose()
         }}
       >
         <FormField label="Final Contract Value (R)" required>
-          <input type="number" className={inputClass} value={form.finalValue} onChange={(e) => setForm({ ...form, finalValue: e.target.value })} required />
+          <input
+            type="number"
+            className={inputClass}
+            value={form.finalValue}
+            onChange={(e) => setForm({ ...form, finalValue: e.target.value })}
+            placeholder="Enter final contract value"
+            required
+          />
         </FormField>
-        <FormField label="Start Date" required>
+        <FormField label="Starting Date" required>
           <input type="date" className={inputClass} value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} required />
         </FormField>
         <FormField label="Service Sold">
@@ -34,6 +51,17 @@ export function MarkWonModal({ defaultValue, defaultService, onClose, onSave }: 
             ))}
           </select>
         </FormField>
+        {isHandover && (
+          <FormField label="Handover Amount (R)">
+            <input
+              type="number"
+              className={inputClass}
+              value={form.handoverAmount}
+              onChange={(e) => setForm({ ...form, handoverAmount: e.target.value })}
+              placeholder="e.g. 750000"
+            />
+          </FormField>
+        )}
         <FormField label="Contract Duration">
           <input className={inputClass} value={form.contractDuration} onChange={(e) => setForm({ ...form, contractDuration: e.target.value })} />
         </FormField>

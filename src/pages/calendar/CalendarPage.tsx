@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { companyById, formatDate, TODAY } from '../../data/mockData'
 import { DEAL_CLOSE_EVENT_COLOR, TASK_TYPE_COLORS } from '../../lib/colors'
+import { buildDrilldownUrl } from '../../lib/drilldown'
 import type { Task } from '../../types'
 
 type ViewMode = 'Month' | 'Week' | 'Day'
@@ -12,15 +14,29 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 interface CalEvent {
   id: string
-  title: string
+  /** Client/company name — the primary thing shown, per the calendar's whole purpose of surfacing who a day's work is about. */
+  primary: string
+  /** Task type (e.g. "Follow-up") or "Expected Close" for a deal's close-date marker. */
+  type: string
+  /** Free-text detail (task title) — only set when distinct from `primary`, so we don't repeat the same string twice on cramped chips. */
+  note?: string
   date: Date
   color: string
   ownerId: string
-  sub?: string
+  href: string
 }
 
 function sameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+}
+
+/** Local YYYY-MM-DD — deliberately not toISOString(), which shifts to UTC and can land on the wrong day. */
+function ymd(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function tasksUrlForDate(d: Date) {
+  return buildDrilldownUrl('/tasks', { date: ymd(d) })
 }
 
 export function CalendarPage() {
@@ -31,10 +47,31 @@ export function CalendarPage() {
   const events = useMemo<CalEvent[]>(() => {
     const taskEvents = tasks
       .filter((t: Task) => t.status !== 'Cancelled')
-      .map((t) => ({ id: `t-${t.id}`, title: t.title, date: new Date(t.dueDate), color: TASK_TYPE_COLORS[t.type] ?? '#94a3b8', ownerId: t.ownerId, sub: t.relatedToLabel }))
+      .map((t) => {
+        const date = new Date(t.dueDate)
+        return {
+          id: `t-${t.id}`,
+          primary: t.relatedToLabel || t.title,
+          type: t.type,
+          note: t.relatedToLabel ? t.title : undefined,
+          date,
+          color: TASK_TYPE_COLORS[t.type] ?? '#94a3b8',
+          ownerId: t.ownerId,
+          href: tasksUrlForDate(date),
+        }
+      })
     const closeEvents = deals
       .filter((d) => d.stage !== 'Won' && d.stage !== 'Lost')
-      .map((d) => ({ id: `d-${d.id}`, title: `${d.name} — Expected Close`, date: new Date(d.expectedCloseDate), color: DEAL_CLOSE_EVENT_COLOR, ownerId: d.ownerId, sub: companyById(d.companyId)?.name }))
+      .map((d) => ({
+        id: `d-${d.id}`,
+        primary: companyById(d.companyId)?.name ?? d.name,
+        type: 'Expected Close',
+        note: d.name,
+        date: new Date(d.expectedCloseDate),
+        color: DEAL_CLOSE_EVENT_COLOR,
+        ownerId: d.ownerId,
+        href: `/deals/${d.id}`,
+      }))
     return [...taskEvents, ...closeEvents]
   }, [tasks, deals])
 
@@ -116,14 +153,23 @@ function MonthView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
           const dayEvents = events.filter((e) => sameDay(e.date, d))
           return (
             <div key={i} className={`min-h-[100px] border-b border-r border-slate-50 p-1.5 ${inMonth ? '' : 'bg-slate-50/40'}`}>
-              <span className={`inline-flex items-center justify-center w-6 h-6 text-xs rounded-full ${isToday ? 'bg-brand-600 text-white font-semibold' : inMonth ? 'text-slate-600' : 'text-slate-300'}`}>
+              <Link
+                to={tasksUrlForDate(d)}
+                className={`inline-flex items-center justify-center w-6 h-6 text-xs rounded-full hover:ring-2 hover:ring-brand-200 ${isToday ? 'bg-brand-600 text-white font-semibold' : inMonth ? 'text-slate-600' : 'text-slate-300'}`}
+              >
                 {d.getDate()}
-              </span>
+              </Link>
               <div className="mt-1 space-y-1">
                 {dayEvents.slice(0, 3).map((e) => (
-                  <div key={e.id} className="text-[10px] font-medium px-1.5 py-0.5 rounded truncate" style={{ backgroundColor: `${e.color}1a`, color: e.color }} title={e.title}>
-                    {e.title}
-                  </div>
+                  <Link
+                    key={e.id}
+                    to={e.href}
+                    className="block text-[10px] font-medium px-1.5 py-0.5 rounded truncate hover:brightness-95"
+                    style={{ backgroundColor: `${e.color}1a`, color: e.color }}
+                    title={`${e.primary} — ${e.type}${e.note ? ` (${e.note})` : ''}`}
+                  >
+                    {e.primary}
+                  </Link>
                 ))}
                 {dayEvents.length > 3 && <div className="text-[10px] text-slate-400 px-1.5">+{dayEvents.length - 3} more</div>}
               </div>
@@ -149,15 +195,24 @@ function WeekView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
         const isToday = sameDay(d, TODAY)
         return (
           <Card key={d.toISOString()} padded={false} className={isToday ? 'ring-2 ring-brand-500/40' : ''}>
-            <div className="px-3 py-2 border-b border-slate-100 text-center">
+            <Link to={tasksUrlForDate(d)} className="block px-3 py-2 border-b border-slate-100 text-center hover:bg-slate-50">
               <p className="text-[11px] text-slate-400">{WEEKDAYS[d.getDay()]}</p>
               <p className={`text-sm font-semibold ${isToday ? 'text-brand-600' : 'text-slate-700'}`}>{d.getDate()}</p>
-            </div>
+            </Link>
             <div className="p-2 space-y-1.5 min-h-[220px]">
               {dayEvents.map((e) => (
-                <div key={e.id} className="text-[11px] font-medium px-1.5 py-1 rounded" style={{ backgroundColor: `${e.color}1a`, color: e.color }}>
-                  {e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })} {e.title}
-                </div>
+                <Link
+                  key={e.id}
+                  to={e.href}
+                  className="block text-[11px] px-1.5 py-1 rounded hover:brightness-95"
+                  style={{ backgroundColor: `${e.color}1a`, color: e.color }}
+                  title={`${e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })} · ${e.type}${e.note ? ` · ${e.note}` : ''}`}
+                >
+                  <span className="font-semibold">{e.primary}</span>
+                  <span className="block text-[10px] opacity-80 truncate">
+                    {e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })} · {e.type}
+                  </span>
+                </Link>
               ))}
             </div>
           </Card>
@@ -174,15 +229,18 @@ function DayView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
       <div className="divide-y divide-slate-50">
         {dayEvents.length === 0 && <p className="text-center text-slate-400 text-sm py-10">No events scheduled for this day.</p>}
         {dayEvents.map((e) => (
-          <div key={e.id} className="flex items-center gap-3 px-5 py-3">
+          <Link key={e.id} to={e.href} className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50">
             <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: e.color }} />
             <span className="text-sm text-slate-500 w-16 shrink-0">{e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-slate-700 truncate">{e.title}</p>
-              {e.sub && <p className="text-xs text-slate-400">{e.sub}</p>}
+              <p className="text-sm font-medium text-slate-700 truncate">{e.primary}</p>
+              <p className="text-xs text-slate-400">
+                {e.type}
+                {e.note ? ` · ${e.note}` : ''}
+              </p>
             </div>
             <UserAvatar userId={e.ownerId} size={24} />
-          </div>
+          </Link>
         ))}
       </div>
     </Card>

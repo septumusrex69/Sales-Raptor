@@ -97,7 +97,6 @@ export function LeadForm({ onClose, store, navigate }: { onClose: () => void; st
     phone: '',
     email: '',
     source: 'Website' as LeadSource,
-    estimatedValue: '',
     ownerId: currentUser?.id ?? '',
   })
   const [opportunity, setOpportunity] = useState(emptyLeadOpportunityValue())
@@ -114,7 +113,6 @@ export function LeadForm({ onClose, store, navigate }: { onClose: () => void; st
             phone: form.phone || undefined,
             email: form.email || undefined,
             source: form.source,
-            estimatedValue: Number(form.estimatedValue) || 0,
             ownerId: form.ownerId || undefined,
             ...leadOpportunityPatch(opportunity),
           })
@@ -141,18 +139,13 @@ export function LeadForm({ onClose, store, navigate }: { onClose: () => void; st
             <input type="email" className={inputClass} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
           </FormField>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <FormField label="Lead Source" required>
-            <select className={inputClass} value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value as LeadSource })}>
-              {leadSources.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
-          </FormField>
-          <FormField label="Estimated Value (R)">
-            <input type="number" className={inputClass} value={form.estimatedValue} onChange={(e) => setForm({ ...form, estimatedValue: e.target.value })} />
-          </FormField>
-        </div>
+        <FormField label="Lead Source" required>
+          <select className={inputClass} value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value as LeadSource })}>
+            {leadSources.map((s) => (
+              <option key={s}>{s}</option>
+            ))}
+          </select>
+        </FormField>
         <FormField label="Owner">
           <select className={inputClass} value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>
             {reps.map((r) => (
