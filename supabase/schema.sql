@@ -203,8 +203,19 @@ create table if not exists public.deals (
   next_action_at timestamptz,
   -- cascade: a converted lead's Deal is that lead's outcome, not an
   -- independent record — deleting the lead removes the Deal it produced.
-  lead_id uuid references public.leads (id) on delete cascade
+  lead_id uuid references public.leads (id) on delete cascade,
+  -- Handover-type deals only (e.g. Debt Collection) — outstanding balance
+  -- being handed over, distinct from `value` (the contract/project value).
+  handover_amount numeric,
+  -- Date the client is expected to begin handing over accounts / service
+  -- commencement date, captured when marking the deal Won.
+  contract_start_date date
 );
+
+-- Covers re-running this script against a database where `deals` already
+-- existed before these columns were added.
+alter table public.deals add column if not exists handover_amount numeric;
+alter table public.deals add column if not exists contract_start_date date;
 
 -- ---------- Tasks ----------
 create table if not exists public.tasks (

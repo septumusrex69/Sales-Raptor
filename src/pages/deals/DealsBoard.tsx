@@ -216,7 +216,6 @@ export function DealsBoard() {
       {addOpen && <DealForm onClose={() => setAddOpen(false)} store={store} navigate={navigate} />}
       {wonModalFor && (
         <MarkWonModal
-          defaultValue={wonModalFor.value}
           defaultService={wonModalFor.service}
           onClose={() => setWonModalFor(null)}
           onSave={(details: WonDealDetails) => markDealWon(wonModalFor.id, details)}

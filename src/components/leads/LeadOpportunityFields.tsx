@@ -105,6 +105,12 @@ export function leadOpportunityPatch(value: LeadOpportunityFormValue): Partial<L
 
   const estimatedProjectValue = serviceValues.reduce((sum, sv) => sum + (sv.value ?? 0), 0)
   const debtCollectionEntry = serviceValues.find((sv) => sv.service === 'Debt Collection')
+  // The lead's single headline number — unlike estimatedProjectValue (which
+  // excludes handover amounts to keep that concept distinct), this is what
+  // Lead.estimatedValue now derives from everywhere it's shown (LeadsList
+  // column, LeadDetail header, Reports fallback), so removing the old
+  // standalone Estimated Value input doesn't lose that figure.
+  const estimatedValue = serviceValues.reduce((sum, sv) => sum + (sv.value ?? 0) + (sv.handoverAmount ?? 0), 0)
 
   return {
     country: value.country || undefined,
@@ -114,6 +120,7 @@ export function leadOpportunityPatch(value: LeadOpportunityFormValue): Partial<L
     otherServiceDetail: hasOther && value.otherServiceDetail ? value.otherServiceDetail : undefined,
     classification: value.classification || undefined,
     serviceValues: serviceValues.length ? serviceValues : undefined,
+    estimatedValue,
     estimatedProjectValue: estimatedProjectValue > 0 ? estimatedProjectValue : undefined,
     estimatedHandoverAmount: debtCollectionEntry?.handoverAmount,
     estimatedAccountsCount: debtCollectionEntry?.accountsCount,

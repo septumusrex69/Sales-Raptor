@@ -321,9 +321,6 @@ function EditLeadModal({
               ))}
             </select>
           </FormField>
-          <FormField label="Estimated Value (R)">
-            <input type="number" className={inputClass} value={form.estimatedValue} onChange={(e) => setForm({ ...form, estimatedValue: Number(e.target.value) })} />
-          </FormField>
           <FormField label="Lead Score">
             <input type="number" min={0} max={100} className={inputClass} value={form.score} onChange={(e) => setForm({ ...form, score: Number(e.target.value) })} />
           </FormField>

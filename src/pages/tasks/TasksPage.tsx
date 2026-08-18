@@ -21,15 +21,25 @@ function startOfDay(d: Date) {
   return x
 }
 
+/** Local YYYY-MM-DD, matching CalendarPage's ymd() — deliberately not toISOString(), which shifts to UTC. */
+function ymd(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function formatLongDate(dateParam: string) {
+  return new Date(`${dateParam}T00:00:00`).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })
+}
+
 export function TasksPage() {
   const { tasks, users, updateTask, addTask } = useAppStore()
   const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [view, setView] = useState<View>(() => {
     const fromUrl = readParam(searchParams, 'view')
     return (VIEWS as readonly string[]).includes(fromUrl ?? '') ? (fromUrl as View) : 'My Tasks'
   })
+  const [dateFilter, setDateFilter] = useState<string | undefined>(() => readParam(searchParams, 'date'))
   const [search, setSearch] = useState('')
   const [addOpen, setAddOpen] = useState(false)
   const [rescheduleTask, setRescheduleTask] = useState<Task | null>(null)
@@ -42,35 +52,61 @@ export function TasksPage() {
 
   const filtered = useMemo(() => {
     let list = [...tasks]
-    switch (view) {
-      case 'My Tasks':
-        list = list.filter((t) => t.ownerId === currentUser?.id && t.status !== 'Completed' && t.status !== 'Cancelled')
-        break
-      case 'Team Tasks':
-        list = list.filter((t) => t.status !== 'Completed' && t.status !== 'Cancelled')
-        break
-      case 'Overdue':
-        list = list.filter((t) => new Date(t.dueDate) < today && t.status !== 'Completed' && t.status !== 'Cancelled')
-        break
-      case 'Today':
-        list = list.filter((t) => startOfDay(new Date(t.dueDate)).getTime() === today.getTime())
-        break
-      case 'Tomorrow':
-        list = list.filter((t) => startOfDay(new Date(t.dueDate)).getTime() === tomorrow.getTime())
-        break
-      case 'This Week':
-        list = list.filter((t) => new Date(t.dueDate) >= today && new Date(t.dueDate) <= weekEnd)
-        break
-      case 'Completed':
-        list = list.filter((t) => t.status === 'Completed')
-        break
+    if (dateFilter) {
+      // Matches exactly what Calendar shows for this day (same status
+      // exclusion), so clicking through gives a consistent picture.
+      list = list.filter((t) => t.status !== 'Cancelled' && ymd(new Date(t.dueDate)) === dateFilter)
+    } else {
+      switch (view) {
+        case 'My Tasks':
+          list = list.filter((t) => t.ownerId === currentUser?.id && t.status !== 'Completed' && t.status !== 'Cancelled')
+          break
+        case 'Team Tasks':
+          list = list.filter((t) => t.status !== 'Completed' && t.status !== 'Cancelled')
+          break
+        case 'Overdue':
+          list = list.filter((t) => new Date(t.dueDate) < today && t.status !== 'Completed' && t.status !== 'Cancelled')
+          break
+        case 'Today':
+          list = list.filter((t) => startOfDay(new Date(t.dueDate)).getTime() === today.getTime())
+          break
+        case 'Tomorrow':
+          list = list.filter((t) => startOfDay(new Date(t.dueDate)).getTime() === tomorrow.getTime())
+          break
+        case 'This Week':
+          list = list.filter((t) => new Date(t.dueDate) >= today && new Date(t.dueDate) <= weekEnd)
+          break
+        case 'Completed':
+          list = list.filter((t) => t.status === 'Completed')
+          break
+      }
     }
     if (search) {
       const q = search.toLowerCase()
       list = list.filter((t) => t.title.toLowerCase().includes(q) || (t.relatedToLabel ?? '').toLowerCase().includes(q))
     }
     return list.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
-  }, [tasks, view, search, today, tomorrow, weekEnd, currentUser])
+  }, [tasks, view, dateFilter, search, today, tomorrow, weekEnd, currentUser])
+
+  function selectView(v: View) {
+    setView(v)
+    setDateFilter(undefined)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.delete('date')
+      next.set('view', v)
+      return next
+    })
+  }
+
+  function clearDateFilter() {
+    setDateFilter(undefined)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.delete('date')
+      return next
+    })
+  }
 
   const counts = useMemo(() => {
     const overdue = tasks.filter((t) => new Date(t.dueDate) < today && t.status !== 'Completed' && t.status !== 'Cancelled').length
@@ -99,17 +135,26 @@ export function TasksPage() {
         </Card>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        {VIEWS.map((v) => (
-          <button
-            key={v}
-            onClick={() => setView(v)}
-            className={`text-sm font-medium px-3 py-1.5 rounded-lg ${view === v ? 'bg-brand-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-          >
-            {v}
+      {dateFilter ? (
+        <div className="flex flex-wrap items-center gap-2.5">
+          <h2 className="text-sm font-semibold text-slate-700">Tasks — {formatLongDate(dateFilter)}</h2>
+          <button onClick={clearDateFilter} className="text-xs font-medium text-brand-600 hover:underline">
+            Clear date filter
           </button>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          {VIEWS.map((v) => (
+            <button
+              key={v}
+              onClick={() => selectView(v)}
+              className={`text-sm font-medium px-3 py-1.5 rounded-lg ${view === v ? 'bg-brand-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2.5">
         <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 w-64">

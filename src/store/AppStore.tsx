@@ -143,6 +143,8 @@ export interface WonDealDetails {
   startDate: string
   service: string
   contractDuration: string
+  /** Handover-type services only (e.g. Debt Collection) — outstanding balance being handed over, distinct from finalValue. */
+  handoverAmount?: number
 }
 
 interface AppActions {
@@ -433,6 +435,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         stage: 'Won' as DealStage,
         value: details.finalValue,
         service: details.service,
+        handoverAmount: details.handoverAmount,
+        contractStartDate: details.startDate,
         wonAt: TODAY.toISOString(),
         notes: `${deal?.notes ?? ''}\nContract start: ${details.startDate}. Duration: ${details.contractDuration}.`.trim(),
       }

@@ -251,7 +251,7 @@ export function CompanyDetail() {
       {followUpOpen && (
         <ScheduleFollowUpModal
           onClose={() => setFollowUpOpen(false)}
-          onSave={(input) => addTask({ ...input, companyId: company.id })}
+          onSave={(input) => addTask({ ...input, companyId: company.id, relatedToLabel: company.name })}
         />
       )}
     </div>
