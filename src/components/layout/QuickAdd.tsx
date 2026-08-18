@@ -141,7 +141,7 @@ export function LeadForm({ onClose, store, navigate }: { onClose: () => void; st
             <input type="email" className={inputClass} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
           </FormField>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className={opportunity.services.length > 0 ? '' : 'grid grid-cols-2 gap-3'}>
           <FormField label="Lead Source" required>
             <select className={inputClass} value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value as LeadSource })}>
               {leadSources.map((s) => (
@@ -149,9 +149,11 @@ export function LeadForm({ onClose, store, navigate }: { onClose: () => void; st
               ))}
             </select>
           </FormField>
-          <FormField label="Estimated Value (R)">
-            <input type="number" className={inputClass} value={form.estimatedValue} onChange={(e) => setForm({ ...form, estimatedValue: e.target.value })} />
-          </FormField>
+          {opportunity.services.length === 0 && (
+            <FormField label="Estimated Value (R)">
+              <input type="number" className={inputClass} value={form.estimatedValue} onChange={(e) => setForm({ ...form, estimatedValue: e.target.value })} />
+            </FormField>
+          )}
         </div>
         <FormField label="Owner">
           <select className={inputClass} value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>

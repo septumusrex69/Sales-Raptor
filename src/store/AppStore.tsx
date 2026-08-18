@@ -613,25 +613,38 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         setContacts((prev) => [newContact!, ...prev])
       }
 
-      const deal: Deal = {
+      // One Deal per selected service, each carrying its own value — a lead
+      // interested in both Executive Listing and Credit Check becomes two
+      // independently trackable deals rather than one blended number. Falls
+      // back to the legacy single-deal behavior for leads saved before
+      // per-service values existed (serviceValues undefined/empty).
+      const serviceEntries = lead.serviceValues && lead.serviceValues.length > 0 ? lead.serviceValues : undefined
+      const dealDefs: { service?: string; value: number }[] = serviceEntries
+        ? serviceEntries.map((sv) => ({ service: sv.service, value: (sv.service === 'Debt Collection' ? sv.handoverAmount : sv.value) ?? 0 }))
+        : [{ service: lead.serviceInterested, value: dealValue ?? lead.estimatedValue }]
+
+      const dealsToCreate: Deal[] = dealDefs.map((def) => ({
         id: crypto.randomUUID(),
-        name: `${lead.companyName} Deal`,
+        name: def.service ? `${lead.companyName} — ${def.service}` : `${lead.companyName} Deal`,
         companyId,
         contactId,
         ownerId: lead.ownerId,
         stage: 'Qualified',
-        value: dealValue ?? lead.estimatedValue,
+        value: def.value,
         probability: 40,
         expectedCloseDate: new Date(TODAY.getTime() + 1000 * 60 * 60 * 24 * 30).toISOString(),
-        service: lead.serviceInterested,
+        service: def.service,
         source: lead.source,
         createdAt: TODAY.toISOString(),
         leadId: lead.id,
-      }
-      setDeals((prev) => [deal, ...prev])
+      }))
+      const firstDeal = dealsToCreate[0]
+      setDeals((prev) => [...dealsToCreate, ...prev])
 
-      updateLead(leadId, { status: 'Converted' as LeadStatus, convertedDealId: deal.id })
-      addActivity({ type: 'Status change', subject: `Lead converted to deal: ${deal.name}`, leadId, dealId: deal.id, companyId })
+      updateLead(leadId, { status: 'Converted' as LeadStatus, convertedDealId: firstDeal.id })
+      for (const deal of dealsToCreate) {
+        addActivity({ type: 'Status change', subject: `Lead converted to deal: ${deal.name}`, leadId, dealId: deal.id, companyId })
+      }
 
       // Persist strictly in dependency order: contacts/deals reference
       // company_id, so if a new company is being created here, its insert
@@ -640,13 +653,16 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       // of the still-in-flight company request and get rejected with a
       // foreign-key violation (the company it references doesn't exist
       // yet). That row then only ever existed in local state and silently
-      // vanishes on the next reload, with no error shown anywhere.
+      // vanishes on the next reload, with no error shown anywhere. The
+      // deals themselves don't depend on each other, so once company/
+      // contact are confirmed their inserts can fire in parallel.
       void (async () => {
+        const dealIds = dealsToCreate.map((d) => d.id)
         if (newCompany) {
           const companyError = await insertRow('companies', newCompany, 'addCompany')
           if (companyError) {
             setCompanies((prev) => prev.filter((c) => c.id !== newCompany!.id))
-            setDeals((prev) => prev.filter((d) => d.id !== deal.id))
+            setDeals((prev) => prev.filter((d) => !dealIds.includes(d.id)))
             if (newContact) setContacts((prev) => prev.filter((c) => c.id !== newContact!.id))
             showError(companyError)
             return
@@ -656,19 +672,20 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           const contactError = await insertRow('contacts', newContact, 'convertLeadToDeal:contact')
           if (contactError) {
             setContacts((prev) => prev.filter((c) => c.id !== newContact!.id))
-            setDeals((prev) => prev.filter((d) => d.id !== deal.id))
+            setDeals((prev) => prev.filter((d) => !dealIds.includes(d.id)))
             showError(contactError)
             return
           }
         }
-        const dealError = await insertRow('deals', deal, 'convertLeadToDeal:deal')
-        if (dealError) {
-          setDeals((prev) => prev.filter((d) => d.id !== deal.id))
-          showError(dealError)
+        const results = await Promise.all(dealsToCreate.map((deal) => insertRow('deals', deal, 'convertLeadToDeal:deal')))
+        const failedIds = dealsToCreate.filter((_, i) => results[i]).map((d) => d.id)
+        if (failedIds.length > 0) {
+          setDeals((prev) => prev.filter((d) => !failedIds.includes(d.id)))
+          showError(results.find((r) => r)!)
         }
       })()
 
-      return deal
+      return firstDeal
     },
     [leads, contacts, updateLead, addActivity, showError, ownerId],
   )

@@ -43,6 +43,17 @@ export type ProductService =
   | 'Labour Law'
   | 'Other'
 
+/** One selected service's own estimated value, so a lead interested in several services doesn't blend them into one number. */
+export interface LeadServiceValue {
+  service: ProductService
+  /** Standard services */
+  value?: number
+  /** Debt Collection only — combined outstanding balance of accounts being handed over */
+  handoverAmount?: number
+  /** Debt Collection only — number of accounts/matters in the handover */
+  accountsCount?: number
+}
+
 export interface Lead {
   id: ID
   /** Permanent, sequential, never-reused display number (formatted via formatLeadNumber → "SR-00001"). */
@@ -79,6 +90,8 @@ export interface Lead {
   estimatedHandoverAmount?: number
   /** Debt Collection specific — number of accounts/matters in the handover */
   estimatedAccountsCount?: number
+  /** Per-service value breakdown when multiple services are selected. estimatedProjectValue/estimatedHandoverAmount/estimatedAccountsCount are derived sums of this, kept for backward-compat reads (LeadsList, Reports). Undefined on leads created before this existed. */
+  serviceValues?: LeadServiceValue[]
   notes?: string
   lastContactAt?: string
   nextFollowUpAt?: string

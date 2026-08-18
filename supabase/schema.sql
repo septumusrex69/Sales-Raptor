@@ -161,6 +161,13 @@ create table if not exists public.leads (
   estimated_project_value numeric,
   estimated_handover_amount numeric,
   estimated_accounts_count integer,
+  -- Per-service value breakdown, e.g. [{"service": "Executive Listing",
+  -- "value": 200}, {"service": "Debt Collection", "handoverAmount": 850000,
+  -- "accountsCount": 40}]. estimated_project_value/estimated_handover_amount/
+  -- estimated_accounts_count above are derived sums of this, kept for
+  -- backward-compat reads (LeadsList, Reports). Null on leads created
+  -- before this existed.
+  service_values jsonb,
   notes text,
   last_contact_at timestamptz,
   next_follow_up_at timestamptz,
@@ -168,6 +175,11 @@ create table if not exists public.leads (
   updated_at timestamptz not null default now(),
   converted_deal_id uuid
 );
+
+-- Covers re-running this script against a database where `leads` already
+-- existed before service_values was added (create table if not exists
+-- above is a no-op in that case, so this catches it separately).
+alter table public.leads add column if not exists service_values jsonb;
 
 -- ---------- Deals ----------
 create table if not exists public.deals (
