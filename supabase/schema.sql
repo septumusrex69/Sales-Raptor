@@ -241,6 +241,18 @@ create table if not exists public.proposals (
   created_at timestamptz not null default now()
 );
 
+-- ---------- Base table grants ----------
+-- Tables created via the SQL Editor (as opposed to Supabase's Table Editor
+-- UI, which does this automatically) do NOT get default SELECT/INSERT/
+-- UPDATE/DELETE grants for the anon/authenticated roles. Postgres checks
+-- these base grants *before* it ever evaluates RLS policies, so without
+-- this block every request — reads and writes alike — comes back as a
+-- flat 403 regardless of how correct the RLS policies below are. This bit
+-- everyone the first time this schema was run; don't remove it.
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on all tables in schema public to authenticated;
+alter default privileges in schema public grant select, insert, update, delete on tables to authenticated;
+
 -- ---------- Row Level Security ----------
 -- Phase 2 policy: everyone can still SEE everything (team-wide leaderboards,
 -- reports, and search all depend on that and haven't changed). Writes are
@@ -353,3 +365,17 @@ drop policy if exists "teams_write" on public.teams;
 create policy "teams_write" on public.teams for all
   using (public.current_user_role() = 'Administrator')
   with check (public.current_user_role() = 'Administrator');
+
+-- ---------- Function hardening ----------
+-- handle_new_user and protect_profile_privileged_fields only ever run as
+-- triggers (they reference NEW/OLD, which only exist in trigger context),
+-- so there's no legitimate reason for them to be directly callable via
+-- Supabase's auto-exposed /rest/v1/rpc/<function> endpoints. Revoking
+-- EXECUTE from PUBLIC doesn't affect the triggers themselves — trigger
+-- invocation runs through the table owner's privileges, not the calling
+-- client's. current_user_role() is genuinely used by RLS policies for
+-- `authenticated`, so only anon (which never needs it — every policy
+-- already requires auth.uid() is not null) loses direct RPC access.
+revoke execute on function public.handle_new_user() from public;
+revoke execute on function public.protect_profile_privileged_fields() from public;
+revoke execute on function public.current_user_role() from anon;
