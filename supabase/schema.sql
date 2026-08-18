@@ -216,7 +216,10 @@ create table if not exists public.activities (
   id uuid primary key default gen_random_uuid(),
   type text not null,
   user_id uuid not null references public.profiles (id),
-  lead_id uuid references public.leads (id) on delete set null,
+  -- cascade (not set null): an activity logged against a lead is that
+  -- lead's history, not a standalone record — deleting the lead should
+  -- delete its activity log entries too, not leave them orphaned.
+  lead_id uuid references public.leads (id) on delete cascade,
   contact_id uuid references public.contacts (id) on delete set null,
   company_id uuid references public.companies (id) on delete set null,
   deal_id uuid references public.deals (id) on delete set null,
