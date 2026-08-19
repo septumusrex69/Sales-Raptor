@@ -8,7 +8,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   const location = useLocation()
 
   if (loading) {
-    return <div className="flex h-screen items-center justify-center text-sm text-slate-400">Loading…</div>
+    return <div className="flex h-dvh items-center justify-center text-sm text-slate-400">Loading…</div>
   }
   if (!session) {
     return <Navigate to="/login" state={{ from: location }} replace />
@@ -18,7 +18,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }
   if (currentUser?.status === 'Inactive') {
     return (
-      <div className="flex h-screen items-center justify-center px-4">
+      <div className="flex h-dvh items-center justify-center px-4">
         <div className="text-center max-w-sm">
           <p className="font-semibold text-navy-950 mb-1">Account deactivated</p>
           <p className="text-sm text-slate-500 mb-4">Your account has been deactivated. Contact your administrator to regain access.</p>

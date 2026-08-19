@@ -34,7 +34,7 @@ export function SetPasswordPage() {
   }
 
   return (
-    <div className="flex h-screen items-center justify-center bg-surface px-4">
+    <div className="flex h-dvh items-center justify-center bg-surface px-4">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-6">
           <div className="w-11 h-11 rounded-full border border-gold-500 flex items-center justify-center bg-navy-950 mb-3">

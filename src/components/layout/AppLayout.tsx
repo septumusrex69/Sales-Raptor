@@ -25,7 +25,7 @@ export function AppLayout() {
   const title = TITLES.find((t) => t.test.test(location.pathname))?.title ?? 'Dashboard'
 
   return (
-    <div className="flex h-screen w-full overflow-hidden">
+    <div className="flex h-dvh w-full overflow-hidden">
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <Topbar title={title} />
