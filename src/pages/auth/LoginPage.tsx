@@ -3,6 +3,7 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { Card } from '../../components/ui/Card'
 import { FormField, inputClass } from '../../components/ui/Modal'
 import { useAuth } from '../../store/AuthContext'
+import { supabase } from '../../lib/supabase'
 
 export function LoginPage() {
   const { session, loading, signIn } = useAuth()
@@ -11,6 +12,8 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [resetSent, setResetSent] = useState(false)
+  const [resetting, setResetting] = useState(false)
 
   if (!loading && session) {
     const from = (location.state as { from?: Location })?.from
@@ -24,6 +27,18 @@ export function LoginPage() {
     const { error: signInError } = await signIn(email, password)
     setSubmitting(false)
     if (signInError) setError(signInError)
+  }
+
+  async function handleForgotPassword() {
+    if (!email) {
+      setError('Enter your email above first, then click "Forgot password?".')
+      return
+    }
+    setError(null)
+    setResetting(true)
+    await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/login` })
+    setResetting(false)
+    setResetSent(true)
   }
 
   return (
@@ -61,12 +76,21 @@ export function LoginPage() {
               />
             </FormField>
             {error && <p className="text-sm text-[#794234] mb-3.5">{error}</p>}
+            {resetSent && <p className="text-sm text-[#406d58] mb-3.5">If that email has an account, a password reset link has been sent.</p>}
             <button
               type="submit"
               disabled={submitting}
               className="w-full text-sm font-medium px-3.5 py-2.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {submitting ? 'Signing in…' : 'Sign In'}
+            </button>
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              disabled={resetting}
+              className="w-full text-xs font-medium text-slate-500 hover:text-brand-600 mt-3 disabled:opacity-50"
+            >
+              {resetting ? 'Sending…' : 'Forgot password?'}
             </button>
           </form>
         </Card>
