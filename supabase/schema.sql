@@ -285,6 +285,14 @@ grant usage on schema public to authenticated;
 grant select, insert, update, delete on all tables in schema public to authenticated;
 alter default privileges in schema public grant select, insert, update, delete on tables to authenticated;
 
+-- service_role bypasses RLS but still needs these same base grants first —
+-- server-side code (api/invite-user.ts) uses it to check a caller's role
+-- before allowing an invite, and that lookup was a flat 403 on every table
+-- until this was added, since service_role had never been granted access.
+grant usage on schema public to service_role;
+grant select, insert, update, delete on all tables in schema public to service_role;
+alter default privileges in schema public grant select, insert, update, delete on tables to service_role;
+
 -- ---------- Row Level Security ----------
 -- Phase 2 policy: everyone can still SEE everything (team-wide leaderboards,
 -- reports, and search all depend on that and haven't changed). Writes are
