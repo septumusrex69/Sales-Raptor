@@ -10,3 +10,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+/**
+ * Hardcoded rather than derived from window.location.origin: invite/reset
+ * emails encode this as the redirect target, so if an admin ever triggers
+ * one while browsing a local dev server or preview deploy, the recipient
+ * would get sent to a URL that only exists on the admin's machine. Update
+ * this if the production domain ever changes.
+ */
+export const PRODUCTION_APP_URL = 'https://sales-raptor.vercel.app'

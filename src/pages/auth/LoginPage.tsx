@@ -3,7 +3,7 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { Card } from '../../components/ui/Card'
 import { FormField, inputClass } from '../../components/ui/Modal'
 import { useAuth } from '../../store/AuthContext'
-import { supabase } from '../../lib/supabase'
+import { supabase, PRODUCTION_APP_URL } from '../../lib/supabase'
 
 export function LoginPage() {
   const { session, loading, signIn } = useAuth()
@@ -36,7 +36,7 @@ export function LoginPage() {
     }
     setError(null)
     setResetting(true)
-    await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/login` })
+    await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${PRODUCTION_APP_URL}/login` })
     setResetting(false)
     setResetSent(true)
   }
