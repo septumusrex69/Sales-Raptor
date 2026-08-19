@@ -6,7 +6,7 @@ import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { customFields as initialCustomFields, industries, leadSources as initialLeadSources, lossReasons as initialLossReasons } from '../../data/mockData'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
-import { supabase } from '../../lib/supabase'
+import { supabase, PRODUCTION_APP_URL } from '../../lib/supabase'
 import type { CustomField, CustomFieldType, UserRole } from '../../types'
 import { DEAL_STAGES } from '../../types'
 
@@ -230,7 +230,7 @@ function ResetLoginButton({ email }: { email: string }) {
 
   async function handleClick() {
     setState('sending')
-    await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/login` })
+    await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${PRODUCTION_APP_URL}/login` })
     setState('sent')
   }
 

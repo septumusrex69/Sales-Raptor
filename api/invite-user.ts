@@ -47,7 +47,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const { data, error } = await admin.auth.admin.inviteUserByEmail(email, name ? { data: { name } } : undefined)
+  // Hardcoded rather than derived from the request's Origin header: this
+  // email's redirect link must always point at the real production site,
+  // never wherever the inviting admin happened to be browsing from.
+  const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
+    redirectTo: 'https://sales-raptor.vercel.app/login',
+    ...(name ? { data: { name } } : {}),
+  })
   if (error) {
     res.status(400).json({ error: error.message })
     return
