@@ -6,6 +6,7 @@ import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { customFields as initialCustomFields, industries, leadSources as initialLeadSources, lossReasons as initialLossReasons } from '../../data/mockData'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
+import { supabase } from '../../lib/supabase'
 import type { CustomField, CustomFieldType, UserRole } from '../../types'
 import { DEAL_STAGES } from '../../types'
 
@@ -162,6 +163,7 @@ function UsersTab() {
               <th className="font-medium px-3 py-2.5">Role</th>
               <th className="font-medium px-3 py-2.5">Email</th>
               <th className="font-medium px-3 py-2.5">Status</th>
+              {isAdmin && <th className="font-medium px-3 py-2.5">Login</th>}
             </tr>
           </thead>
           <tbody>
@@ -201,6 +203,11 @@ function UsersTab() {
                     <span className={`badge ${u.status === 'Active' ? 'bg-[#eef4f1] text-[#406d58]' : 'bg-slate-100 text-slate-500'}`}>{u.status}</span>
                   )}
                 </td>
+                {isAdmin && (
+                  <td className="px-3 py-2.5">
+                    <ResetLoginButton email={u.email} />
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -208,6 +215,32 @@ function UsersTab() {
       </div>
       {addOpen && session && <InviteUserModal accessToken={session.access_token} onClose={() => setAddOpen(false)} />}
     </Card>
+  )
+}
+
+/**
+ * Covers the "invited but never actually able to log in" case (an invite
+ * link signs someone in once but doesn't let them set a password — see
+ * SetPasswordPage) — this sends the same kind of email a "Forgot password"
+ * click would, which works for any existing user regardless of whether
+ * they ever completed setup.
+ */
+function ResetLoginButton({ email }: { email: string }) {
+  const [state, setState] = useState<'idle' | 'sending' | 'sent'>('idle')
+
+  async function handleClick() {
+    setState('sending')
+    await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/login` })
+    setState('sent')
+  }
+
+  if (state === 'sent') {
+    return <span className="text-xs text-[#406d58]">Reset link sent</span>
+  }
+  return (
+    <button onClick={handleClick} disabled={state === 'sending'} className="text-xs font-medium text-brand-600 hover:underline disabled:opacity-50">
+      {state === 'sending' ? 'Sending…' : 'Send login link'}
+    </button>
   )
 }
 

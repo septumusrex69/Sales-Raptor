@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../store/AuthContext'
+import { SetPasswordPage } from '../../pages/auth/SetPasswordPage'
 
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { session, loading, currentUser, signOut } = useAuth()
+  const { session, loading, currentUser, signOut, passwordSetupRequired } = useAuth()
   const location = useLocation()
 
   if (loading) {
@@ -11,6 +12,9 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }
   if (!session) {
     return <Navigate to="/login" state={{ from: location }} replace />
+  }
+  if (passwordSetupRequired) {
+    return <SetPasswordPage />
   }
   if (currentUser?.status === 'Inactive') {
     return (
