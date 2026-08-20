@@ -36,9 +36,10 @@ export function LoginPage() {
     }
     setError(null)
     setResetting(true)
-    await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${PRODUCTION_APP_URL}/login` })
+    const { error: sendError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${PRODUCTION_APP_URL}/login` })
     setResetting(false)
-    setResetSent(true)
+    if (sendError) setError(sendError.message)
+    else setResetSent(true)
   }
 
   return (
