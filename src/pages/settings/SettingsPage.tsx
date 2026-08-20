@@ -227,10 +227,17 @@ function UsersTab() {
  */
 function ResetLoginButton({ email }: { email: string }) {
   const [state, setState] = useState<'idle' | 'sending' | 'sent'>('idle')
+  const [error, setError] = useState<string | null>(null)
 
   async function handleClick() {
     setState('sending')
-    await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${PRODUCTION_APP_URL}/login` })
+    setError(null)
+    const { error: sendError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${PRODUCTION_APP_URL}/login` })
+    if (sendError) {
+      setState('idle')
+      setError(sendError.message)
+      return
+    }
     setState('sent')
   }
 
@@ -238,9 +245,12 @@ function ResetLoginButton({ email }: { email: string }) {
     return <span className="text-xs text-[#406d58]">Reset link sent</span>
   }
   return (
-    <button onClick={handleClick} disabled={state === 'sending'} className="text-xs font-medium text-brand-600 hover:underline disabled:opacity-50">
-      {state === 'sending' ? 'Sending…' : 'Send login link'}
-    </button>
+    <div>
+      <button onClick={handleClick} disabled={state === 'sending'} className="text-xs font-medium text-brand-600 hover:underline disabled:opacity-50">
+        {state === 'sending' ? 'Sending…' : 'Send login link'}
+      </button>
+      {error && <p className="text-[11px] text-[#794234] mt-0.5 max-w-[160px]">{error}</p>}
+    </div>
   )
 }
 
