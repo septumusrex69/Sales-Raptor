@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Pencil, CheckCircle2, XCircle, StickyNote, CheckSquare, FileText, Send, Plus, Upload, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
+import { useAuth } from '../../store/AuthContext'
+import { canEditOwned, canReassign } from '../../lib/permissions'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { StageBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
@@ -44,8 +46,10 @@ export function DealDetail() {
     addProposal,
     updateProposal,
   } = store
+  const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const deal = deals.find((d) => d.id === id)
+  const canEdit = canEditOwned(currentUser, deal?.ownerId)
 
   const [tab, setTab] = useState<Tab>('Overview')
   const [editOpen, setEditOpen] = useState(false)
@@ -107,7 +111,7 @@ export function DealDetail() {
           <label className="text-xs text-slate-400">Stage:</label>
           <select
             value={deal.stage}
-            disabled={isClosed}
+            disabled={isClosed || !canEdit}
             onChange={(e) => {
               const next = e.target.value as DealStage
               if (next === 'Won') setWonOpen(true)
@@ -121,11 +125,11 @@ export function DealDetail() {
             ))}
           </select>
           <div className="flex flex-wrap gap-2 ml-auto">
-            <ActionButton icon={Pencil} label="Edit" onClick={() => setEditOpen(true)} />
+            {canEdit && <ActionButton icon={Pencil} label="Edit" onClick={() => setEditOpen(true)} />}
             <ActionButton icon={StickyNote} label="Add Activity" onClick={() => setActivityOpen(true)} />
             <ActionButton icon={CheckSquare} label="Create Task" onClick={() => setTaskOpen(true)} />
-            <ActionButton icon={CheckCircle2} label="Mark Won" tone="success" onClick={() => setWonOpen(true)} disabled={isClosed} />
-            <ActionButton icon={XCircle} label="Mark Lost" tone="danger" onClick={() => setLostOpen(true)} disabled={isClosed} />
+            {canEdit && <ActionButton icon={CheckCircle2} label="Mark Won" tone="success" onClick={() => setWonOpen(true)} disabled={isClosed} />}
+            {canEdit && <ActionButton icon={XCircle} label="Mark Lost" tone="danger" onClick={() => setLostOpen(true)} disabled={isClosed} />}
           </div>
         </div>
       </Card>
@@ -335,7 +339,9 @@ export function DealDetail() {
         </Card>
       )}
 
-      {editOpen && <EditDealModal deal={deal} reps={reps} onClose={() => setEditOpen(false)} onSave={(patch) => updateDeal(deal.id, patch)} />}
+      {editOpen && (
+        <EditDealModal deal={deal} reps={reps} canReassign={canReassign(currentUser)} onClose={() => setEditOpen(false)} onSave={(patch) => updateDeal(deal.id, patch)} />
+      )}
       {wonOpen && <MarkWonModal defaultService={deal.service} onClose={() => setWonOpen(false)} onSave={(details: WonDealDetails) => markDealWon(deal.id, details)} />}
       {lostOpen && <MarkLostModal onClose={() => setLostOpen(false)} onSave={(reason: LossReason) => markDealLost(deal.id, reason)} />}
       {activityOpen && (
@@ -398,11 +404,13 @@ function Field({ label, value }: { label: string; value?: string }) {
 function EditDealModal({
   deal,
   reps,
+  canReassign,
   onClose,
   onSave,
 }: {
   deal: ReturnType<typeof useAppStore>['deals'][number]
   reps: ReturnType<typeof useAppStore>['users']
+  canReassign: boolean
   onClose: () => void
   onSave: (patch: Partial<typeof deal>) => void
 }) {
@@ -430,13 +438,17 @@ function EditDealModal({
             <input type="date" className={inputClass} value={form.expectedCloseDate} onChange={(e) => setForm({ ...form, expectedCloseDate: e.target.value })} />
           </FormField>
           <FormField label="Owner">
-            <select className={inputClass} value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>
-              {reps.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
+            {canReassign ? (
+              <select className={inputClass} value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>
+                {reps.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-sm text-slate-500 py-2">{reps.find((r) => r.id === form.ownerId)?.name ?? '—'} <span className="text-xs text-slate-400">(ask a manager to reassign)</span></p>
+            )}
           </FormField>
           <FormField label="Service">
             <select className={inputClass} value={form.service ?? ''} onChange={(e) => setForm({ ...form, service: e.target.value })}>

@@ -21,6 +21,8 @@ import {
   AlertTriangle,
 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
+import { useAuth } from '../../store/AuthContext'
+import { canEditOwned, canReassign as canReassignRole } from '../../lib/permissions'
 import { Card } from '../../components/ui/Card'
 import { StatusBadge, ServiceBadge, ClassificationBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
@@ -67,6 +69,8 @@ function isStaleClassAContact(lead: Lead) {
 export function LeadsList() {
   const store = useAppStore()
   const { leads, activities, users, userById, updateLead, markLeadLost, deleteLead, convertLeadToDeal, addActivity } = store
+  const { currentUser } = useAuth()
+  const canReassign = canReassignRole(currentUser)
   const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -478,17 +482,25 @@ export function LeadsList() {
                           { label: 'Add note', icon: <StickyNote size={14} />, onClick: () => addActivity({ type: 'Note', subject: 'Note added', leadId: lead.id, companyId: lead.companyId }) },
                           { label: 'Add task', icon: <CheckSquare size={14} />, onClick: () => navigate(`/leads/${lead.id}`) },
                           { label: 'Schedule meeting', icon: <Calendar size={14} />, onClick: () => navigate(`/leads/${lead.id}`) },
-                          {
-                            label: 'Convert to deal',
-                            icon: <ArrowRightLeft size={14} />,
-                            onClick: () => {
-                              const deal = convertLeadToDeal(lead.id)
-                              if (deal) navigate(`/deals/${deal.id}`)
-                            },
-                          },
-                          { label: 'Reassign', icon: <UserCog size={14} />, onClick: () => setReassignLead(lead) },
-                          { label: 'Mark lost', icon: <XCircle size={14} />, danger: true, onClick: () => markLeadLost(lead.id) },
-                          { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onClick: () => setDeleteLeadTarget(lead) },
+                          ...(canEditOwned(currentUser, lead.ownerId)
+                            ? [
+                                {
+                                  label: 'Convert to deal',
+                                  icon: <ArrowRightLeft size={14} />,
+                                  onClick: () => {
+                                    const deal = convertLeadToDeal(lead.id)
+                                    if (deal) navigate(`/deals/${deal.id}`)
+                                  },
+                                },
+                              ]
+                            : []),
+                          ...(canReassign ? [{ label: 'Reassign', icon: <UserCog size={14} />, onClick: () => setReassignLead(lead) }] : []),
+                          ...(canEditOwned(currentUser, lead.ownerId)
+                            ? [
+                                { label: 'Mark lost', icon: <XCircle size={14} />, danger: true, onClick: () => markLeadLost(lead.id) },
+                                { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onClick: () => setDeleteLeadTarget(lead) },
+                              ]
+                            : []),
                         ]}
                       />
                     </td>

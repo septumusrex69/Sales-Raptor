@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Download, CheckCircle2, Circle } from 'lucide-react'
 import { useAppStore } from '../store/AppStore'
+import { useAuth } from '../store/AuthContext'
 import { Card, CardHeader } from '../components/ui/Card'
 import { StageBadge, PriorityBadge } from '../components/ui/Badge'
 import { UserAvatar } from '../components/ui/Avatar'
@@ -54,10 +55,16 @@ function minutesToLabel(mins: number): string {
 
 export function Dashboard() {
   const { leads, deals, tasks, activities, users, teams, userById, companyById, updateTask } = useAppStore()
+  const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(TODAY))
   const [compareMode, setCompareMode] = useState<CompareMode>('previous')
-  const [scope, setScope] = useState<Scope>('all')
+  // Reps land on their own numbers by default (their own dashboard, not the
+  // whole team's) but can still switch the scope selector to view anyone —
+  // Administrators/Sales Managers default to the full team view as before.
+  const [scope, setScope] = useState<Scope>(() =>
+    currentUser && currentUser.role !== 'Administrator' && currentUser.role !== 'Sales Manager' ? `rep:${currentUser.id}` : 'all',
+  )
   const [rescheduleTask, setRescheduleTask] = useState<Task | null>(null)
 
   const repIds = useMemo(() => repIdsForScope(scope, reps, teams), [scope, reps, teams])
