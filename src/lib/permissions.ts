@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import type { User } from '../types'
 
 /**
@@ -17,4 +18,33 @@ export function canEditOwned(user: Pick<User, 'id' | 'role'> | null | undefined,
 /** Reassigning a record to a different owner is a managerial action, independent of who currently owns it. */
 export function canReassign(user: Pick<User, 'role'> | null | undefined): boolean {
   return user?.role === 'Administrator' || user?.role === 'Sales Manager'
+}
+
+/**
+ * "Owner" list-filter state that defaults to the current user's own
+ * records the moment their profile loads — Administrators/Sales
+ * Managers default to "All" instead, since seeing the whole team is
+ * their normal view. A pre-supplied value (e.g. a drill-down link's
+ * `?owner=` URL param) always wins and is never overridden.
+ *
+ * currentUser is typically still null on first render (the profile
+ * fetch after sign-in is async), so this can't be a useState initializer
+ * — it applies once, in an effect, the moment currentUser actually
+ * arrives, and never again afterward (so it doesn't stomp on a later
+ * manual filter change).
+ */
+export function useDefaultOwnerFilter(
+  initialValue: string | undefined,
+  currentUser: Pick<User, 'id' | 'role'> | null | undefined,
+): [string, (value: string) => void] {
+  const [owner, setOwner] = useState(initialValue ?? 'All')
+  const defaulted = useRef(!!initialValue)
+  useEffect(() => {
+    if (defaulted.current || !currentUser) return
+    defaulted.current = true
+    if (currentUser.role !== 'Administrator' && currentUser.role !== 'Sales Manager') {
+      setOwner(currentUser.id)
+    }
+  }, [currentUser])
+  return [owner, setOwner]
 }

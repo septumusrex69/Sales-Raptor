@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Plus, Search } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
+import { useAuth } from '../../store/AuthContext'
+import { useDefaultOwnerFilter } from '../../lib/permissions'
 import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { ContactForm } from '../../components/layout/QuickAdd'
@@ -9,16 +11,20 @@ import { companyById, formatDate, userById } from '../../data/mockData'
 
 export function ContactsList() {
   const store = useAppStore()
-  const { contacts, deals } = store
+  const { contacts, deals, users } = store
+  const { currentUser } = useAuth()
+  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
+  const [owner, setOwner] = useDefaultOwnerFilter(undefined, currentUser)
   const [addOpen, setAddOpen] = useState(false)
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
-    if (!q) return contacts
-    return contacts.filter((c) => `${c.firstName} ${c.lastName} ${companyById(c.companyId)?.name ?? ''}`.toLowerCase().includes(q))
-  }, [contacts, search])
+    return contacts
+      .filter((c) => owner === 'All' || c.ownerId === owner)
+      .filter((c) => !q || `${c.firstName} ${c.lastName} ${companyById(c.companyId)?.name ?? ''}`.toLowerCase().includes(q))
+  }, [contacts, search, owner])
 
   const activeDealsFor = (contactId: string) => deals.filter((d) => d.contactId === contactId && d.stage !== 'Won' && d.stage !== 'Lost').length
 
@@ -29,6 +35,14 @@ export function ContactsList() {
           <Search size={15} className="text-slate-400" />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search contacts..." className="text-sm outline-none flex-1 min-w-0" />
         </div>
+        <select value={owner} onChange={(e) => setOwner(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none">
+          <option value="All">All Owners</option>
+          {reps.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.name}
+            </option>
+          ))}
+        </select>
         <span className="text-xs text-slate-400">{filtered.length} contacts</span>
         <button
           onClick={() => setAddOpen(true)}

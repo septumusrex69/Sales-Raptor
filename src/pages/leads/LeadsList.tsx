@@ -22,7 +22,7 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
-import { canEditOwned, canReassign as canReassignRole } from '../../lib/permissions'
+import { canEditOwned, canReassign as canReassignRole, useDefaultOwnerFilter } from '../../lib/permissions'
 import { Card } from '../../components/ui/Card'
 import { StatusBadge, ServiceBadge, ClassificationBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
@@ -79,7 +79,7 @@ export function LeadsList() {
   const [status, setStatus] = useState<'All' | LeadStatus>(() => (readParam(searchParams, 'status') as LeadStatus) ?? 'All')
   const [classification, setClassification] = useState<'All' | LeadClassification>(() => (readParam(searchParams, 'classification') as LeadClassification) ?? 'All')
   const [scoreThreshold, setScoreThreshold] = useState<(typeof SCORE_THRESHOLDS)[number]>('All')
-  const [owner, setOwner] = useState<'All' | string>(() => readParam(searchParams, 'owner') ?? 'All')
+  const [owner, setOwner] = useDefaultOwnerFilter(readParam(searchParams, 'owner'), currentUser)
   const [service, setService] = useState<'All' | ProductService>(() => (readParam(searchParams, 'service') as ProductService) ?? 'All')
   const [province, setProvince] = useState(() => readParam(searchParams, 'province') ?? 'All')
   const [source, setSource] = useState<'All' | string>(() => readParam(searchParams, 'source') ?? 'All')
