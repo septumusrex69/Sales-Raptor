@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
+import { useAuth } from '../../store/AuthContext'
+import { useDefaultOwnerFilter } from '../../lib/permissions'
 import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { companyById, formatDate, TODAY } from '../../data/mockData'
@@ -40,13 +42,17 @@ function tasksUrlForDate(d: Date) {
 }
 
 export function CalendarPage() {
-  const { tasks, deals } = useAppStore()
+  const { tasks, deals, users } = useAppStore()
+  const { currentUser } = useAuth()
+  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
+  const [owner, setOwner] = useDefaultOwnerFilter(undefined, currentUser)
   const [view, setView] = useState<ViewMode>('Month')
   const [cursor, setCursor] = useState(new Date(TODAY))
 
   const events = useMemo<CalEvent[]>(() => {
     const taskEvents = tasks
       .filter((t: Task) => t.status !== 'Cancelled')
+      .filter((t) => owner === 'All' || t.ownerId === owner)
       .map((t) => {
         const date = new Date(t.dueDate)
         return {
@@ -62,6 +68,7 @@ export function CalendarPage() {
       })
     const closeEvents = deals
       .filter((d) => d.stage !== 'Won' && d.stage !== 'Lost')
+      .filter((d) => owner === 'All' || d.ownerId === owner)
       .map((d) => ({
         id: `d-${d.id}`,
         primary: companyById(d.companyId)?.name ?? d.name,
@@ -73,7 +80,7 @@ export function CalendarPage() {
         href: `/deals/${d.id}`,
       }))
     return [...taskEvents, ...closeEvents]
-  }, [tasks, deals])
+  }, [tasks, deals, owner])
 
   function shift(amount: number) {
     const next = new Date(cursor)
@@ -105,12 +112,22 @@ export function CalendarPage() {
             Today
           </button>
         </div>
-        <div className="flex items-center bg-slate-100 rounded-lg p-1">
-          {(['Day', 'Week', 'Month'] as ViewMode[]).map((v) => (
-            <button key={v} onClick={() => setView(v)} className={`px-3 py-1.5 text-xs font-medium rounded-md ${view === v ? 'bg-white shadow-sm text-slate-700' : 'text-slate-500'}`}>
-              {v}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <select value={owner} onChange={(e) => setOwner(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none">
+            <option value="All">All Owners</option>
+            {reps.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+          <div className="flex items-center bg-slate-100 rounded-lg p-1">
+            {(['Day', 'Week', 'Month'] as ViewMode[]).map((v) => (
+              <button key={v} onClick={() => setView(v)} className={`px-3 py-1.5 text-xs font-medium rounded-md ${view === v ? 'bg-white shadow-sm text-slate-700' : 'text-slate-500'}`}>
+                {v}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

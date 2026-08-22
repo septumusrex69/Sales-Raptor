@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { LayoutGrid, List, Plus, Search } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
-import { canEditOwned } from '../../lib/permissions'
+import { canEditOwned, useDefaultOwnerFilter } from '../../lib/permissions'
 import { Card } from '../../components/ui/Card'
 import { StageBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
@@ -40,7 +40,7 @@ export function DealsBoard() {
     readParam(searchParams, 'view') === 'table' || stageFilter || noNextActionFilter || overdueFilter ? 'table' : 'kanban',
   )
   const [search, setSearch] = useState('')
-  const [owner, setOwner] = useState(() => readParam(searchParams, 'owner') ?? 'All')
+  const [owner, setOwner] = useDefaultOwnerFilter(readParam(searchParams, 'owner'), currentUser)
   const [addOpen, setAddOpen] = useState(false)
   const [dragging, setDragging] = useState<string | null>(null)
   const [wonModalFor, setWonModalFor] = useState<Deal | null>(null)
