@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Download, CheckCircle2, Circle } from 'lucide-react'
 import { useAppStore } from '../store/AppStore'
@@ -62,9 +62,20 @@ export function Dashboard() {
   // Reps land on their own numbers by default (their own dashboard, not the
   // whole team's) but can still switch the scope selector to view anyone —
   // Administrators/Sales Managers default to the full team view as before.
-  const [scope, setScope] = useState<Scope>(() =>
-    currentUser && currentUser.role !== 'Administrator' && currentUser.role !== 'Sales Manager' ? `rep:${currentUser.id}` : 'all',
-  )
+  // currentUser is often still null on first render (the profile loads
+  // asynchronously after sign-in), so a useState initializer would freeze
+  // in the wrong default forever — this instead applies it once, the
+  // moment currentUser actually becomes available, and never again after
+  // that (so it doesn't stomp on a later manual scope change).
+  const [scope, setScope] = useState<Scope>('all')
+  const scopeDefaulted = useRef(false)
+  useEffect(() => {
+    if (scopeDefaulted.current || !currentUser) return
+    scopeDefaulted.current = true
+    if (currentUser.role !== 'Administrator' && currentUser.role !== 'Sales Manager') {
+      setScope(`rep:${currentUser.id}`)
+    }
+  }, [currentUser])
   const [rescheduleTask, setRescheduleTask] = useState<Task | null>(null)
 
   const repIds = useMemo(() => repIdsForScope(scope, reps, teams), [scope, reps, teams])
