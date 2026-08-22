@@ -50,8 +50,18 @@ export function TasksPage() {
   const weekEnd = new Date(today)
   weekEnd.setDate(weekEnd.getDate() + 7)
 
+  // Every view except the explicit "Team Tasks" escape hatch is scoped to
+  // the logged-in rep's own tasks — Administrators/Sales Managers keep
+  // seeing everyone everywhere, matching how Dashboard/Leads/Deals/
+  // Contacts/Calendar already default. currentUser is briefly null right
+  // after sign-in (the profile loads asynchronously), so this is computed
+  // fresh each render rather than cached in state — it naturally narrows
+  // the instant the profile arrives, with no stale-default risk.
+  const scopeToSelf = !!currentUser && currentUser.role !== 'Administrator' && currentUser.role !== 'Sales Manager'
+  const scopedTasks = useMemo(() => (scopeToSelf ? tasks.filter((t) => t.ownerId === currentUser?.id) : tasks), [tasks, scopeToSelf, currentUser])
+
   const filtered = useMemo(() => {
-    let list = [...tasks]
+    let list = [...scopedTasks]
     if (dateFilter) {
       // Matches exactly what Calendar shows for this day (same status
       // exclusion), so clicking through gives a consistent picture.
@@ -62,7 +72,7 @@ export function TasksPage() {
           list = list.filter((t) => t.ownerId === currentUser?.id && t.status !== 'Completed' && t.status !== 'Cancelled')
           break
         case 'Team Tasks':
-          list = list.filter((t) => t.status !== 'Completed' && t.status !== 'Cancelled')
+          list = tasks.filter((t) => t.status !== 'Completed' && t.status !== 'Cancelled')
           break
         case 'Overdue':
           list = list.filter((t) => new Date(t.dueDate) < today && t.status !== 'Completed' && t.status !== 'Cancelled')
@@ -86,7 +96,7 @@ export function TasksPage() {
       list = list.filter((t) => t.title.toLowerCase().includes(q) || (t.relatedToLabel ?? '').toLowerCase().includes(q))
     }
     return list.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
-  }, [tasks, view, dateFilter, search, today, tomorrow, weekEnd, currentUser])
+  }, [scopedTasks, tasks, view, dateFilter, search, today, tomorrow, weekEnd, currentUser])
 
   function selectView(v: View) {
     setView(v)
@@ -109,10 +119,12 @@ export function TasksPage() {
   }
 
   const counts = useMemo(() => {
-    const overdue = tasks.filter((t) => new Date(t.dueDate) < today && t.status !== 'Completed' && t.status !== 'Cancelled').length
-    const dueToday = tasks.filter((t) => startOfDay(new Date(t.dueDate)).getTime() === today.getTime() && t.status !== 'Completed').length
-    return { overdue, dueToday }
-  }, [tasks, today])
+    const overdue = scopedTasks.filter((t) => new Date(t.dueDate) < today && t.status !== 'Completed' && t.status !== 'Cancelled').length
+    const dueToday = scopedTasks.filter((t) => startOfDay(new Date(t.dueDate)).getTime() === today.getTime() && t.status !== 'Completed').length
+    const open = scopedTasks.filter((t) => t.status !== 'Completed' && t.status !== 'Cancelled').length
+    const completed = scopedTasks.filter((t) => t.status === 'Completed').length
+    return { overdue, dueToday, open, completed }
+  }, [scopedTasks, today])
 
   return (
     <div className="space-y-4">
@@ -127,11 +139,11 @@ export function TasksPage() {
         </Card>
         <Card className="p-4">
           <p className="text-xs text-slate-400">Open Tasks</p>
-          <p className="text-xl font-bold text-slate-800 mt-1">{tasks.filter((t) => t.status !== 'Completed' && t.status !== 'Cancelled').length}</p>
+          <p className="text-xl font-bold text-slate-800 mt-1">{counts.open}</p>
         </Card>
         <Card className="p-4">
           <p className="text-xs text-slate-400">Completed</p>
-          <p className="text-xl font-bold text-[#406d58] mt-1">{tasks.filter((t) => t.status === 'Completed').length}</p>
+          <p className="text-xl font-bold text-[#406d58] mt-1">{counts.completed}</p>
         </Card>
       </div>
 
