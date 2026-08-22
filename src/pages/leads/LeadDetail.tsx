@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Pencil, ArrowRightLeft, StickyNote, CheckSquare, Calendar, XCircle, Phone, Mail, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
+import { useAuth } from '../../store/AuthContext'
+import { canEditOwned, canReassign } from '../../lib/permissions'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { StatusBadge, ServiceBadge, StageBadge } from '../../components/ui/Badge'
 import { Avatar, UserAvatar } from '../../components/ui/Avatar'
@@ -17,9 +19,11 @@ export function LeadDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { leads, deals, activities, users, userById, updateLead, convertLeadToDeal, markLeadLost, deleteLead, addActivity, addTask } = useAppStore()
+  const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const lead = leads.find((l) => l.id === id)
   const resultingDeals = useMemo(() => deals.filter((d) => d.leadId === id), [deals, id])
+  const canEdit = canEditOwned(currentUser, lead?.ownerId)
 
   const [editOpen, setEditOpen] = useState(false)
   const [activityOpen, setActivityOpen] = useState(false)
@@ -77,21 +81,23 @@ export function LeadDetail() {
         </div>
 
         <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t border-slate-100">
-          <ActionButton icon={Pencil} label="Edit" onClick={() => setEditOpen(true)} />
-          <ActionButton
-            icon={ArrowRightLeft}
-            label="Convert"
-            onClick={() => {
-              const deal = convertLeadToDeal(lead.id)
-              if (deal) navigate(`/deals/${deal.id}`)
-            }}
-            disabled={lead.status === 'Converted' || lead.status === 'Lost'}
-          />
+          {canEdit && <ActionButton icon={Pencil} label="Edit" onClick={() => setEditOpen(true)} />}
+          {canEdit && (
+            <ActionButton
+              icon={ArrowRightLeft}
+              label="Convert"
+              onClick={() => {
+                const deal = convertLeadToDeal(lead.id)
+                if (deal) navigate(`/deals/${deal.id}`)
+              }}
+              disabled={lead.status === 'Converted' || lead.status === 'Lost'}
+            />
+          )}
           <ActionButton icon={StickyNote} label="Add Activity" onClick={() => setActivityOpen(true)} />
           <ActionButton icon={CheckSquare} label="Create Task" onClick={() => setTaskOpen('task')} />
           <ActionButton icon={Calendar} label="Schedule Meeting" onClick={() => setTaskOpen('meeting')} />
-          <ActionButton icon={XCircle} label="Mark Lost" tone="danger" onClick={() => markLeadLost(lead.id)} disabled={lead.status === 'Lost'} />
-          <ActionButton icon={Trash2} label="Delete" tone="danger" onClick={() => setDeleteOpen(true)} />
+          {canEdit && <ActionButton icon={XCircle} label="Mark Lost" tone="danger" onClick={() => markLeadLost(lead.id)} disabled={lead.status === 'Lost'} />}
+          {canEdit && <ActionButton icon={Trash2} label="Delete" tone="danger" onClick={() => setDeleteOpen(true)} />}
         </div>
       </Card>
 
@@ -205,7 +211,9 @@ export function LeadDetail() {
         </Card>
       </div>
 
-      {editOpen && <EditLeadModal lead={lead} reps={reps} onClose={() => setEditOpen(false)} onSave={(patch) => updateLead(lead.id, patch)} />}
+      {editOpen && (
+        <EditLeadModal lead={lead} reps={reps} canReassign={canReassign(currentUser)} onClose={() => setEditOpen(false)} onSave={(patch) => updateLead(lead.id, patch)} />
+      )}
       {activityOpen && (
         <AddActivityModal
           onClose={() => setActivityOpen(false)}
@@ -269,11 +277,13 @@ function Field({ label, value, icon: Icon, href }: { label: string; value?: stri
 function EditLeadModal({
   lead,
   reps,
+  canReassign,
   onClose,
   onSave,
 }: {
   lead: ReturnType<typeof useAppStore>['leads'][number]
   reps: ReturnType<typeof useAppStore>['users']
+  canReassign: boolean
   onClose: () => void
   onSave: (patch: Partial<typeof lead>) => void
 }) {
@@ -325,13 +335,17 @@ function EditLeadModal({
             <input type="number" min={0} max={100} className={inputClass} value={form.score} onChange={(e) => setForm({ ...form, score: Number(e.target.value) })} />
           </FormField>
           <FormField label="Owner">
-            <select className={inputClass} value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>
-              {reps.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
+            {canReassign ? (
+              <select className={inputClass} value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>
+                {reps.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-sm text-slate-500 py-2">{reps.find((r) => r.id === form.ownerId)?.name ?? '—'} <span className="text-xs text-slate-400">(ask a manager to reassign)</span></p>
+            )}
           </FormField>
           <FormField label="Industry">
             <select className={inputClass} value={form.industry ?? ''} onChange={(e) => setForm({ ...form, industry: e.target.value })}>

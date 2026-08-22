@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { LayoutGrid, List, Plus, Search } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
+import { useAuth } from '../../store/AuthContext'
+import { canEditOwned } from '../../lib/permissions'
 import { Card } from '../../components/ui/Card'
 import { StageBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
@@ -20,6 +22,7 @@ const OPEN_STAGES = DEAL_STAGES.filter((s) => s !== 'Won' && s !== 'Lost')
 export function DealsBoard() {
   const store = useAppStore()
   const { deals, users, companyById, userById, moveDealStage, markDealWon, markDealLost } = store
+  const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -161,7 +164,13 @@ export function DealsBoard() {
                 <p className="px-3.5 text-xs text-slate-400 -mt-2 mb-2">{formatCurrency(stageValue)}</p>
                 <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2.5">
                   {stageDeals.map((deal) => (
-                    <DealCard key={deal.id} deal={deal} onDragStart={() => setDragging(deal.id)} onOpen={() => navigate(`/deals/${deal.id}`)} />
+                    <DealCard
+                      key={deal.id}
+                      deal={deal}
+                      canDrag={canEditOwned(currentUser, deal.ownerId)}
+                      onDragStart={() => setDragging(deal.id)}
+                      onOpen={() => navigate(`/deals/${deal.id}`)}
+                    />
                   ))}
                   {stageDeals.length === 0 && <div className="text-xs text-slate-300 text-center py-6 border border-dashed border-slate-200 rounded-lg">Drop deals here</div>}
                 </div>
@@ -226,16 +235,17 @@ export function DealsBoard() {
   )
 }
 
-function DealCard({ deal, onDragStart, onOpen }: { deal: Deal; onDragStart: () => void; onOpen: () => void }) {
+function DealCard({ deal, canDrag, onDragStart, onOpen }: { deal: Deal; canDrag: boolean; onDragStart: () => void; onOpen: () => void }) {
   const { companyById, contactById } = useAppStore()
   const company = companyById(deal.companyId)
   const contact = contactById(deal.contactId)
   return (
     <div
-      draggable
+      draggable={canDrag}
       onDragStart={onDragStart}
       onClick={onOpen}
-      className="bg-white rounded-lg border border-slate-200 p-3 cursor-pointer hover:shadow-md hover:border-slate-300 transition-shadow"
+      title={canDrag ? undefined : "Only this deal's owner, a Sales Manager, or an Administrator can move its stage"}
+      className={`bg-white rounded-lg border border-slate-200 p-3 hover:shadow-md hover:border-slate-300 transition-shadow ${canDrag ? 'cursor-pointer' : 'cursor-default'}`}
     >
       <p className="text-sm font-semibold text-slate-800 truncate">{company?.name ?? deal.name}</p>
       {contact && <p className="text-xs text-slate-400 truncate">{contact.firstName} {contact.lastName}</p>}
