@@ -46,9 +46,8 @@ export function Sidebar() {
 
   return (
     <aside className="w-60 shrink-0 bg-navy-950 text-slate-300 flex flex-col h-full">
-      <div className="flex items-center gap-2.5 px-5 h-16 border-b border-white/10">
-        <img src="/brand/icon-light.svg" alt="" className="w-8 h-8 shrink-0" />
-        <span className="font-semibold text-white text-[15px] tracking-tight">Bredell Ferreira</span>
+      <div className="flex items-center px-5 h-16 border-b border-white/10">
+        <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="w-full h-auto" />
       </div>
 
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
