@@ -13,6 +13,7 @@ export function MarkWonModal({ defaultService, onClose, onSave }: { defaultServi
     service: defaultService ?? services[0],
     contractDuration: '12 months',
     handoverAmount: '',
+    accountsCount: '',
   })
   const isHandover = HANDOVER_SERVICES.includes(form.service)
   return (
@@ -22,25 +23,28 @@ export function MarkWonModal({ defaultService, onClose, onSave }: { defaultServi
           e.preventDefault()
           if (!form.startDate) return
           onSave({
-            finalValue: Number(form.finalValue) || 0,
+            finalValue: isHandover ? Number(form.handoverAmount) || 0 : Number(form.finalValue) || 0,
             startDate: form.startDate,
             service: form.service,
             contractDuration: form.contractDuration,
             handoverAmount: isHandover && form.handoverAmount !== '' ? Number(form.handoverAmount) : undefined,
+            accountsCount: isHandover && form.accountsCount !== '' ? Number(form.accountsCount) : undefined,
           })
           onClose()
         }}
       >
-        <FormField label="Final Contract Value (R)" required>
-          <input
-            type="number"
-            className={inputClass}
-            value={form.finalValue}
-            onChange={(e) => setForm({ ...form, finalValue: e.target.value })}
-            placeholder="Enter final contract value"
-            required
-          />
-        </FormField>
+        {!isHandover && (
+          <FormField label="Final Contract Value (R)" required>
+            <input
+              type="number"
+              className={inputClass}
+              value={form.finalValue}
+              onChange={(e) => setForm({ ...form, finalValue: e.target.value })}
+              placeholder="Enter final contract value"
+              required
+            />
+          </FormField>
+        )}
         <FormField label="Starting Date" required>
           <input type="date" className={inputClass} value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} required />
         </FormField>
@@ -52,15 +56,27 @@ export function MarkWonModal({ defaultService, onClose, onSave }: { defaultServi
           </select>
         </FormField>
         {isHandover && (
-          <FormField label="Handover Amount (R)">
-            <input
-              type="number"
-              className={inputClass}
-              value={form.handoverAmount}
-              onChange={(e) => setForm({ ...form, handoverAmount: e.target.value })}
-              placeholder="e.g. 750000"
-            />
-          </FormField>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Handover Amount (R)" required>
+              <input
+                type="number"
+                className={inputClass}
+                value={form.handoverAmount}
+                onChange={(e) => setForm({ ...form, handoverAmount: e.target.value })}
+                placeholder="e.g. 750000"
+                required
+              />
+            </FormField>
+            <FormField label="Number of Accounts / Matters">
+              <input
+                type="number"
+                className={inputClass}
+                value={form.accountsCount}
+                onChange={(e) => setForm({ ...form, accountsCount: e.target.value })}
+                placeholder="e.g. 40"
+              />
+            </FormField>
+          </div>
         )}
         <FormField label="Contract Duration">
           <input className={inputClass} value={form.contractDuration} onChange={(e) => setForm({ ...form, contractDuration: e.target.value })} />

@@ -207,6 +207,8 @@ create table if not exists public.deals (
   -- Handover-type deals only (e.g. Debt Collection) — outstanding balance
   -- being handed over, distinct from `value` (the contract/project value).
   handover_amount numeric,
+  -- Handover-type deals only — number of accounts/matters in the handover.
+  accounts_count integer,
   -- Date the client is expected to begin handing over accounts / service
   -- commencement date, captured when marking the deal Won.
   contract_start_date date
@@ -215,6 +217,7 @@ create table if not exists public.deals (
 -- Covers re-running this script against a database where `deals` already
 -- existed before these columns were added.
 alter table public.deals add column if not exists handover_amount numeric;
+alter table public.deals add column if not exists accounts_count integer;
 alter table public.deals add column if not exists contract_start_date date;
 
 -- ---------- Tasks ----------

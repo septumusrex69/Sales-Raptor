@@ -167,6 +167,7 @@ export function DealDetail() {
             {deal.lossReason && <Field label="Loss Reason" value={deal.lossReason} />}
             <Field label="Weighted Value" value={formatCurrency(Math.round((deal.value * deal.probability) / 100))} />
             {deal.handoverAmount != null && <Field label="Handover Amount" value={formatCurrency(deal.handoverAmount)} />}
+            {deal.accountsCount != null && <Field label="Number of Accounts / Matters" value={deal.accountsCount.toString()} />}
             {deal.contractStartDate && <Field label="Starting Date" value={formatDate(deal.contractStartDate)} />}
           </dl>
           {deal.notes && (
