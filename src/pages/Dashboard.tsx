@@ -270,6 +270,18 @@ export function Dashboard() {
         </div>
       </div>
 
+      <WinRateCard
+        deals={scopedDeals}
+        won={kpis.curr.won}
+        lost={kpis.curr.lost}
+        winRate={kpis.curr.winRate}
+        newLeads={kpis.curr.newLeads}
+        qualified={kpis.curr.qualified}
+        converted={kpis.curr.converted}
+        periodLabel={period.label}
+        periodParam={periodParam}
+      />
+
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatTile
           label="New Leads"
@@ -348,18 +360,6 @@ export function Dashboard() {
           to={buildDrilldownUrl('/leads', { touched: '0', [SALES_MONTH_PARAM]: periodParam })}
         />
       </div>
-
-      <WinRateCard
-        deals={scopedDeals}
-        won={kpis.curr.won}
-        lost={kpis.curr.lost}
-        winRate={kpis.curr.winRate}
-        newLeads={kpis.curr.newLeads}
-        qualified={kpis.curr.qualified}
-        converted={kpis.curr.converted}
-        periodLabel={period.label}
-        periodParam={periodParam}
-      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2">
