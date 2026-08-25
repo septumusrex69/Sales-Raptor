@@ -35,7 +35,7 @@ function RateDonut({ data, rate, rateLabel, caption }: { data: DonutSlice[]; rat
       <div className="h-40 w-40 relative">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
-            <Pie data={data} dataKey="value" nameKey="name" innerRadius={50} outerRadius={72} paddingAngle={2} isAnimationActive={false}>
+            <Pie data={data} dataKey="value" nameKey="name" innerRadius={56} outerRadius={72} paddingAngle={2} isAnimationActive={false}>
               {data.map((entry) => (
                 <Cell key={entry.name} fill={entry.color} stroke="none" />
               ))}
@@ -43,11 +43,11 @@ function RateDonut({ data, rate, rateLabel, caption }: { data: DonutSlice[]; rat
             <Tooltip formatter={(value, name) => [value, name]} />
           </PieChart>
         </ResponsiveContainer>
-        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <span className="text-[28px] font-extrabold" style={{ color: POSITIVE_HEX }}>
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-2">
+          <span className="text-[26px] font-extrabold leading-none" style={{ color: POSITIVE_HEX }}>
             {rate}%
           </span>
-          <span className="text-[10px] font-semibold text-slate-400 mt-0.5 tracking-wide text-center leading-tight">{rateLabel}</span>
+          <span className="text-[9px] font-semibold text-slate-400 mt-1 tracking-wide text-center leading-tight max-w-[86px]">{rateLabel}</span>
         </div>
       </div>
       <span className="text-[11px] text-slate-400 text-center -mt-1">{caption}</span>
