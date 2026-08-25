@@ -22,11 +22,16 @@ interface DonutSlice {
   name: string
   value: number
   color: string
+  /** Muted slices (excluded from that donut's own rate) get de-emphasized legend text too. */
+  muted?: boolean
 }
+
+/** Neutral gray for a slice that's excluded from a given rate's own math — still shown for context, just visually de-emphasized so it doesn't read as "counted." */
+const EXCLUDED_HEX = '#cbd5e1'
 
 function RateDonut({ data, rate, rateLabel, caption }: { data: DonutSlice[]; rate: number; rateLabel: string; caption: string }) {
   return (
-    <div className="flex flex-col items-center gap-1.5">
+    <div className="flex flex-col items-center gap-2.5">
       <div className="h-40 w-40 relative">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
@@ -45,7 +50,15 @@ function RateDonut({ data, rate, rateLabel, caption }: { data: DonutSlice[]; rat
           <span className="text-[10px] font-semibold text-slate-400 mt-0.5 tracking-wide text-center leading-tight">{rateLabel}</span>
         </div>
       </div>
-      <span className="text-[11px] text-slate-400 text-center">{caption}</span>
+      <span className="text-[11px] text-slate-400 text-center -mt-1">{caption}</span>
+      <div className="flex items-center gap-3 text-[11px] flex-wrap justify-center">
+        {data.map((d) => (
+          <span key={d.name} className={`flex items-center gap-1 ${d.muted ? 'text-slate-400' : 'text-slate-600'}`}>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: d.color }} />
+            {d.name} <b className={d.muted ? 'font-semibold' : 'font-bold'}>{d.value}</b>
+          </span>
+        ))}
+      </div>
     </div>
   )
 }
@@ -55,9 +68,19 @@ export function WinRateCard({ deals, won, lost, winRate, newLeads, qualified, co
   const total = won + open + lost
   const overallRate = total > 0 ? Math.round((won / total) * 100) : 0
 
-  const donutData: DonutSlice[] = [
+  // Overall Conversion counts Open toward the denominator, so it's colored in full —
+  // every slice here contributes to the percentage shown.
+  const overallDonutData: DonutSlice[] = [
     { name: 'Won', value: won, color: POSITIVE_HEX },
     { name: 'Open', value: open, color: OPEN_HEX },
+    { name: 'Lost', value: lost, color: NEGATIVE_HEX },
+  ].filter((d) => d.value > 0)
+
+  // Win Rate excludes Open from its math entirely, so its wedge is grayed out here
+  // rather than reusing the amber "Open" color — a visual cue that it isn't counted.
+  const winRateDonutData: DonutSlice[] = [
+    { name: 'Won', value: won, color: POSITIVE_HEX },
+    { name: 'Open', value: open, color: EXCLUDED_HEX, muted: true },
     { name: 'Lost', value: lost, color: NEGATIVE_HEX },
   ].filter((d) => d.value > 0)
 
@@ -70,13 +93,13 @@ export function WinRateCard({ deals, won, lost, winRate, newLeads, qualified, co
   return (
     <Card>
       <div className="flex items-start justify-between mb-4 gap-3">
-        <CardHeader title="Win Rate" subtitle="Two ways to read your pipeline — closed deals only, and everything still open" />
+        <CardHeader title="Win Rate" subtitle="Two ways to read your pipeline — everything in it, and just what's closed" />
         <span className="text-xs font-medium text-brand-600 bg-brand-50 px-2.5 py-1 rounded-full whitespace-nowrap shrink-0">{periodLabel}</span>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-[176px_176px_1fr] gap-6 items-center">
-        <RateDonut data={donutData} rate={winRate} rateLabel="WIN RATE" caption="Of deals that closed" />
-        <RateDonut data={donutData} rate={overallRate} rateLabel="OVERALL CONVERSION" caption="Of everything in the pipeline" />
+      <div className="grid grid-cols-1 md:grid-cols-[176px_176px_1fr] gap-6 items-start">
+        <RateDonut data={overallDonutData} rate={overallRate} rateLabel="OVERALL CONVERSION" caption="Of everything in the pipeline" />
+        <RateDonut data={winRateDonutData} rate={winRate} rateLabel="WIN RATE" caption="Of deals that closed" />
 
         <div className="flex flex-col gap-2.5">
           <span className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">Lead pipeline, same period</span>
@@ -94,25 +117,8 @@ export function WinRateCard({ deals, won, lost, winRate, newLeads, qualified, co
         </div>
       </div>
 
-      <div className="flex items-center gap-4 text-xs text-slate-500 flex-wrap justify-center mt-5 pt-4 border-t border-slate-100">
-        <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: POSITIVE_HEX }} />
-          Won <b className="text-slate-700 font-bold">{won}</b>
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: OPEN_HEX }} />
-          Open <b className="text-slate-700 font-bold">{open}</b>
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: NEGATIVE_HEX }} />
-          Lost <b className="text-slate-700 font-bold">{lost}</b>
-        </span>
-      </div>
-
-      <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100 text-xs text-slate-400">
-        <span>
-          Win Rate = Won ÷ (Won + Lost) &nbsp;·&nbsp; Overall Conversion = Won ÷ (Won + Open + Lost)
-        </span>
+      <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 text-xs text-slate-400">
+        <span>Overall Conversion = Won ÷ (Won + Open + Lost) &nbsp;·&nbsp; Win Rate = Won ÷ (Won + Lost)</span>
         <Link to={buildDrilldownUrl('/deals', { view: 'table', [SALES_MONTH_PARAM]: periodParam })} className="font-semibold text-brand-600 hover:underline shrink-0">
           View all deals →
         </Link>
