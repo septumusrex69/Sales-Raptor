@@ -11,6 +11,7 @@ import { StatTile } from '../components/ui/StatTile'
 import { SalesMonthPicker } from '../components/ui/SalesMonthPicker'
 import { CompareSelector, type CompareMode } from '../components/ui/CompareSelector'
 import { SalesFunnelChart } from '../components/dashboard/SalesFunnelChart'
+import { WinRateCard } from '../components/dashboard/WinRateCard'
 import { RevenueTrendChart } from '../components/dashboard/RevenueTrendChart'
 import { ActivityBreakdownChart } from '../components/dashboard/ActivityBreakdownChart'
 import { RepLeaderboard, type LeaderboardRow } from '../components/dashboard/RepLeaderboard'
@@ -95,12 +96,22 @@ export function Dashboard() {
       const qualified = scopedLeads.filter(
         (l) => isWithinPeriod(l.createdAt, p) && ['Qualified', 'Proposal Required', 'Converted'].includes(l.status),
       )
+      const converted = scopedLeads.filter((l) => isWithinPeriod(l.createdAt, p) && l.status === 'Converted')
       const won = scopedDeals.filter((d) => d.wonAt && isWithinPeriod(d.wonAt, p))
       const lost = scopedDeals.filter((d) => d.lostAt && isWithinPeriod(d.lostAt, p))
       const revenueWon = won.reduce((s, d) => s + d.value, 0)
       const closed = won.length + lost.length
       const winRate = closed > 0 ? Math.round((won.length / closed) * 100) : 0
-      return { newLeads: newLeads.length, activities: meaningfulActivities.length, qualified: qualified.length, won: won.length, revenueWon, winRate }
+      return {
+        newLeads: newLeads.length,
+        activities: meaningfulActivities.length,
+        qualified: qualified.length,
+        converted: converted.length,
+        won: won.length,
+        lost: lost.length,
+        revenueWon,
+        winRate,
+      }
     }
     const curr = compute(period)
     const prev = compareMode === 'previous' ? compute(previousPeriod) : undefined
@@ -337,6 +348,18 @@ export function Dashboard() {
           to={buildDrilldownUrl('/leads', { touched: '0', [SALES_MONTH_PARAM]: periodParam })}
         />
       </div>
+
+      <WinRateCard
+        deals={scopedDeals}
+        won={kpis.curr.won}
+        lost={kpis.curr.lost}
+        winRate={kpis.curr.winRate}
+        newLeads={kpis.curr.newLeads}
+        qualified={kpis.curr.qualified}
+        converted={kpis.curr.converted}
+        periodLabel={period.label}
+        periodParam={periodParam}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2">

@@ -85,6 +85,17 @@ export function getLastNSalesMonthsRange(referenceDate: Date, count: number): Sa
   }
 }
 
+/** Every record ever entered, through `referenceDate` — no start date to reason about. */
+export function getAllTimeRange(referenceDate: Date): SalesMonthPeriod {
+  return {
+    start: new Date(0),
+    end: referenceDate,
+    label: 'All Time',
+    rangeLabel: 'Since the beginning',
+    key: 'all-time',
+  }
+}
+
 /** Calendar-year Year to Date, through `referenceDate` (not through the full in-progress Sales Month). */
 export function getYTDRange(referenceDate: Date): SalesMonthPeriod {
   const start = startOfYear(referenceDate)

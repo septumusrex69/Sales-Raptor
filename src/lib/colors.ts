@@ -127,3 +127,5 @@ export const FUNNEL_COLORS: string[] = FUNNEL_STAGES.map((s) => STAGE_COLORS[s])
 /** Semantic tokens for KPI deltas / positive-negative indicators (mirrors --color-positive/--color-negative in index.css). */
 export const POSITIVE_HEX = '#406d58'
 export const NEGATIVE_HEX = '#794234'
+/** "Still open / in progress" — the third state alongside Won/Lost on the Win Rate donut. */
+export const OPEN_HEX = '#b28e34'

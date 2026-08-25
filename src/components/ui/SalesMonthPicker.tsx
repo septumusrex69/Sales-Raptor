@@ -7,11 +7,13 @@ import {
   getNextSalesMonth,
   getLastNSalesMonthsRange,
   getYTDRange,
+  getAllTimeRange,
 } from '../../lib/salesMonth'
 
-type PresetKey = 'current' | 'previous' | 'historical' | 'last3' | 'last6' | 'last12' | 'ytd' | 'custom'
+type PresetKey = 'allTime' | 'current' | 'previous' | 'historical' | 'last3' | 'last6' | 'last12' | 'ytd' | 'custom'
 
 const PRESET_LABELS: Record<PresetKey, string> = {
+  allTime: 'All Time',
   current: 'Current Sales Month',
   previous: 'Previous Sales Month',
   historical: 'Select Historical Sales Month',
@@ -42,7 +44,8 @@ export function SalesMonthPicker({
 
   function applyPreset(next: PresetKey) {
     setPreset(next)
-    if (next === 'current') onChange(current)
+    if (next === 'allTime') onChange(getAllTimeRange(referenceDate))
+    else if (next === 'current') onChange(current)
     else if (next === 'previous') onChange(getPreviousSalesMonth(current))
     else if (next === 'historical') onChange(getPreviousSalesMonth(current))
     else if (next === 'last3') onChange(getLastNSalesMonthsRange(referenceDate, 3))
