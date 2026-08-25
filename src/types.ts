@@ -153,6 +153,8 @@ export interface Deal {
   leadId?: ID
   /** Handover-type deals only (e.g. Debt Collection) — the outstanding balance being handed over, distinct from `value` (the contract/project value). */
   handoverAmount?: number
+  /** Handover-type deals only — number of accounts/matters included in the handover. */
+  accountsCount?: number
   /** Date the client is expected to begin handing over accounts / service commencement date, captured when marking the deal Won. */
   contractStartDate?: string
 }
