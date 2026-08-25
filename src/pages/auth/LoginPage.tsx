@@ -46,8 +46,7 @@ export function LoginPage() {
     <div className="flex h-dvh items-center justify-center bg-surface px-4">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-6">
-          <img src="/brand/icon-dark.svg" alt="" className="w-14 h-14 mb-3" />
-          <h1 className="font-semibold text-lg text-navy-950">Bredell Ferreira</h1>
+          <img src="/brand/wordmark-dark.svg" alt="Bredell Ferreira" className="h-6 w-auto mb-3" />
           <p className="text-sm text-slate-400 mt-0.5">Sign in to Sales Raptor</p>
         </div>
 
