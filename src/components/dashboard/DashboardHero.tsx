@@ -1,10 +1,14 @@
+import type { ReactNode } from 'react'
+
 /**
  * Gradient band using the actual brand navy gradient + gold ring from the
  * logo, with the real icon mark inline (not an <img>, so its gold ring
  * path can double as the large faint background watermark without a
- * second network request).
+ * second network request). `children` renders as the controls row on the
+ * right, alongside the title — the period/compare/scope filters and
+ * Export button live inside the hero, not below it.
  */
-export function DashboardHero() {
+export function DashboardHero({ children }: { children?: ReactNode }) {
   return (
     <div
       className="relative overflow-hidden rounded-2xl px-7 py-8"
@@ -21,8 +25,9 @@ export function DashboardHero() {
           d="M173.546875 132.019531C161.039062 159.359375 133.535156 177.023438 103.476562 177.023438C61.003906 177.023438 26.453125 142.46875 26.453125 100C26.453125 57.53125 61.003906 22.980469 103.476562 22.980469C118.230469 22.980469 132.570312 27.164062 144.941406 35.082031C156.988281 42.792969 166.640625 53.660156 172.855469 66.503906L171.539062 67.140625C158.992188 41.199219 132.277344 24.4375 103.476562 24.4375C61.8125 24.4375 27.914062 58.335938 27.914062 100C27.914062 141.664062 61.8125 175.5625 103.476562 175.5625C132.964844 175.5625 159.949219 158.230469 172.21875 131.414062Z"
         />
       </svg>
-      <div className="relative z-[1] flex items-center gap-3.5">
-        <svg viewBox="0 0 200 200" className="h-10 w-10 shrink-0" aria-hidden="true">
+      <div className="relative z-[1] flex flex-wrap items-start justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <svg viewBox="0 0 200 200" className="h-10 w-10 shrink-0" aria-hidden="true">
           <path
             fillRule="evenodd"
             fill="#c69f54"
@@ -44,7 +49,9 @@ export function DashboardHero() {
           <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-gold-500 mb-1">Bredell Ferreira · Sales Raptor</p>
           <h2 className="text-2xl font-extrabold tracking-tight text-white">Sales Dashboard</h2>
           <p className="text-[13px] text-white/60 mt-0.5">Real-time overview of your sales performance</p>
+          </div>
         </div>
+        <div className="flex flex-wrap items-center gap-2">{children}</div>
       </div>
     </div>
   )

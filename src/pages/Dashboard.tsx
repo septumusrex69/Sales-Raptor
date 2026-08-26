@@ -233,27 +233,27 @@ export function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <DashboardHero />
-
-      <div className="relative z-[1] -mt-9 card px-4 py-3.5 flex flex-wrap items-center gap-2 shadow-md">
-        <SalesMonthPicker value={period} onChange={setPeriod} referenceDate={TODAY} />
-        <CompareSelector value={compareMode} onChange={setCompareMode} />
+      <DashboardHero>
+        <SalesMonthPicker value={period} onChange={setPeriod} referenceDate={TODAY} variant="dark" />
+        <CompareSelector value={compareMode} onChange={setCompareMode} variant="dark" />
         <select
           value={scope}
           onChange={(e) => setScope(e.target.value as Scope)}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 outline-none"
+          className="text-sm border border-white/20 rounded-lg px-3 py-2 bg-white/10 text-white outline-none"
         >
-          <option value="all">All Sales Reps</option>
+          <option value="all" className="text-slate-700">
+            All Sales Reps
+          </option>
           <optgroup label="Representatives">
             {reps.map((r) => (
-              <option key={r.id} value={`rep:${r.id}`}>
+              <option key={r.id} value={`rep:${r.id}`} className="text-slate-700">
                 {r.name}
               </option>
             ))}
           </optgroup>
           <optgroup label="Teams">
             {teams.map((t) => (
-              <option key={t.id} value={`team:${t.id}`}>
+              <option key={t.id} value={`team:${t.id}`} className="text-slate-700">
                 {t.name}
               </option>
             ))}
@@ -261,12 +261,12 @@ export function Dashboard() {
         </select>
         <button
           onClick={handleExport}
-          className="ml-auto inline-flex items-center gap-1.5 text-sm font-semibold px-3.5 py-2 rounded-lg text-navy-950 shadow-sm"
+          className="inline-flex items-center gap-1.5 text-sm font-semibold px-3.5 py-2 rounded-lg text-navy-950 shadow-sm"
           style={{ background: 'linear-gradient(135deg, #c69f54 0%, #d9b876 100%)' }}
         >
           <Download size={15} /> Export
         </button>
-      </div>
+      </DashboardHero>
 
       <WinRateCard
         deals={scopedDeals}
