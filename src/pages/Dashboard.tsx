@@ -12,6 +12,7 @@ import { SalesMonthPicker } from '../components/ui/SalesMonthPicker'
 import { CompareSelector, type CompareMode } from '../components/ui/CompareSelector'
 import { SalesFunnelChart } from '../components/dashboard/SalesFunnelChart'
 import { WinRateCard } from '../components/dashboard/WinRateCard'
+import { DashboardHero } from '../components/dashboard/DashboardHero'
 import { RevenueTrendChart } from '../components/dashboard/RevenueTrendChart'
 import { ActivityBreakdownChart } from '../components/dashboard/ActivityBreakdownChart'
 import { RepLeaderboard, type LeaderboardRow } from '../components/dashboard/RepLeaderboard'
@@ -232,42 +233,39 @@ export function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-semibold text-slate-800">Sales Dashboard</h2>
-          <p className="text-sm text-slate-400 mt-0.5">Real-time overview of your sales performance</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <SalesMonthPicker value={period} onChange={setPeriod} referenceDate={TODAY} />
-          <CompareSelector value={compareMode} onChange={setCompareMode} />
-          <select
-            value={scope}
-            onChange={(e) => setScope(e.target.value as Scope)}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 outline-none"
-          >
-            <option value="all">All Sales Reps</option>
-            <optgroup label="Representatives">
-              {reps.map((r) => (
-                <option key={r.id} value={`rep:${r.id}`}>
-                  {r.name}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="Teams">
-              {teams.map((t) => (
-                <option key={t.id} value={`team:${t.id}`}>
-                  {t.name}
-                </option>
-              ))}
-            </optgroup>
-          </select>
-          <button
-            onClick={handleExport}
-            className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700"
-          >
-            <Download size={15} /> Export
-          </button>
-        </div>
+      <DashboardHero />
+
+      <div className="relative z-[1] -mt-9 card px-4 py-3.5 flex flex-wrap items-center gap-2 shadow-md">
+        <SalesMonthPicker value={period} onChange={setPeriod} referenceDate={TODAY} />
+        <CompareSelector value={compareMode} onChange={setCompareMode} />
+        <select
+          value={scope}
+          onChange={(e) => setScope(e.target.value as Scope)}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 outline-none"
+        >
+          <option value="all">All Sales Reps</option>
+          <optgroup label="Representatives">
+            {reps.map((r) => (
+              <option key={r.id} value={`rep:${r.id}`}>
+                {r.name}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Teams">
+            {teams.map((t) => (
+              <option key={t.id} value={`team:${t.id}`}>
+                {t.name}
+              </option>
+            ))}
+          </optgroup>
+        </select>
+        <button
+          onClick={handleExport}
+          className="ml-auto inline-flex items-center gap-1.5 text-sm font-semibold px-3.5 py-2 rounded-lg text-navy-950 shadow-sm"
+          style={{ background: 'linear-gradient(135deg, #c69f54 0%, #d9b876 100%)' }}
+        >
+          <Download size={15} /> Export
+        </button>
       </div>
 
       <WinRateCard
@@ -317,6 +315,7 @@ export function Dashboard() {
           label="Win Rate"
           value={`${kpis.curr.winRate}%`}
           pctChange={kpis.prev ? pctDelta(kpis.curr.winRate, kpis.prev.winRate) : undefined}
+          accent="gold"
         />
       </div>
 

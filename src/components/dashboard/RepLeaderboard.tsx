@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import clsx from 'clsx'
 import { Card, CardHeader } from '../ui/Card'
 import { UserAvatar } from '../ui/Avatar'
 import { formatCurrency } from '../../data/mockData'
@@ -69,10 +70,19 @@ export function RepLeaderboard({ rows }: { rows: LeaderboardRow[] }) {
             </tr>
           </thead>
           <tbody>
-            {sorted.map((r) => (
-              <tr key={r.repId} className="border-t border-slate-50 hover:bg-slate-50/60">
+            {sorted.map((r, i) => (
+              <tr key={r.repId} className={i === 0 ? 'border-t border-slate-50 bg-gold-300/25 hover:bg-gold-300/35' : 'border-t border-slate-50 hover:bg-slate-50/60'}>
                 <td className="px-5 py-2.5">
                   <Link to={`/reps/${r.repId}`} className="flex items-center gap-2 font-medium text-slate-700 hover:text-brand-600">
+                    <span
+                      className={clsx(
+                        'inline-flex items-center justify-center w-5 h-5 rounded-md text-[10.5px] font-extrabold shrink-0',
+                        i === 0 ? 'text-white' : 'bg-slate-100 text-slate-400',
+                      )}
+                      style={i === 0 ? { background: 'linear-gradient(135deg, #c69f54, #a9822f)' } : undefined}
+                    >
+                      {i + 1}
+                    </span>
                     <UserAvatar userId={r.repId} size={24} />
                     {r.name}
                   </Link>

@@ -16,9 +16,11 @@ export interface StatTileProps {
   onClick?: () => void
   size?: 'primary' | 'secondary'
   icon?: ReactNode
+  /** Gold top border + gold value — for the one number on a page that matters most. Use sparingly. */
+  accent?: 'gold'
 }
 
-export function StatTile({ label, value, compareLabel, pctChange, absChange, to, onClick, size = 'primary', icon }: StatTileProps) {
+export function StatTile({ label, value, compareLabel, pctChange, absChange, to, onClick, size = 'primary', icon, accent }: StatTileProps) {
   const interactive = Boolean(to || onClick)
   const positive = pctChange !== undefined && pctChange >= 0
 
@@ -28,7 +30,7 @@ export function StatTile({ label, value, compareLabel, pctChange, absChange, to,
         <p className="text-xs font-medium text-slate-400">{label}</p>
         {icon}
       </div>
-      <p className={clsx('font-bold text-slate-800 mt-1', size === 'primary' ? 'text-2xl' : 'text-xl')}>{value}</p>
+      <p className={clsx('font-bold mt-1', size === 'primary' ? 'text-2xl' : 'text-xl', accent === 'gold' ? 'text-gold-600' : 'text-slate-800')}>{value}</p>
       {pctChange !== undefined && (
         <p
           className={clsx(
@@ -45,7 +47,11 @@ export function StatTile({ label, value, compareLabel, pctChange, absChange, to,
     </>
   )
 
-  const cardClassName = clsx(size === 'secondary' && 'p-4', interactive && 'transition-shadow hover:ring-2 hover:ring-brand-500/20')
+  const cardClassName = clsx(
+    size === 'secondary' && 'p-4',
+    interactive && 'transition-shadow hover:ring-2 hover:ring-brand-500/20',
+    accent === 'gold' && 'border-t-[2.5px] border-t-gold-500',
+  )
 
   if (to) {
     return (
@@ -61,5 +67,5 @@ export function StatTile({ label, value, compareLabel, pctChange, absChange, to,
       </button>
     )
   }
-  return <Card className={size === 'secondary' ? 'p-4' : undefined}>{body}</Card>
+  return <Card className={cardClassName || undefined}>{body}</Card>
 }
