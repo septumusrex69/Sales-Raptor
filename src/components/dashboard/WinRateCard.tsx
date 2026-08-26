@@ -1,5 +1,4 @@
 import { Link } from 'react-router-dom'
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { Card, CardHeader } from '../ui/Card'
 import { POSITIVE_HEX, NEGATIVE_HEX, OPEN_HEX } from '../../lib/colors'
 import { buildDrilldownUrl, SALES_MONTH_PARAM } from '../../lib/drilldown'
@@ -29,20 +28,44 @@ interface DonutSlice {
 /** Neutral gray for a slice that's excluded from a given rate's own math — still shown for context, just visually de-emphasized so it doesn't read as "counted." */
 const EXCLUDED_HEX = '#cbd5e1'
 
+/** SVG geometry for the rounded-stroke ring — a plain stroked circle per slice (round caps, small gaps), not a filled pie wedge. */
+const DONUT_SIZE = 160
+const DONUT_STROKE = 22
+const DONUT_R = (DONUT_SIZE - DONUT_STROKE) / 2
+const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_R
+
 function RateDonut({ data, rate, rateLabel, caption }: { data: DonutSlice[]; rate: number; rateLabel: string; caption: string }) {
+  const total = data.reduce((s, d) => s + d.value, 0)
+  const gap = data.length > 1 ? 3 : 0
+  let cumulative = 0
+  const arcs = data.map((d) => {
+    const raw = total > 0 ? (d.value / total) * DONUT_CIRCUMFERENCE : 0
+    const length = Math.max(raw - gap, 0)
+    const offset = -cumulative
+    cumulative += raw
+    return { color: d.color, length, offset, key: d.name }
+  })
+
   return (
     <div className="flex flex-col items-center gap-2.5">
       <div className="h-40 w-40 relative">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie data={data} dataKey="value" nameKey="name" innerRadius={56} outerRadius={72} paddingAngle={2} isAnimationActive={false}>
-              {data.map((entry) => (
-                <Cell key={entry.name} fill={entry.color} stroke="none" />
-              ))}
-            </Pie>
-            <Tooltip formatter={(value, name) => [value, name]} />
-          </PieChart>
-        </ResponsiveContainer>
+        <svg viewBox={`0 0 ${DONUT_SIZE} ${DONUT_SIZE}`} className="h-full w-full -rotate-90">
+          <circle cx={DONUT_SIZE / 2} cy={DONUT_SIZE / 2} r={DONUT_R} fill="none" stroke="#eef1f6" strokeWidth={DONUT_STROKE} />
+          {arcs.map((a) => (
+            <circle
+              key={a.key}
+              cx={DONUT_SIZE / 2}
+              cy={DONUT_SIZE / 2}
+              r={DONUT_R}
+              fill="none"
+              stroke={a.color}
+              strokeWidth={DONUT_STROKE}
+              strokeLinecap="round"
+              strokeDasharray={`${a.length} ${DONUT_CIRCUMFERENCE - a.length}`}
+              strokeDashoffset={a.offset}
+            />
+          ))}
+        </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-2">
           <span className="text-[26px] font-extrabold leading-none" style={{ color: POSITIVE_HEX }}>
             {rate}%

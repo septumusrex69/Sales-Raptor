@@ -7,12 +7,12 @@
 export function DashboardHero() {
   return (
     <div
-      className="relative overflow-hidden rounded-2xl px-7 py-7 -mx-1"
+      className="relative overflow-hidden rounded-2xl px-7 py-8"
       style={{ background: 'linear-gradient(120deg, #12212f 0%, #2c4054 52%, #46607b 100%)' }}
     >
       <svg
         viewBox="0 0 200 200"
-        className="pointer-events-none absolute -top-20 -right-16 h-[380px] w-[380px] opacity-[0.16]"
+        className="pointer-events-none absolute -top-10 -right-10 h-52 w-52 opacity-20"
         aria-hidden="true"
       >
         <path
