@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Plus, Trash2, Check, X } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
@@ -7,7 +7,7 @@ import { customFields as initialCustomFields, industries, leadSources as initial
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { supabase, PRODUCTION_APP_URL } from '../../lib/supabase'
-import type { CustomField, CustomFieldType, UserRole } from '../../types'
+import type { CustomField, CustomFieldType, User, UserRole } from '../../types'
 import { DEAL_STAGES } from '../../types'
 
 const TABS = ['Profile', 'Users', 'Teams', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Lost Reasons', 'Notifications', 'Integrations'] as const
@@ -140,10 +140,12 @@ function ProfileTab() {
 }
 
 function UsersTab() {
-  const { users, updateUser } = useAppStore()
+  const { users, updateUser, removeUserLocal } = useAppStore()
   const { currentUser, session } = useAuth()
   const isAdmin = currentUser?.role === 'Administrator'
   const [addOpen, setAddOpen] = useState(false)
+  const [editingUser, setEditingUser] = useState<User | null>(null)
+  const [removingUser, setRemovingUser] = useState<User | null>(null)
 
   return (
     <Card padded={false}>
@@ -164,6 +166,7 @@ function UsersTab() {
               <th className="font-medium px-3 py-2.5">Email</th>
               <th className="font-medium px-3 py-2.5">Status</th>
               {isAdmin && <th className="font-medium px-3 py-2.5">Login</th>}
+              {isAdmin && <th className="font-medium px-3 py-2.5"></th>}
             </tr>
           </thead>
           <tbody>
@@ -208,12 +211,42 @@ function UsersTab() {
                     <ResetLoginButton email={u.email} />
                   </td>
                 )}
+                {isAdmin && (
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <button onClick={() => setEditingUser(u)} className="text-slate-400 hover:text-brand-600" title="Edit user">
+                        <Pencil size={14} />
+                      </button>
+                      {u.id !== currentUser?.id && (
+                        <button onClick={() => setRemovingUser(u)} className="text-slate-400 hover:text-[#794234]" title="Remove user">
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       {addOpen && session && <InviteUserModal accessToken={session.access_token} onClose={() => setAddOpen(false)} />}
+      {editingUser && session && (
+        <EditUserModal
+          user={editingUser}
+          accessToken={session.access_token}
+          onClose={() => setEditingUser(null)}
+          onSaveName={(name) => updateUser(editingUser.id, { name })}
+        />
+      )}
+      {removingUser && session && (
+        <RemoveUserModal
+          user={removingUser}
+          accessToken={session.access_token}
+          onClose={() => setRemovingUser(null)}
+          onRemoved={() => removeUserLocal(removingUser.id)}
+        />
+      )}
     </Card>
   )
 }
@@ -251,6 +284,142 @@ function ResetLoginButton({ email }: { email: string }) {
       </button>
       {error && <p className="text-[11px] text-[#794234] mt-0.5 max-w-[160px]">{error}</p>}
     </div>
+  )
+}
+
+function EditUserModal({
+  user,
+  accessToken,
+  onClose,
+  onSaveName,
+}: {
+  user: User
+  accessToken: string
+  onClose: () => void
+  onSaveName: (name: string) => void
+}) {
+  const [name, setName] = useState(user.name)
+  const [email, setEmail] = useState(user.email)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!name.trim() || !email.trim()) return
+    setSubmitting(true)
+    setError(null)
+    if (name.trim() !== user.name) onSaveName(name.trim())
+    if (email.trim() !== user.email) {
+      try {
+        const res = await fetch('/api/update-user-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify({ userId: user.id, email: email.trim() }),
+        })
+        const body = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setError(body.error ?? 'Something went wrong updating the email.')
+          setSubmitting(false)
+          return
+        }
+      } catch {
+        setError('Could not reach the server. Please try again.')
+        setSubmitting(false)
+        return
+      }
+    }
+    setSubmitting(false)
+    onClose()
+  }
+
+  return (
+    <Modal title="Edit User" onClose={onClose} width={400}>
+      <form onSubmit={handleSubmit}>
+        <FormField label="Name" required>
+          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} required />
+        </FormField>
+        <FormField label="Email" required>
+          <input type="email" className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} required />
+        </FormField>
+        {email.trim() !== user.email && (
+          <p className="text-xs text-slate-400 mb-3.5 -mt-2">Changing the email changes their login — they'll need to sign in with the new address.</p>
+        )}
+        {error && <p className="text-sm text-[#794234] mb-3.5">{error}</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {submitting ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function RemoveUserModal({
+  user,
+  accessToken,
+  onClose,
+  onRemoved,
+}: {
+  user: User
+  accessToken: string
+  onClose: () => void
+  onRemoved: () => void
+}) {
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleConfirm() {
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ userId: user.id }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(body.error ?? 'Something went wrong removing this user.')
+        setSubmitting(false)
+        return
+      }
+      onRemoved()
+      onClose()
+    } catch {
+      setError('Could not reach the server. Please try again.')
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Modal title="Remove User" onClose={onClose} width={380}>
+      <p className="text-sm text-slate-600 leading-relaxed mb-1">
+        Remove <b>{user.name}</b> ({user.email})? They'll no longer be able to log in. Records they own (leads, deals, etc.) are kept, not deleted.
+      </p>
+      <p className="text-sm text-[#794234] mb-3.5">This can't be undone.</p>
+      {error && <p className="text-sm text-[#794234] mb-3.5">{error}</p>}
+      <div className="flex justify-end gap-2 pt-1">
+        <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleConfirm}
+          disabled={submitting}
+          className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[#794234] text-white hover:bg-[#622f24] disabled:opacity-50"
+        >
+          {submitting ? 'Removing…' : 'Remove User'}
+        </button>
+      </div>
+    </Modal>
   )
 }
 

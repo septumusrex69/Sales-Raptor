@@ -173,6 +173,8 @@ interface AppActions {
   updateProposal: (id: ID, patch: Partial<Proposal>) => void
 
   updateUser: (id: ID, patch: Partial<User>) => void
+  /** Drops a user from local state after the server has actually deleted their account (via /api/delete-user) -- there's no client-side delete of auth.users, so this just syncs the UI. */
+  removeUserLocal: (id: ID) => void
   addTeam: (input: Partial<Team> & { name: string }) => Team
 
   dismissToast: () => void
@@ -712,6 +714,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [showError],
   )
 
+  const removeUserLocal = useCallback<AppActions['removeUserLocal']>((id) => {
+    setUsers((prev) => prev.filter((u) => u.id !== id))
+  }, [])
+
   const addTeam = useCallback<AppActions['addTeam']>(
     (input) => {
       const id = crypto.randomUUID()
@@ -764,6 +770,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       addProposal,
       updateProposal,
       updateUser,
+      removeUserLocal,
       addTeam,
       dismissToast,
       companyById,
@@ -803,6 +810,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       addProposal,
       updateProposal,
       updateUser,
+      removeUserLocal,
       addTeam,
       dismissToast,
       companyById,
