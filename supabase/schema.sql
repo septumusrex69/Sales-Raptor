@@ -73,18 +73,6 @@ as $$
   select role from public.profiles where id = auth.uid();
 $$;
 
--- Same shape as current_user_role(), for the Sales Manager team-scoping
--- checks below (a Sales Manager may only see/edit their own team's rows).
-create or replace function public.current_user_team_id()
-returns uuid
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select team_id from public.profiles where id = auth.uid();
-$$;
-
 -- Only an Administrator may change someone's role/status/team via the
 -- profiles table. Non-admin updates (e.g. editing your own name/phone from
 -- Settings → Profile) silently keep these three fields at their prior
@@ -325,18 +313,13 @@ alter table public.activities enable row level security;
 alter table public.proposals enable row level security;
 
 -- companies/contacts/leads/deals/tasks/activities all follow the same
--- shape: read/write gated to the row's owner column (or an Administrator,
--- who always sees/edits everything, or a Sales Manager, who is scoped to
--- rows owned by their own team — see current_user_team_id() above).
--- Every other role (Sales Representative, Read Only) still reads
--- everything, same as before; only the Sales Manager role and the write
--- policies were ever restricted by ownership.
+-- shape: open read, open insert, and update/delete gated to the row's
+-- owner column (or an Administrator/Sales Manager).
 do $$
 declare
   pair text[];
   t text;
   owner_col text;
-  same_team_clause text;
 begin
   foreach pair slice 1 in array array[
     array['companies', 'account_owner_id'],
@@ -349,51 +332,35 @@ begin
   loop
     t := pair[1];
     owner_col := pair[2];
-    same_team_clause := format(
-      'exists (select 1 from public.profiles p where p.id = %I and p.team_id = public.current_user_team_id())',
-      owner_col
-    );
 
     execute format('drop policy if exists "authenticated_all" on public.%I;', t);
 
     execute format('drop policy if exists "%s_select" on public.%I;', t, t);
-    execute format(
-      'create policy "%s_select" on public.%I for select using (public.current_user_role() <> ''Sales Manager'' or %I = auth.uid() or %s);',
-      t, t, owner_col, same_team_clause
-    );
+    execute format('create policy "%s_select" on public.%I for select using (auth.uid() is not null);', t, t);
 
     execute format('drop policy if exists "%s_insert" on public.%I;', t, t);
     execute format('create policy "%s_insert" on public.%I for insert with check (auth.uid() is not null);', t, t);
 
     execute format('drop policy if exists "%s_update" on public.%I;', t, t);
     execute format(
-      'create policy "%s_update" on public.%I for update using (%I = auth.uid() or public.current_user_role() = ''Administrator'' or (public.current_user_role() = ''Sales Manager'' and %s)) with check (%I = auth.uid() or public.current_user_role() = ''Administrator'' or (public.current_user_role() = ''Sales Manager'' and %s));',
-      t, t, owner_col, same_team_clause, owner_col, same_team_clause
+      'create policy "%s_update" on public.%I for update using (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager'')) with check (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager''));',
+      t, t, owner_col, owner_col
     );
 
     execute format('drop policy if exists "%s_delete" on public.%I;', t, t);
     execute format(
-      'create policy "%s_delete" on public.%I for delete using (%I = auth.uid() or public.current_user_role() = ''Administrator'' or (public.current_user_role() = ''Sales Manager'' and %s));',
-      t, t, owner_col, same_team_clause
+      'create policy "%s_delete" on public.%I for delete using (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager''));',
+      t, t, owner_col
     );
   end loop;
 end $$;
 
 -- proposals have no owner column of their own — ownership follows the
--- parent deal's owner, so the same Administrator-sees-all /
--- Sales-Manager-sees-own-team shape is expressed by joining through deals.
+-- parent deal's owner.
 drop policy if exists "authenticated_all" on public.proposals;
 
 drop policy if exists "proposals_select" on public.proposals;
-create policy "proposals_select" on public.proposals for select using (
-  public.current_user_role() <> 'Sales Manager'
-  or exists (
-    select 1 from public.deals d
-    join public.profiles p on p.id = d.owner_id
-    where d.id = proposals.deal_id
-      and (d.owner_id = auth.uid() or p.team_id = public.current_user_team_id())
-  )
-);
+create policy "proposals_select" on public.proposals for select using (auth.uid() is not null);
 
 drop policy if exists "proposals_insert" on public.proposals;
 create policy "proposals_insert" on public.proposals for insert with check (auth.uid() is not null);
@@ -401,43 +368,19 @@ create policy "proposals_insert" on public.proposals for insert with check (auth
 drop policy if exists "proposals_update" on public.proposals;
 create policy "proposals_update" on public.proposals for update
   using (
-    public.current_user_role() = 'Administrator'
+    public.current_user_role() in ('Administrator', 'Sales Manager')
     or exists (select 1 from public.deals d where d.id = proposals.deal_id and d.owner_id = auth.uid())
-    or (
-      public.current_user_role() = 'Sales Manager'
-      and exists (
-        select 1 from public.deals d
-        join public.profiles p on p.id = d.owner_id
-        where d.id = proposals.deal_id and p.team_id = public.current_user_team_id()
-      )
-    )
   )
   with check (
-    public.current_user_role() = 'Administrator'
+    public.current_user_role() in ('Administrator', 'Sales Manager')
     or exists (select 1 from public.deals d where d.id = proposals.deal_id and d.owner_id = auth.uid())
-    or (
-      public.current_user_role() = 'Sales Manager'
-      and exists (
-        select 1 from public.deals d
-        join public.profiles p on p.id = d.owner_id
-        where d.id = proposals.deal_id and p.team_id = public.current_user_team_id()
-      )
-    )
   );
 
 drop policy if exists "proposals_delete" on public.proposals;
 create policy "proposals_delete" on public.proposals for delete
   using (
-    public.current_user_role() = 'Administrator'
+    public.current_user_role() in ('Administrator', 'Sales Manager')
     or exists (select 1 from public.deals d where d.id = proposals.deal_id and d.owner_id = auth.uid())
-    or (
-      public.current_user_role() = 'Sales Manager'
-      and exists (
-        select 1 from public.deals d
-        join public.profiles p on p.id = d.owner_id
-        where d.id = proposals.deal_id and p.team_id = public.current_user_team_id()
-      )
-    )
   );
 
 -- profiles: anyone can view the directory; you can edit your own row (name,
@@ -479,4 +422,3 @@ create policy "teams_write" on public.teams for all
 revoke execute on function public.handle_new_user() from public;
 revoke execute on function public.protect_profile_privileged_fields() from public;
 revoke execute on function public.current_user_role() from anon;
-revoke execute on function public.current_user_team_id() from anon;
