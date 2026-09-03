@@ -46,7 +46,7 @@ export function DashboardHero({ children }: { children?: ReactNode }) {
           </defs>
         </svg>
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-gold-500 mb-1">Bredell Ferreira · Sales Raptor</p>
+          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-gold-500 mb-1">Bredell Ferreira · Raptor</p>
           <h2 className="text-2xl font-extrabold tracking-tight text-white">Sales Dashboard</h2>
           <p className="text-[13px] text-white/60 mt-0.5">Real-time overview of your sales performance</p>
           </div>
