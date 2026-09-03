@@ -513,30 +513,105 @@ function InviteUserModal({ accessToken, onClose }: { accessToken: string; onClos
 }
 
 function TeamsTab() {
-  const { teams, addTeam } = useAppStore()
+  const { teams, users, addTeam, updateTeam, deleteTeam, updateUser } = useAppStore()
   const { currentUser } = useAuth()
   const isAdmin = currentUser?.role === 'Administrator'
   const [name, setName] = useState('')
+  const [editingTeamId, setEditingTeamId] = useState<string | null>(null)
+  const [editingName, setEditingName] = useState('')
+  const [removingTeam, setRemovingTeam] = useState<{ id: string; name: string } | null>(null)
 
   return (
     <Card>
       <CardHeader title="Teams" subtitle="Group salespeople into teams" />
       <div className="space-y-3">
-        {teams.map((t) => (
-          <div key={t.id} className="flex items-center justify-between border border-slate-100 rounded-xl p-3.5">
-            <div>
-              <p className="text-sm font-semibold text-slate-700">{t.name}</p>
-              <p className="text-xs text-slate-400">{t.memberIds.length} members</p>
+        {teams.map((t) => {
+          const unassigned = users.filter((u) => u.teamId !== t.id)
+          return (
+            <div key={t.id} className="border border-slate-100 rounded-xl p-3.5">
+              <div className="flex items-center justify-between">
+                {editingTeamId === t.id ? (
+                  <form
+                    className="flex items-center gap-2 flex-1"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      if (!editingName.trim()) return
+                      updateTeam(t.id, { name: editingName.trim() })
+                      setEditingTeamId(null)
+                    }}
+                  >
+                    <input
+                      autoFocus
+                      className={`${inputClass} text-sm py-1`}
+                      value={editingName}
+                      onChange={(e) => setEditingName(e.target.value)}
+                    />
+                    <button type="submit" className="text-brand-600 hover:text-brand-700" title="Save">
+                      <Check size={16} />
+                    </button>
+                    <button type="button" onClick={() => setEditingTeamId(null)} className="text-slate-400 hover:text-slate-600" title="Cancel">
+                      <X size={16} />
+                    </button>
+                  </form>
+                ) : (
+                  <div>
+                    <p className="text-sm font-semibold text-slate-700">{t.name}</p>
+                    <p className="text-xs text-slate-400">{t.memberIds.length} members</p>
+                  </div>
+                )}
+                {isAdmin && editingTeamId !== t.id && (
+                  <div className="flex items-center gap-2.5 shrink-0">
+                    <button
+                      onClick={() => {
+                        setEditingTeamId(t.id)
+                        setEditingName(t.name)
+                      }}
+                      className="text-slate-400 hover:text-brand-600"
+                      title="Rename team"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button onClick={() => setRemovingTeam({ id: t.id, name: t.name })} className="text-slate-400 hover:text-[#794234]" title="Delete team">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 mt-3">
+                {t.memberIds.map((id) => {
+                  const member = users.find((u) => u.id === id)
+                  return (
+                    <div key={id} className="flex items-center gap-1.5 bg-slate-50 rounded-full pl-1 pr-2 py-1">
+                      <UserAvatar userId={id} size={20} />
+                      <span className="text-xs text-slate-600">{member?.name ?? 'Unknown'}</span>
+                      {isAdmin && (
+                        <button onClick={() => updateUser(id, { teamId: undefined })} className="text-slate-400 hover:text-[#794234]" title="Remove from team">
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+              {isAdmin && unassigned.length > 0 && (
+                <select
+                  className="text-sm text-slate-500 border border-slate-200 rounded-lg px-2 py-1 bg-white outline-none mt-2.5"
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) updateUser(e.target.value, { teamId: t.id })
+                  }}
+                >
+                  <option value="">+ Add member…</option>
+                  {unassigned.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
-            <div className="flex items-center -space-x-2">
-              {t.memberIds.map((id) => (
-                <div key={id} className="ring-2 ring-white rounded-full">
-                  <UserAvatar userId={id} size={26} />
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
       {isAdmin && (
         <form
@@ -553,6 +628,27 @@ function TeamsTab() {
             <Plus size={15} /> Add Team
           </button>
         </form>
+      )}
+      {removingTeam && (
+        <Modal title="Remove team" onClose={() => setRemovingTeam(null)}>
+          <p className="text-sm text-slate-600">
+            Remove <span className="font-medium text-slate-800">{removingTeam.name}</span>? Its members won't be deleted, they'll just no longer belong to a team. This can't be undone.
+          </p>
+          <div className="flex justify-end gap-2 mt-5">
+            <button onClick={() => setRemovingTeam(null)} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                deleteTeam(removingTeam.id)
+                setRemovingTeam(null)
+              }}
+              className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[#794234] text-white hover:bg-[#6a3a2d]"
+            >
+              Remove
+            </button>
+          </div>
+        </Modal>
       )}
     </Card>
   )
