@@ -140,7 +140,7 @@ function ProfileTab() {
 }
 
 function UsersTab() {
-  const { users, updateUser, removeUserLocal } = useAppStore()
+  const { users, teams, updateUser, removeUserLocal } = useAppStore()
   const { currentUser, session } = useAuth()
   const isAdmin = currentUser?.role === 'Administrator'
   const [addOpen, setAddOpen] = useState(false)
@@ -163,6 +163,7 @@ function UsersTab() {
             <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
               <th className="font-medium px-5 py-2.5">User</th>
               <th className="font-medium px-3 py-2.5">Role</th>
+              <th className="font-medium px-3 py-2.5">Team</th>
               <th className="font-medium px-3 py-2.5">Email</th>
               <th className="font-medium px-3 py-2.5">Status</th>
               {isAdmin && <th className="font-medium px-3 py-2.5">Login</th>}
@@ -191,6 +192,24 @@ function UsersTab() {
                     </select>
                   ) : (
                     <span className="text-slate-500">{u.role}</span>
+                  )}
+                </td>
+                <td className="px-3 py-2.5">
+                  {isAdmin ? (
+                    <select
+                      className="text-sm text-slate-600 border border-slate-200 rounded-lg px-2 py-1 bg-white outline-none"
+                      value={u.teamId ?? ''}
+                      onChange={(e) => updateUser(u.id, { teamId: e.target.value || undefined })}
+                    >
+                      <option value="">No team</option>
+                      {teams.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="text-slate-500">{teams.find((t) => t.id === u.teamId)?.name ?? '—'}</span>
                   )}
                 </td>
                 <td className="px-3 py-2.5 text-slate-500">{u.email}</td>
