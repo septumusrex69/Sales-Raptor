@@ -176,6 +176,8 @@ interface AppActions {
   /** Drops a user from local state after the server has actually deleted their account (via /api/delete-user) -- there's no client-side delete of auth.users, so this just syncs the UI. */
   removeUserLocal: (id: ID) => void
   addTeam: (input: Partial<Team> & { name: string }) => Team
+  updateTeam: (id: ID, patch: Partial<Pick<Team, 'name'>>) => void
+  deleteTeam: (id: ID) => void
 
   dismissToast: () => void
 
@@ -732,6 +734,37 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [showError],
   )
 
+  const updateTeam = useCallback<AppActions['updateTeam']>(
+    (id, patch) => {
+      let previous: { id: ID; name: string } | undefined
+      setTeamRows((prev) => {
+        previous = prev.find((t) => t.id === id)
+        return prev.map((t) => (t.id === id ? { ...t, ...patch } : t))
+      })
+      updateRow('teams', id, patch, 'updateTeam', (message) => {
+        if (previous) setTeamRows((prev) => prev.map((t) => (t.id === id ? previous! : t)))
+        showError(message)
+      })
+    },
+    [showError],
+  )
+
+  const deleteTeam = useCallback<AppActions['deleteTeam']>(
+    (id) => {
+      let previous: { id: ID; name: string } | undefined
+      setTeamRows((prev) => {
+        previous = prev.find((t) => t.id === id)
+        return prev.filter((t) => t.id !== id)
+      })
+      setUsers((prev) => prev.map((u) => (u.teamId === id ? { ...u, teamId: undefined } : u)))
+      deleteRow('teams', id, 'deleteTeam', (message) => {
+        if (previous) setTeamRows((prev) => [...prev, previous!])
+        showError(message)
+      })
+    },
+    [showError],
+  )
+
   const companyById = useCallback<AppActions['companyById']>((id) => companies.find((c) => c.id === id), [companies])
   const contactById = useCallback<AppActions['contactById']>((id) => contacts.find((c) => c.id === id), [contacts])
   const dealById = useCallback<AppActions['dealById']>((id) => deals.find((d) => d.id === id), [deals])
@@ -772,6 +805,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateUser,
       removeUserLocal,
       addTeam,
+      updateTeam,
+      deleteTeam,
       dismissToast,
       companyById,
       contactById,
@@ -812,6 +847,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateUser,
       removeUserLocal,
       addTeam,
+      updateTeam,
+      deleteTeam,
       dismissToast,
       companyById,
       contactById,
