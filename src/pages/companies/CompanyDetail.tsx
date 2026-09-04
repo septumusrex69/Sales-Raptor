@@ -1,18 +1,18 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock, Users2 } from 'lucide-react'
+import { ArrowLeft, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock, Users2, Link2, Unlink } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { StatusBadge, StageBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { formatCurrency, formatDate, formatDateTime, services } from '../../data/mockData'
-import type { ProductService } from '../../types'
+import type { Company, ProductService } from '../../types'
 
 export function CompanyDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { companies, contacts, leads, deals, activities, tasks, users, addActivity, updateCompany, addDeal, addTask } = useAppStore()
+  const { companies, contacts, leads, deals, activities, tasks, users, addActivity, updateCompany, addCompany, addDeal, addTask } = useAppStore()
   const company = companies.find((c) => c.id === id)
   const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const [noteOpen, setNoteOpen] = useState(false)
@@ -20,6 +20,7 @@ export function CompanyDetail() {
   const [dealOpen, setDealOpen] = useState(false)
   const [followUpOpen, setFollowUpOpen] = useState(false)
   const [meetingOpen, setMeetingOpen] = useState(false)
+  const [parentOpen, setParentOpen] = useState(false)
 
   const companyContacts = useMemo(() => contacts.filter((c) => c.companyId === id), [contacts, id])
   const companyLeads = useMemo(() => leads.filter((l) => l.companyId === id), [leads, id])
@@ -58,11 +59,14 @@ export function CompanyDetail() {
               {company.code && <span className="font-mono text-[11px] text-white bg-gold-500 px-2 py-0.5 rounded-md">{company.code}</span>}
             </div>
             {company.parentCompanyId && (
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5">
                 Sub-account of{' '}
                 <Link to={`/companies/${company.parentCompanyId}`} className="text-brand-600 hover:underline">
                   {companies.find((c) => c.id === company.parentCompanyId)?.name}
                 </Link>
+                <button onClick={() => updateCompany(company.id, { parentCompanyId: undefined })} className="inline-flex items-center gap-0.5 text-slate-300 hover:text-slate-600" title="Remove from parent">
+                  <Unlink size={11} />
+                </button>
               </p>
             )}
             <p className="text-sm text-slate-500 mt-0.5">{company.industry} · {company.city}, {company.province}</p>
@@ -112,6 +116,11 @@ export function CompanyDetail() {
               <button onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
                 <StickyNote size={13} /> Add Note
               </button>
+              {subAccounts.length === 0 && (
+                <button onClick={() => setParentOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+                  <Link2 size={13} /> {company.parentCompanyId ? 'Change Parent' : 'Assign to Parent'}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -331,6 +340,18 @@ export function CompanyDetail() {
           onSave={(input) => addTask({ ...input, type: 'Meeting', companyId: company.id, relatedToLabel: company.name })}
         />
       )}
+      {parentOpen && (
+        <AssignParentModal
+          currentParentId={company.parentCompanyId}
+          candidates={companies.filter((c) => c.id !== company.id && !c.parentCompanyId)}
+          onClose={() => setParentOpen(false)}
+          onAssignExisting={(parentId) => updateCompany(company.id, { parentCompanyId: parentId })}
+          onCreateNew={(name, code) => {
+            const parent = addCompany({ name, code: code || undefined, accountOwnerId: company.accountOwnerId })
+            updateCompany(company.id, { parentCompanyId: parent.id })
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -493,6 +514,93 @@ function ScheduleFollowUpModal({ onClose, onSave }: { onClose: () => void; onSav
           </button>
           <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
             Schedule
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function AssignParentModal({
+  currentParentId,
+  candidates,
+  onClose,
+  onAssignExisting,
+  onCreateNew,
+}: {
+  currentParentId?: string
+  candidates: Company[]
+  onClose: () => void
+  onAssignExisting: (parentId: string) => void
+  onCreateNew: (name: string, code: string) => void
+}) {
+  const [mode, setMode] = useState<'existing' | 'new'>(candidates.length > 0 ? 'existing' : 'new')
+  const [selectedId, setSelectedId] = useState(currentParentId ?? candidates[0]?.id ?? '')
+  const [newName, setNewName] = useState('')
+  const [newCode, setNewCode] = useState('')
+
+  return (
+    <Modal title="Assign to Parent Client" onClose={onClose} width={420}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (mode === 'existing') {
+            if (!selectedId) return
+            onAssignExisting(selectedId)
+          } else {
+            if (!newName.trim()) return
+            onCreateNew(newName.trim(), newCode.trim())
+          }
+          onClose()
+        }}
+      >
+        <div className="flex gap-2 mb-3 text-xs font-medium">
+          <button
+            type="button"
+            onClick={() => setMode('existing')}
+            disabled={candidates.length === 0}
+            className={`px-3 py-1.5 rounded-lg border ${mode === 'existing' ? 'bg-brand-600 text-white border-brand-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'} disabled:opacity-40 disabled:cursor-not-allowed`}
+          >
+            Existing client
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('new')}
+            className={`px-3 py-1.5 rounded-lg border ${mode === 'new' ? 'bg-brand-600 text-white border-brand-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+          >
+            New parent client
+          </button>
+        </div>
+
+        {mode === 'existing' ? (
+          <FormField label="Parent Client" required>
+            <select className={inputClass} value={selectedId} onChange={(e) => setSelectedId(e.target.value)} required>
+              {candidates.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                  {c.code ? ` (${c.code})` : ''}
+                </option>
+              ))}
+            </select>
+          </FormField>
+        ) : (
+          <>
+            <p className="text-xs text-slate-400 mb-3">Creates a new parent client record with no Swordfish prefix of its own, and moves this client underneath it.</p>
+            <FormField label="Parent Client Name" required>
+              <input className={inputClass} value={newName} onChange={(e) => setNewName(e.target.value)} required autoFocus placeholder="e.g. Marara Pharmacy" />
+            </FormField>
+            <FormField label="Code (optional)">
+              <input className={inputClass} value={newCode} onChange={(e) => setNewCode(e.target.value.toUpperCase())} placeholder="e.g. MARARA" />
+            </FormField>
+          </>
+        )}
+
+        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
+          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
+            Cancel
+          </button>
+          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
+            Assign
           </button>
         </div>
       </form>
