@@ -126,6 +126,78 @@ export function CompanyDetail() {
         </div>
       </Card>
 
+      <Card>
+        <CardHeader title="Contact Details" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-4 pb-4 border-b border-slate-100">
+          <div>
+            <p className="text-xs text-slate-400 mb-0.5">Phone</p>
+            {company.phone ? (
+              <a href={`tel:${company.phone}`} className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600">
+                <Phone size={13} /> {company.phone}
+              </a>
+            ) : (
+              <span className="text-slate-300">—</span>
+            )}
+          </div>
+          <div>
+            <p className="text-xs text-slate-400 mb-0.5">Email</p>
+            {company.email ? (
+              <a href={`mailto:${company.email}`} className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600">
+                <Mail size={13} /> {company.email}
+              </a>
+            ) : (
+              <span className="text-slate-300">—</span>
+            )}
+          </div>
+          <div>
+            <p className="text-xs text-slate-400 mb-0.5">Website</p>
+            {company.website ? (
+              <span className="inline-flex items-center gap-1.5 text-slate-700 font-medium">
+                <Globe size={13} /> {company.website}
+              </span>
+            ) : (
+              <span className="text-slate-300">—</span>
+            )}
+          </div>
+        </div>
+
+        <p className="text-xs text-slate-400 mb-2">Contact Persons</p>
+        {companyContacts.length === 0 ? (
+          <p className="text-sm text-slate-400">No contact persons yet.</p>
+        ) : (
+          <div className="space-y-1">
+            {companyContacts.map((c) => (
+              <div key={c.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 hover:bg-slate-50 -mx-1 px-2 py-2 rounded-lg">
+                <Link to={`/contacts/${c.id}`} className="flex items-center gap-2.5 min-w-0">
+                  <UserAvatar userId={c.ownerId} size={30} />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-700 hover:text-brand-600 truncate">{c.firstName} {c.lastName}</p>
+                    <p className="text-xs text-slate-400 truncate">{c.jobTitle}</p>
+                  </div>
+                </Link>
+                <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
+                  {c.phone && (
+                    <a href={`tel:${c.phone}`} className="inline-flex items-center gap-1 hover:text-brand-600">
+                      <Phone size={11} /> {c.phone}
+                    </a>
+                  )}
+                  {c.mobile && (
+                    <a href={`tel:${c.mobile}`} className="inline-flex items-center gap-1 hover:text-brand-600">
+                      <Phone size={11} /> {c.mobile} <span className="text-slate-300">mobile</span>
+                    </a>
+                  )}
+                  {c.email && (
+                    <a href={`mailto:${c.email}`} className="inline-flex items-center gap-1 hover:text-brand-600">
+                      <Mail size={11} /> {c.email}
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
       {subAccounts.length > 0 && (
         <Card padded={false}>
           <div className="p-5 pb-3">
@@ -170,6 +242,22 @@ export function CompanyDetail() {
           </div>
         </Card>
       )}
+
+      <Card>
+        <CardHeader title="Notes" subtitle={`${notes.length} note${notes.length === 1 ? '' : 's'}`} />
+        {notes.length === 0 ? (
+          <p className="text-sm text-slate-400">No notes yet.</p>
+        ) : (
+          <div className="space-y-2.5">
+            {notes.map((n) => (
+              <div key={n.id} className="bg-[#f7f4eb] border border-[#e7dbb2] rounded-lg p-3">
+                <p className="text-sm text-slate-700">{n.notes || n.subject}</p>
+                <p className="text-[11px] text-slate-400 mt-1">{formatDateTime(n.activityDate)}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 space-y-5">
@@ -264,25 +352,6 @@ export function CompanyDetail() {
           </Card>
 
           <Card>
-            <CardHeader title="Contacts" />
-            {companyContacts.length === 0 ? (
-              <p className="text-sm text-slate-400">No contacts yet.</p>
-            ) : (
-              <div className="space-y-2.5">
-                {companyContacts.map((c) => (
-                  <Link key={c.id} to={`/contacts/${c.id}`} className="flex items-center gap-2.5 hover:bg-slate-50 -mx-1 px-1 py-1 rounded-lg">
-                    <UserAvatar userId={c.ownerId} size={26} />
-                    <div>
-                      <p className="text-sm font-medium text-slate-700">{c.firstName} {c.lastName}</p>
-                      <p className="text-xs text-slate-400">{c.jobTitle}</p>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          <Card>
             <CardHeader title="Tasks" />
             {companyTasks.length === 0 ? (
               <p className="text-sm text-slate-400">No tasks yet.</p>
@@ -292,22 +361,6 @@ export function CompanyDetail() {
                   <div key={t.id} className="text-sm">
                     <p className="text-slate-700">{t.title}</p>
                     <p className="text-xs text-slate-400">Due {formatDate(t.dueDate)}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          <Card>
-            <CardHeader title="Notes" />
-            {notes.length === 0 ? (
-              <p className="text-sm text-slate-400">No notes yet.</p>
-            ) : (
-              <div className="space-y-2.5">
-                {notes.map((n) => (
-                  <div key={n.id} className="bg-[#f7f4eb] border border-[#e7dbb2] rounded-lg p-3">
-                    <p className="text-sm text-slate-700">{n.notes || n.subject}</p>
-                    <p className="text-[11px] text-slate-400 mt-1">{formatDateTime(n.activityDate)}</p>
                   </div>
                 ))}
               </div>
