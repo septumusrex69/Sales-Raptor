@@ -122,7 +122,8 @@ create table if not exists public.companies (
   code text,
   account_count integer,
   handover_amount numeric,
-  payments_to_date numeric
+  payments_to_date numeric,
+  marketing_agent text
 );
 
 -- ---------- Contacts ----------

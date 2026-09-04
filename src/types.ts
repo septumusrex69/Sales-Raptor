@@ -194,6 +194,8 @@ export interface Company {
   accountCount?: number
   handoverAmount?: number
   paymentsToDate?: number
+  /** Name of the closer who originally signed this client (Swordfish's "Marketing Agent"), where known. */
+  marketingAgent?: string
 }
 
 export type TaskType =
