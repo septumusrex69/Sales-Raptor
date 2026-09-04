@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card, CardHeader } from '../../components/ui/Card'
@@ -11,6 +11,7 @@ import type { ProductService } from '../../types'
 
 export function CompanyDetail() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const { companies, contacts, leads, deals, activities, tasks, users, addActivity, updateCompany, addDeal, addTask } = useAppStore()
   const company = companies.find((c) => c.id === id)
   const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
@@ -24,7 +25,8 @@ export function CompanyDetail() {
   const companyDeals = useMemo(() => deals.filter((d) => d.companyId === id), [deals, id])
   const openDeals = companyDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Lost')
   const wonDeals = companyDeals.filter((d) => d.stage === 'Won')
-  const isClient = wonDeals.length > 0
+  const subAccounts = useMemo(() => companies.filter((c) => c.parentCompanyId === id), [companies, id])
+  const isClient = wonDeals.length > 0 || !!company?.code
   const companyActivities = useMemo(
     () => activities.filter((a) => a.companyId === id).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()),
     [activities, id],
@@ -50,8 +52,25 @@ export function CompanyDetail() {
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-slate-800">{company.name}</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-slate-800">{company.name}</h2>
+              {company.code && <span className="font-mono text-[11px] text-white bg-gold-500 px-2 py-0.5 rounded-md">{company.code}</span>}
+            </div>
+            {company.parentCompanyId && (
+              <p className="text-xs text-slate-400 mt-0.5">
+                Sub-account of{' '}
+                <Link to={`/companies/${company.parentCompanyId}`} className="text-brand-600 hover:underline">
+                  {companies.find((c) => c.id === company.parentCompanyId)?.name}
+                </Link>
+              </p>
+            )}
             <p className="text-sm text-slate-500 mt-0.5">{company.industry} · {company.city}, {company.province}</p>
+            {(company.accountCount !== undefined || company.handoverAmount !== undefined) && (
+              <p className="text-xs text-slate-500 mt-1">
+                {company.accountCount ?? 0} accounts · Handover {formatCurrency(company.handoverAmount ?? 0)}
+                {company.paymentsToDate !== undefined && ` · Paid to date ${formatCurrency(company.paymentsToDate)}`}
+              </p>
+            )}
             <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
               {company.email && (
                 <a href={`mailto:${company.email}`} className="inline-flex items-center gap-1 hover:text-brand-600">
@@ -91,6 +110,51 @@ export function CompanyDetail() {
           </div>
         </div>
       </Card>
+
+      {subAccounts.length > 0 && (
+        <Card padded={false}>
+          <div className="p-5 pb-3">
+            <CardHeader title="Sub-accounts" subtitle={`${subAccounts.length} under this client`} />
+          </div>
+          <div className="overflow-x-auto px-5 pb-5">
+            <table className="w-full text-sm border border-slate-100 rounded-xl overflow-hidden">
+              <thead>
+                <tr className="text-left text-xs text-slate-400 bg-slate-50/70">
+                  <th className="font-medium px-4 py-2.5">Sub-account</th>
+                  <th className="font-medium px-3 py-2.5">Code</th>
+                  <th className="font-medium px-3 py-2.5 text-right">Accounts</th>
+                  <th className="font-medium px-3 py-2.5 text-right">Handover Amount</th>
+                  <th className="font-medium px-3 py-2.5 text-right">Payments to Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {subAccounts.map((s) => (
+                  <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/60 cursor-pointer" onClick={() => navigate(`/companies/${s.id}`)}>
+                    <td className="px-4 py-2.5">
+                      <Link to={`/companies/${s.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
+                        {s.name}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {s.code ? <span className="font-mono text-[11px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">{s.code}</span> : '—'}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{s.accountCount ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{s.handoverAmount !== undefined ? formatCurrency(s.handoverAmount) : '—'}</td>
+                    <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{s.paymentsToDate !== undefined ? formatCurrency(s.paymentsToDate) : '—'}</td>
+                  </tr>
+                ))}
+                <tr className="border-t border-slate-200" style={{ background: 'rgba(236,220,184,0.25)' }}>
+                  <td className="px-4 py-2.5 font-bold text-slate-800">Total</td>
+                  <td className="px-3 py-2.5"></td>
+                  <td className="px-3 py-2.5 text-right font-bold text-slate-800 tabular-nums">{subAccounts.reduce((s, a) => s + (a.accountCount ?? 0), 0)}</td>
+                  <td className="px-3 py-2.5 text-right font-bold text-slate-800 tabular-nums">{formatCurrency(subAccounts.reduce((s, a) => s + (a.handoverAmount ?? 0), 0))}</td>
+                  <td className="px-3 py-2.5 text-right font-bold text-slate-800 tabular-nums">{formatCurrency(subAccounts.reduce((s, a) => s + (a.paymentsToDate ?? 0), 0))}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 space-y-5">

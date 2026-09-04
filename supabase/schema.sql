@@ -111,7 +111,18 @@ create table if not exists public.companies (
   city text,
   address text,
   account_owner_id uuid not null references public.profiles (id),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Groups this company as a sub-account under another (e.g. "Bonitas" under
+  -- "Marara Pharmacy"). Short reference code is either a real Swordfish
+  -- client prefix, or an internal-only code invented for a parent that has
+  -- no Swordfish code of its own. account_count/handover_amount/
+  -- payments_to_date are debt-collection servicing totals synced per
+  -- sub-account; a parent with children has no totals of its own.
+  parent_company_id uuid references public.companies (id) on delete set null,
+  code text,
+  account_count integer,
+  handover_amount numeric,
+  payments_to_date numeric
 );
 
 -- ---------- Contacts ----------

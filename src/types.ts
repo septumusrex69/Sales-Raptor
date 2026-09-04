@@ -186,6 +186,14 @@ export interface Company {
   address?: string
   accountOwnerId: ID
   createdAt: string
+  /** Groups this Company as a sub-account under another Company (e.g. "Bonitas" under "Marara Pharmacy"). Undefined for a standalone client or a parent itself. */
+  parentCompanyId?: ID
+  /** Short reference code — either the real Swordfish client prefix (e.g. "MPY"), or an internal-only code we invent for a parent that has no Swordfish code of its own (e.g. "MARARA"). */
+  code?: string
+  /** Debt-collection servicing totals, synced from Swordfish per sub-account. A parent with children has no totals of its own — sum its children instead. */
+  accountCount?: number
+  handoverAmount?: number
+  paymentsToDate?: number
 }
 
 export type TaskType =
