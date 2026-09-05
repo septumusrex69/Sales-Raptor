@@ -23,8 +23,24 @@ export function CompanyDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { currentUser } = useAuth()
-  const { companies, contacts, leads, deals, activities, tasks, users, addActivity, updateCompany, updateContact, addContact, deleteCompany, addCompany, addDeal, addTask } =
-    useAppStore()
+  const {
+    companies,
+    contacts,
+    leads,
+    deals,
+    activities,
+    tasks,
+    users,
+    addActivity,
+    updateActivity,
+    updateCompany,
+    updateContact,
+    addContact,
+    deleteCompany,
+    addCompany,
+    addDeal,
+    addTask,
+  } = useAppStore()
   const company = companies.find((c) => c.id === id)
   const isAdmin = currentUser?.role === 'Administrator'
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
@@ -43,8 +59,10 @@ export function CompanyDetail() {
   const [editCompanyOpen, setEditCompanyOpen] = useState(false)
   const [addContactOpen, setAddContactOpen] = useState(false)
   const [replyTarget, setReplyTarget] = useState<{ to: string; subject: string; body: string; contactId?: string } | null>(null)
-  const [emailLimit, setEmailLimit] = useState<RowLimit>(10)
-  const [noteLimit, setNoteLimit] = useState<RowLimit>(10)
+  const [emailLimit, setEmailLimit] = useState<RowLimit>(5)
+  const [noteLimit, setNoteLimit] = useState<RowLimit>(5)
+  const [composeOpen, setComposeOpen] = useState(false)
+  const [composeTarget, setComposeTarget] = useState<{ to: string; contactId?: string } | null>(null)
 
   const companyContacts = useMemo(() => contacts.filter((c) => c.companyId === id), [contacts, id])
   const companyLeads = useMemo(() => leads.filter((l) => l.companyId === id), [leads, id])
@@ -342,22 +360,39 @@ export function CompanyDetail() {
         <CardHeader
           title="Emails"
           subtitle={`${emailActivities.length} message${emailActivities.length === 1 ? '' : 's'}`}
-          action={<RowLimitSelect value={emailLimit} onChange={setEmailLimit} />}
+          action={
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setComposeOpen(true)}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+              >
+                <Mail size={12} /> Compose
+              </button>
+              <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
+            </div>
+          }
         />
         {emailActivities.length === 0 ? (
           <p className="text-sm text-slate-400">No emails yet.</p>
         ) : (
-          <div className="space-y-2.5">
+          <div className="space-y-2">
             {applyRowLimit(emailActivities, emailLimit).map((a) => {
               const parsed = parseEmailActivity(a.subject)
               const canReply = parsed?.direction === 'received'
               const replyToAddress = a.contactId ? contacts.find((c) => c.id === a.contactId)?.email : company.email
+              const isUnread = parsed?.direction === 'received' && a.isRead === false
+              const borderColor = parsed?.direction === 'sent' ? '#6086a9' : parsed?.isSpam ? '#c9962c' : '#406d58'
               return (
-                <div key={a.id} className="flex items-start justify-between gap-3 border-b border-slate-50 pb-2.5 last:border-0 last:pb-0">
+                <div
+                  key={a.id}
+                  onClick={() => isUnread && updateActivity(a.id, { isRead: true })}
+                  style={{ borderLeftColor: borderColor }}
+                  className={`flex items-start justify-between gap-3 rounded-lg border-l-[3px] pl-2.5 pr-2 py-2 ${isUnread ? 'bg-brand-50/60 cursor-pointer' : ''}`}
+                >
                   <div className="flex items-start gap-2 min-w-0">
-                    <Mail size={13} className={`mt-1 shrink-0 ${parsed?.direction === 'sent' ? 'text-brand-500' : parsed?.isSpam ? 'text-amber-500' : 'text-slate-400'}`} />
+                    {isUnread && <span className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 shrink-0" />}
                     <div className="min-w-0">
-                      <p className="text-sm text-slate-700">
+                      <p className={`text-sm ${isUnread ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>
                         <span className="text-xs font-medium text-slate-400 mr-1.5">
                           {parsed?.direction === 'sent' ? 'Sent' : parsed?.isSpam ? 'Received (Spam/Junk)' : parsed ? 'Received' : ''}
                         </span>
@@ -370,7 +405,8 @@ export function CompanyDetail() {
                     <span className="text-[11px] text-slate-400">{formatDateTime(a.activityDate)}</span>
                     {canReply && replyToAddress && (
                       <button
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation()
                           const rawSubject = parsed?.subject ?? a.subject
                           setReplyTarget({
                             to: replyToAddress,
@@ -544,6 +580,24 @@ export function CompanyDetail() {
           onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, contactId: replyTarget.contactId, companyId: company.id })}
         />
       )}
+      {composeOpen && (
+        <ChooseRecipientModal
+          company={company}
+          contacts={companyContacts}
+          onClose={() => setComposeOpen(false)}
+          onChoose={(target) => {
+            setComposeOpen(false)
+            setComposeTarget(target)
+          }}
+        />
+      )}
+      {composeTarget && (
+        <ComposeEmailModal
+          to={composeTarget.to}
+          onClose={() => setComposeTarget(null)}
+          onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, contactId: composeTarget.contactId, companyId: company.id })}
+        />
+      )}
       {editContact && (
         <EditContactModal contact={editContact} onClose={() => setEditContact(null)} onSave={(patch) => updateContact(editContact.id, patch)} />
       )}
@@ -680,6 +734,44 @@ function QuickLogModal({
           </button>
         </div>
       </form>
+    </Modal>
+  )
+}
+
+function ChooseRecipientModal({
+  company,
+  contacts,
+  onClose,
+  onChoose,
+}: {
+  company: Company
+  contacts: Contact[]
+  onClose: () => void
+  onChoose: (target: { to: string; contactId?: string }) => void
+}) {
+  const recipients = [
+    ...(company.email ? [{ label: `${company.name} (Client)`, email: company.email, contactId: undefined as string | undefined }] : []),
+    ...contacts.filter((c) => c.email).map((c) => ({ label: `${c.firstName} ${c.lastName}${c.jobTitle ? ` — ${c.jobTitle}` : ''}`, email: c.email!, contactId: c.id })),
+  ]
+
+  return (
+    <Modal title="Compose Email" onClose={onClose} width={400}>
+      {recipients.length === 0 ? (
+        <p className="text-sm text-slate-400">No one here has an email address on file yet.</p>
+      ) : (
+        <div className="space-y-1">
+          {recipients.map((r) => (
+            <button
+              key={r.contactId ?? 'company'}
+              onClick={() => onChoose({ to: r.email, contactId: r.contactId })}
+              className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-slate-50 flex items-center justify-between gap-3"
+            >
+              <span className="text-sm font-medium text-slate-700">{r.label}</span>
+              <span className="text-xs text-slate-400">{r.email}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </Modal>
   )
 }

@@ -287,11 +287,34 @@ create table if not exists public.activities (
   -- Set only for Activities logged from a synced incoming email (the message's Message-ID
   -- header). Lets emailSync.ts upsert with ON CONFLICT DO NOTHING so the same email can never
   -- be logged twice for the same person, however many times a sync happens to reprocess it.
-  email_message_id text
+  email_message_id text,
+  -- Only meaningful for type = 'Email': true for every non-email Activity and for an
+  -- outgoing sent email (nothing to "read"); false for a freshly-synced incoming email
+  -- until someone opens it in the Emails card.
+  is_read boolean not null default true
 );
 create unique index if not exists activities_user_email_message_id_key
   on public.activities (user_id, email_message_id)
   where email_message_id is not null;
+
+-- ---------- Notifications ----------
+-- One row per person per notifyable event. Only ever written by service_role (server-side
+-- code, e.g. emailSync.ts logging a new incoming email) in this pass -- no insert policy for
+-- authenticated/anon, so a person can read and mark their own notifications read but never
+-- forge one for themselves or anyone else.
+create table if not exists public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  type text not null,
+  message text not null,
+  -- App-relative path to open when clicked, e.g. "/companies/<id>".
+  link text,
+  read boolean not null default false,
+  created_at timestamptz not null default now()
+);
+alter table public.notifications enable row level security;
+create policy "notifications_select" on public.notifications for select using (user_id = auth.uid());
+create policy "notifications_update" on public.notifications for update using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 -- ---------- Proposals ----------
 create table if not exists public.proposals (

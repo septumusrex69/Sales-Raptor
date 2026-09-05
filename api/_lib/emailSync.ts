@@ -27,12 +27,14 @@ function findFolder(mailboxes: ListResponse[], specialUse: string, commonNames: 
 
 async function findMatch(admin: SupabaseClient, fromAddress: string) {
   const email = fromAddress.toLowerCase()
-  const { data: contact } = await admin.from('contacts').select('id, company_id').ilike('email', email).limit(1).maybeSingle()
-  if (contact) return { contactId: contact.id as string, companyId: (contact.company_id as string | null) ?? undefined }
-  const { data: lead } = await admin.from('leads').select('id, company_id').ilike('email', email).limit(1).maybeSingle()
-  if (lead) return { leadId: lead.id as string, companyId: (lead.company_id as string | null) ?? undefined }
-  const { data: company } = await admin.from('companies').select('id').ilike('email', email).limit(1).maybeSingle()
-  if (company) return { companyId: company.id as string }
+  const { data: contact } = await admin.from('contacts').select('id, company_id, owner_id').ilike('email', email).limit(1).maybeSingle()
+  if (contact) {
+    return { contactId: contact.id as string, companyId: (contact.company_id as string | null) ?? undefined, notifyUserId: contact.owner_id as string }
+  }
+  const { data: lead } = await admin.from('leads').select('id, company_id, owner_id').ilike('email', email).limit(1).maybeSingle()
+  if (lead) return { leadId: lead.id as string, companyId: (lead.company_id as string | null) ?? undefined, notifyUserId: lead.owner_id as string }
+  const { data: company } = await admin.from('companies').select('id, account_owner_id').ilike('email', email).limit(1).maybeSingle()
+  if (company) return { companyId: company.id as string, notifyUserId: company.account_owner_id as string }
   return null
 }
 
@@ -127,6 +129,7 @@ async function syncMailbox(
             notes: (parsed.text || '').slice(0, NOTES_MAX_LENGTH),
             activity_date: (parsed.date ?? new Date()).toISOString(),
             email_message_id: parsed.messageId ?? `${conn.user_id}:${path}:${uid}`,
+            is_read: false,
           },
           { onConflict: 'user_id,email_message_id', ignoreDuplicates: true },
         )
@@ -134,7 +137,18 @@ async function syncMailbox(
       // A duplicate (already-logged Message-ID) is silently skipped by ignoreDuplicates
       // and comes back as an empty array, not an error -- only count it when a row was
       // actually inserted.
-      if (!error && inserted && inserted.length > 0) logged += 1
+      if (!error && inserted && inserted.length > 0) {
+        logged += 1
+        if (match.notifyUserId) {
+          const link = match.companyId ? `/companies/${match.companyId}` : match.leadId ? `/leads/${match.leadId}` : `/contacts/${match.contactId}`
+          await admin.from('notifications').insert({
+            user_id: match.notifyUserId,
+            type: 'Email received',
+            message: `New email from ${parsed.from?.text || fromAddress}: ${parsed.subject || '(no subject)'}`,
+            link,
+          })
+        }
+      }
     }
 
     return { logged, maxUid }

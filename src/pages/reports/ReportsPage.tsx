@@ -14,6 +14,7 @@ import { DEAL_STAGES } from '../../types'
 import type { Deal, Lead, LeadClassification, LeadSource, LeadStatus, ProductService } from '../../types'
 import { getCurrentSalesMonth, getPreviousSalesMonth, isWithinPeriod, encodeSalesMonthParam, type SalesMonthPeriod } from '../../lib/salesMonth'
 import { isMeaningfulActivity } from '../../lib/meaningfulActivity'
+import { parseEmailActivity } from '../../lib/emailActivity'
 import { buildDrilldownUrl, SALES_MONTH_PARAM } from '../../lib/drilldown'
 import { STAGE_COLORS } from '../../lib/colors'
 import { isAssignableOwner } from '../../lib/permissions'
@@ -212,6 +213,9 @@ export function ReportsPage() {
         const calls = activities.filter((a) => a.userId === r.id && a.type === 'Call' && isMeaningfulActivity(a) && isWithinPeriod(a.activityDate, period)).length
         const meetings = activities.filter((a) => a.userId === r.id && a.type === 'Meeting' && isWithinPeriod(a.activityDate, period)).length
         const proposals = activities.filter((a) => a.userId === r.id && a.type === 'Proposal' && isWithinPeriod(a.activityDate, period)).length
+        const repEmails = activities.filter((a) => a.userId === r.id && a.type === 'Email' && isWithinPeriod(a.activityDate, period))
+        const emailsSent = repEmails.filter((a) => parseEmailActivity(a.subject)?.direction === 'sent').length
+        const emailsResponded = repEmails.filter((a) => parseEmailActivity(a.subject)?.direction === 'received').length
         const revenueWon = won.reduce((s, d) => s + d.value, 0)
         const closed = won.length + lost.length
         return {
@@ -220,6 +224,8 @@ export function ReportsPage() {
           calls,
           meetings,
           proposals,
+          emailsSent,
+          emailsResponded,
           dealsWon: won.length,
           revenueWon,
           avgDealValue: won.length ? Math.round(revenueWon / won.length) : 0,
@@ -263,6 +269,21 @@ export function ReportsPage() {
       }),
     [leadsInPeriod],
   )
+
+  const emailActivitiesInPeriod = useMemo(
+    () => activities.filter((a) => a.type === 'Email' && isWithinPeriod(a.activityDate, period) && (rep === 'All' || a.userId === rep)),
+    [activities, period, rep],
+  )
+  const emailStats = useMemo(() => {
+    let sent = 0
+    let responded = 0
+    for (const a of emailActivitiesInPeriod) {
+      const parsed = parseEmailActivity(a.subject)
+      if (parsed?.direction === 'sent') sent += 1
+      else if (parsed?.direction === 'received') responded += 1
+    }
+    return { sent, responded }
+  }, [emailActivitiesInPeriod])
 
   const cityReport = useMemo(
     () =>
@@ -429,6 +450,8 @@ export function ReportsPage() {
               pctChange={prevCore ? pctDelta(core.totalHandoverValue, prevCore.totalHandoverValue) : undefined}
               to={buildDrilldownUrl('/leads', { service: 'Debt Collection', [SALES_MONTH_PARAM]: periodParam })}
             />
+            <StatTile label="Emails Sent" value={String(emailStats.sent)} to={buildDrilldownUrl('/activities', { type: 'Email', [SALES_MONTH_PARAM]: periodParam })} />
+            <StatTile label="Responded" value={String(emailStats.responded)} to={buildDrilldownUrl('/activities', { type: 'Email', [SALES_MONTH_PARAM]: periodParam })} />
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <Card>
@@ -608,6 +631,8 @@ export function ReportsPage() {
                   <th className="font-medium px-3 py-3 text-center">Calls</th>
                   <th className="font-medium px-3 py-3 text-center">Meetings</th>
                   <th className="font-medium px-3 py-3 text-center">Proposals</th>
+                  <th className="font-medium px-3 py-3 text-center">Emails Sent</th>
+                  <th className="font-medium px-3 py-3 text-center">Responded</th>
                   <th className="font-medium px-3 py-3 text-center">Deals Won</th>
                   <th className="font-medium px-3 py-3 text-right">Revenue Won</th>
                   <th className="font-medium px-3 py-3 text-right">Avg Deal Value</th>
@@ -646,6 +671,16 @@ export function ReportsPage() {
                       <td className="px-3 py-3 text-center">
                         <Link to={buildDrilldownUrl('/activities', { owner: s.rep.id, type: 'Proposal' })} className="text-slate-600 hover:text-brand-600 hover:underline">
                           {s.proposals}
+                        </Link>
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <Link to={buildDrilldownUrl('/activities', { owner: s.rep.id, type: 'Email' })} className="text-slate-600 hover:text-brand-600 hover:underline">
+                          {s.emailsSent}
+                        </Link>
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <Link to={buildDrilldownUrl('/activities', { owner: s.rep.id, type: 'Email' })} className="text-slate-600 hover:text-brand-600 hover:underline">
+                          {s.emailsResponded}
                         </Link>
                       </td>
                       <td className="px-3 py-3 text-center text-slate-600">{s.dealsWon}</td>

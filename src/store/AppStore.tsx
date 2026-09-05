@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { supabase } from '../lib/supabase'
 import { useAuth } from './AuthContext'
 import { TODAY } from '../data/mockData'
-import type { Activity, ActivityType, Company, Contact, Deal, DealStage, ID, Lead, LeadStatus, LossReason, Proposal, Task, Team, TeamKind, User } from '../types'
+import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, LeadStatus, LossReason, Proposal, Task, Team, TeamKind, User } from '../types'
 
 /**
  * Generic camelCase(app) <-> snake_case(Postgres) row mapping. The SQL
@@ -133,6 +133,7 @@ interface AppState {
   proposals: Proposal[]
   users: User[]
   teams: Team[]
+  notifications: AppNotification[]
   dataLoading: boolean
   /** Message from the most recent failed write (e.g. permission denied). Null when nothing to show. */
   toast: string | null
@@ -170,6 +171,9 @@ interface AppActions {
   addTask: (input: Partial<Task> & { title: string; dueDate: string }) => Task
   updateTask: (id: ID, patch: Partial<Task>) => void
   addActivity: (input: Partial<Activity> & { type: ActivityType; subject: string }) => Activity
+  updateActivity: (id: ID, patch: Partial<Activity>) => void
+  markNotificationRead: (id: ID) => void
+  markAllNotificationsRead: () => void
 
   addProposal: (input: Partial<Proposal> & { dealId: ID; companyId: ID; service: string; pricing: number }) => Proposal
   updateProposal: (id: ID, patch: Partial<Proposal>) => void
@@ -204,6 +208,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [proposals, setProposals] = useState<Proposal[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [teamRows, setTeamRows] = useState<{ id: ID; name: string; kind: TeamKind }[]>([])
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const [toast, setToast] = useState<string | null>(null)
 
@@ -227,6 +232,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       setProposals([])
       setUsers([])
       setTeamRows([])
+      setNotifications([])
       setDataLoading(false)
       return
     }
@@ -242,8 +248,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       fetchTable<Proposal>('proposals', 'created_at'),
       fetchTable<User>('profiles', 'created_at'),
       fetchTable<{ id: ID; name: string; kind: TeamKind }>('teams', 'created_at'),
+      fetchTable<AppNotification>('notifications', 'created_at'),
     ])
-      .then(([l, d, ct, co, tk, ac, pr, us, tm]) => {
+      .then(([l, d, ct, co, tk, ac, pr, us, tm, nt]) => {
         if (!active) return
         setLeads(l)
         setDeals(d)
@@ -254,6 +261,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         setProposals(pr)
         setUsers(us)
         setTeamRows(tm)
+        setNotifications(nt)
         setDataLoading(false)
       })
       .catch((err: unknown) => {
@@ -295,6 +303,34 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     },
     [ownerId],
   )
+
+  const updateActivity = useCallback<AppActions['updateActivity']>(
+    (id, patch) => {
+      let previous: Activity | undefined
+      setActivities((prev) => {
+        previous = prev.find((a) => a.id === id)
+        return prev.map((a) => (a.id === id ? { ...a, ...patch } : a))
+      })
+      updateRow('activities', id, patch, 'updateActivity', (message) => {
+        if (previous) setActivities((prev) => prev.map((a) => (a.id === id ? previous! : a)))
+        showError(message)
+      })
+    },
+    [showError],
+  )
+
+  const markNotificationRead = useCallback<AppActions['markNotificationRead']>((id) => {
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)))
+    updateRow('notifications', id, { read: true }, 'markNotificationRead')
+  }, [])
+
+  const markAllNotificationsRead = useCallback<AppActions['markAllNotificationsRead']>(() => {
+    setNotifications((prev) => {
+      const unreadIds = prev.filter((n) => !n.read).map((n) => n.id)
+      for (const id of unreadIds) updateRow('notifications', id, { read: true }, 'markAllNotificationsRead')
+      return prev.map((n) => ({ ...n, read: true }))
+    })
+  }, [])
 
   const addLead = useCallback<AppActions['addLead']>(
     (input) => {
@@ -815,6 +851,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       proposals,
       users,
       teams,
+      notifications,
       dataLoading,
       toast,
       addLead,
@@ -835,6 +872,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       addTask,
       updateTask,
       addActivity,
+      updateActivity,
+      markNotificationRead,
+      markAllNotificationsRead,
       addProposal,
       updateProposal,
       updateUser,
@@ -859,6 +899,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       proposals,
       users,
       teams,
+      notifications,
       dataLoading,
       toast,
       addLead,
@@ -879,6 +920,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       addTask,
       updateTask,
       addActivity,
+      updateActivity,
+      markNotificationRead,
+      markAllNotificationsRead,
       addProposal,
       updateProposal,
       updateUser,

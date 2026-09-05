@@ -261,6 +261,8 @@ export interface Activity {
   notes?: string
   activityDate: string
   createdAt: string
+  /** Only meaningful for type 'Email': false until a freshly-synced incoming email has been opened. */
+  isRead?: boolean
 }
 
 export type ProposalStatus = 'Draft' | 'Sent' | 'Viewed' | 'Accepted' | 'Declined' | 'Expired'
@@ -349,6 +351,7 @@ export type NotificationType =
   | 'Deal moved'
   | 'Deal won'
   | 'Lead reassigned'
+  | 'Email received'
 
 export interface AppNotification {
   id: ID
@@ -356,4 +359,6 @@ export interface AppNotification {
   message: string
   createdAt: string
   read: boolean
+  /** App-relative path to open when clicked, e.g. "/companies/<id>". */
+  link?: string
 }

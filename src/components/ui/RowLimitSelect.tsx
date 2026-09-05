@@ -1,4 +1,4 @@
-export const ROW_LIMIT_OPTIONS = [10, 20, 30, 50, 'All'] as const
+export const ROW_LIMIT_OPTIONS = [5, 10, 20, 30, 50, 'All'] as const
 export type RowLimit = (typeof ROW_LIMIT_OPTIONS)[number]
 
 export function RowLimitSelect({ value, onChange }: { value: RowLimit; onChange: (v: RowLimit) => void }) {
