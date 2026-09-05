@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
+import { SignatureEditor } from '../../components/settings/SignatureEditor'
 import { customFields as initialCustomFields, industries, leadSources as initialLeadSources, lossReasons as initialLossReasons } from '../../data/mockData'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
@@ -52,6 +53,9 @@ function ProfileTab() {
     email: currentUser?.email ?? '',
     phone: currentUser?.phone ?? '',
     emailSignature: currentUser?.emailSignature ?? '',
+    emailSignatureImageUrl: currentUser?.emailSignatureImageUrl,
+    emailSignatureImageWidth: currentUser?.emailSignatureImageWidth,
+    emailSignatureImageAlign: currentUser?.emailSignatureImageAlign,
     language: 'English',
     timezone: '(GMT+02:00) Johannesburg',
     dateFormat: 'DD MMM YYYY',
@@ -73,7 +77,14 @@ function ProfileTab() {
         onSubmit={(e) => {
           e.preventDefault()
           if (currentUser) {
-            const patch = { name: form.fullName, phone: form.phone || undefined, emailSignature: form.emailSignature || undefined }
+            const patch = {
+              name: form.fullName,
+              phone: form.phone || undefined,
+              emailSignature: form.emailSignature || undefined,
+              emailSignatureImageUrl: form.emailSignatureImageUrl,
+              emailSignatureImageWidth: form.emailSignatureImageWidth,
+              emailSignatureImageAlign: form.emailSignatureImageAlign,
+            }
             updateUser(currentUser.id, patch)
             updateCurrentUserLocal(patch)
           }
@@ -96,16 +107,26 @@ function ProfileTab() {
             <FormField label="Role">
               <input className={inputClass} value={currentUser?.role ?? ''} disabled />
             </FormField>
-            <FormField label="Email Signature">
-              <textarea
-                className={inputClass}
-                rows={4}
-                placeholder={'e.g.\nStephan Bredell\nBredell Ferreira · 082 000 0000'}
-                value={form.emailSignature}
-                onChange={(e) => setForm({ ...form, emailSignature: e.target.value })}
+            {currentUser && (
+              <SignatureEditor
+                userId={currentUser.id}
+                value={{
+                  text: form.emailSignature,
+                  imageUrl: form.emailSignatureImageUrl,
+                  imageWidth: form.emailSignatureImageWidth,
+                  imageAlign: form.emailSignatureImageAlign,
+                }}
+                onChange={(patch) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    ...(patch.text !== undefined ? { emailSignature: patch.text } : {}),
+                    ...('imageUrl' in patch ? { emailSignatureImageUrl: patch.imageUrl } : {}),
+                    ...('imageWidth' in patch ? { emailSignatureImageWidth: patch.imageWidth } : {}),
+                    ...('imageAlign' in patch ? { emailSignatureImageAlign: patch.imageAlign } : {}),
+                  }))
+                }
               />
-              <p className="text-xs text-slate-400 mt-1">Appended under any email you send from Sales Raptor once your inbox is connected — see Settings → Integrations.</p>
-            </FormField>
+            )}
           </div>
           <div>
             <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Preferences</h4>
@@ -158,6 +179,7 @@ function UsersTab() {
   const [editingUser, setEditingUser] = useState<User | null>(null)
   const [removingUser, setRemovingUser] = useState<User | null>(null)
   const [emailUser, setEmailUser] = useState<User | null>(null)
+  const [signatureUser, setSignatureUser] = useState<User | null>(null)
 
   return (
     <Card padded={false}>
@@ -248,6 +270,9 @@ function UsersTab() {
                       <button onClick={() => setEmailUser(u)} className="text-slate-400 hover:text-brand-600" title="Manage email connection">
                         <Mail size={14} />
                       </button>
+                      <button onClick={() => setSignatureUser(u)} className="text-slate-400 hover:text-brand-600" title="Manage email signature">
+                        <ImageIcon size={14} />
+                      </button>
                       <button onClick={() => setEditingUser(u)} className="text-slate-400 hover:text-brand-600" title="Edit user">
                         <Pencil size={14} />
                       </button>
@@ -284,7 +309,46 @@ function UsersTab() {
       {emailUser && session && (
         <AdminEmailConnectModal user={emailUser} accessToken={session.access_token} onClose={() => setEmailUser(null)} />
       )}
+      {signatureUser && (
+        <AdminSignatureModal user={signatureUser} onClose={() => setSignatureUser(null)} onSave={(patch) => updateUser(signatureUser.id, patch)} />
+      )}
     </Card>
+  )
+}
+
+function AdminSignatureModal({ user, onClose, onSave }: { user: User; onClose: () => void; onSave: (patch: Partial<User>) => void }) {
+  const [value, setValue] = useState({
+    text: user.emailSignature ?? '',
+    imageUrl: user.emailSignatureImageUrl,
+    imageWidth: user.emailSignatureImageWidth,
+    imageAlign: user.emailSignatureImageAlign,
+  })
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    onSave({
+      emailSignature: value.text || undefined,
+      emailSignatureImageUrl: value.imageUrl,
+      emailSignatureImageWidth: value.imageWidth,
+      emailSignatureImageAlign: value.imageAlign,
+    })
+    onClose()
+  }
+
+  return (
+    <Modal title={`Email Signature — ${user.name}`} onClose={onClose} width={460}>
+      <form onSubmit={handleSubmit}>
+        <SignatureEditor userId={user.id} value={value} onChange={(patch) => setValue((prev) => ({ ...prev, ...patch }))} />
+        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
+          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
+            Cancel
+          </button>
+          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
+            Save Changes
+          </button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 

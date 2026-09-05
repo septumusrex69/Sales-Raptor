@@ -12,6 +12,10 @@ interface ProfileRow {
   status: 'Active' | 'Inactive'
   phone: string | null
   avatar_color: string
+  email_signature: string | null
+  email_signature_image_url: string | null
+  email_signature_image_width: number | null
+  email_signature_image_align: 'left' | 'center' | 'right' | null
 }
 
 function mapProfileRow(row: ProfileRow): User {
@@ -24,6 +28,10 @@ function mapProfileRow(row: ProfileRow): User {
     status: row.status,
     phone: row.phone ?? undefined,
     avatarColor: row.avatar_color,
+    emailSignature: row.email_signature ?? undefined,
+    emailSignatureImageUrl: row.email_signature_image_url ?? undefined,
+    emailSignatureImageWidth: row.email_signature_image_width ?? undefined,
+    emailSignatureImageAlign: row.email_signature_image_align ?? undefined,
   }
 }
 

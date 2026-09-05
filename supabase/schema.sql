@@ -30,7 +30,12 @@ create table if not exists public.profiles (
   avatar_color text not null default '#355069',
   created_at timestamptz not null default now(),
   -- Appended under the body of any email sent from Sales Raptor via this person's connected inbox.
-  email_signature text
+  email_signature text,
+  -- Optional signature image (e.g. a scanned handwritten signature or logo), stored in the
+  -- 'email-signatures' Storage bucket, laid out under the text signature at send time.
+  email_signature_image_url text,
+  email_signature_image_width integer,
+  email_signature_image_align text not null default 'left' check (email_signature_image_align in ('left', 'center', 'right'))
 );
 
 -- Auto-create a profile the moment someone accepts a Supabase invite /
@@ -453,6 +458,36 @@ create table if not exists public.email_connections (
   updated_at timestamptz not null default now()
 );
 alter table public.email_connections enable row level security;
+
+-- ---------- Email signature image storage ----------
+-- Public bucket (an outgoing email's <img> tag needs a URL any mail client
+-- can fetch without auth). Writes are restricted to the owning user's own
+-- folder (path "<user_id>/...") or an Administrator uploading on someone
+-- else's behalf, mirroring the profiles_update policy below.
+insert into storage.buckets (id, name, public)
+values ('email-signatures', 'email-signatures', true)
+on conflict (id) do nothing;
+
+create policy "email_signatures_read" on storage.objects
+  for select using (bucket_id = 'email-signatures');
+
+create policy "email_signatures_insert" on storage.objects
+  for insert with check (
+    bucket_id = 'email-signatures'
+    and (auth.uid()::text = (storage.foldername(name))[1] or public.current_user_role() = 'Administrator')
+  );
+
+create policy "email_signatures_update" on storage.objects
+  for update using (
+    bucket_id = 'email-signatures'
+    and (auth.uid()::text = (storage.foldername(name))[1] or public.current_user_role() = 'Administrator')
+  );
+
+create policy "email_signatures_delete" on storage.objects
+  for delete using (
+    bucket_id = 'email-signatures'
+    and (auth.uid()::text = (storage.foldername(name))[1] or public.current_user_role() = 'Administrator')
+  );
 
 -- ---------- Function hardening ----------
 -- handle_new_user and protect_profile_privileged_fields only ever run as

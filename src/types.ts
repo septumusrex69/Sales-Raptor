@@ -292,6 +292,10 @@ export interface User {
   avatarColor: string
   /** Appended under the body of any email sent from Sales Raptor via this person's connected inbox. */
   emailSignature?: string
+  /** Optional signature image (e.g. a scanned signature or logo), stored in the 'email-signatures' bucket. */
+  emailSignatureImageUrl?: string
+  emailSignatureImageWidth?: number
+  emailSignatureImageAlign?: 'left' | 'center' | 'right'
 }
 
 export type TeamKind = 'Sales' | 'Communications'

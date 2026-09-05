@@ -32,9 +32,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const { data: profile } = await admin.from('profiles').select('email_signature').eq('id', caller.id).maybeSingle()
-  const signature = profile?.email_signature as string | null | undefined
-  const fullHtml = signature ? `${bodyHtml}<br><br>${signature.replace(/\n/g, '<br>')}` : bodyHtml
+  const { data: profile } = await admin
+    .from('profiles')
+    .select('email_signature, email_signature_image_url, email_signature_image_width, email_signature_image_align')
+    .eq('id', caller.id)
+    .maybeSingle()
+  const signatureText = profile?.email_signature as string | null | undefined
+  const signatureImageUrl = profile?.email_signature_image_url as string | null | undefined
+  const signatureImageWidth = (profile?.email_signature_image_width as number | null | undefined) ?? 160
+  const signatureImageAlign = (profile?.email_signature_image_align as 'left' | 'center' | 'right' | null | undefined) ?? 'left'
+
+  let signatureHtml = ''
+  if (signatureText) signatureHtml += signatureText.replace(/\n/g, '<br>')
+  if (signatureImageUrl) {
+    const margin = signatureImageAlign === 'right' ? 'margin:8px 0 0 auto' : signatureImageAlign === 'center' ? 'margin:8px auto 0' : 'margin:8px 0 0 0'
+    signatureHtml += `<img src="${signatureImageUrl}" width="${signatureImageWidth}" style="display:block;max-width:100%;${margin}" alt="" />`
+  }
+  const fullHtml = signatureHtml ? `${bodyHtml}<br><br>${signatureHtml}` : bodyHtml
 
   try {
     const transporter = nodemailer.createTransport({
