@@ -97,6 +97,8 @@ async function syncMailbox(
       uids = (found === false ? [] : found).slice(-FIRST_SYNC_MESSAGE_LIMIT)
     }
 
+    console.log(`[emailSync] ${path}: found ${uids.length} new UID(s) since ${sinceUid ?? '(first sync)'}`)
+
     let maxUid = sinceUid ?? 0
     for (const uid of uids) {
       const msg = await client.fetchOne(String(uid), { source: true }, { uid: true })
@@ -105,10 +107,16 @@ async function syncMailbox(
 
       const parsed = await simpleParser(msg.source)
       const fromAddress = parsed.from?.value?.[0]?.address
-      if (!fromAddress) continue
+      if (!fromAddress) {
+        console.log(`[emailSync] ${path} UID ${uid}: no parseable From address, skipped`)
+        continue
+      }
 
       const match = await findMatch(admin, fromAddress)
-      if (!match) continue
+      if (!match) {
+        console.log(`[emailSync] ${path} UID ${uid}: sender ${fromAddress} matches no Contact/Lead/Company, skipped`)
+        continue
+      }
 
       // upsert + ignoreDuplicates rather than insert: a UID this sync reprocesses (a
       // concurrent sync, or the watermark not having advanced yet) must never log the
@@ -181,6 +189,9 @@ export async function syncConnection(admin: SupabaseClient, conn: EmailConnectio
 
     const mailboxes = await client.list()
     const junkPath = findFolder(mailboxes, '\\Junk', ['junk', 'spam', 'junk email', 'bulk mail', 'inbox.junk', 'inbox.spam', 'inbox/junk', 'inbox/spam'])
+    console.log(
+      `[emailSync] mailboxes: ${mailboxes.map((m) => `${m.path}${m.specialUse ? ` (${m.specialUse})` : ''}`).join(', ')} -- junk folder detected as: ${junkPath ?? '(none found)'}`,
+    )
     const junkResult = junkPath ? await syncMailbox(client, admin, conn, junkPath, conn.last_seen_uid_junk, true) : { logged: 0, maxUid: conn.last_seen_uid_junk ?? 0 }
 
     // Checked deliberately: a swallowed error here would leave a watermark stuck, so a
