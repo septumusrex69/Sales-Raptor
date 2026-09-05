@@ -35,9 +35,13 @@ export function DealsBoard() {
   const [noNextActionFilter] = useState(() => readParam(searchParams, 'noNextAction') === '1')
   const [overdueFilter] = useState(() => readParam(searchParams, 'overdue') === '1')
   const [salesMonthFilter] = useState(() => decodeSalesMonthParam(searchParams.get('salesMonth')))
+  const [companyIdFilter] = useState(() => readParam(searchParams, 'company'))
+  const [openOnlyFilter] = useState(() => readParam(searchParams, 'open') === '1')
 
   const [view, setView] = useState<'kanban' | 'table'>(() =>
-    readParam(searchParams, 'view') === 'table' || stageFilter || noNextActionFilter || overdueFilter ? 'table' : 'kanban',
+    readParam(searchParams, 'view') === 'table' || stageFilter || noNextActionFilter || overdueFilter || companyIdFilter || openOnlyFilter
+      ? 'table'
+      : 'kanban',
   )
   const [search, setSearch] = useState('')
   const [owner, setOwner] = useDefaultOwnerFilter(readParam(searchParams, 'owner'), currentUser)
@@ -72,13 +76,15 @@ export function DealsBoard() {
       }
       if (noNextActionFilter && (d.stage === 'Won' || d.stage === 'Lost' || d.nextActionAt)) return false
       if (overdueFilter && (d.stage === 'Won' || d.stage === 'Lost' || new Date(d.expectedCloseDate) >= TODAY)) return false
+      if (companyIdFilter && d.companyId !== companyIdFilter) return false
+      if (openOnlyFilter && (d.stage === 'Won' || d.stage === 'Lost')) return false
       if (salesMonthFilter) {
         const dateField = d.stage === 'Won' ? d.wonAt : d.stage === 'Lost' ? d.lostAt : d.createdAt
         if (!isWithinPeriod(dateField, salesMonthFilter)) return false
       }
       return true
     })
-  }, [filtered, view, stageFilter, stageAtLeast, noNextActionFilter, overdueFilter, salesMonthFilter])
+  }, [filtered, view, stageFilter, stageAtLeast, noNextActionFilter, overdueFilter, salesMonthFilter, companyIdFilter, openOnlyFilter])
 
   const columns = [...OPEN_STAGES, 'Won', 'Lost'] as DealStage[]
 

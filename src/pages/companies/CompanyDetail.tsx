@@ -14,6 +14,8 @@ import { AddContactModal } from '../../components/contacts/AddContactModal'
 import { formatCurrency, formatDate, formatDateTime, services } from '../../data/mockData'
 import { ACTIVITY_TYPE_COLORS } from '../../lib/colors'
 import { parseEmailActivity } from '../../lib/emailActivity'
+import { buildDrilldownUrl } from '../../lib/drilldown'
+import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/ui/RowLimitSelect'
 import type { Company, Contact, ProductService } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
 
@@ -41,6 +43,8 @@ export function CompanyDetail() {
   const [editCompanyOpen, setEditCompanyOpen] = useState(false)
   const [addContactOpen, setAddContactOpen] = useState(false)
   const [replyTarget, setReplyTarget] = useState<{ to: string; subject: string; body: string; contactId?: string } | null>(null)
+  const [emailLimit, setEmailLimit] = useState<RowLimit>(10)
+  const [noteLimit, setNoteLimit] = useState<RowLimit>(10)
 
   const companyContacts = useMemo(() => contacts.filter((c) => c.companyId === id), [contacts, id])
   const companyLeads = useMemo(() => leads.filter((l) => l.companyId === id), [leads, id])
@@ -138,7 +142,7 @@ export function CompanyDetail() {
               </div>
               {collectionsCoefficient !== undefined && (
                 <div>
-                  <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Collections Coefficient</p>
+                  <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Coefficient</p>
                   <p className="text-2xl font-bold text-slate-800 mt-0.5">{collectionsCoefficient.toFixed(0)}%</p>
                 </div>
               )}
@@ -148,6 +152,10 @@ export function CompanyDetail() {
             <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Deals Won</p>
             <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(lifetimeValue)}</p>
           </div>
+          <Link to={buildDrilldownUrl('/deals', { company: company.id, open: '1', view: 'table' })} className="hover:opacity-70">
+            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Open Deals</p>
+            <p className="text-2xl font-bold text-slate-800 mt-0.5">{openDeals.length}</p>
+          </Link>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-slate-100">
@@ -331,12 +339,16 @@ export function CompanyDetail() {
       )}
 
       <Card>
-        <CardHeader title="Emails" subtitle={`${emailActivities.length} message${emailActivities.length === 1 ? '' : 's'}`} />
+        <CardHeader
+          title="Emails"
+          subtitle={`${emailActivities.length} message${emailActivities.length === 1 ? '' : 's'}`}
+          action={<RowLimitSelect value={emailLimit} onChange={setEmailLimit} />}
+        />
         {emailActivities.length === 0 ? (
           <p className="text-sm text-slate-400">No emails yet.</p>
         ) : (
           <div className="space-y-2.5">
-            {emailActivities.map((a) => {
+            {applyRowLimit(emailActivities, emailLimit).map((a) => {
               const parsed = parseEmailActivity(a.subject)
               const canReply = parsed?.direction === 'received'
               const replyToAddress = a.contactId ? contacts.find((c) => c.id === a.contactId)?.email : company.email
@@ -381,12 +393,16 @@ export function CompanyDetail() {
       </Card>
 
       <Card>
-        <CardHeader title="Notes" subtitle={`${nonEmailActivities.length} update${nonEmailActivities.length === 1 ? '' : 's'}`} />
+        <CardHeader
+          title="Notes"
+          subtitle={`${nonEmailActivities.length} update${nonEmailActivities.length === 1 ? '' : 's'}`}
+          action={<RowLimitSelect value={noteLimit} onChange={setNoteLimit} />}
+        />
         {nonEmailActivities.length === 0 ? (
           <p className="text-sm text-slate-400">No activity recorded yet.</p>
         ) : (
           <div className="space-y-2.5">
-            {nonEmailActivities.map((a) =>
+            {applyRowLimit(nonEmailActivities, noteLimit).map((a) =>
               a.type === 'Note' ? (
                 <div key={a.id} className="bg-[#f7f4eb] border border-[#e7dbb2] rounded-lg p-3">
                   <p className="text-sm text-slate-700">{a.notes || a.subject}</p>
