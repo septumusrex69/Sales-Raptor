@@ -16,6 +16,7 @@ import { ACTIVITY_TYPE_COLORS } from '../../lib/colors'
 import { parseEmailActivity } from '../../lib/emailActivity'
 import { buildDrilldownUrl } from '../../lib/drilldown'
 import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/ui/RowLimitSelect'
+import { EmailActivityRow } from '../../components/EmailActivityRow'
 import type { Company, Contact, ProductService } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
 
@@ -377,50 +378,25 @@ export function CompanyDetail() {
         ) : (
           <div className="space-y-2">
             {applyRowLimit(emailActivities, emailLimit).map((a) => {
-              const parsed = parseEmailActivity(a.subject)
-              const canReply = parsed?.direction === 'received'
               const replyToAddress = a.contactId ? contacts.find((c) => c.id === a.contactId)?.email : company.email
-              const isUnread = parsed?.direction === 'received' && a.isRead === false
-              const borderColor = parsed?.direction === 'sent' ? '#6086a9' : parsed?.isSpam ? '#c9962c' : '#406d58'
               return (
-                <div
+                <EmailActivityRow
                   key={a.id}
-                  onClick={() => isUnread && updateActivity(a.id, { isRead: true })}
-                  style={{ borderLeftColor: borderColor }}
-                  className={`flex items-start justify-between gap-3 rounded-lg border-l-[3px] pl-2.5 pr-2 py-2 ${isUnread ? 'bg-brand-50/60 cursor-pointer' : ''}`}
-                >
-                  <div className="flex items-start gap-2 min-w-0">
-                    {isUnread && <span className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 shrink-0" />}
-                    <div className="min-w-0">
-                      <p className={`text-sm ${isUnread ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>
-                        <span className="text-xs font-medium text-slate-400 mr-1.5">
-                          {parsed?.direction === 'sent' ? 'Sent' : parsed?.isSpam ? 'Received (Spam/Junk)' : parsed ? 'Received' : ''}
-                        </span>
-                        {parsed?.subject ?? a.subject}
-                      </p>
-                      {a.notes && <p className="text-xs text-slate-500 mt-0.5">{a.notes}</p>}
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span className="text-[11px] text-slate-400">{formatDateTime(a.activityDate)}</span>
-                    {canReply && replyToAddress && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          const rawSubject = parsed?.subject ?? a.subject
+                  activity={a}
+                  onMarkRead={() => updateActivity(a.id, { isRead: true })}
+                  onReply={
+                    replyToAddress
+                      ? () => {
+                          const rawSubject = parseEmailActivity(a.subject)?.subject ?? a.subject
                           setReplyTarget({
                             to: replyToAddress,
                             subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}`,
                             contactId: a.contactId,
                           })
-                        }}
-                        className="text-[11px] font-medium text-brand-600 hover:underline"
-                      >
-                        Reply
-                      </button>
-                    )}
-                  </div>
-                </div>
+                        }
+                      : undefined
+                  }
+                />
               )
             })}
           </div>

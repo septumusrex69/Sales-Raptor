@@ -15,8 +15,13 @@ export interface EmailConnectionRow {
 
 /** On the very first sync of a mailbox there's no watermark yet — pull only the most recent messages instead of its entire history. */
 const FIRST_SYNC_MESSAGE_LIMIT = 25
-/** Keep each Activity's logged body short — this is a CRM timeline entry, not a mail client. */
-const NOTES_MAX_LENGTH = 2000
+/**
+ * A ceiling on the stored body, not a preview length -- the Emails card clamps long
+ * messages behind "Show more" on its own. This was 2000, which cut an ordinary 500-word
+ * email off mid-sentence and lost the rest permanently; 20k comfortably holds a long
+ * business email while still refusing to store a runaway newsletter or quoted-history chain.
+ */
+const NOTES_MAX_LENGTH = 20000
 
 function findFolder(mailboxes: ListResponse[], specialUse: string, commonNames: string[]): string | undefined {
   const bySpecialUse = mailboxes.find((m) => m.specialUse === specialUse)
