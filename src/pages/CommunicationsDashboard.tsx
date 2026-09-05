@@ -41,6 +41,17 @@ function coefficientTone(pct: number): 'good' | 'mid' | 'low' {
 }
 const TONE_HEX: Record<'good' | 'mid' | 'low', string> = { good: '#406d58', mid: '#a9822f', low: '#794234' }
 
+function rollupsFor(subset: Company[], companies: Company[]) {
+  return subset
+    .map((c) => ({ company: c, rollup: rollupClient(c, companies) }))
+    .filter((r) => r.rollup.handoverAmount !== undefined || r.rollup.accountCount !== undefined)
+}
+function coefficientFor(rollups: { rollup: ClientRollup }[]) {
+  const handover = rollups.reduce((s, r) => s + (r.rollup.handoverAmount ?? 0), 0)
+  const paid = rollups.reduce((s, r) => s + (r.rollup.paymentsToDate ?? 0), 0)
+  return handover > 0 ? (paid / handover) * 100 : undefined
+}
+
 type Scope = 'all' | `member:${string}` | `team:${string}`
 
 function scopeIdsFor(scope: Scope, members: User[], teams: Team[]): ID[] {
@@ -83,16 +94,21 @@ export function CommunicationsDashboard() {
 
   const previousPeriod = useMemo(() => getPreviousSalesMonth(period), [period])
 
-  // Book-wide client servicing health — a snapshot of current totals, not scoped to
-  // period or team, since Company.handoverAmount/paymentsToDate aren't a time series.
-  const clients = useMemo(() => topLevelClients(companies, (id) => deals.some((d) => d.companyId === id && d.stage === 'Won')), [companies, deals])
-  const clientRollups = useMemo(
-    () =>
-      clients
-        .map((c) => ({ company: c, rollup: rollupClient(c, companies) }))
-        .filter((r) => r.rollup.handoverAmount !== undefined || r.rollup.accountCount !== undefined),
-    [clients, companies],
-  )
+  // Client servicing health — a snapshot of current totals, not scoped to period
+  // (Company.handoverAmount/paymentsToDate aren't a time series), but it IS scoped
+  // by who the client's Client Liaison (Company.accountOwnerId) actually is: pick
+  // one team member and you see only their clients, not the whole book.
+  const allClients = useMemo(() => topLevelClients(companies, (id) => deals.some((d) => d.companyId === id && d.stage === 'Won')), [companies, deals])
+
+  // The whole Communications department's book — the baseline an individual gets
+  // compared against when they're the one selected in the scope picker.
+  const teamClients = useMemo(() => allClients.filter((c) => commsMemberIds.has(c.accountOwnerId)), [allClients, commsMemberIds])
+  const teamRollups = useMemo(() => rollupsFor(teamClients, companies), [teamClients, companies])
+  const teamCoefficient = coefficientFor(teamRollups)
+
+  // Whichever member/team is currently selected in the scope picker.
+  const clients = useMemo(() => allClients.filter((c) => scopedIdSet.has(c.accountOwnerId)), [allClients, scopedIdSet])
+  const clientRollups = useMemo(() => rollupsFor(clients, companies), [clients, companies])
   const swordfishClients = useMemo(() => clientRollups.filter((r) => collectionsCoefficient(r.rollup) !== undefined), [clientRollups])
   const bookHandover = clientRollups.reduce((s, r) => s + (r.rollup.handoverAmount ?? 0), 0)
   const bookPaid = clientRollups.reduce((s, r) => s + (r.rollup.paymentsToDate ?? 0), 0)
@@ -102,6 +118,7 @@ export function CommunicationsDashboard() {
       [...swordfishClients].sort((a, b) => (collectionsCoefficient(a.rollup) ?? 0) - (collectionsCoefficient(b.rollup) ?? 0)),
     [swordfishClients],
   )
+  const coefficientScopeLabel = scope === 'all' ? 'DEPARTMENT COEFFICIENT' : scope.startsWith('team:') ? 'TEAM COEFFICIENT' : 'YOUR COEFFICIENT'
 
   const kpis = useMemo(() => {
     function compute(p: SalesMonthPeriod) {
@@ -280,20 +297,22 @@ export function CommunicationsDashboard() {
 
       <Card>
         <div className="flex items-start justify-between mb-4 gap-3">
-          <CardHeader title="Recovery Rate" subtitle="Book-wide payments vs. handover amount, and this period's meeting format split" />
+          <CardHeader title="Recovery Rate" subtitle="Payments vs. handover amount for the clients in scope, and this period's meeting format split" />
           <span className="text-xs font-medium text-brand-600 bg-brand-50 px-2.5 py-1 rounded-full whitespace-nowrap shrink-0">{period.label}</span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-[176px_176px_1fr] gap-6 items-start">
-          {recoveryDonut.length > 0 ? (
+          {scope.startsWith('member:') && bookCoefficient !== undefined && teamCoefficient !== undefined ? (
+            <ComparisonGauge individualPct={bookCoefficient} teamPct={teamCoefficient} />
+          ) : recoveryDonut.length > 0 ? (
             <RingDonut
               data={recoveryDonut}
               centerValue={`${Math.round(bookCoefficient ?? 0)}%`}
               centerColor={coefficientTone(bookCoefficient ?? 0) === 'good' ? POSITIVE_HEX : coefficientTone(bookCoefficient ?? 0) === 'mid' ? '#a9822f' : NEGATIVE_HEX}
-              centerLabel="COLLECTIONS COEFFICIENT"
+              centerLabel={coefficientScopeLabel}
               caption="Paid to date ÷ handover amount"
             />
           ) : (
-            <p className="text-sm text-slate-400">No handover data yet.</p>
+            <p className="text-sm text-slate-400">No handover data for this selection yet.</p>
           )}
           {meetingDonut.length > 0 ? (
             <RingDonut data={meetingDonut} centerValue={kpis.curr.meetings.toString()} centerLabel="MEETINGS HELD" caption="This period's format split" />
@@ -362,7 +381,7 @@ export function CommunicationsDashboard() {
           icon={<ClipboardCheck size={14} className="text-slate-300" />}
         />
         <StatTile
-          label="Collections Coefficient"
+          label={scope.startsWith('member:') ? 'Your Collections Coefficient' : scope.startsWith('team:') ? 'Team Collections Coefficient' : 'Collections Coefficient'}
           value={bookCoefficient !== undefined ? `${bookCoefficient.toFixed(1)}%` : '—'}
           accent="gold"
           icon={<Percent size={14} className="text-slate-300" />}
@@ -390,7 +409,7 @@ export function CommunicationsDashboard() {
           )}
           {clientRollups.length > 0 && (
             <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100 text-xs">
-              <span className="text-slate-500">Book total: {clientRollups.reduce((s, r) => s + (r.rollup.accountCount ?? 0), 0).toLocaleString()} accounts</span>
+              <span className="text-slate-500">Total: {clientRollups.reduce((s, r) => s + (r.rollup.accountCount ?? 0), 0).toLocaleString()} accounts</span>
               <span className="font-semibold text-slate-700">{bookCoefficient !== undefined ? `${bookCoefficient.toFixed(1)}% overall` : '—'}</span>
             </div>
           )}
@@ -580,6 +599,60 @@ export function CommunicationsDashboard() {
           onSave={(dueDate) => updateTask(rescheduleTask.id, { dueDate, autoRescheduledFrom: undefined })}
         />
       )}
+    </div>
+  )
+}
+
+/** Two concentric progress rings — inner = the selected individual's own Collections Coefficient, outer = the whole Communications team's, so a single glance shows how they compare. */
+function ComparisonGauge({ individualPct, teamPct }: { individualPct: number; teamPct: number }) {
+  const SIZE = 160
+  const OUTER_R = 69
+  const INNER_R = 48
+  const STROKE = 15
+  const outerCirc = 2 * Math.PI * OUTER_R
+  const innerCirc = 2 * Math.PI * INNER_R
+  const outerLen = (Math.max(Math.min(teamPct, 100), 0) / 100) * outerCirc
+  const innerLen = (Math.max(Math.min(individualPct, 100), 0) / 100) * innerCirc
+  const outerColor = TONE_HEX[coefficientTone(teamPct)]
+  const innerColor = TONE_HEX[coefficientTone(individualPct)]
+  return (
+    <div className="flex flex-col items-center gap-2.5">
+      <div className="h-40 w-40 relative">
+        <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full -rotate-90">
+          <circle cx={SIZE / 2} cy={SIZE / 2} r={OUTER_R} fill="none" stroke="#eef1f6" strokeWidth={STROKE} />
+          <circle
+            cx={SIZE / 2}
+            cy={SIZE / 2}
+            r={OUTER_R}
+            fill="none"
+            stroke={outerColor}
+            strokeWidth={STROKE}
+            strokeLinecap="round"
+            strokeOpacity={0.45}
+            strokeDasharray={`${outerLen} ${outerCirc - outerLen}`}
+          />
+          <circle cx={SIZE / 2} cy={SIZE / 2} r={INNER_R} fill="none" stroke="#eef1f6" strokeWidth={STROKE} />
+          <circle
+            cx={SIZE / 2}
+            cy={SIZE / 2}
+            r={INNER_R}
+            fill="none"
+            stroke={innerColor}
+            strokeWidth={STROKE}
+            strokeLinecap="round"
+            strokeDasharray={`${innerLen} ${innerCirc - innerLen}`}
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-2">
+          <span className="text-[22px] font-extrabold leading-none" style={{ color: innerColor }}>
+            {individualPct.toFixed(0)}%
+          </span>
+          <span className="text-[9px] font-semibold text-slate-400 mt-1 tracking-wide text-center leading-tight">YOUR COEFFICIENT</span>
+        </div>
+      </div>
+      <span className="text-[11px] text-slate-400 text-center -mt-1">
+        Inner = you · Outer = team ({teamPct.toFixed(0)}%)
+      </span>
     </div>
   )
 }
