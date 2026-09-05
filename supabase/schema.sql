@@ -293,9 +293,15 @@ create table if not exists public.activities (
   -- until someone opens it in the Emails card.
   is_read boolean not null default true
 );
+-- Deliberately NOT partial (no `where email_message_id is not null`): Postgres can't use a
+-- partial index as an ON CONFLICT (user_id, email_message_id) inference target unless the
+-- upsert also repeats that predicate, so a partial version here made every synced-email
+-- upsert fail with "no unique or exclusion constraint matching the ON CONFLICT specification"
+-- -- confirmed via emailSync diagnostic logging. A plain unique index already treats NULLs as
+-- mutually distinct, so every non-email Activity and outgoing sent-email Activity (both have
+-- no email_message_id) is unaffected -- only genuine duplicate Message-IDs collide.
 create unique index if not exists activities_user_email_message_id_key
-  on public.activities (user_id, email_message_id)
-  where email_message_id is not null;
+  on public.activities (user_id, email_message_id);
 
 -- ---------- Notifications ----------
 -- One row per person per notifyable event. Only ever written by service_role (server-side
