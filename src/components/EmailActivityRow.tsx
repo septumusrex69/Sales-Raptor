@@ -1,31 +1,32 @@
 import { useState } from 'react'
-import { ArrowDownLeft, ArrowUpRight, Paperclip, ShieldAlert, Mail } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, Paperclip, Mail } from 'lucide-react'
 import { emailDayLabel, emailTimeLabel, parseEmailActivity } from '../lib/emailActivity'
 import { useAppStore } from '../store/AppStore'
 import { useAuth } from '../store/AuthContext'
 import type { Activity } from '../types'
 
-type Direction = 'sent' | 'received' | 'spam'
+type Direction = 'sent' | 'received'
 
 /**
  * What each colour means, in one place — the row badge, the tooltip and the legend under the
  * card header all read from this, so they can't disagree with each other.
+ *
+ * Deliberately only two: whether the mail server had misfiled a message as spam is a fact
+ * about the mail server, not about the client relationship. The CRM rescues those messages
+ * either way, so surfacing a third colour for them just made the list harder to read.
  */
 export const EMAIL_KINDS: Record<Direction, { label: string; color: string; tint: string; hint: string }> = {
   sent: { label: 'Sent', color: '#4a7ba7', tint: '#eaf1f8', hint: 'Sent from the CRM by one of your team' },
   received: { label: 'Received', color: '#3a7a5c', tint: '#e9f4ee', hint: "Arrived in your team's inbox from this client" },
-  spam: { label: 'Spam/Junk', color: '#b8862a', tint: '#fbf3e2', hint: 'Arrived, but the mail server had filed it as spam — worth a second look' },
 }
 
 function directionOf(parsed: ReturnType<typeof parseEmailActivity>): Direction {
-  if (parsed?.direction === 'sent') return 'sent'
-  if (parsed?.isSpam) return 'spam'
-  return 'received'
+  return parsed?.direction === 'sent' ? 'sent' : 'received'
 }
 
 function DirectionBadge({ kind }: { kind: Direction }) {
   const { color, tint, label, hint } = EMAIL_KINDS[kind]
-  const Icon = kind === 'sent' ? ArrowUpRight : kind === 'spam' ? ShieldAlert : ArrowDownLeft
+  const Icon = kind === 'sent' ? ArrowUpRight : ArrowDownLeft
   return (
     <span
       title={`${label} — ${hint}`}
@@ -37,7 +38,7 @@ function DirectionBadge({ kind }: { kind: Direction }) {
   )
 }
 
-/** A key to the row colours, so nobody has to guess what green vs amber means. */
+/** A key to the row colours, so nobody has to work out which direction blue vs green means. */
 export function EmailLegend() {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-3 pb-3 border-b border-slate-100">
