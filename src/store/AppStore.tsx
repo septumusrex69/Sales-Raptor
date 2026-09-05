@@ -293,7 +293,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const activity: Activity = {
         id: crypto.randomUUID(),
         userId: ownerId,
-        activityDate: TODAY.toISOString(),
+        activityDate: nowIso(),
         createdAt: nowIso(),
         ...input,
       }
@@ -344,8 +344,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         score: 10,
         estimatedValue: 0,
         ownerId,
-        createdAt: TODAY.toISOString(),
-        updatedAt: TODAY.toISOString(),
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
         ...input,
       }
       setLeads((prev) => [lead, ...prev])
@@ -374,7 +374,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const updateLead = useCallback<AppActions['updateLead']>(
     (id, patch) => {
-      const fullPatch = { ...patch, updatedAt: TODAY.toISOString() }
+      const fullPatch = { ...patch, updatedAt: nowIso() }
       let previous: Lead | undefined
       setLeads((prev) => {
         previous = prev.find((l) => l.id === id)
@@ -419,9 +419,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         stage: 'New Lead',
         value: 0,
         probability: 10,
-        expectedCloseDate: TODAY.toISOString(),
+        expectedCloseDate: nowIso(),
         source: 'Direct',
-        createdAt: TODAY.toISOString(),
+        createdAt: nowIso(),
         ...input,
       }
       setDeals((prev) => [deal, ...prev])
@@ -450,8 +450,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const moveDealStage = useCallback<AppActions['moveDealStage']>(
     (id, stage) => {
       const patch: Partial<Deal> = { stage }
-      if (stage === 'Won') patch.wonAt = TODAY.toISOString()
-      if (stage === 'Lost') patch.lostAt = TODAY.toISOString()
+      if (stage === 'Won') patch.wonAt = nowIso()
+      if (stage === 'Lost') patch.lostAt = nowIso()
       let previous: Deal | undefined
       setDeals((prev) => {
         previous = prev.find((d) => d.id === id)
@@ -482,7 +482,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         handoverAmount: details.handoverAmount,
         accountsCount: details.accountsCount,
         contractStartDate: details.startDate,
-        wonAt: TODAY.toISOString(),
+        wonAt: nowIso(),
         notes: `${deal?.notes ?? ''}\nContract start: ${details.startDate}. Duration: ${details.contractDuration}.`.trim(),
       }
       let previous: Deal | undefined
@@ -501,7 +501,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const markDealLost = useCallback<AppActions['markDealLost']>(
     (id, reason) => {
-      const patch: Partial<Deal> = { stage: 'Lost' as DealStage, lossReason: reason, lostAt: TODAY.toISOString() }
+      const patch: Partial<Deal> = { stage: 'Lost' as DealStage, lossReason: reason, lostAt: nowIso() }
       let previous: Deal | undefined
       setDeals((prev) => {
         previous = prev.find((d) => d.id === id)
@@ -522,8 +522,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const proposal: Proposal = {
         id: crypto.randomUUID(),
         status: 'Draft',
-        validityDate: new Date(TODAY.getTime() + 1000 * 60 * 60 * 24 * 30).toISOString(),
-        createdAt: TODAY.toISOString(),
+        validityDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
+        createdAt: nowIso(),
         ...input,
       }
       setProposals((prev) => [proposal, ...prev])
@@ -553,7 +553,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     const company: Company = {
       id: crypto.randomUUID(),
       accountOwnerId: ownerId,
-      createdAt: TODAY.toISOString(),
+      createdAt: nowIso(),
       ...input,
     }
     setCompanies((prev) => [company, ...prev])
@@ -599,7 +599,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const contact: Contact = {
         id: crypto.randomUUID(),
         ownerId,
-        createdAt: TODAY.toISOString(),
+        createdAt: nowIso(),
         ...input,
       }
       setContacts((prev) => [contact, ...prev])
@@ -632,7 +632,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         status: 'Not Started',
         priority: 'Medium',
         ownerId,
-        createdAt: TODAY.toISOString(),
+        createdAt: nowIso(),
         ...input,
       }
       setTasks((prev) => [task, ...prev])
@@ -666,7 +666,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       let companyId = lead.companyId
       let newCompany: Company | undefined
       if (!companyId) {
-        newCompany = { id: crypto.randomUUID(), accountOwnerId: ownerId, createdAt: TODAY.toISOString(), name: lead.companyName, industry: lead.industry, province: lead.province, city: lead.city }
+        newCompany = { id: crypto.randomUUID(), accountOwnerId: ownerId, createdAt: nowIso(), name: lead.companyName, industry: lead.industry, province: lead.province, city: lead.city }
         companyId = newCompany.id
         setCompanies((prev) => [newCompany!, ...prev])
       }
@@ -687,7 +687,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           phone: lead.phone,
           mobile: lead.mobile,
           ownerId: lead.ownerId,
-          createdAt: TODAY.toISOString(),
+          createdAt: nowIso(),
         }
         contactId = newContact.id
         setContacts((prev) => [newContact!, ...prev])
@@ -712,10 +712,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         stage: 'Qualified',
         value: def.value,
         probability: 40,
-        expectedCloseDate: new Date(TODAY.getTime() + 1000 * 60 * 60 * 24 * 30).toISOString(),
+        expectedCloseDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
         service: def.service,
         source: lead.source,
-        createdAt: TODAY.toISOString(),
+        createdAt: nowIso(),
         leadId: lead.id,
       }))
       const firstDeal = dealsToCreate[0]
