@@ -91,6 +91,78 @@ export async function appendToSent(
   }
 }
 
+export interface FetchedAttachment {
+  filename: string
+  contentType: string
+  content: Buffer
+}
+
+/**
+ * Fetches one attachment straight out of the mailbox, on demand.
+ *
+ * Deliberately does NOT copy files into Storage: this mailbox takes thousands of
+ * attachments a week, the overwhelming majority of which nobody ever opens twice, so
+ * warehousing them all would mean paying indefinitely to store read-once auto-replies for
+ * the sake of the handful of mandates that matter. The mailbox is already the archive --
+ * this just reaches into it.
+ *
+ * Looks in the folder the message was synced from first, and falls back to searching by
+ * Message-ID, since a message genuinely does move (rescued from Spam, filed into a folder)
+ * after the CRM logged it. Returns null if the message or the named file is gone.
+ */
+export async function fetchAttachment(
+  conn: { email: string; imap_host: string; imap_port: number; encrypted_password: string },
+  location: { folder?: string | null; uid?: number | null; messageId?: string | null },
+  filename: string,
+): Promise<FetchedAttachment | null> {
+  const password = decrypt(conn.encrypted_password)
+  const client = new ImapFlow({
+    host: conn.imap_host,
+    port: conn.imap_port,
+    secure: conn.imap_port === 993,
+    auth: { user: conn.email, pass: password },
+    logger: false,
+  })
+  await client.connect()
+  try {
+    const candidateFolders = location.folder ? [location.folder] : []
+    if (location.messageId) {
+      // Only worth listing mailboxes if we may need to hunt for a moved message.
+      const mailboxes = await client.list()
+      for (const box of mailboxes) if (!candidateFolders.includes(box.path)) candidateFolders.push(box.path)
+    }
+
+    for (const folder of candidateFolders) {
+      const lock = await client.getMailboxLock(folder).catch(() => null)
+      if (!lock) continue
+      try {
+        let uid = folder === location.folder ? location.uid ?? null : null
+        if (uid === null && location.messageId) {
+          const found = await client.search({ header: { 'message-id': location.messageId } }, { uid: true })
+          uid = found === false || found.length === 0 ? null : found[found.length - 1]
+        }
+        if (uid === null) continue
+
+        const msg = await client.fetchOne(String(uid), { source: true }, { uid: true })
+        if (!msg || !msg.source) continue
+        const parsed = await simpleParser(msg.source)
+        // A message found by UID alone could be a different message entirely if the
+        // original was deleted and the UID reused, so confirm identity when we can.
+        if (location.messageId && parsed.messageId && parsed.messageId !== location.messageId) continue
+
+        const match = (parsed.attachments ?? []).find((att) => (att.filename || '') === filename)
+        if (!match) continue
+        return { filename, contentType: match.contentType || 'application/octet-stream', content: match.content as Buffer }
+      } finally {
+        lock.release()
+      }
+    }
+    return null
+  } finally {
+    await client.logout().catch(() => {})
+  }
+}
+
 /**
  * Pulls whatever's new in one mailbox since sinceUid, and logs an Activity for
  * any message whose sender matches a known Contact, Lead, or Company email —
@@ -170,6 +242,9 @@ async function syncMailbox(
             // carrying a signed mandate or an invoice can't land in the CRM looking like an
             // ordinary (or, for an attachment-only email, empty) message.
             attachment_names: realAttachmentNames(parsed.attachments),
+            // Breadcrumb back to the message itself, for on-demand attachment fetching.
+            email_folder: path,
+            email_uid: msg.uid,
           },
           { onConflict: 'user_id,email_message_id', ignoreDuplicates: true },
         )

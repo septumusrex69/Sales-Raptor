@@ -3,6 +3,7 @@ import { Paperclip } from 'lucide-react'
 import { formatDateTime } from '../data/mockData'
 import { parseEmailActivity } from '../lib/emailActivity'
 import { useAppStore } from '../store/AppStore'
+import { useAuth } from '../store/AuthContext'
 import type { Activity } from '../types'
 
 /**
@@ -19,7 +20,47 @@ const PREVIEW_THRESHOLD = 180
  */
 export function EmailActivityRow({ activity, onMarkRead, onReply }: { activity: Activity; onMarkRead: () => void; onReply?: () => void }) {
   const [expanded, setExpanded] = useState(false)
-  const { userById } = useAppStore()
+  const [downloading, setDownloading] = useState<string | null>(null)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
+  const { userById, refreshSyncedData } = useAppStore()
+  const { session } = useAuth()
+
+  /**
+   * Pulls the file from the mailbox through the server rather than storing it in the CRM.
+   * Needs the auth header, so it can't be a plain link — fetch, then hand the browser a
+   * blob to save.
+   */
+  async function download(name: string) {
+    if (!session?.access_token) return
+    setDownloading(name)
+    setDownloadError(null)
+    try {
+      const res = await fetch('/api/email/attachment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ activityId: activity.id, filename: name }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setDownloadError(body.error ?? 'Could not download that attachment.')
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = name
+      link.click()
+      URL.revokeObjectURL(url)
+      // The download is logged as an Activity server-side; pull it in so it shows straight away.
+      void refreshSyncedData()
+    } catch {
+      setDownloadError('Could not reach the server.')
+    } finally {
+      setDownloading(null)
+    }
+  }
+
   const parsed = parseEmailActivity(activity.subject)
   // Who sent it, or whose connected mailbox it arrived in. Debt-collection correspondence
   // needs to be attributable to a person, not just to the company.
@@ -64,17 +105,24 @@ export function EmailActivityRow({ activity, onMarkRead, onReply }: { activity: 
           {attachments.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
               {attachments.map((name, i) => (
-                <span
+                <button
                   key={`${name}-${i}`}
-                  title="Attached to the original email — open it in your mailbox to download"
-                  className="inline-flex items-center gap-1 text-[11px] text-slate-500 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 max-w-[220px]"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void download(name)
+                  }}
+                  disabled={downloading === name}
+                  title="Download from the mailbox"
+                  className="inline-flex items-center gap-1 text-[11px] text-slate-600 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 max-w-[220px] hover:bg-slate-200 hover:text-brand-700 disabled:opacity-50"
                 >
                   <Paperclip size={10} className="shrink-0" />
                   <span className="truncate">{name}</span>
-                </span>
+                  {downloading === name && <span className="text-slate-400">…</span>}
+                </button>
               ))}
             </div>
           )}
+          {downloadError && <p className="text-[11px] text-red-600 mt-1">{downloadError}</p>}
         </div>
       </div>
       <div className="flex flex-col items-end gap-1 shrink-0">

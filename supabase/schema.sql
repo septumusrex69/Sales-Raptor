@@ -296,7 +296,14 @@ create table if not exists public.activities (
   -- NOT stored -- they stay in the connected mailbox -- but without this the CRM gave no
   -- indication an email carried an attachment at all, so a mandate or invoice could be
   -- sitting in someone's inbox with nothing here hinting it exists.
-  attachment_names text[]
+  attachment_names text[],
+  -- Where this email lives in the mailbox, so /api/email/attachment can go back and fetch
+  -- an attachment on demand instead of the CRM warehousing every file it ever receives
+  -- (this mailbox takes thousands of attachments a week). A UID is only unique within its
+  -- own folder, hence storing both; if the message has since been moved, the endpoint
+  -- falls back to searching for it by Message-ID.
+  email_folder text,
+  email_uid integer
 );
 -- Deliberately NOT partial (no `where email_message_id is not null`): Postgres can't use a
 -- partial index as an ON CONFLICT (user_id, email_message_id) inference target unless the
