@@ -3,6 +3,6 @@
     { "source": "/((?!api/|assets/|brand/|favicon\\.svg).*)", "destination": "/index.html" }
   ],
   "crons": [
-    { "path": "/api/email/sync-all", "schedule": "0 * * * *" }
+    { "path": "/api/email/sync-all", "schedule": "0 5 * * *" }
   ]
 }
