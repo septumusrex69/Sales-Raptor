@@ -11,7 +11,7 @@ import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { formatCurrency, formatDate, formatDateTime, services } from '../../data/mockData'
 import { ACTIVITY_TYPE_COLORS } from '../../lib/colors'
-import type { Company, ProductService } from '../../types'
+import type { Company, Contact, ProductService } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
 
 export function CompanyDetail() {
@@ -32,6 +32,7 @@ export function CompanyDetail() {
   const [parentOpen, setParentOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [emailOpen, setEmailOpen] = useState(false)
+  const [contactEmailTarget, setContactEmailTarget] = useState<Contact | null>(null)
 
   const companyContacts = useMemo(() => contacts.filter((c) => c.companyId === id), [contacts, id])
   const companyLeads = useMemo(() => leads.filter((l) => l.companyId === id), [leads, id])
@@ -197,14 +198,12 @@ export function CompanyDetail() {
           <div>
             <p className="text-xs text-slate-400 mb-0.5">Email</p>
             {company.email ? (
-              <div className="flex items-center gap-2">
-                <a href={`mailto:${company.email}`} className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600">
-                  <Mail size={13} /> {company.email}
-                </a>
-                <button onClick={() => setEmailOpen(true)} className="text-xs font-medium text-brand-600 hover:underline shrink-0">
-                  Send Email
+              <span className="inline-flex items-center gap-1.5 text-slate-700 font-medium">
+                <button onClick={() => setEmailOpen(true)} className="text-slate-400 hover:text-brand-600" title="Send email">
+                  <Mail size={13} />
                 </button>
-              </div>
+                {company.email}
+              </span>
             ) : (
               <span className="text-slate-300">—</span>
             )}
@@ -247,9 +246,12 @@ export function CompanyDetail() {
                     </a>
                   )}
                   {c.email && (
-                    <a href={`mailto:${c.email}`} className="inline-flex items-center gap-1 hover:text-brand-600">
-                      <Mail size={11} /> {c.email}
-                    </a>
+                    <span className="inline-flex items-center gap-1">
+                      <button onClick={() => setContactEmailTarget(c)} className="text-slate-400 hover:text-brand-600" title="Send email">
+                        <Mail size={11} />
+                      </button>
+                      {c.email}
+                    </span>
                   )}
                 </div>
               </div>
@@ -431,6 +433,15 @@ export function CompanyDetail() {
           to={company.email}
           onClose={() => setEmailOpen(false)}
           onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, companyId: company.id })}
+        />
+      )}
+      {contactEmailTarget && contactEmailTarget.email && (
+        <ComposeEmailModal
+          to={contactEmailTarget.email}
+          onClose={() => setContactEmailTarget(null)}
+          onSent={(subject, bodyText) =>
+            addActivity({ type: 'Email', subject, notes: bodyText, contactId: contactEmailTarget.id, companyId: company.id })
+          }
         />
       )}
       {noteOpen && (

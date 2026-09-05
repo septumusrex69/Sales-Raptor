@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Mail, Phone, StickyNote, Building2 } from 'lucide-react'
+import { ArrowLeft, Mail, Phone, StickyNote, Building2, Pencil } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { Avatar } from '../../components/ui/Avatar'
@@ -8,13 +8,15 @@ import { StageBadge } from '../../components/ui/Badge'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { companyById, formatCurrency, formatDate, formatDateTime, userById } from '../../data/mockData'
+import type { Contact } from '../../types'
 
 export function ContactDetail() {
   const { id } = useParams()
-  const { contacts, deals, activities, tasks, addActivity } = useAppStore()
+  const { contacts, deals, activities, tasks, addActivity, updateContact } = useAppStore()
   const contact = contacts.find((c) => c.id === id)
   const [noteOpen, setNoteOpen] = useState(false)
   const [emailOpen, setEmailOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
 
   const contactDeals = useMemo(() => deals.filter((d) => d.contactId === id), [deals, id])
   const contactActivities = useMemo(
@@ -49,9 +51,12 @@ export function ContactDetail() {
               <p className="text-sm text-slate-500">{contact.jobTitle}{company ? ` at ${company.name}` : ''}</p>
               <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
                 {contact.email && (
-                  <a href={`mailto:${contact.email}`} className="inline-flex items-center gap-1 hover:text-brand-600">
-                    <Mail size={12} /> {contact.email}
-                  </a>
+                  <span className="inline-flex items-center gap-1">
+                    <button onClick={() => setEmailOpen(true)} className="text-slate-400 hover:text-brand-600" title="Send email">
+                      <Mail size={12} />
+                    </button>
+                    {contact.email}
+                  </span>
                 )}
                 {(contact.phone || contact.mobile) && (
                   <a href={`tel:${contact.phone ?? contact.mobile}`} className="inline-flex items-center gap-1 hover:text-brand-600">
@@ -62,11 +67,9 @@ export function ContactDetail() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {contact.email && (
-              <button onClick={() => setEmailOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-                <Mail size={14} /> Send Email
-              </button>
-            )}
+            <button onClick={() => setEditOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+              <Pencil size={14} /> Edit
+            </button>
             <button onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
               <StickyNote size={14} /> Add Note
             </button>
@@ -190,6 +193,9 @@ export function ContactDetail() {
           onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, contactId: contact.id, companyId: contact.companyId })}
         />
       )}
+      {editOpen && (
+        <EditContactModal contact={contact} onClose={() => setEditOpen(false)} onSave={(patch) => updateContact(contact.id, patch)} />
+      )}
     </div>
   )
 }
@@ -224,6 +230,68 @@ function NoteModal({ onClose, onSave }: { onClose: () => void; onSave: (text: st
           </button>
           <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
             Add Note
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function EditContactModal({ contact, onClose, onSave }: { contact: Contact; onClose: () => void; onSave: (patch: Partial<Contact>) => void }) {
+  const [form, setForm] = useState({
+    firstName: contact.firstName,
+    lastName: contact.lastName,
+    jobTitle: contact.jobTitle ?? '',
+    email: contact.email ?? '',
+    phone: contact.phone ?? '',
+    mobile: contact.mobile ?? '',
+  })
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!form.firstName.trim() || !form.lastName.trim()) return
+    onSave({
+      firstName: form.firstName.trim(),
+      lastName: form.lastName.trim(),
+      jobTitle: form.jobTitle.trim() || undefined,
+      email: form.email.trim() || undefined,
+      phone: form.phone.trim() || undefined,
+      mobile: form.mobile.trim() || undefined,
+    })
+    onClose()
+  }
+
+  return (
+    <Modal title="Edit Contact" onClose={onClose} width={440}>
+      <form onSubmit={handleSubmit}>
+        <div className="grid grid-cols-2 gap-x-3">
+          <FormField label="First Name" required>
+            <input className={inputClass} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} required autoFocus />
+          </FormField>
+          <FormField label="Last Name" required>
+            <input className={inputClass} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} required />
+          </FormField>
+        </div>
+        <FormField label="Job Title">
+          <input className={inputClass} value={form.jobTitle} onChange={(e) => setForm({ ...form, jobTitle: e.target.value })} />
+        </FormField>
+        <FormField label="Email">
+          <input className={inputClass} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        </FormField>
+        <div className="grid grid-cols-2 gap-x-3">
+          <FormField label="Phone">
+            <input className={inputClass} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          </FormField>
+          <FormField label="Mobile">
+            <input className={inputClass} value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
+          </FormField>
+        </div>
+        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
+          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
+            Cancel
+          </button>
+          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
+            Save Changes
           </button>
         </div>
       </form>

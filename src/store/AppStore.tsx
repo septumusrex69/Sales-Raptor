@@ -163,6 +163,7 @@ interface AppActions {
   markDealLost: (id: ID, reason: LossReason) => void
 
   addContact: (input: Partial<Contact> & { firstName: string; lastName: string }) => Contact
+  updateContact: (id: ID, patch: Partial<Contact>) => void
   addCompany: (input: Partial<Company> & { name: string }) => Company
   updateCompany: (id: ID, patch: Partial<Company>) => void
   deleteCompany: (id: ID) => void
@@ -572,6 +573,21 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [ownerId],
   )
 
+  const updateContact = useCallback<AppActions['updateContact']>(
+    (id, patch) => {
+      let previous: Contact | undefined
+      setContacts((prev) => {
+        previous = prev.find((c) => c.id === id)
+        return prev.map((c) => (c.id === id ? { ...c, ...patch } : c))
+      })
+      updateRow('contacts', id, patch, 'updateContact', (message) => {
+        if (previous) setContacts((prev) => prev.map((c) => (c.id === id ? previous! : c)))
+        showError(message)
+      })
+    },
+    [showError],
+  )
+
   const addTask = useCallback<AppActions['addTask']>(
     (input) => {
       const task: Task = {
@@ -812,6 +828,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       markDealWon,
       markDealLost,
       addContact,
+      updateContact,
       addCompany,
       updateCompany,
       deleteCompany,
@@ -855,6 +872,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       markDealWon,
       markDealLost,
       addContact,
+      updateContact,
       addCompany,
       updateCompany,
       deleteCompany,

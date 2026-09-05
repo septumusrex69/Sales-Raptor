@@ -96,7 +96,6 @@ export function LeadDetail() {
             />
           )}
           <ActionButton icon={StickyNote} label="Add Activity" onClick={() => setActivityOpen(true)} />
-          {lead.email && <ActionButton icon={Mail} label="Send Email" onClick={() => setEmailOpen(true)} />}
           <ActionButton icon={CheckSquare} label="Create Task" onClick={() => setTaskOpen('task')} />
           <ActionButton icon={Calendar} label="Schedule Meeting" onClick={() => setTaskOpen('meeting')} />
           {canEdit && <ActionButton icon={XCircle} label="Mark Lost" tone="danger" onClick={() => markLeadLost(lead.id)} disabled={lead.status === 'Lost'} />}
@@ -113,7 +112,7 @@ export function LeadDetail() {
               <Field label="Last Name" value={lead.lastName} />
               <Field label="Company" value={lead.companyName} />
               <Field label="Job Title" value={lead.jobTitle} />
-              <Field label="Email" value={lead.email} icon={Mail} href={lead.email ? `mailto:${lead.email}` : undefined} />
+              <Field label="Email" value={lead.email} icon={Mail} onIconClick={lead.email ? () => setEmailOpen(true) : undefined} />
               <Field label="Mobile Number" value={lead.mobile} icon={Phone} href={lead.mobile ? `tel:${lead.mobile}` : undefined} />
               <Field label="Office Number" value={lead.phone} icon={Phone} href={lead.phone ? `tel:${lead.phone}` : undefined} />
               <Field label="Industry" value={lead.industry} />
@@ -266,12 +265,18 @@ function ActionButton({ icon: Icon, label, onClick, tone, disabled }: { icon: ty
   )
 }
 
-function Field({ label, value, icon: Icon, href }: { label: string; value?: string; icon?: typeof Mail; href?: string }) {
+function Field({ label, value, icon: Icon, href, onIconClick }: { label: string; value?: string; icon?: typeof Mail; href?: string; onIconClick?: () => void }) {
   return (
     <div>
       <dt className="text-xs text-slate-400 mb-0.5">{label}</dt>
       <dd className="text-slate-700 font-medium flex items-center gap-1.5">
-        {Icon && <Icon size={13} className="text-slate-400" />}
+        {Icon && (onIconClick ? (
+          <button type="button" onClick={onIconClick} className="text-slate-400 hover:text-brand-600" title="Send email">
+            <Icon size={13} />
+          </button>
+        ) : (
+          <Icon size={13} className="text-slate-400" />
+        ))}
         {href ? (
           <a href={href} className="hover:text-brand-600 hover:underline">
             {value ?? '—'}
