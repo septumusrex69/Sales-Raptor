@@ -123,7 +123,9 @@ create table if not exists public.companies (
   account_count integer,
   handover_amount numeric,
   payments_to_date numeric,
-  marketing_agent text
+  marketing_agent text,
+  -- Swordfish's client classification (A/B/C/D), where known.
+  classification text check (classification in ('A', 'B', 'C', 'D'))
 );
 
 -- ---------- Contacts ----------

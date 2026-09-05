@@ -165,6 +165,7 @@ interface AppActions {
   addContact: (input: Partial<Contact> & { firstName: string; lastName: string }) => Contact
   addCompany: (input: Partial<Company> & { name: string }) => Company
   updateCompany: (id: ID, patch: Partial<Company>) => void
+  deleteCompany: (id: ID) => void
   addTask: (input: Partial<Task> & { title: string; dueDate: string }) => Task
   updateTask: (id: ID, patch: Partial<Task>) => void
   addActivity: (input: Partial<Activity> & { type: ActivityType; subject: string }) => Activity
@@ -540,6 +541,22 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [showError],
   )
 
+  const deleteCompany = useCallback<AppActions['deleteCompany']>(
+    (id) => {
+      let previous: Company | undefined
+      setCompanies((prev) => {
+        previous = prev.find((c) => c.id === id)
+        return prev.filter((c) => c.id !== id)
+      })
+      setCompanies((prev) => prev.map((c) => (c.parentCompanyId === id ? { ...c, parentCompanyId: undefined } : c)))
+      deleteRow('companies', id, 'deleteCompany', (message) => {
+        if (previous) setCompanies((prev) => [previous!, ...prev])
+        showError(message)
+      })
+    },
+    [showError],
+  )
+
   const addContact = useCallback<AppActions['addContact']>(
     (input) => {
       const contact: Contact = {
@@ -797,6 +814,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       addContact,
       addCompany,
       updateCompany,
+      deleteCompany,
       addTask,
       updateTask,
       addActivity,
@@ -839,6 +857,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       addContact,
       addCompany,
       updateCompany,
+      deleteCompany,
       addTask,
       updateTask,
       addActivity,

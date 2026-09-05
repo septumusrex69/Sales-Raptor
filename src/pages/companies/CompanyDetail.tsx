@@ -1,19 +1,23 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock, Users2, Link2, Unlink } from 'lucide-react'
+import { ArrowLeft, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock, Users2, Link2, Unlink, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
+import { useAuth } from '../../store/AuthContext'
 import { Card, CardHeader } from '../../components/ui/Card'
-import { StatusBadge, StageBadge } from '../../components/ui/Badge'
+import { StatusBadge, StageBadge, ClassificationBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { formatCurrency, formatDate, formatDateTime, services } from '../../data/mockData'
+import { ACTIVITY_TYPE_COLORS } from '../../lib/colors'
 import type { Company, ProductService } from '../../types'
 
 export function CompanyDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { companies, contacts, leads, deals, activities, tasks, users, addActivity, updateCompany, addCompany, addDeal, addTask } = useAppStore()
+  const { currentUser } = useAuth()
+  const { companies, contacts, leads, deals, activities, tasks, users, addActivity, updateCompany, deleteCompany, addCompany, addDeal, addTask } = useAppStore()
   const company = companies.find((c) => c.id === id)
+  const isAdmin = currentUser?.role === 'Administrator'
   const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const [noteOpen, setNoteOpen] = useState(false)
   const [ownerOpen, setOwnerOpen] = useState(false)
@@ -21,6 +25,7 @@ export function CompanyDetail() {
   const [followUpOpen, setFollowUpOpen] = useState(false)
   const [meetingOpen, setMeetingOpen] = useState(false)
   const [parentOpen, setParentOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   const companyContacts = useMemo(() => contacts.filter((c) => c.companyId === id), [contacts, id])
   const companyLeads = useMemo(() => leads.filter((l) => l.companyId === id), [leads, id])
@@ -34,7 +39,6 @@ export function CompanyDetail() {
     [activities, id],
   )
   const companyTasks = useMemo(() => tasks.filter((t) => t.companyId === id), [tasks, id])
-  const notes = companyActivities.filter((a) => a.type === 'Note')
   const lifetimeValue = wonDeals.reduce((s, d) => s + d.value, 0)
 
   if (!company) {
@@ -70,34 +74,11 @@ export function CompanyDetail() {
               </p>
             )}
             <p className="text-sm text-slate-500 mt-0.5">{company.industry} · {company.city}, {company.province}</p>
-            {(company.accountCount !== undefined || company.handoverAmount !== undefined) && (
-              <p className="text-xs text-slate-500 mt-1">
-                {company.accountCount ?? 0} accounts · Handover {formatCurrency(company.handoverAmount ?? 0)}
-                {company.paymentsToDate !== undefined && ` · Paid to date ${formatCurrency(company.paymentsToDate)}`}
-              </p>
-            )}
-            <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
-              {company.email && (
-                <a href={`mailto:${company.email}`} className="inline-flex items-center gap-1 hover:text-brand-600">
-                  <Mail size={12} /> {company.email}
-                </a>
-              )}
-              {company.phone && (
-                <a href={`tel:${company.phone}`} className="inline-flex items-center gap-1 hover:text-brand-600">
-                  <Phone size={12} /> {company.phone}
-                </a>
-              )}
-              {company.website && (
-                <span className="inline-flex items-center gap-1">
-                  <Globe size={12} /> {company.website}
-                </span>
-              )}
-            </div>
           </div>
           <div className="text-right">
             <p className="text-xs text-slate-400">Lifetime Value</p>
             <p className="text-xl font-bold text-slate-800">{formatCurrency(lifetimeValue)}</p>
-            <div className="flex items-center gap-2 mt-2">
+            <div className="flex flex-wrap items-center justify-end gap-2 mt-2">
               {isClient && (
                 <button onClick={() => setDealOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
                   <Handshake size={13} /> Add Deal
@@ -121,9 +102,37 @@ export function CompanyDetail() {
                   <Link2 size={13} /> {company.parentCompanyId ? 'Change Parent' : 'Assign to Parent'}
                 </button>
               )}
+              {isAdmin && (
+                <button onClick={() => setDeleteOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">
+                  <Trash2 size={13} /> Delete
+                </button>
+              )}
             </div>
           </div>
         </div>
+
+        {(company.accountCount !== undefined || company.handoverAmount !== undefined) && (
+          <div className="flex flex-wrap items-end gap-x-10 gap-y-3 mt-4 pt-4 border-t border-slate-100">
+            <div>
+              <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Accounts</p>
+              <p className="text-2xl font-bold text-slate-800 mt-0.5">{company.accountCount ?? 0}</p>
+            </div>
+            {company.classification && (
+              <div>
+                <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide mb-1.5">Class</p>
+                <ClassificationBadge classification={company.classification} />
+              </div>
+            )}
+            <div>
+              <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Handover Amount</p>
+              <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(company.handoverAmount ?? 0)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Paid to Date</p>
+              <p className="text-2xl font-bold text-[#957323] mt-0.5">{formatCurrency(company.paymentsToDate ?? 0)}</p>
+            </div>
+          </div>
+        )}
       </Card>
 
       <Card>
@@ -244,17 +253,30 @@ export function CompanyDetail() {
       )}
 
       <Card>
-        <CardHeader title="Notes" subtitle={`${notes.length} note${notes.length === 1 ? '' : 's'}`} />
-        {notes.length === 0 ? (
-          <p className="text-sm text-slate-400">No notes yet.</p>
+        <CardHeader title="Notes" subtitle={`${companyActivities.length} update${companyActivities.length === 1 ? '' : 's'}`} />
+        {companyActivities.length === 0 ? (
+          <p className="text-sm text-slate-400">No activity recorded yet.</p>
         ) : (
           <div className="space-y-2.5">
-            {notes.map((n) => (
-              <div key={n.id} className="bg-[#f7f4eb] border border-[#e7dbb2] rounded-lg p-3">
-                <p className="text-sm text-slate-700">{n.notes || n.subject}</p>
-                <p className="text-[11px] text-slate-400 mt-1">{formatDateTime(n.activityDate)}</p>
-              </div>
-            ))}
+            {companyActivities.map((a) =>
+              a.type === 'Note' ? (
+                <div key={a.id} className="bg-[#f7f4eb] border border-[#e7dbb2] rounded-lg p-3">
+                  <p className="text-sm text-slate-700">{a.notes || a.subject}</p>
+                  <p className="text-[11px] text-slate-400 mt-1">{formatDateTime(a.activityDate)}</p>
+                </div>
+              ) : (
+                <div key={a.id} className="flex items-start justify-between gap-3 border-b border-slate-50 pb-2.5 last:border-0 last:pb-0">
+                  <div className="flex items-start gap-2 min-w-0">
+                    <span className="w-2 h-2 rounded-full shrink-0 mt-1.5" style={{ backgroundColor: ACTIVITY_TYPE_COLORS[a.type] }} />
+                    <div className="min-w-0">
+                      <p className="text-sm text-slate-700">{a.subject}</p>
+                      {a.notes && <p className="text-xs text-slate-500 mt-0.5">{a.notes}</p>}
+                    </div>
+                  </div>
+                  <span className="text-[11px] text-slate-400 shrink-0">{formatDateTime(a.activityDate)}</span>
+                </div>
+              ),
+            )}
           </div>
         )}
       </Card>
@@ -307,22 +329,6 @@ export function CompanyDetail() {
                     <span className="text-sm font-medium text-slate-700">{l.firstName} {l.lastName}</span>
                     <StatusBadge status={l.status} />
                   </Link>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          <Card>
-            <CardHeader title="Activities" />
-            {companyActivities.length === 0 ? (
-              <p className="text-sm text-slate-400">No activity recorded yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {companyActivities.slice(0, 8).map((a) => (
-                  <div key={a.id} className="flex justify-between text-sm border-b border-slate-50 pb-2.5 last:border-0">
-                    <span className="text-slate-700">{a.subject}</span>
-                    <span className="text-xs text-slate-400">{formatDateTime(a.activityDate)}</span>
-                  </div>
                 ))}
               </div>
             )}
@@ -402,6 +408,20 @@ export function CompanyDetail() {
           onCreateNew={(name, code) => {
             const parent = addCompany({ name, code: code || undefined, accountOwnerId: company.accountOwnerId })
             updateCompany(company.id, { parentCompanyId: parent.id })
+          }}
+        />
+      )}
+      {deleteOpen && (
+        <DeleteClientModal
+          company={company}
+          subAccountsCount={subAccounts.length}
+          dealsCount={companyDeals.length}
+          contactsCount={companyContacts.length}
+          leadsCount={companyLeads.length}
+          onClose={() => setDeleteOpen(false)}
+          onConfirm={() => {
+            deleteCompany(company.id)
+            navigate('/companies')
           }}
         />
       )}
@@ -570,6 +590,61 @@ function ScheduleFollowUpModal({ onClose, onSave }: { onClose: () => void; onSav
           </button>
         </div>
       </form>
+    </Modal>
+  )
+}
+
+function DeleteClientModal({
+  company,
+  subAccountsCount,
+  dealsCount,
+  contactsCount,
+  leadsCount,
+  onClose,
+  onConfirm,
+}: {
+  company: Company
+  subAccountsCount: number
+  dealsCount: number
+  contactsCount: number
+  leadsCount: number
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  const [confirmText, setConfirmText] = useState('')
+  const canDelete = confirmText.trim() === company.name
+
+  return (
+    <Modal title="Delete Client" onClose={onClose} width={420}>
+      <div className="space-y-3">
+        <p className="text-sm text-slate-600">
+          This permanently deletes <strong>{company.name}</strong> and cannot be undone.
+        </p>
+        {(dealsCount > 0 || subAccountsCount > 0 || contactsCount > 0 || leadsCount > 0) && (
+          <ul className="list-disc pl-5 space-y-1 text-xs text-slate-500">
+            {dealsCount > 0 && <li>{dealsCount} deal{dealsCount === 1 ? '' : 's'} linked to this client will also be permanently deleted.</li>}
+            {subAccountsCount > 0 && <li>{subAccountsCount} sub-account{subAccountsCount === 1 ? '' : 's'} will become standalone clients.</li>}
+            {contactsCount > 0 && <li>{contactsCount} contact{contactsCount === 1 ? '' : 's'} will be kept but unlinked from this client.</li>}
+            {leadsCount > 0 && <li>{leadsCount} lead{leadsCount === 1 ? '' : 's'} will be kept but unlinked from this client.</li>}
+          </ul>
+        )}
+        <FormField label={`Type "${company.name}" to confirm`}>
+          <input className={inputClass} value={confirmText} onChange={(e) => setConfirmText(e.target.value)} autoFocus />
+        </FormField>
+        <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!canDelete}
+            onClick={onConfirm}
+            className="text-sm font-medium px-3.5 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Delete Client
+          </button>
+        </div>
+      </div>
     </Modal>
   )
 }

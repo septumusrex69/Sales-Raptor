@@ -196,6 +196,8 @@ export interface Company {
   paymentsToDate?: number
   /** Name of the closer who originally signed this client (Swordfish's "Marketing Agent"), where known. */
   marketingAgent?: string
+  /** Swordfish's client classification (A/B/C/D), where known. Set at the level a Swordfish code actually exists — a parent container invented by us has none of its own. */
+  classification?: LeadClassification
 }
 
 export type TaskType =
