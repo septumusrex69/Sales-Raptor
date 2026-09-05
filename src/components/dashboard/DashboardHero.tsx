@@ -8,7 +8,17 @@ import type { ReactNode } from 'react'
  * right, alongside the title — the period/compare/scope filters and
  * Export button live inside the hero, not below it.
  */
-export function DashboardHero({ children }: { children?: ReactNode }) {
+export function DashboardHero({
+  children,
+  eyebrow = 'Bredell Ferreira · Raptor',
+  title = 'Sales Dashboard',
+  subtitle = 'Real-time overview of your sales performance',
+}: {
+  children?: ReactNode
+  eyebrow?: ReactNode
+  title?: ReactNode
+  subtitle?: ReactNode
+}) {
   return (
     <div
       className="relative overflow-hidden rounded-2xl px-7 py-8"
@@ -46,9 +56,9 @@ export function DashboardHero({ children }: { children?: ReactNode }) {
           </defs>
         </svg>
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-gold-500 mb-1">Bredell Ferreira · Raptor</p>
-          <h2 className="text-2xl font-extrabold tracking-tight text-white">Sales Dashboard</h2>
-          <p className="text-[13px] text-white/60 mt-0.5">Real-time overview of your sales performance</p>
+          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-gold-500 mb-1">{eyebrow}</p>
+          <h2 className="text-2xl font-extrabold tracking-tight text-white">{title}</h2>
+          <p className="text-[13px] text-white/60 mt-0.5">{subtitle}</p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">{children}</div>

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock, Users2, Link2, Unlink, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
+import { DashboardHero } from '../../components/dashboard/DashboardHero'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { StatusBadge, StageBadge, ClassificationBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
@@ -62,43 +63,55 @@ export function CompanyDetail() {
         <ArrowLeft size={15} /> Back to Clients
       </Link>
 
-      <Card>
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold text-slate-800">{company.name}</h2>
-            {company.code && <span className="font-mono text-[11px] text-white bg-gold-500 px-2 py-0.5 rounded-md">{company.code}</span>}
-          </div>
-          {company.parentCompanyId && (
-            <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5">
-              Sub-account of{' '}
-              <Link to={`/companies/${company.parentCompanyId}`} className="text-brand-600 hover:underline">
-                {companies.find((c) => c.id === company.parentCompanyId)?.name}
-              </Link>
-              <button onClick={() => updateCompany(company.id, { parentCompanyId: undefined })} className="inline-flex items-center gap-0.5 text-slate-300 hover:text-slate-600" title="Remove from parent">
-                <Unlink size={11} />
-              </button>
-            </p>
-          )}
-          <p className="text-sm text-slate-500 mt-0.5">{company.industry} · {company.city}, {company.province}</p>
-        </div>
+      <DashboardHero
+        eyebrow={company.parentCompanyId ? 'Sub-account' : 'Client'}
+        title={
+          <span className="inline-flex items-center gap-2">
+            {company.name}
+            {company.code && (
+              <span className="font-mono text-[11px] font-bold text-navy-950 bg-gold-400 px-2 py-0.5 rounded-md align-middle">{company.code}</span>
+            )}
+          </span>
+        }
+        subtitle={
+          <span className="inline-flex flex-wrap items-center gap-x-1.5">
+            {company.parentCompanyId && (
+              <>
+                <span>Sub-account of</span>
+                <Link to={`/companies/${company.parentCompanyId}`} className="text-gold-400 hover:underline">
+                  {companies.find((c) => c.id === company.parentCompanyId)?.name}
+                </Link>
+                <button
+                  onClick={() => updateCompany(company.id, { parentCompanyId: undefined })}
+                  className="inline-flex items-center text-white/40 hover:text-white"
+                  title="Remove from parent"
+                >
+                  <Unlink size={11} />
+                </button>
+                <span className="text-white/30">·</span>
+              </>
+            )}
+            <span>
+              {company.industry} · {company.city}, {company.province}
+            </span>
+          </span>
+        }
+      />
 
-        <div className="flex flex-wrap items-end gap-x-10 gap-y-3 mt-4 pt-4 border-t border-slate-100">
-          <div>
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Additional Service Value</p>
-            <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(lifetimeValue)}</p>
-          </div>
+      <Card>
+        <div className="flex flex-wrap items-end gap-x-10 gap-y-3">
           {(company.accountCount !== undefined || company.handoverAmount !== undefined) && (
             <>
-              <div>
-                <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Accounts</p>
-                <p className="text-2xl font-bold text-slate-800 mt-0.5">{company.accountCount ?? 0}</p>
-              </div>
               {company.classification && (
                 <div>
                   <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide mb-1.5">Class</p>
                   <ClassificationBadge classification={company.classification} />
                 </div>
               )}
+              <div>
+                <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Accounts</p>
+                <p className="text-2xl font-bold text-slate-800 mt-0.5">{company.accountCount ?? 0}</p>
+              </div>
               <div>
                 <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Handover Amount</p>
                 <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(company.handoverAmount ?? 0)}</p>
@@ -115,6 +128,10 @@ export function CompanyDetail() {
               )}
             </>
           )}
+          <div>
+            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Deals Won</p>
+            <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(lifetimeValue)}</p>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-slate-100">
