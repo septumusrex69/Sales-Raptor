@@ -40,6 +40,13 @@ export function CompanyDetail() {
   )
   const companyTasks = useMemo(() => tasks.filter((t) => t.companyId === id), [tasks, id])
   const lifetimeValue = wonDeals.reduce((s, d) => s + d.value, 0)
+  // Paid-to-date vs. handover amount. Can exceed 100% — payments here include
+  // fees on top of the handover amount, which this system deliberately never
+  // discloses, so the ratio isn't meant to cap at 100.
+  const collectionsCoefficient =
+    company?.handoverAmount !== undefined && company.handoverAmount > 0 && company?.paymentsToDate !== undefined
+      ? (company.paymentsToDate / company.handoverAmount) * 100
+      : undefined
 
   if (!company) {
     return (
@@ -56,83 +63,90 @@ export function CompanyDetail() {
       </Link>
 
       <Card>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-semibold text-slate-800">{company.name}</h2>
-              {company.code && <span className="font-mono text-[11px] text-white bg-gold-500 px-2 py-0.5 rounded-md">{company.code}</span>}
-            </div>
-            {company.parentCompanyId && (
-              <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5">
-                Sub-account of{' '}
-                <Link to={`/companies/${company.parentCompanyId}`} className="text-brand-600 hover:underline">
-                  {companies.find((c) => c.id === company.parentCompanyId)?.name}
-                </Link>
-                <button onClick={() => updateCompany(company.id, { parentCompanyId: undefined })} className="inline-flex items-center gap-0.5 text-slate-300 hover:text-slate-600" title="Remove from parent">
-                  <Unlink size={11} />
-                </button>
-              </p>
-            )}
-            <p className="text-sm text-slate-500 mt-0.5">{company.industry} · {company.city}, {company.province}</p>
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-slate-800">{company.name}</h2>
+            {company.code && <span className="font-mono text-[11px] text-white bg-gold-500 px-2 py-0.5 rounded-md">{company.code}</span>}
           </div>
-          <div className="text-right">
-            <p className="text-xs text-slate-400">Lifetime Value</p>
-            <p className="text-xl font-bold text-slate-800">{formatCurrency(lifetimeValue)}</p>
-            <div className="flex flex-wrap items-center justify-end gap-2 mt-2">
-              {isClient && (
-                <button onClick={() => setDealOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-                  <Handshake size={13} /> Add Deal
-                </button>
-              )}
-              {isClient && (
-                <button onClick={() => setFollowUpOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-                  <CalendarClock size={13} /> Schedule Follow-up
-                </button>
-              )}
-              {isClient && (
-                <button onClick={() => setMeetingOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-                  <Users2 size={13} /> Schedule Meeting
-                </button>
-              )}
-              <button onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-                <StickyNote size={13} /> Add Note
+          {company.parentCompanyId && (
+            <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5">
+              Sub-account of{' '}
+              <Link to={`/companies/${company.parentCompanyId}`} className="text-brand-600 hover:underline">
+                {companies.find((c) => c.id === company.parentCompanyId)?.name}
+              </Link>
+              <button onClick={() => updateCompany(company.id, { parentCompanyId: undefined })} className="inline-flex items-center gap-0.5 text-slate-300 hover:text-slate-600" title="Remove from parent">
+                <Unlink size={11} />
               </button>
-              {subAccounts.length === 0 && (
-                <button onClick={() => setParentOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-                  <Link2 size={13} /> {company.parentCompanyId ? 'Change Parent' : 'Assign to Parent'}
-                </button>
-              )}
-              {isAdmin && (
-                <button onClick={() => setDeleteOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">
-                  <Trash2 size={13} /> Delete
-                </button>
-              )}
-            </div>
-          </div>
+            </p>
+          )}
+          <p className="text-sm text-slate-500 mt-0.5">{company.industry} · {company.city}, {company.province}</p>
         </div>
 
-        {(company.accountCount !== undefined || company.handoverAmount !== undefined) && (
-          <div className="flex flex-wrap items-end gap-x-10 gap-y-3 mt-4 pt-4 border-t border-slate-100">
-            <div>
-              <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Accounts</p>
-              <p className="text-2xl font-bold text-slate-800 mt-0.5">{company.accountCount ?? 0}</p>
-            </div>
-            {company.classification && (
-              <div>
-                <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide mb-1.5">Class</p>
-                <ClassificationBadge classification={company.classification} />
-              </div>
-            )}
-            <div>
-              <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Handover Amount</p>
-              <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(company.handoverAmount ?? 0)}</p>
-            </div>
-            <div>
-              <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Paid to Date</p>
-              <p className="text-2xl font-bold text-[#957323] mt-0.5">{formatCurrency(company.paymentsToDate ?? 0)}</p>
-            </div>
+        <div className="flex flex-wrap items-end gap-x-10 gap-y-3 mt-4 pt-4 border-t border-slate-100">
+          <div>
+            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Additional Service Value</p>
+            <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(lifetimeValue)}</p>
           </div>
-        )}
+          {(company.accountCount !== undefined || company.handoverAmount !== undefined) && (
+            <>
+              <div>
+                <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Accounts</p>
+                <p className="text-2xl font-bold text-slate-800 mt-0.5">{company.accountCount ?? 0}</p>
+              </div>
+              {company.classification && (
+                <div>
+                  <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide mb-1.5">Class</p>
+                  <ClassificationBadge classification={company.classification} />
+                </div>
+              )}
+              <div>
+                <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Handover Amount</p>
+                <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(company.handoverAmount ?? 0)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Paid to Date</p>
+                <p className="text-2xl font-bold text-[#957323] mt-0.5">{formatCurrency(company.paymentsToDate ?? 0)}</p>
+              </div>
+              {collectionsCoefficient !== undefined && (
+                <div>
+                  <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Collections Coefficient</p>
+                  <p className="text-2xl font-bold text-slate-800 mt-0.5">{collectionsCoefficient.toFixed(0)}%</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-slate-100">
+          {isClient && (
+            <button onClick={() => setDealOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+              <Handshake size={13} /> Add Deal
+            </button>
+          )}
+          {isClient && (
+            <button onClick={() => setFollowUpOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+              <CalendarClock size={13} /> Schedule Follow-up
+            </button>
+          )}
+          {isClient && (
+            <button onClick={() => setMeetingOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+              <Users2 size={13} /> Schedule Meeting
+            </button>
+          )}
+          <button onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+            <StickyNote size={13} /> Add Note
+          </button>
+          {subAccounts.length === 0 && (
+            <button onClick={() => setParentOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+              <Link2 size={13} /> {company.parentCompanyId ? 'Change Parent' : 'Assign to Parent'}
+            </button>
+          )}
+          {isAdmin && (
+            <button onClick={() => setDeleteOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">
+              <Trash2 size={13} /> Delete
+            </button>
+          )}
+        </div>
       </Card>
 
       <Card>
