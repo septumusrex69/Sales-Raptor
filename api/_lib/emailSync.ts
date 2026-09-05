@@ -102,7 +102,10 @@ async function syncMailbox(
     let maxUid = sinceUid ?? 0
     for (const uid of uids) {
       const msg = await client.fetchOne(String(uid), { source: true }, { uid: true })
-      if (!msg || !msg.source) continue
+      if (!msg || !msg.source) {
+        console.log(`[emailSync] ${path} UID ${uid}: fetchOne returned no message/source, skipped`)
+        continue
+      }
       maxUid = Math.max(maxUid, msg.uid)
 
       const parsed = await simpleParser(msg.source)
@@ -117,6 +120,9 @@ async function syncMailbox(
         console.log(`[emailSync] ${path} UID ${uid}: sender ${fromAddress} matches no Contact/Lead/Company, skipped`)
         continue
       }
+      console.log(
+        `[emailSync] ${path} UID ${uid}: sender ${fromAddress} matched (contact=${match.contactId ?? '-'}, lead=${match.leadId ?? '-'}, company=${match.companyId ?? '-'}), writing activity...`,
+      )
 
       // upsert + ignoreDuplicates rather than insert: a UID this sync reprocesses (a
       // concurrent sync, or the watermark not having advanced yet) must never log the
@@ -145,7 +151,10 @@ async function syncMailbox(
       // A duplicate (already-logged Message-ID) is silently skipped by ignoreDuplicates
       // and comes back as an empty array, not an error -- only count it when a row was
       // actually inserted.
-      if (!error && inserted && inserted.length > 0) {
+      if (error) {
+        console.error(`[emailSync] ${path} UID ${uid}: activities upsert failed: ${error.message}`)
+      } else if (inserted && inserted.length > 0) {
+        console.log(`[emailSync] ${path} UID ${uid}: activity ${inserted[0].id} inserted`)
         logged += 1
         if (match.notifyUserId) {
           const link = match.companyId ? `/companies/${match.companyId}` : match.leadId ? `/leads/${match.leadId}` : `/contacts/${match.contactId}`
@@ -156,6 +165,8 @@ async function syncMailbox(
             link,
           })
         }
+      } else {
+        console.log(`[emailSync] ${path} UID ${uid}: upsert reported a duplicate (already logged), skipped`)
       }
     }
 
