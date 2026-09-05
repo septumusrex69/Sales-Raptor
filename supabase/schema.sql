@@ -291,7 +291,12 @@ create table if not exists public.activities (
   -- Only meaningful for type = 'Email': true for every non-email Activity and for an
   -- outgoing sent email (nothing to "read"); false for a freshly-synced incoming email
   -- until someone opens it in the Emails card.
-  is_read boolean not null default true
+  is_read boolean not null default true,
+  -- File names of any attachments on a synced incoming email. The files themselves are
+  -- NOT stored -- they stay in the connected mailbox -- but without this the CRM gave no
+  -- indication an email carried an attachment at all, so a mandate or invoice could be
+  -- sitting in someone's inbox with nothing here hinting it exists.
+  attachment_names text[]
 );
 -- Deliberately NOT partial (no `where email_message_id is not null`): Postgres can't use a
 -- partial index as an ON CONFLICT (user_id, email_message_id) inference target unless the

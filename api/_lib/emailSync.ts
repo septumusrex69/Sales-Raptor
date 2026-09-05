@@ -149,6 +149,10 @@ async function syncMailbox(
             activity_date: (parsed.date ?? new Date()).toISOString(),
             email_message_id: parsed.messageId ?? `${conn.user_id}:${path}:${uid}`,
             is_read: false,
+            // Names only -- the files stay in the mailbox. Recording them means an email
+            // carrying a signed mandate or an invoice can't land in the CRM looking like an
+            // ordinary (or, for an attachment-only email, empty) message.
+            attachment_names: (parsed.attachments ?? []).map((att, i) => att.filename || `attachment-${i + 1}`),
           },
           { onConflict: 'user_id,email_message_id', ignoreDuplicates: true },
         )

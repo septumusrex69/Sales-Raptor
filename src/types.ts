@@ -263,6 +263,8 @@ export interface Activity {
   createdAt: string
   /** Only meaningful for type 'Email': false until a freshly-synced incoming email has been opened. */
   isRead?: boolean
+  /** File names of attachments on a synced incoming email. The files themselves stay in the mailbox. */
+  attachmentNames?: string[]
 }
 
 export type ProposalStatus = 'Draft' | 'Sent' | 'Viewed' | 'Accepted' | 'Declined' | 'Expired'

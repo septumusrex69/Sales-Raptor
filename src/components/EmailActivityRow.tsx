@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Paperclip } from 'lucide-react'
 import { formatDateTime } from '../data/mockData'
 import { parseEmailActivity } from '../lib/emailActivity'
 import type { Activity } from '../types'
@@ -22,6 +23,7 @@ export function EmailActivityRow({ activity, onMarkRead, onReply }: { activity: 
   const borderColor = parsed?.direction === 'sent' ? '#6086a9' : parsed?.isSpam ? '#c9962c' : '#406d58'
   const body = activity.notes ?? ''
   const isLong = body.length > PREVIEW_THRESHOLD
+  const attachments = activity.attachmentNames ?? []
 
   return (
     <div
@@ -53,6 +55,20 @@ export function EmailActivityRow({ activity, onMarkRead, onReply }: { activity: 
                 </button>
               )}
             </>
+          )}
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+              {attachments.map((name, i) => (
+                <span
+                  key={`${name}-${i}`}
+                  title="Attached to the original email — open it in your mailbox to download"
+                  className="inline-flex items-center gap-1 text-[11px] text-slate-500 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 max-w-[220px]"
+                >
+                  <Paperclip size={10} className="shrink-0" />
+                  <span className="truncate">{name}</span>
+                </span>
+              ))}
+            </div>
           )}
         </div>
       </div>
