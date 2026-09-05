@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { ImapFlow } from 'imapflow'
 import nodemailer from 'nodemailer'
-import { adminClient, requireCaller } from '../_lib/auth'
+import { adminClient, callerIsAdmin, requireCaller } from '../_lib/auth'
 import { encrypt } from '../_lib/crypto'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -21,17 +21,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const { email, password, smtpHost, smtpPort, imapHost, imapPort } = (req.body ?? {}) as {
+  const { email, password, smtpHost, smtpPort, imapHost, imapPort, targetUserId } = (req.body ?? {}) as {
     email?: string
     password?: string
     smtpHost?: string
     smtpPort?: number
     imapHost?: string
     imapPort?: number
+    targetUserId?: string
   }
   if (!email || !password || !smtpHost || !smtpPort || !imapHost || !imapPort) {
     res.status(400).json({ error: 'Email, password, and both SMTP and IMAP host/port are required.' })
     return
+  }
+
+  let userId = caller.id
+  if (targetUserId && targetUserId !== caller.id) {
+    if (!(await callerIsAdmin(admin, caller.id))) {
+      res.status(403).json({ error: 'Only administrators can connect another user’s mailbox.' })
+      return
+    }
+    userId = targetUserId
   }
 
   // Verify the credentials actually work before saving anything -- fail fast
@@ -55,7 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   await admin.from('email_connections').upsert({
-    user_id: caller.id,
+    user_id: userId,
     email,
     smtp_host: smtpHost,
     smtp_port: smtpPort,

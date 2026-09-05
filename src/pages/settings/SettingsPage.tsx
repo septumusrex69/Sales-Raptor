@@ -157,6 +157,7 @@ function UsersTab() {
   const [addOpen, setAddOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<User | null>(null)
   const [removingUser, setRemovingUser] = useState<User | null>(null)
+  const [emailUser, setEmailUser] = useState<User | null>(null)
 
   return (
     <Card padded={false}>
@@ -244,6 +245,9 @@ function UsersTab() {
                 {isAdmin && (
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-2.5">
+                      <button onClick={() => setEmailUser(u)} className="text-slate-400 hover:text-brand-600" title="Manage email connection">
+                        <Mail size={14} />
+                      </button>
                       <button onClick={() => setEditingUser(u)} className="text-slate-400 hover:text-brand-600" title="Edit user">
                         <Pencil size={14} />
                       </button>
@@ -277,7 +281,124 @@ function UsersTab() {
           onRemoved={() => removeUserLocal(removingUser.id)}
         />
       )}
+      {emailUser && session && (
+        <AdminEmailConnectModal user={emailUser} accessToken={session.access_token} onClose={() => setEmailUser(null)} />
+      )}
     </Card>
+  )
+}
+
+function AdminEmailConnectModal({ user, accessToken, onClose }: { user: User; accessToken: string; onClose: () => void }) {
+  const [status, setStatus] = useState<EmailStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [form, setForm] = useState({ email: user.email, password: '', smtpHost: '', smtpPort: '587', imapHost: '', imapPort: '993' })
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    fetch(`/api/email/status?targetUserId=${encodeURIComponent(user.id)}`, { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then((res) => res.json())
+      .then((body) => setStatus(body))
+      .catch(() => setStatus({ connected: false }))
+      .finally(() => setLoading(false))
+  }, [accessToken, user.id])
+
+  async function handleConnect(e: FormEvent) {
+    e.preventDefault()
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/email/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          targetUserId: user.id,
+          email: form.email.trim(),
+          password: form.password,
+          smtpHost: form.smtpHost.trim(),
+          smtpPort: Number(form.smtpPort),
+          imapHost: form.imapHost.trim(),
+          imapPort: Number(form.imapPort),
+        }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(body.error ?? 'Could not connect that mailbox.')
+        setSubmitting(false)
+        return
+      }
+      setStatus({ connected: true, email: form.email.trim(), lastSyncedAt: null })
+    } catch {
+      setError('Could not reach the server. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleDisconnect() {
+    if (!confirm(`Disconnect ${user.name}'s mailbox?`)) return
+    await fetch('/api/email/disconnect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ targetUserId: user.id }),
+    })
+    setStatus({ connected: false })
+  }
+
+  return (
+    <Modal title={`Email — ${user.name}`} onClose={onClose} width={480}>
+      {loading ? (
+        <p className="text-sm text-slate-400">Checking connection…</p>
+      ) : status?.connected ? (
+        <div>
+          <p className="text-sm text-slate-700">
+            Connected as <span className="font-medium">{status.email}</span>
+          </p>
+          {status.lastSyncedAt && <p className="text-xs text-slate-400 mt-1">Last synced {new Date(status.lastSyncedAt).toLocaleString()}</p>}
+          <div className="flex justify-end mt-4">
+            <button onClick={handleDisconnect} className="text-sm font-medium px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">
+              Disconnect
+            </button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={handleConnect}>
+          <p className="text-xs text-slate-400 mb-4">
+            Enter {user.name}'s mailbox credentials to connect it on their behalf. Find the SMTP/IMAP host and port under Email Accounts →
+            Connect Devices (or Configure Mail Client) in ConsoleH / webmail.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <FormField label="Email Address" required>
+              <input className={inputClass} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
+            </FormField>
+            <FormField label="Password" required>
+              <input className={inputClass} type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
+            </FormField>
+            <FormField label="SMTP Host" required>
+              <input className={inputClass} placeholder="mail.yourdomain.co.za" value={form.smtpHost} onChange={(e) => setForm({ ...form, smtpHost: e.target.value })} required />
+            </FormField>
+            <FormField label="SMTP Port" required>
+              <input className={inputClass} type="number" value={form.smtpPort} onChange={(e) => setForm({ ...form, smtpPort: e.target.value })} required />
+            </FormField>
+            <FormField label="IMAP Host" required>
+              <input className={inputClass} placeholder="mail.yourdomain.co.za" value={form.imapHost} onChange={(e) => setForm({ ...form, imapHost: e.target.value })} required />
+            </FormField>
+            <FormField label="IMAP Port" required>
+              <input className={inputClass} type="number" value={form.imapPort} onChange={(e) => setForm({ ...form, imapPort: e.target.value })} required />
+            </FormField>
+          </div>
+          {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+          <div className="flex justify-end gap-2 mt-4">
+            <button type="button" onClick={onClose} className="text-sm font-medium px-4 py-2 rounded-lg text-slate-500 hover:bg-slate-100">
+              Cancel
+            </button>
+            <button type="submit" disabled={submitting} className="text-sm font-medium px-4 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+              {submitting ? 'Connecting…' : 'Connect Mailbox'}
+            </button>
+          </div>
+        </form>
+      )}
+    </Modal>
   )
 }
 

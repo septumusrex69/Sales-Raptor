@@ -17,3 +17,8 @@ export async function requireCaller(req: VercelRequest, admin: SupabaseClient): 
   if (error || !data.user) return null
   return data.user
 }
+
+export async function callerIsAdmin(admin: SupabaseClient, userId: string): Promise<boolean> {
+  const { data } = await admin.from('profiles').select('role').eq('id', userId).maybeSingle()
+  return data?.role === 'Administrator'
+}
