@@ -13,6 +13,7 @@ import { EditContactModal } from '../../components/contacts/EditContactModal'
 import { AddContactModal } from '../../components/contacts/AddContactModal'
 import { formatCurrency, formatDate, formatDateTime, services } from '../../data/mockData'
 import { ACTIVITY_TYPE_COLORS } from '../../lib/colors'
+import { parseEmailActivity } from '../../lib/emailActivity'
 import type { Company, Contact, ProductService } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
 
@@ -39,6 +40,7 @@ export function CompanyDetail() {
   const [editContact, setEditContact] = useState<Contact | null>(null)
   const [editCompanyOpen, setEditCompanyOpen] = useState(false)
   const [addContactOpen, setAddContactOpen] = useState(false)
+  const [replyTarget, setReplyTarget] = useState<{ to: string; subject: string; body: string; contactId?: string } | null>(null)
 
   const companyContacts = useMemo(() => contacts.filter((c) => c.companyId === id), [contacts, id])
   const companyLeads = useMemo(() => leads.filter((l) => l.companyId === id), [leads, id])
@@ -51,6 +53,8 @@ export function CompanyDetail() {
     () => activities.filter((a) => a.companyId === id).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()),
     [activities, id],
   )
+  const emailActivities = useMemo(() => companyActivities.filter((a) => a.type === 'Email'), [companyActivities])
+  const nonEmailActivities = useMemo(() => companyActivities.filter((a) => a.type !== 'Email'), [companyActivities])
   const companyTasks = useMemo(() => tasks.filter((t) => t.companyId === id), [tasks, id])
   const lifetimeValue = wonDeals.reduce((s, d) => s + d.value, 0)
   // Paid-to-date vs. handover amount. Can exceed 100% — payments here include
@@ -327,12 +331,62 @@ export function CompanyDetail() {
       )}
 
       <Card>
-        <CardHeader title="Notes" subtitle={`${companyActivities.length} update${companyActivities.length === 1 ? '' : 's'}`} />
-        {companyActivities.length === 0 ? (
+        <CardHeader title="Emails" subtitle={`${emailActivities.length} message${emailActivities.length === 1 ? '' : 's'}`} />
+        {emailActivities.length === 0 ? (
+          <p className="text-sm text-slate-400">No emails yet.</p>
+        ) : (
+          <div className="space-y-2.5">
+            {emailActivities.map((a) => {
+              const parsed = parseEmailActivity(a.subject)
+              const canReply = parsed?.direction === 'received'
+              const replyToAddress = a.contactId ? contacts.find((c) => c.id === a.contactId)?.email : company.email
+              return (
+                <div key={a.id} className="flex items-start justify-between gap-3 border-b border-slate-50 pb-2.5 last:border-0 last:pb-0">
+                  <div className="flex items-start gap-2 min-w-0">
+                    <Mail size={13} className={`mt-1 shrink-0 ${parsed?.direction === 'sent' ? 'text-brand-500' : parsed?.isSpam ? 'text-amber-500' : 'text-slate-400'}`} />
+                    <div className="min-w-0">
+                      <p className="text-sm text-slate-700">
+                        <span className="text-xs font-medium text-slate-400 mr-1.5">
+                          {parsed?.direction === 'sent' ? 'Sent' : parsed?.isSpam ? 'Received (Spam/Junk)' : parsed ? 'Received' : ''}
+                        </span>
+                        {parsed?.subject ?? a.subject}
+                      </p>
+                      {a.notes && <p className="text-xs text-slate-500 mt-0.5">{a.notes}</p>}
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <span className="text-[11px] text-slate-400">{formatDateTime(a.activityDate)}</span>
+                    {canReply && replyToAddress && (
+                      <button
+                        onClick={() => {
+                          const rawSubject = parsed?.subject ?? a.subject
+                          setReplyTarget({
+                            to: replyToAddress,
+                            subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}`,
+                            body: `\n\n\nOn ${formatDateTime(a.activityDate)}, wrote:\n${(a.notes ?? '').split('\n').map((line) => `> ${line}`).join('\n')}`,
+                            contactId: a.contactId,
+                          })
+                        }}
+                        className="text-[11px] font-medium text-brand-600 hover:underline"
+                      >
+                        Reply
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </Card>
+
+      <Card>
+        <CardHeader title="Notes" subtitle={`${nonEmailActivities.length} update${nonEmailActivities.length === 1 ? '' : 's'}`} />
+        {nonEmailActivities.length === 0 ? (
           <p className="text-sm text-slate-400">No activity recorded yet.</p>
         ) : (
           <div className="space-y-2.5">
-            {companyActivities.map((a) =>
+            {nonEmailActivities.map((a) =>
               a.type === 'Note' ? (
                 <div key={a.id} className="bg-[#f7f4eb] border border-[#e7dbb2] rounded-lg p-3">
                   <p className="text-sm text-slate-700">{a.notes || a.subject}</p>
@@ -463,6 +517,15 @@ export function CompanyDetail() {
           onSent={(subject, bodyText) =>
             addActivity({ type: 'Email', subject, notes: bodyText, contactId: contactEmailTarget.id, companyId: company.id })
           }
+        />
+      )}
+      {replyTarget && (
+        <ComposeEmailModal
+          to={replyTarget.to}
+          initialSubject={replyTarget.subject}
+          initialBody={replyTarget.body}
+          onClose={() => setReplyTarget(null)}
+          onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, contactId: replyTarget.contactId, companyId: company.id })}
         />
       )}
       {editContact && (

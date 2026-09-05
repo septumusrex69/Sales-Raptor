@@ -8,16 +8,22 @@ import { useAuth } from '../store/AuthContext'
  */
 export function ComposeEmailModal({
   to,
+  initialSubject,
+  initialBody,
   onClose,
   onSent,
 }: {
   to: string
+  /** Pre-filled subject, e.g. "Re: ..." when replying to a received email. */
+  initialSubject?: string
+  /** Pre-filled body, e.g. a quoted copy of the message being replied to. */
+  initialBody?: string
   onClose: () => void
   onSent: (subject: string, bodyText: string) => void
 }) {
   const { session } = useAuth()
-  const [subject, setSubject] = useState('')
-  const [body, setBody] = useState('')
+  const [subject, setSubject] = useState(initialSubject ?? '')
+  const [body, setBody] = useState(initialBody ?? '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -49,16 +55,16 @@ export function ComposeEmailModal({
   }
 
   return (
-    <Modal title={`Email ${to}`} onClose={onClose} width={480}>
+    <Modal title={initialSubject ? `Reply to ${to}` : `Email ${to}`} onClose={onClose} width={480}>
       <form onSubmit={handleSubmit}>
         <FormField label="To">
           <input className={inputClass} value={to} disabled />
         </FormField>
         <FormField label="Subject" required>
-          <input className={inputClass} value={subject} onChange={(e) => setSubject(e.target.value)} required autoFocus />
+          <input className={inputClass} value={subject} onChange={(e) => setSubject(e.target.value)} required autoFocus={!initialSubject} />
         </FormField>
         <FormField label="Message" required>
-          <textarea className={inputClass} rows={7} value={body} onChange={(e) => setBody(e.target.value)} required />
+          <textarea className={inputClass} rows={7} value={body} onChange={(e) => setBody(e.target.value)} required autoFocus={!!initialSubject} />
         </FormField>
         {error && <p className="text-xs text-red-600 mb-3">{error}</p>}
         <div className="flex justify-end gap-2">
