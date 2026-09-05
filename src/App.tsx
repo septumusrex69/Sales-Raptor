@@ -4,7 +4,7 @@ import { AuthProvider } from './store/AuthContext'
 import { RequireAuth } from './components/auth/RequireAuth'
 import { LoginPage } from './pages/auth/LoginPage'
 import { AppLayout } from './components/layout/AppLayout'
-import { Dashboard } from './pages/Dashboard'
+import { DashboardRouter } from './pages/DashboardRouter'
 import { LeadsList } from './pages/leads/LeadsList'
 import { LeadDetail } from './pages/leads/LeadDetail'
 import { DealsBoard } from './pages/deals/DealsBoard'
@@ -33,7 +33,7 @@ function App() {
               </RequireAuth>
             }
           >
-            <Route path="/" element={<Dashboard />} handle={{ title: 'Dashboard' }} />
+            <Route path="/" element={<DashboardRouter />} handle={{ title: 'Dashboard' }} />
             <Route path="/leads" element={<LeadsList />} handle={{ title: 'Leads' }} />
             <Route path="/leads/:id" element={<LeadDetail />} handle={{ title: 'Lead Details' }} />
             <Route path="/deals" element={<DealsBoard />} handle={{ title: 'Deals' }} />

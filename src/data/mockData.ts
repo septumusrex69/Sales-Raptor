@@ -32,11 +32,11 @@ export const users: User[] = [
 ]
 
 export const teams: Team[] = [
-  { id: 't1', name: 'New Business', memberIds: ['u3', 'u4'] },
-  { id: 't2', name: 'Corporate Sales', memberIds: ['u2', 'u3'] },
-  { id: 't3', name: 'SME Sales', memberIds: ['u4', 'u6'] },
-  { id: 't4', name: 'Key Accounts', memberIds: ['u5'] },
-  { id: 't5', name: 'Management', memberIds: ['u1', 'u7'] },
+  { id: 't1', name: 'New Business', memberIds: ['u3', 'u4'], kind: 'Sales' },
+  { id: 't2', name: 'Corporate Sales', memberIds: ['u2', 'u3'], kind: 'Sales' },
+  { id: 't3', name: 'SME Sales', memberIds: ['u4', 'u6'], kind: 'Sales' },
+  { id: 't4', name: 'Key Accounts', memberIds: ['u5'], kind: 'Sales' },
+  { id: 't5', name: 'Management', memberIds: ['u1', 'u7'], kind: 'Sales' },
 ]
 
 export const currentUser = users[0]

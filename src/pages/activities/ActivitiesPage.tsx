@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Phone, Mail, MessageCircle, Calendar, StickyNote, FileText, CheckSquare, ArrowRightLeft, Trophy, XOctagon } from 'lucide-react'
+import { Phone, Mail, MessageCircle, Calendar, StickyNote, FileText, CheckSquare, ArrowRightLeft, Trophy, XOctagon, Inbox } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
@@ -10,7 +10,22 @@ import { readParam } from '../../lib/drilldown'
 import { decodeSalesMonthParam, isWithinPeriod } from '../../lib/salesMonth'
 import type { ActivityType } from '../../types'
 
-const ACTIVITY_TYPES: ActivityType[] = ['Call', 'Email', 'WhatsApp', 'Meeting', 'Note', 'Proposal', 'Task', 'Status change', 'Deal update', 'Deal Stage Change', 'Deal Won', 'Deal Lost']
+const ACTIVITY_TYPES: ActivityType[] = [
+  'Call',
+  'Email',
+  'WhatsApp',
+  'Meeting',
+  'Note',
+  'Proposal',
+  'Task',
+  'Status change',
+  'Deal update',
+  'Deal Stage Change',
+  'Deal Won',
+  'Deal Lost',
+  'Courtesy Call',
+  'Handover Received',
+]
 
 const ICONS: Record<ActivityType, typeof Phone> = {
   Call: Phone,
@@ -25,6 +40,8 @@ const ICONS: Record<ActivityType, typeof Phone> = {
   'Deal Stage Change': ArrowRightLeft,
   'Deal Won': Trophy,
   'Deal Lost': XOctagon,
+  'Courtesy Call': Phone,
+  'Handover Received': Inbox,
 }
 
 const ICON_COLORS = ACTIVITY_TYPE_TAILWIND

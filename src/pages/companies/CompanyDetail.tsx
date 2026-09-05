@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock, Users2, Link2, Unlink, Trash2 } from 'lucide-react'
+import { ArrowLeft, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock, Users2, Link2, Unlink, Trash2, Inbox } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
@@ -21,6 +21,8 @@ export function CompanyDetail() {
   const isAdmin = currentUser?.role === 'Administrator'
   const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
   const [noteOpen, setNoteOpen] = useState(false)
+  const [courtesyCallOpen, setCourtesyCallOpen] = useState(false)
+  const [handoverOpen, setHandoverOpen] = useState(false)
   const [ownerOpen, setOwnerOpen] = useState(false)
   const [dealOpen, setDealOpen] = useState(false)
   const [followUpOpen, setFollowUpOpen] = useState(false)
@@ -148,6 +150,16 @@ export function CompanyDetail() {
           {isClient && (
             <button onClick={() => setMeetingOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
               <Users2 size={13} /> Schedule Meeting
+            </button>
+          )}
+          {isClient && (
+            <button onClick={() => setCourtesyCallOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+              <Phone size={13} /> Log Courtesy Call
+            </button>
+          )}
+          {isClient && (
+            <button onClick={() => setHandoverOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+              <Inbox size={13} /> Log Handover Received
             </button>
           )}
           <button onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
@@ -407,7 +419,33 @@ export function CompanyDetail() {
       </div>
 
       {noteOpen && (
-        <NoteModal onClose={() => setNoteOpen(false)} onSave={(text) => addActivity({ type: 'Note', subject: 'Note added', notes: text, companyId: company.id })} />
+        <QuickLogModal
+          title="Add Note"
+          fieldLabel="Note"
+          submitLabel="Add Note"
+          onClose={() => setNoteOpen(false)}
+          onSave={(text) => addActivity({ type: 'Note', subject: 'Note added', notes: text, companyId: company.id })}
+        />
+      )}
+      {courtesyCallOpen && (
+        <QuickLogModal
+          title="Log Courtesy Call"
+          fieldLabel="What was discussed? (optional)"
+          submitLabel="Log Call"
+          required={false}
+          onClose={() => setCourtesyCallOpen(false)}
+          onSave={(text) => addActivity({ type: 'Courtesy Call', subject: `Courtesy call — ${company.name}`, notes: text || undefined, companyId: company.id })}
+        />
+      )}
+      {handoverOpen && (
+        <QuickLogModal
+          title="Log Handover Received"
+          fieldLabel="Details (optional)"
+          submitLabel="Log Handover"
+          required={false}
+          onClose={() => setHandoverOpen(false)}
+          onSave={(text) => addActivity({ type: 'Handover Received', subject: `Handover received — ${company.name}`, notes: text || undefined, companyId: company.id })}
+        />
       )}
       {ownerOpen && (
         <EditOwnerModal
@@ -469,27 +507,41 @@ function Field({ label, value }: { label: string; value?: string }) {
   )
 }
 
-function NoteModal({ onClose, onSave }: { onClose: () => void; onSave: (text: string) => void }) {
+function QuickLogModal({
+  title,
+  fieldLabel,
+  submitLabel,
+  required = true,
+  onClose,
+  onSave,
+}: {
+  title: string
+  fieldLabel: string
+  submitLabel: string
+  required?: boolean
+  onClose: () => void
+  onSave: (text: string) => void
+}) {
   const [text, setText] = useState('')
   return (
-    <Modal title="Add Note" onClose={onClose} width={400}>
+    <Modal title={title} onClose={onClose} width={400}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          if (!text.trim()) return
+          if (required && !text.trim()) return
           onSave(text)
           onClose()
         }}
       >
-        <FormField label="Note" required>
-          <textarea className={inputClass} rows={4} value={text} onChange={(e) => setText(e.target.value)} required autoFocus />
+        <FormField label={fieldLabel} required={required}>
+          <textarea className={inputClass} rows={4} value={text} onChange={(e) => setText(e.target.value)} required={required} autoFocus />
         </FormField>
         <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
             Cancel
           </button>
           <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
-            Add Note
+            {submitLabel}
           </button>
         </div>
       </form>

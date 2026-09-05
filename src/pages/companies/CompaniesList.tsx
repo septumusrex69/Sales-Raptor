@@ -5,7 +5,8 @@ import { useAppStore } from '../../store/AppStore'
 import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { formatCurrency } from '../../data/mockData'
-import type { Company, ID } from '../../types'
+import { topLevelClients, rollupClient } from '../../lib/companyRollup'
+import type { ID } from '../../types'
 
 export function CompaniesList() {
   const { companies, deals, users } = useAppStore()
@@ -17,11 +18,8 @@ export function CompaniesList() {
   const wonDealsFor = (companyId: string) => deals.filter((d) => d.companyId === companyId && d.stage === 'Won')
   const childrenOf = (companyId: ID) => companies.filter((c) => c.parentCompanyId === companyId)
 
-  // A top-level company is a "client" once it has a Won deal of its own, or
-  // it's a Swordfish-sourced record (has a code — either a real prefix on a
-  // standalone/sub-account, or an internal code on a parent container).
   const clients = useMemo(
-    () => companies.filter((c) => !c.parentCompanyId && (wonDealsFor(c.id).length > 0 || !!c.code)),
+    () => topLevelClients(companies, (id) => wonDealsFor(id).length > 0),
     [companies, deals],
   )
 
@@ -32,17 +30,6 @@ export function CompaniesList() {
   }, [clients, search, companies])
 
   const activeDealsFor = (companyId: string) => deals.filter((d) => d.companyId === companyId && d.stage !== 'Won' && d.stage !== 'Lost')
-
-  /** Parents have no Swordfish totals of their own — roll their children's up. */
-  function rollup(c: Company) {
-    const kids = childrenOf(c.id)
-    if (kids.length === 0) return { accountCount: c.accountCount, handoverAmount: c.handoverAmount, paymentsToDate: c.paymentsToDate }
-    return {
-      accountCount: kids.reduce((s, k) => s + (k.accountCount ?? 0), 0),
-      handoverAmount: kids.reduce((s, k) => s + (k.handoverAmount ?? 0), 0),
-      paymentsToDate: kids.reduce((s, k) => s + (k.paymentsToDate ?? 0), 0),
-    }
-  }
 
   function toggleExpanded(id: ID) {
     setExpanded((prev) => {
@@ -81,7 +68,7 @@ export function CompaniesList() {
               {filtered.map((c) => {
                 const kids = childrenOf(c.id)
                 const isExpanded = expanded.has(c.id)
-                const totals = rollup(c)
+                const totals = rollupClient(c, companies)
                 return (
                   <Fragment key={c.id}>
                     <tr onClick={() => navigate(`/companies/${c.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">

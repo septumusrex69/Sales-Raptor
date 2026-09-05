@@ -10,7 +10,17 @@ import type { Activity, ActivityType } from '../types'
  * Centralized here so every KPI/report/chart that counts "activity" agrees
  * on what counts, per the spec's "centrally configurable" requirement.
  */
-export const MEANINGFUL_ACTIVITY_TYPES: ActivityType[] = ['Call', 'Email', 'WhatsApp', 'Meeting', 'Note', 'Proposal', 'Task']
+export const MEANINGFUL_ACTIVITY_TYPES: ActivityType[] = [
+  'Call',
+  'Email',
+  'WhatsApp',
+  'Meeting',
+  'Note',
+  'Proposal',
+  'Task',
+  'Courtesy Call',
+  'Handover Received',
+]
 
 export function isMeaningfulActivity(activity: Activity): boolean {
   return MEANINGFUL_ACTIVITY_TYPES.includes(activity.type)

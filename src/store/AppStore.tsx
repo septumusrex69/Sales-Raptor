@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { supabase } from '../lib/supabase'
 import { useAuth } from './AuthContext'
 import { TODAY } from '../data/mockData'
-import type { Activity, ActivityType, Company, Contact, Deal, DealStage, ID, Lead, LeadStatus, LossReason, Proposal, Task, Team, User } from '../types'
+import type { Activity, ActivityType, Company, Contact, Deal, DealStage, ID, Lead, LeadStatus, LossReason, Proposal, Task, Team, TeamKind, User } from '../types'
 
 /**
  * Generic camelCase(app) <-> snake_case(Postgres) row mapping. The SQL
@@ -177,7 +177,7 @@ interface AppActions {
   /** Drops a user from local state after the server has actually deleted their account (via /api/delete-user) -- there's no client-side delete of auth.users, so this just syncs the UI. */
   removeUserLocal: (id: ID) => void
   addTeam: (input: Partial<Team> & { name: string }) => Team
-  updateTeam: (id: ID, patch: Partial<Pick<Team, 'name'>>) => void
+  updateTeam: (id: ID, patch: Partial<Pick<Team, 'name' | 'kind'>>) => void
   deleteTeam: (id: ID) => void
 
   dismissToast: () => void
@@ -202,7 +202,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [activities, setActivities] = useState<Activity[]>([])
   const [proposals, setProposals] = useState<Proposal[]>([])
   const [users, setUsers] = useState<User[]>([])
-  const [teamRows, setTeamRows] = useState<{ id: ID; name: string }[]>([])
+  const [teamRows, setTeamRows] = useState<{ id: ID; name: string; kind: TeamKind }[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const [toast, setToast] = useState<string | null>(null)
 
@@ -240,7 +240,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       fetchTable<Activity>('activities', 'activity_date'),
       fetchTable<Proposal>('proposals', 'created_at'),
       fetchTable<User>('profiles', 'created_at'),
-      fetchTable<{ id: ID; name: string }>('teams', 'created_at'),
+      fetchTable<{ id: ID; name: string; kind: TeamKind }>('teams', 'created_at'),
     ])
       .then(([l, d, ct, co, tk, ac, pr, us, tm]) => {
         if (!active) return
@@ -272,7 +272,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   }, [session])
 
   const teams = useMemo<Team[]>(
-    () => teamRows.map((t) => ({ id: t.id, name: t.name, memberIds: users.filter((u) => u.teamId === t.id).map((u) => u.id) })),
+    () => teamRows.map((t) => ({ id: t.id, name: t.name, kind: t.kind, memberIds: users.filter((u) => u.teamId === t.id).map((u) => u.id) })),
     [teamRows, users],
   )
 
@@ -740,9 +740,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const addTeam = useCallback<AppActions['addTeam']>(
     (input) => {
       const id = crypto.randomUUID()
-      const team: Team = { memberIds: [], ...input, id }
-      setTeamRows((prev) => [...prev, { id, name: team.name }])
-      insertRow('teams', { id, name: team.name }, 'addTeam', (message) => {
+      const team: Team = { memberIds: [], kind: 'Sales', ...input, id }
+      setTeamRows((prev) => [...prev, { id, name: team.name, kind: team.kind }])
+      insertRow('teams', { id, name: team.name, kind: team.kind }, 'addTeam', (message) => {
         setTeamRows((prev) => prev.filter((t) => t.id !== id))
         showError(message)
       })
@@ -753,7 +753,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const updateTeam = useCallback<AppActions['updateTeam']>(
     (id, patch) => {
-      let previous: { id: ID; name: string } | undefined
+      let previous: { id: ID; name: string; kind: TeamKind } | undefined
       setTeamRows((prev) => {
         previous = prev.find((t) => t.id === id)
         return prev.map((t) => (t.id === id ? { ...t, ...patch } : t))
@@ -768,7 +768,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const deleteTeam = useCallback<AppActions['deleteTeam']>(
     (id) => {
-      let previous: { id: ID; name: string } | undefined
+      let previous: { id: ID; name: string; kind: TeamKind } | undefined
       setTeamRows((prev) => {
         previous = prev.find((t) => t.id === id)
         return prev.filter((t) => t.id !== id)

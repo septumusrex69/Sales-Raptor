@@ -7,7 +7,7 @@ import { customFields as initialCustomFields, industries, leadSources as initial
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { supabase, PRODUCTION_APP_URL } from '../../lib/supabase'
-import type { CustomField, CustomFieldType, User, UserRole } from '../../types'
+import type { CustomField, CustomFieldType, TeamKind, User, UserRole } from '../../types'
 import { DEAL_STAGES } from '../../types'
 
 const TABS = ['Profile', 'Users', 'Teams', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Lost Reasons', 'Notifications', 'Integrations'] as const
@@ -517,6 +517,7 @@ function TeamsTab() {
   const { currentUser } = useAuth()
   const isAdmin = currentUser?.role === 'Administrator'
   const [name, setName] = useState('')
+  const [kind, setKind] = useState<TeamKind>('Sales')
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
   const [removingTeam, setRemovingTeam] = useState<{ id: string; name: string } | null>(null)
@@ -555,12 +556,28 @@ function TeamsTab() {
                   </form>
                 ) : (
                   <div>
-                    <p className="text-sm font-semibold text-slate-700">{t.name}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-semibold text-slate-700">{t.name}</p>
+                      <span
+                        className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${t.kind === 'Communications' ? 'bg-[#edf1f5] text-[#355069]' : 'bg-[#f7f4eb] text-[#957323]'}`}
+                      >
+                        {t.kind}
+                      </span>
+                    </div>
                     <p className="text-xs text-slate-400">{t.memberIds.length} members</p>
                   </div>
                 )}
                 {isAdmin && editingTeamId !== t.id && (
                   <div className="flex items-center gap-2.5 shrink-0">
+                    <select
+                      value={t.kind}
+                      onChange={(e) => updateTeam(t.id, { kind: e.target.value as TeamKind })}
+                      className="text-xs text-slate-500 border border-slate-200 rounded-lg px-2 py-1 bg-white outline-none"
+                      title="Which dashboard this team's members land on"
+                    >
+                      <option value="Sales">Sales</option>
+                      <option value="Communications">Communications</option>
+                    </select>
                     <button
                       onClick={() => {
                         setEditingTeamId(t.id)
@@ -618,12 +635,17 @@ function TeamsTab() {
           onSubmit={(e) => {
             e.preventDefault()
             if (!name.trim()) return
-            addTeam({ name })
+            addTeam({ name, kind })
             setName('')
+            setKind('Sales')
           }}
           className="flex gap-2 mt-4 pt-4 border-t border-slate-100"
         >
           <input className={inputClass} placeholder="New team name" value={name} onChange={(e) => setName(e.target.value)} />
+          <select value={kind} onChange={(e) => setKind(e.target.value as TeamKind)} className={`${inputClass} w-40 shrink-0`}>
+            <option value="Sales">Sales</option>
+            <option value="Communications">Communications</option>
+          </select>
           <button type="submit" className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 shrink-0">
             <Plus size={15} /> Add Team
           </button>

@@ -246,6 +246,8 @@ export type ActivityType =
   | 'Deal Stage Change'
   | 'Deal Won'
   | 'Deal Lost'
+  | 'Courtesy Call'
+  | 'Handover Received'
 
 export interface Activity {
   id: ID
@@ -290,10 +292,13 @@ export interface User {
   avatarColor: string
 }
 
+export type TeamKind = 'Sales' | 'Communications'
+
 export interface Team {
   id: ID
   name: string
   memberIds: ID[]
+  kind: TeamKind
 }
 
 export type CustomFieldType =

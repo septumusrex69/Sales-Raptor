@@ -75,6 +75,8 @@ export const ACTIVITY_TYPE_COLORS: Record<ActivityType, string> = {
   'Deal Stage Change': '#416281',
   'Deal Won': '#957323',
   'Deal Lost': '#794234',
+  'Courtesy Call': '#6086a9',
+  'Handover Received': '#957323',
 }
 
 export const ACTIVITY_TYPE_TAILWIND: Record<ActivityType, string> = {
@@ -90,6 +92,8 @@ export const ACTIVITY_TYPE_TAILWIND: Record<ActivityType, string> = {
   'Deal Stage Change': 'bg-[#edf1f5] text-[#416281]',
   'Deal Won': 'bg-[#f7f3eb] text-[#957323]',
   'Deal Lost': 'bg-[#f6eeec] text-[#794234]',
+  'Courtesy Call': 'bg-[#edf1f5] text-[#6086a9]',
+  'Handover Received': 'bg-[#f7f3eb] text-[#957323]',
 }
 
 export const TASK_TYPE_COLORS: Record<TaskType, string> = {
