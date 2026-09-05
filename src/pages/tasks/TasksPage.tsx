@@ -11,6 +11,7 @@ import { RescheduleTaskModal } from '../../components/ui/RescheduleTaskModal'
 import { formatDate, TODAY } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
 import type { Task, TaskPriority, TaskType, User } from '../../types'
+import { isAssignableOwner } from '../../lib/permissions'
 
 const VIEWS = ['My Tasks', 'Team Tasks', 'Overdue', 'Today', 'Tomorrow', 'This Week', 'Completed'] as const
 type View = (typeof VIEWS)[number]
@@ -33,7 +34,7 @@ function formatLongDate(dateParam: string) {
 export function TasksPage() {
   const { tasks, users, updateTask, addTask } = useAppStore()
   const { currentUser } = useAuth()
-  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
+  const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const [searchParams, setSearchParams] = useSearchParams()
   const [view, setView] = useState<View>(() => {
     const fromUrl = readParam(searchParams, 'view')

@@ -279,7 +279,7 @@ export interface Proposal {
   createdAt: string
 }
 
-export type UserRole = 'Administrator' | 'Sales Manager' | 'Sales Representative' | 'Read Only'
+export type UserRole = 'Administrator' | 'Sales Manager' | 'Sales Representative' | 'Liaison Manager' | 'Liaison' | 'Read Only'
 
 export interface User {
   id: ID

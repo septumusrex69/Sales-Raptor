@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Pencil, CheckCircle2, XCircle, StickyNote, CheckSquare, FileText, Send, Plus, Upload, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
-import { canEditOwned, canReassign } from '../../lib/permissions'
+import { canEditOwned, canReassign, isAssignableOwner} from '../../lib/permissions'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { StageBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
@@ -47,7 +47,7 @@ export function DealDetail() {
     updateProposal,
   } = store
   const { currentUser } = useAuth()
-  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
+  const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const deal = deals.find((d) => d.id === id)
   const canEdit = canEditOwned(currentUser, deal?.ownerId)
 

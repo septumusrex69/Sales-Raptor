@@ -22,7 +22,7 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
-import { canEditOwned, canReassign as canReassignRole, useDefaultOwnerFilter } from '../../lib/permissions'
+import { canEditOwned, canReassign as canReassignRole, useDefaultOwnerFilter, isAssignableOwner} from '../../lib/permissions'
 import { Card } from '../../components/ui/Card'
 import { StatusBadge, ServiceBadge, ClassificationBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
@@ -71,7 +71,7 @@ export function LeadsList() {
   const { leads, activities, users, userById, updateLead, markLeadLost, deleteLead, convertLeadToDeal, addActivity } = store
   const { currentUser } = useAuth()
   const canReassign = canReassignRole(currentUser)
-  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
+  const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 

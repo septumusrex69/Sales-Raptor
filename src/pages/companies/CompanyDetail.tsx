@@ -11,6 +11,7 @@ import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { formatCurrency, formatDate, formatDateTime, services } from '../../data/mockData'
 import { ACTIVITY_TYPE_COLORS } from '../../lib/colors'
 import type { Company, ProductService } from '../../types'
+import { isAssignableOwner } from '../../lib/permissions'
 
 export function CompanyDetail() {
   const { id } = useParams()
@@ -19,7 +20,7 @@ export function CompanyDetail() {
   const { companies, contacts, leads, deals, activities, tasks, users, addActivity, updateCompany, deleteCompany, addCompany, addDeal, addTask } = useAppStore()
   const company = companies.find((c) => c.id === id)
   const isAdmin = currentUser?.role === 'Administrator'
-  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
+  const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const [noteOpen, setNoteOpen] = useState(false)
   const [courtesyCallOpen, setCourtesyCallOpen] = useState(false)
   const [handoverOpen, setHandoverOpen] = useState(false)

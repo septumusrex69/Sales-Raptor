@@ -7,7 +7,7 @@ import { customFields as initialCustomFields, industries, leadSources as initial
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { supabase, PRODUCTION_APP_URL } from '../../lib/supabase'
-import type { CustomField, CustomFieldType, TeamKind, User, UserRole } from '../../types'
+import type { CustomField, CustomFieldType, Team, TeamKind, User, UserRole } from '../../types'
 import { DEAL_STAGES } from '../../types'
 
 const TABS = ['Profile', 'Users', 'Teams', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Lost Reasons', 'Notifications', 'Integrations'] as const
@@ -186,7 +186,7 @@ function UsersTab() {
                       value={u.role}
                       onChange={(e) => updateUser(u.id, { role: e.target.value as UserRole })}
                     >
-                      {(['Administrator', 'Sales Manager', 'Sales Representative', 'Read Only'] as UserRole[]).map((r) => (
+                      {(['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Read Only'] as UserRole[]).map((r) => (
                         <option key={r}>{r}</option>
                       ))}
                     </select>
@@ -249,7 +249,7 @@ function UsersTab() {
           </tbody>
         </table>
       </div>
-      {addOpen && session && <InviteUserModal accessToken={session.access_token} onClose={() => setAddOpen(false)} />}
+      {addOpen && session && <InviteUserModal accessToken={session.access_token} teams={teams} onClose={() => setAddOpen(false)} />}
       {editingUser && session && (
         <EditUserModal
           user={editingUser}
@@ -442,9 +442,13 @@ function RemoveUserModal({
   )
 }
 
-function InviteUserModal({ accessToken, onClose }: { accessToken: string; onClose: () => void }) {
-  const [email, setEmail] = useState('')
+const INVITE_ROLES: UserRole[] = ['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Read Only']
+
+function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string; teams: Team[]; onClose: () => void }) {
   const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [role, setRole] = useState<UserRole>('Sales Representative')
+  const [teamId, setTeamId] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sent, setSent] = useState(false)
@@ -458,7 +462,7 @@ function InviteUserModal({ accessToken, onClose }: { accessToken: string; onClos
       const res = await fetch('/api/invite-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ email, name: name || undefined }),
+        body: JSON.stringify({ email, name: name || undefined, role, teamId: teamId || undefined }),
       })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -478,7 +482,7 @@ function InviteUserModal({ accessToken, onClose }: { accessToken: string; onClos
       <Modal title="Add User" onClose={onClose} width={420}>
         <p className="text-sm text-slate-600 leading-relaxed">
           Invite sent to <span className="font-medium text-slate-800">{email}</span>. They'll get an email to set their password, and will appear in this
-          list automatically once they accept — just set their role and team here.
+          list with the role{teamId ? ' and team' : ''} you just set once they accept.
         </p>
         <div className="flex justify-end mt-4 pt-3 border-t border-slate-100">
           <button onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
@@ -492,11 +496,28 @@ function InviteUserModal({ accessToken, onClose }: { accessToken: string; onClos
   return (
     <Modal title="Add User" onClose={onClose} width={420}>
       <form onSubmit={handleSubmit}>
-        <FormField label="Email" required>
-          <input type="email" className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
-        </FormField>
         <FormField label="Full Name (optional)">
-          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        </FormField>
+        <FormField label="Email" required>
+          <input type="email" className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} required />
+        </FormField>
+        <FormField label="Role" required>
+          <select className={inputClass} value={role} onChange={(e) => setRole(e.target.value as UserRole)}>
+            {INVITE_ROLES.map((r) => (
+              <option key={r}>{r}</option>
+            ))}
+          </select>
+        </FormField>
+        <FormField label="Team (optional)">
+          <select className={inputClass} value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+            <option value="">No team</option>
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
         </FormField>
         {error && <p className="text-sm text-[#794234] mb-3.5">{error}</p>}
         <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">

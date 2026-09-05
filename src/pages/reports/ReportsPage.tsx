@@ -16,6 +16,7 @@ import { getCurrentSalesMonth, getPreviousSalesMonth, isWithinPeriod, encodeSale
 import { isMeaningfulActivity } from '../../lib/meaningfulActivity'
 import { buildDrilldownUrl, SALES_MONTH_PARAM } from '../../lib/drilldown'
 import { STAGE_COLORS } from '../../lib/colors'
+import { isAssignableOwner } from '../../lib/permissions'
 
 const TABS = ['Overview', 'Leads', 'Pipeline', 'Products & Services', 'Debt Collection', 'Sales Team', 'Lead Sources', 'Geography', 'Lost Deals'] as const
 type Tab = (typeof TABS)[number]
@@ -29,7 +30,7 @@ function pctDelta(curr: number, prev: number): number {
 
 export function ReportsPage() {
   const { leads, deals, activities, users } = useAppStore()
-  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
+  const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const [tab, setTab] = useState<Tab>('Overview')
   const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(TODAY))
   const [compareMode, setCompareMode] = useState<CompareMode>('previous')

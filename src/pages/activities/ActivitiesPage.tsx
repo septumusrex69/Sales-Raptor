@@ -9,6 +9,7 @@ import { ACTIVITY_TYPE_TAILWIND } from '../../lib/colors'
 import { readParam } from '../../lib/drilldown'
 import { decodeSalesMonthParam, isWithinPeriod } from '../../lib/salesMonth'
 import type { ActivityType } from '../../types'
+import { isAssignableOwner } from '../../lib/permissions'
 
 const ACTIVITY_TYPES: ActivityType[] = [
   'Call',
@@ -48,7 +49,7 @@ const ICON_COLORS = ACTIVITY_TYPE_TAILWIND
 
 export function ActivitiesPage() {
   const { activities, deals, companies, users, companyById, leadById } = useAppStore()
-  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
+  const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const [searchParams] = useSearchParams()
   const [user, setUser] = useState(() => readParam(searchParams, 'owner') ?? 'All')
   const [type, setType] = useState(() => readParam(searchParams, 'type') ?? 'All')

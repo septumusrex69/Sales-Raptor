@@ -23,6 +23,7 @@ import { computeAllRepScorecards } from '../lib/repScore'
 import { buildDrilldownUrl, SALES_MONTH_PARAM } from '../lib/drilldown'
 import { downloadCsv } from '../lib/csvExport'
 import type { ID, Task, Team, User } from '../types'
+import { isAssignableOwner } from '../lib/permissions'
 
 function daysAgoLabel(dateIso: string) {
   const diff = Math.round((new Date(dateIso).getTime() - TODAY.getTime()) / (1000 * 60 * 60 * 24))
@@ -58,7 +59,7 @@ function minutesToLabel(mins: number): string {
 export function Dashboard() {
   const { leads, deals, tasks, activities, users, teams, userById, companyById, updateTask } = useAppStore()
   const { currentUser } = useAuth()
-  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
+  const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(TODAY))
   const [compareMode, setCompareMode] = useState<CompareMode>('previous')
   // Reps land on their own numbers by default (their own dashboard, not the

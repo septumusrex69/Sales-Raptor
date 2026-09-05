@@ -3,7 +3,7 @@ import { useNavigate, useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Pencil, ArrowRightLeft, StickyNote, CheckSquare, Calendar, XCircle, Phone, Mail, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
-import { canEditOwned, canReassign } from '../../lib/permissions'
+import { canEditOwned, canReassign, isAssignableOwner} from '../../lib/permissions'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { StatusBadge, ServiceBadge, StageBadge } from '../../components/ui/Badge'
 import { Avatar, UserAvatar } from '../../components/ui/Avatar'
@@ -20,7 +20,7 @@ export function LeadDetail() {
   const navigate = useNavigate()
   const { leads, deals, activities, users, userById, updateLead, convertLeadToDeal, markLeadLost, deleteLead, addActivity, addTask } = useAppStore()
   const { currentUser } = useAuth()
-  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
+  const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const lead = leads.find((l) => l.id === id)
   const resultingDeals = useMemo(() => deals.filter((d) => d.leadId === id), [deals, id])
   const canEdit = canEditOwned(currentUser, lead?.ownerId)

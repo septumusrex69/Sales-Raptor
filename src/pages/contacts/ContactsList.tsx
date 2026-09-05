@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Plus, Search } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
-import { useDefaultOwnerFilter } from '../../lib/permissions'
+import { useDefaultOwnerFilter, isAssignableOwner} from '../../lib/permissions'
 import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { ContactForm } from '../../components/layout/QuickAdd'
@@ -13,7 +13,7 @@ export function ContactsList() {
   const store = useAppStore()
   const { contacts, deals, users } = store
   const { currentUser } = useAuth()
-  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
+  const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [owner, setOwner] = useDefaultOwnerFilter(undefined, currentUser)

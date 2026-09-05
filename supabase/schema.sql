@@ -23,7 +23,7 @@ create table if not exists public.profiles (
   name text not null default '',
   email text not null,
   role text not null default 'Sales Representative'
-    check (role in ('Administrator', 'Sales Manager', 'Sales Representative', 'Read Only')),
+    check (role in ('Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Read Only')),
   team_id uuid references public.teams (id) on delete set null,
   status text not null default 'Active' check (status in ('Active', 'Inactive')),
   phone text,
@@ -361,13 +361,13 @@ begin
 
     execute format('drop policy if exists "%s_update" on public.%I;', t, t);
     execute format(
-      'create policy "%s_update" on public.%I for update using (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager'')) with check (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager''));',
+      'create policy "%s_update" on public.%I for update using (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager'', ''Liaison Manager'')) with check (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager'', ''Liaison Manager''));',
       t, t, owner_col, owner_col
     );
 
     execute format('drop policy if exists "%s_delete" on public.%I;', t, t);
     execute format(
-      'create policy "%s_delete" on public.%I for delete using (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager''));',
+      'create policy "%s_delete" on public.%I for delete using (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager'', ''Liaison Manager''));',
       t, t, owner_col
     );
   end loop;
@@ -386,18 +386,18 @@ create policy "proposals_insert" on public.proposals for insert with check (auth
 drop policy if exists "proposals_update" on public.proposals;
 create policy "proposals_update" on public.proposals for update
   using (
-    public.current_user_role() in ('Administrator', 'Sales Manager')
+    public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
     or exists (select 1 from public.deals d where d.id = proposals.deal_id and d.owner_id = auth.uid())
   )
   with check (
-    public.current_user_role() in ('Administrator', 'Sales Manager')
+    public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
     or exists (select 1 from public.deals d where d.id = proposals.deal_id and d.owner_id = auth.uid())
   );
 
 drop policy if exists "proposals_delete" on public.proposals;
 create policy "proposals_delete" on public.proposals for delete
   using (
-    public.current_user_role() in ('Administrator', 'Sales Manager')
+    public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
     or exists (select 1 from public.deals d where d.id = proposals.deal_id and d.owner_id = auth.uid())
   );
 

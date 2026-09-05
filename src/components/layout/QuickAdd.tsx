@@ -7,6 +7,7 @@ import { useAuth } from '../../store/AuthContext'
 import { leadSources, services } from '../../data/mockData'
 import type { LeadSource, ProductService } from '../../types'
 import { LeadOpportunityFields, emptyLeadOpportunityValue, leadOpportunityPatch } from '../leads/LeadOpportunityFields'
+import { isAssignableOwner } from '../../lib/permissions'
 
 type QuickAddType = 'lead' | 'contact' | 'company' | 'deal' | 'task' | 'meeting' | 'note'
 
@@ -89,7 +90,7 @@ export type Store = ReturnType<typeof useAppStore>
 
 export function LeadForm({ onClose, store, navigate }: { onClose: () => void; store: Store; navigate: ReturnType<typeof useNavigate> }) {
   const { currentUser } = useAuth()
-  const reps = useMemo(() => store.users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [store.users])
+  const reps = useMemo(() => store.users.filter((u) => isAssignableOwner(u.role)), [store.users])
   const [form, setForm] = useState({
     firstName: '',
     lastName: '',

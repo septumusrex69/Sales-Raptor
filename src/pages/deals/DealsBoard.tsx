@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { LayoutGrid, List, Plus, Search } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
-import { canEditOwned, useDefaultOwnerFilter } from '../../lib/permissions'
+import { canEditOwned, useDefaultOwnerFilter, isAssignableOwner} from '../../lib/permissions'
 import { Card } from '../../components/ui/Card'
 import { StageBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
@@ -23,7 +23,7 @@ export function DealsBoard() {
   const store = useAppStore()
   const { deals, users, companyById, userById, moveDealStage, markDealWon, markDealLost } = store
   const { currentUser } = useAuth()
-  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
+  const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
