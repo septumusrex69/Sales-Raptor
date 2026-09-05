@@ -1,29 +1,51 @@
 import { useState } from 'react'
 import { Paperclip } from 'lucide-react'
-import { formatDateTime } from '../data/mockData'
-import { parseEmailActivity } from '../lib/emailActivity'
+import { emailDayLabel, emailTimeLabel, parseEmailActivity } from '../lib/emailActivity'
 import { useAppStore } from '../store/AppStore'
 import { useAuth } from '../store/AuthContext'
 import type { Activity } from '../types'
 
-/**
- * Longer than this and the body is clamped to a couple of lines behind a
- * "Show more" toggle. A real email can run many hundreds of words, and
- * rendering that in full made a single message fill the entire Emails card
- * and push every other message off the screen.
- */
-const PREVIEW_THRESHOLD = 180
+const DIRECTION_COLORS = { sent: '#6086a9', received: '#406d58', spam: '#c9962c' } as const
+
+function railColor(parsed: ReturnType<typeof parseEmailActivity>): string {
+  if (parsed?.direction === 'sent') return DIRECTION_COLORS.sent
+  if (parsed?.isSpam) return DIRECTION_COLORS.spam
+  return DIRECTION_COLORS.received
+}
+
+/** The words the coloured rail already implies — shown only once a row is open. */
+function directionLabel(parsed: ReturnType<typeof parseEmailActivity>): string {
+  if (parsed?.direction === 'sent') return 'Sent'
+  if (parsed?.isSpam) return 'Received (Spam/Junk)'
+  return 'Received'
+}
 
 /**
- * One row in an Emails card. Shared by the Client and Lead pages so the two
- * can't drift apart — they render incoming/outgoing mail identically.
+ * One email in an Emails card, collapsed to a single line until it's opened.
+ *
+ * At rest a row is subject + one line of preview + a time: enough to find the message you
+ * want among twenty. Everything else — the full body, attachments, Reply, and who sent or
+ * received it — belongs to the message you've actually chosen, so it appears on open.
+ * Shared by the Client and Lead pages so the two can't drift apart.
  */
-export function EmailActivityRow({ activity, onMarkRead, onReply }: { activity: Activity; onMarkRead: () => void; onReply?: () => void }) {
-  const [expanded, setExpanded] = useState(false)
+export function EmailActivityRow({ activity, onReply }: { activity: Activity; onReply?: () => void }) {
+  const [open, setOpen] = useState(false)
   const [downloading, setDownloading] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
-  const { userById, refreshSyncedData } = useAppStore()
+  const { userById, updateActivity, refreshSyncedData } = useAppStore()
   const { session } = useAuth()
+
+  const parsed = parseEmailActivity(activity.subject)
+  const subject = parsed?.subject ?? activity.subject
+  const body = activity.notes ?? ''
+  const attachments = activity.attachmentNames ?? []
+  const isUnread = parsed?.direction === 'received' && activity.isRead === false
+  const actorName = userById(activity.userId)?.name
+
+  function toggle() {
+    if (isUnread) updateActivity(activity.id, { isRead: true })
+    setOpen((v) => !v)
+  }
 
   /**
    * Pulls the file from the mailbox through the server rather than storing it in the CRM.
@@ -41,8 +63,8 @@ export function EmailActivityRow({ activity, onMarkRead, onReply }: { activity: 
         body: JSON.stringify({ activityId: activity.id, filename: name }),
       })
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        setDownloadError(body.error ?? 'Could not download that attachment.')
+        const errorBody = await res.json().catch(() => ({}))
+        setDownloadError(errorBody.error ?? 'Could not download that attachment.')
         return
       }
       const blob = await res.blob()
@@ -61,89 +83,86 @@ export function EmailActivityRow({ activity, onMarkRead, onReply }: { activity: 
     }
   }
 
-  const parsed = parseEmailActivity(activity.subject)
-  // Who sent it, or whose connected mailbox it arrived in. Debt-collection correspondence
-  // needs to be attributable to a person, not just to the company.
-  const actorName = userById(activity.userId)?.name
-  const isUnread = parsed?.direction === 'received' && activity.isRead === false
-  const borderColor = parsed?.direction === 'sent' ? '#6086a9' : parsed?.isSpam ? '#c9962c' : '#406d58'
-  const body = activity.notes ?? ''
-  const isLong = body.length > PREVIEW_THRESHOLD
-  const attachments = activity.attachmentNames ?? []
-
   return (
-    <div
-      onClick={() => isUnread && onMarkRead()}
-      style={{ borderLeftColor: borderColor }}
-      className={`flex items-start justify-between gap-3 rounded-lg border-l-[3px] pl-2.5 pr-2 py-2 ${isUnread ? 'bg-brand-50/60 cursor-pointer' : ''}`}
-    >
-      <div className="flex items-start gap-2 min-w-0">
-        {isUnread && <span className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 shrink-0" />}
-        <div className="min-w-0">
-          <p className={`text-sm ${isUnread ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>
-            <span className="text-xs font-medium text-slate-400 mr-1.5">
-              {parsed?.direction === 'sent' ? 'Sent' : parsed?.isSpam ? 'Received (Spam/Junk)' : parsed ? 'Received' : ''}
-            </span>
-            {parsed?.subject ?? activity.subject}
+    <div style={{ borderLeftColor: railColor(parsed) }} className={`border-l-[3px] ${open ? 'bg-slate-50/70' : ''}`}>
+      <button
+        onClick={toggle}
+        className="w-full flex items-center gap-2 pl-2.5 pr-3 py-1.5 text-left hover:bg-slate-50"
+        aria-expanded={open}
+      >
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isUnread ? 'bg-brand-500' : 'bg-transparent'}`} />
+        <span className="flex-1 min-w-0 flex items-baseline gap-2">
+          <span className={`text-[13px] shrink-0 max-w-[55%] truncate ${isUnread ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>{subject}</span>
+          {!open && body && <span className="text-xs text-slate-400 truncate min-w-0">{body}</span>}
+        </span>
+        <span className="flex items-center gap-2 shrink-0">
+          {attachments.length > 0 && <Paperclip size={11} className="text-slate-400" />}
+          <span className="text-[11px] text-slate-400 tabular-nums">{emailTimeLabel(activity.activityDate)}</span>
+        </span>
+      </button>
+
+      {open && (
+        <div className="pl-[22px] pr-3 pb-3 -mt-0.5">
+          <p className="text-[11px] text-slate-400 mb-1.5">
+            {directionLabel(parsed)}
+            {actorName && ` · ${parsed?.direction === 'sent' ? 'sent by' : 'received by'} ${actorName}`}
+            {` · ${emailDayLabel(activity.activityDate)} at ${emailTimeLabel(activity.activityDate)}`}
           </p>
-          {body && (
-            <>
-              <p className={`text-xs text-slate-500 mt-0.5 whitespace-pre-wrap ${isLong && !expanded ? 'line-clamp-2' : ''}`}>{body}</p>
-              {isLong && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setExpanded((v) => !v)
-                  }}
-                  className="text-[11px] font-medium text-brand-600 hover:underline mt-0.5"
-                >
-                  {expanded ? 'Show less' : 'Show more'}
-                </button>
-              )}
-            </>
-          )}
-          {attachments.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+          {body && <p className="text-[13px] text-slate-600 whitespace-pre-wrap max-w-[70ch]">{body}</p>}
+          {(attachments.length > 0 || onReply) && (
+            <div className="flex flex-wrap items-center gap-2 mt-2.5">
               {attachments.map((name, i) => (
                 <button
                   key={`${name}-${i}`}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    void download(name)
-                  }}
+                  onClick={() => void download(name)}
                   disabled={downloading === name}
                   title="Download from the mailbox"
-                  className="inline-flex items-center gap-1 text-[11px] text-slate-600 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 max-w-[220px] hover:bg-slate-200 hover:text-brand-700 disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 bg-white border border-slate-200 rounded-md px-2 py-1 max-w-[280px] hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"
                 >
-                  <Paperclip size={10} className="shrink-0" />
+                  <Paperclip size={11} className="shrink-0" />
                   <span className="truncate">{name}</span>
                   {downloading === name && <span className="text-slate-400">…</span>}
                 </button>
               ))}
+              {onReply && (
+                <button
+                  onClick={onReply}
+                  className="text-[11px] font-medium text-brand-600 border border-slate-200 rounded-md px-2.5 py-1 bg-white hover:bg-slate-50"
+                >
+                  Reply
+                </button>
+              )}
             </div>
           )}
-          {downloadError && <p className="text-[11px] text-red-600 mt-1">{downloadError}</p>}
+          {downloadError && <p className="text-[11px] text-red-600 mt-1.5">{downloadError}</p>}
         </div>
-      </div>
-      <div className="flex flex-col items-end gap-1 shrink-0">
-        <span className="text-[11px] text-slate-400">{formatDateTime(activity.activityDate)}</span>
-        {actorName && (
-          <span className="text-[11px] text-slate-400">
-            {parsed?.direction === 'sent' ? 'Sent by' : 'Received by'} {actorName}
-          </span>
-        )}
-        {onReply && parsed?.direction === 'received' && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onReply()
-            }}
-            className="text-[11px] font-medium text-brand-600 hover:underline"
-          >
-            Reply
-          </button>
-        )}
-      </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * A card's worth of emails, grouped under day headings. The heading carries the date so
+ * each row only needs a time — "05 Sep 2026 at 21:55" repeated down every row was a large
+ * share of what made the list feel bulky.
+ */
+export function EmailActivityList({ activities, onReply }: { activities: Activity[]; onReply?: (activity: Activity) => void }) {
+  let lastDay: string | null = null
+  return (
+    <div className="-mx-1 divide-y divide-slate-50">
+      {activities.map((a) => {
+        const day = emailDayLabel(a.activityDate)
+        const showDay = day !== lastDay
+        lastDay = day
+        return (
+          <div key={a.id}>
+            {showDay && (
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 bg-slate-50 px-3 py-1">{day}</p>
+            )}
+            <EmailActivityRow activity={a} onReply={onReply ? () => onReply(a) : undefined} />
+          </div>
+        )
+      })}
     </div>
   )
 }

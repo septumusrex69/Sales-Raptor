@@ -2,6 +2,7 @@ import { Route, Routes } from 'react-router-dom'
 import { AppStoreProvider } from './store/AppStore'
 import { AuthProvider } from './store/AuthContext'
 import { RequireAuth } from './components/auth/RequireAuth'
+import { NewVersionWatcher } from './components/NewVersionWatcher'
 import { LoginPage } from './pages/auth/LoginPage'
 import { AppLayout } from './components/layout/AppLayout'
 import { DashboardRouter } from './pages/DashboardRouter'
@@ -24,6 +25,7 @@ function App() {
   return (
     <AuthProvider>
       <AppStoreProvider>
+        <NewVersionWatcher />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route

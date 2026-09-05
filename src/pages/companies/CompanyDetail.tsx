@@ -15,7 +15,7 @@ import { formatCurrency, formatDate, services } from '../../data/mockData'
 import { parseEmailActivity } from '../../lib/emailActivity'
 import { buildDrilldownUrl } from '../../lib/drilldown'
 import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/ui/RowLimitSelect'
-import { EmailActivityRow } from '../../components/EmailActivityRow'
+import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityRow } from '../../components/NoteActivityRow'
 import type { Company, Contact, ProductService } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
@@ -33,7 +33,6 @@ export function CompanyDetail() {
     tasks,
     users,
     addActivity,
-    updateActivity,
     updateCompany,
     updateContact,
     addContact,
@@ -376,30 +375,19 @@ export function CompanyDetail() {
         {emailActivities.length === 0 ? (
           <p className="text-sm text-slate-400">No emails yet.</p>
         ) : (
-          <div className="space-y-2">
-            {applyRowLimit(emailActivities, emailLimit).map((a) => {
+          <EmailActivityList
+            activities={applyRowLimit(emailActivities, emailLimit)}
+            onReply={(a) => {
               const replyToAddress = a.contactId ? contacts.find((c) => c.id === a.contactId)?.email : company.email
-              return (
-                <EmailActivityRow
-                  key={a.id}
-                  activity={a}
-                  onMarkRead={() => updateActivity(a.id, { isRead: true })}
-                  onReply={
-                    replyToAddress
-                      ? () => {
-                          const rawSubject = parseEmailActivity(a.subject)?.subject ?? a.subject
-                          setReplyTarget({
-                            to: replyToAddress,
-                            subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}`,
-                            contactId: a.contactId,
-                          })
-                        }
-                      : undefined
-                  }
-                />
-              )
-            })}
-          </div>
+              if (!replyToAddress) return
+              const rawSubject = parseEmailActivity(a.subject)?.subject ?? a.subject
+              setReplyTarget({
+                to: replyToAddress,
+                subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}`,
+                contactId: a.contactId,
+              })
+            }}
+          />
         )}
       </Card>
 

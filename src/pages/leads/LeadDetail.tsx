@@ -11,7 +11,7 @@ import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/ui/RowLimitSelect'
-import { EmailActivityRow } from '../../components/EmailActivityRow'
+import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityRow } from '../../components/NoteActivityRow'
 import { parseEmailActivity } from '../../lib/emailActivity'
 import { formatCurrency, formatDate, formatLeadNumber, industries, leadSources } from '../../data/mockData'
@@ -23,7 +23,7 @@ const ALL_STATUSES: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Q
 export function LeadDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { leads, deals, activities, users, userById, updateLead, updateActivity, convertLeadToDeal, markLeadLost, deleteLead, addActivity, addTask } = useAppStore()
+  const { leads, deals, activities, users, userById, updateLead, convertLeadToDeal, markLeadLost, deleteLead, addActivity, addTask } = useAppStore()
   const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const lead = leads.find((l) => l.id === id)
@@ -222,23 +222,17 @@ export function LeadDetail() {
           {emailActivities.length === 0 ? (
             <p className="text-sm text-slate-400">No emails yet.</p>
           ) : (
-            <div className="space-y-2">
-              {applyRowLimit(emailActivities, emailLimit).map((a) => (
-                <EmailActivityRow
-                  key={a.id}
-                  activity={a}
-                  onMarkRead={() => updateActivity(a.id, { isRead: true })}
-                  onReply={
-                    lead.email
-                      ? () => {
-                          const rawSubject = parseEmailActivity(a.subject)?.subject ?? a.subject
-                          setReplyTarget({ subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}` })
-                        }
-                      : undefined
-                  }
-                />
-              ))}
-            </div>
+            <EmailActivityList
+              activities={applyRowLimit(emailActivities, emailLimit)}
+              onReply={
+                lead.email
+                  ? (a) => {
+                      const rawSubject = parseEmailActivity(a.subject)?.subject ?? a.subject
+                      setReplyTarget({ subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}` })
+                    }
+                  : undefined
+              }
+            />
           )}
         </Card>
 

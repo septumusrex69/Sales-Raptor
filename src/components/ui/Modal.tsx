@@ -13,7 +13,10 @@ export function Modal({ title, onClose, children, width = 480 }: { title: string
   }, [onClose])
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center bg-slate-900/40 p-4 overflow-y-auto" onClick={onClose}>
+    // data-modal-open marks that someone is mid-task in a form: the new-version check
+    // refuses to auto-reload while this is in the DOM, so an update can't wipe a
+    // half-written email out from under them.
+    <div data-modal-open className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center bg-slate-900/40 p-4 overflow-y-auto" onClick={onClose}>
       <div
         className="bg-white rounded-2xl shadow-xl w-full mt-10 sm:mt-0 max-h-[90vh] overflow-y-auto"
         style={{ maxWidth: width }}
