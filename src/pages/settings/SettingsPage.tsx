@@ -1142,6 +1142,7 @@ type EmailStatus = { connected: boolean; email?: string; lastSyncedAt?: string |
 
 function EmailIntegrationCard() {
   const { session } = useAuth()
+  const { refreshSyncedData } = useAppStore()
   const accessToken = session?.access_token
   const [status, setStatus] = useState<EmailStatus | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1214,6 +1215,10 @@ function EmailIntegrationCard() {
       } else {
         setSyncMessage(`Synced — ${body.logged ?? 0} new message${body.logged === 1 ? '' : 's'} logged.`)
         setStatus((prev) => (prev ? { ...prev, lastSyncedAt: new Date().toISOString() } : prev))
+        // Sync writes the new Activities and notifications server-side, so this session
+        // is holding stale data until it re-reads them — without this a just-synced email
+        // only appeared on the client/lead after a full page refresh.
+        await refreshSyncedData()
       }
     } catch {
       setSyncMessage('Could not reach the server.')

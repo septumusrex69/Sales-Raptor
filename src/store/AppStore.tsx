@@ -174,6 +174,8 @@ interface AppActions {
   updateActivity: (id: ID, patch: Partial<Activity>) => void
   markNotificationRead: (id: ID) => void
   markAllNotificationsRead: () => void
+  /** Re-reads activities + notifications after server-side email sync has written to them. */
+  refreshSyncedData: () => Promise<void>
 
   addProposal: (input: Partial<Proposal> & { dealId: ID; companyId: ID; service: string; pricing: number }) => Proposal
   updateProposal: (id: ID, patch: Partial<Proposal>) => void
@@ -279,6 +281,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       active = false
     }
   }, [session])
+
+  /**
+   * Re-reads the tables that server-side code (not this browser) writes to.
+   * Email sync runs entirely on the server, so a freshly-logged incoming email
+   * and its notification exist in the database but not in this session's state
+   * until something re-fetches — previously only a full page reload did, which
+   * is why a synced email wouldn't appear on the client until you refreshed.
+   */
+  const refreshSyncedData = useCallback<AppActions['refreshSyncedData']>(async () => {
+    const [ac, nt] = await Promise.all([fetchTable<Activity>('activities', 'activity_date'), fetchTable<AppNotification>('notifications', 'created_at')])
+    setActivities(ac)
+    setNotifications(nt)
+  }, [])
 
   const teams = useMemo<Team[]>(
     () => teamRows.map((t) => ({ id: t.id, name: t.name, kind: t.kind, memberIds: users.filter((u) => u.teamId === t.id).map((u) => u.id) })),
@@ -883,6 +898,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateActivity,
       markNotificationRead,
       markAllNotificationsRead,
+      refreshSyncedData,
       addProposal,
       updateProposal,
       updateUser,
@@ -931,6 +947,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateActivity,
       markNotificationRead,
       markAllNotificationsRead,
+      refreshSyncedData,
       addProposal,
       updateProposal,
       updateUser,
