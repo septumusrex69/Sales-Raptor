@@ -40,7 +40,7 @@ export function ComposeEmailModal({
         setSubmitting(false)
         return
       }
-      onSent(subject.trim(), body.trim())
+      onSent(`Email sent: ${subject.trim()}`, body.trim())
       onClose()
     } catch {
       setError('Could not reach the server. Please try again.')

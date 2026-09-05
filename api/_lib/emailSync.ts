@@ -78,7 +78,7 @@ export async function syncConnection(admin: SupabaseClient, conn: EmailConnectio
           contact_id: match.contactId ?? null,
           lead_id: match.leadId ?? null,
           company_id: match.companyId ?? null,
-          subject: parsed.subject || '(no subject)',
+          subject: `Email received: ${parsed.subject || '(no subject)'}`,
           notes: (parsed.text || '').slice(0, NOTES_MAX_LENGTH),
           activity_date: (parsed.date ?? new Date()).toISOString(),
         })

@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock, Users2, Link2, Unlink, Trash2, Inbox } from 'lucide-react'
+import { ArrowLeft, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock, Users2, Link2, Unlink, Trash2, Inbox, Plus } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
@@ -10,6 +10,7 @@ import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { EditContactModal } from '../../components/contacts/EditContactModal'
+import { AddContactModal } from '../../components/contacts/AddContactModal'
 import { formatCurrency, formatDate, formatDateTime, services } from '../../data/mockData'
 import { ACTIVITY_TYPE_COLORS } from '../../lib/colors'
 import type { Company, Contact, ProductService } from '../../types'
@@ -19,7 +20,8 @@ export function CompanyDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { currentUser } = useAuth()
-  const { companies, contacts, leads, deals, activities, tasks, users, addActivity, updateCompany, updateContact, deleteCompany, addCompany, addDeal, addTask } = useAppStore()
+  const { companies, contacts, leads, deals, activities, tasks, users, addActivity, updateCompany, updateContact, addContact, deleteCompany, addCompany, addDeal, addTask } =
+    useAppStore()
   const company = companies.find((c) => c.id === id)
   const isAdmin = currentUser?.role === 'Administrator'
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
@@ -36,6 +38,7 @@ export function CompanyDetail() {
   const [contactEmailTarget, setContactEmailTarget] = useState<Contact | null>(null)
   const [editContact, setEditContact] = useState<Contact | null>(null)
   const [editCompanyOpen, setEditCompanyOpen] = useState(false)
+  const [addContactOpen, setAddContactOpen] = useState(false)
 
   const companyContacts = useMemo(() => contacts.filter((c) => c.companyId === id), [contacts, id])
   const companyLeads = useMemo(() => leads.filter((l) => l.companyId === id), [leads, id])
@@ -230,7 +233,12 @@ export function CompanyDetail() {
           </div>
         </div>
 
-        <p className="text-xs text-slate-400 mb-2">Contact Persons</p>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs text-slate-400">Contact Persons</p>
+          <button onClick={() => setAddContactOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline">
+            <Plus size={12} /> Add Contact
+          </button>
+        </div>
         {companyContacts.length === 0 ? (
           <p className="text-sm text-slate-400">No contact persons yet.</p>
         ) : (
@@ -462,6 +470,9 @@ export function CompanyDetail() {
       )}
       {editCompanyOpen && (
         <EditCompanyDetailsModal company={company} onClose={() => setEditCompanyOpen(false)} onSave={(patch) => updateCompany(company.id, patch)} />
+      )}
+      {addContactOpen && (
+        <AddContactModal onClose={() => setAddContactOpen(false)} onSave={(input) => addContact({ ...input, companyId: company.id })} />
       )}
       {noteOpen && (
         <QuickLogModal
