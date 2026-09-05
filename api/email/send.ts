@@ -1,7 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import nodemailer from 'nodemailer'
+import MailComposer from 'nodemailer/lib/mail-composer'
 import { adminClient, requireCaller } from '../_lib/auth.js'
 import { decrypt } from '../_lib/crypto.js'
+import { appendToSent } from '../_lib/emailSync.js'
 
 /** Sends an email through the caller's own connected mailbox via SMTP, with their saved signature appended. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -61,6 +63,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to send email.' })
     return
+  }
+
+  // Best-effort: file a copy in the connected mailbox's Sent folder so it shows up in the
+  // person's own mail client too, not just the CRM timeline. A failure here doesn't undo the
+  // send above -- the message already went out -- so it's never surfaced as a send error.
+  try {
+    const raw = await new MailComposer({ from: conn.email as string, to, subject, html: fullHtml }).compile().build()
+    await appendToSent(
+      { email: conn.email as string, imap_host: conn.imap_host as string, imap_port: conn.imap_port as number, encrypted_password: conn.encrypted_password as string },
+      raw,
+    )
+  } catch {
+    // ignore -- the send itself already succeeded
   }
 
   res.status(200).json({ ok: true })

@@ -29,6 +29,40 @@ async function findMatch(admin: SupabaseClient, fromAddress: string) {
 }
 
 /**
+ * SMTP delivery and IMAP are unrelated protocols -- sending a message via
+ * nodemailer only hands it to the recipient's mail server, it never files a
+ * copy into the sender's own Sent folder the way composing inside a mail
+ * client does. Without this, a message sent through the CRM would never
+ * show up in the connected mailbox (e.g. Spark) at all, even though it was
+ * genuinely delivered.
+ */
+export async function appendToSent(
+  conn: { email: string; imap_host: string; imap_port: number; encrypted_password: string },
+  rawMessage: string | Buffer,
+): Promise<void> {
+  const password = decrypt(conn.encrypted_password)
+  const client = new ImapFlow({
+    host: conn.imap_host,
+    port: conn.imap_port,
+    secure: conn.imap_port === 993,
+    auth: { user: conn.email, pass: password },
+    logger: false,
+  })
+  await client.connect()
+  try {
+    const mailboxes = await client.list()
+    const bySpecialUse = mailboxes.find((m) => m.specialUse === '\\Sent')
+    const commonNames = ['sent', 'sent items', 'sent messages', 'inbox.sent', 'inbox/sent']
+    const byName = mailboxes.find((m) => commonNames.includes(m.name.toLowerCase()) || commonNames.includes(m.path.toLowerCase()))
+    const sentPath = bySpecialUse?.path ?? byName?.path
+    if (!sentPath) return
+    await client.append(sentPath, rawMessage, ['\\Seen'])
+  } finally {
+    await client.logout().catch(() => {})
+  }
+}
+
+/**
  * Pulls whatever's new in this person's INBOX since the last sync, and logs
  * an Activity for any message whose sender matches a known Contact, Lead, or
  * Company email — unmatched mail (most of an inbox, realistically) is left
