@@ -1,7 +1,7 @@
 import { ImapFlow } from 'imapflow'
 import { simpleParser } from 'mailparser'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { decrypt } from './crypto'
+import { decrypt } from './crypto.js'
 
 export interface EmailConnectionRow {
   user_id: string

@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { adminClient } from '../_lib/auth'
-import { syncConnection, type EmailConnectionRow } from '../_lib/emailSync'
+import { adminClient } from '../_lib/auth.js'
+import { syncConnection, type EmailConnectionRow } from '../_lib/emailSync.js'
 
 /**
  * Intended for Vercel Cron (see vercel.json) — Vercel automatically sends

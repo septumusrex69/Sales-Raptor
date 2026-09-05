@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import nodemailer from 'nodemailer'
-import { adminClient, requireCaller } from '../_lib/auth'
-import { decrypt } from '../_lib/crypto'
+import { adminClient, requireCaller } from '../_lib/auth.js'
+import { decrypt } from '../_lib/crypto.js'
 
 /** Sends an email through the caller's own connected mailbox via SMTP, with their saved signature appended. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {

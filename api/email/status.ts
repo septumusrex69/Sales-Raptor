@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { adminClient, callerIsAdmin, requireCaller } from '../_lib/auth'
+import { adminClient, callerIsAdmin, requireCaller } from '../_lib/auth.js'
 
 /** Whether the caller (or, for an admin, a targetUserId query param) has a connected mailbox — never returns the password. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
