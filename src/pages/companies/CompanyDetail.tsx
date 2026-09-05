@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock, Users2, Link2, Unlink, Trash2, Inbox } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
@@ -35,6 +35,7 @@ export function CompanyDetail() {
   const [emailOpen, setEmailOpen] = useState(false)
   const [contactEmailTarget, setContactEmailTarget] = useState<Contact | null>(null)
   const [editContact, setEditContact] = useState<Contact | null>(null)
+  const [editCompanyOpen, setEditCompanyOpen] = useState(false)
 
   const companyContacts = useMemo(() => contacts.filter((c) => c.companyId === id), [contacts, id])
   const companyLeads = useMemo(() => leads.filter((l) => l.companyId === id), [leads, id])
@@ -185,7 +186,14 @@ export function CompanyDetail() {
       </Card>
 
       <Card>
-        <CardHeader title="Contact Details" />
+        <CardHeader
+          title="Contact Details"
+          action={
+            <button onClick={() => setEditCompanyOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+              <Pencil size={12} /> Edit
+            </button>
+          }
+        />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-4 pb-4 border-b border-slate-100">
           <div>
             <p className="text-xs text-slate-400 mb-0.5">Phone</p>
@@ -452,6 +460,9 @@ export function CompanyDetail() {
       {editContact && (
         <EditContactModal contact={editContact} onClose={() => setEditContact(null)} onSave={(patch) => updateContact(editContact.id, patch)} />
       )}
+      {editCompanyOpen && (
+        <EditCompanyDetailsModal company={company} onClose={() => setEditCompanyOpen(false)} onSave={(patch) => updateCompany(company.id, patch)} />
+      )}
       {noteOpen && (
         <QuickLogModal
           title="Add Note"
@@ -576,6 +587,73 @@ function QuickLogModal({
           </button>
           <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
             {submitLabel}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function EditCompanyDetailsModal({ company, onClose, onSave }: { company: Company; onClose: () => void; onSave: (patch: Partial<Company>) => void }) {
+  const [form, setForm] = useState({
+    name: company.name,
+    phone: company.phone ?? '',
+    email: company.email ?? '',
+    website: company.website ?? '',
+    province: company.province ?? '',
+    city: company.city ?? '',
+    address: company.address ?? '',
+  })
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!form.name.trim()) return
+    onSave({
+      name: form.name.trim(),
+      phone: form.phone.trim() || undefined,
+      email: form.email.trim() || undefined,
+      website: form.website.trim() || undefined,
+      province: form.province.trim() || undefined,
+      city: form.city.trim() || undefined,
+      address: form.address.trim() || undefined,
+    })
+    onClose()
+  }
+
+  return (
+    <Modal title="Edit Contact Details" onClose={onClose} width={460}>
+      <form onSubmit={handleSubmit}>
+        <FormField label="Client Name" required>
+          <input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required autoFocus />
+        </FormField>
+        <div className="grid grid-cols-2 gap-x-3">
+          <FormField label="Phone">
+            <input className={inputClass} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          </FormField>
+          <FormField label="Email">
+            <input className={inputClass} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          </FormField>
+        </div>
+        <FormField label="Website">
+          <input className={inputClass} value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} />
+        </FormField>
+        <div className="grid grid-cols-2 gap-x-3">
+          <FormField label="Province">
+            <input className={inputClass} value={form.province} onChange={(e) => setForm({ ...form, province: e.target.value })} />
+          </FormField>
+          <FormField label="City / Town">
+            <input className={inputClass} value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
+          </FormField>
+        </div>
+        <FormField label="Address">
+          <input className={inputClass} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+        </FormField>
+        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
+          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
+            Cancel
+          </button>
+          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
+            Save Changes
           </button>
         </div>
       </form>
