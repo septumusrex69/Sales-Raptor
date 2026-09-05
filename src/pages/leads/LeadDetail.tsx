@@ -10,6 +10,9 @@ import { Avatar, UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
+import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/ui/RowLimitSelect'
+import { parseEmailActivity } from '../../lib/emailActivity'
+import { ACTIVITY_TYPE_COLORS } from '../../lib/colors'
 import { formatCurrency, formatDate, formatDateTime, formatLeadNumber, industries, leadSources } from '../../data/mockData'
 import type { ActivityType, LeadStatus, TaskType } from '../../types'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, serviceValueLabel, leadServiceValueList } from '../../components/leads/LeadOpportunityFields'
@@ -19,7 +22,7 @@ const ALL_STATUSES: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Q
 export function LeadDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { leads, deals, activities, users, userById, updateLead, convertLeadToDeal, markLeadLost, deleteLead, addActivity, addTask } = useAppStore()
+  const { leads, deals, activities, users, userById, updateLead, updateActivity, convertLeadToDeal, markLeadLost, deleteLead, addActivity, addTask } = useAppStore()
   const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const lead = leads.find((l) => l.id === id)
@@ -31,11 +34,16 @@ export function LeadDetail() {
   const [taskOpen, setTaskOpen] = useState<'task' | 'meeting' | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [emailOpen, setEmailOpen] = useState(false)
+  const [emailLimit, setEmailLimit] = useState<RowLimit>(5)
+  const [noteLimit, setNoteLimit] = useState<RowLimit>(5)
+  const [replyTarget, setReplyTarget] = useState<{ subject: string; body: string } | null>(null)
 
   const timeline = useMemo(
     () => activities.filter((a) => a.leadId === id).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()),
     [activities, id],
   )
+  const emailActivities = useMemo(() => timeline.filter((a) => a.type === 'Email'), [timeline])
+  const nonEmailActivities = useMemo(() => timeline.filter((a) => a.type !== 'Email'), [timeline])
 
   if (!lead) {
     return (
@@ -103,10 +111,9 @@ export function LeadDetail() {
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 space-y-5">
-          <Card>
-            <CardHeader title="Contact Information" />
+      <div className="space-y-5">
+        <Card>
+          <CardHeader title="Contact Information" />
             <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
               <Field label="First Name" value={lead.firstName} />
               <Field label="Last Name" value={lead.lastName} />
@@ -192,24 +199,109 @@ export function LeadDetail() {
               </div>
             </Card>
           )}
-        </div>
 
-        <Card padded={false} className="h-fit">
-          <div className="p-5 pb-3">
-            <CardHeader title="Activity Timeline" />
-          </div>
-          <div className="px-5 pb-5 space-y-4 max-h-[600px] overflow-y-auto">
-            {timeline.length === 0 && <p className="text-sm text-slate-400">No activity recorded yet.</p>}
-            {timeline.map((a, i) => (
-              <div key={a.id} className="relative pl-5">
-                {i !== timeline.length - 1 && <span className="absolute left-[3px] top-3 bottom-[-16px] w-px bg-slate-100" />}
-                <span className="absolute left-0 top-1.5 w-2 h-2 rounded-full bg-brand-500" />
-                <p className="text-xs text-slate-400">{formatDateTime(a.activityDate)}</p>
-                <p className="text-sm font-medium text-slate-700 mt-0.5">{a.subject}</p>
-                {a.notes && <p className="text-xs text-slate-500 mt-0.5">{a.notes}</p>}
+        <Card>
+          <CardHeader
+            title="Emails"
+            subtitle={`${emailActivities.length} message${emailActivities.length === 1 ? '' : 's'}`}
+            action={
+              <div className="flex items-center gap-2">
+                {lead.email && (
+                  <button
+                    onClick={() => setEmailOpen(true)}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                  >
+                    <Mail size={12} /> Compose
+                  </button>
+                )}
+                <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
               </div>
-            ))}
-          </div>
+            }
+          />
+          {emailActivities.length === 0 ? (
+            <p className="text-sm text-slate-400">No emails yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {applyRowLimit(emailActivities, emailLimit).map((a) => {
+                const parsed = parseEmailActivity(a.subject)
+                const canReply = parsed?.direction === 'received' && Boolean(lead.email)
+                const isUnread = parsed?.direction === 'received' && a.isRead === false
+                const borderColor = parsed?.direction === 'sent' ? '#6086a9' : parsed?.isSpam ? '#c9962c' : '#406d58'
+                return (
+                  <div
+                    key={a.id}
+                    onClick={() => isUnread && updateActivity(a.id, { isRead: true })}
+                    style={{ borderLeftColor: borderColor }}
+                    className={`flex items-start justify-between gap-3 rounded-lg border-l-[3px] pl-2.5 pr-2 py-2 ${isUnread ? 'bg-brand-50/60 cursor-pointer' : ''}`}
+                  >
+                    <div className="flex items-start gap-2 min-w-0">
+                      {isUnread && <span className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 shrink-0" />}
+                      <div className="min-w-0">
+                        <p className={`text-sm ${isUnread ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>
+                          <span className="text-xs font-medium text-slate-400 mr-1.5">
+                            {parsed?.direction === 'sent' ? 'Sent' : parsed?.isSpam ? 'Received (Spam/Junk)' : parsed ? 'Received' : ''}
+                          </span>
+                          {parsed?.subject ?? a.subject}
+                        </p>
+                        {a.notes && <p className="text-xs text-slate-500 mt-0.5">{a.notes}</p>}
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <span className="text-[11px] text-slate-400">{formatDateTime(a.activityDate)}</span>
+                      {canReply && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const rawSubject = parsed?.subject ?? a.subject
+                            setReplyTarget({
+                              subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}`,
+                              body: `\n\n\nOn ${formatDateTime(a.activityDate)}, wrote:\n${(a.notes ?? '').split('\n').map((line) => `> ${line}`).join('\n')}`,
+                            })
+                          }}
+                          className="text-[11px] font-medium text-brand-600 hover:underline"
+                        >
+                          Reply
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Notes"
+            subtitle={`${nonEmailActivities.length} update${nonEmailActivities.length === 1 ? '' : 's'}`}
+            action={<RowLimitSelect value={noteLimit} onChange={setNoteLimit} />}
+          />
+          {nonEmailActivities.length === 0 ? (
+            <p className="text-sm text-slate-400">No activity recorded yet.</p>
+          ) : (
+            <div className="space-y-2.5">
+              {applyRowLimit(nonEmailActivities, noteLimit).map((a) =>
+                a.type === 'Note' ? (
+                  <div key={a.id} className="bg-[#f7f4eb] border border-[#e7dbb2] rounded-lg p-3">
+                    <p className="text-sm text-slate-700">{a.notes || a.subject}</p>
+                    <p className="text-[11px] text-slate-400 mt-1">{formatDateTime(a.activityDate)}</p>
+                  </div>
+                ) : (
+                  <div key={a.id} className="flex items-start justify-between gap-3 border-b border-slate-50 pb-2.5 last:border-0 last:pb-0">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <span className="w-2 h-2 rounded-full shrink-0 mt-1.5" style={{ backgroundColor: ACTIVITY_TYPE_COLORS[a.type] }} />
+                      <div className="min-w-0">
+                        <p className="text-sm text-slate-700">{a.subject}</p>
+                        {a.notes && <p className="text-xs text-slate-500 mt-0.5">{a.notes}</p>}
+                      </div>
+                    </div>
+                    <span className="text-[11px] text-slate-400 shrink-0">{formatDateTime(a.activityDate)}</span>
+                  </div>
+                ),
+              )}
+            </div>
+          )}
         </Card>
       </div>
 
@@ -244,6 +336,15 @@ export function LeadDetail() {
         <ComposeEmailModal
           to={lead.email}
           onClose={() => setEmailOpen(false)}
+          onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, leadId: lead.id, companyId: lead.companyId })}
+        />
+      )}
+      {replyTarget && lead.email && (
+        <ComposeEmailModal
+          to={lead.email}
+          initialSubject={replyTarget.subject}
+          initialBody={replyTarget.body}
+          onClose={() => setReplyTarget(null)}
           onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, leadId: lead.id, companyId: lead.companyId })}
         />
       )}
