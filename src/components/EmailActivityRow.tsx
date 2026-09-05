@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Paperclip } from 'lucide-react'
 import { formatDateTime } from '../data/mockData'
 import { parseEmailActivity } from '../lib/emailActivity'
+import { useAppStore } from '../store/AppStore'
 import type { Activity } from '../types'
 
 /**
@@ -18,7 +19,11 @@ const PREVIEW_THRESHOLD = 180
  */
 export function EmailActivityRow({ activity, onMarkRead, onReply }: { activity: Activity; onMarkRead: () => void; onReply?: () => void }) {
   const [expanded, setExpanded] = useState(false)
+  const { userById } = useAppStore()
   const parsed = parseEmailActivity(activity.subject)
+  // Who sent it, or whose connected mailbox it arrived in. Debt-collection correspondence
+  // needs to be attributable to a person, not just to the company.
+  const actorName = userById(activity.userId)?.name
   const isUnread = parsed?.direction === 'received' && activity.isRead === false
   const borderColor = parsed?.direction === 'sent' ? '#6086a9' : parsed?.isSpam ? '#c9962c' : '#406d58'
   const body = activity.notes ?? ''
@@ -74,6 +79,11 @@ export function EmailActivityRow({ activity, onMarkRead, onReply }: { activity: 
       </div>
       <div className="flex flex-col items-end gap-1 shrink-0">
         <span className="text-[11px] text-slate-400">{formatDateTime(activity.activityDate)}</span>
+        {actorName && (
+          <span className="text-[11px] text-slate-400">
+            {parsed?.direction === 'sent' ? 'Sent by' : 'Received by'} {actorName}
+          </span>
+        )}
         {onReply && parsed?.direction === 'received' && (
           <button
             onClick={(e) => {

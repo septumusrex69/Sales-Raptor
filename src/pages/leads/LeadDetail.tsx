@@ -12,9 +12,9 @@ import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/ui/RowLimitSelect'
 import { EmailActivityRow } from '../../components/EmailActivityRow'
+import { NoteActivityRow } from '../../components/NoteActivityRow'
 import { parseEmailActivity } from '../../lib/emailActivity'
-import { ACTIVITY_TYPE_COLORS } from '../../lib/colors'
-import { formatCurrency, formatDate, formatDateTime, formatLeadNumber, industries, leadSources } from '../../data/mockData'
+import { formatCurrency, formatDate, formatLeadNumber, industries, leadSources } from '../../data/mockData'
 import type { ActivityType, LeadStatus, TaskType } from '../../types'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, serviceValueLabel, leadServiceValueList } from '../../components/leads/LeadOpportunityFields'
 
@@ -252,25 +252,9 @@ export function LeadDetail() {
             <p className="text-sm text-slate-400">No activity recorded yet.</p>
           ) : (
             <div className="space-y-2.5">
-              {applyRowLimit(nonEmailActivities, noteLimit).map((a) =>
-                a.type === 'Note' ? (
-                  <div key={a.id} className="bg-[#f7f4eb] border border-[#e7dbb2] rounded-lg p-3">
-                    <p className="text-sm text-slate-700">{a.notes || a.subject}</p>
-                    <p className="text-[11px] text-slate-400 mt-1">{formatDateTime(a.activityDate)}</p>
-                  </div>
-                ) : (
-                  <div key={a.id} className="flex items-start justify-between gap-3 border-b border-slate-50 pb-2.5 last:border-0 last:pb-0">
-                    <div className="flex items-start gap-2 min-w-0">
-                      <span className="w-2 h-2 rounded-full shrink-0 mt-1.5" style={{ backgroundColor: ACTIVITY_TYPE_COLORS[a.type] }} />
-                      <div className="min-w-0">
-                        <p className="text-sm text-slate-700">{a.subject}</p>
-                        {a.notes && <p className="text-xs text-slate-500 mt-0.5">{a.notes}</p>}
-                      </div>
-                    </div>
-                    <span className="text-[11px] text-slate-400 shrink-0">{formatDateTime(a.activityDate)}</span>
-                  </div>
-                ),
-              )}
+              {applyRowLimit(nonEmailActivities, noteLimit).map((a) => (
+                <NoteActivityRow key={a.id} activity={a} />
+              ))}
             </div>
           )}
         </Card>
