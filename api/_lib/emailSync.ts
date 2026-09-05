@@ -34,15 +34,20 @@ function findFolder(mailboxes: ListResponse[], specialUse: string, commonNames: 
 const MAX_ATTACHMENT_NAMES = 10
 
 /**
- * Real attachments only. Most messages carry "attachments" that are nothing of the sort --
- * signature logos, tracking pixels and inline images referenced from the HTML body, which
- * mailparser reports with related=true or disposition 'inline'. Listing those would bury a
- * genuine mandate or invoice in image001.png noise, which at this mailbox's volume
- * (thousands of attachments a week) would make the paperclip chips worthless.
+ * Real attachments only -- signature logos and tracking pixels shouldn't bury a genuine
+ * mandate in image001.png noise at this mailbox's volume.
+ *
+ * The test is `related`: mailparser sets it for parts referenced from the HTML body by cid,
+ * which is exactly what an embedded signature image is. Disposition is deliberately NOT
+ * used, because Apple Mail (and others) send perfectly real attachments as 'inline' -- an
+ * earlier version filtered on that and silently dropped a .docx someone had genuinely
+ * attached. An unnamed image with no filename is the remaining tracking-pixel shape.
  */
-function realAttachmentNames(attachments: { filename?: string; related?: boolean; contentDisposition?: string }[] | undefined): string[] {
+function realAttachmentNames(
+  attachments: { filename?: string; related?: boolean; contentDisposition?: string; contentType?: string }[] | undefined,
+): string[] {
   return (attachments ?? [])
-    .filter((att) => !att.related && att.contentDisposition !== 'inline')
+    .filter((att) => !att.related && !(!att.filename && (att.contentType ?? '').startsWith('image/')))
     .map((att, i) => att.filename || `attachment-${i + 1}`)
     .slice(0, MAX_ATTACHMENT_NAMES)
 }
@@ -217,6 +222,14 @@ async function syncMailbox(
       console.log(
         `[emailSync] ${path} UID ${uid}: sender ${fromAddress} matched (contact=${match.contactId ?? '-'}, lead=${match.leadId ?? '-'}, company=${match.companyId ?? '-'}), writing activity...`,
       )
+      // Logged whenever a message carries parts at all, so a "my attachment vanished" report
+      // can be answered from what the mail server actually sent rather than by guessing.
+      if ((parsed.attachments ?? []).length > 0) {
+        const described = (parsed.attachments ?? [])
+          .map((att) => `${att.filename || '(no filename)'} [${att.contentType}, disposition=${att.contentDisposition ?? '-'}, related=${att.related ?? false}]`)
+          .join('; ')
+        console.log(`[emailSync] ${path} UID ${uid}: parts -- ${described}`)
+      }
 
       // upsert + ignoreDuplicates rather than insert: a UID this sync reprocesses (a
       // concurrent sync, or the watermark not having advanced yet) must never log the
