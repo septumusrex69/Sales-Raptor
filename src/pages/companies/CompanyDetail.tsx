@@ -9,6 +9,7 @@ import { StatusBadge, StageBadge, ClassificationBadge } from '../../components/u
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
+import { EditContactModal } from '../../components/contacts/EditContactModal'
 import { formatCurrency, formatDate, formatDateTime, services } from '../../data/mockData'
 import { ACTIVITY_TYPE_COLORS } from '../../lib/colors'
 import type { Company, Contact, ProductService } from '../../types'
@@ -18,7 +19,7 @@ export function CompanyDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { currentUser } = useAuth()
-  const { companies, contacts, leads, deals, activities, tasks, users, addActivity, updateCompany, deleteCompany, addCompany, addDeal, addTask } = useAppStore()
+  const { companies, contacts, leads, deals, activities, tasks, users, addActivity, updateCompany, updateContact, deleteCompany, addCompany, addDeal, addTask } = useAppStore()
   const company = companies.find((c) => c.id === id)
   const isAdmin = currentUser?.role === 'Administrator'
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
@@ -33,6 +34,7 @@ export function CompanyDetail() {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [emailOpen, setEmailOpen] = useState(false)
   const [contactEmailTarget, setContactEmailTarget] = useState<Contact | null>(null)
+  const [editContact, setEditContact] = useState<Contact | null>(null)
 
   const companyContacts = useMemo(() => contacts.filter((c) => c.companyId === id), [contacts, id])
   const companyLeads = useMemo(() => leads.filter((l) => l.companyId === id), [leads, id])
@@ -253,6 +255,9 @@ export function CompanyDetail() {
                       {c.email}
                     </span>
                   )}
+                  <button onClick={() => setEditContact(c)} className="text-slate-400 hover:text-brand-600" title="Edit contact">
+                    <Pencil size={11} />
+                  </button>
                 </div>
               </div>
             ))}
@@ -443,6 +448,9 @@ export function CompanyDetail() {
             addActivity({ type: 'Email', subject, notes: bodyText, contactId: contactEmailTarget.id, companyId: company.id })
           }
         />
+      )}
+      {editContact && (
+        <EditContactModal contact={editContact} onClose={() => setEditContact(null)} onSave={(patch) => updateContact(editContact.id, patch)} />
       )}
       {noteOpen && (
         <QuickLogModal

@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Mail, Phone, StickyNote, Building2, Pencil } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
@@ -7,8 +7,8 @@ import { Avatar } from '../../components/ui/Avatar'
 import { StageBadge } from '../../components/ui/Badge'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
+import { EditContactModal } from '../../components/contacts/EditContactModal'
 import { companyById, formatCurrency, formatDate, formatDateTime, userById } from '../../data/mockData'
-import type { Contact } from '../../types'
 
 export function ContactDetail() {
   const { id } = useParams()
@@ -230,68 +230,6 @@ function NoteModal({ onClose, onSave }: { onClose: () => void; onSave: (text: st
           </button>
           <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
             Add Note
-          </button>
-        </div>
-      </form>
-    </Modal>
-  )
-}
-
-function EditContactModal({ contact, onClose, onSave }: { contact: Contact; onClose: () => void; onSave: (patch: Partial<Contact>) => void }) {
-  const [form, setForm] = useState({
-    firstName: contact.firstName,
-    lastName: contact.lastName,
-    jobTitle: contact.jobTitle ?? '',
-    email: contact.email ?? '',
-    phone: contact.phone ?? '',
-    mobile: contact.mobile ?? '',
-  })
-
-  function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    if (!form.firstName.trim() || !form.lastName.trim()) return
-    onSave({
-      firstName: form.firstName.trim(),
-      lastName: form.lastName.trim(),
-      jobTitle: form.jobTitle.trim() || undefined,
-      email: form.email.trim() || undefined,
-      phone: form.phone.trim() || undefined,
-      mobile: form.mobile.trim() || undefined,
-    })
-    onClose()
-  }
-
-  return (
-    <Modal title="Edit Contact" onClose={onClose} width={440}>
-      <form onSubmit={handleSubmit}>
-        <div className="grid grid-cols-2 gap-x-3">
-          <FormField label="First Name" required>
-            <input className={inputClass} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} required autoFocus />
-          </FormField>
-          <FormField label="Last Name" required>
-            <input className={inputClass} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} required />
-          </FormField>
-        </div>
-        <FormField label="Job Title">
-          <input className={inputClass} value={form.jobTitle} onChange={(e) => setForm({ ...form, jobTitle: e.target.value })} />
-        </FormField>
-        <FormField label="Email">
-          <input className={inputClass} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-        </FormField>
-        <div className="grid grid-cols-2 gap-x-3">
-          <FormField label="Phone">
-            <input className={inputClass} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-          </FormField>
-          <FormField label="Mobile">
-            <input className={inputClass} value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
-          </FormField>
-        </div>
-        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
-          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
-            Cancel
-          </button>
-          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
-            Save Changes
           </button>
         </div>
       </form>
