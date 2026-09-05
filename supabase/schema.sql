@@ -283,8 +283,15 @@ create table if not exists public.activities (
   subject text not null,
   notes text,
   activity_date timestamptz not null default now(),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Set only for Activities logged from a synced incoming email (the message's Message-ID
+  -- header). Lets emailSync.ts upsert with ON CONFLICT DO NOTHING so the same email can never
+  -- be logged twice for the same person, however many times a sync happens to reprocess it.
+  email_message_id text
 );
+create unique index if not exists activities_user_email_message_id_key
+  on public.activities (user_id, email_message_id)
+  where email_message_id is not null;
 
 -- ---------- Proposals ----------
 create table if not exists public.proposals (

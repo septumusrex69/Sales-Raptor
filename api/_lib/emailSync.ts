@@ -106,23 +106,42 @@ export async function syncConnection(admin: SupabaseClient, conn: EmailConnectio
         const match = await findMatch(admin, fromAddress)
         if (!match) continue
 
-        await admin.from('activities').insert({
-          type: 'Email',
-          user_id: conn.user_id,
-          contact_id: match.contactId ?? null,
-          lead_id: match.leadId ?? null,
-          company_id: match.companyId ?? null,
-          subject: `Email received: ${parsed.subject || '(no subject)'}`,
-          notes: (parsed.text || '').slice(0, NOTES_MAX_LENGTH),
-          activity_date: (parsed.date ?? new Date()).toISOString(),
-        })
-        logged += 1
+        // upsert + ignoreDuplicates rather than insert: a UID this sync reprocesses (a
+        // concurrent sync, or the watermark not having advanced yet) must never log the
+        // same email twice -- the unique index on (user_id, email_message_id) is what
+        // actually enforces that, this just tells Postgres to skip silently on conflict
+        // instead of raising an error that would abort the rest of the sync.
+        const { data: inserted, error } = await admin
+          .from('activities')
+          .upsert(
+            {
+              type: 'Email',
+              user_id: conn.user_id,
+              contact_id: match.contactId ?? null,
+              lead_id: match.leadId ?? null,
+              company_id: match.companyId ?? null,
+              subject: `Email received: ${parsed.subject || '(no subject)'}`,
+              notes: (parsed.text || '').slice(0, NOTES_MAX_LENGTH),
+              activity_date: (parsed.date ?? new Date()).toISOString(),
+              email_message_id: parsed.messageId ?? `${conn.user_id}:${uid}`,
+            },
+            { onConflict: 'user_id,email_message_id', ignoreDuplicates: true },
+          )
+          .select('id')
+        // A duplicate (already-logged Message-ID) is silently skipped by ignoreDuplicates
+        // and comes back as an empty array, not an error -- only count it when a row was
+        // actually inserted.
+        if (!error && inserted && inserted.length > 0) logged += 1
       }
 
-      await admin
+      // Checked deliberately: a swallowed error here would leave the watermark stuck, so every
+      // future sync silently reprocesses the same already-logged messages from scratch (only
+      // caught downstream by the dedup upsert above, at the cost of a full re-fetch every time).
+      const { error: watermarkError } = await admin
         .from('email_connections')
         .update({ last_seen_uid: maxUid, last_synced_at: new Date().toISOString() })
         .eq('user_id', conn.user_id)
+      if (watermarkError) throw new Error(`Failed to save sync watermark: ${watermarkError.message}`)
     } finally {
       lock.release()
     }
