@@ -30,6 +30,23 @@ function findFolder(mailboxes: ListResponse[], specialUse: string, commonNames: 
   return byName?.path
 }
 
+/** No point recording 40 filenames on one message; nobody scans past the first few. */
+const MAX_ATTACHMENT_NAMES = 10
+
+/**
+ * Real attachments only. Most messages carry "attachments" that are nothing of the sort --
+ * signature logos, tracking pixels and inline images referenced from the HTML body, which
+ * mailparser reports with related=true or disposition 'inline'. Listing those would bury a
+ * genuine mandate or invoice in image001.png noise, which at this mailbox's volume
+ * (thousands of attachments a week) would make the paperclip chips worthless.
+ */
+function realAttachmentNames(attachments: { filename?: string; related?: boolean; contentDisposition?: string }[] | undefined): string[] {
+  return (attachments ?? [])
+    .filter((att) => !att.related && att.contentDisposition !== 'inline')
+    .map((att, i) => att.filename || `attachment-${i + 1}`)
+    .slice(0, MAX_ATTACHMENT_NAMES)
+}
+
 async function findMatch(admin: SupabaseClient, fromAddress: string) {
   const email = fromAddress.toLowerCase()
   const { data: contact } = await admin.from('contacts').select('id, company_id, owner_id').ilike('email', email).limit(1).maybeSingle()
@@ -152,7 +169,7 @@ async function syncMailbox(
             // Names only -- the files stay in the mailbox. Recording them means an email
             // carrying a signed mandate or an invoice can't land in the CRM looking like an
             // ordinary (or, for an attachment-only email, empty) message.
-            attachment_names: (parsed.attachments ?? []).map((att, i) => att.filename || `attachment-${i + 1}`),
+            attachment_names: realAttachmentNames(parsed.attachments),
           },
           { onConflict: 'user_id,email_message_id', ignoreDuplicates: true },
         )
