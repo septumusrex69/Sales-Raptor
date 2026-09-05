@@ -374,7 +374,15 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const updateLead = useCallback<AppActions['updateLead']>(
     (id, patch) => {
-      const fullPatch = { ...patch, updatedAt: nowIso() }
+      // Edit forms hand back the whole lead object rather than just the changed fields, so
+      // strip the columns Postgres won't accept in an UPDATE before it reaches the DB.
+      // leadNumber is the one that actually breaks: it's GENERATED ALWAYS AS IDENTITY, so
+      // including it -- even set to its own current value -- fails the entire update with
+      // 'column "lead_number" can only be updated to DEFAULT', which silently killed every
+      // Edit Lead save. id and createdAt are stripped for the same reason in principle:
+      // neither is ever a legitimate thing to change on an existing record.
+      const { leadNumber: _leadNumber, id: _id, createdAt: _createdAt, ...safePatch } = patch
+      const fullPatch = { ...safePatch, updatedAt: nowIso() }
       let previous: Lead | undefined
       setLeads((prev) => {
         previous = prev.find((l) => l.id === id)
