@@ -28,9 +28,7 @@ create table if not exists public.profiles (
   status text not null default 'Active' check (status in ('Active', 'Inactive')),
   phone text,
   avatar_color text not null default '#355069',
-  created_at timestamptz not null default now(),
-  -- Appended under the body of any email sent from Sales Raptor via this person's connected inbox.
-  email_signature text
+  created_at timestamptz not null default now()
 );
 
 -- Auto-create a profile the moment someone accepts a Supabase invite /
@@ -428,25 +426,6 @@ drop policy if exists "teams_write" on public.teams;
 create policy "teams_write" on public.teams for all
   using (public.current_user_role() = 'Administrator')
   with check (public.current_user_role() = 'Administrator');
-
--- ---------- Email connections (Microsoft OAuth) ----------
--- One row per person who has connected their own Outlook/Microsoft 365
--- inbox so Sales Raptor can send email as them. Tokens here are never read
--- or written by the browser directly -- only /api/auth/microsoft/* and
--- /api/email/send (using the service_role key, which bypasses RLS) ever
--- touch this table. RLS is enabled with zero policies for authenticated/
--- anon, so even a compromised anon/authenticated key can't read a token.
-create table if not exists public.email_connections (
-  user_id uuid primary key references public.profiles (id) on delete cascade,
-  provider text not null default 'microsoft' check (provider in ('microsoft')),
-  email text not null,
-  refresh_token text not null,
-  access_token text,
-  access_token_expires_at timestamptz,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-alter table public.email_connections enable row level security;
 
 -- ---------- Function hardening ----------
 -- handle_new_user and protect_profile_privileged_fields only ever run as
