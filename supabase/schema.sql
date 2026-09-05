@@ -449,8 +449,10 @@ create policy "teams_write" on public.teams for all
 -- credentials themselves, is only ever read or written by the service_role
 -- API routes under /api/email/*, never the browser. RLS is enabled with no
 -- policies for authenticated/anon, so even a compromised anon/authenticated
--- key can't read a row. last_seen_uid is the IMAP UID watermark so each
--- sync only processes messages that arrived since the last one.
+-- key can't read a row. last_seen_uid is the INBOX IMAP UID watermark, and
+-- last_seen_uid_junk the same for the mailbox's Junk/Spam folder (a client's
+-- reply misfiled as spam is still a reply) -- IMAP UIDs are only unique
+-- within a single mailbox, so each folder needs its own watermark.
 create table if not exists public.email_connections (
   user_id uuid primary key references public.profiles (id) on delete cascade,
   email text not null,
@@ -460,6 +462,7 @@ create table if not exists public.email_connections (
   imap_port integer not null default 993,
   encrypted_password text not null,
   last_seen_uid integer,
+  last_seen_uid_junk integer,
   last_synced_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
