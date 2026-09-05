@@ -290,6 +290,8 @@ export interface User {
   status: 'Active' | 'Inactive'
   phone?: string
   avatarColor: string
+  /** Appended under the body of any email sent from Sales Raptor via this person's connected inbox. */
+  emailSignature?: string
 }
 
 export type TeamKind = 'Sales' | 'Communications'

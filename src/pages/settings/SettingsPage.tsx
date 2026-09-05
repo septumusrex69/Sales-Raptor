@@ -1,5 +1,6 @@
-import { useState, type FormEvent } from 'react'
-import { Plus, Trash2, Pencil, Check, X } from 'lucide-react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
@@ -14,7 +15,8 @@ const TABS = ['Profile', 'Users', 'Teams', 'Pipelines', 'Custom Fields', 'Lead S
 type Tab = (typeof TABS)[number]
 
 export function SettingsPage() {
-  const [tab, setTab] = useState<Tab>('Profile')
+  const [searchParams] = useSearchParams()
+  const [tab, setTab] = useState<Tab>(() => (searchParams.get('emailConnected') || searchParams.get('emailConnectError') ? 'Integrations' : 'Profile'))
 
   return (
     <div className="flex gap-6">
@@ -51,6 +53,7 @@ function ProfileTab() {
     fullName: currentUser?.name ?? '',
     email: currentUser?.email ?? '',
     phone: currentUser?.phone ?? '',
+    emailSignature: currentUser?.emailSignature ?? '',
     language: 'English',
     timezone: '(GMT+02:00) Johannesburg',
     dateFormat: 'DD MMM YYYY',
@@ -72,7 +75,7 @@ function ProfileTab() {
         onSubmit={(e) => {
           e.preventDefault()
           if (currentUser) {
-            const patch = { name: form.fullName, phone: form.phone || undefined }
+            const patch = { name: form.fullName, phone: form.phone || undefined, emailSignature: form.emailSignature || undefined }
             updateUser(currentUser.id, patch)
             updateCurrentUserLocal(patch)
           }
@@ -94,6 +97,16 @@ function ProfileTab() {
             </FormField>
             <FormField label="Role">
               <input className={inputClass} value={currentUser?.role ?? ''} disabled />
+            </FormField>
+            <FormField label="Email Signature">
+              <textarea
+                className={inputClass}
+                rows={4}
+                placeholder={'e.g.\nStephan Bredell\nBredell Ferreira · 082 000 0000'}
+                value={form.emailSignature}
+                onChange={(e) => setForm({ ...form, emailSignature: e.target.value })}
+              />
+              <p className="text-xs text-slate-400 mt-1">Appended under any email you send from Sales Raptor once your inbox is connected — see Settings → Integrations.</p>
             </FormField>
           </div>
           <div>
@@ -919,10 +932,12 @@ const INTEGRATIONS = [
 ]
 
 function IntegrationsTab() {
-  const [connected, setConnected] = useState<Record<string, boolean>>({ Email: true })
+  const [connected, setConnected] = useState<Record<string, boolean>>({})
+  const otherIntegrations = INTEGRATIONS.filter((i) => i.name !== 'Email')
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {INTEGRATIONS.map((i) => (
+      <EmailIntegrationCard />
+      {otherIntegrations.map((i) => (
         <Card key={i.name} className="p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -939,5 +954,78 @@ function IntegrationsTab() {
         </Card>
       ))}
     </div>
+  )
+}
+
+/**
+ * The one real integration on this page — the rest of INTEGRATIONS is still
+ * a decorative placeholder. Connecting sends the browser off to Microsoft
+ * (api/auth/microsoft/start) and back (api/auth/microsoft/callback), which
+ * lands here again with ?emailConnected=1 or ?emailConnectError=1.
+ */
+function EmailIntegrationCard() {
+  const { session } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [status, setStatus] = useState<{ loading: boolean; connected: boolean; email: string | null }>({ loading: true, connected: false, email: null })
+  const [disconnecting, setDisconnecting] = useState(false)
+  const notice = searchParams.get('emailConnected') ? 'connected' : searchParams.get('emailConnectError') ? 'error' : null
+
+  useEffect(() => {
+    if (!session) return
+    fetch('/api/email/status', { headers: { Authorization: `Bearer ${session.access_token}` } })
+      .then((r) => r.json())
+      .then((body) => setStatus({ loading: false, connected: !!body.connected, email: body.email ?? null }))
+      .catch(() => setStatus({ loading: false, connected: false, email: null }))
+  }, [session, notice])
+
+  useEffect(() => {
+    if (!notice) return
+    const next = new URLSearchParams(searchParams)
+    next.delete('emailConnected')
+    next.delete('emailConnectError')
+    setSearchParams(next, { replace: true })
+  }, [notice])
+
+  async function handleDisconnect() {
+    if (!session) return
+    setDisconnecting(true)
+    await fetch('/api/auth/microsoft/disconnect', { method: 'POST', headers: { Authorization: `Bearer ${session.access_token}` } })
+    setStatus({ loading: false, connected: false, email: null })
+    setDisconnecting(false)
+  }
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2.5">
+          <Mail size={16} className="text-slate-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Email</p>
+            <p className="text-xs text-slate-400 mt-0.5">Send email from Sales Raptor through your own Outlook inbox</p>
+            {status.connected && status.email && <p className="text-xs text-[#406d58] mt-1">Connected as {status.email}</p>}
+            {notice === 'connected' && <p className="text-xs text-[#406d58] mt-1">Outlook connected successfully.</p>}
+            {notice === 'error' && <p className="text-xs text-[#794234] mt-1">Couldn't connect Outlook — please try again.</p>}
+          </div>
+        </div>
+        {status.loading ? (
+          <span className="text-xs text-slate-400 shrink-0">Checking…</span>
+        ) : status.connected ? (
+          <button
+            onClick={handleDisconnect}
+            disabled={disconnecting}
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-[#eef4f1] text-[#406d58] hover:bg-slate-100 shrink-0 disabled:opacity-50"
+          >
+            <Unlink size={12} /> {disconnecting ? 'Disconnecting…' : 'Disconnect'}
+          </button>
+        ) : (
+          <a
+            href={session ? `/api/auth/microsoft/start?token=${encodeURIComponent(session.access_token)}` : '#'}
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 shrink-0"
+          >
+            <Link2 size={12} /> Connect
+          </a>
+        )}
+      </div>
+    </Card>
   )
 }
