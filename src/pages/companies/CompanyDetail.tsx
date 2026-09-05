@@ -16,7 +16,7 @@ import { parseEmailActivity } from '../../lib/emailActivity'
 import { buildDrilldownUrl } from '../../lib/drilldown'
 import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/ui/RowLimitSelect'
 import { EmailActivityList } from '../../components/EmailActivityRow'
-import { NoteActivityRow } from '../../components/NoteActivityRow'
+import { NoteActivityList } from '../../components/NoteActivityRow'
 import type { Company, Contact, ProductService } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
 
@@ -401,9 +401,7 @@ export function CompanyDetail() {
           <p className="text-sm text-slate-400">No activity recorded yet.</p>
         ) : (
           <div className="space-y-2.5">
-            {applyRowLimit(nonEmailActivities, noteLimit).map((a) => (
-              <NoteActivityRow key={a.id} activity={a} />
-            ))}
+            <NoteActivityList activities={nonEmailActivities} limit={noteLimit} />
           </div>
         )}
       </Card>

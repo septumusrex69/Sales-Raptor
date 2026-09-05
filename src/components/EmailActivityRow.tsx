@@ -122,13 +122,13 @@ export function EmailActivityRow({ activity, onReply }: { activity: Activity; on
       <button onClick={toggle} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-slate-50" aria-expanded={open}>
         <DirectionBadge kind={kind} />
         <span className="flex-1 min-w-0 flex items-baseline gap-2">
-          <span className={`text-sm shrink-0 max-w-[55%] truncate ${isUnread ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>{subject}</span>
-          {!open && body && <span className="text-[13px] text-slate-400 truncate min-w-0">{body}</span>}
+          <span className={`text-[14.5px] shrink-0 max-w-[55%] truncate ${isUnread ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>{subject}</span>
+          {!open && body && <span className="text-[13.5px] text-slate-400 truncate min-w-0">{body}</span>}
         </span>
         <span className="flex items-center gap-2.5 shrink-0">
           {attachments.length > 0 && <Paperclip size={13} className="text-slate-400" />}
           {isUnread && <span className="w-2 h-2 rounded-full bg-brand-500" title="Unread" />}
-          <span className="text-xs text-slate-400 tabular-nums">{emailTimeLabel(activity.activityDate)}</span>
+          <span className="text-[12px] text-slate-400 tabular-nums">{emailTimeLabel(activity.activityDate)}</span>
         </span>
       </button>
 
