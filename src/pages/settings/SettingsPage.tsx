@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react'
-import { Plus, Trash2, Pencil, Check, X } from 'lucide-react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
@@ -51,6 +51,7 @@ function ProfileTab() {
     fullName: currentUser?.name ?? '',
     email: currentUser?.email ?? '',
     phone: currentUser?.phone ?? '',
+    emailSignature: currentUser?.emailSignature ?? '',
     language: 'English',
     timezone: '(GMT+02:00) Johannesburg',
     dateFormat: 'DD MMM YYYY',
@@ -72,7 +73,7 @@ function ProfileTab() {
         onSubmit={(e) => {
           e.preventDefault()
           if (currentUser) {
-            const patch = { name: form.fullName, phone: form.phone || undefined }
+            const patch = { name: form.fullName, phone: form.phone || undefined, emailSignature: form.emailSignature || undefined }
             updateUser(currentUser.id, patch)
             updateCurrentUserLocal(patch)
           }
@@ -94,6 +95,16 @@ function ProfileTab() {
             </FormField>
             <FormField label="Role">
               <input className={inputClass} value={currentUser?.role ?? ''} disabled />
+            </FormField>
+            <FormField label="Email Signature">
+              <textarea
+                className={inputClass}
+                rows={4}
+                placeholder={'e.g.\nStephan Bredell\nBredell Ferreira · 082 000 0000'}
+                value={form.emailSignature}
+                onChange={(e) => setForm({ ...form, emailSignature: e.target.value })}
+              />
+              <p className="text-xs text-slate-400 mt-1">Appended under any email you send from Sales Raptor once your inbox is connected — see Settings → Integrations.</p>
             </FormField>
           </div>
           <div>
@@ -912,16 +923,16 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 const INTEGRATIONS = [
   { name: 'Google Calendar', desc: 'Sync meetings and tasks to Google Calendar' },
   { name: 'Outlook Calendar', desc: 'Sync meetings and tasks to Outlook' },
-  { name: 'Email', desc: 'Send and log emails from the CRM' },
   { name: 'WhatsApp', desc: 'Log WhatsApp conversations with leads' },
   { name: 'Website Forms', desc: 'Auto-capture leads from your website' },
   { name: 'Google Ads', desc: 'Import leads from Google Ads campaigns' },
 ]
 
 function IntegrationsTab() {
-  const [connected, setConnected] = useState<Record<string, boolean>>({ Email: true })
+  const [connected, setConnected] = useState<Record<string, boolean>>({})
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <EmailIntegrationCard />
       {INTEGRATIONS.map((i) => (
         <Card key={i.name} className="p-4">
           <div className="flex items-start justify-between gap-3">
@@ -939,5 +950,177 @@ function IntegrationsTab() {
         </Card>
       ))}
     </div>
+  )
+}
+
+type EmailStatus = { connected: boolean; email?: string; lastSyncedAt?: string | null }
+
+function EmailIntegrationCard() {
+  const { session } = useAuth()
+  const accessToken = session?.access_token
+  const [status, setStatus] = useState<EmailStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ email: '', password: '', smtpHost: '', smtpPort: '587', imapHost: '', imapPort: '993' })
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMessage, setSyncMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!accessToken) return
+    fetch('/api/email/status', { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then((res) => res.json())
+      .then((body) => setStatus(body))
+      .catch(() => setStatus({ connected: false }))
+      .finally(() => setLoading(false))
+  }, [accessToken])
+
+  async function handleConnect(e: FormEvent) {
+    e.preventDefault()
+    if (!accessToken) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/email/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          email: form.email.trim(),
+          password: form.password,
+          smtpHost: form.smtpHost.trim(),
+          smtpPort: Number(form.smtpPort),
+          imapHost: form.imapHost.trim(),
+          imapPort: Number(form.imapPort),
+        }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(body.error ?? 'Could not connect that mailbox.')
+        setSubmitting(false)
+        return
+      }
+      setStatus({ connected: true, email: form.email.trim(), lastSyncedAt: null })
+      setShowForm(false)
+      setForm({ email: '', password: '', smtpHost: '', smtpPort: '587', imapHost: '', imapPort: '993' })
+    } catch {
+      setError('Could not reach the server. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleDisconnect() {
+    if (!accessToken) return
+    if (!confirm('Disconnect this mailbox? Sending and automatic email logging will stop.')) return
+    await fetch('/api/email/disconnect', { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } })
+    setStatus({ connected: false })
+  }
+
+  async function handleSync() {
+    if (!accessToken) return
+    setSyncing(true)
+    setSyncMessage(null)
+    try {
+      const res = await fetch('/api/email/sync', { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSyncMessage(body.error ?? 'Sync failed.')
+      } else {
+        setSyncMessage(`Synced — ${body.logged ?? 0} new message${body.logged === 1 ? '' : 's'} logged.`)
+        setStatus((prev) => (prev ? { ...prev, lastSyncedAt: new Date().toISOString() } : prev))
+      }
+    } catch {
+      setSyncMessage('Could not reach the server.')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  return (
+    <Card className="p-4 md:col-span-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <div className="w-9 h-9 rounded-lg bg-[#eef4f1] text-[#406d58] flex items-center justify-center shrink-0">
+            <Mail size={16} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Email (SMTP / IMAP)</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {loading
+                ? 'Checking connection…'
+                : status?.connected
+                ? `Connected as ${status.email}`
+                : 'Send email and automatically log matching replies as CRM activity'}
+            </p>
+            {status?.connected && status.lastSyncedAt && (
+              <p className="text-xs text-slate-400 mt-0.5">Last synced {new Date(status.lastSyncedAt).toLocaleString()}</p>
+            )}
+          </div>
+        </div>
+        {!loading && !status?.connected && !showForm && (
+          <button
+            onClick={() => setShowForm(true)}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg shrink-0 bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center gap-1.5"
+          >
+            <Link2 size={13} /> Connect
+          </button>
+        )}
+        {status?.connected && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              className="text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} /> Sync now
+            </button>
+            <button
+              onClick={handleDisconnect}
+              className="text-xs font-medium px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 flex items-center gap-1.5"
+            >
+              <Unlink size={13} /> Disconnect
+            </button>
+          </div>
+        )}
+      </div>
+
+      {syncMessage && <p className="text-xs text-slate-500 mt-2">{syncMessage}</p>}
+
+      {showForm && !status?.connected && (
+        <form onSubmit={handleConnect} className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <FormField label="Email Address" required>
+            <input className={inputClass} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
+          </FormField>
+          <FormField label="Password" required>
+            <input className={inputClass} type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
+          </FormField>
+          <FormField label="SMTP Host" required>
+            <input className={inputClass} placeholder="mail.yourdomain.co.za" value={form.smtpHost} onChange={(e) => setForm({ ...form, smtpHost: e.target.value })} required />
+          </FormField>
+          <FormField label="SMTP Port" required>
+            <input className={inputClass} type="number" value={form.smtpPort} onChange={(e) => setForm({ ...form, smtpPort: e.target.value })} required />
+          </FormField>
+          <FormField label="IMAP Host" required>
+            <input className={inputClass} placeholder="mail.yourdomain.co.za" value={form.imapHost} onChange={(e) => setForm({ ...form, imapHost: e.target.value })} required />
+          </FormField>
+          <FormField label="IMAP Port" required>
+            <input className={inputClass} type="number" value={form.imapPort} onChange={(e) => setForm({ ...form, imapPort: e.target.value })} required />
+          </FormField>
+          <p className="text-xs text-slate-400 md:col-span-2 -mt-1">
+            Find these under Email Accounts → Connect Devices (or Configure Mail Client) in ConsoleH / your webmail control panel.
+          </p>
+          {error && <p className="text-xs text-red-600 md:col-span-2">{error}</p>}
+          <div className="md:col-span-2 flex items-center gap-2">
+            <button type="submit" disabled={submitting} className="text-xs font-medium px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+              {submitting ? 'Connecting…' : 'Connect Mailbox'}
+            </button>
+            <button type="button" onClick={() => { setShowForm(false); setError(null) }} className="text-xs font-medium px-3 py-1.5 rounded-lg text-slate-500 hover:bg-slate-100">
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+    </Card>
   )
 }

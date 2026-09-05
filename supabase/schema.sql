@@ -28,7 +28,9 @@ create table if not exists public.profiles (
   status text not null default 'Active' check (status in ('Active', 'Inactive')),
   phone text,
   avatar_color text not null default '#355069',
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Appended under the body of any email sent from Sales Raptor via this person's connected inbox.
+  email_signature text
 );
 
 -- Auto-create a profile the moment someone accepts a Supabase invite /
@@ -426,6 +428,31 @@ drop policy if exists "teams_write" on public.teams;
 create policy "teams_write" on public.teams for all
   using (public.current_user_role() = 'Administrator')
   with check (public.current_user_role() = 'Administrator');
+
+-- ---------- Email connections (SMTP/IMAP, e.g. Xneelo-hosted mail) ----------
+-- One row per person who has connected their own mailbox so Sales Raptor
+-- can send email as them and log incoming mail against matching CRM
+-- records. encrypted_password is AES-256-GCM ciphertext (see
+-- api/_lib/crypto.ts) -- never plaintext -- and like the mailbox
+-- credentials themselves, is only ever read or written by the service_role
+-- API routes under /api/email/*, never the browser. RLS is enabled with no
+-- policies for authenticated/anon, so even a compromised anon/authenticated
+-- key can't read a row. last_seen_uid is the IMAP UID watermark so each
+-- sync only processes messages that arrived since the last one.
+create table if not exists public.email_connections (
+  user_id uuid primary key references public.profiles (id) on delete cascade,
+  email text not null,
+  smtp_host text not null,
+  smtp_port integer not null default 587,
+  imap_host text not null,
+  imap_port integer not null default 993,
+  encrypted_password text not null,
+  last_seen_uid integer,
+  last_synced_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.email_connections enable row level security;
 
 -- ---------- Function hardening ----------
 -- handle_new_user and protect_profile_privileged_fields only ever run as

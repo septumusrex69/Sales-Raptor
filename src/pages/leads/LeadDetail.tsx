@@ -9,6 +9,7 @@ import { StatusBadge, ServiceBadge, StageBadge } from '../../components/ui/Badge
 import { Avatar, UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
+import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { formatCurrency, formatDate, formatDateTime, formatLeadNumber, industries, leadSources } from '../../data/mockData'
 import type { ActivityType, LeadStatus, TaskType } from '../../types'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, serviceValueLabel, leadServiceValueList } from '../../components/leads/LeadOpportunityFields'
@@ -29,6 +30,7 @@ export function LeadDetail() {
   const [activityOpen, setActivityOpen] = useState(false)
   const [taskOpen, setTaskOpen] = useState<'task' | 'meeting' | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [emailOpen, setEmailOpen] = useState(false)
 
   const timeline = useMemo(
     () => activities.filter((a) => a.leadId === id).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()),
@@ -94,6 +96,7 @@ export function LeadDetail() {
             />
           )}
           <ActionButton icon={StickyNote} label="Add Activity" onClick={() => setActivityOpen(true)} />
+          {lead.email && <ActionButton icon={Mail} label="Send Email" onClick={() => setEmailOpen(true)} />}
           <ActionButton icon={CheckSquare} label="Create Task" onClick={() => setTaskOpen('task')} />
           <ActionButton icon={Calendar} label="Schedule Meeting" onClick={() => setTaskOpen('meeting')} />
           {canEdit && <ActionButton icon={XCircle} label="Mark Lost" tone="danger" onClick={() => markLeadLost(lead.id)} disabled={lead.status === 'Lost'} />}
@@ -236,6 +239,13 @@ export function LeadDetail() {
             deleteLead(lead.id)
             navigate('/leads')
           }}
+        />
+      )}
+      {emailOpen && lead.email && (
+        <ComposeEmailModal
+          to={lead.email}
+          onClose={() => setEmailOpen(false)}
+          onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, leadId: lead.id, companyId: lead.companyId })}
         />
       )}
     </div>

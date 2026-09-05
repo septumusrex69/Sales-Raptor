@@ -6,6 +6,7 @@ import { Card, CardHeader } from '../../components/ui/Card'
 import { Avatar } from '../../components/ui/Avatar'
 import { StageBadge } from '../../components/ui/Badge'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
+import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { companyById, formatCurrency, formatDate, formatDateTime, userById } from '../../data/mockData'
 
 export function ContactDetail() {
@@ -13,6 +14,7 @@ export function ContactDetail() {
   const { contacts, deals, activities, tasks, addActivity } = useAppStore()
   const contact = contacts.find((c) => c.id === id)
   const [noteOpen, setNoteOpen] = useState(false)
+  const [emailOpen, setEmailOpen] = useState(false)
 
   const contactDeals = useMemo(() => deals.filter((d) => d.contactId === id), [deals, id])
   const contactActivities = useMemo(
@@ -59,9 +61,16 @@ export function ContactDetail() {
               </div>
             </div>
           </div>
-          <button onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-            <StickyNote size={14} /> Add Note
-          </button>
+          <div className="flex items-center gap-2">
+            {contact.email && (
+              <button onClick={() => setEmailOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+                <Mail size={14} /> Send Email
+              </button>
+            )}
+            <button onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+              <StickyNote size={14} /> Add Note
+            </button>
+          </div>
         </div>
       </Card>
 
@@ -172,6 +181,13 @@ export function ContactDetail() {
         <NoteModal
           onClose={() => setNoteOpen(false)}
           onSave={(text) => addActivity({ type: 'Note', subject: 'Note added', notes: text, contactId: contact.id, companyId: contact.companyId })}
+        />
+      )}
+      {emailOpen && contact.email && (
+        <ComposeEmailModal
+          to={contact.email}
+          onClose={() => setEmailOpen(false)}
+          onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, contactId: contact.id, companyId: contact.companyId })}
         />
       )}
     </div>

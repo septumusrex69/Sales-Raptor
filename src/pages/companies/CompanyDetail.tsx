@@ -8,6 +8,7 @@ import { Card, CardHeader } from '../../components/ui/Card'
 import { StatusBadge, StageBadge, ClassificationBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
+import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { formatCurrency, formatDate, formatDateTime, services } from '../../data/mockData'
 import { ACTIVITY_TYPE_COLORS } from '../../lib/colors'
 import type { Company, ProductService } from '../../types'
@@ -30,6 +31,7 @@ export function CompanyDetail() {
   const [meetingOpen, setMeetingOpen] = useState(false)
   const [parentOpen, setParentOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [emailOpen, setEmailOpen] = useState(false)
 
   const companyContacts = useMemo(() => contacts.filter((c) => c.companyId === id), [contacts, id])
   const companyLeads = useMemo(() => leads.filter((l) => l.companyId === id), [leads, id])
@@ -195,9 +197,14 @@ export function CompanyDetail() {
           <div>
             <p className="text-xs text-slate-400 mb-0.5">Email</p>
             {company.email ? (
-              <a href={`mailto:${company.email}`} className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600">
-                <Mail size={13} /> {company.email}
-              </a>
+              <div className="flex items-center gap-2">
+                <a href={`mailto:${company.email}`} className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600">
+                  <Mail size={13} /> {company.email}
+                </a>
+                <button onClick={() => setEmailOpen(true)} className="text-xs font-medium text-brand-600 hover:underline shrink-0">
+                  Send Email
+                </button>
+              </div>
             ) : (
               <span className="text-slate-300">—</span>
             )}
@@ -419,6 +426,13 @@ export function CompanyDetail() {
         </div>
       </div>
 
+      {emailOpen && company.email && (
+        <ComposeEmailModal
+          to={company.email}
+          onClose={() => setEmailOpen(false)}
+          onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, companyId: company.id })}
+        />
+      )}
       {noteOpen && (
         <QuickLogModal
           title="Add Note"
