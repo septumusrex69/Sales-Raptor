@@ -36,7 +36,7 @@ export function LeadDetail() {
   const [emailOpen, setEmailOpen] = useState(false)
   const [emailLimit, setEmailLimit] = useState<RowLimit>(5)
   const [noteLimit, setNoteLimit] = useState<RowLimit>(5)
-  const [replyTarget, setReplyTarget] = useState<{ subject: string; body: string } | null>(null)
+  const [replyTarget, setReplyTarget] = useState<{ subject: string } | null>(null)
 
   const timeline = useMemo(
     () => activities.filter((a) => a.leadId === id).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()),
@@ -253,10 +253,7 @@ export function LeadDetail() {
                           onClick={(e) => {
                             e.stopPropagation()
                             const rawSubject = parsed?.subject ?? a.subject
-                            setReplyTarget({
-                              subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}`,
-                              body: `\n\n\nOn ${formatDateTime(a.activityDate)}, wrote:\n${(a.notes ?? '').split('\n').map((line) => `> ${line}`).join('\n')}`,
-                            })
+                            setReplyTarget({ subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}` })
                           }}
                           className="text-[11px] font-medium text-brand-600 hover:underline"
                         >
@@ -343,7 +340,6 @@ export function LeadDetail() {
         <ComposeEmailModal
           to={lead.email}
           initialSubject={replyTarget.subject}
-          initialBody={replyTarget.body}
           onClose={() => setReplyTarget(null)}
           onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, leadId: lead.id, companyId: lead.companyId })}
         />

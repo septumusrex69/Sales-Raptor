@@ -58,7 +58,7 @@ export function CompanyDetail() {
   const [editContact, setEditContact] = useState<Contact | null>(null)
   const [editCompanyOpen, setEditCompanyOpen] = useState(false)
   const [addContactOpen, setAddContactOpen] = useState(false)
-  const [replyTarget, setReplyTarget] = useState<{ to: string; subject: string; body: string; contactId?: string } | null>(null)
+  const [replyTarget, setReplyTarget] = useState<{ to: string; subject: string; contactId?: string } | null>(null)
   const [emailLimit, setEmailLimit] = useState<RowLimit>(5)
   const [noteLimit, setNoteLimit] = useState<RowLimit>(5)
   const [composeOpen, setComposeOpen] = useState(false)
@@ -411,7 +411,6 @@ export function CompanyDetail() {
                           setReplyTarget({
                             to: replyToAddress,
                             subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}`,
-                            body: `\n\n\nOn ${formatDateTime(a.activityDate)}, wrote:\n${(a.notes ?? '').split('\n').map((line) => `> ${line}`).join('\n')}`,
                             contactId: a.contactId,
                           })
                         }}
@@ -575,7 +574,6 @@ export function CompanyDetail() {
         <ComposeEmailModal
           to={replyTarget.to}
           initialSubject={replyTarget.subject}
-          initialBody={replyTarget.body}
           onClose={() => setReplyTarget(null)}
           onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, contactId: replyTarget.contactId, companyId: company.id })}
         />
