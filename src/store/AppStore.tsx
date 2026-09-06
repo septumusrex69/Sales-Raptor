@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { supabase } from '../lib/supabase'
 import { useAuth } from './AuthContext'
 import { TODAY } from '../data/mockData'
-import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, LeadStatus, LossReason, Proposal, Task, Team, TeamKind, User } from '../types'
+import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, LeadStatus, LossReason, Proposal, Task, TaskType, Team, TeamKind, User } from '../types'
 
 /**
  * Generic camelCase(app) <-> snake_case(Postgres) row mapping. The SQL
@@ -91,6 +91,24 @@ function deleteRow(table: string, id: ID, action: string, onError?: (message: st
         onError?.(error.message)
       }
     })
+}
+
+/**
+ * A completed task is logged as the kind of thing it actually was, so a meeting that happened
+ * reads as a Meeting on the client's file — with the meeting colour — rather than as generic
+ * admin. The types that don't describe a client interaction fall back to Task.
+ */
+function taskCompletionActivityType(taskType: TaskType): ActivityType {
+  switch (taskType) {
+    case 'Call':
+    case 'Email':
+    case 'Meeting':
+    case 'WhatsApp':
+    case 'Proposal':
+      return taskType
+    default:
+      return 'Task'
+  }
 }
 
 function startOfDay(d: Date) {
@@ -677,8 +695,22 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         if (previous) setTasks((prev) => prev.map((t) => (t.id === id ? previous! : t)))
         showError(message)
       })
+
+      // Creating a task was already logged on the client's file; finishing one wasn't, so a
+      // meeting that actually happened left no trace anywhere except the task disappearing
+      // off a list. Logged here rather than at each tick-box so it holds wherever a task gets
+      // completed — dashboard, tasks page, or anywhere added later.
+      if (previous && patch.status === 'Completed' && previous.status !== 'Completed') {
+        addActivity({
+          type: taskCompletionActivityType(previous.type),
+          subject: `${previous.type} completed: ${previous.title}`,
+          leadId: previous.leadId,
+          dealId: previous.dealId,
+          companyId: previous.companyId,
+        })
+      }
     },
-    [showError],
+    [showError, addActivity],
   )
 
   const convertLeadToDeal = useCallback<AppActions['convertLeadToDeal']>(
