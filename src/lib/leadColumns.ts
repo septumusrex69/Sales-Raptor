@@ -49,9 +49,6 @@ export const COLUMN_LABELS: Record<ColumnKey, string> = {
 export const DEFAULT_COLUMNS: ColumnKey[] = [
   'leadNumber',
   'companyLead',
-  // Third, right behind the columns that say which lead this is: when it came in is the next
-  // thing anyone asks, and it was previously twelfth — off the right-hand edge of the scroll.
-  'dateAdded',
   'contactPerson',
   'status',
   'classification',
@@ -65,8 +62,12 @@ export const DEFAULT_COLUMNS: ColumnKey[] = [
   'source',
 ]
 
-/** Extra columns available via the Columns menu — hidden by default. */
-export const OPTIONAL_COLUMNS: ColumnKey[] = ['city', 'province', 'leadAge', 'jobTitle', 'phone', 'email']
+/**
+ * Extra columns available via the Columns menu — hidden by default. 'dateAdded' lives here
+ * rather than in the defaults because the table groups rows under day headings instead, the
+ * way the email list does; the column stays available for anyone who wants the date inline.
+ */
+export const OPTIONAL_COLUMNS: ColumnKey[] = ['dateAdded', 'city', 'province', 'leadAge', 'jobTitle', 'phone', 'email']
 
 export const ALL_COLUMNS: ColumnKey[] = [...DEFAULT_COLUMNS, ...OPTIONAL_COLUMNS]
 

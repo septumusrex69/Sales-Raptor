@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Phone,
@@ -32,7 +32,7 @@ import { LeadsPeriodBar } from '../../components/leads/LeadsPeriodBar'
 import { LeadsKpiRow, type LeadsKpiValues } from '../../components/leads/LeadsKpiRow'
 import { RejectLeadModal } from '../../components/leads/RejectLeadModal'
 import { SortHeader } from '../../components/ui/SortHeader'
-import { relativeDayLabel } from '../../lib/dateLabels'
+import { dateGroupLabel, relativeDayLabel } from '../../lib/dateLabels'
 import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
 import { formatCurrency, formatDate, formatLeadNumber, daysAgoLabel, industries, leadClassifications, leadSources, provinces, services, TODAY } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
@@ -265,6 +265,7 @@ export function LeadsList() {
   // Their offsets are measured from what's actually showing rather than baked into class
   // names, so hiding one via the Columns menu doesn't strand a gap where it used to sit.
   const pinnedLeft = { leadNumber: 0, companyLead: col.leadNumber ? 100 : 0 }
+  const visibleColumnCount = ALL_COLUMNS.filter((key) => col[key]).length + 1
 
   return (
     <div className="space-y-4">
@@ -383,11 +384,23 @@ export function LeadsList() {
               </tr>
             </thead>
             <tbody>
-              {pageItems.map((lead) => {
+              {pageItems.map((lead, i) => {
                 const leadServices = lead.services ?? []
                 const staleContact = isStaleClassAContact(lead)
+                // Headings only make sense while the rows are in date order — under a sort by
+                // score or value they'd be dividing the list on something it isn't sorted by.
+                const group = sortKey === 'dateAdded' ? dateGroupLabel(lead.createdAt) : null
+                const isFirstOfGroup = group !== null && (i === 0 || group !== dateGroupLabel(pageItems[i - 1].createdAt))
                 return (
-                  <tr key={lead.id} onClick={() => navigate(`/leads/${lead.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
+                  <Fragment key={lead.id}>
+                  {isFirstOfGroup && (
+                    <tr>
+                      <td colSpan={visibleColumnCount} className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 bg-slate-50 px-5 py-1.5">
+                        {group}
+                      </td>
+                    </tr>
+                  )}
+                  <tr onClick={() => navigate(`/leads/${lead.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
                     {col.leadNumber && (
                       <td className="px-5 py-3 sticky z-10 bg-white" style={{ left: pinnedLeft.leadNumber }}>
                         <Link to={`/leads/${lead.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
@@ -528,6 +541,7 @@ export function LeadsList() {
                       />
                     </td>
                   </tr>
+                  </Fragment>
                 )
               })}
               {pageItems.length === 0 && (

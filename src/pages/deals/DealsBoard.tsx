@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { LayoutGrid, List, Plus, Search } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
@@ -7,7 +7,7 @@ import { canEditOwned, useDefaultOwnerFilter, isAssignableOwner} from '../../lib
 import { Card } from '../../components/ui/Card'
 import { StageBadge } from '../../components/ui/Badge'
 import { SortHeader } from '../../components/ui/SortHeader'
-import { relativeDayLabel } from '../../lib/dateLabels'
+import { dateGroupLabel, relativeDayLabel } from '../../lib/dateLabels'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { DealForm } from '../../components/layout/QuickAdd'
 import { MarkRejectedModal, MarkWonModal } from './DealStageModals'
@@ -255,13 +255,25 @@ export function DealsBoard() {
                   <th className="font-medium px-3 py-3">{header('stage', 'Stage')}</th>
                   <th className="font-medium px-3 py-3">{header('probability', 'Probability')}</th>
                   <th className="font-medium px-3 py-3">{header('owner', 'Owner')}</th>
-                  <th className="font-medium px-3 py-3">{header('createdAt', 'Created')}</th>
                   <th className="font-medium px-3 py-3">{header('expectedCloseDate', 'Expected Close')}</th>
                 </tr>
               </thead>
               <tbody>
-                {tableSorted.map((deal) => (
-                  <tr key={deal.id} onClick={() => navigate(`/deals/${deal.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
+                {tableSorted.map((deal, i) => {
+                  // Headings only make sense while the rows are in date order — under a sort by
+                  // value they'd be dividing the list on something it isn't sorted by.
+                  const group = sortKey === 'createdAt' ? dateGroupLabel(deal.createdAt) : null
+                  const isFirstOfGroup = group !== null && (i === 0 || group !== dateGroupLabel(tableSorted[i - 1].createdAt))
+                  return (
+                  <Fragment key={deal.id}>
+                  {isFirstOfGroup && (
+                    <tr>
+                      <td colSpan={7} className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 bg-slate-50 px-5 py-1.5">
+                        {group}
+                      </td>
+                    </tr>
+                  )}
+                  <tr onClick={() => navigate(`/deals/${deal.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
                     <td className="px-5 py-3">
                       <Link to={`/deals/${deal.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
                         {deal.name}
@@ -279,12 +291,11 @@ export function DealsBoard() {
                         <span className="text-slate-500 text-xs">{userById(deal.ownerId)?.name.split(' ')[0]}</span>
                       </div>
                     </td>
-                    <td className="px-3 py-3 text-slate-500 whitespace-nowrap" title={formatDate(deal.createdAt)}>
-                      {relativeDayLabel(deal.createdAt)}
-                    </td>
                     <td className="px-3 py-3 text-slate-500">{formatDate(deal.expectedCloseDate)}</td>
                   </tr>
-                ))}
+                  </Fragment>
+                  )
+                })}
               </tbody>
             </table>
           </div>
