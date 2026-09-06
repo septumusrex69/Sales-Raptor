@@ -11,8 +11,7 @@ import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { MarkRejectedModal, MarkWonModal } from './DealStageModals'
 import { dealKind, dealStageLabel } from '../../lib/dealKind'
 import { formatCurrency, formatDate, formatDateTime, services } from '../../data/mockData'
-import { DEAL_STAGES } from '../../types'
-import type { ActivityType, DealStage, ProposalStatus, TaskType } from '../../types'
+import type { ActivityType, ProposalStatus, TaskType } from '../../types'
 import type { WonDealDetails } from '../../store/AppStore'
 
 const TABS = ['Overview', 'Activities', 'Tasks', 'Documents', 'Proposals', 'Notes', 'History'] as const
@@ -39,7 +38,6 @@ export function DealDetail() {
     contactById,
     userById,
     updateDeal,
-    moveDealStage,
     markDealWon,
     markDealRejected,
     logDealDocument,
@@ -128,23 +126,7 @@ export function DealDetail() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 mt-5 pt-4 border-t border-slate-100">
-          <label className="text-xs text-slate-400">Stage:</label>
-          <select
-            value={deal.stage}
-            disabled={isClosed || !canEdit}
-            onChange={(e) => {
-              const next = e.target.value as DealStage
-              if (next === 'Won') setWonOpen(true)
-              else if (next === 'Rejected') setRejectOpen(true)
-              else moveDealStage(deal.id, next)
-            }}
-            className="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-600 outline-none disabled:opacity-50"
-          >
-            {DEAL_STAGES.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-          <div className="flex flex-wrap gap-2 ml-auto">
+          <div className="flex flex-wrap gap-2">
             {canEdit && !isClosed && !isHandover && !deal.quotationSentAt && (
               <ActionButton icon={FileText} label="Quotation Sent" onClick={() => logDealDocument(deal.id, 'quotation')} />
             )}
