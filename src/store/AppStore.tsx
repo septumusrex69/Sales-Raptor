@@ -420,11 +420,35 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
+  /**
+   * The Company a lead's deals hang off. A lead often has no client record yet, and a Deal
+   * can't exist without one, so the client is created here the first time it's needed. It
+   * stays out of the Clients list until one of its deals is Won, so opening a deal on a lead
+   * doesn't quietly promote them to a client.
+   */
+  const ensureLeadCompany = useCallback(
+    (lead: Lead): { companyId: ID; newCompany?: Company } => {
+      if (lead.companyId) return { companyId: lead.companyId }
+      const newCompany: Company = {
+        id: crypto.randomUUID(),
+        accountOwnerId: ownerId,
+        createdAt: nowIso(),
+        name: lead.companyName,
+        industry: lead.industry,
+        province: lead.province,
+        city: lead.city,
+      }
+      setCompanies((prev) => [newCompany, ...prev])
+      return { companyId: newCompany.id, newCompany }
+    },
+    [ownerId],
+  )
+
   const addLead = useCallback<AppActions['addLead']>(
     (input) => {
       const id = crypto.randomUUID()
       const optimisticLeadNumber = leads.reduce((max, l) => Math.max(max, l.leadNumber), 0) + 1
-      const lead: Lead = {
+      const draft: Lead = {
         id,
         leadNumber: optimisticLeadNumber,
         status: 'No Contact Yet',
@@ -436,28 +460,99 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         updatedAt: nowIso(),
         ...input,
       }
+
+      // Each service the lead is interested in is a live opportunity, so it becomes a deal
+      // straight away rather than waiting for conversion — which is the point at which they
+      // used to appear, long after anyone needed to see them.
+      const serviceEntries = draft.serviceValues && draft.serviceValues.length > 0 ? draft.serviceValues : undefined
+      const dealDefs: { service?: ProductService; value: number; handoverAmount?: number; accountsCount?: number }[] = serviceEntries
+        ? serviceEntries.map((sv) => ({
+            service: sv.service,
+            value: kindForService(sv.service) === 'Handover' ? 0 : sv.value ?? 0,
+            handoverAmount: sv.handoverAmount,
+            accountsCount: sv.accountsCount,
+          }))
+        : (draft.services ?? []).map((service) => ({ service, value: 0 }))
+
+      // Deals need a client to hang off, and the client has to exist before either the lead
+      // or its deals reference it. It stays out of the Clients list until a deal is Won.
+      const { companyId, newCompany } = dealDefs.length > 0 ? ensureLeadCompany(draft) : { companyId: draft.companyId, newCompany: undefined }
+      const lead: Lead = { ...draft, companyId }
+
+      const dealsToCreate: Deal[] = dealDefs.map((def) => ({
+        id: crypto.randomUUID(),
+        name: def.service ? `${lead.companyName} — ${def.service}` : `${lead.companyName} Deal`,
+        companyId: companyId!,
+        ownerId: lead.ownerId,
+        stage: 'New Deal',
+        kind: kindForService(def.service),
+        value: def.value,
+        probability: DEAL_STAGE_PROBABILITY['New Deal'],
+        expectedCloseDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
+        service: def.service,
+        handoverAmount: def.handoverAmount,
+        accountsCount: def.accountsCount,
+        source: lead.source,
+        createdAt: nowIso(),
+        leadId: id,
+      }))
+
       setLeads((prev) => [lead, ...prev])
-      addActivity({ type: 'Note', subject: `New lead created: ${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId })
+      if (dealsToCreate.length > 0) setDeals((prev) => [...dealsToCreate, ...prev])
 
       const row = appToRow(lead)
       delete row.lead_number // DB identity column assigns the real, gap-free number
-      supabase
-        .from('leads')
-        .insert(row)
-        .select('id, lead_number')
-        .single()
-        .then(({ data, error }) => {
-          if (error) {
-            reportError('addLead', error.message)
+
+      // Strict order, because every one of these is a foreign key on the next: client, then
+      // lead, then its deals, and only then the activities that point at them. Firing the
+      // activity alongside the lead is what produced "violates foreign key constraint
+      // activities_lead_id_fkey" — whichever request reached Postgres first decided whether
+      // it worked.
+      void (async () => {
+        const rollback = () => {
+          setLeads((prev) => prev.filter((l) => l.id !== id))
+          setDeals((prev) => prev.filter((d) => d.leadId !== id))
+          if (newCompany) setCompanies((prev) => prev.filter((c) => c.id !== newCompany.id))
+        }
+
+        if (newCompany) {
+          const companyError = await insertRow('companies', newCompany, 'addLead:company')
+          if (companyError) {
+            rollback()
+            showError(companyError)
             return
           }
-          if (data && data.lead_number !== optimisticLeadNumber) {
-            setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, leadNumber: data.lead_number as number } : l)))
-          }
-        })
+        }
+
+        const { data, error } = await supabase.from('leads').insert(row).select('id, lead_number').single()
+        if (error) {
+          rollback()
+          reportError('addLead', error.message)
+          showError(error.message)
+          return
+        }
+        if (data && data.lead_number !== optimisticLeadNumber) {
+          setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, leadNumber: data.lead_number as number } : l)))
+        }
+
+        addActivity({ type: 'Note', subject: `New lead created: ${lead.firstName} ${lead.lastName}`, leadId: id, companyId })
+
+        const results = await Promise.all(dealsToCreate.map((deal) => insertRow('deals', deal, 'addLead:deal')))
+        const failedIds = dealsToCreate.filter((_, i) => results[i]).map((d) => d.id)
+        if (failedIds.length > 0) {
+          setDeals((prev) => prev.filter((d) => !failedIds.includes(d.id)))
+          showError(results.find((r) => r)!)
+        }
+        // Logged only for the deals that actually landed — an activity naming a deal that
+        // failed to insert is the foreign-key error all over again.
+        for (const deal of dealsToCreate.filter((d) => !failedIds.includes(d.id))) {
+          addActivity({ type: 'Deal update', subject: `Deal opened on lead: ${deal.name}`, leadId: id, dealId: deal.id, companyId })
+        }
+      })()
+
       return lead
     },
-    [ownerId, leads, addActivity],
+    [ownerId, leads, addActivity, ensureLeadCompany, showError],
   )
 
   const updateLead = useCallback<AppActions['updateLead']>(
@@ -521,11 +616,16 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         deal.value = 0
       }
       setDeals((prev) => [deal, ...prev])
-      insertRow('deals', deal, 'addDeal', (message) => {
-        setDeals((prev) => prev.filter((d) => d.id !== deal.id))
-        showError(message)
-      })
-      addActivity({ type: 'Deal update', subject: `New deal created: ${deal.name}`, dealId: deal.id, companyId: deal.companyId })
+      // The activity points at this deal, so it can only be written once the deal is there.
+      void (async () => {
+        const error = await insertRow('deals', deal, 'addDeal')
+        if (error) {
+          setDeals((prev) => prev.filter((d) => d.id !== deal.id))
+          showError(error)
+          return
+        }
+        addActivity({ type: 'Deal update', subject: `New deal created: ${deal.name}`, dealId: deal.id, companyId: deal.companyId })
+      })()
       return deal
     },
     [ownerId, addActivity],
@@ -831,30 +931,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [showError, addActivity],
   )
 
-  /**
-   * The Company a lead's deals hang off. A lead often has no client record yet, and a Deal
-   * can't exist without one, so the client is created here the first time it's needed. It
-   * stays out of the Clients list until one of its deals is Won, so opening a deal on a lead
-   * doesn't quietly promote them to a client.
-   */
-  const ensureLeadCompany = useCallback(
-    (lead: Lead): { companyId: ID; newCompany?: Company } => {
-      if (lead.companyId) return { companyId: lead.companyId }
-      const newCompany: Company = {
-        id: crypto.randomUUID(),
-        accountOwnerId: ownerId,
-        createdAt: nowIso(),
-        name: lead.companyName,
-        industry: lead.industry,
-        province: lead.province,
-        city: lead.city,
-      }
-      setCompanies((prev) => [newCompany, ...prev])
-      return { companyId: newCompany.id, newCompany }
-    },
-    [ownerId],
-  )
-
   const addLeadDeal = useCallback<AppActions['addLeadDeal']>(
     (leadId, input) => {
       const lead = leads.find((l) => l.id === leadId)
@@ -881,7 +957,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         leadId,
       }
       setDeals((prev) => [deal, ...prev])
-      addActivity({ type: 'Deal update', subject: `Deal opened on lead: ${deal.name}`, leadId, dealId: deal.id, companyId })
 
       // The company has to land before the deal that references it, or the deal insert fails
       // its foreign key and the row only ever exists in this browser tab.
@@ -900,7 +975,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         if (dealError) {
           setDeals((prev) => prev.filter((d) => d.id !== deal.id))
           showError(dealError)
+          return
         }
+        addActivity({ type: 'Deal update', subject: `Deal opened on lead: ${deal.name}`, leadId, dealId: deal.id, companyId })
       })()
 
       return deal
@@ -1021,7 +1098,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         updateRow('contacts', contact.id, { companyId }, 'convertLeadToClient:contactCompany')
       }
       addActivity({ type: 'Status change', subject: `Lead converted to client: ${lead.companyName}`, leadId, companyId })
-      for (const deal of [...dealsToCreate, ...dealsToConfirm]) {
+      for (const deal of dealsToConfirm) {
         addActivity({ type: 'Deal Won', subject: `Deal confirmed on conversion: ${deal.name}`, leadId, dealId: deal.id, companyId })
       }
 
@@ -1062,6 +1139,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         if (failedIds.length > 0) {
           setDeals((prev) => prev.filter((d) => !failedIds.includes(d.id)))
           showError(results.find((r) => r)!)
+        }
+        // Logged only for the deals that actually landed — an activity naming a deal that
+        // failed to insert is the foreign-key error all over again.
+        for (const deal of dealsToCreate.filter((d) => !failedIds.includes(d.id))) {
+          addActivity({ type: 'Deal Won', subject: `Deal confirmed on conversion: ${deal.name}`, leadId, dealId: deal.id, companyId })
         }
       })()
 
