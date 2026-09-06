@@ -39,7 +39,24 @@ export const THEMES: ThemeDefinition[] = [
   },
 ]
 
-export const DEFAULT_THEME: ThemeId = 'original'
+/**
+ * What someone gets before they've ever chosen a skin.
+ *
+ * Kept separate from BASE_THEME below, because the two answer different questions and the app
+ * now gives them different answers: this one is a product decision, that one is a fact about
+ * where the stylesheet keeps its tokens.
+ */
+export const DEFAULT_THEME: ThemeId = 'raptor'
+
+/**
+ * The skin the stylesheet renders with no attribute set.
+ *
+ * `:root` in index.css holds the original token values, and every skin overrides them from its
+ * own [data-theme] block — so there is no [data-theme='original'] block to select, and the
+ * original skin can only be expressed by the absence of the attribute. This is a property of
+ * the CSS, not a preference, so it stays put even though the default has moved on.
+ */
+export const BASE_THEME: ThemeId = 'original'
 
 const STORAGE_KEY = 'crm.theme'
 
@@ -71,12 +88,19 @@ export function storeTheme(id: ThemeId) {
 }
 
 /**
- * The default skin deliberately stamps nothing. Every themed rule is scoped to a
- * [data-theme] selector, so with no attribute present not one of them matches and the
- * application renders exactly as it did before skins existed.
+ * The base skin deliberately stamps nothing. Every themed rule is scoped to a [data-theme]
+ * selector, so with no attribute present not one of them matches and the application renders
+ * exactly as it did before skins existed.
+ *
+ * Note this tests BASE_THEME, not DEFAULT_THEME. Stripping the attribute for whichever skin
+ * happens to be the default would render that skin as the unstyled baseline — which is
+ * precisely the wrong picture now that the default is a skin with rules of its own.
+ *
+ * index.html repeats the essentials of this before first paint. If the storage key or the set
+ * of ids changes here, change it there too.
  */
 export function applyTheme(id: ThemeId) {
   const root = document.documentElement
-  if (id === DEFAULT_THEME) root.removeAttribute('data-theme')
+  if (id === BASE_THEME) root.removeAttribute('data-theme')
   else root.setAttribute('data-theme', id)
 }

@@ -3,8 +3,26 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Romulus</title>
+    <title>Raptor</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      // Stamps the skin before the first paint. React only mounts once the document has been
+      // parsed, so leaving this to ThemeProvider means every page load briefly renders the
+      // unstyled baseline and then snaps to the real skin.
+      //
+      // This deliberately duplicates a few lines of src/lib/themes.ts — a module import can't
+      // run this early. Keep the storage key, the ids and the default in step with that file.
+      ;(function () {
+        var id = 'raptor'
+        try {
+          var saved = localStorage.getItem('crm.theme')
+          if (saved === 'original' || saved === 'raptor') id = saved
+        } catch (e) {
+          // Storage blocked. The default is still the right answer.
+        }
+        if (id !== 'original') document.documentElement.setAttribute('data-theme', id)
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

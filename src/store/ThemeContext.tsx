@@ -24,6 +24,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     storeTheme(id)
   }, [])
 
+  // A skin carries its own branding, and the browser tab is part of that. index.html sets the
+  // default before boot; this keeps it honest when someone switches to a skin that calls the
+  // product something else.
+  useEffect(() => {
+    document.title = themeById(themeId).productName
+  }, [themeId])
+
   // A second tab is the same person: changing the skin in one should carry to the others
   // rather than leaving them looking like a different product.
   useEffect(() => {
