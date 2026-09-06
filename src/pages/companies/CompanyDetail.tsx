@@ -6,13 +6,14 @@ import { useAuth } from '../../store/AuthContext'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { StatusBadge, StageBadge, ClassificationBadge } from '../../components/ui/Badge'
+import { InlineSelect } from '../../components/ui/InlineSelect'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { AddDealModal, QuickLogModal, ScheduleFollowUpModal, ScheduleMeetingModal } from '../../components/QuickModals'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { EditContactModal } from '../../components/contacts/EditContactModal'
 import { AddContactModal } from '../../components/contacts/AddContactModal'
-import { formatCurrency, formatDate } from '../../data/mockData'
+import { formatCurrency, formatDate, leadClassifications } from '../../data/mockData'
 import { parseEmailActivity } from '../../lib/emailActivity'
 import { buildDrilldownUrl } from '../../lib/drilldown'
 import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/ui/RowLimitSelect'
@@ -142,14 +143,25 @@ export function CompanyDetail() {
 
       <Card>
         <div className="flex flex-wrap items-end gap-x-10 gap-y-3">
+          {/* Class sits outside the debt-collection block: it applies to every client, and it
+              was previously invisible on any client without handover totals — including the
+              ones nobody had graded yet, which are exactly the ones you'd want to grade. */}
+          <div>
+            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide mb-1.5">Class</p>
+            <InlineSelect
+              value={company.classification}
+              options={leadClassifications}
+              onChange={(classification) => updateCompany(company.id, { classification })}
+            >
+              {company.classification ? (
+                <ClassificationBadge classification={company.classification} />
+              ) : (
+                <span className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-md px-2 py-1">Not yet graded</span>
+              )}
+            </InlineSelect>
+          </div>
           {(company.accountCount !== undefined || company.handoverAmount !== undefined) && (
             <>
-              {company.classification && (
-                <div>
-                  <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide mb-1.5">Class</p>
-                  <ClassificationBadge classification={company.classification} />
-                </div>
-              )}
               <div>
                 <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Accounts</p>
                 <p className="text-2xl font-bold text-slate-800 mt-0.5">{company.accountCount ?? 0}</p>
