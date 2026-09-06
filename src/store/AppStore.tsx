@@ -47,6 +47,12 @@ function reportError(action: string, message: string) {
 
 /** Turns raw Postgrest/RLS errors into something worth showing a user. */
 function friendlyError(message: string): string {
+  // Postgrest says this when a write matched no row: either the record isn't on the server
+  // (an earlier save failed and it only exists in this tab) or RLS is hiding it. Neither is
+  // something "Cannot coerce the result to a single JSON object" helps anyone with.
+  if (message.includes('coerce the result')) {
+    return "That record couldn't be found on the server — it may not have saved. Reload the page and try again."
+  }
   if (message.includes('row-level security') || message.includes('JSON object requested')) {
     return "You don't have permission to do that."
   }
@@ -377,7 +383,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         ...input,
       }
       setActivities((prev) => [activity, ...prev])
-      insertRow('activities', activity, 'addActivity')
+      insertRow('activities', activity, 'addActivity', (message) => {
+        setActivities((prev) => prev.filter((a) => a.id !== activity.id))
+        showError(message)
+      })
       return activity
     },
     [ownerId],
@@ -512,7 +521,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         deal.value = 0
       }
       setDeals((prev) => [deal, ...prev])
-      insertRow('deals', deal, 'addDeal')
+      insertRow('deals', deal, 'addDeal', (message) => {
+        setDeals((prev) => prev.filter((d) => d.id !== deal.id))
+        showError(message)
+      })
       addActivity({ type: 'Deal update', subject: `New deal created: ${deal.name}`, dealId: deal.id, companyId: deal.companyId })
       return deal
     },
@@ -662,7 +674,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         ...input,
       }
       setProposals((prev) => [proposal, ...prev])
-      insertRow('proposals', proposal, 'addProposal')
+      insertRow('proposals', proposal, 'addProposal', (message) => {
+        setProposals((prev) => prev.filter((p) => p.id !== proposal.id))
+        showError(message)
+      })
       addActivity({ type: 'Proposal', subject: `Proposal created: ${proposal.service}`, dealId: proposal.dealId, companyId: proposal.companyId })
       return proposal
     },
@@ -692,7 +707,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       ...input,
     }
     setCompanies((prev) => [company, ...prev])
-    insertRow('companies', company, 'addCompany')
+    insertRow('companies', company, 'addCompany', (message) => {
+      setCompanies((prev) => prev.filter((c) => c.id !== company.id))
+      showError(message)
+    })
     return company
   }
 
@@ -738,7 +756,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         ...input,
       }
       setContacts((prev) => [contact, ...prev])
-      insertRow('contacts', contact, 'addContact')
+      insertRow('contacts', contact, 'addContact', (message) => {
+        setContacts((prev) => prev.filter((c) => c.id !== contact.id))
+        showError(message)
+      })
       return contact
     },
     [ownerId],
@@ -771,7 +792,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         ...input,
       }
       setTasks((prev) => [task, ...prev])
-      insertRow('tasks', task, 'addTask')
+      insertRow('tasks', task, 'addTask', (message) => {
+        setTasks((prev) => prev.filter((t) => t.id !== task.id))
+        showError(message)
+      })
       addActivity({ type: 'Task', subject: `Task created: ${task.title}`, leadId: task.leadId, dealId: task.dealId, companyId: task.companyId })
       return task
     },
