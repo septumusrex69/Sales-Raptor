@@ -14,8 +14,6 @@ import {
   SlidersHorizontal,
   Plus,
   Trash2,
-  ChevronUp,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   AlertTriangle,
@@ -33,6 +31,7 @@ import { LeadForm } from '../../components/layout/QuickAdd'
 import { LeadsPeriodBar } from '../../components/leads/LeadsPeriodBar'
 import { LeadsKpiRow, type LeadsKpiValues } from '../../components/leads/LeadsKpiRow'
 import { RejectLeadModal } from '../../components/leads/RejectLeadModal'
+import { SortHeader } from '../../components/ui/SortHeader'
 import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
 import { formatCurrency, formatDate, formatLeadNumber, daysAgoLabel, industries, leadClassifications, leadSources, provinces, services, TODAY } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
@@ -197,6 +196,10 @@ export function LeadsList() {
         return l.createdAt
       case 'lastContact':
         return l.lastContactAt
+      case 'owner':
+        return userById(l.ownerId)?.name?.toLowerCase()
+      case 'source':
+        return l.source
     }
   }
 
@@ -236,16 +239,14 @@ export function LeadsList() {
 
   function sortableHeader(colKey: ColumnKey, label: string, align: 'left' | 'right' | 'center' = 'left') {
     const sortKeyForCol = SORTABLE_COLUMN_KEYS[colKey]
-    const active = sortKeyForCol && sortKey === sortKeyForCol
     return (
-      <button
-        type="button"
-        onClick={sortKeyForCol ? () => handleSort(colKey) : undefined}
-        className={`inline-flex items-center gap-1 ${sortKeyForCol ? 'cursor-pointer hover:text-slate-600' : 'cursor-default'} ${align === 'right' ? 'flex-row-reverse' : ''}`}
-      >
-        {label}
-        {active && (sortDir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
-      </button>
+      <SortHeader
+        label={label}
+        align={align}
+        active={Boolean(sortKeyForCol) && sortKey === sortKeyForCol}
+        dir={sortDir}
+        onSort={sortKeyForCol ? () => handleSort(colKey) : undefined}
+      />
     )
   }
 

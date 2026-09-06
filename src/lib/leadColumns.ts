@@ -51,6 +51,9 @@ export const DEFAULT_COLUMNS: ColumnKey[] = [
   'companyLead',
   'contactPerson',
   'status',
+  // When a lead came in is one of the first things anyone wants to know, so it sits with the
+  // identity columns rather than twelfth, off the right-hand edge of the scroll.
+  'dateAdded',
   'classification',
   'score',
   'services',
@@ -58,7 +61,6 @@ export const DEFAULT_COLUMNS: ColumnKey[] = [
   'handoverAmount',
   'owner',
   'nextFollowUp',
-  'dateAdded',
   'lastContact',
   'source',
 ]
@@ -85,6 +87,8 @@ export type SortKey =
   | 'nextFollowUp'
   | 'dateAdded'
   | 'lastContact'
+  | 'owner'
+  | 'source'
 
 export const SORTABLE_COLUMN_KEYS: Partial<Record<ColumnKey, SortKey>> = {
   leadNumber: 'leadNumber',
@@ -97,4 +101,6 @@ export const SORTABLE_COLUMN_KEYS: Partial<Record<ColumnKey, SortKey>> = {
   nextFollowUp: 'nextFollowUp',
   dateAdded: 'dateAdded',
   lastContact: 'lastContact',
+  owner: 'owner',
+  source: 'source',
 }

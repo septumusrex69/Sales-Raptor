@@ -6,6 +6,7 @@ import { useAuth } from '../../store/AuthContext'
 import { canEditOwned, useDefaultOwnerFilter, isAssignableOwner} from '../../lib/permissions'
 import { Card } from '../../components/ui/Card'
 import { StageBadge } from '../../components/ui/Badge'
+import { SortHeader } from '../../components/ui/SortHeader'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { DealForm } from '../../components/layout/QuickAdd'
 import { MarkRejectedModal, MarkWonModal } from './DealStageModals'
@@ -13,11 +14,13 @@ import { formatCurrency, formatDate, TODAY } from '../../data/mockData'
 import { FUNNEL_STAGES, STAGE_COLORS } from '../../lib/colors'
 import { readParam } from '../../lib/drilldown'
 import { decodeSalesMonthParam, isWithinPeriod } from '../../lib/salesMonth'
-import { OPEN_DEAL_STAGES } from '../../types'
+import { DEAL_STAGES, OPEN_DEAL_STAGES } from '../../types'
 import type { Deal, DealStage } from '../../types'
 import type { WonDealDetails } from '../../store/AppStore'
 
 const OPEN_STAGES = OPEN_DEAL_STAGES
+
+type DealSortKey = 'name' | 'company' | 'value' | 'stage' | 'probability' | 'owner' | 'createdAt' | 'expectedCloseDate'
 
 export function DealsBoard() {
   const store = useAppStore()
@@ -47,6 +50,9 @@ export function DealsBoard() {
   const [owner, setOwner] = useDefaultOwnerFilter(readParam(searchParams, 'owner'), currentUser)
   const [addOpen, setAddOpen] = useState(false)
   const [dragging, setDragging] = useState<string | null>(null)
+  // Newest first: the question the table gets asked most often is "what came in recently?"
+  const [sortKey, setSortKey] = useState<DealSortKey>('createdAt')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [wonModalFor, setWonModalFor] = useState<Deal | null>(null)
   const [rejectModalFor, setRejectModalFor] = useState<Deal | null>(null)
 
@@ -89,6 +95,56 @@ export function DealsBoard() {
   // Annotated rather than asserted: `as DealStage[]` would let a retired stage name through,
   // and a column nothing matches is a column of deals nobody can see.
   const columns: DealStage[] = [...OPEN_STAGES, 'Won', 'Rejected']
+
+  function sortValue(d: Deal, key: DealSortKey): string | number | undefined {
+    switch (key) {
+      case 'name':
+        return d.name.toLowerCase()
+      case 'company':
+        return companyById(d.companyId)?.name.toLowerCase()
+      case 'value':
+        return d.value
+      case 'stage':
+        // Pipeline order, not alphabetical — sorted by name, Rejected would land before Won.
+        return DEAL_STAGES.indexOf(d.stage)
+      case 'probability':
+        return d.probability
+      case 'owner':
+        return userById(d.ownerId)?.name.toLowerCase()
+      case 'createdAt':
+        return d.createdAt
+      case 'expectedCloseDate':
+        return d.expectedCloseDate
+    }
+  }
+
+  const tableSorted = useMemo(() => {
+    const arr = [...tableRows]
+    arr.sort((a, b) => {
+      const va = sortValue(a, sortKey)
+      const vb = sortValue(b, sortKey)
+      // Deals missing the sorted field sink to the bottom either way, so flipping the
+      // direction never floats a row of blanks to the top.
+      if (va == null && vb == null) return 0
+      if (va == null) return 1
+      if (vb == null) return -1
+      const cmp = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb))
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+    return arr
+  }, [tableRows, sortKey, sortDir])
+
+  function toggleSort(key: DealSortKey) {
+    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else {
+      setSortKey(key)
+      setSortDir('desc')
+    }
+  }
+
+  function header(key: DealSortKey, label: string, align: 'left' | 'right' | 'center' = 'left') {
+    return <SortHeader label={label} align={align} active={sortKey === key} dir={sortDir} onSort={() => toggleSort(key)} />
+  }
 
   const totals = useMemo(() => {
     const open = deals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected')
@@ -192,17 +248,18 @@ export function DealsBoard() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-slate-400">
-                  <th className="font-medium px-5 py-3">Deal</th>
-                  <th className="font-medium px-3 py-3">Company</th>
-                  <th className="font-medium px-3 py-3 text-right">Value</th>
-                  <th className="font-medium px-3 py-3">Stage</th>
-                  <th className="font-medium px-3 py-3">Probability</th>
-                  <th className="font-medium px-3 py-3">Owner</th>
-                  <th className="font-medium px-3 py-3">Expected Close</th>
+                  <th className="font-medium px-5 py-3">{header('name', 'Deal')}</th>
+                  <th className="font-medium px-3 py-3">{header('company', 'Company')}</th>
+                  <th className="font-medium px-3 py-3 text-right">{header('value', 'Value', 'right')}</th>
+                  <th className="font-medium px-3 py-3">{header('stage', 'Stage')}</th>
+                  <th className="font-medium px-3 py-3">{header('probability', 'Probability')}</th>
+                  <th className="font-medium px-3 py-3">{header('owner', 'Owner')}</th>
+                  <th className="font-medium px-3 py-3">{header('createdAt', 'Created')}</th>
+                  <th className="font-medium px-3 py-3">{header('expectedCloseDate', 'Expected Close')}</th>
                 </tr>
               </thead>
               <tbody>
-                {tableRows.map((deal) => (
+                {tableSorted.map((deal) => (
                   <tr key={deal.id} onClick={() => navigate(`/deals/${deal.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
                     <td className="px-5 py-3">
                       <Link to={`/deals/${deal.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
@@ -221,6 +278,7 @@ export function DealsBoard() {
                         <span className="text-slate-500 text-xs">{userById(deal.ownerId)?.name.split(' ')[0]}</span>
                       </div>
                     </td>
+                    <td className="px-3 py-3 text-slate-500">{formatDate(deal.createdAt)}</td>
                     <td className="px-3 py-3 text-slate-500">{formatDate(deal.expectedCloseDate)}</td>
                   </tr>
                 ))}
@@ -262,9 +320,15 @@ function DealCard({ deal, canDrag, onDragStart, onOpen }: { deal: Deal; canDrag:
         <UserAvatar userId={deal.ownerId} size={22} />
         <span className="text-xs font-medium text-slate-500">{deal.probability}%</span>
       </div>
-      <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-50 text-[11px] text-slate-400">
-        <span>Close</span>
-        <span>{formatDate(deal.expectedCloseDate)}</span>
+      <div className="mt-2 pt-2 border-t border-slate-50 text-[11px] text-slate-400 space-y-0.5">
+        <div className="flex items-center justify-between">
+          <span>Opened</span>
+          <span>{formatDate(deal.createdAt)}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span>Close</span>
+          <span>{formatDate(deal.expectedCloseDate)}</span>
+        </div>
       </div>
     </div>
   )
