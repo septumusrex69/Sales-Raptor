@@ -69,7 +69,7 @@ export function CompanyDetail() {
   const companyContacts = useMemo(() => contacts.filter((c) => c.companyId === id), [contacts, id])
   const companyLeads = useMemo(() => leads.filter((l) => l.companyId === id), [leads, id])
   const companyDeals = useMemo(() => deals.filter((d) => d.companyId === id), [deals, id])
-  const openDeals = companyDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Lost')
+  const openDeals = companyDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected')
   const wonDeals = companyDeals.filter((d) => d.stage === 'Won')
   const subAccounts = useMemo(() => companies.filter((c) => c.parentCompanyId === id), [companies, id])
   const isClient = wonDeals.length > 0 || !!company?.code

@@ -2,7 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { supabase } from '../lib/supabase'
 import { useAuth } from './AuthContext'
 import { TODAY } from '../data/mockData'
-import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, LossReason, ProductService, Proposal, RejectionReason, Task, TaskType, Team, TeamKind, User } from '../types'
+import { DEAL_STAGE_PROBABILITY } from '../types'
+import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, ProductService, Proposal, RejectionReason, Task, TaskType, Team, TeamKind, User } from '../types'
 
 /**
  * Generic camelCase(app) <-> snake_case(Postgres) row mapping. The SQL
@@ -212,7 +213,7 @@ interface AppActions {
   updateDeal: (id: ID, patch: Partial<Deal>) => void
   moveDealStage: (id: ID, stage: DealStage) => void
   markDealWon: (id: ID, details: WonDealDetails) => void
-  markDealLost: (id: ID, reason: LossReason) => void
+  markDealRejected: (id: ID, reason: RejectionReason, note?: string) => void
 
   addContact: (input: Partial<Contact> & { firstName: string; lastName: string }) => Contact
   updateContact: (id: ID, patch: Partial<Contact>) => void
@@ -249,19 +250,6 @@ interface AppActions {
 
 const AppContext = createContext<(AppState & AppActions) | null>(null)
 
-/**
- * Rejection reasons are written in the sales team's language; deals record loss reasons in
- * their own, older vocabulary. Mapping here keeps a rejected lead's deals consistent with
- * the rest of the Lost Deals reporting instead of introducing a second set of labels.
- */
-const LOSS_REASON_FOR_REJECTION: Record<RejectionReason, LossReason> = {
-  'Not interested anymore': 'Other',
-  'Too expensive': 'Price',
-  'Went with another provider': 'Competitor',
-  'No response': 'No response',
-  'We declined them': 'Service not suitable',
-  Other: 'Other',
-}
 
 
 export function AppStoreProvider({ children }: { children: ReactNode }) {
@@ -497,9 +485,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const deal: Deal = {
         id: crypto.randomUUID(),
         ownerId,
-        stage: 'New Lead',
+        stage: 'New Deal',
         value: 0,
-        probability: 10,
+        probability: DEAL_STAGE_PROBABILITY['New Deal'],
         expectedCloseDate: nowIso(),
         source: 'Direct',
         createdAt: nowIso(),
@@ -530,9 +518,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const moveDealStage = useCallback<AppActions['moveDealStage']>(
     (id, stage) => {
-      const patch: Partial<Deal> = { stage }
+      const patch: Partial<Deal> = { stage, probability: DEAL_STAGE_PROBABILITY[stage] }
       if (stage === 'Won') patch.wonAt = nowIso()
-      if (stage === 'Lost') patch.lostAt = nowIso()
+      if (stage === 'Rejected') patch.rejectedAt = nowIso()
       let previous: Deal | undefined
       setDeals((prev) => {
         previous = prev.find((d) => d.id === id)
@@ -544,7 +532,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       })
       const deal = deals.find((d) => d.id === id)
       addActivity({
-        type: stage === 'Won' ? 'Deal Won' : stage === 'Lost' ? 'Deal Lost' : 'Deal Stage Change',
+        type: stage === 'Won' ? 'Deal Won' : stage === 'Rejected' ? 'Deal Rejected' : 'Deal Stage Change',
         subject: `${deal?.name ?? 'Deal'} moved to ${stage}`,
         dealId: id,
         companyId: deal?.companyId,
@@ -558,6 +546,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const deal = deals.find((d) => d.id === id)
       const patch: Partial<Deal> = {
         stage: 'Won' as DealStage,
+        probability: DEAL_STAGE_PROBABILITY.Won,
         value: details.finalValue,
         service: details.service,
         handoverAmount: details.handoverAmount,
@@ -580,20 +569,20 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [deals, addActivity, showError],
   )
 
-  const markDealLost = useCallback<AppActions['markDealLost']>(
-    (id, reason) => {
-      const patch: Partial<Deal> = { stage: 'Lost' as DealStage, lossReason: reason, lostAt: nowIso() }
+  const markDealRejected = useCallback<AppActions['markDealRejected']>(
+    (id, reason, note) => {
+      const patch: Partial<Deal> = { stage: 'Lost' as DealStage, rejectionReason: reason, rejectedAt: nowIso() }
       let previous: Deal | undefined
       setDeals((prev) => {
         previous = prev.find((d) => d.id === id)
         return prev.map((d) => (d.id === id ? { ...d, ...patch } : d))
       })
-      updateRow('deals', id, patch, 'markDealLost', (message) => {
+      updateRow('deals', id, patch, 'markDealRejected', (message) => {
         if (previous) setDeals((prev) => prev.map((d) => (d.id === id ? previous! : d)))
         showError(message)
       })
       const deal = deals.find((d) => d.id === id)
-      addActivity({ type: 'Deal Lost', subject: `${deal?.name ?? 'Deal'} marked Lost — reason: ${reason}`, dealId: id, companyId: deal?.companyId })
+      addActivity({ type: 'Deal Rejected', subject: `${deal?.name ?? 'Deal'} rejected — ${reason}`, notes: note || undefined, dealId: id, companyId: deal?.companyId })
     },
     [deals, addActivity, showError],
   )
@@ -788,9 +777,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         name: input.name,
         companyId,
         ownerId: lead.ownerId,
-        stage: 'Qualified',
+        stage: 'New Deal',
         value: input.value,
-        probability: 40,
+        probability: DEAL_STAGE_PROBABILITY['New Deal'],
         expectedCloseDate: input.expectedCloseDate,
         service: input.service,
         source: lead.source,
@@ -881,7 +870,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
             companyId,
             contactId,
             ownerId: lead.ownerId,
-            probability: 100,
+            probability: DEAL_STAGE_PROBABILITY.Won,
             expectedCloseDate: confirm.startDate,
             service: entry.service,
             source: lead.source,
@@ -979,11 +968,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       // A deal opened while working this lead has nowhere left to go once the lead itself is
       // rejected. Leaving it open would keep it sitting in the pipeline and the forecast for
       // business that is definitively not happening.
-      for (const deal of deals.filter((d) => d.leadId === leadId && d.stage !== 'Won' && d.stage !== 'Lost')) {
-        markDealLost(deal.id, LOSS_REASON_FOR_REJECTION[reason])
+      for (const deal of deals.filter((d) => d.leadId === leadId && d.stage !== 'Won' && d.stage !== 'Rejected')) {
+        markDealRejected(deal.id, reason)
       }
     },
-    [updateLead, addActivity, deals, markDealLost],
+    [updateLead, addActivity, deals, markDealRejected],
   )
 
   const updateUser = useCallback<AppActions['updateUser']>(
@@ -1080,7 +1069,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateDeal,
       moveDealStage,
       markDealWon,
-      markDealLost,
+      markDealRejected,
       addContact,
       updateContact,
       addCompany,
@@ -1130,7 +1119,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateDeal,
       moveDealStage,
       markDealWon,
-      markDealLost,
+      markDealRejected,
       addContact,
       updateContact,
       addCompany,

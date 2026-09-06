@@ -20,10 +20,10 @@ import { STAGE_COLORS } from '../../lib/colors'
 import { isAssignableOwner } from '../../lib/permissions'
 import { LEAD_STATUSES, isActiveLead, isEngagedLead } from '../../lib/leadStatus'
 
-const TABS = ['Overview', 'Leads', 'Pipeline', 'Products & Services', 'Debt Collection', 'Sales Team', 'Lead Sources', 'Geography', 'Lost Deals'] as const
+const TABS = ['Overview', 'Leads', 'Pipeline', 'Products & Services', 'Debt Collection', 'Sales Team', 'Lead Sources', 'Geography', 'Rejected Deals'] as const
 type Tab = (typeof TABS)[number]
 const ALL_STATUSES: LeadStatus[] = LEAD_STATUSES
-const BAR_COLOR = STAGE_COLORS.Negotiation
+const BAR_COLOR = STAGE_COLORS['Quotation Sent']
 
 function pctDelta(curr: number, prev: number): number {
   if (prev === 0) return curr === 0 ? 0 : 100
@@ -85,7 +85,7 @@ export function ReportsPage() {
     [deals, period, rep, source, service],
   )
   const lostDealsInPeriod = useMemo(
-    () => deals.filter((d) => d.lostAt && isWithinPeriod(d.lostAt, period) && matchesDealFilters(d)),
+    () => deals.filter((d) => d.rejectedAt && isWithinPeriod(d.rejectedAt, period) && matchesDealFilters(d)),
     [deals, period, rep, source, service],
   )
   const prevWonDeals = useMemo(
@@ -93,10 +93,10 @@ export function ReportsPage() {
     [deals, previousPeriod, compareMode, rep, source, service],
   )
   const prevLostDeals = useMemo(
-    () => (compareMode === 'previous' ? deals.filter((d) => d.lostAt && isWithinPeriod(d.lostAt, previousPeriod) && matchesDealFilters(d)) : []),
+    () => (compareMode === 'previous' ? deals.filter((d) => d.rejectedAt && isWithinPeriod(d.rejectedAt, previousPeriod) && matchesDealFilters(d)) : []),
     [deals, previousPeriod, compareMode, rep, source, service],
   )
-  const openDeals = useMemo(() => deals.filter((d) => d.stage !== 'Won' && d.stage !== 'Lost' && matchesDealFilters(d)), [deals, rep, source, service])
+  const openDeals = useMemo(() => deals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected' && matchesDealFilters(d)), [deals, rep, source, service])
   const allDealsFiltered = useMemo(() => deals.filter((d) => matchesDealFilters(d)), [deals, rep, source, service])
 
   function computeCore(periodLeads: Lead[], won: Deal[], lost: Deal[]) {
@@ -154,7 +154,7 @@ export function ReportsPage() {
   const lostByReason = useMemo(() => {
     const map = new Map<string, number>()
     for (const d of lostDealsInPeriod) {
-      const reason = d.lossReason ?? 'Other'
+      const reason = d.rejectionReason ?? 'Other'
       map.set(reason, (map.get(reason) ?? 0) + 1)
     }
     return Array.from(map.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
@@ -820,11 +820,11 @@ export function ReportsPage() {
         </div>
       )}
 
-      {tab === 'Lost Deals' && (
+      {tab === 'Rejected Deals' && (
         <div className="space-y-5">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <Card>
-              <CardHeader title="Lost Deals by Reason" />
+              <CardHeader title="Rejected Deals by Reason" />
               {lostByReason.length === 0 ? (
                 <p className="text-sm text-slate-400">No lost deals in this Sales Cycle.</p>
               ) : (

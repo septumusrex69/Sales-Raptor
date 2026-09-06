@@ -23,7 +23,7 @@ const ACTIVITY_TYPES: ActivityType[] = [
   'Deal update',
   'Deal Stage Change',
   'Deal Won',
-  'Deal Lost',
+  'Deal Rejected',
   'Courtesy Call',
   'Handover Received',
 ]
@@ -40,7 +40,7 @@ const ICONS: Record<ActivityType, typeof Phone> = {
   'Deal update': ArrowRightLeft,
   'Deal Stage Change': ArrowRightLeft,
   'Deal Won': Trophy,
-  'Deal Lost': XOctagon,
+  'Deal Rejected': XOctagon,
   'Courtesy Call': Phone,
   'Handover Received': Inbox,
 }

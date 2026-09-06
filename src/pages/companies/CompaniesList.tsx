@@ -29,7 +29,7 @@ export function CompaniesList() {
     return clients.filter((c) => c.name.toLowerCase().includes(q) || childrenOf(c.id).some((ch) => ch.name.toLowerCase().includes(q)))
   }, [clients, search, companies])
 
-  const activeDealsFor = (companyId: string) => deals.filter((d) => d.companyId === companyId && d.stage !== 'Won' && d.stage !== 'Lost')
+  const activeDealsFor = (companyId: string) => deals.filter((d) => d.companyId === companyId && d.stage !== 'Won' && d.stage !== 'Rejected')
 
   function toggleExpanded(id: ID) {
     setExpanded((prev) => {

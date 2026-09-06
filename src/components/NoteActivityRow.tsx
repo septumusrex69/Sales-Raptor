@@ -27,7 +27,7 @@ const TYPE_ICONS: Partial<Record<ActivityType, LucideIcon>> = {
   Proposal: FileText,
   Task: CheckCircle2,
   'Deal Won': Trophy,
-  'Deal Lost': XCircle,
+  'Deal Rejected': XCircle,
   'Handover Received': Download,
 }
 

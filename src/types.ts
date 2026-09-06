@@ -8,9 +8,10 @@ export type LeadStatus =
   | 'Rejected'
 
 /**
- * Why a lead ended without becoming a client. 'We declined them' is deliberately its own
- * reason: a book turned down on our side isn't a loss, and lumping it in with the rest
- * would make a deliberately selective month read as a bad one.
+ * Why a lead or a deal ended without being signed. One vocabulary for both, so "why did we
+ * lose it" is answered the same way whichever record you're looking at. 'We declined them'
+ * is deliberately its own reason: a book turned down on our side isn't a loss, and lumping
+ * it in with the rest would make a deliberately selective month read as a bad one.
  */
 export type RejectionReason =
   | 'Not interested anymore'
@@ -114,36 +115,30 @@ export interface Lead {
   rejectionNote?: string
 }
 
-export type DealStage =
-  | 'New Lead'
-  | 'Contacted'
-  | 'Qualified'
-  | 'Proposal Sent'
-  | 'Negotiation'
-  | 'Won'
-  | 'Lost'
+/**
+ * A deal moves through the same three steps wherever it was raised — off a lead or off an
+ * existing client — then ends Won or Rejected. Anything finer than this was stages nobody
+ * moved a deal into.
+ */
+export type DealStage = 'New Deal' | 'Quotation Sent' | 'Invoice Sent' | 'Won' | 'Rejected'
 
-export const DEAL_STAGES: DealStage[] = [
-  'New Lead',
-  'Contacted',
-  'Qualified',
-  'Proposal Sent',
-  'Negotiation',
-  'Won',
-  'Lost',
-]
+export const DEAL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Invoice Sent', 'Won', 'Rejected']
 
-export type LossReason =
-  | 'Price'
-  | 'No budget'
-  | 'Competitor'
-  | 'No response'
-  | 'Project cancelled'
-  | 'Not decision-maker'
-  | 'Service not suitable'
-  | 'Timing'
-  | 'Duplicate'
-  | 'Other'
+/** The steps a deal is still being worked in — everything before it ends one way or the other. */
+export const OPEN_DEAL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Invoice Sent']
+
+/**
+ * How likely a deal at each step is to close, used for the weighted forecast. Derived from the
+ * stage rather than typed in per deal — nobody keeps a hand-entered percentage honest, and a
+ * quote that's out is genuinely further along than one that isn't.
+ */
+export const DEAL_STAGE_PROBABILITY: Record<DealStage, number> = {
+  'New Deal': 20,
+  'Quotation Sent': 50,
+  'Invoice Sent': 80,
+  Won: 100,
+  Rejected: 0,
+}
 
 export interface Deal {
   id: ID
@@ -159,10 +154,13 @@ export interface Deal {
   source: LeadSource
   competitor?: string
   notes?: string
-  lossReason?: LossReason
+  /** Set when stage is 'Rejected'. */
+  rejectionReason?: RejectionReason
+  /** Free-text detail captured alongside the rejection reason. */
+  rejectionNote?: string
   createdAt: string
   wonAt?: string
-  lostAt?: string
+  rejectedAt?: string
   nextActionAt?: string
   leadId?: ID
   /** Handover-type deals only (e.g. Debt Collection) — the outstanding balance being handed over, distinct from `value` (the contract/project value). */
@@ -261,7 +259,7 @@ export type ActivityType =
   | 'Deal update'
   | 'Deal Stage Change'
   | 'Deal Won'
-  | 'Deal Lost'
+  | 'Deal Rejected'
   | 'Courtesy Call'
   | 'Handover Received'
 

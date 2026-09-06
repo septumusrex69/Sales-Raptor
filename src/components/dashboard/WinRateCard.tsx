@@ -22,7 +22,7 @@ interface WinRateCardProps {
 const EXCLUDED_HEX = '#cbd5e1'
 
 export function WinRateCard({ deals, won, lost, winRate, newLeads, qualified, converted, periodLabel, periodParam }: WinRateCardProps) {
-  const open = deals.filter((d) => d.stage !== 'Won' && d.stage !== 'Lost').length
+  const open = deals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected').length
   const total = won + open + lost
   const overallRate = total > 0 ? Math.round((won / total) * 100) : 0
 
@@ -31,7 +31,7 @@ export function WinRateCard({ deals, won, lost, winRate, newLeads, qualified, co
   const overallDonutData: RingDonutSlice[] = [
     { name: 'Won', value: won, color: POSITIVE_HEX },
     { name: 'Open', value: open, color: OPEN_HEX },
-    { name: 'Lost', value: lost, color: NEGATIVE_HEX },
+    { name: 'Rejected', value: lost, color: NEGATIVE_HEX },
   ].filter((d) => d.value > 0)
 
   // Win Rate excludes Open from its math entirely, so its wedge is grayed out here
@@ -39,7 +39,7 @@ export function WinRateCard({ deals, won, lost, winRate, newLeads, qualified, co
   const winRateDonutData: RingDonutSlice[] = [
     { name: 'Won', value: won, color: POSITIVE_HEX },
     { name: 'Open', value: open, color: EXCLUDED_HEX, muted: true },
-    { name: 'Lost', value: lost, color: NEGATIVE_HEX },
+    { name: 'Rejected', value: lost, color: NEGATIVE_HEX },
   ].filter((d) => d.value > 0)
 
   const pipeline = [
@@ -76,7 +76,7 @@ export function WinRateCard({ deals, won, lost, winRate, newLeads, qualified, co
       </div>
 
       <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 text-xs text-slate-400">
-        <span>Overall Conversion = Won ÷ (Won + Open + Lost) &nbsp;·&nbsp; Win Rate = Won ÷ (Won + Lost)</span>
+        <span>Overall Conversion = Won ÷ (Won + Open + Rejected) &nbsp;·&nbsp; Win Rate = Won ÷ (Won + Rejected)</span>
         <Link to={buildDrilldownUrl('/deals', { view: 'table', [SALES_MONTH_PARAM]: periodParam })} className="font-semibold text-brand-600 hover:underline shrink-0">
           View all deals →
         </Link>

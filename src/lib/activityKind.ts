@@ -8,7 +8,7 @@ export const ATTACHMENT_DOWNLOAD_PREFIX = 'Attachment downloaded: '
  * stage, a task being created. Nobody sat down and typed these, so they shouldn't compete
  * with the notes that someone did.
  */
-const AUTOMATIC_TYPES: ActivityType[] = ['Status change', 'Deal update', 'Deal Stage Change', 'Deal Won', 'Deal Lost', 'Task']
+const AUTOMATIC_TYPES: ActivityType[] = ['Status change', 'Deal update', 'Deal Stage Change', 'Deal Won', 'Deal Rejected', 'Task']
 
 /**
  * Did a person write this, or did the system record it?

@@ -9,7 +9,6 @@ import type {
   Lead,
   LeadClassification,
   LeadSource,
-  LossReason,
   ProductService,
   Proposal,
   Task,
@@ -44,10 +43,6 @@ export const currentUser = users[0]
 // ---------- Reference data ----------
 export const leadSources: LeadSource[] = [
   'Website', 'Google Ads', 'Referral', 'LinkedIn', 'Facebook', 'Direct', 'Email', 'Existing Client', 'Sales Rep', 'Event', 'ChatGPT', 'Claude', 'Gemini', 'Other',
-]
-
-export const lossReasons: LossReason[] = [
-  'Price', 'No budget', 'Competitor', 'No response', 'Project cancelled', 'Not decision-maker', 'Service not suitable', 'Timing', 'Duplicate', 'Other',
 ]
 
 export const industries = ['Construction', 'Legal', 'Education', 'Property', 'IT Services', 'Retail', 'Manufacturing', 'Healthcare', 'Hospitality', 'Financial Services']

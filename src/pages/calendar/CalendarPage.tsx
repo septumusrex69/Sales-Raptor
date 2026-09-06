@@ -67,7 +67,7 @@ export function CalendarPage() {
         }
       })
     const closeEvents = deals
-      .filter((d) => d.stage !== 'Won' && d.stage !== 'Lost')
+      .filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected')
       .filter((d) => owner === 'All' || d.ownerId === owner)
       .map((d) => ({
         id: `d-${d.id}`,

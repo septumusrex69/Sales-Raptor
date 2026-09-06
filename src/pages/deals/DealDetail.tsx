@@ -8,10 +8,10 @@ import { Card, CardHeader } from '../../components/ui/Card'
 import { StageBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
-import { MarkLostModal, MarkWonModal } from './DealStageModals'
+import { MarkRejectedModal, MarkWonModal } from './DealStageModals'
 import { formatCurrency, formatDate, formatDateTime, services } from '../../data/mockData'
 import { DEAL_STAGES } from '../../types'
-import type { ActivityType, DealStage, LossReason, ProposalStatus, TaskType } from '../../types'
+import type { ActivityType, DealStage, ProposalStatus, TaskType } from '../../types'
 import type { WonDealDetails } from '../../store/AppStore'
 
 const TABS = ['Overview', 'Activities', 'Tasks', 'Documents', 'Proposals', 'Notes', 'History'] as const
@@ -39,7 +39,7 @@ export function DealDetail() {
     updateDeal,
     moveDealStage,
     markDealWon,
-    markDealLost,
+    markDealRejected,
     addActivity,
     addTask,
     updateTask,
@@ -54,7 +54,7 @@ export function DealDetail() {
   const [tab, setTab] = useState<Tab>('Overview')
   const [editOpen, setEditOpen] = useState(false)
   const [wonOpen, setWonOpen] = useState(false)
-  const [lostOpen, setLostOpen] = useState(false)
+  const [rejectOpen, setRejectOpen] = useState(false)
   const [activityOpen, setActivityOpen] = useState(false)
   const [taskOpen, setTaskOpen] = useState(false)
   const [proposalOpen, setProposalOpen] = useState(false)
@@ -77,7 +77,7 @@ export function DealDetail() {
 
   const company = companyById(deal.companyId)
   const contact = contactById(deal.contactId)
-  const isClosed = deal.stage === 'Won' || deal.stage === 'Lost'
+  const isClosed = deal.stage === 'Won' || deal.stage === 'Rejected'
 
   return (
     <div className="space-y-5">
@@ -115,7 +115,7 @@ export function DealDetail() {
             onChange={(e) => {
               const next = e.target.value as DealStage
               if (next === 'Won') setWonOpen(true)
-              else if (next === 'Lost') setLostOpen(true)
+              else if (next === 'Rejected') setRejectOpen(true)
               else moveDealStage(deal.id, next)
             }}
             className="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-600 outline-none disabled:opacity-50"
@@ -129,7 +129,7 @@ export function DealDetail() {
             <ActionButton icon={StickyNote} label="Add Activity" onClick={() => setActivityOpen(true)} />
             <ActionButton icon={CheckSquare} label="Create Task" onClick={() => setTaskOpen(true)} />
             {canEdit && <ActionButton icon={CheckCircle2} label="Mark Won" tone="success" onClick={() => setWonOpen(true)} disabled={isClosed} />}
-            {canEdit && <ActionButton icon={XCircle} label="Mark Lost" tone="danger" onClick={() => setLostOpen(true)} disabled={isClosed} />}
+            {canEdit && <ActionButton icon={XCircle} label="Mark Rejected" tone="danger" onClick={() => setRejectOpen(true)} disabled={isClosed} />}
           </div>
         </div>
       </Card>
@@ -164,7 +164,7 @@ export function DealDetail() {
             <Field label="Service" value={deal.service} />
             <Field label="Lead Source" value={deal.source} />
             <Field label="Competitor" value={deal.competitor} />
-            {deal.lossReason && <Field label="Loss Reason" value={deal.lossReason} />}
+            {deal.rejectionReason && <Field label="Rejection Reason" value={deal.rejectionReason} />}
             <Field label="Weighted Value" value={formatCurrency(Math.round((deal.value * deal.probability) / 100))} />
             {deal.handoverAmount != null && <Field label="Handover Amount" value={formatCurrency(deal.handoverAmount)} />}
             {deal.accountsCount != null && <Field label="Number of Accounts / Matters" value={deal.accountsCount.toString()} />}
@@ -330,12 +330,12 @@ export function DealDetail() {
           <div className="px-5 pb-5 space-y-3">
             <HistoryRow label="Deal created" date={deal.createdAt} />
             {dealActivities
-              .filter((a) => ['Deal Stage Change', 'Deal update', 'Deal Won', 'Deal Lost'].includes(a.type))
+              .filter((a) => ['Deal Stage Change', 'Deal update', 'Deal Won', 'Deal Rejected'].includes(a.type))
               .map((a) => (
                 <HistoryRow key={a.id} label={a.subject} date={a.activityDate} />
               ))}
             {deal.wonAt && <HistoryRow label="Deal marked Won" date={deal.wonAt} />}
-            {deal.lostAt && <HistoryRow label="Deal marked Lost" date={deal.lostAt} />}
+            {deal.rejectedAt && <HistoryRow label="Deal rejected" date={deal.rejectedAt} />}
           </div>
         </Card>
       )}
@@ -344,7 +344,7 @@ export function DealDetail() {
         <EditDealModal deal={deal} reps={reps} canReassign={canReassign(currentUser)} onClose={() => setEditOpen(false)} onSave={(patch) => updateDeal(deal.id, patch)} />
       )}
       {wonOpen && <MarkWonModal defaultService={deal.service} onClose={() => setWonOpen(false)} onSave={(details: WonDealDetails) => markDealWon(deal.id, details)} />}
-      {lostOpen && <MarkLostModal onClose={() => setLostOpen(false)} onSave={(reason: LossReason) => markDealLost(deal.id, reason)} />}
+      {rejectOpen && <MarkRejectedModal onClose={() => setRejectOpen(false)} onSave={(reason, note) => markDealRejected(deal.id, reason, note)} />}
       {activityOpen && (
         <AddActivityModal onClose={() => setActivityOpen(false)} onSave={(type, notes) => addActivity({ type, subject: `${type} logged on ${deal.name}`, notes, dealId: deal.id, companyId: deal.companyId })} />
       )}

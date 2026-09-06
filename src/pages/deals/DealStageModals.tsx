@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
-import { lossReasons, services } from '../../data/mockData'
-import type { LossReason } from '../../types'
+import { services } from '../../data/mockData'
+import { REJECTION_REASONS } from '../../lib/rejection'
+import type { RejectionReason } from '../../types'
 import type { WonDealDetails } from '../../store/AppStore'
 
 const HANDOVER_SERVICES = ['Debt Collection']
@@ -94,30 +95,38 @@ export function MarkWonModal({ defaultService, onClose, onSave }: { defaultServi
   )
 }
 
-export function MarkLostModal({ onClose, onSave }: { onClose: () => void; onSave: (reason: LossReason) => void }) {
-  const [reason, setReason] = useState<LossReason>('Price')
+/**
+ * The same reason list a lead is rejected with, so a deal that fell over and a lead that
+ * never signed can be counted together rather than in two vocabularies.
+ */
+export function MarkRejectedModal({ onClose, onSave }: { onClose: () => void; onSave: (reason: RejectionReason, note: string) => void }) {
+  const [reason, setReason] = useState<RejectionReason>('Not interested anymore')
+  const [note, setNote] = useState('')
   return (
-    <Modal title="Mark Deal Lost" onClose={onClose} width={380}>
+    <Modal title="Reject Deal" onClose={onClose} width={400}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          onSave(reason)
+          onSave(reason, note.trim())
           onClose()
         }}
       >
-        <FormField label="Loss Reason" required>
-          <select className={inputClass} value={reason} onChange={(e) => setReason(e.target.value as LossReason)}>
-            {lossReasons.map((r) => (
+        <FormField label="Rejection Reason" required>
+          <select className={inputClass} value={reason} onChange={(e) => setReason(e.target.value as RejectionReason)} autoFocus>
+            {REJECTION_REASONS.map((r) => (
               <option key={r}>{r}</option>
             ))}
           </select>
+        </FormField>
+        <FormField label="Note (optional)">
+          <textarea className={inputClass} rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything worth remembering if it comes back." />
         </FormField>
         <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
             Cancel
           </button>
           <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[#794234] text-white hover:bg-[#622f24]">
-            Confirm Lost
+            Reject Deal
           </button>
         </div>
       </form>

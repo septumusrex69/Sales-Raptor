@@ -99,7 +99,7 @@ export function Dashboard() {
       const qualified = scopedLeads.filter((l) => isWithinPeriod(l.createdAt, p) && isEngagedLead(l))
       const converted = scopedLeads.filter((l) => isWithinPeriod(l.createdAt, p) && l.status === 'Converted')
       const won = scopedDeals.filter((d) => d.wonAt && isWithinPeriod(d.wonAt, p))
-      const lost = scopedDeals.filter((d) => d.lostAt && isWithinPeriod(d.lostAt, p))
+      const lost = scopedDeals.filter((d) => d.rejectedAt && isWithinPeriod(d.rejectedAt, p))
       const revenueWon = won.reduce((s, d) => s + d.value, 0)
       const closed = won.length + lost.length
       const winRate = closed > 0 ? Math.round((won.length / closed) * 100) : 0
@@ -145,7 +145,7 @@ export function Dashboard() {
     const overdueTasks = scopedTasks.filter((t) => t.status !== 'Completed' && t.status !== 'Cancelled' && new Date(t.dueDate) < TODAY)
 
     const leadsNoNextAction = activeLeads.filter((l) => !l.nextFollowUpAt)
-    const openDeals = scopedDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Lost')
+    const openDeals = scopedDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected')
     const dealsNoNextAction = openDeals.filter((d) => !d.nextActionAt)
     const dealsOverdue = openDeals.filter((d) => new Date(d.expectedCloseDate) < TODAY)
 
@@ -175,7 +175,7 @@ export function Dashboard() {
         const touched = activeOwnLeads.filter((l) => touchedIds.has(l.id) || (l.lastContactAt && isWithinPeriod(l.lastContactAt, period)))
         const repActivities = activities.filter((a) => a.userId === repId && isMeaningfulActivity(a) && isWithinPeriod(a.activityDate, period))
         const won = deals.filter((d) => d.ownerId === repId && d.wonAt && isWithinPeriod(d.wonAt, period))
-        const lost = deals.filter((d) => d.ownerId === repId && d.lostAt && isWithinPeriod(d.lostAt, period))
+        const lost = deals.filter((d) => d.ownerId === repId && d.rejectedAt && isWithinPeriod(d.rejectedAt, period))
         const closed = won.length + lost.length
         const scorecard = scorecards.find((s) => s.repId === repId)
         return {
@@ -196,7 +196,7 @@ export function Dashboard() {
   const periodParam = encodeSalesMonthParam(period)
 
   const recentActivities = scopedActivities.slice(0, 6)
-  const topDeals = useMemo(() => [...scopedDeals].filter((d) => d.stage !== 'Lost').sort((a, b) => b.value - a.value).slice(0, 5), [scopedDeals])
+  const topDeals = useMemo(() => [...scopedDeals].filter((d) => d.stage !== 'Rejected').sort((a, b) => b.value - a.value).slice(0, 5), [scopedDeals])
   const tasksDue = useMemo(() => {
     const recentOverdueFloor = new Date(TODAY.getTime() - 14 * 24 * 60 * 60 * 1000)
     return scopedTasks

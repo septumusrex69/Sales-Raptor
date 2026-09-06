@@ -600,7 +600,7 @@ export function LeadsList() {
       {convertLeadTarget && (
         <ConvertLeadModal
           lead={convertLeadTarget}
-          openDeals={deals.filter((d) => d.leadId === convertLeadTarget.id && d.stage !== 'Won' && d.stage !== 'Lost')}
+          openDeals={deals.filter((d) => d.leadId === convertLeadTarget.id && d.stage !== 'Won' && d.stage !== 'Rejected')}
           onClose={() => setConvertLeadTarget(null)}
           onConfirm={(confirmation) => {
             const result = convertLeadToClient(convertLeadTarget.id, confirmation)

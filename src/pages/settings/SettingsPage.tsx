@@ -4,14 +4,15 @@ import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { SignatureEditor } from '../../components/settings/SignatureEditor'
-import { customFields as initialCustomFields, industries, leadSources as initialLeadSources, lossReasons as initialLossReasons } from '../../data/mockData'
+import { customFields as initialCustomFields, industries, leadSources as initialLeadSources } from '../../data/mockData'
+import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { supabase, PRODUCTION_APP_URL } from '../../lib/supabase'
 import type { CustomField, CustomFieldType, Team, TeamKind, User, UserRole } from '../../types'
 import { DEAL_STAGES } from '../../types'
 
-const TABS = ['Profile', 'Users', 'Teams', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Lost Reasons', 'Notifications', 'Integrations'] as const
+const TABS = ['Profile', 'Users', 'Teams', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations'] as const
 type Tab = (typeof TABS)[number]
 
 export function SettingsPage() {
@@ -37,7 +38,7 @@ export function SettingsPage() {
         {tab === 'Pipelines' && <PipelinesTab />}
         {tab === 'Custom Fields' && <CustomFieldsTab />}
         {tab === 'Lead Sources' && <StringListTab title="Lead Sources" initial={initialLeadSources} />}
-        {tab === 'Lost Reasons' && <StringListTab title="Lost Reasons" initial={initialLossReasons} />}
+        {tab === 'Rejection Reasons' && <StringListTab title="Rejection Reasons" initial={REJECTION_REASONS} />}
         {tab === 'Notifications' && <NotificationsTab />}
         {tab === 'Integrations' && <IntegrationsTab />}
       </div>
@@ -904,7 +905,7 @@ function PipelinesTab() {
           <div key={s} className="flex items-center gap-3 border border-slate-100 rounded-lg px-3.5 py-2.5">
             <span className="text-xs text-slate-400 w-5">{i + 1}</span>
             <span className="text-sm font-medium text-slate-700 flex-1">{s}</span>
-            {!(['Won', 'Lost'] as string[]).includes(s) && (
+            {!(['Won', 'Rejected'] as string[]).includes(s) && (
               <button onClick={() => setStages((prev) => prev.filter((x) => x !== s))} className="p-1 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50">
                 <X size={14} />
               </button>

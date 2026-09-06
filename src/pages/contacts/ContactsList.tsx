@@ -26,7 +26,7 @@ export function ContactsList() {
       .filter((c) => !q || `${c.firstName} ${c.lastName} ${companyById(c.companyId)?.name ?? ''}`.toLowerCase().includes(q))
   }, [contacts, search, owner])
 
-  const activeDealsFor = (contactId: string) => deals.filter((d) => d.contactId === contactId && d.stage !== 'Won' && d.stage !== 'Lost').length
+  const activeDealsFor = (contactId: string) => deals.filter((d) => d.contactId === contactId && d.stage !== 'Won' && d.stage !== 'Rejected').length
 
   return (
     <div className="space-y-4">

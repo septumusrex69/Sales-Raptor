@@ -30,13 +30,11 @@ const LEAD_STATUS_TONE: Record<string, BadgeTone> = {
 }
 
 const DEAL_STAGE_TONE: Record<string, BadgeTone> = {
-  'New Lead': 'new',
-  Contacted: 'contacted',
-  Qualified: 'qualified',
-  'Proposal Sent': 'proposal',
-  Negotiation: 'negotiation',
+  'New Deal': 'new',
+  'Quotation Sent': 'proposal',
+  'Invoice Sent': 'negotiation',
   Won: 'won',
-  Lost: 'lost',
+  Rejected: 'lost',
 }
 
 const PRIORITY_TONE: Record<string, BadgeTone> = {

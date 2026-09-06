@@ -37,7 +37,7 @@ export function LeadDetail() {
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const lead = leads.find((l) => l.id === id)
   const resultingDeals = useMemo(() => deals.filter((d) => d.leadId === id), [deals, id])
-  const openLeadDeals = useMemo(() => resultingDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Lost'), [resultingDeals])
+  const openLeadDeals = useMemo(() => resultingDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected'), [resultingDeals])
   const canEdit = canEditOwned(currentUser, lead?.ownerId)
 
   const [editOpen, setEditOpen] = useState(false)

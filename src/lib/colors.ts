@@ -8,13 +8,11 @@ import type { ActivityType, DealStage, LeadClassification, LeadSource, ProductSe
  */
 
 export const STAGE_COLORS: Record<DealStage, string> = {
-  'New Lead': '#6086a9',
-  Contacted: '#416281',
-  Qualified: '#406d58',
-  'Proposal Sent': '#b28e34',
-  Negotiation: '#2b4055',
+  'New Deal': '#6086a9',
+  'Quotation Sent': '#416281',
+  'Invoice Sent': '#b28e34',
   Won: '#957323',
-  Lost: '#794234',
+  Rejected: '#794234',
 }
 
 export const SOURCE_COLORS: Record<LeadSource, string> = {
@@ -74,7 +72,7 @@ export const ACTIVITY_TYPE_COLORS: Record<ActivityType, string> = {
   'Deal update': '#94a3b8',
   'Deal Stage Change': '#416281',
   'Deal Won': '#3a7a5c',
-  'Deal Lost': '#794234',
+  'Deal Rejected': '#794234',
   'Courtesy Call': '#6086a9',
   'Handover Received': '#957323',
 }
@@ -91,7 +89,7 @@ export const ACTIVITY_TYPE_TAILWIND: Record<ActivityType, string> = {
   'Deal update': 'bg-slate-100 text-slate-500',
   'Deal Stage Change': 'bg-[#edf1f5] text-[#416281]',
   'Deal Won': 'bg-[#e9f4ee] text-[#3a7a5c]',
-  'Deal Lost': 'bg-[#f6eeec] text-[#794234]',
+  'Deal Rejected': 'bg-[#f6eeec] text-[#794234]',
   'Courtesy Call': 'bg-[#edf1f5] text-[#6086a9]',
   'Handover Received': 'bg-[#f7f3eb] text-[#957323]',
 }
@@ -124,12 +122,12 @@ export const CLASSIFICATION_TAILWIND: Record<LeadClassification, string> = {
 
 export const DEAL_CLOSE_EVENT_COLOR = '#ad6452'
 
-/** The 6 open-pipeline-through-Won stages, in funnel order (Lost is shown separately). */
-export const FUNNEL_STAGES: DealStage[] = ['New Lead', 'Contacted', 'Qualified', 'Proposal Sent', 'Negotiation', 'Won']
+/** The open-pipeline-through-Won stages, in funnel order (Rejected is shown separately). */
+export const FUNNEL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Invoice Sent', 'Won']
 export const FUNNEL_COLORS: string[] = FUNNEL_STAGES.map((s) => STAGE_COLORS[s])
 
 /** Semantic tokens for KPI deltas / positive-negative indicators (mirrors --color-positive/--color-negative in index.css). */
 export const POSITIVE_HEX = '#406d58'
 export const NEGATIVE_HEX = '#794234'
-/** "Still open / in progress" — the third state alongside Won/Lost on the Win Rate donut. */
+/** "Still open / in progress" — the third state alongside Won/Rejected on the Win Rate donut. */
 export const OPEN_HEX = '#b28e34'

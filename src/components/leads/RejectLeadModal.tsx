@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
-import { REJECTION_REASONS } from '../../lib/leadStatus'
+import { REJECTION_REASONS } from '../../lib/rejection'
 import type { RejectionReason } from '../../types'
 
 /**

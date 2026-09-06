@@ -101,7 +101,7 @@ function followUpScore(repId: ID, period: SalesMonthPeriod, tasks: Task[], deals
   const dueInPeriod = tasks.filter((t) => t.ownerId === repId && t.status !== 'Cancelled' && isWithinPeriod(t.dueDate, period))
   const completedOnTime = dueInPeriod.filter((t) => t.completedAt && new Date(t.completedAt) <= new Date(t.dueDate))
   const overdue = tasks.filter((t) => t.ownerId === repId && t.status !== 'Completed' && t.status !== 'Cancelled' && new Date(t.dueDate) < referenceDate)
-  const openNoNextAction = deals.filter((d) => d.ownerId === repId && d.stage !== 'Won' && d.stage !== 'Lost' && !d.nextActionAt)
+  const openNoNextAction = deals.filter((d) => d.ownerId === repId && d.stage !== 'Won' && d.stage !== 'Rejected' && !d.nextActionAt)
   const onTimePct = pct(completedOnTime.length, dueInPeriod.length, 100)
   const overduePenaltyScore = Math.max(0, 100 - overdue.length * 10)
   return {
@@ -137,7 +137,7 @@ function conversionScore(repId: ID, period: SalesMonthPeriod, leads: Lead[]): Su
 
 function winScore(repId: ID, period: SalesMonthPeriod, deals: Deal[]): SubScore {
   const won = deals.filter((d) => d.ownerId === repId && d.wonAt && isWithinPeriod(d.wonAt, period))
-  const lost = deals.filter((d) => d.ownerId === repId && d.lostAt && isWithinPeriod(d.lostAt, period))
+  const lost = deals.filter((d) => d.ownerId === repId && d.rejectedAt && isWithinPeriod(d.rejectedAt, period))
   const closed = won.length + lost.length
   const winRate = pct(won.length, closed, 50)
   return {

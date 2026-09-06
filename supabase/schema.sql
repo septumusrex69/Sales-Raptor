@@ -231,7 +231,10 @@ create table if not exists public.deals (
   company_id uuid not null references public.companies (id) on delete cascade,
   contact_id uuid references public.contacts (id) on delete set null,
   owner_id uuid not null references public.profiles (id),
-  stage text not null default 'New Lead',
+  -- 'New Deal' | 'Quotation Sent' | 'Invoice Sent' | 'Won' | 'Rejected'.
+  -- Unconstrained text for the same reason lead status is: the vocabulary belongs in
+  -- src/types.ts, not behind a migration every time a step is renamed.
+  stage text not null default 'New Deal',
   value numeric not null default 0,
   probability integer not null default 10,
   expected_close_date timestamptz not null,
@@ -239,10 +242,12 @@ create table if not exists public.deals (
   source text not null,
   competitor text,
   notes text,
-  loss_reason text,
+  -- Set when stage is 'Rejected'. Same vocabulary as leads.rejection_reason.
+  rejection_reason text,
+  rejection_note text,
   created_at timestamptz not null default now(),
   won_at timestamptz,
-  lost_at timestamptz,
+  rejected_at timestamptz,
   next_action_at timestamptz,
   -- cascade: a converted lead's Deal is that lead's outcome, not an
   -- independent record — deleting the lead removes the Deal it produced.

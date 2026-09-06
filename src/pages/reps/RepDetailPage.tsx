@@ -50,9 +50,9 @@ export function RepDetailPage() {
     const touched = activeLeads.filter((l) => touchedIds.has(l.id) || (l.lastContactAt && isWithinPeriod(l.lastContactAt, period)))
 
     const ownDeals = deals.filter((d) => d.ownerId === id)
-    const openDeals = ownDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Lost')
+    const openDeals = ownDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected')
     const won = ownDeals.filter((d) => d.wonAt && isWithinPeriod(d.wonAt, period))
-    const lost = ownDeals.filter((d) => d.lostAt && isWithinPeriod(d.lostAt, period))
+    const lost = ownDeals.filter((d) => d.rejectedAt && isWithinPeriod(d.rejectedAt, period))
     const closed = won.length + lost.length
     const revenueWon = won.reduce((s, d) => s + d.value, 0)
 
@@ -224,7 +224,7 @@ export function RepDetailPage() {
             <Field label="Win Rate" value={`${data.winRate}%`} />
             <Field label="Lead → Win Rate" value={`${data.leadToWinRate}%`} />
             <Field label="Deals Won" value={data.won.length.toString()} />
-            <Field label="Deals Lost" value={data.lost.length.toString()} />
+            <Field label="Deals Rejected" value={data.lost.length.toString()} />
           </dl>
         </Card>
       )}
@@ -234,7 +234,7 @@ export function RepDetailPage() {
           <CardHeader title="Commercial Performance" subtitle={period.rangeLabel} />
           <dl className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3.5 text-sm">
             <Field label="Deals Won" value={data.won.length.toString()} />
-            <Field label="Deals Lost" value={data.lost.length.toString()} />
+            <Field label="Deals Rejected" value={data.lost.length.toString()} />
             <Field label="Revenue Won" value={formatCurrency(data.revenueWon)} />
             <Field label="Average Deal Value" value={formatCurrency(data.avgDealValue)} />
             <Field label="Median Deal Value" value={formatCurrency(data.medianDealValue)} />

@@ -1,19 +1,10 @@
-import type { Lead, LeadStatus, RejectionReason } from '../types'
+import type { Lead, LeadStatus } from '../types'
 
 /** Every status a lead can hold, in the order it moves through them. */
 export const LEAD_STATUSES: LeadStatus[] = ['No Contact Yet', 'Interested', 'Hot Lead', 'Converted', 'Rejected']
 
 /** The stages a lead is still being worked in — everything before it ends one way or the other. */
 export const ACTIVE_LEAD_STATUSES: LeadStatus[] = ['No Contact Yet', 'Interested', 'Hot Lead']
-
-export const REJECTION_REASONS: RejectionReason[] = [
-  'Not interested anymore',
-  'Too expensive',
-  'Went with another provider',
-  'No response',
-  'We declined them',
-  'Other',
-]
 
 /**
  * Still on someone's plate. A lead stays active until it either becomes a client or is

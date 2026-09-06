@@ -8,20 +8,20 @@ import { Card } from '../../components/ui/Card'
 import { StageBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { DealForm } from '../../components/layout/QuickAdd'
-import { MarkLostModal, MarkWonModal } from './DealStageModals'
+import { MarkRejectedModal, MarkWonModal } from './DealStageModals'
 import { formatCurrency, formatDate, TODAY } from '../../data/mockData'
 import { FUNNEL_STAGES, STAGE_COLORS } from '../../lib/colors'
 import { readParam } from '../../lib/drilldown'
 import { decodeSalesMonthParam, isWithinPeriod } from '../../lib/salesMonth'
-import { DEAL_STAGES } from '../../types'
-import type { Deal, DealStage, LossReason } from '../../types'
+import { OPEN_DEAL_STAGES } from '../../types'
+import type { Deal, DealStage } from '../../types'
 import type { WonDealDetails } from '../../store/AppStore'
 
-const OPEN_STAGES = DEAL_STAGES.filter((s) => s !== 'Won' && s !== 'Lost')
+const OPEN_STAGES = OPEN_DEAL_STAGES
 
 export function DealsBoard() {
   const store = useAppStore()
-  const { deals, users, companyById, userById, moveDealStage, markDealWon, markDealLost } = store
+  const { deals, users, companyById, userById, moveDealStage, markDealWon, markDealRejected } = store
   const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const navigate = useNavigate()
@@ -48,7 +48,7 @@ export function DealsBoard() {
   const [addOpen, setAddOpen] = useState(false)
   const [dragging, setDragging] = useState<string | null>(null)
   const [wonModalFor, setWonModalFor] = useState<Deal | null>(null)
-  const [lostModalFor, setLostModalFor] = useState<Deal | null>(null)
+  const [rejectModalFor, setRejectModalFor] = useState<Deal | null>(null)
 
   const filtered = useMemo(() => {
     return deals.filter((d) => {
@@ -74,22 +74,22 @@ export function DealsBoard() {
           return false
         }
       }
-      if (noNextActionFilter && (d.stage === 'Won' || d.stage === 'Lost' || d.nextActionAt)) return false
-      if (overdueFilter && (d.stage === 'Won' || d.stage === 'Lost' || new Date(d.expectedCloseDate) >= TODAY)) return false
+      if (noNextActionFilter && (d.stage === 'Won' || d.stage === 'Rejected' || d.nextActionAt)) return false
+      if (overdueFilter && (d.stage === 'Won' || d.stage === 'Rejected' || new Date(d.expectedCloseDate) >= TODAY)) return false
       if (companyIdFilter && d.companyId !== companyIdFilter) return false
-      if (openOnlyFilter && (d.stage === 'Won' || d.stage === 'Lost')) return false
+      if (openOnlyFilter && (d.stage === 'Won' || d.stage === 'Rejected')) return false
       if (salesMonthFilter) {
-        const dateField = d.stage === 'Won' ? d.wonAt : d.stage === 'Lost' ? d.lostAt : d.createdAt
+        const dateField = d.stage === 'Won' ? d.wonAt : d.stage === 'Rejected' ? d.rejectedAt : d.createdAt
         if (!isWithinPeriod(dateField, salesMonthFilter)) return false
       }
       return true
     })
   }, [filtered, view, stageFilter, stageAtLeast, noNextActionFilter, overdueFilter, salesMonthFilter, companyIdFilter, openOnlyFilter])
 
-  const columns = [...OPEN_STAGES, 'Won', 'Lost'] as DealStage[]
+  const columns = [...OPEN_STAGES, 'Won', 'Rejected'] as DealStage[]
 
   const totals = useMemo(() => {
-    const open = deals.filter((d) => d.stage !== 'Won' && d.stage !== 'Lost')
+    const open = deals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected')
     const won = deals.filter((d) => d.stage === 'Won')
     return { pipeline: open.reduce((s, d) => s + d.value, 0), won: won.reduce((s, d) => s + d.value, 0), count: deals.length }
   }, [deals])
@@ -153,7 +153,7 @@ export function DealsBoard() {
                   const deal = deals.find((d) => d.id === dragging)
                   if (deal) {
                     if (stage === 'Won') setWonModalFor(deal)
-                    else if (stage === 'Lost') setLostModalFor(deal)
+                    else if (stage === 'Rejected') setRejectModalFor(deal)
                     else moveDealStage(deal.id, stage)
                   }
                   setDragging(null)
@@ -236,7 +236,7 @@ export function DealsBoard() {
           onSave={(details: WonDealDetails) => markDealWon(wonModalFor.id, details)}
         />
       )}
-      {lostModalFor && <MarkLostModal onClose={() => setLostModalFor(null)} onSave={(reason: LossReason) => markDealLost(lostModalFor.id, reason)} />}
+      {rejectModalFor && <MarkRejectedModal onClose={() => setRejectModalFor(null)} onSave={(reason, note) => markDealRejected(rejectModalFor.id, reason, note)} />}
     </div>
   )
 }
