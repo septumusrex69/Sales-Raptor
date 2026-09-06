@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
-import { Card } from '../../components/ui/Card'
-import { FormField, inputClass } from '../../components/ui/Modal'
+import { ArrowRight, Eye, EyeOff, Lock, Mail } from 'lucide-react'
 import { useAuth } from '../../store/AuthContext'
 import { supabase } from '../../lib/supabase'
 
@@ -10,6 +9,7 @@ export function LoginPage() {
   const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [resetSent, setResetSent] = useState(false)
@@ -42,58 +42,124 @@ export function LoginPage() {
     else setResetSent(true)
   }
 
+  const fieldClass =
+    'w-full text-sm rounded-lg border border-slate-200 bg-white pl-10 pr-3 py-2.5 text-slate-700 placeholder:text-slate-400 outline-none focus:border-[#c9a052] focus:ring-2 focus:ring-[#c9a052]/25'
+
   return (
-    <div className="flex h-dvh items-center justify-center bg-surface px-4">
-      <div className="w-full max-w-sm">
-        <div className="flex flex-col items-center mb-6">
-          <img src="/brand/wordmark-dark.svg" alt="Bredell Ferreira" className="h-6 w-auto mb-3" />
-          <p className="text-sm text-slate-400 mt-0.5">Sign in to Romulus</p>
+    <div className="h-dvh w-full flex bg-[#f7f8fa]">
+      {/*
+        The photograph is decorative and heavy, so it's hidden below large screens rather than
+        stacked above the form — a login is one thing, and on a phone that thing is the fields.
+      */}
+      <div
+        className="relative hidden lg:block lg:w-[46%] shrink-0 bg-[#0b1620] bg-cover bg-center"
+        style={{ backgroundImage: "url('/brand/raptor-login.jpg')" }}
+        aria-hidden="true"
+      >
+        {/* Feathered into the panel beside it, so the two halves read as one surface. */}
+        <div className="absolute inset-0 bg-gradient-to-r from-[#0b1620]/45 via-transparent to-[#f7f8fa]" />
+        <p className="relative z-[1] pt-24 pl-14 text-[13px] font-semibold uppercase leading-[2.2] tracking-[0.32em] text-[#d8b56f]">
+          Discipline
+          <br />
+          Creates
+          <br />
+          Freedom
+        </p>
+        <span className="relative z-[1] block ml-14 mt-4 h-px w-14 bg-[#d8b56f]/70" />
+      </div>
+
+      <div className="flex-1 flex items-center justify-center px-6 py-10 overflow-y-auto">
+        <div className="w-full max-w-[420px]">
+          <div className="flex flex-col items-center text-center">
+            <img src="/brand/raptor-mark.png" alt="" className="h-16 w-auto" />
+            <p className="mt-4 text-[34px] font-semibold leading-none tracking-[0.32em] text-[#12233a] pl-[0.32em]">RAPTOR</p>
+            <p className="mt-2.5 text-[10px] font-medium uppercase tracking-[0.3em] text-slate-400 pl-[0.3em]">by Bredell Ferreira</p>
+
+            <h1 className="mt-8 text-[13px] font-semibold uppercase tracking-[0.22em] text-[#12233a] pl-[0.22em]">Sign in to Raptor</h1>
+            <p className="mt-2 text-sm text-slate-400">Recover. Rise. Take flight.</p>
+          </div>
+
+          <div className="mt-7 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_12px_30px_rgba(15,23,42,0.06)]">
+            <form onSubmit={handleSubmit}>
+              <label className="block text-[13px] font-medium text-slate-600 mb-1.5" htmlFor="login-email">
+                Email <span className="text-[var(--c-rust)]">*</span>
+              </label>
+              <div className="relative mb-4">
+                <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  id="login-email"
+                  type="email"
+                  autoComplete="email"
+                  className={fieldClass}
+                  placeholder="Enter your email address"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <label className="block text-[13px] font-medium text-slate-600 mb-1.5" htmlFor="login-password">
+                Password <span className="text-[var(--c-rust)]">*</span>
+              </label>
+              <div className="relative mb-5">
+                <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  id="login-password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  className={`${fieldClass} pr-11`}
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+
+              {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
+              {resetSent && <p className="text-sm text-[var(--c-green)] mb-3.5">If that email has an account, a password reset link has been sent.</p>}
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full inline-flex items-center justify-center gap-2 text-sm font-semibold px-4 py-3 rounded-xl bg-[#142433] text-white hover:bg-[#1c3149] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {submitting ? 'Signing in…' : 'Sign In'}
+                {!submitting && <ArrowRight size={15} />}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleForgotPassword}
+                disabled={resetting}
+                className="w-full text-[13px] text-slate-500 underline underline-offset-4 hover:text-[#12233a] mt-4 disabled:opacity-50"
+              >
+                {resetting ? 'Sending…' : 'Forgot password?'}
+              </button>
+            </form>
+          </div>
+
+          <div className="mt-7 flex items-center gap-4">
+            <span className="h-px flex-1 bg-slate-200" />
+            <p className="text-[13px] font-medium text-slate-600 whitespace-nowrap">Don't have an account?</p>
+            <span className="h-px flex-1 bg-slate-200" />
+          </div>
+          <p className="mt-2 text-center text-[13px] text-slate-400">Ask your administrator to invite you.</p>
+
+          <div className="mt-12 flex flex-col items-center">
+            <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-slate-400 pl-[0.28em]">Bredell Ferreira</p>
+            <span className="mt-2.5 h-px w-10 bg-[#d8b56f]" />
+            <p className="mt-3 text-[10px] font-medium uppercase tracking-[0.22em] text-slate-400 pl-[0.22em]">People &nbsp;|&nbsp; Process &nbsp;|&nbsp; Performance</p>
+          </div>
         </div>
-
-        <Card>
-          <form onSubmit={handleSubmit}>
-            <FormField label="Email" required>
-              <input
-                type="email"
-                autoComplete="email"
-                className={inputClass}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoFocus
-              />
-            </FormField>
-            <FormField label="Password" required>
-              <input
-                type="password"
-                autoComplete="current-password"
-                className={inputClass}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </FormField>
-            {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
-            {resetSent && <p className="text-sm text-[var(--c-green)] mb-3.5">If that email has an account, a password reset link has been sent.</p>}
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full text-sm font-medium px-3.5 py-2.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {submitting ? 'Signing in…' : 'Sign In'}
-            </button>
-            <button
-              type="button"
-              onClick={handleForgotPassword}
-              disabled={resetting}
-              className="w-full text-xs font-medium text-slate-500 hover:text-brand-600 mt-3 disabled:opacity-50"
-            >
-              {resetting ? 'Sending…' : 'Forgot password?'}
-            </button>
-          </form>
-        </Card>
-
-        <p className="text-center text-xs text-slate-400 mt-5">Don't have an account? Ask your administrator to invite you.</p>
       </div>
     </div>
   )
