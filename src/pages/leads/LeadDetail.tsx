@@ -4,9 +4,10 @@ import { ArrowLeft, Pencil, ArrowRightLeft, StickyNote, CheckSquare, Calendar, X
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { canEditOwned, canReassign, isAssignableOwner} from '../../lib/permissions'
+import { DashboardHero } from '../../components/dashboard/DashboardHero'
+import { HeroOwner } from '../../components/HeroOwner'
 import { Card, CardHeader } from '../../components/ui/Card'
-import { StatusBadge, ServiceBadge, StageBadge } from '../../components/ui/Badge'
-import { Avatar, UserAvatar } from '../../components/ui/Avatar'
+import { StatusBadge, ServiceBadge, StageBadge, ClassificationBadge } from '../../components/ui/Badge'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
@@ -14,6 +15,7 @@ import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/u
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
 import { parseEmailActivity } from '../../lib/emailActivity'
+import { buildDrilldownUrl } from '../../lib/drilldown'
 import { formatCurrency, formatDate, formatLeadNumber, industries, leadSources } from '../../data/mockData'
 import type { ActivityType, LeadStatus, TaskType } from '../../types'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, serviceValueLabel, leadServiceValueList } from '../../components/leads/LeadOpportunityFields'
@@ -46,6 +48,12 @@ export function LeadDetail() {
   const emailActivities = useMemo(() => timeline.filter((a) => a.type === 'Email'), [timeline])
   const nonEmailActivities = useMemo(() => timeline.filter((a) => a.type !== 'Email'), [timeline])
 
+  // A lead's debt-collection numbers can be captured either per-service (the current shape) or
+  // on the lead itself (leads saved before per-service values existed) — prefer the newer one.
+  const debtService = lead ? leadServiceValueList(lead).find((sv) => sv.service === 'Debt Collection') : undefined
+  const estimatedHandover = debtService?.handoverAmount ?? lead?.estimatedHandoverAmount
+  const estimatedAccounts = debtService?.accountsCount ?? lead?.estimatedAccountsCount
+
   if (!lead) {
     return (
       <div className="text-center py-16 text-slate-400">
@@ -60,36 +68,76 @@ export function LeadDetail() {
         <ArrowLeft size={15} /> Back to Leads
       </Link>
 
+      <DashboardHero
+        eyebrow={`Lead · ${formatLeadNumber(lead.leadNumber)}`}
+        title={`${lead.firstName} ${lead.lastName}`}
+        subtitle={
+          <span className="inline-flex flex-wrap items-center gap-x-1.5">
+            <span>
+              {lead.jobTitle ? `${lead.jobTitle} at ` : ''}
+              {lead.companyName}
+            </span>
+            <span className="text-white/30">·</span>
+            <span>Source: {lead.source}</span>
+          </span>
+        }
+      >
+        <HeroOwner ownerId={lead.ownerId} label="Salesperson" />
+      </DashboardHero>
+
       <Card>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-start gap-3.5">
-            <Avatar name={`${lead.firstName} ${lead.lastName}`} color="#6086a9" size={48} />
+        <div className="flex flex-wrap items-end gap-x-10 gap-y-3">
+          <div>
+            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide mb-1.5">Class</p>
+            {lead.classification ? (
+              <ClassificationBadge classification={lead.classification} />
+            ) : (
+              // A lead often hasn't been graded yet; saying so is more useful than an empty gap
+              // that reads as though the field doesn't exist.
+              <span className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-md px-2 py-1">Not yet graded</span>
+            )}
+          </div>
+          <div>
+            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Status</p>
+            <div className="mt-1.5">
+              <StatusBadge status={lead.status} />
+            </div>
+          </div>
+          {estimatedAccounts !== undefined && (
             <div>
-              <p className="text-xs font-medium text-slate-400 tracking-wide">{formatLeadNumber(lead.leadNumber)}</p>
-              <h2 className="text-lg font-semibold text-slate-800">{lead.firstName} {lead.lastName}</h2>
-              <p className="text-sm text-slate-500">{lead.jobTitle ? `${lead.jobTitle} at ` : ''}{lead.companyName}</p>
-              <div className="flex items-center gap-2 mt-2">
-                <StatusBadge status={lead.status} />
-                <span className="text-xs text-slate-400">Source: {lead.source}</span>
-              </div>
-              {lead.services && lead.services.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-2.5">
-                  {lead.services.map((s) => (
-                    <ServiceBadge key={s} service={s} />
-                  ))}
-                </div>
-              )}
+              <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Accounts</p>
+              <p className="text-2xl font-bold text-slate-800 mt-0.5">{estimatedAccounts}</p>
             </div>
-          </div>
-          <div className="text-right">
-            <p className="text-xs text-slate-400">Estimated Value</p>
-            <p className="text-xl font-bold text-slate-800">{formatCurrency(lead.estimatedValue)}</p>
-            <div className="flex items-center gap-1.5 justify-end mt-1.5">
-              <UserAvatar userId={lead.ownerId} size={20} />
-              <span className="text-xs text-slate-500">{userById(lead.ownerId)?.name}</span>
+          )}
+          {estimatedHandover !== undefined && (
+            <div>
+              <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Handover Amount</p>
+              <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(estimatedHandover)}</p>
             </div>
+          )}
+          <div>
+            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Estimated Value</p>
+            <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(lead.estimatedValue)}</p>
           </div>
+          <div>
+            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Lead Score</p>
+            <p className="text-2xl font-bold text-slate-800 mt-0.5">{lead.score}</p>
+          </div>
+          {resultingDeals.length > 0 && (
+            <Link to={buildDrilldownUrl('/deals', { view: 'table' })} className="hover:opacity-70">
+              <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Deals</p>
+              <p className="text-2xl font-bold text-slate-800 mt-0.5">{resultingDeals.length}</p>
+            </Link>
+          )}
         </div>
+
+        {lead.services && lead.services.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-4">
+            {lead.services.map((s) => (
+              <ServiceBadge key={s} service={s} />
+            ))}
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t border-slate-100">
           {canEdit && <ActionButton icon={Pencil} label="Edit" onClick={() => setEditOpen(true)} />}

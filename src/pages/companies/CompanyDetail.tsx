@@ -15,6 +15,7 @@ import { formatCurrency, formatDate, services } from '../../data/mockData'
 import { parseEmailActivity } from '../../lib/emailActivity'
 import { buildDrilldownUrl } from '../../lib/drilldown'
 import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/ui/RowLimitSelect'
+import { HeroOwner } from '../../components/HeroOwner'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
 import type { Company, Contact, ProductService } from '../../types'
@@ -134,7 +135,9 @@ export function CompanyDetail() {
             </span>
           </span>
         }
-      />
+      >
+        <HeroOwner ownerId={company.accountOwnerId} label="Client Liaison" />
+      </DashboardHero>
 
       <Card>
         <div className="flex flex-wrap items-end gap-x-10 gap-y-3">
