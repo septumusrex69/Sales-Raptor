@@ -45,8 +45,10 @@ export function SearchableSelect({
 
   useEffect(() => {
     if (!open) return
-    // The search field is the whole point of opening it, so put the caret there.
-    inputRef.current?.focus()
+    // Focus the search field only where there's a real pointer. On a tablet, focusing it
+    // raises the on-screen keyboard, which resizes the viewport and shifts this panel out
+    // from under the finger already on its way down — so the first tap lands on nothing.
+    if (window.matchMedia?.('(pointer: fine)').matches) inputRef.current?.focus()
     function onDocClick(e: MouseEvent) {
       if (!ref.current?.contains(e.target as Node)) setOpen(false)
     }
@@ -106,6 +108,15 @@ export function SearchableSelect({
                 type="button"
                 role="option"
                 aria-selected={o.id === value}
+                // Chosen on the press rather than the click. A click only counts if the
+                // press and release land on the same element, and between them the keyboard
+                // can appear or the list can scroll under the finger — which is exactly how
+                // a tap ends up doing nothing and needing a second go.
+                onPointerDown={(e) => {
+                  e.preventDefault()
+                  choose(o.id)
+                }}
+                // Keyboard users get here without a pointer event at all.
                 onClick={() => choose(o.id)}
                 className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-start gap-2"
               >
