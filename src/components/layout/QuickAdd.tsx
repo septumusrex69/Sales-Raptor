@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Plus, Target, Users, Building2, Handshake, CheckSquare, Calendar, FileText, ChevronDown } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { isHandoverService } from '../../lib/dealKind'
+import { SearchableSelect } from '../ui/SearchableSelect'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { leadSources, services } from '../../data/mockData'
@@ -257,6 +258,14 @@ export function DealForm({ onClose, store, navigate }: { onClose: () => void; st
   })
   const isHandover = isHandoverService(form.service)
   const company = store.companies.find((c) => c.id === form.companyId)
+  // Sub-accounts share a parent's name closely enough that the code is what tells them apart.
+  const clientOptions = useMemo(
+    () =>
+      [...store.companies]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((c) => ({ id: c.id, label: c.name, hint: c.code ?? undefined })),
+    [store.companies],
+  )
 
   return (
     <Modal title="Add Deal" onClose={onClose}>
@@ -282,13 +291,14 @@ export function DealForm({ onClose, store, navigate }: { onClose: () => void; st
         }}
       >
         <FormField label="Client" required>
-          <select className={inputClass} value={form.companyId} onChange={(e) => setForm({ ...form, companyId: e.target.value })}>
-            {store.companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <SearchableSelect
+            ariaLabel="Client"
+            value={form.companyId}
+            onChange={(companyId) => setForm({ ...form, companyId })}
+            placeholder="Search clients…"
+            emptyLabel="No client matches that name"
+            options={clientOptions}
+          />
         </FormField>
         <FormField label="Service" required>
           <select className={inputClass} value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value as ProductService })}>
