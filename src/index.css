@@ -110,8 +110,6 @@
 
   /* The hero band at the top of a dashboard or record page. */
   --skin-hero-background: linear-gradient(120deg, #12212f 0%, #2c4054 52%, #46607b 100%);
-  --skin-hero-image: none;
-  --skin-hero-image-opacity: 0;
   --skin-hero-radius: 1rem;
 
   /* Decorative treatment at the foot of the sidebar. */
@@ -162,19 +160,6 @@ body {
   overflow: hidden;
   border-radius: var(--skin-hero-radius);
   background: var(--skin-hero-background);
-}
-.app-hero::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: var(--skin-hero-image);
-  background-size: cover;
-  background-position: center 62%;
-  opacity: var(--skin-hero-image-opacity);
-  pointer-events: none;
-}
-.app-hero > * {
-  position: relative;
 }
 
 .badge {

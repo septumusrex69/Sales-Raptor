@@ -136,11 +136,10 @@ html[data-theme='raptor'] {
      changes behind it. */
   --skin-hero-background:
     linear-gradient(100deg, rgba(11, 22, 32, 0.97) 0%, rgba(11, 22, 32, 0.86) 42%, rgba(14, 27, 39, 0.55) 100%);
-  --skin-hero-image: url('/brand/raptor-ridge.jpg');
-  --skin-hero-image-opacity: 1;
+  --skin-hero-image: url('/brand/raptor-wing.jpg');
   --skin-hero-radius: 18px;
 
-  --skin-sidebar-art: url('/brand/raptor-ridge-tall.jpg');
+  --skin-sidebar-art: url('/brand/raptor-wing-tall.jpg');
   --skin-sidebar-art-opacity: 0.22;
 
   --raptor-gold-metal: linear-gradient(
@@ -158,10 +157,7 @@ html[data-theme='raptor'] {
 html[data-theme='raptor'] .app-hero {
   background:
     var(--skin-hero-background),
-    var(--skin-hero-image) center 62% / cover no-repeat;
-}
-html[data-theme='raptor'] .app-hero::before {
-  content: none;
+    var(--skin-hero-image) center right / cover no-repeat;
 }
 
 /* ── Typography ──────────────────────────────────────────────────────────── */
