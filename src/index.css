@@ -168,6 +168,25 @@ body {
   background: var(--skin-hero-background);
 }
 
+/*
+ * The sign-in photograph.
+ *
+ * A background rather than an <img> on purpose: the panel is hidden below lg, and a browser
+ * never fetches a background on a display:none element, whereas it will happily download an
+ * <img> inside one. A phone shouldn't pay for a picture it is never shown.
+ *
+ * Three declarations of one property, each overriding the last where it's understood. Anything
+ * modern takes the standard image-set and gets the WebP; Safari 14-16 takes the -webkit- form
+ * and gets the same file; anything older keeps the plain JPEG.
+ */
+.login-photo {
+  background-image: url('/brand/raptor-login.jpg');
+  background-image: -webkit-image-set(url('/brand/raptor-login.webp') 1x);
+  background-image: image-set(url('/brand/raptor-login.webp') type('image/webp'), url('/brand/raptor-login.jpg') type('image/jpeg'));
+  background-size: cover;
+  background-position: 32% center;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
