@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ArrowDownLeft, ArrowUpRight, Paperclip, Mail } from 'lucide-react'
 import { emailDayLabel, emailTimeLabel, parseEmailActivity } from '../lib/emailActivity'
+import { DateGroupHeading } from './ui/DateGroupHeading'
 import { useAppStore } from '../store/AppStore'
 import { useAuth } from '../store/AuthContext'
 import type { Activity } from '../types'
@@ -202,7 +203,7 @@ export function EmailActivityList({ activities, onReply }: { activities: Activit
           return (
             <div key={a.id}>
               {showDay && (
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 bg-slate-50 px-3 py-1.5">{day}</p>
+                <DateGroupHeading label={day} />
               )}
               <EmailActivityRow activity={a} onReply={onReply ? () => onReply(a) : undefined} />
             </div>

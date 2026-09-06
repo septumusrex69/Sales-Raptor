@@ -32,6 +32,7 @@ import { LeadsPeriodBar } from '../../components/leads/LeadsPeriodBar'
 import { LeadsKpiRow, type LeadsKpiValues } from '../../components/leads/LeadsKpiRow'
 import { RejectLeadModal } from '../../components/leads/RejectLeadModal'
 import { SortHeader } from '../../components/ui/SortHeader'
+import { DATE_GROUP_CLASS } from '../../components/ui/DateGroupHeading'
 import { dateGroupLabel, relativeDayLabel } from '../../lib/dateLabels'
 import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
 import { formatCurrency, formatDate, formatLeadNumber, daysAgoLabel, industries, leadClassifications, leadSources, provinces, services, TODAY } from '../../data/mockData'
@@ -353,33 +354,33 @@ export function LeadsList() {
             <thead>
               <tr className="text-left text-xs text-slate-400">
                 {col.leadNumber && (
-                  <th className="font-medium px-5 py-3 sticky z-10 bg-white min-w-[100px]" style={{ left: pinnedLeft.leadNumber }}>
+                  <th className="font-medium px-5 py-2.5 sticky z-10 bg-white min-w-[100px]" style={{ left: pinnedLeft.leadNumber }}>
                     {sortableHeader('leadNumber', 'Lead #')}
                   </th>
                 )}
                 {col.companyLead && (
-                  <th className="font-medium px-3 py-3 sticky z-10 bg-white min-w-[180px]" style={{ left: pinnedLeft.companyLead }}>
+                  <th className="font-medium px-3 py-2.5 sticky z-10 bg-white min-w-[180px]" style={{ left: pinnedLeft.companyLead }}>
                     {sortableHeader('companyLead', 'Company / Lead')}
                   </th>
                 )}
-                {col.dateAdded && <th className="font-medium px-3 py-3">{sortableHeader('dateAdded', 'Added')}</th>}
-                {col.contactPerson && <th className="font-medium px-3 py-3">Contact Person</th>}
-                {col.status && <th className="font-medium px-3 py-3">{sortableHeader('status', 'Status')}</th>}
-                {col.classification && <th className="font-medium px-3 py-3">{sortableHeader('classification', 'Class')}</th>}
-                {col.score && <th className="font-medium px-3 py-3">{sortableHeader('score', 'Score')}</th>}
-                {col.services && <th className="font-medium px-3 py-3">Service(s)</th>}
-                {col.estValue && <th className="font-medium px-3 py-3 text-right">{sortableHeader('estValue', 'Est. Value', 'right')}</th>}
-                {col.handoverAmount && <th className="font-medium px-3 py-3 text-right">{sortableHeader('handoverAmount', 'Handover Amount', 'right')}</th>}
-                {col.owner && <th className="font-medium px-3 py-3">Owner</th>}
-                {col.nextFollowUp && <th className="font-medium px-3 py-3">{sortableHeader('nextFollowUp', 'Next Follow-up')}</th>}
-                {col.lastContact && <th className="font-medium px-3 py-3">{sortableHeader('lastContact', 'Last Contact')}</th>}
-                {col.source && <th className="font-medium px-3 py-3">Source</th>}
-                {col.city && <th className="font-medium px-3 py-3">City</th>}
-                {col.province && <th className="font-medium px-3 py-3">Province</th>}
-                {col.leadAge && <th className="font-medium px-3 py-3">Lead Age</th>}
-                {col.jobTitle && <th className="font-medium px-3 py-3">Job Title</th>}
-                {col.phone && <th className="font-medium px-3 py-3">Phone</th>}
-                {col.email && <th className="font-medium px-3 py-3">Email</th>}
+                {col.dateAdded && <th className="font-medium px-3 py-2.5">{sortableHeader('dateAdded', 'Added')}</th>}
+                {col.contactPerson && <th className="font-medium px-3 py-2.5">Contact Person</th>}
+                {col.status && <th className="font-medium px-3 py-2.5">{sortableHeader('status', 'Status')}</th>}
+                {col.classification && <th className="font-medium px-3 py-2.5">{sortableHeader('classification', 'Class')}</th>}
+                {col.score && <th className="font-medium px-3 py-2.5">{sortableHeader('score', 'Score')}</th>}
+                {col.services && <th className="font-medium px-3 py-2.5">Service(s)</th>}
+                {col.estValue && <th className="font-medium px-3 py-2.5 text-right">{sortableHeader('estValue', 'Est. Value', 'right')}</th>}
+                {col.handoverAmount && <th className="font-medium px-3 py-2.5 text-right">{sortableHeader('handoverAmount', 'Handover Amount', 'right')}</th>}
+                {col.owner && <th className="font-medium px-3 py-2.5">Owner</th>}
+                {col.nextFollowUp && <th className="font-medium px-3 py-2.5">{sortableHeader('nextFollowUp', 'Next Follow-up')}</th>}
+                {col.lastContact && <th className="font-medium px-3 py-2.5">{sortableHeader('lastContact', 'Last Contact')}</th>}
+                {col.source && <th className="font-medium px-3 py-2.5">Source</th>}
+                {col.city && <th className="font-medium px-3 py-2.5">City</th>}
+                {col.province && <th className="font-medium px-3 py-2.5">Province</th>}
+                {col.leadAge && <th className="font-medium px-3 py-2.5">Lead Age</th>}
+                {col.jobTitle && <th className="font-medium px-3 py-2.5">Job Title</th>}
+                {col.phone && <th className="font-medium px-3 py-2.5">Phone</th>}
+                {col.email && <th className="font-medium px-3 py-2.5">Email</th>}
                 <th className="w-10"></th>
               </tr>
             </thead>
@@ -395,33 +396,33 @@ export function LeadsList() {
                   <Fragment key={lead.id}>
                   {isFirstOfGroup && (
                     <tr>
-                      <td colSpan={visibleColumnCount} className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 bg-slate-50 px-5 py-1.5">
+                      <td colSpan={visibleColumnCount} className={DATE_GROUP_CLASS}>
                         {group}
                       </td>
                     </tr>
                   )}
                   <tr onClick={() => navigate(`/leads/${lead.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
                     {col.leadNumber && (
-                      <td className="px-5 py-3 sticky z-10 bg-white" style={{ left: pinnedLeft.leadNumber }}>
+                      <td className="px-5 py-2 sticky z-10 bg-white" style={{ left: pinnedLeft.leadNumber }}>
                         <Link to={`/leads/${lead.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
                           {formatLeadNumber(lead.leadNumber)}
                         </Link>
                       </td>
                     )}
                     {col.companyLead && (
-                      <td className="px-3 py-3 sticky z-10 bg-white" style={{ left: pinnedLeft.companyLead }}>
+                      <td className="px-3 py-2 sticky z-10 bg-white" style={{ left: pinnedLeft.companyLead }}>
                         <Link to={`/leads/${lead.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
                           {lead.companyName || `${lead.firstName} ${lead.lastName}`}
                         </Link>
                       </td>
                     )}
                     {col.dateAdded && (
-                      <td className="px-3 py-3 text-slate-500 whitespace-nowrap" title={formatDate(lead.createdAt)}>
+                      <td className="px-3 py-2 text-slate-500 whitespace-nowrap" title={formatDate(lead.createdAt)}>
                         {relativeDayLabel(lead.createdAt)}
                       </td>
                     )}
                     {col.contactPerson && (
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2">
                         <p className="text-slate-700">
                           {lead.firstName} {lead.lastName}
                         </p>
@@ -429,20 +430,20 @@ export function LeadsList() {
                       </td>
                     )}
                     {col.status && (
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2">
                         <StatusBadge status={lead.status} />
                       </td>
                     )}
                     {col.classification && (
-                      <td className="px-3 py-3">{lead.classification ? <ClassificationBadge classification={lead.classification} /> : <span className="text-slate-300">—</span>}</td>
+                      <td className="px-3 py-2">{lead.classification ? <ClassificationBadge classification={lead.classification} /> : <span className="text-slate-300">—</span>}</td>
                     )}
                     {col.score && (
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2">
                         <ScorePill score={lead.score} />
                       </td>
                     )}
                     {col.services && (
-                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                         {leadServices.length === 0 ? (
                           <span className="text-slate-300">—</span>
                         ) : (
@@ -469,12 +470,12 @@ export function LeadsList() {
                         )}
                       </td>
                     )}
-                    {col.estValue && <td className="px-3 py-3 text-right font-medium text-slate-700">{formatCurrency(lead.estimatedValue)}</td>}
+                    {col.estValue && <td className="px-3 py-2 text-right font-medium text-slate-700">{formatCurrency(lead.estimatedValue)}</td>}
                     {col.handoverAmount && (
-                      <td className="px-3 py-3 text-right text-slate-600">{lead.estimatedHandoverAmount != null ? formatCurrency(lead.estimatedHandoverAmount) : '—'}</td>
+                      <td className="px-3 py-2 text-right text-slate-600">{lead.estimatedHandoverAmount != null ? formatCurrency(lead.estimatedHandoverAmount) : '—'}</td>
                     )}
                     {col.owner && (
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2">
                         <div className="flex items-center gap-1.5">
                           <UserAvatar userId={lead.ownerId} size={22} />
                           <span className="text-slate-500 text-xs">{userById(lead.ownerId)?.name.split(' ')[0]}</span>
@@ -482,14 +483,14 @@ export function LeadsList() {
                       </td>
                     )}
                     {col.nextFollowUp && (
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2">
                         <Link to={`/leads/${lead.id}`} onClick={(e) => e.stopPropagation()} className={`hover:underline ${followUpTone(lead.nextFollowUpAt)}`}>
                           {formatDate(lead.nextFollowUpAt)}
                         </Link>
                       </td>
                     )}
                     {col.lastContact && (
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2">
                         <div className="flex items-center gap-1.5">
                           <div>
                             <p className="text-slate-600">{formatDate(lead.lastContactAt)}</p>
@@ -503,14 +504,14 @@ export function LeadsList() {
                         </div>
                       </td>
                     )}
-                    {col.source && <td className="px-3 py-3 text-slate-500">{lead.source}</td>}
-                    {col.city && <td className="px-3 py-3 text-slate-500">{lead.city ?? '—'}</td>}
-                    {col.province && <td className="px-3 py-3 text-slate-500">{lead.province ?? '—'}</td>}
-                    {col.leadAge && <td className="px-3 py-3 text-slate-500">{leadAgeLabel(lead.createdAt)}</td>}
-                    {col.jobTitle && <td className="px-3 py-3 text-slate-500">{lead.jobTitle ?? '—'}</td>}
-                    {col.phone && <td className="px-3 py-3 text-slate-500">{lead.phone ?? '—'}</td>}
-                    {col.email && <td className="px-3 py-3 text-slate-500">{lead.email ?? '—'}</td>}
-                    <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                    {col.source && <td className="px-3 py-2 text-slate-500">{lead.source}</td>}
+                    {col.city && <td className="px-3 py-2 text-slate-500">{lead.city ?? '—'}</td>}
+                    {col.province && <td className="px-3 py-2 text-slate-500">{lead.province ?? '—'}</td>}
+                    {col.leadAge && <td className="px-3 py-2 text-slate-500">{leadAgeLabel(lead.createdAt)}</td>}
+                    {col.jobTitle && <td className="px-3 py-2 text-slate-500">{lead.jobTitle ?? '—'}</td>}
+                    {col.phone && <td className="px-3 py-2 text-slate-500">{lead.phone ?? '—'}</td>}
+                    {col.email && <td className="px-3 py-2 text-slate-500">{lead.email ?? '—'}</td>}
+                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                       <RowMenu
                         items={[
                           { label: 'Call', icon: <Phone size={14} />, onClick: () => logQuickAction(lead, 'Call') },

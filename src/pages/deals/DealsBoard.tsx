@@ -7,6 +7,7 @@ import { canEditOwned, useDefaultOwnerFilter, isAssignableOwner} from '../../lib
 import { Card } from '../../components/ui/Card'
 import { StageBadge } from '../../components/ui/Badge'
 import { SortHeader } from '../../components/ui/SortHeader'
+import { DATE_GROUP_CLASS } from '../../components/ui/DateGroupHeading'
 import { dateGroupLabel, relativeDayLabel } from '../../lib/dateLabels'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { DealForm } from '../../components/layout/QuickAdd'
@@ -249,13 +250,13 @@ export function DealsBoard() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-slate-400">
-                  <th className="font-medium px-5 py-3">{header('name', 'Deal')}</th>
-                  <th className="font-medium px-3 py-3">{header('company', 'Company')}</th>
-                  <th className="font-medium px-3 py-3 text-right">{header('value', 'Value', 'right')}</th>
-                  <th className="font-medium px-3 py-3">{header('stage', 'Stage')}</th>
-                  <th className="font-medium px-3 py-3">{header('probability', 'Probability')}</th>
-                  <th className="font-medium px-3 py-3">{header('owner', 'Owner')}</th>
-                  <th className="font-medium px-3 py-3">{header('expectedCloseDate', 'Expected Close')}</th>
+                  <th className="font-medium px-5 py-2.5">{header('name', 'Deal')}</th>
+                  <th className="font-medium px-3 py-2.5">{header('company', 'Company')}</th>
+                  <th className="font-medium px-3 py-2.5 text-right">{header('value', 'Value', 'right')}</th>
+                  <th className="font-medium px-3 py-2.5">{header('stage', 'Stage')}</th>
+                  <th className="font-medium px-3 py-2.5">{header('probability', 'Probability')}</th>
+                  <th className="font-medium px-3 py-2.5">{header('owner', 'Owner')}</th>
+                  <th className="font-medium px-3 py-2.5">{header('expectedCloseDate', 'Expected Close')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -268,30 +269,30 @@ export function DealsBoard() {
                   <Fragment key={deal.id}>
                   {isFirstOfGroup && (
                     <tr>
-                      <td colSpan={7} className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 bg-slate-50 px-5 py-1.5">
+                      <td colSpan={7} className={DATE_GROUP_CLASS}>
                         {group}
                       </td>
                     </tr>
                   )}
                   <tr onClick={() => navigate(`/deals/${deal.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
-                    <td className="px-5 py-3">
+                    <td className="px-5 py-2">
                       <Link to={`/deals/${deal.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
                         {deal.name}
                       </Link>
                     </td>
-                    <td className="px-3 py-3 text-slate-500">{companyById(deal.companyId)?.name}</td>
-                    <td className="px-3 py-3 text-right font-medium text-slate-700">{formatCurrency(deal.value)}</td>
-                    <td className="px-3 py-3">
+                    <td className="px-3 py-2 text-slate-500">{companyById(deal.companyId)?.name}</td>
+                    <td className="px-3 py-2 text-right font-medium text-slate-700">{formatCurrency(deal.value)}</td>
+                    <td className="px-3 py-2">
                       <StageBadge stage={deal.stage} />
                     </td>
-                    <td className="px-3 py-3 text-slate-500">{deal.probability}%</td>
-                    <td className="px-3 py-3">
+                    <td className="px-3 py-2 text-slate-500">{deal.probability}%</td>
+                    <td className="px-3 py-2">
                       <div className="flex items-center gap-1.5">
                         <UserAvatar userId={deal.ownerId} size={22} />
                         <span className="text-slate-500 text-xs">{userById(deal.ownerId)?.name.split(' ')[0]}</span>
                       </div>
                     </td>
-                    <td className="px-3 py-3 text-slate-500">{formatDate(deal.expectedCloseDate)}</td>
+                    <td className="px-3 py-2 text-slate-500">{formatDate(deal.expectedCloseDate)}</td>
                   </tr>
                   </Fragment>
                   )
