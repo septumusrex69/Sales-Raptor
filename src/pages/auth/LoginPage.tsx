@@ -94,7 +94,14 @@ export function LoginPage() {
           <div className="flex flex-col items-center text-center">
             {/* The real lockup, not the mark with the wordmark re-set beside it — the spacing
                 between the wing and the letterforms is part of the mark. */}
-            <img src="/brand/raptor-lockup-navy.png" alt="Raptor by Bredell Ferreira" className="w-[290px] max-w-full h-auto" />
+            {/* Nudged left of true centre on purpose: the wing is light gold and the wordmark is
+                dark and heavy, so measured centring reads as sitting right of centre. The eye
+                balances mass, not boxes. */}
+            <img
+              src="/brand/raptor-lockup-navy.png"
+              alt="Raptor by Bredell Ferreira"
+              className="w-[290px] max-w-full h-auto mt-1 -translate-x-[8px]"
+            />
 
             <h1 className="mt-9 text-[13px] font-semibold uppercase tracking-[0.22em] text-[#12233a] pl-[0.22em]">Sign in to Raptor</h1>
             <p className="mt-2 text-sm text-slate-400">Recover. Rise. Take flight.</p>
