@@ -160,7 +160,7 @@ export function LeadDetail() {
           </div>
         )}
 
-        <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t border-slate-100">
+        <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-slate-100">
           {canEdit && <ActionButton icon={Pencil} label="Edit" onClick={() => setEditOpen(true)} />}
           {canEdit && active && (
             <ActionButton
@@ -542,16 +542,17 @@ export function LeadDetail() {
   )
 }
 
+/** Deliberately identical in weight to the Client page's action row — same size, same padding. */
 function ActionButton({ icon: Icon, label, onClick, tone, disabled }: { icon: typeof Pencil; label: string; onClick: () => void; tone?: 'danger'; disabled?: boolean }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-        tone === 'danger' ? 'border-red-100 text-red-600 hover:bg-red-50' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+      className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+        tone === 'danger' ? 'border-red-200 text-red-500 hover:bg-red-50' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
       }`}
     >
-      <Icon size={14} /> {label}
+      <Icon size={13} /> {label}
     </button>
   )
 }
