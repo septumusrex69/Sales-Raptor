@@ -28,7 +28,7 @@ const ALL_STATUSES: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Q
 export function LeadDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { leads, deals, contacts, activities, users, userById, updateLead, convertLeadToDeal, markLeadLost, deleteLead, addActivity, addContact, updateContact, addTask } = useAppStore()
+  const { leads, deals, contacts, activities, tasks, users, userById, updateLead, convertLeadToDeal, markLeadLost, deleteLead, addActivity, addContact, updateContact, addTask } = useAppStore()
   const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const lead = leads.find((l) => l.id === id)
@@ -48,6 +48,7 @@ export function LeadDetail() {
   const [contactEmailTarget, setContactEmailTarget] = useState<Contact | null>(null)
 
   const leadContacts = useMemo(() => contacts.filter((c) => c.leadId === id), [contacts, id])
+  const leadTasks = useMemo(() => tasks.filter((t) => t.leadId === id), [tasks, id])
 
   const timeline = useMemo(
     () => activities.filter((a) => a.leadId === id).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()),
@@ -271,91 +272,6 @@ export function LeadDetail() {
         </Card>
 
         <Card>
-          <CardHeader title="Lead Profile" />
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
-            <Field label="First Name" value={lead.firstName} />
-            <Field label="Last Name" value={lead.lastName} />
-            <Field label="Company" value={lead.companyName} />
-            <Field label="Job Title" value={lead.jobTitle} />
-            <Field label="Industry" value={lead.industry} />
-            <Field label="Country" value={lead.country} />
-            <Field label="Province" value={lead.province} />
-            <Field label="City / Town" value={lead.city} />
-            <Field label="Address" value={lead.address} />
-          </dl>
-        </Card>
-
-          <Card>
-            <CardHeader title="Lead Information" />
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
-              <Field label="Lead Source" value={lead.source} />
-              <Field label="Campaign" value={lead.campaign} />
-              <Field label="Assigned Owner" value={userById(lead.ownerId)?.name} />
-              <Field label="Lead Status" value={lead.status} />
-              <Field label="Lead Score" value={`${lead.score} / 100`} />
-              <Field label="Estimated Value" value={formatCurrency(lead.estimatedValue)} />
-              <Field label="Classification" value={lead.classification ? `Class ${lead.classification}` : undefined} />
-              <Field label="Date Created" value={formatDate(lead.createdAt)} />
-              <Field label="Last Contact" value={formatDate(lead.lastContactAt)} />
-              <Field label="Next Follow-up" value={formatDate(lead.nextFollowUpAt)} />
-            </dl>
-            {lead.notes && (
-              <div className="mt-4 pt-4 border-t border-slate-100">
-                <p className="text-xs font-medium text-slate-400 mb-1">Notes</p>
-                <p className="text-sm text-slate-600">{lead.notes}</p>
-              </div>
-            )}
-          </Card>
-
-          <Card>
-            <CardHeader title="Opportunity Information" />
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
-              {leadServiceValueList(lead).map((sv) =>
-                sv.service === 'Debt Collection' ? (
-                  <div key={sv.service} className="col-span-2 grid grid-cols-2 gap-x-6 gap-y-3.5">
-                    <Field label="Estimated Handover Amount" value={sv.handoverAmount != null ? formatCurrency(sv.handoverAmount) : undefined} />
-                    <Field label="Estimated Number of Accounts / Matters" value={sv.accountsCount != null ? String(sv.accountsCount) : undefined} />
-                  </div>
-                ) : (
-                  <Field
-                    key={sv.service}
-                    label={lead.services && lead.services.length > 1 ? `${sv.service} — ${serviceValueLabel(sv.service)}` : serviceValueLabel(sv.service)}
-                    value={sv.value != null ? formatCurrency(sv.value) : undefined}
-                  />
-                ),
-              )}
-              {lead.services?.includes('Other') && <Field label="Other Service — Please Specify" value={lead.otherServiceDetail} />}
-            </dl>
-            {(!lead.services || lead.services.length === 0) && !lead.estimatedProjectValue && (
-              <p className="text-xs text-slate-400">No products or services captured yet. Use Edit to add opportunity details.</p>
-            )}
-          </Card>
-
-          {resultingDeals.length > 0 && (
-            <Card>
-              <CardHeader title="Resulting Deal(s)" />
-              <div className="space-y-2">
-                {resultingDeals.map((d) => (
-                  <Link
-                    key={d.id}
-                    to={`/deals/${d.id}`}
-                    className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-slate-700">{d.name}</p>
-                      {d.service && <p className="text-xs text-slate-400">{d.service}</p>}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-semibold text-slate-700">{formatCurrency(d.value)}</span>
-                      <StageBadge stage={d.stage} />
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </Card>
-          )}
-
-        <Card>
           <CardHeader
             title="Emails"
             subtitle={`${emailActivities.length} message${emailActivities.length === 1 ? '' : 's'}`}
@@ -404,6 +320,113 @@ export function LeadDetail() {
             </div>
           )}
         </Card>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          <div className="lg:col-span-2 space-y-5">
+
+          {resultingDeals.length > 0 && (
+            <Card>
+              <CardHeader title="Resulting Deal(s)" />
+              <div className="space-y-2">
+                {resultingDeals.map((d) => (
+                  <Link
+                    key={d.id}
+                    to={`/deals/${d.id}`}
+                    className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">{d.name}</p>
+                      {d.service && <p className="text-xs text-slate-400">{d.service}</p>}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-semibold text-slate-700">{formatCurrency(d.value)}</span>
+                      <StageBadge stage={d.stage} />
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader title="Opportunity Information" />
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
+              {leadServiceValueList(lead).map((sv) =>
+                sv.service === 'Debt Collection' ? (
+                  <div key={sv.service} className="col-span-2 grid grid-cols-2 gap-x-6 gap-y-3.5">
+                    <Field label="Estimated Handover Amount" value={sv.handoverAmount != null ? formatCurrency(sv.handoverAmount) : undefined} />
+                    <Field label="Estimated Number of Accounts / Matters" value={sv.accountsCount != null ? String(sv.accountsCount) : undefined} />
+                  </div>
+                ) : (
+                  <Field
+                    key={sv.service}
+                    label={lead.services && lead.services.length > 1 ? `${sv.service} — ${serviceValueLabel(sv.service)}` : serviceValueLabel(sv.service)}
+                    value={sv.value != null ? formatCurrency(sv.value) : undefined}
+                  />
+                ),
+              )}
+              {lead.services?.includes('Other') && <Field label="Other Service — Please Specify" value={lead.otherServiceDetail} />}
+            </dl>
+            {(!lead.services || lead.services.length === 0) && !lead.estimatedProjectValue && (
+              <p className="text-xs text-slate-400">No products or services captured yet. Use Edit to add opportunity details.</p>
+            )}
+          </Card>
+          </div>
+          <div className="space-y-5">
+          <Card>
+            <CardHeader title="Lead Information" />
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
+              <Field label="Lead Source" value={lead.source} />
+              <Field label="Campaign" value={lead.campaign} />
+              <Field label="Assigned Owner" value={userById(lead.ownerId)?.name} />
+              <Field label="Lead Status" value={lead.status} />
+              <Field label="Lead Score" value={`${lead.score} / 100`} />
+              <Field label="Estimated Value" value={formatCurrency(lead.estimatedValue)} />
+              <Field label="Classification" value={lead.classification ? `Class ${lead.classification}` : undefined} />
+              <Field label="Date Created" value={formatDate(lead.createdAt)} />
+              <Field label="Last Contact" value={formatDate(lead.lastContactAt)} />
+              <Field label="Next Follow-up" value={formatDate(lead.nextFollowUpAt)} />
+            </dl>
+            {lead.notes && (
+              <div className="mt-4 pt-4 border-t border-slate-100">
+                <p className="text-xs font-medium text-slate-400 mb-1">Notes</p>
+                <p className="text-sm text-slate-600">{lead.notes}</p>
+              </div>
+            )}
+          </Card>
+
+          <Card>
+            <CardHeader title="Lead Profile" />
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
+              <Field label="First Name" value={lead.firstName} />
+              <Field label="Last Name" value={lead.lastName} />
+              <Field label="Company" value={lead.companyName} />
+              <Field label="Job Title" value={lead.jobTitle} />
+              <Field label="Industry" value={lead.industry} />
+              <Field label="Country" value={lead.country} />
+              <Field label="Province" value={lead.province} />
+              <Field label="City / Town" value={lead.city} />
+              <Field label="Address" value={lead.address} />
+            </dl>
+          </Card>
+
+            <Card>
+              <CardHeader title="Tasks" />
+              {leadTasks.length === 0 ? (
+                <p className="text-sm text-slate-400">No tasks yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {leadTasks.map((t) => (
+                    <div key={t.id} className="text-sm">
+                      <p className="text-slate-700">{t.title}</p>
+                      <p className="text-xs text-slate-400">Due {formatDate(t.dueDate)}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          </div>
+        </div>
       </div>
 
       {editOpen && (
