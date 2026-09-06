@@ -5,7 +5,7 @@ import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { canEditOwned, canReassign, isAssignableOwner} from '../../lib/permissions'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
-import { RecordOwner } from '../../components/RecordOwner'
+import { HeroOwner } from '../../components/RecordOwner'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { AddContactModal } from '../../components/contacts/AddContactModal'
@@ -102,11 +102,16 @@ export function LeadDetail() {
             <span>Source: {lead.source}</span>
           </span>
         }
-      />
+      >
+        <HeroOwner ownerId={lead.ownerId} label="Owner" />
+      </DashboardHero>
 
       <Card>
         <div className="flex flex-wrap items-end gap-x-10 gap-y-3">
-          <RecordOwner ownerId={lead.ownerId} label="Salesperson" />
+          <div>
+            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Date Added</p>
+            <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatDate(lead.createdAt)}</p>
+          </div>
           <div>
             <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide mb-1.5">Class</p>
             <InlineSelect
@@ -163,12 +168,10 @@ export function LeadDetail() {
             <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Lead Score</p>
             <p className="text-2xl font-bold text-slate-800 mt-0.5">{lead.score}</p>
           </div>
-          {resultingDeals.length > 0 && (
-            <Link to={buildDrilldownUrl('/deals', { view: 'table' })} className="hover:opacity-70">
-              <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Deals</p>
-              <p className="text-2xl font-bold text-slate-800 mt-0.5">{resultingDeals.length}</p>
-            </Link>
-          )}
+          <Link to={buildDrilldownUrl('/deals', { view: 'table' })} className="hover:opacity-70">
+            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Open Deals</p>
+            <p className="text-2xl font-bold text-slate-800 mt-0.5">{openLeadDeals.length}</p>
+          </Link>
         </div>
 
         {lead.services && lead.services.length > 0 && (
