@@ -24,6 +24,7 @@ import { buildDrilldownUrl, SALES_MONTH_PARAM } from '../lib/drilldown'
 import { downloadCsv } from '../lib/csvExport'
 import type { ID, Task, Team, User } from '../types'
 import { isAssignableOwner } from '../lib/permissions'
+import { isActiveLead, isEngagedLead } from '../lib/leadStatus'
 
 function daysAgoLabel(dateIso: string) {
   const diff = Math.round((new Date(dateIso).getTime() - TODAY.getTime()) / (1000 * 60 * 60 * 24))
@@ -95,9 +96,7 @@ export function Dashboard() {
     function compute(p: SalesMonthPeriod) {
       const newLeads = scopedLeads.filter((l) => isWithinPeriod(l.createdAt, p))
       const meaningfulActivities = scopedActivities.filter((a) => isMeaningfulActivity(a) && isWithinPeriod(a.activityDate, p))
-      const qualified = scopedLeads.filter(
-        (l) => isWithinPeriod(l.createdAt, p) && ['Qualified', 'Proposal Required', 'Converted'].includes(l.status),
-      )
+      const qualified = scopedLeads.filter((l) => isWithinPeriod(l.createdAt, p) && isEngagedLead(l))
       const converted = scopedLeads.filter((l) => isWithinPeriod(l.createdAt, p) && l.status === 'Converted')
       const won = scopedDeals.filter((d) => d.wonAt && isWithinPeriod(d.wonAt, p))
       const lost = scopedDeals.filter((d) => d.lostAt && isWithinPeriod(d.lostAt, p))
@@ -121,7 +120,7 @@ export function Dashboard() {
   }, [scopedLeads, scopedDeals, scopedActivities, period, previousPeriod, compareMode])
 
   const secondary = useMemo(() => {
-    const activeLeads = scopedLeads.filter((l) => l.status !== 'Converted' && l.status !== 'Lost')
+    const activeLeads = scopedLeads.filter(isActiveLead)
     const newLeadsThisPeriod = scopedLeads.filter((l) => isWithinPeriod(l.createdAt, period))
     const touchedLeadIds = new Set(
       scopedActivities.filter((a) => a.leadId && isMeaningfulActivity(a) && isWithinPeriod(a.activityDate, period)).map((a) => a.leadId as string),
@@ -169,7 +168,7 @@ export function Dashboard() {
       repIds.map((repId) => {
         const rep = userById(repId)
         const ownLeads = leads.filter((l) => l.ownerId === repId)
-        const activeOwnLeads = ownLeads.filter((l) => l.status !== 'Converted' && l.status !== 'Lost')
+        const activeOwnLeads = ownLeads.filter(isActiveLead)
         const touchedIds = new Set(
           activities.filter((a) => a.userId === repId && a.leadId && isMeaningfulActivity(a) && isWithinPeriod(a.activityDate, period)).map((a) => a.leadId as string),
         )
@@ -298,7 +297,7 @@ export function Dashboard() {
           label="Qualified Leads"
           value={kpis.curr.qualified.toString()}
           pctChange={kpis.prev ? pctDelta(kpis.curr.qualified, kpis.prev.qualified) : undefined}
-          to={buildDrilldownUrl('/leads', { status: 'Qualified', [SALES_MONTH_PARAM]: periodParam })}
+          to={buildDrilldownUrl('/leads', { status: 'Hot Lead', [SALES_MONTH_PARAM]: periodParam })}
         />
         <StatTile
           label="Deals Won"

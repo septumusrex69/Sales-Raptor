@@ -44,7 +44,7 @@ export function WinRateCard({ deals, won, lost, winRate, newLeads, qualified, co
 
   const pipeline = [
     { label: 'New Leads', value: newLeads, color: '#6086a9', bg: '#edf1f5', to: buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam }) },
-    { label: 'Qualified', value: qualified, color: '#406d58', bg: '#eef4f1', to: buildDrilldownUrl('/leads', { status: 'Qualified', [SALES_MONTH_PARAM]: periodParam }) },
+    { label: 'Hot leads', value: qualified, color: '#406d58', bg: '#eef4f1', to: buildDrilldownUrl('/leads', { status: 'Hot Lead', [SALES_MONTH_PARAM]: periodParam }) },
     { label: 'Converted to Deal', value: converted, color: '#957323', bg: '#f7f3eb', to: buildDrilldownUrl('/leads', { status: 'Converted', [SALES_MONTH_PARAM]: periodParam }) },
   ]
 

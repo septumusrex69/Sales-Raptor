@@ -22,14 +22,11 @@ export function Badge({ children, tone = 'slate', className }: { children: React
 }
 
 const LEAD_STATUS_TONE: Record<string, BadgeTone> = {
-  New: 'new',
-  'Attempting Contact': 'attempting',
-  Contacted: 'contacted',
-  Qualified: 'qualified',
-  Unqualified: 'slate',
-  'Proposal Required': 'proposal',
+  'No Contact Yet': 'new',
+  Interested: 'contacted',
+  'Hot Lead': 'qualified',
   Converted: 'won',
-  Lost: 'lost',
+  Rejected: 'lost',
 }
 
 const DEAL_STAGE_TONE: Record<string, BadgeTone> = {

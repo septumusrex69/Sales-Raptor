@@ -1,14 +1,24 @@
 export type ID = string
 
 export type LeadStatus =
-  | 'New'
-  | 'Attempting Contact'
-  | 'Contacted'
-  | 'Qualified'
-  | 'Unqualified'
-  | 'Proposal Required'
+  | 'No Contact Yet'
+  | 'Interested'
+  | 'Hot Lead'
   | 'Converted'
-  | 'Lost'
+  | 'Rejected'
+
+/**
+ * Why a lead ended without becoming a client. 'We declined them' is deliberately its own
+ * reason: a book turned down on our side isn't a loss, and lumping it in with the rest
+ * would make a deliberately selective month read as a bad one.
+ */
+export type RejectionReason =
+  | 'Not interested anymore'
+  | 'Too expensive'
+  | 'Went with another provider'
+  | 'No response'
+  | 'We declined them'
+  | 'Other'
 
 export type LeadSource =
   | 'Website'
@@ -98,6 +108,10 @@ export interface Lead {
   createdAt: string
   updatedAt: string
   convertedDealId?: ID
+  /** Set when status is 'Rejected'. */
+  rejectionReason?: RejectionReason
+  /** Free-text detail captured alongside the rejection reason. */
+  rejectionNote?: string
 }
 
 export type DealStage =

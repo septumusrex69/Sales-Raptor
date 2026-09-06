@@ -18,10 +18,11 @@ import { parseEmailActivity } from '../../lib/emailActivity'
 import { buildDrilldownUrl, SALES_MONTH_PARAM } from '../../lib/drilldown'
 import { STAGE_COLORS } from '../../lib/colors'
 import { isAssignableOwner } from '../../lib/permissions'
+import { LEAD_STATUSES, isActiveLead, isEngagedLead } from '../../lib/leadStatus'
 
 const TABS = ['Overview', 'Leads', 'Pipeline', 'Products & Services', 'Debt Collection', 'Sales Team', 'Lead Sources', 'Geography', 'Lost Deals'] as const
 type Tab = (typeof TABS)[number]
-const ALL_STATUSES: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Qualified', 'Unqualified', 'Proposal Required', 'Converted', 'Lost']
+const ALL_STATUSES: LeadStatus[] = LEAD_STATUSES
 const BAR_COLOR = STAGE_COLORS.Negotiation
 
 function pctDelta(curr: number, prev: number): number {
@@ -100,11 +101,14 @@ export function ReportsPage() {
 
   function computeCore(periodLeads: Lead[], won: Deal[], lost: Deal[]) {
     const total = periodLeads.length
-    const newCount = periodLeads.filter((l) => l.status === 'New').length
-    const contacted = periodLeads.filter((l) => l.status === 'Attempting Contact' || l.status === 'Contacted').length
-    const qualified = periodLeads.filter((l) => l.status === 'Qualified' || l.status === 'Proposal Required' || l.status === 'Converted').length
+    const noContact = periodLeads.filter((l) => l.status === 'No Contact Yet').length
+    const interested = periodLeads.filter((l) => l.status === 'Interested').length
+    const hot = periodLeads.filter((l) => l.status === 'Hot Lead').length
+    // Everyone showing real intent, including the ones that went on to convert — the base the
+    // pipeline is actually forecast from, rather than any single status.
+    const engaged = periodLeads.filter(isEngagedLead).length
     const wonLeads = periodLeads.filter((l) => l.status === 'Converted').length
-    const lostLeads = periodLeads.filter((l) => l.status === 'Lost').length
+    const rejectedLeads = periodLeads.filter((l) => l.status === 'Rejected').length
     const conversionRate = total ? Math.round((wonLeads / total) * 100) : 0
     const revenueWon = won.reduce((s, d) => s + d.value, 0)
     const avgDealValue = won.length ? Math.round(revenueWon / won.length) : 0
@@ -125,7 +129,7 @@ export function ReportsPage() {
     }
     const avgTimeToConversionDays = conversionTimes.length ? Math.round(conversionTimes.reduce((s, v) => s + v, 0) / conversionTimes.length) : undefined
 
-    return { total, newCount, contacted, qualified, wonLeads, lostLeads, conversionRate, revenueWon, avgDealValue, winRate, totalHandoverValue, avgHandoverValue, avgTimeToConversionDays }
+    return { total, noContact, interested, hot, engaged, wonLeads, rejectedLeads, conversionRate, revenueWon, avgDealValue, winRate, totalHandoverValue, avgHandoverValue, avgTimeToConversionDays }
   }
 
   const core = useMemo(() => computeCore(leadsInPeriod, wonDealsInPeriod, lostDealsInPeriod), [leadsInPeriod, wonDealsInPeriod, lostDealsInPeriod])
@@ -162,19 +166,19 @@ export function ReportsPage() {
     () =>
       services.map((svc) => {
         const svcLeads = leadsInPeriod.filter((l) => l.services?.includes(svc))
-        const qualified = svcLeads.filter((l) => l.status === 'Qualified' || l.status === 'Proposal Required' || l.status === 'Converted')
+        const engaged = svcLeads.filter(isEngagedLead)
         const won = svcLeads.filter((l) => l.status === 'Converted')
-        const lost = svcLeads.filter((l) => l.status === 'Lost')
-        const open = svcLeads.filter((l) => l.status !== 'Converted' && l.status !== 'Lost')
+        const rejected = svcLeads.filter((l) => l.status === 'Rejected')
+        const open = svcLeads.filter(isActiveLead)
         const pipelineVal = open.reduce((s, l) => s + (l.estimatedProjectValue ?? l.estimatedValue ?? 0), 0)
         const values = svcLeads.map((l) => l.estimatedProjectValue ?? l.estimatedValue).filter((v): v is number => v != null)
         const avgValue = values.length ? Math.round(values.reduce((s, v) => s + v, 0) / values.length) : 0
         return {
           service: svc,
           leads: svcLeads.length,
-          qualified: qualified.length,
+          engaged: engaged.length,
           won: won.length,
-          lost: lost.length,
+          rejected: rejected.length,
           conversionRate: svcLeads.length ? Math.round((won.length / svcLeads.length) * 100) : 0,
           pipelineValue: pipelineVal,
           avgValue,
@@ -186,7 +190,7 @@ export function ReportsPage() {
   const debtCollectionLeads = useMemo(() => leadsInPeriod.filter((l) => l.services?.includes('Debt Collection')), [leadsInPeriod])
   const debtCollectionStats = useMemo(() => {
     const won = debtCollectionLeads.filter((l) => l.status === 'Converted')
-    const lost = debtCollectionLeads.filter((l) => l.status === 'Lost')
+    const rejected = debtCollectionLeads.filter((l) => l.status === 'Rejected')
     const amounts = debtCollectionLeads.map((l) => l.estimatedHandoverAmount).filter((v): v is number => v != null)
     const totalHandover = amounts.reduce((s, v) => s + v, 0)
     const accounts = debtCollectionLeads.map((l) => l.estimatedAccountsCount).filter((v): v is number => v != null)
@@ -198,7 +202,7 @@ export function ReportsPage() {
       avgHandover: amounts.length ? Math.round(totalHandover / amounts.length) : 0,
       totalAccounts,
       won: won.length,
-      lost: lost.length,
+      rejected: rejected.length,
       conversionRate: debtCollectionLeads.length ? Math.round((won.length / debtCollectionLeads.length) * 100) : 0,
       wonHandoverValue,
     }
@@ -239,15 +243,15 @@ export function ReportsPage() {
     () =>
       leadSources.map((s) => {
         const sourceLeads = leadsInPeriod.filter((l) => l.source === s)
-        const qualifiedLeads = sourceLeads.filter((l) => l.status === 'Qualified' || l.status === 'Proposal Required' || l.status === 'Converted')
+        const engagedLeads = sourceLeads.filter(isEngagedLead)
         const won = wonDealsInPeriod.filter((d) => d.source === s)
         return {
           source: s,
           leads: sourceLeads.length,
-          qualified: qualifiedLeads.length,
+          engaged: engagedLeads.length,
           won: won.length,
           revenue: won.reduce((sum, d) => sum + d.value, 0),
-          conversionRate: sourceLeads.length ? Math.round((qualifiedLeads.length / sourceLeads.length) * 100) : 0,
+          conversionRate: sourceLeads.length ? Math.round((engagedLeads.length / sourceLeads.length) * 100) : 0,
         }
       }),
     [leadsInPeriod, wonDealsInPeriod],
@@ -258,7 +262,7 @@ export function ReportsPage() {
       provinces.map((p) => {
         const provinceLeads = leadsInPeriod.filter((l) => l.province === p)
         const won = provinceLeads.filter((l) => l.status === 'Converted')
-        const open = provinceLeads.filter((l) => l.status !== 'Converted' && l.status !== 'Lost')
+        const open = provinceLeads.filter(isActiveLead)
         return {
           province: p,
           leads: provinceLeads.length,
@@ -424,10 +428,10 @@ export function ReportsPage() {
               to={buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam })}
             />
             <StatTile
-              label="Qualified Leads"
-              value={String(core.qualified)}
-              pctChange={prevCore ? pctDelta(core.qualified, prevCore.qualified) : undefined}
-              to={buildDrilldownUrl('/leads', { status: 'Qualified', [SALES_MONTH_PARAM]: periodParam })}
+              label="Hot Leads"
+              value={String(core.hot)}
+              pctChange={prevCore ? pctDelta(core.hot, prevCore.hot) : undefined}
+              to={buildDrilldownUrl('/leads', { status: 'Hot Lead', [SALES_MONTH_PARAM]: periodParam })}
             />
             <StatTile label="Conversion Rate" value={`${core.conversionRate}%`} pctChange={prevCore ? pctDelta(core.conversionRate, prevCore.conversionRate) : undefined} />
             <StatTile label="Win Rate" value={`${core.winRate}%`} pctChange={prevCore ? pctDelta(core.winRate, prevCore.winRate) : undefined} />
@@ -470,11 +474,11 @@ export function ReportsPage() {
         <div className="space-y-5">
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <StatTile label="Total Leads" value={String(core.total)} to={buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam })} />
-            <StatTile label="New" value={String(core.newCount)} to={buildDrilldownUrl('/leads', { status: 'New', [SALES_MONTH_PARAM]: periodParam })} />
-            <StatTile label="Contacted" value={String(core.contacted)} to={buildDrilldownUrl('/leads', { status: 'Contacted', [SALES_MONTH_PARAM]: periodParam })} />
-            <StatTile label="Qualified" value={String(core.qualified)} to={buildDrilldownUrl('/leads', { status: 'Qualified', [SALES_MONTH_PARAM]: periodParam })} />
-            <StatTile label="Won" value={String(core.wonLeads)} to={buildDrilldownUrl('/leads', { status: 'Converted', [SALES_MONTH_PARAM]: periodParam })} />
-            <StatTile label="Lost" value={String(core.lostLeads)} to={buildDrilldownUrl('/leads', { status: 'Lost', [SALES_MONTH_PARAM]: periodParam })} />
+            <StatTile label="No Contact Yet" value={String(core.noContact)} to={buildDrilldownUrl('/leads', { status: 'No Contact Yet', [SALES_MONTH_PARAM]: periodParam })} />
+            <StatTile label="Interested" value={String(core.interested)} to={buildDrilldownUrl('/leads', { status: 'Interested', [SALES_MONTH_PARAM]: periodParam })} />
+            <StatTile label="Hot Leads" value={String(core.hot)} to={buildDrilldownUrl('/leads', { status: 'Hot Lead', [SALES_MONTH_PARAM]: periodParam })} />
+            <StatTile label="Converted" value={String(core.wonLeads)} to={buildDrilldownUrl('/leads', { status: 'Converted', [SALES_MONTH_PARAM]: periodParam })} />
+            <StatTile label="Rejected" value={String(core.rejectedLeads)} to={buildDrilldownUrl('/leads', { status: 'Rejected', [SALES_MONTH_PARAM]: periodParam })} />
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatTile label="Conversion Rate" value={`${core.conversionRate}%`} size="secondary" />
@@ -556,9 +560,9 @@ export function ReportsPage() {
                 <tr className="text-left text-xs text-slate-400">
                   <th className="font-medium px-5 py-3">Service</th>
                   <th className="font-medium px-3 py-3 text-center">Leads</th>
-                  <th className="font-medium px-3 py-3 text-center">Qualified</th>
+                  <th className="font-medium px-3 py-3 text-center">Engaged</th>
                   <th className="font-medium px-3 py-3 text-center">Won</th>
-                  <th className="font-medium px-3 py-3 text-center">Lost</th>
+                  <th className="font-medium px-3 py-3 text-center">Rejected</th>
                   <th className="font-medium px-3 py-3 text-center">Conversion</th>
                   <th className="font-medium px-3 py-3 text-right">Pipeline Value</th>
                   <th className="font-medium px-3 py-3 text-right">Avg Value</th>
@@ -578,9 +582,9 @@ export function ReportsPage() {
                           {s.leads}
                         </Link>
                       </td>
-                      <td className="px-3 py-3 text-center text-slate-600">{s.qualified}</td>
+                      <td className="px-3 py-3 text-center text-slate-600">{s.engaged}</td>
                       <td className="px-3 py-3 text-center text-slate-600">{s.won}</td>
-                      <td className="px-3 py-3 text-center text-slate-600">{s.lost}</td>
+                      <td className="px-3 py-3 text-center text-slate-600">{s.rejected}</td>
                       <td className="px-3 py-3 text-center text-slate-600">{s.conversionRate}%</td>
                       <td className="px-3 py-3 text-right font-semibold text-slate-700">{formatCurrency(s.pipelineValue)}</td>
                       <td className="px-3 py-3 text-right text-slate-600">{formatCurrency(s.avgValue)}</td>
@@ -604,14 +608,14 @@ export function ReportsPage() {
             <StatTile label="Average Handover Amount" value={formatCurrency(debtCollectionStats.avgHandover)} />
             <StatTile label="Total Accounts" value={String(debtCollectionStats.totalAccounts)} />
             <StatTile
-              label="Won"
+              label="Converted"
               value={String(debtCollectionStats.won)}
               to={buildDrilldownUrl('/leads', { service: 'Debt Collection', status: 'Converted', [SALES_MONTH_PARAM]: periodParam })}
             />
             <StatTile
-              label="Lost"
-              value={String(debtCollectionStats.lost)}
-              to={buildDrilldownUrl('/leads', { service: 'Debt Collection', status: 'Lost', [SALES_MONTH_PARAM]: periodParam })}
+              label="Rejected"
+              value={String(debtCollectionStats.rejected)}
+              to={buildDrilldownUrl('/leads', { service: 'Debt Collection', status: 'Rejected', [SALES_MONTH_PARAM]: periodParam })}
             />
             <StatTile label="Conversion Rate" value={`${debtCollectionStats.conversionRate}%`} />
             <StatTile label="Won Handover Value" value={formatCurrency(debtCollectionStats.wonHandoverValue)} />
@@ -703,7 +707,7 @@ export function ReportsPage() {
                 <tr className="text-left text-xs text-slate-400">
                   <th className="font-medium px-5 py-3">Source</th>
                   <th className="font-medium px-3 py-3 text-center">Leads</th>
-                  <th className="font-medium px-3 py-3 text-center">Qualified Leads</th>
+                  <th className="font-medium px-3 py-3 text-center">Engaged Leads</th>
                   <th className="font-medium px-3 py-3 text-center">Deals Won</th>
                   <th className="font-medium px-3 py-3 text-right">Revenue</th>
                   <th className="font-medium px-3 py-3 text-center">Conversion Rate</th>
@@ -723,7 +727,7 @@ export function ReportsPage() {
                           {s.leads}
                         </Link>
                       </td>
-                      <td className="px-3 py-3 text-center text-slate-600">{s.qualified}</td>
+                      <td className="px-3 py-3 text-center text-slate-600">{s.engaged}</td>
                       <td className="px-3 py-3 text-center text-slate-600">{s.won}</td>
                       <td className="px-3 py-3 text-right font-semibold text-slate-700">{formatCurrency(s.revenue)}</td>
                       <td className="px-3 py-3 text-center text-slate-600">{s.conversionRate}%</td>

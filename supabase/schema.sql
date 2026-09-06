@@ -172,7 +172,11 @@ create table if not exists public.leads (
   website text,
   source text not null,
   campaign text,
-  status text not null default 'New',
+  -- 'No Contact Yet' | 'Interested' | 'Hot Lead' | 'Converted' | 'Rejected'.
+  -- Deliberately unconstrained text: the vocabulary lives in src/lib/leadStatus.ts
+  -- and has already changed once; a CHECK here would mean a migration every time
+  -- the sales team renames a stage.
+  status text not null default 'No Contact Yet',
   score integer not null default 10,
   estimated_value numeric not null default 0,
   owner_id uuid not null references public.profiles (id),
@@ -200,7 +204,12 @@ create table if not exists public.leads (
   next_follow_up_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  converted_deal_id uuid
+  converted_deal_id uuid,
+  -- Set together when a lead is rejected: why, and anything worth remembering if
+  -- they come back. 'We declined them' is one of the reasons, so a selective month
+  -- doesn't read as a bad one.
+  rejection_reason text,
+  rejection_note text
 );
 
 -- Covers re-running this script against a database where `leads` already

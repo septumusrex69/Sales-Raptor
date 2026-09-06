@@ -32,6 +32,7 @@ import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { LeadForm } from '../../components/layout/QuickAdd'
 import { LeadsPeriodBar } from '../../components/leads/LeadsPeriodBar'
 import { LeadsKpiRow, type LeadsKpiValues } from '../../components/leads/LeadsKpiRow'
+import { RejectLeadModal } from '../../components/leads/RejectLeadModal'
 import { formatCurrency, formatDate, formatLeadNumber, daysAgoLabel, industries, leadClassifications, leadSources, provinces, services, TODAY } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
 import { decodeSalesMonthParam, isWithinPeriod, type SalesMonthPeriod } from '../../lib/salesMonth'
@@ -39,8 +40,9 @@ import { getPreviousEquivalentRange, getThisCalendarMonth } from '../../lib/date
 import { isMeaningfulActivity } from '../../lib/meaningfulActivity'
 import { ALL_COLUMNS, defaultVisibleColumns, SORTABLE_COLUMN_KEYS, type ColumnKey, type SortKey } from '../../lib/leadColumns'
 import type { Lead, LeadClassification, LeadStatus, ProductService } from '../../types'
+import { LEAD_STATUSES, isActiveLead } from '../../lib/leadStatus'
 
-const ALL_STATUSES: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Qualified', 'Unqualified', 'Proposal Required', 'Converted', 'Lost']
+const ALL_STATUSES: LeadStatus[] = LEAD_STATUSES
 const SCORE_THRESHOLDS = ['All', '80', '60', '40', '20'] as const
 const PAGE_SIZES = [10, 25, 50, 100]
 
@@ -68,7 +70,7 @@ function isStaleClassAContact(lead: Lead) {
 
 export function LeadsList() {
   const store = useAppStore()
-  const { leads, activities, users, userById, updateLead, markLeadLost, deleteLead, convertLeadToDeal, addActivity } = store
+  const { leads, activities, users, userById, updateLead, rejectLead, deleteLead, convertLeadToClient, addActivity } = store
   const { currentUser } = useAuth()
   const canReassign = canReassignRole(currentUser)
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
@@ -99,6 +101,7 @@ export function LeadsList() {
   const [addOpen, setAddOpen] = useState(false)
   const [reassignLead, setReassignLead] = useState<Lead | null>(null)
   const [deleteLeadTarget, setDeleteLeadTarget] = useState<Lead | null>(null)
+  const [rejectLeadTarget, setRejectLeadTarget] = useState<Lead | null>(null)
   const [openServicesFor, setOpenServicesFor] = useState<string | null>(null)
 
   // One-time drill-down filters carried in from Dashboard/Reports links — not exposed as UI controls.
@@ -108,11 +111,11 @@ export function LeadsList() {
   const cityOptions = useMemo(() => Array.from(new Set(leads.map((l) => l.city).filter((c): c is string => Boolean(c)))).sort(), [leads])
 
   function matchesLeadFilters(l: Lead) {
-    // Once converted, a lead is no longer an active thing to chase — it's
-    // tracked as a Deal from here on. The default (no explicit status
-    // chosen) view excludes them so the working list stays about leads
-    // still worth pursuing; picking "Converted" explicitly still shows them.
-    if (status === 'All' && l.status === 'Converted') return false
+    // A lead stays on this list until it ends one way or the other — converted into a
+    // client, or rejected. Both are still on file and still reportable; they just drop
+    // out of the default working view so it stays about leads worth chasing today.
+    // Picking "Converted" or "Rejected" explicitly still shows them.
+    if (status === 'All' && !isActiveLead(l)) return false
     if (status !== 'All' && l.status !== status) return false
     if (source !== 'All' && l.source !== source) return false
     if (owner !== 'All' && l.ownerId !== owner) return false
@@ -160,8 +163,8 @@ export function LeadsList() {
   function computeKpis(rows: Lead[]): LeadsKpiValues {
     return {
       totalLeads: rows.length,
-      newLeads: rows.filter((l) => l.status === 'New').length,
-      qualified: rows.filter((l) => l.status === 'Qualified').length,
+      newLeads: rows.filter((l) => l.status === 'No Contact Yet').length,
+      qualified: rows.filter((l) => l.status === 'Hot Lead').length,
       converted: rows.filter((l) => l.status === 'Converted').length,
       estValueTotal: rows.reduce((s, l) => s + (l.estimatedValue ?? 0), 0),
       handoverTotal: rows.reduce((s, l) => s + (l.estimatedHandoverAmount ?? 0), 0),
@@ -485,11 +488,11 @@ export function LeadsList() {
                           ...(canEditOwned(currentUser, lead.ownerId)
                             ? [
                                 {
-                                  label: 'Convert to deal',
+                                  label: 'Convert to client',
                                   icon: <ArrowRightLeft size={14} />,
                                   onClick: () => {
-                                    const deal = convertLeadToDeal(lead.id)
-                                    if (deal) navigate(`/deals/${deal.id}`)
+                                    const result = convertLeadToClient(lead.id)
+                                    if (result) navigate(`/companies/${result.companyId}`)
                                   },
                                 },
                               ]
@@ -497,7 +500,7 @@ export function LeadsList() {
                           ...(canReassign ? [{ label: 'Reassign', icon: <UserCog size={14} />, onClick: () => setReassignLead(lead) }] : []),
                           ...(canEditOwned(currentUser, lead.ownerId)
                             ? [
-                                { label: 'Mark lost', icon: <XCircle size={14} />, danger: true, onClick: () => markLeadLost(lead.id) },
+                                { label: 'Reject', icon: <XCircle size={14} />, danger: true, onClick: () => setRejectLeadTarget(lead) },
                                 { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onClick: () => setDeleteLeadTarget(lead) },
                               ]
                             : []),
@@ -592,6 +595,13 @@ export function LeadsList() {
             ))}
           </div>
         </Modal>
+      )}
+      {rejectLeadTarget && (
+        <RejectLeadModal
+          leadName={`${rejectLeadTarget.firstName} ${rejectLeadTarget.lastName}`}
+          onClose={() => setRejectLeadTarget(null)}
+          onConfirm={(reason, note) => rejectLead(rejectLeadTarget.id, reason, note)}
+        />
       )}
       {deleteLeadTarget && (
         <ConfirmDeleteModal

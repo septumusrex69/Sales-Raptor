@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Pencil, ArrowRightLeft, StickyNote, CheckSquare, Calendar, XCircle, Phone, Mail, Trash2, Plus } from 'lucide-react'
+import { ArrowLeft, Pencil, UserPlus, StickyNote, CalendarClock, Users2, XCircle, Phone, Mail, Trash2, Plus } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { canEditOwned, canReassign, isAssignableOwner} from '../../lib/permissions'
@@ -14,21 +14,22 @@ import { StatusBadge, ServiceBadge, StageBadge, ClassificationBadge } from '../.
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
+import { QuickLogModal, ScheduleFollowUpModal, ScheduleMeetingModal } from '../../components/QuickModals'
+import { RejectLeadModal } from '../../components/leads/RejectLeadModal'
+import { LEAD_STATUSES, isActiveLead } from '../../lib/leadStatus'
 import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/ui/RowLimitSelect'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
 import { parseEmailActivity } from '../../lib/emailActivity'
 import { buildDrilldownUrl } from '../../lib/drilldown'
 import { formatCurrency, formatDate, formatLeadNumber, industries, leadSources } from '../../data/mockData'
-import type { ActivityType, Contact, LeadStatus, TaskType } from '../../types'
+import type { Contact, LeadStatus } from '../../types'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, serviceValueLabel, leadServiceValueList } from '../../components/leads/LeadOpportunityFields'
-
-const ALL_STATUSES: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Qualified', 'Unqualified', 'Proposal Required', 'Converted', 'Lost']
 
 export function LeadDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { leads, deals, contacts, activities, tasks, users, userById, updateLead, convertLeadToDeal, markLeadLost, deleteLead, addActivity, addContact, updateContact, addTask } = useAppStore()
+  const { leads, deals, contacts, activities, tasks, users, userById, updateLead, convertLeadToClient, rejectLead, deleteLead, addActivity, addContact, updateContact, addTask } = useAppStore()
   const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const lead = leads.find((l) => l.id === id)
@@ -36,8 +37,11 @@ export function LeadDetail() {
   const canEdit = canEditOwned(currentUser, lead?.ownerId)
 
   const [editOpen, setEditOpen] = useState(false)
-  const [activityOpen, setActivityOpen] = useState(false)
-  const [taskOpen, setTaskOpen] = useState<'task' | 'meeting' | null>(null)
+  const [callOpen, setCallOpen] = useState(false)
+  const [noteOpen, setNoteOpen] = useState(false)
+  const [followUpOpen, setFollowUpOpen] = useState(false)
+  const [meetingOpen, setMeetingOpen] = useState(false)
+  const [rejectOpen, setRejectOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [emailOpen, setEmailOpen] = useState(false)
   const [emailLimit, setEmailLimit] = useState<RowLimit>(5)
@@ -70,6 +74,8 @@ export function LeadDetail() {
       </div>
     )
   }
+
+  const active = isActiveLead(lead)
 
   return (
     <div className="space-y-5">
@@ -147,23 +153,32 @@ export function LeadDetail() {
           </div>
         )}
 
+        {lead.status === 'Rejected' && lead.rejectionReason && (
+          <div className="mt-4 rounded-lg border border-red-100 bg-red-50/60 px-3.5 py-2.5">
+            <p className="text-xs font-medium text-red-700">Rejected — {lead.rejectionReason}</p>
+            {lead.rejectionNote && <p className="text-sm text-red-900/70 mt-0.5">{lead.rejectionNote}</p>}
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t border-slate-100">
           {canEdit && <ActionButton icon={Pencil} label="Edit" onClick={() => setEditOpen(true)} />}
-          {canEdit && (
+          {canEdit && active && (
             <ActionButton
-              icon={ArrowRightLeft}
-              label="Convert"
+              icon={UserPlus}
+              label="Convert to Client"
               onClick={() => {
-                const deal = convertLeadToDeal(lead.id)
-                if (deal) navigate(`/deals/${deal.id}`)
+                const result = convertLeadToClient(lead.id)
+                // The client record is where the handover actually gets worked, so that's where
+                // the person doing the converting should land — not on one of the deals it made.
+                if (result) navigate(`/companies/${result.companyId}`)
               }}
-              disabled={lead.status === 'Converted' || lead.status === 'Lost'}
             />
           )}
-          <ActionButton icon={StickyNote} label="Add Activity" onClick={() => setActivityOpen(true)} />
-          <ActionButton icon={CheckSquare} label="Create Task" onClick={() => setTaskOpen('task')} />
-          <ActionButton icon={Calendar} label="Schedule Meeting" onClick={() => setTaskOpen('meeting')} />
-          {canEdit && <ActionButton icon={XCircle} label="Mark Lost" tone="danger" onClick={() => markLeadLost(lead.id)} disabled={lead.status === 'Lost'} />}
+          <ActionButton icon={Phone} label="Log Call" onClick={() => setCallOpen(true)} />
+          <ActionButton icon={CalendarClock} label="Schedule Follow-up" onClick={() => setFollowUpOpen(true)} />
+          <ActionButton icon={Users2} label="Schedule Meeting" onClick={() => setMeetingOpen(true)} />
+          <ActionButton icon={StickyNote} label="Add Note" onClick={() => setNoteOpen(true)} />
+          {canEdit && active && <ActionButton icon={XCircle} label="Reject" tone="danger" onClick={() => setRejectOpen(true)} />}
           {canEdit && <ActionButton icon={Trash2} label="Delete" tone="danger" onClick={() => setDeleteOpen(true)} />}
         </div>
       </Card>
@@ -386,6 +401,7 @@ export function LeadDetail() {
               <Field label="Date Created" value={formatDate(lead.createdAt)} />
               <Field label="Last Contact" value={formatDate(lead.lastContactAt)} />
               <Field label="Next Follow-up" value={formatDate(lead.nextFollowUpAt)} />
+              {lead.status === 'Rejected' && <Field label="Rejection Reason" value={lead.rejectionReason} />}
             </dl>
             {lead.notes && (
               <div className="mt-4 pt-4 border-t border-slate-100">
@@ -432,17 +448,46 @@ export function LeadDetail() {
       {editOpen && (
         <EditLeadModal lead={lead} reps={reps} canReassign={canReassign(currentUser)} onClose={() => setEditOpen(false)} onSave={(patch) => updateLead(lead.id, patch)} />
       )}
-      {activityOpen && (
-        <AddActivityModal
-          onClose={() => setActivityOpen(false)}
-          onSave={(type, notes) => addActivity({ type, subject: `${type}: ${lead.firstName} ${lead.lastName}`, notes, leadId: lead.id, companyId: lead.companyId })}
+      {callOpen && (
+        <QuickLogModal
+          title="Log Call"
+          fieldLabel="What was discussed? (optional)"
+          submitLabel="Log Call"
+          required={false}
+          onClose={() => setCallOpen(false)}
+          onSave={(text) =>
+            addActivity({ type: 'Call', subject: `Call — ${lead.firstName} ${lead.lastName}`, notes: text || undefined, leadId: lead.id, companyId: lead.companyId })
+          }
         />
       )}
-      {taskOpen && (
-        <QuickTaskModal
-          isMeeting={taskOpen === 'meeting'}
-          onClose={() => setTaskOpen(null)}
-          onSave={(title, dueDate, type) => addTask({ title, dueDate, type, leadId: lead.id, companyId: lead.companyId, relatedToLabel: `${lead.firstName} ${lead.lastName}` })}
+      {noteOpen && (
+        <QuickLogModal
+          title="Add Note"
+          fieldLabel="Note"
+          submitLabel="Add Note"
+          onClose={() => setNoteOpen(false)}
+          onSave={(text) => addActivity({ type: 'Note', subject: 'Note added', notes: text, leadId: lead.id, companyId: lead.companyId })}
+        />
+      )}
+      {followUpOpen && (
+        <ScheduleFollowUpModal
+          placeholder="e.g. Call back about the handover"
+          onClose={() => setFollowUpOpen(false)}
+          onSave={(input) => addTask({ ...input, type: 'Follow-up', leadId: lead.id, companyId: lead.companyId, relatedToLabel: `${lead.firstName} ${lead.lastName}` })}
+        />
+      )}
+      {meetingOpen && (
+        <ScheduleMeetingModal
+          placeholder="e.g. Intro meeting"
+          onClose={() => setMeetingOpen(false)}
+          onSave={(input) => addTask({ ...input, type: 'Meeting', leadId: lead.id, companyId: lead.companyId, relatedToLabel: `${lead.firstName} ${lead.lastName}` })}
+        />
+      )}
+      {rejectOpen && (
+        <RejectLeadModal
+          leadName={`${lead.firstName} ${lead.lastName}`}
+          onClose={() => setRejectOpen(false)}
+          onConfirm={(reason, note) => rejectLead(lead.id, reason, note)}
         />
       )}
       {deleteOpen && (
@@ -580,7 +625,7 @@ function EditLeadModal({
           </FormField>
           <FormField label="Lead Status">
             <select className={inputClass} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as LeadStatus })}>
-              {ALL_STATUSES.map((s) => (
+              {LEAD_STATUSES.map((s) => (
                 <option key={s}>{s}</option>
               ))}
             </select>
@@ -634,77 +679,4 @@ function EditLeadModal({
   )
 }
 
-const ACTIVITY_TYPES: ActivityType[] = ['Call', 'Email', 'WhatsApp', 'Meeting', 'Note', 'Proposal']
 
-function AddActivityModal({ onClose, onSave }: { onClose: () => void; onSave: (type: ActivityType, notes: string) => void }) {
-  const [type, setType] = useState<ActivityType>('Call')
-  const [notes, setNotes] = useState('')
-  return (
-    <Modal title="Add Activity" onClose={onClose} width={420}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          onSave(type, notes)
-          onClose()
-        }}
-      >
-        <FormField label="Activity Type">
-          <select className={inputClass} value={type} onChange={(e) => setType(e.target.value as ActivityType)}>
-            {ACTIVITY_TYPES.map((t) => (
-              <option key={t}>{t}</option>
-            ))}
-          </select>
-        </FormField>
-        <FormField label="Notes">
-          <textarea className={inputClass} rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="What happened?" />
-        </FormField>
-        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
-          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
-            Cancel
-          </button>
-          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
-            Log Activity
-          </button>
-        </div>
-      </form>
-    </Modal>
-  )
-}
-
-function QuickTaskModal({ isMeeting, onClose, onSave }: { isMeeting: boolean; onClose: () => void; onSave: (title: string, dueDate: string, type: TaskType) => void }) {
-  const [title, setTitle] = useState('')
-  const [date, setDate] = useState('')
-  const [time, setTime] = useState('09:00')
-  return (
-    <Modal title={isMeeting ? 'Schedule Meeting' : 'Create Task'} onClose={onClose} width={420}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (!title || !date) return
-          onSave(title, new Date(`${date}T${time}`).toISOString(), isMeeting ? 'Meeting' : 'Follow-up')
-          onClose()
-        }}
-      >
-        <FormField label={isMeeting ? 'Meeting Title' : 'Task Title'} required>
-          <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} required autoFocus />
-        </FormField>
-        <div className="grid grid-cols-2 gap-3">
-          <FormField label="Date" required>
-            <input type="date" className={inputClass} value={date} onChange={(e) => setDate(e.target.value)} required />
-          </FormField>
-          <FormField label="Time">
-            <input type="time" className={inputClass} value={time} onChange={(e) => setTime(e.target.value)} />
-          </FormField>
-        </div>
-        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
-          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
-            Cancel
-          </button>
-          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
-            {isMeeting ? 'Schedule' : 'Create'}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  )
-}

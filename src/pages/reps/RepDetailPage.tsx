@@ -10,6 +10,7 @@ import { formatCurrency, TODAY } from '../../data/mockData'
 import { decodeSalesMonthParam, getCurrentSalesMonth, isWithinPeriod, type SalesMonthPeriod } from '../../lib/salesMonth'
 import { isContactActivity, isMeaningfulActivity, MEANINGFUL_ACTIVITY_TYPES } from '../../lib/meaningfulActivity'
 import { computeRepScorecard } from '../../lib/repScore'
+import { isActiveLead, isContactedLead, isEngagedLead } from '../../lib/leadStatus'
 
 const TABS = ['Workload', 'Activity', 'Effectiveness', 'Commercial Performance', 'Discipline'] as const
 type Tab = (typeof TABS)[number]
@@ -41,7 +42,7 @@ export function RepDetailPage() {
   const data = useMemo(() => {
     if (!id) return undefined
     const ownLeads = leads.filter((l) => l.ownerId === id)
-    const activeLeads = ownLeads.filter((l) => l.status !== 'Converted' && l.status !== 'Lost')
+    const activeLeads = ownLeads.filter(isActiveLead)
     const newLeads = ownLeads.filter((l) => isWithinPeriod(l.createdAt, period))
     const touchedIds = new Set(
       activities.filter((a) => a.userId === id && a.leadId && isMeaningfulActivity(a) && isWithinPeriod(a.activityDate, period)).map((a) => a.leadId as string),
@@ -82,9 +83,9 @@ export function RepDetailPage() {
     const sortedValues = [...won.map((d) => d.value)].sort((a, b) => a - b)
     const medianDealValue = sortedValues.length > 0 ? sortedValues[Math.floor(sortedValues.length / 2)] : 0
 
-    const contactRate = newLeads.length > 0 ? Math.round((newLeads.filter((l) => l.status !== 'New').length / newLeads.length) * 100) : 0
+    const contactRate = newLeads.length > 0 ? Math.round((newLeads.filter(isContactedLead).length / newLeads.length) * 100) : 0
     const qualificationRate =
-      newLeads.length > 0 ? Math.round((newLeads.filter((l) => ['Qualified', 'Proposal Required', 'Converted'].includes(l.status)).length / newLeads.length) * 100) : 0
+      newLeads.length > 0 ? Math.round((newLeads.filter(isEngagedLead).length / newLeads.length) * 100) : 0
     const winRate = closed > 0 ? Math.round((won.length / closed) * 100) : 0
     const leadToWinRate = newLeads.length > 0 ? Math.round((won.length / newLeads.length) * 100) : 0
 

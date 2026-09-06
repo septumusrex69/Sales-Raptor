@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { supabase } from '../lib/supabase'
 import { useAuth } from './AuthContext'
 import { TODAY } from '../data/mockData'
-import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, LeadStatus, LossReason, Proposal, Task, TaskType, Team, TeamKind, User } from '../types'
+import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, LossReason, Proposal, RejectionReason, Task, TaskType, Team, TeamKind, User } from '../types'
 
 /**
  * Generic camelCase(app) <-> snake_case(Postgres) row mapping. The SQL
@@ -171,8 +171,13 @@ export interface WonDealDetails {
 interface AppActions {
   addLead: (input: Partial<Lead> & { firstName: string; lastName: string; companyName: string }) => Lead
   updateLead: (id: ID, patch: Partial<Lead>) => void
-  convertLeadToDeal: (leadId: ID, dealValue?: number) => Deal | undefined
-  markLeadLost: (leadId: ID) => void
+  /**
+   * Turns a won lead into a real client: creates the Company (if there isn't one yet), carries
+   * its contact people across, and opens a Deal per service so the handover can be tracked.
+   * The lead itself stays on file as 'Converted' rather than disappearing.
+   */
+  convertLeadToClient: (leadId: ID, dealValue?: number) => { companyId: ID; deal: Deal } | undefined
+  rejectLead: (leadId: ID, reason: RejectionReason, note?: string) => void
   deleteLead: (leadId: ID) => void
 
   addDeal: (input: Partial<Deal> & { name: string; companyId: ID }) => Deal
@@ -372,7 +377,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const lead: Lead = {
         id,
         leadNumber: optimisticLeadNumber,
-        status: 'New',
+        status: 'No Contact Yet',
         source: 'Direct',
         score: 10,
         estimatedValue: 0,
@@ -429,10 +434,12 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [showError],
   )
 
-  const markLeadLost = useCallback<AppActions['markLeadLost']>(
-    (leadId) => {
-      updateLead(leadId, { status: 'Lost' as LeadStatus })
-      addActivity({ type: 'Status change', subject: 'Lead marked as Lost', leadId })
+  const rejectLead = useCallback<AppActions['rejectLead']>(
+    (leadId, reason, note) => {
+      updateLead(leadId, { status: 'Rejected', rejectionReason: reason, rejectionNote: note || undefined })
+      // The reason goes in the subject so it reads at a glance on the timeline; a rejection
+      // nobody can explain six months later is the same as no record at all.
+      addActivity({ type: 'Status change', subject: `Lead rejected — ${reason}`, notes: note || undefined, leadId })
     },
     [updateLead, addActivity],
   )
@@ -713,7 +720,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [showError, addActivity],
   )
 
-  const convertLeadToDeal = useCallback<AppActions['convertLeadToDeal']>(
+  const convertLeadToClient = useCallback<AppActions['convertLeadToClient']>(
     (leadId, dealValue) => {
       const lead = leads.find((l) => l.id === leadId)
       if (!lead) return undefined
@@ -776,7 +783,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const firstDeal = dealsToCreate[0]
       setDeals((prev) => [...dealsToCreate, ...prev])
 
-      updateLead(leadId, { status: 'Converted' as LeadStatus, convertedDealId: firstDeal.id })
+      updateLead(leadId, { status: 'Converted', convertedDealId: firstDeal.id })
 
       // Contact people captured while this was still a lead belong to the client now — without
       // this they'd stay pointed only at the lead and vanish from the record everyone actually
@@ -784,7 +791,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const carriedOverContacts = contacts.filter((c) => c.leadId === leadId && !c.companyId)
       for (const contact of carriedOverContacts) {
         setContacts((prev) => prev.map((c) => (c.id === contact.id ? { ...c, companyId } : c)))
-        updateRow('contacts', contact.id, { companyId }, 'convertLeadToDeal:contactCompany')
+        updateRow('contacts', contact.id, { companyId }, 'convertLeadToClient:contactCompany')
       }
       for (const deal of dealsToCreate) {
         addActivity({ type: 'Status change', subject: `Lead converted to deal: ${deal.name}`, leadId, dealId: deal.id, companyId })
@@ -813,7 +820,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           }
         }
         if (newContact) {
-          const contactError = await insertRow('contacts', newContact, 'convertLeadToDeal:contact')
+          const contactError = await insertRow('contacts', newContact, 'convertLeadToClient:contact')
           if (contactError) {
             setContacts((prev) => prev.filter((c) => c.id !== newContact!.id))
             setDeals((prev) => prev.filter((d) => !dealIds.includes(d.id)))
@@ -821,7 +828,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
             return
           }
         }
-        const results = await Promise.all(dealsToCreate.map((deal) => insertRow('deals', deal, 'convertLeadToDeal:deal')))
+        const results = await Promise.all(dealsToCreate.map((deal) => insertRow('deals', deal, 'convertLeadToClient:deal')))
         const failedIds = dealsToCreate.filter((_, i) => results[i]).map((d) => d.id)
         if (failedIds.length > 0) {
           setDeals((prev) => prev.filter((d) => !failedIds.includes(d.id)))
@@ -829,7 +836,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         }
       })()
 
-      return firstDeal
+      return { companyId, deal: firstDeal }
     },
     [leads, contacts, updateLead, addActivity, showError, ownerId],
   )
@@ -920,8 +927,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       toast,
       addLead,
       updateLead,
-      convertLeadToDeal,
-      markLeadLost,
+      convertLeadToClient,
+      rejectLead,
       deleteLead,
       addDeal,
       updateDeal,
@@ -969,8 +976,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       toast,
       addLead,
       updateLead,
-      convertLeadToDeal,
-      markLeadLost,
+      convertLeadToClient,
+      rejectLead,
       deleteLead,
       addDeal,
       updateDeal,

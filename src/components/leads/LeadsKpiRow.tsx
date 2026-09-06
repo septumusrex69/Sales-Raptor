@@ -25,7 +25,7 @@ const TILES: {
 }[] = [
   { key: 'totalLeads', label: 'Total Leads', icon: Users, chip: 'bg-[#edf1f5] text-[#6086a9]', format: (v) => String(v) },
   { key: 'newLeads', label: 'New Leads', icon: UserPlus, chip: 'bg-[#eef4f1] text-[#406d58]', format: (v) => String(v) },
-  { key: 'qualified', label: 'Qualified', icon: CheckCircle2, chip: 'bg-[#f7f4eb] text-[#b28e34]', format: (v) => String(v) },
+  { key: 'qualified', label: 'Hot leads', icon: CheckCircle2, chip: 'bg-[#f7f4eb] text-[#b28e34]', format: (v) => String(v) },
   { key: 'converted', label: 'Converted', icon: Trophy, chip: 'bg-[#f7f3eb] text-[#957323]', format: (v) => String(v) },
   { key: 'estValueTotal', label: 'Estimated Value (Total)', icon: Wallet, chip: 'bg-[#edf1f5] text-[#355069]', format: formatCurrency },
   { key: 'handoverTotal', label: 'Handover Amount', icon: Banknote, chip: 'bg-[#f6eeec] text-[#794234]', format: formatCurrency },
