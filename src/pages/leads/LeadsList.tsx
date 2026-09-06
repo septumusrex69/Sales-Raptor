@@ -260,6 +260,16 @@ export function LeadsList() {
 
   const col = visibleColumns
 
+  // Pinned columns hold their place while the table scrolls sideways. Their left offsets
+  // depend on which of them are actually showing, so they're measured here rather than
+  // baked into class names that would strand a gap when one is hidden.
+  const PINNED_WIDTHS = { dateAdded: 116, leadNumber: 100, companyLead: 180 }
+  const pinnedLeft = {
+    dateAdded: 0,
+    leadNumber: col.dateAdded ? PINNED_WIDTHS.dateAdded : 0,
+    companyLead: (col.dateAdded ? PINNED_WIDTHS.dateAdded : 0) + (col.leadNumber ? PINNED_WIDTHS.leadNumber : 0),
+  }
+
   return (
     <div className="space-y-4">
       <div>
@@ -345,8 +355,21 @@ export function LeadsList() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-slate-400">
-                {col.leadNumber && <th className="font-medium px-5 py-3 sticky left-0 z-10 bg-white min-w-[100px]">{sortableHeader('leadNumber', 'Lead #')}</th>}
-                {col.companyLead && <th className="font-medium px-3 py-3 sticky left-[100px] z-10 bg-white min-w-[180px]">{sortableHeader('companyLead', 'Company / Lead')}</th>}
+                {col.dateAdded && (
+                  <th className="font-medium px-5 py-3 sticky z-10 bg-white min-w-[116px]" style={{ left: pinnedLeft.dateAdded }}>
+                    {sortableHeader('dateAdded', 'Date Added')}
+                  </th>
+                )}
+                {col.leadNumber && (
+                  <th className="font-medium px-3 py-3 sticky z-10 bg-white min-w-[100px]" style={{ left: pinnedLeft.leadNumber }}>
+                    {sortableHeader('leadNumber', 'Lead #')}
+                  </th>
+                )}
+                {col.companyLead && (
+                  <th className="font-medium px-3 py-3 sticky z-10 bg-white min-w-[180px]" style={{ left: pinnedLeft.companyLead }}>
+                    {sortableHeader('companyLead', 'Company / Lead')}
+                  </th>
+                )}
                 {col.contactPerson && <th className="font-medium px-3 py-3">Contact Person</th>}
                 {col.status && <th className="font-medium px-3 py-3">{sortableHeader('status', 'Status')}</th>}
                 {col.classification && <th className="font-medium px-3 py-3">{sortableHeader('classification', 'Class')}</th>}
@@ -356,7 +379,6 @@ export function LeadsList() {
                 {col.handoverAmount && <th className="font-medium px-3 py-3 text-right">{sortableHeader('handoverAmount', 'Handover Amount', 'right')}</th>}
                 {col.owner && <th className="font-medium px-3 py-3">Owner</th>}
                 {col.nextFollowUp && <th className="font-medium px-3 py-3">{sortableHeader('nextFollowUp', 'Next Follow-up')}</th>}
-                {col.dateAdded && <th className="font-medium px-3 py-3">{sortableHeader('dateAdded', 'Date Added')}</th>}
                 {col.lastContact && <th className="font-medium px-3 py-3">{sortableHeader('lastContact', 'Last Contact')}</th>}
                 {col.source && <th className="font-medium px-3 py-3">Source</th>}
                 {col.city && <th className="font-medium px-3 py-3">City</th>}
@@ -374,15 +396,20 @@ export function LeadsList() {
                 const staleContact = isStaleClassAContact(lead)
                 return (
                   <tr key={lead.id} onClick={() => navigate(`/leads/${lead.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
+                    {col.dateAdded && (
+                      <td className="px-5 py-3 text-slate-500 sticky z-10 bg-white" style={{ left: pinnedLeft.dateAdded }}>
+                        {formatDate(lead.createdAt)}
+                      </td>
+                    )}
                     {col.leadNumber && (
-                      <td className="px-5 py-3 sticky left-0 z-10 bg-white">
+                      <td className="px-3 py-3 sticky z-10 bg-white" style={{ left: pinnedLeft.leadNumber }}>
                         <Link to={`/leads/${lead.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
                           {formatLeadNumber(lead.leadNumber)}
                         </Link>
                       </td>
                     )}
                     {col.companyLead && (
-                      <td className="px-3 py-3 sticky left-[100px] z-10 bg-white">
+                      <td className="px-3 py-3 sticky z-10 bg-white" style={{ left: pinnedLeft.companyLead }}>
                         <Link to={`/leads/${lead.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
                           {lead.companyName || `${lead.firstName} ${lead.lastName}`}
                         </Link>
@@ -456,7 +483,6 @@ export function LeadsList() {
                         </Link>
                       </td>
                     )}
-                    {col.dateAdded && <td className="px-3 py-3 text-slate-500">{formatDate(lead.createdAt)}</td>}
                     {col.lastContact && (
                       <td className="px-3 py-3">
                         <div className="flex items-center gap-1.5">

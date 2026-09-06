@@ -47,13 +47,13 @@ export const COLUMN_LABELS: Record<ColumnKey, string> = {
 
 /** Default column order per spec — everything here starts visible. */
 export const DEFAULT_COLUMNS: ColumnKey[] = [
+  // When a lead came in is the first thing anyone wants to know, so it opens the table and
+  // stays pinned while you scroll — rather than sitting twelfth, off the right-hand edge.
+  'dateAdded',
   'leadNumber',
   'companyLead',
   'contactPerson',
   'status',
-  // When a lead came in is one of the first things anyone wants to know, so it sits with the
-  // identity columns rather than twelfth, off the right-hand edge of the scroll.
-  'dateAdded',
   'classification',
   'score',
   'services',
