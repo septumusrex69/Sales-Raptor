@@ -4,6 +4,7 @@ import { useAuth } from './AuthContext'
 import { TODAY } from '../data/mockData'
 import { DEAL_STAGE_PROBABILITY } from '../types'
 import { normalizeDeal, normalizeLead } from '../lib/legacyValues'
+import { dealKind, kindForService } from '../lib/dealKind'
 import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, ProductService, Proposal, RejectionReason, Task, TaskType, Team, TeamKind, User } from '../types'
 
 /**
@@ -160,6 +161,7 @@ interface AppState {
 }
 
 export interface WonDealDetails {
+  /** Zero for a Handover: nothing is earned at signature, so there is no value to record. */
   finalValue: number
   startDate: string
   service: string
@@ -215,6 +217,11 @@ interface AppActions {
   moveDealStage: (id: ID, stage: DealStage) => void
   markDealWon: (id: ID, details: WonDealDetails) => void
   markDealRejected: (id: ID, reason: RejectionReason, note?: string) => void
+  /**
+   * Records that a document went out. Kept as dates on the deal rather than pipeline stages,
+   * because a single deal can need both a quotation and a mandate — which one stage can't say.
+   */
+  logDealDocument: (id: ID, document: 'quotation' | 'mandate' | 'invoice') => void
 
   addContact: (input: Partial<Contact> & { firstName: string; lastName: string }) => Contact
   updateContact: (id: ID, patch: Partial<Contact>) => void
@@ -491,10 +498,18 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         stage: 'New Deal',
         value: 0,
         probability: DEAL_STAGE_PROBABILITY['New Deal'],
+        kind: kindForService(input.service),
         expectedCloseDate: nowIso(),
         source: 'Direct',
         createdAt: nowIso(),
         ...input,
+      }
+      // Enforced after the spread, so a caller can't hand a handover a fee by accident. The
+      // whole "a signed book is not revenue" rule rests on this staying zero: every revenue
+      // total in the app sums deal.value, so a handover contributes nothing to any of them.
+      if (kindForService(deal.service) === 'Handover') {
+        deal.kind = 'Handover'
+        deal.value = 0
       }
       setDeals((prev) => [deal, ...prev])
       insertRow('deals', deal, 'addDeal')
@@ -547,10 +562,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const markDealWon = useCallback<AppActions['markDealWon']>(
     (id, details) => {
       const deal = deals.find((d) => d.id === id)
+      // A signed book is not revenue: a Handover's value stays at zero and its size lives in
+      // handoverAmount, so nothing downstream can add the two kinds of money together.
+      const isHandover = deal ? dealKind(deal) === 'Handover' : false
       const patch: Partial<Deal> = {
         stage: 'Won',
         probability: DEAL_STAGE_PROBABILITY.Won,
-        value: details.finalValue,
+        value: isHandover ? 0 : details.finalValue,
         service: details.service,
         handoverAmount: details.handoverAmount,
         accountsCount: details.accountsCount,
@@ -567,7 +585,46 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         if (previous) setDeals((prev) => prev.map((d) => (d.id === id ? previous! : d)))
         showError(message)
       })
-      addActivity({ type: 'Deal Won', subject: `${deal?.name ?? 'Deal'} marked Won — ${details.service}, starting ${details.startDate}`, dealId: id, companyId: deal?.companyId })
+      if (isHandover && deal?.companyId) {
+        const signedAt = nowIso()
+        setCompanies((prev) => prev.map((c) => (c.id === deal.companyId ? { ...c, mandateSignedAt: signedAt } : c)))
+        updateRow('companies', deal.companyId, { mandateSignedAt: signedAt }, 'markDealWon:mandateSigned')
+      }
+      addActivity({
+        type: 'Deal Won',
+        subject: isHandover
+          ? `${deal?.name ?? 'Deal'} — mandate signed, ${details.accountsCount ?? 0} accounts`
+          : `${deal?.name ?? 'Deal'} marked Won — ${details.service}, starting ${details.startDate}`,
+        dealId: id,
+        companyId: deal?.companyId,
+      })
+    },
+    [deals, addActivity, showError],
+  )
+
+  const logDealDocument = useCallback<AppActions['logDealDocument']>(
+    (id, document) => {
+      const deal = deals.find((d) => d.id === id)
+      const sentAt = nowIso()
+      const field = document === 'quotation' ? 'quotationSentAt' : document === 'mandate' ? 'mandateSentAt' : 'invoiceSentAt'
+      const patch: Partial<Deal> = { [field]: sentAt }
+      // Sending the quotation or the mandate is what moves a deal along; an invoice follows a
+      // deal that's already won, so it records the fact without touching the stage.
+      if (document !== 'invoice' && deal?.stage === 'New Deal') {
+        patch.stage = 'Quotation Sent'
+        patch.probability = DEAL_STAGE_PROBABILITY['Quotation Sent']
+      }
+      let previous: Deal | undefined
+      setDeals((prev) => {
+        previous = prev.find((d) => d.id === id)
+        return prev.map((d) => (d.id === id ? { ...d, ...patch } : d))
+      })
+      updateRow('deals', id, patch, 'logDealDocument', (message) => {
+        if (previous) setDeals((prev) => prev.map((d) => (d.id === id ? previous! : d)))
+        showError(message)
+      })
+      const label = document === 'quotation' ? 'Quotation' : document === 'mandate' ? 'Mandate' : 'Invoice'
+      addActivity({ type: 'Deal update', subject: `${label} sent: ${deal?.name ?? 'Deal'}`, dealId: id, companyId: deal?.companyId })
     },
     [deals, addActivity, showError],
   )
@@ -787,7 +844,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         companyId,
         ownerId: lead.ownerId,
         stage: 'New Deal',
-        value: input.value,
+        // A handover earns nothing at signature, so it carries no deal value — only a book.
+        kind: kindForService(input.service),
+        value: kindForService(input.service) === 'Handover' ? 0 : input.value,
         probability: DEAL_STAGE_PROBABILITY['New Deal'],
         expectedCloseDate: input.expectedCloseDate,
         service: input.service,
@@ -862,9 +921,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const dealsToConfirm: { id: ID; name: string; patch: Partial<Deal> }[] = []
 
       for (const entry of confirm.deals) {
+        const entryIsHandover = kindForService(entry.service) === 'Handover'
         const won: Partial<Deal> = {
           stage: 'Won',
-          value: entry.value,
+          value: entryIsHandover ? 0 : entry.value,
           handoverAmount: entry.handoverAmount,
           accountsCount: entry.accountsCount,
           contractStartDate: confirm.startDate,
@@ -885,8 +945,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
             source: lead.source,
             createdAt: nowIso(),
             leadId: lead.id,
+            kind: kindForService(entry.service),
             stage: 'Won',
-            value: entry.value,
+            value: entryIsHandover ? 0 : entry.value,
             handoverAmount: entry.handoverAmount,
             accountsCount: entry.accountsCount,
             contractStartDate: confirm.startDate,
@@ -906,6 +967,22 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         updateRow('deals', confirmed.id, confirmed.patch, 'convertLeadToClient:confirmDeal')
       }
       const firstDeal = dealsToCreate[0] ?? deals.find((d) => d.id === dealsToConfirm[0]?.id)
+
+      // The estimate's working life ends here. It moves to the client as a labelled record of
+      // what was promised — never a forecast, never summed with the real figures that arrive
+      // once accounts are actually handed over.
+      const estimatedBook = confirm.deals.find((d) => kindForService(d.service) === 'Handover')
+      if (estimatedBook) {
+        const estimate = {
+          estimatedHandoverAmount: estimatedBook.handoverAmount,
+          estimatedAccountsCount: estimatedBook.accountsCount,
+          estimatedAtConversion: nowIso(),
+          mandateSignedAt: nowIso(),
+        }
+        setCompanies((prev) => prev.map((c) => (c.id === companyId ? { ...c, ...estimate } : c)))
+        if (!newCompany) updateRow('companies', companyId, estimate, 'convertLeadToClient:signupEstimate')
+        else Object.assign(newCompany, estimate)
+      }
 
       updateLead(leadId, { status: 'Converted', convertedDealId: firstDeal?.id })
 
@@ -1079,6 +1156,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       moveDealStage,
       markDealWon,
       markDealRejected,
+      logDealDocument,
       addContact,
       updateContact,
       addCompany,
@@ -1129,6 +1207,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       moveDealStage,
       markDealWon,
       markDealRejected,
+      logDealDocument,
       addContact,
       updateContact,
       addCompany,

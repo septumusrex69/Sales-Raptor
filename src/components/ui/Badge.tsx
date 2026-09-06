@@ -54,8 +54,9 @@ export function StatusBadge({ status }: { status: string }) {
   return <Badge tone={LEAD_STATUS_TONE[status] ?? 'slate'}>{status}</Badge>
 }
 
-export function StageBadge({ stage }: { stage: string }) {
-  return <Badge tone={DEAL_STAGE_TONE[stage] ?? 'slate'}>{stage}</Badge>
+/** `label` lets a deal say "Mandate Sent" where another says "Quotation Sent" — same stage, right word. */
+export function StageBadge({ stage, label }: { stage: string; label?: string }) {
+  return <Badge tone={DEAL_STAGE_TONE[stage] ?? 'slate'}>{label ?? stage}</Badge>
 }
 
 export function PriorityBadge({ priority }: { priority: string }) {

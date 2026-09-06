@@ -19,6 +19,7 @@ import { buildDrilldownUrl, SALES_MONTH_PARAM } from '../../lib/drilldown'
 import { STAGE_COLORS } from '../../lib/colors'
 import { isAssignableOwner } from '../../lib/permissions'
 import { LEAD_STATUSES, isActiveLead, isEngagedLead } from '../../lib/leadStatus'
+import { dealKind } from '../../lib/dealKind'
 
 const TABS = ['Overview', 'Leads', 'Pipeline', 'Products & Services', 'Debt Collection', 'Sales Team', 'Lead Sources', 'Geography', 'Rejected Deals'] as const
 type Tab = (typeof TABS)[number]
@@ -110,8 +111,14 @@ export function ReportsPage() {
     const wonLeads = periodLeads.filter((l) => l.status === 'Converted').length
     const rejectedLeads = periodLeads.filter((l) => l.status === 'Rejected').length
     const conversionRate = total ? Math.round((wonLeads / total) * 100) : 0
-    const revenueWon = won.reduce((s, d) => s + d.value, 0)
-    const avgDealValue = won.length ? Math.round(revenueWon / won.length) : 0
+    // Fees only. A signed book earns nothing at signature, so folding handovers in here
+    // would report money that hasn't been made and might never be made in full.
+    const feeDeals = won.filter((d) => dealKind(d) === 'Service')
+    const handoverDeals = won.filter((d) => dealKind(d) === 'Handover')
+    const revenueWon = feeDeals.reduce((s, d) => s + d.value, 0)
+    const avgDealValue = feeDeals.length ? Math.round(revenueWon / feeDeals.length) : 0
+    const bookSigned = handoverDeals.reduce((s, d) => s + (d.handoverAmount ?? 0), 0)
+    const accountsSigned = handoverDeals.reduce((s, d) => s + (d.accountsCount ?? 0), 0)
     const closed = won.length + lost.length
     const winRate = closed ? Math.round((won.length / closed) * 100) : 0
 
@@ -129,7 +136,7 @@ export function ReportsPage() {
     }
     const avgTimeToConversionDays = conversionTimes.length ? Math.round(conversionTimes.reduce((s, v) => s + v, 0) / conversionTimes.length) : undefined
 
-    return { total, noContact, interested, hot, engaged, wonLeads, rejectedLeads, conversionRate, revenueWon, avgDealValue, winRate, totalHandoverValue, avgHandoverValue, avgTimeToConversionDays }
+    return { total, noContact, interested, hot, engaged, wonLeads, rejectedLeads, conversionRate, revenueWon, avgDealValue, bookSigned, accountsSigned, winRate, totalHandoverValue, avgHandoverValue, avgTimeToConversionDays }
   }
 
   const core = useMemo(() => computeCore(leadsInPeriod, wonDealsInPeriod, lostDealsInPeriod), [leadsInPeriod, wonDealsInPeriod, lostDealsInPeriod])
@@ -447,9 +454,15 @@ export function ReportsPage() {
               pctChange={prevCore ? pctDelta(core.revenueWon, prevCore.revenueWon) : undefined}
               to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table' })}
             />
+            <StatTile
+              label="Book Signed"
+              value={formatCurrency(core.bookSigned)}
+              pctChange={prevCore ? pctDelta(core.bookSigned, prevCore.bookSigned) : undefined}
+              to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table' })}
+            />
             <StatTile label="Pipeline Value" value={formatCurrency(pipelineValue)} to={buildDrilldownUrl('/deals', { view: 'table' })} />
             <StatTile
-              label="Total Handover Value"
+              label="Estimated Handover (Leads)"
               value={formatCurrency(core.totalHandoverValue)}
               pctChange={prevCore ? pctDelta(core.totalHandoverValue, prevCore.totalHandoverValue) : undefined}
               to={buildDrilldownUrl('/leads', { service: 'Debt Collection', [SALES_MONTH_PARAM]: periodParam })}
@@ -484,7 +497,7 @@ export function ReportsPage() {
             <StatTile label="Conversion Rate" value={`${core.conversionRate}%`} size="secondary" />
             <StatTile label="Avg Time to Conversion" value={core.avgTimeToConversionDays !== undefined ? `${core.avgTimeToConversionDays}d` : '—'} size="secondary" />
             <StatTile label="Avg Deal Value" value={formatCurrency(core.avgDealValue)} size="secondary" />
-            <StatTile label="Avg Handover Value" value={formatCurrency(core.avgHandoverValue)} size="secondary" />
+            <StatTile label="Avg Estimated Handover" value={formatCurrency(core.avgHandoverValue)} size="secondary" />
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <Card>
@@ -604,8 +617,8 @@ export function ReportsPage() {
               value={String(debtCollectionStats.count)}
               to={buildDrilldownUrl('/leads', { service: 'Debt Collection', [SALES_MONTH_PARAM]: periodParam })}
             />
-            <StatTile label="Total Handover Amount" value={formatCurrency(debtCollectionStats.totalHandover)} />
-            <StatTile label="Average Handover Amount" value={formatCurrency(debtCollectionStats.avgHandover)} />
+            <StatTile label="Estimated Handover (Leads)" value={formatCurrency(debtCollectionStats.totalHandover)} />
+            <StatTile label="Avg Estimated Handover" value={formatCurrency(debtCollectionStats.avgHandover)} />
             <StatTile label="Total Accounts" value={String(debtCollectionStats.totalAccounts)} />
             <StatTile
               label="Converted"

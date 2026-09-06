@@ -136,7 +136,15 @@ create table if not exists public.companies (
   payments_to_date numeric,
   marketing_agent text,
   -- Swordfish's client classification (A/B/C/D), where known.
-  classification text check (classification in ('A', 'B', 'C', 'D'))
+  classification text check (classification in ('A', 'B', 'C', 'D')),
+  -- What the lead was estimated to hand over, captured at conversion. Historical only: what a
+  -- client says they'll hand over is reliably not what arrives, so this never feeds a forecast
+  -- or a total. Kept as the record of what was promised, and to grade estimate against actual.
+  estimated_handover_amount numeric,
+  estimated_accounts_count integer,
+  estimated_at_conversion timestamptz,
+  -- When the collection mandate was signed — the clock on "signed, nothing handed over yet".
+  mandate_signed_at timestamptz
 );
 
 -- ---------- Contacts ----------
@@ -242,6 +250,15 @@ create table if not exists public.deals (
   source text not null,
   competitor text,
   notes text,
+  -- 'Service' (quoted, delivered, invoiced) or 'Handover' (a book of accounts collected on
+  -- commission). A Handover earns nothing at signature, so it carries no `value` at all —
+  -- its book lives in handover_amount and is never summed into revenue.
+  kind text not null default 'Service',
+  -- Which documents have gone out. Facts rather than stages: one deal can need both a
+  -- quotation and a mandate, which a single stage can't express.
+  quotation_sent_at timestamptz,
+  mandate_sent_at timestamptz,
+  invoice_sent_at timestamptz,
   -- Set when stage is 'Rejected'. Same vocabulary as leads.rejection_reason.
   rejection_reason text,
   rejection_note text,

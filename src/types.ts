@@ -122,6 +122,16 @@ export interface Lead {
  */
 export type DealStage = 'New Deal' | 'Quotation Sent' | 'Won' | 'Rejected'
 
+/**
+ * Two different businesses sharing one pipeline.
+ *
+ * A Service is quoted, delivered and invoiced — the fee is known up front and earned on
+ * completion. A Handover is a book of accounts we collect on commission, so nothing is earned
+ * at signature and the real numbers only exist once accounts are actually handed over. They
+ * must never be added together: a signed book is not revenue.
+ */
+export type DealKind = 'Service' | 'Handover'
+
 export const DEAL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Won', 'Rejected']
 
 /** The steps a deal is still being worked in — everything before it ends one way or the other. */
@@ -153,6 +163,12 @@ export interface Deal {
   source: LeadSource
   competitor?: string
   notes?: string
+  /** Absent on deals created before the two kinds were distinguished — derive with dealKind(). */
+  kind?: DealKind
+  /** When each document went out. Recorded as facts rather than stages, because one deal can need both a quotation and a mandate. */
+  quotationSentAt?: string
+  mandateSentAt?: string
+  invoiceSentAt?: string
   /** Set when stage is 'Rejected'. */
   rejectionReason?: RejectionReason
   /** Free-text detail captured alongside the rejection reason. */
@@ -211,6 +227,19 @@ export interface Company {
   marketingAgent?: string
   /** Swordfish's client classification (A/B/C/D), where known. Set at the level a Swordfish code actually exists — a parent container invented by us has none of its own. */
   classification?: LeadClassification
+  /**
+   * What the lead was estimated to hand over, captured at conversion.
+   *
+   * Historical context only: what a client says they'll hand over is reliably not what
+   * arrives, so this never feeds a forecast or a total once the mandate is signed. It's kept
+   * because it's the only record of what was promised, and because estimate-versus-actual is
+   * worth grading per rep once real handover data exists.
+   */
+  estimatedHandoverAmount?: number
+  estimatedAccountsCount?: number
+  estimatedAtConversion?: string
+  /** When the collection mandate was signed — the clock on "signed, but nothing handed over yet". */
+  mandateSignedAt?: string
 }
 
 export type TaskType =

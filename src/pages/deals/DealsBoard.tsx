@@ -7,6 +7,7 @@ import { canEditOwned, useDefaultOwnerFilter, isAssignableOwner} from '../../lib
 import { Card } from '../../components/ui/Card'
 import { StageBadge } from '../../components/ui/Badge'
 import { SortHeader } from '../../components/ui/SortHeader'
+import { dealKind, dealStageLabel, stageColumnLabel } from '../../lib/dealKind'
 import { DATE_GROUP_CLASS } from '../../components/ui/DateGroupHeading'
 import { dateGroupLabel, relativeDayLabel } from '../../lib/dateLabels'
 import { UserAvatar } from '../../components/ui/Avatar'
@@ -223,7 +224,7 @@ export function DealsBoard() {
                 <div className="px-3.5 py-3 flex items-center justify-between sticky top-0">
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full" style={{ backgroundColor: STAGE_COLORS[stage] }} />
-                    <span className="text-sm font-semibold text-slate-700">{stage}</span>
+                    <span className="text-sm font-semibold text-slate-700">{stageColumnLabel(stage)}</span>
                     <span className="text-xs text-slate-400">({stageDeals.length})</span>
                   </div>
                 </div>
@@ -283,7 +284,7 @@ export function DealsBoard() {
                     <td className="px-3 py-2 text-slate-500">{companyById(deal.companyId)?.name}</td>
                     <td className="px-3 py-2 text-right font-medium text-slate-700">{formatCurrency(deal.value)}</td>
                     <td className="px-3 py-2">
-                      <StageBadge stage={deal.stage} />
+                      <StageBadge stage={deal.stage} label={dealStageLabel(deal)} />
                     </td>
                     <td className="px-3 py-2 text-slate-500">{deal.probability}%</td>
                     <td className="px-3 py-2">
@@ -330,7 +331,14 @@ function DealCard({ deal, canDrag, onDragStart, onOpen }: { deal: Deal; canDrag:
     >
       <p className="text-sm font-semibold text-slate-800 truncate">{company?.name ?? deal.name}</p>
       {contact && <p className="text-xs text-slate-400 truncate">{contact.firstName} {contact.lastName}</p>}
-      <p className="text-base font-bold text-slate-800 mt-1.5">{formatCurrency(deal.value)}</p>
+      {dealKind(deal) === 'Handover' ? (
+        <p className="text-base font-bold text-slate-800 mt-1.5">
+          {deal.handoverAmount != null ? formatCurrency(deal.handoverAmount) : '—'}
+          <span className="text-[11px] font-medium text-slate-400 ml-1.5">book</span>
+        </p>
+      ) : (
+        <p className="text-base font-bold text-slate-800 mt-1.5">{formatCurrency(deal.value)}</p>
+      )}
       <div className="flex items-center justify-between mt-2.5">
         <UserAvatar userId={deal.ownerId} size={22} />
         <span className="text-xs font-medium text-slate-500">{deal.probability}%</span>

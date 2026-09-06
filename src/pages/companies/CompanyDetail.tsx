@@ -180,6 +180,15 @@ export function CompanyDetail() {
           </Link>
         </div>
 
+        {company.estimatedHandoverAmount != null && (
+          <p className="text-xs text-slate-400 mt-3">
+            Estimated at signup: {formatCurrency(company.estimatedHandoverAmount)}
+            {company.estimatedAccountsCount != null ? ` across ${company.estimatedAccountsCount} accounts` : ''}
+            {company.estimatedAtConversion ? ` · ${formatDate(company.estimatedAtConversion)}` : ''}
+            <span className="text-slate-300"> — what they said they'd hand over, kept for the record. The figures above are actual.</span>
+          </p>
+        )}
+
         <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-slate-100">
           {isClient && (
             <button onClick={() => setDealOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
@@ -482,6 +491,7 @@ export function CompanyDetail() {
                   </button>
                 </dd>
               </div>
+              {company.mandateSignedAt && <Field label="Mandate Signed" value={formatDate(company.mandateSignedAt)} />}
               <Field label="Created" value={formatDate(company.createdAt)} />
             </dl>
           </Card>

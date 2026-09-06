@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Modal, FormField, inputClass } from './ui/Modal'
 import { services } from '../data/mockData'
+import { isHandoverService } from '../lib/dealKind'
 import type { ProductService } from '../types'
 
 /**
@@ -165,6 +166,9 @@ export function AddDealModal({
   namePlaceholder?: string
 }) {
   const [form, setForm] = useState({ name: defaultName, value: '', service: defaultService ?? services[0], expectedCloseDate: '' })
+  // A handover is billed on what's recovered, so there's no figure to enter here — the book
+  // is agreed when the mandate is signed, and even that is what the client says.
+  const isHandover = isHandoverService(form.service)
   return (
     <Modal title="Add Deal" onClose={onClose} width={420}>
       <form
@@ -173,7 +177,7 @@ export function AddDealModal({
           if (!form.name) return
           onSave({
             name: form.name,
-            value: Number(form.value) || 0,
+            value: isHandover ? 0 : Number(form.value) || 0,
             service: form.service,
             expectedCloseDate: form.expectedCloseDate ? new Date(form.expectedCloseDate).toISOString() : new Date().toISOString(),
           })
@@ -184,9 +188,15 @@ export function AddDealModal({
           <input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required autoFocus placeholder={namePlaceholder} />
         </FormField>
         <div className="grid grid-cols-2 gap-3">
-          <FormField label="Value (R)">
-            <input type="number" className={inputClass} value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
-          </FormField>
+          {isHandover ? (
+            <FormField label="Value">
+              <p className="text-sm text-slate-400 py-2">Billed on recovery — no value yet</p>
+            </FormField>
+          ) : (
+            <FormField label="Value (R)">
+              <input type="number" className={inputClass} value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
+            </FormField>
+          )}
           <FormField label="Expected Close Date">
             <input type="date" className={inputClass} value={form.expectedCloseDate} onChange={(e) => setForm({ ...form, expectedCloseDate: e.target.value })} />
           </FormField>

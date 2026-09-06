@@ -1,11 +1,10 @@
 import { useState } from 'react'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { services } from '../../data/mockData'
+import { isHandoverService } from '../../lib/dealKind'
 import { REJECTION_REASONS } from '../../lib/rejection'
 import type { RejectionReason } from '../../types'
 import type { WonDealDetails } from '../../store/AppStore'
-
-const HANDOVER_SERVICES = ['Debt Collection']
 
 export function MarkWonModal({ defaultService, onClose, onSave }: { defaultService?: string; onClose: () => void; onSave: (details: WonDealDetails) => void }) {
   const [form, setForm] = useState({
@@ -16,15 +15,17 @@ export function MarkWonModal({ defaultService, onClose, onSave }: { defaultServi
     handoverAmount: '',
     accountsCount: '',
   })
-  const isHandover = HANDOVER_SERVICES.includes(form.service)
+  const isHandover = isHandoverService(form.service)
   return (
-    <Modal title="Mark Deal Won 🎉" onClose={onClose} width={420}>
+    <Modal title={isHandover ? 'Confirm Mandate Signed' : 'Mark Deal Won 🎉'} onClose={onClose} width={420}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
           if (!form.startDate) return
           onSave({
-            finalValue: isHandover ? Number(form.handoverAmount) || 0 : Number(form.finalValue) || 0,
+            // A handover earns nothing at signature, so it has no value to record. The book
+            // goes in handoverAmount, where nothing will add it to revenue.
+            finalValue: isHandover ? 0 : Number(form.finalValue) || 0,
             startDate: form.startDate,
             service: form.service,
             contractDuration: form.contractDuration,
@@ -46,7 +47,13 @@ export function MarkWonModal({ defaultService, onClose, onSave }: { defaultServi
             />
           </FormField>
         )}
-        <FormField label="Starting Date" required>
+        {isHandover && (
+          <p className="text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 mb-3">
+            Nothing is earned at signature — this client is billed on what's recovered. Record the book they've agreed to
+            hand over; the real figures arrive with the accounts themselves.
+          </p>
+        )}
+        <FormField label={isHandover ? 'Mandate Signed On' : 'Starting Date'} required>
           <input type="date" className={inputClass} value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} required />
         </FormField>
         <FormField label="Service Sold">
@@ -58,7 +65,7 @@ export function MarkWonModal({ defaultService, onClose, onSave }: { defaultServi
         </FormField>
         {isHandover && (
           <div className="grid grid-cols-2 gap-3">
-            <FormField label="Handover Amount (R)" required>
+            <FormField label="Agreed Book (R)" required>
               <input
                 type="number"
                 className={inputClass}
@@ -87,7 +94,7 @@ export function MarkWonModal({ defaultService, onClose, onSave }: { defaultServi
             Cancel
           </button>
           <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[var(--c-gold-deep)] text-white hover:bg-[var(--c-gold-deep-hover)]">
-            Confirm Won
+            {isHandover ? 'Confirm Mandate' : 'Confirm Won'}
           </button>
         </div>
       </form>

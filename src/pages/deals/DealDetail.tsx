@@ -9,6 +9,7 @@ import { StageBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { MarkRejectedModal, MarkWonModal } from './DealStageModals'
+import { dealKind, dealStageLabel } from '../../lib/dealKind'
 import { formatCurrency, formatDate, formatDateTime, services } from '../../data/mockData'
 import { DEAL_STAGES } from '../../types'
 import type { ActivityType, DealStage, ProposalStatus, TaskType } from '../../types'
@@ -41,6 +42,7 @@ export function DealDetail() {
     moveDealStage,
     markDealWon,
     markDealRejected,
+    logDealDocument,
     addActivity,
     addTask,
     updateTask,
@@ -78,6 +80,8 @@ export function DealDetail() {
 
   const company = companyById(deal.companyId)
   const contact = contactById(deal.contactId)
+  const kind = dealKind(deal)
+  const isHandover = kind === 'Handover'
   const isClosed = deal.stage === 'Won' || deal.stage === 'Rejected'
 
   return (
@@ -91,7 +95,10 @@ export function DealDetail() {
           <div>
             <div className="flex items-center gap-2.5">
               <h2 className="text-lg font-semibold text-slate-800">{deal.name}</h2>
-              <StageBadge stage={deal.stage} />
+              <StageBadge stage={deal.stage} label={dealStageLabel(deal)} />
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 border border-slate-200 rounded-md px-1.5 py-0.5">
+                {kind}
+              </span>
             </div>
             <p className="text-sm text-slate-500 mt-1">
               {company?.name}
@@ -99,8 +106,20 @@ export function DealDetail() {
             </p>
           </div>
           <div className="text-right">
-            <p className="text-xs text-slate-400">Deal Value</p>
-            <p className="text-xl font-bold text-slate-800">{formatCurrency(deal.value)}</p>
+            {/* A handover earns nothing at signature, so showing a deal value would be
+                inventing one. Its size is the book, and even that is what the client says
+                rather than what arrives. */}
+            <p className="text-xs text-slate-400">{isHandover ? 'Agreed Book' : 'Deal Value'}</p>
+            <p className="text-xl font-bold text-slate-800">
+              {isHandover
+                ? deal.handoverAmount != null
+                  ? formatCurrency(deal.handoverAmount)
+                  : '—'
+                : formatCurrency(deal.value)}
+            </p>
+            {isHandover && deal.accountsCount != null && (
+              <p className="text-xs text-slate-400">{deal.accountsCount} accounts</p>
+            )}
             <div className="flex items-center gap-1.5 justify-end mt-1.5">
               <UserAvatar userId={deal.ownerId} size={20} />
               <span className="text-xs text-slate-500">{userById(deal.ownerId)?.name}</span>
@@ -126,10 +145,19 @@ export function DealDetail() {
             ))}
           </select>
           <div className="flex flex-wrap gap-2 ml-auto">
+            {canEdit && !isClosed && !deal.quotationSentAt && (
+              <ActionButton icon={FileText} label="Quotation Sent" onClick={() => logDealDocument(deal.id, 'quotation')} />
+            )}
+            {canEdit && !isClosed && isHandover && !deal.mandateSentAt && (
+              <ActionButton icon={FileText} label="Mandate Sent" onClick={() => logDealDocument(deal.id, 'mandate')} />
+            )}
+            {canEdit && !deal.invoiceSentAt && !isHandover && deal.stage === 'Won' && (
+              <ActionButton icon={Send} label="Invoice Sent" onClick={() => logDealDocument(deal.id, 'invoice')} />
+            )}
             {canEdit && <ActionButton icon={Pencil} label="Edit" onClick={() => setEditOpen(true)} />}
             <ActionButton icon={StickyNote} label="Add Activity" onClick={() => setActivityOpen(true)} />
             <ActionButton icon={CheckSquare} label="Create Task" onClick={() => setTaskOpen(true)} />
-            {canEdit && <ActionButton icon={CheckCircle2} label="Mark Won" tone="success" onClick={() => setWonOpen(true)} disabled={isClosed} />}
+            {canEdit && <ActionButton icon={CheckCircle2} label={isHandover ? 'Mandate Signed' : 'Mark Won'} tone="success" onClick={() => setWonOpen(true)} disabled={isClosed} />}
             {canEdit && <ActionButton icon={XCircle} label="Mark Rejected" tone="danger" onClick={() => setRejectOpen(true)} disabled={isClosed} />}
           </div>
         </div>
@@ -167,7 +195,10 @@ export function DealDetail() {
             <Field label="Competitor" value={deal.competitor} />
             {deal.rejectionReason && <Field label="Rejection Reason" value={deal.rejectionReason} />}
             <Field label="Weighted Value" value={formatCurrency(Math.round((deal.value * deal.probability) / 100))} />
-            {deal.handoverAmount != null && <Field label="Handover Amount" value={formatCurrency(deal.handoverAmount)} />}
+            {deal.quotationSentAt && <Field label="Quotation Sent" value={formatDate(deal.quotationSentAt)} />}
+            {deal.mandateSentAt && <Field label="Mandate Sent" value={formatDate(deal.mandateSentAt)} />}
+            {deal.invoiceSentAt && <Field label="Invoice Sent" value={formatDate(deal.invoiceSentAt)} />}
+            {deal.handoverAmount != null && <Field label="Agreed Book" value={formatCurrency(deal.handoverAmount)} />}
             {deal.accountsCount != null && <Field label="Number of Accounts / Matters" value={deal.accountsCount.toString()} />}
             {deal.contractStartDate && <Field label="Starting Date" value={formatDate(deal.contractStartDate)} />}
           </dl>
