@@ -35,7 +35,7 @@ export const THEMES: ThemeDefinition[] = [
     description: 'Deep navy, champagne gold and atmospheric imagery.',
     productName: 'Raptor',
     lockupLight: '/brand/raptor-lockup-light.png',
-    swatch: { ground: '#0b1620', surface: '#f4f5f7', accent: '#c9a052' },
+    swatch: { ground: '#0b1f3b', surface: '#f4f6f9', accent: '#d4a853' },
   },
 ]
 

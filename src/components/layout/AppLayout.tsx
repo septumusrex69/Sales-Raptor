@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
+import { TitleSlotProvider } from './TitleSlot'
 
 const TITLES: { test: RegExp; title: string }[] = [
   { test: /^\/$/, title: 'Dashboard' },
@@ -25,14 +26,16 @@ export function AppLayout() {
   const title = TITLES.find((t) => t.test.test(location.pathname))?.title ?? 'Dashboard'
 
   return (
-    <div className="flex h-dvh w-full overflow-hidden">
-      <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0">
-        <Topbar title={title} />
-        <main className="flex-1 overflow-y-auto p-6">
-          <Outlet />
-        </main>
+    <TitleSlotProvider>
+      <div className="flex h-dvh w-full overflow-hidden">
+        <Sidebar />
+        <div className="flex-1 flex flex-col min-w-0">
+          <Topbar title={title} />
+          <main className="flex-1 overflow-y-auto p-6">
+            <Outlet />
+          </main>
+        </div>
       </div>
-    </div>
+    </TitleSlotProvider>
   )
 }

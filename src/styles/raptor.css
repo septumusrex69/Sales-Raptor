@@ -18,124 +18,118 @@
 
 html[data-theme='raptor'] {
   /* ── Structure ─────────────────────────────────────────────────────────── */
-  --color-surface: #f4f5f7;
+  --color-surface: #f4f6f9;          /* Cloud Grey */
   --color-card: #ffffff;
 
-  /* Neutrals carry a slight blue bias, so white sits warm against them rather than
-     the greys reading as dead. */
-  --color-slate-50: #f8f9fa;
-  --color-slate-100: #eef1f4;
-  --color-slate-200: #e5e9ed;
-  --color-slate-300: #d3dae2;
-  --color-slate-400: #98a4b3;
-  --color-slate-500: #7e8b9b;
-  --color-slate-600: #6f7e90;
-  --color-slate-700: #33475c;
-  --color-slate-800: #1d2e44;
-  --color-slate-900: #142033;
+  /* Neutrals run from Cloud Grey down to Raptor Navy, so every grey in the app belongs to
+     the same family as the brand rather than sitting beside it. */
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #eef1f6;
+  --color-slate-200: #e2e8f0;        /* Neutral Grey */
+  --color-slate-300: #cdd6e3;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #7c8ba1;
+  --color-slate-600: #64748b;
+  --color-slate-700: #33475f;
+  --color-slate-800: #1c3350;
+  --color-slate-900: #0b1f3b;        /* Raptor Navy */
 
-  --color-navy-950: #0b1620;
-  --color-navy-900: #0e1b27;
-  --color-navy-800: #132433;
-  --color-navy-700: #1b3145;
-  --color-navy-600: #2c465c;
+  --color-navy-950: #0b1f3b;         /* Raptor Navy */
+  --color-navy-900: #0f2745;
+  --color-navy-800: #16314e;
+  --color-navy-700: #223851;
+  --color-navy-600: #2e4257;         /* Mountain Slate */
 
-  --color-gold-600: #9b772f;
-  --color-gold-500: #c9a052;
-  --color-gold-400: #d8b56f;
-  --color-gold-300: #f1d79a;
+  --color-gold-600: #a8802f;
+  --color-gold-500: #d4a853;         /* Raptor Gold */
+  --color-gold-400: #e0bc77;
+  --color-gold-300: #f0d9a7;
 
-  --color-brand-50: #f5f7f9;
-  --color-brand-100: #e6ebf0;
-  --color-brand-500: #2c465c;
-  --color-brand-600: #142433;
-  --color-brand-700: #0b1620;
+  --color-brand-50: #f4f6f9;
+  --color-brand-100: #e2e8f0;
+  --color-brand-500: #2e4257;
+  --color-brand-600: #16314e;
+  --color-brand-700: #0b1f3b;
 
-  --color-positive: #3f745b;
-  --color-negative: #b65e4a;
+  --color-positive: #2e7d6b;         /* Success Green */
+  --color-negative: #c75b5b;         /* Error Red */
 
-  /* Status colour stays desaturated — a traffic-light red would undo the restraint
-     everything else is buying. */
-  --color-red-50: #f8ece9;
-  --color-red-100: #f1dbd6;
-  --color-red-200: #e4c3bb;
-  --color-red-500: #b65e4a;
-  --color-red-600: #aa5e4d;
-  --color-red-700: #8f4b3c;
+  /* Status colour stays in the brand's register — a traffic-light red would undo the
+     restraint everything else is buying. */
+  --color-red-50: #f9edec;
+  --color-red-100: #f2d9d9;
+  --color-red-200: #e6bfbf;
+  --color-red-500: #c75b5b;
+  --color-red-600: #b85050;
+  --color-red-700: #9a4141;
 
   /* ── Categorical palette ───────────────────────────────────────────────── */
-  --c-navy-deep: #1e3448;
-  --c-navy: #2c465c;
-  --c-navy-mid: #314f68;
-  --c-navy-slate: #26405a;
-  --c-steel-deep: #456a88;
-  --c-steel: #557a9a;
-  --c-steel-soft: #6089aa;
-  --c-steel-bright: #4a7396;
-  --c-ink: #142033;
-  --c-gold-bright: #c9a052;
-  --c-grey-warm: #7e8b9b;
-  --c-gold-brand: #c9a052;
-  --c-navy-ink: #1b3145;
-  --c-gold-bronze: #9b772f;
-  --c-navy-steel: #3d5f7d;
-  --c-steel-light: #6e8ca5;
-  --c-steel-pale: #a9bccb;
-  --c-gold: #c49a43;
-  --c-gold-deep: #9b772f;
-  --c-gold-dark: #8a6a28;
-  --c-green: #4c7a61;
-  --c-green-bright: #3f745b;
-  --c-green-muted: #5f8570;
-  --c-rust: #b7624d;
-  --c-rust-deep: #9a4e3c;
-  --c-grey: #88939f;
-  --c-grey-light: #a7b1bc;
+  --c-navy-deep: #0b1f3b;
+  --c-navy: #16314e;
+  --c-navy-mid: #234061;
+  --c-navy-slate: #2e4257;
+  --c-navy-ink: #223851;
+  --c-navy-steel: #3a577a;
+  --c-steel: #4a6a8c;
+  --c-steel-soft: #5a7b9d;
+  --c-steel-bright: #6c8dad;
+  --c-steel-deep: #3c5c7e;
+  --c-steel-light: #7f9dbb;
+  --c-steel-pale: #aec3d6;
+  --c-gold: #d4a853;
+  --c-gold-brand: #d4a853;
+  --c-gold-bright: #e0bc77;
+  --c-gold-light: #e8cb96;
+  --c-gold-deep: #a8802f;
+  --c-gold-dark: #8c6a26;
+  --c-gold-bronze: #a8802f;
+  --c-gold-deep-hover: #8c6a26;
+  --c-green: #2e7d6b;
+  --c-green-bright: #369180;
+  --c-green-muted: #5a9184;
+  --c-rust: #c75b5b;
+  --c-rust-deep: #a94a4a;
+  --c-rust-hover: #a94a4a;
+  --c-rust-deep-hover: #8f3d3d;
+  --c-grey: #64748b;
+  --c-grey-warm: #7c8ba1;
+  --c-grey-light: #94a3b8;
+  --c-grey-blue: #8598ad;
+  --c-grey-pale: #cdd6e3;
+  --c-ink: #0b1f3b;
 
-  --tint-steel: #edf3f8;
-  --tint-steel-soft: #eaf1f8;
-  --tint-steel-alt: #eef1f4;
-  --tint-gold: #f6f0e3;
-  --tint-gold-deep: #f4eee1;
-  --tint-gold-dark: #f3eddd;
-  --tint-green: #edf5f0;
-  --tint-green-bright: #eaf3ee;
-  --tint-rust: #f8ece9;
-  --tint-rust-deep: #f6e9e5;
+  --tint-steel: #eef2f8;
+  --tint-steel-soft: #e9f0f7;
+  --tint-steel-alt: #eef1f6;
+  --tint-gold: #f9f1e2;
+  --tint-gold-deep: #f6eede;
+  --tint-gold-dark: #f4ecd9;
+  --tint-gold-pale: #ecd9ae;
+  --tint-green: #e8f3f0;
+  --tint-green-bright: #e4f1ed;
+  --tint-rust: #f9ecec;
+  --tint-rust-deep: #f6e6e6;
+  --tint-neutral: #eef1f6;
+  --tint-neutral-soft: #f8fafc;
 
-  --stage-new-deal: #314f68;
-  --stage-quotation-sent: #c49a43;
-  --stage-won: #9b772f;
-  --stage-rejected: #b7624d;
-
-  --c-gold-light: #d8b56f;
-  --c-gold-deep-hover: #86672a;
-  --c-rust-hover: #9a4e3c;
-  --c-rust-deep-hover: #833f30;
-  --c-grey-blue: #8d99a6;
-  --c-grey-pale: #c7d0d9;
-  --tint-gold-pale: #e8d9b4;
-  --tint-neutral: #eef1f4;
-  --tint-neutral-soft: #f8f9fa;
-
-  /* Metallic gold, used only for logo-like decorative elements — never for body text or a
-     whole button, where it would read as costume jewellery rather than restraint. */
-  --skin-gold-gradient: var(--raptor-gold-metal);
-  --skin-gold-gradient-deep: linear-gradient(135deg, #9b772f 0%, #c9a052 100%);
+  --stage-new-deal: #2e4257;
+  --stage-quotation-sent: #d4a853;
+  --stage-won: #2e7d6b;
+  --stage-rejected: #c75b5b;
 
   /* ── Surfaces ──────────────────────────────────────────────────────────── */
   --skin-card-radius: 14px;
-  --skin-card-border: #e6e9ed;
-  --skin-card-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), 0 6px 18px rgba(15, 23, 42, 0.04);
-  --skin-card-shadow-hover: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 30px rgba(15, 23, 42, 0.08);
-  --skin-body-text: #142033;
-  --skin-scrollbar: #ccd4dd;
+  --skin-card-border: #e2e8f0;
+  --skin-card-shadow: 0 1px 2px rgba(11, 31, 59, 0.03), 0 6px 18px rgba(11, 31, 59, 0.05);
+  --skin-card-shadow-hover: 0 1px 2px rgba(11, 31, 59, 0.04), 0 12px 30px rgba(11, 31, 59, 0.09);
+  --skin-body-text: #0b1f3b;
+  --skin-scrollbar: #cdd6e3;
 
-  /* The hero is the one place imagery is allowed to carry the brand. The overlay is part of
-     the background rather than a separate layer, so text contrast can't drift as the image
-     changes behind it. */
+  /* The hero is the one place imagery is allowed to carry the brand. Gradient and photograph
+     are one background rather than two stacked layers, so the copy's contrast can't drift as
+     the image changes behind it. */
   --skin-hero-background:
-    linear-gradient(100deg, rgba(11, 22, 32, 0.97) 0%, rgba(11, 22, 32, 0.86) 42%, rgba(14, 27, 39, 0.55) 100%);
+    linear-gradient(100deg, rgba(11, 31, 59, 0.97) 0%, rgba(11, 31, 59, 0.86) 42%, rgba(15, 39, 69, 0.55) 100%);
   --skin-hero-image: url('/brand/raptor-hero.jpg');
   --skin-hero-radius: 18px;
 
@@ -144,12 +138,17 @@ html[data-theme='raptor'] {
 
   --raptor-gold-metal: linear-gradient(
     135deg,
-    #9d722d 0%,
-    #d9b66d 35%,
-    #f1d79a 55%,
-    #c5943b 78%,
-    #8a642a 100%
+    #a8802f 0%,
+    #d4a853 35%,
+    #f0d9a7 55%,
+    #d4a853 78%,
+    #8c6a26 100%
   );
+
+  /* Metallic gold, used only for logo-like decorative elements — never for body text or a
+     whole button, where it would read as costume jewellery rather than restraint. */
+  --skin-gold-gradient: var(--raptor-gold-metal);
+  --skin-gold-gradient-deep: linear-gradient(135deg, #a8802f 0%, #d4a853 100%);
 }
 
 /* Gradient and photograph are one background rather than two stacked layers, so the copy's
@@ -193,20 +192,20 @@ html[data-theme='raptor'] .app-sidebar::after {
   height: 46%;
   z-index: -1;
   background:
-    linear-gradient(180deg, #0b1620 0%, rgba(11, 22, 32, 0.72) 38%, rgba(11, 22, 32, 0.9) 100%),
+    linear-gradient(180deg, #0b1f3b 0%, rgba(11, 31, 59, 0.72) 38%, rgba(11, 31, 59, 0.9) 100%),
     var(--skin-sidebar-art) center bottom / cover no-repeat;
   opacity: var(--skin-sidebar-art-opacity);
   pointer-events: none;
 }
 
 html[data-theme='raptor'] .app-sidebar nav a[aria-current='page'] {
-  background: linear-gradient(180deg, #d8b56f 0%, #c9a052 100%);
-  color: #101820;
+  background: linear-gradient(180deg, #e0bc77 0%, #d4a853 100%);
+  color: #0b1f3b;
 }
 
 /* ── Tables ──────────────────────────────────────────────────────────────── */
 html[data-theme='raptor'] tbody tr:hover {
-  background-color: #f8f9fa;
+  background-color: #f8fafc;
 }
 
 /* ── Inputs and controls ─────────────────────────────────────────────────── */
@@ -221,7 +220,7 @@ html[data-theme='raptor'] select:focus-visible,
 html[data-theme='raptor'] textarea:focus-visible,
 html[data-theme='raptor'] button:focus-visible,
 html[data-theme='raptor'] a:focus-visible {
-  outline: 2px solid rgba(201, 160, 82, 0.55);
+  outline: 2px solid rgba(212, 168, 83, 0.55);
   outline-offset: 1px;
 }
 
