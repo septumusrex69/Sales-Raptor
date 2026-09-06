@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Pencil, CheckCircle2, XCircle, StickyNote, CheckSquare, FileText, Send, Plus, Upload, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
@@ -26,6 +26,7 @@ interface MockDocument {
 
 export function DealDetail() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const store = useAppStore()
   const {
     deals,
@@ -344,7 +345,17 @@ export function DealDetail() {
         <EditDealModal deal={deal} reps={reps} canReassign={canReassign(currentUser)} onClose={() => setEditOpen(false)} onSave={(patch) => updateDeal(deal.id, patch)} />
       )}
       {wonOpen && <MarkWonModal defaultService={deal.service} onClose={() => setWonOpen(false)} onSave={(details: WonDealDetails) => markDealWon(deal.id, details)} />}
-      {rejectOpen && <MarkRejectedModal onClose={() => setRejectOpen(false)} onSave={(reason, note) => markDealRejected(deal.id, reason, note)} />}
+      {rejectOpen && (
+        <MarkRejectedModal
+          onClose={() => setRejectOpen(false)}
+          onSave={(reason, note) => {
+            markDealRejected(deal.id, reason, note)
+            // A rejected deal is finished — there's nothing left to do on its page. Back to
+            // the board, where it's now sitting in Rejected alongside the others.
+            navigate('/deals')
+          }}
+        />
+      )}
       {activityOpen && (
         <AddActivityModal onClose={() => setActivityOpen(false)} onSave={(type, notes) => addActivity({ type, subject: `${type} logged on ${deal.name}`, notes, dealId: deal.id, companyId: deal.companyId })} />
       )}

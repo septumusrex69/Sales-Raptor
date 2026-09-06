@@ -548,7 +548,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     (id, details) => {
       const deal = deals.find((d) => d.id === id)
       const patch: Partial<Deal> = {
-        stage: 'Won' as DealStage,
+        stage: 'Won',
         probability: DEAL_STAGE_PROBABILITY.Won,
         value: details.finalValue,
         service: details.service,
@@ -574,7 +574,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const markDealRejected = useCallback<AppActions['markDealRejected']>(
     (id, reason, note) => {
-      const patch: Partial<Deal> = { stage: 'Lost' as DealStage, rejectionReason: reason, rejectedAt: nowIso() }
+      const patch: Partial<Deal> = {
+        stage: 'Rejected',
+        probability: DEAL_STAGE_PROBABILITY.Rejected,
+        rejectionReason: reason,
+        rejectionNote: note || undefined,
+        rejectedAt: nowIso(),
+      }
       let previous: Deal | undefined
       setDeals((prev) => {
         previous = prev.find((d) => d.id === id)

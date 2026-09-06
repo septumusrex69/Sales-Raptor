@@ -86,7 +86,9 @@ export function DealsBoard() {
     })
   }, [filtered, view, stageFilter, stageAtLeast, noNextActionFilter, overdueFilter, salesMonthFilter, companyIdFilter, openOnlyFilter])
 
-  const columns = [...OPEN_STAGES, 'Won', 'Rejected'] as DealStage[]
+  // Annotated rather than asserted: `as DealStage[]` would let a retired stage name through,
+  // and a column nothing matches is a column of deals nobody can see.
+  const columns: DealStage[] = [...OPEN_STAGES, 'Won', 'Rejected']
 
   const totals = useMemo(() => {
     const open = deals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected')
