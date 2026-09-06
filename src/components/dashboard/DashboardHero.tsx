@@ -11,7 +11,7 @@ import { useTheme } from '../../store/ThemeContext'
  */
 export function DashboardHero({
   children,
-  eyebrow = 'Bredell Ferreira · Romulus',
+  eyebrow,
   title = 'Sales Dashboard',
   subtitle = 'Real-time overview of your sales performance',
 }: {
@@ -22,7 +22,7 @@ export function DashboardHero({
 }) {
   // Each skin brings its own mark. The watermark steps aside where a skin supplies its own
   // atmosphere behind the band, rather than two brand devices competing in one panel.
-  const { themeId } = useTheme()
+  const { theme, themeId } = useTheme()
   const raptor = themeId === 'raptor'
   return (
     <div className="app-hero px-7 py-8">
@@ -64,7 +64,7 @@ export function DashboardHero({
         </svg>
           )}
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-gold-500 mb-1">{eyebrow}</p>
+          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-gold-500 mb-1">{eyebrow ?? `Bredell Ferreira · ${theme.productName}`}</p>
           <h2 className="text-2xl font-extrabold tracking-tight text-white">{title}</h2>
           <p className="text-[13px] text-white/60 mt-0.5">{subtitle}</p>
           </div>

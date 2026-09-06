@@ -1036,10 +1036,10 @@ function AddCustomFieldModal({ onClose, onSave }: { onClose: () => void; onSave:
  * three-colour tile can.
  */
 function AppearanceTab() {
-  const { themeId, setTheme } = useTheme()
+  const { themeId, setTheme, theme } = useTheme()
   return (
     <Card>
-      <CardHeader title="Appearance" subtitle="Choose how Romulus looks. This changes nothing but the styling, and applies to you only." />
+      <CardHeader title="Appearance" subtitle={`Choose how ${theme.productName} looks. This changes nothing but the styling, and applies to you only.`} />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
         {THEMES.map((t) => {
           const selected = t.id === themeId

@@ -12,6 +12,8 @@ export interface ThemeDefinition {
   id: ThemeId
   name: string
   description: string
+  /** What the product calls itself under this skin — a skin carries its own branding. */
+  productName: string
   /** Logo lockup for dark surfaces (the sidebar). */
   lockupLight: string
   /** Three colours that stand for the skin on its preview tile: ground, surface, accent. */
@@ -23,6 +25,7 @@ export const THEMES: ThemeDefinition[] = [
     id: 'original',
     name: 'Current',
     description: 'The original Bredell Ferreira appearance.',
+    productName: 'Romulus',
     lockupLight: '/brand/wordmark-light.svg',
     swatch: { ground: '#0f161d', surface: '#f4f6fb', accent: '#c69f54' },
   },
@@ -30,6 +33,7 @@ export const THEMES: ThemeDefinition[] = [
     id: 'raptor',
     name: 'Raptor',
     description: 'Deep navy, champagne gold and atmospheric imagery.',
+    productName: 'Raptor',
     lockupLight: '/brand/raptor-lockup-light.png',
     swatch: { ground: '#0b1620', surface: '#f4f5f7', accent: '#c9a052' },
   },

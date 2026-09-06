@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
+import { useTheme } from '../store/ThemeContext'
 
 /** Quiet enough not to hammer the server, frequent enough that a fix lands the same day it ships. */
 const CHECK_INTERVAL_MS = 5 * 60 * 1000
@@ -41,6 +42,7 @@ function safeToReloadNow(): boolean {
  * page away mid-sentence.
  */
 export function NewVersionWatcher() {
+  const { theme } = useTheme()
   const [updateReady, setUpdateReady] = useState(false)
 
   useEffect(() => {
@@ -79,7 +81,7 @@ export function NewVersionWatcher() {
 
   return (
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-3 bg-navy-950 text-white rounded-xl shadow-lg px-4 py-2.5">
-      <span className="text-sm">A newer version of Romulus is ready.</span>
+      <span className="text-sm">A newer version of {theme.productName} is ready.</span>
       <button
         onClick={() => window.location.reload()}
         className="inline-flex items-center gap-1.5 text-sm font-medium bg-gold-400 text-navy-950 rounded-lg px-3 py-1.5 hover:bg-gold-300"
