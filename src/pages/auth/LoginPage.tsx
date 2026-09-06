@@ -69,10 +69,17 @@ export function LoginPage() {
           className="absolute inset-y-0 left-0 w-[128%]"
           style={{ WebkitMaskImage: EDGE_FADE, maskImage: EDGE_FADE }}
         >
-          <div
-            className="absolute inset-0 bg-[#0b1620] bg-cover"
-            style={{ backgroundImage: "url('/brand/raptor-login.jpg')", backgroundPosition: '32% center' }}
-          />
+          {/* A real <picture> rather than a CSS background, so the browser can take the WebP
+              and fall back to the JPEG on its own. object-cover reproduces what bg-cover did. */}
+          <picture>
+            <source srcSet="/brand/raptor-login.webp" type="image/webp" />
+            <img
+              src="/brand/raptor-login.jpg"
+              alt=""
+              className="absolute inset-0 h-full w-full bg-[#0b1620] object-cover"
+              style={{ objectPosition: '32% center' }}
+            />
+          </picture>
           {/* Weighted to the top-left corner, where the words sit. */}
           <div className="absolute inset-0" style={{ background: CORNER_SHADE }} />
           <div className="absolute inset-0 bg-[#040c14]/18" />
