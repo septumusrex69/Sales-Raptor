@@ -176,13 +176,22 @@ body {
  * <img> inside one. A phone shouldn't pay for a picture it is never shown.
  *
  * Three declarations of one property, each overriding the last where it's understood. Anything
- * modern takes the standard image-set and gets the WebP; Safari 14-16 takes the -webkit- form
- * and gets the same file; anything older keeps the plain JPEG.
+ * modern takes the standard image-set; Safari 14-16 takes the -webkit- form and gets the same
+ * files; anything older keeps the plain JPEG. A browser that chokes on the last declaration
+ * falls back to the one above it and still ends up with WebP, so the ordering is the safety
+ * net rather than a guess about support.
+ *
+ * The 2x file is only ever fetched by a screen dense enough to need it — an ordinary monitor
+ * pays 257KB, not 409KB.
  */
 .login-photo {
   background-image: url('/brand/raptor-login.jpg');
-  background-image: -webkit-image-set(url('/brand/raptor-login.webp') 1x);
-  background-image: image-set(url('/brand/raptor-login.webp') type('image/webp'), url('/brand/raptor-login.jpg') type('image/jpeg'));
+  background-image: -webkit-image-set(url('/brand/raptor-login.webp') 1x, url('/brand/raptor-login@2x.webp') 2x);
+  background-image: image-set(
+    url('/brand/raptor-login.webp') type('image/webp') 1x,
+    url('/brand/raptor-login@2x.webp') type('image/webp') 2x,
+    url('/brand/raptor-login.jpg') type('image/jpeg') 1x
+  );
   background-size: cover;
   background-position: 32% center;
 }
