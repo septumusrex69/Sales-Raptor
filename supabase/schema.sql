@@ -146,6 +146,8 @@ create table if not exists public.contacts (
   last_name text not null,
   job_title text,
   company_id uuid references public.companies (id) on delete set null,
+  -- contacts.lead_id is added after the leads table below: this table is created first, so
+  -- the foreign key can't be declared here without a forward reference.
   email text,
   phone text,
   mobile text,
@@ -205,6 +207,13 @@ create table if not exists public.leads (
 -- existed before service_values was added (create table if not exists
 -- above is a no-op in that case, so this catches it separately).
 alter table public.leads add column if not exists service_values jsonb;
+
+-- Contact persons captured against a lead, before there's a company to hang them off — at a
+-- prospect you're usually dealing with more than one person (whoever enquired, plus whoever
+-- actually signs). Declared here rather than in the contacts table above, which is created
+-- first and so can't reference leads yet. Cleared rather than deleted if the lead goes, and
+-- convertLeadToDeal re-points these at the new company so they survive conversion.
+alter table public.contacts add column if not exists lead_id uuid references public.leads (id) on delete set null;
 
 -- ---------- Deals ----------
 create table if not exists public.deals (

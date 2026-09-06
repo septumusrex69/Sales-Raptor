@@ -777,6 +777,15 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       setDeals((prev) => [...dealsToCreate, ...prev])
 
       updateLead(leadId, { status: 'Converted' as LeadStatus, convertedDealId: firstDeal.id })
+
+      // Contact people captured while this was still a lead belong to the client now — without
+      // this they'd stay pointed only at the lead and vanish from the record everyone actually
+      // works from afterwards.
+      const carriedOverContacts = contacts.filter((c) => c.leadId === leadId && !c.companyId)
+      for (const contact of carriedOverContacts) {
+        setContacts((prev) => prev.map((c) => (c.id === contact.id ? { ...c, companyId } : c)))
+        updateRow('contacts', contact.id, { companyId }, 'convertLeadToDeal:contactCompany')
+      }
       for (const deal of dealsToCreate) {
         addActivity({ type: 'Status change', subject: `Lead converted to deal: ${deal.name}`, leadId, dealId: deal.id, companyId })
       }

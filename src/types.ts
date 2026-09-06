@@ -165,6 +165,8 @@ export interface Contact {
   lastName: string
   jobTitle?: string
   companyId?: ID
+  /** Set for a contact person captured against a lead, before there's a company to attach them to. */
+  leadId?: ID
   email?: string
   phone?: string
   mobile?: string

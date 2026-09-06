@@ -1,12 +1,15 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Pencil, ArrowRightLeft, StickyNote, CheckSquare, Calendar, XCircle, Phone, Mail, Trash2 } from 'lucide-react'
+import { ArrowLeft, Pencil, ArrowRightLeft, StickyNote, CheckSquare, Calendar, XCircle, Phone, Mail, Trash2, Plus } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { canEditOwned, canReassign, isAssignableOwner} from '../../lib/permissions'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
-import { HeroOwner } from '../../components/HeroOwner'
+import { RecordOwner } from '../../components/RecordOwner'
 import { Card, CardHeader } from '../../components/ui/Card'
+import { UserAvatar } from '../../components/ui/Avatar'
+import { AddContactModal } from '../../components/contacts/AddContactModal'
+import { EditContactModal } from '../../components/contacts/EditContactModal'
 import { StatusBadge, ServiceBadge, StageBadge, ClassificationBadge } from '../../components/ui/Badge'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
@@ -17,7 +20,7 @@ import { NoteActivityList } from '../../components/NoteActivityRow'
 import { parseEmailActivity } from '../../lib/emailActivity'
 import { buildDrilldownUrl } from '../../lib/drilldown'
 import { formatCurrency, formatDate, formatLeadNumber, industries, leadSources } from '../../data/mockData'
-import type { ActivityType, LeadStatus, TaskType } from '../../types'
+import type { ActivityType, Contact, LeadStatus, TaskType } from '../../types'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, serviceValueLabel, leadServiceValueList } from '../../components/leads/LeadOpportunityFields'
 
 const ALL_STATUSES: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Qualified', 'Unqualified', 'Proposal Required', 'Converted', 'Lost']
@@ -25,7 +28,7 @@ const ALL_STATUSES: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Q
 export function LeadDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { leads, deals, activities, users, userById, updateLead, convertLeadToDeal, markLeadLost, deleteLead, addActivity, addTask } = useAppStore()
+  const { leads, deals, contacts, activities, users, userById, updateLead, convertLeadToDeal, markLeadLost, deleteLead, addActivity, addContact, updateContact, addTask } = useAppStore()
   const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const lead = leads.find((l) => l.id === id)
@@ -40,6 +43,11 @@ export function LeadDetail() {
   const [emailLimit, setEmailLimit] = useState<RowLimit>(5)
   const [noteLimit, setNoteLimit] = useState<RowLimit>(5)
   const [replyTarget, setReplyTarget] = useState<{ subject: string } | null>(null)
+  const [addContactOpen, setAddContactOpen] = useState(false)
+  const [editContact, setEditContact] = useState<Contact | null>(null)
+  const [contactEmailTarget, setContactEmailTarget] = useState<Contact | null>(null)
+
+  const leadContacts = useMemo(() => contacts.filter((c) => c.leadId === id), [contacts, id])
 
   const timeline = useMemo(
     () => activities.filter((a) => a.leadId === id).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()),
@@ -81,12 +89,11 @@ export function LeadDetail() {
             <span>Source: {lead.source}</span>
           </span>
         }
-      >
-        <HeroOwner ownerId={lead.ownerId} label="Salesperson" />
-      </DashboardHero>
+      />
 
       <Card>
         <div className="flex flex-wrap items-end gap-x-10 gap-y-3">
+          <RecordOwner ownerId={lead.ownerId} label="Salesperson" />
           <div>
             <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide mb-1.5">Class</p>
             {lead.classification ? (
@@ -162,22 +169,121 @@ export function LeadDetail() {
 
       <div className="space-y-5">
         <Card>
-          <CardHeader title="Contact Information" />
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
-              <Field label="First Name" value={lead.firstName} />
-              <Field label="Last Name" value={lead.lastName} />
-              <Field label="Company" value={lead.companyName} />
-              <Field label="Job Title" value={lead.jobTitle} />
-              <Field label="Email" value={lead.email} icon={Mail} onIconClick={lead.email ? () => setEmailOpen(true) : undefined} />
-              <Field label="Mobile Number" value={lead.mobile} icon={Phone} href={lead.mobile ? `tel:${lead.mobile}` : undefined} />
-              <Field label="Office Number" value={lead.phone} icon={Phone} href={lead.phone ? `tel:${lead.phone}` : undefined} />
-              <Field label="Industry" value={lead.industry} />
-              <Field label="Country" value={lead.country} />
-              <Field label="Province" value={lead.province} />
-              <Field label="City / Town" value={lead.city} />
-              <Field label="Address" value={lead.address} />
-            </dl>
-          </Card>
+          <CardHeader
+            title="Contact Details"
+            action={
+              canEdit ? (
+                <button
+                  onClick={() => setEditOpen(true)}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                >
+                  <Pencil size={12} /> Edit
+                </button>
+              ) : undefined
+            }
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-4 pb-4 border-b border-slate-100">
+            <div>
+              <p className="text-xs text-slate-400 mb-0.5">Office Number</p>
+              {lead.phone ? (
+                <a href={`tel:${lead.phone}`} className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600">
+                  <Phone size={13} /> {lead.phone}
+                </a>
+              ) : (
+                <span className="text-slate-300">—</span>
+              )}
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 mb-0.5">Mobile</p>
+              {lead.mobile ? (
+                <a href={`tel:${lead.mobile}`} className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600">
+                  <Phone size={13} /> {lead.mobile}
+                </a>
+              ) : (
+                <span className="text-slate-300">—</span>
+              )}
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 mb-0.5">Email</p>
+              {lead.email ? (
+                <span className="inline-flex items-center gap-1.5 text-slate-700 font-medium">
+                  <button onClick={() => setEmailOpen(true)} className="text-slate-400 hover:text-brand-600" title="Send email">
+                    <Mail size={13} />
+                  </button>
+                  {lead.email}
+                </span>
+              ) : (
+                <span className="text-slate-300">—</span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-slate-400">Contact Persons</p>
+            <button onClick={() => setAddContactOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline">
+              <Plus size={12} /> Add Contact
+            </button>
+          </div>
+          {leadContacts.length === 0 ? (
+            <p className="text-sm text-slate-400">
+              Just {lead.firstName} so far. Add anyone else you deal with at {lead.companyName}.
+            </p>
+          ) : (
+            <div className="space-y-1">
+              {leadContacts.map((c) => (
+                <div key={c.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 hover:bg-slate-50 -mx-1 px-2 py-2 rounded-lg">
+                  <Link to={`/contacts/${c.id}`} className="flex items-center gap-2.5 min-w-0">
+                    <UserAvatar userId={c.ownerId} size={30} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-700 hover:text-brand-600 truncate">
+                        {c.firstName} {c.lastName}
+                      </p>
+                      <p className="text-xs text-slate-400 truncate">{c.jobTitle}</p>
+                    </div>
+                  </Link>
+                  <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
+                    {c.phone && (
+                      <a href={`tel:${c.phone}`} className="inline-flex items-center gap-1 hover:text-brand-600">
+                        <Phone size={11} /> {c.phone}
+                      </a>
+                    )}
+                    {c.mobile && (
+                      <a href={`tel:${c.mobile}`} className="inline-flex items-center gap-1 hover:text-brand-600">
+                        <Phone size={11} /> {c.mobile} <span className="text-slate-300">mobile</span>
+                      </a>
+                    )}
+                    {c.email && (
+                      <span className="inline-flex items-center gap-1">
+                        <button onClick={() => setContactEmailTarget(c)} className="text-slate-400 hover:text-brand-600" title="Send email">
+                          <Mail size={11} />
+                        </button>
+                        {c.email}
+                      </span>
+                    )}
+                    <button onClick={() => setEditContact(c)} className="text-slate-300 hover:text-brand-600" title="Edit contact">
+                      <Pencil size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Card>
+          <CardHeader title="Lead Profile" />
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
+            <Field label="First Name" value={lead.firstName} />
+            <Field label="Last Name" value={lead.lastName} />
+            <Field label="Company" value={lead.companyName} />
+            <Field label="Job Title" value={lead.jobTitle} />
+            <Field label="Industry" value={lead.industry} />
+            <Field label="Country" value={lead.country} />
+            <Field label="Province" value={lead.province} />
+            <Field label="City / Town" value={lead.city} />
+            <Field label="Address" value={lead.address} />
+          </dl>
+        </Card>
 
           <Card>
             <CardHeader title="Lead Information" />
@@ -332,6 +438,28 @@ export function LeadDetail() {
           to={lead.email}
           onClose={() => setEmailOpen(false)}
           onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, leadId: lead.id, companyId: lead.companyId })}
+        />
+      )}
+      {addContactOpen && (
+        <AddContactModal
+          onClose={() => setAddContactOpen(false)}
+          onSave={(input) => addContact({ ...input, leadId: lead.id, companyId: lead.companyId })}
+        />
+      )}
+      {editContact && (
+        <EditContactModal
+          contact={editContact}
+          onClose={() => setEditContact(null)}
+          onSave={(patch) => updateContact(editContact.id, patch)}
+        />
+      )}
+      {contactEmailTarget?.email && (
+        <ComposeEmailModal
+          to={contactEmailTarget.email}
+          onClose={() => setContactEmailTarget(null)}
+          onSent={(subject, bodyText) =>
+            addActivity({ type: 'Email', subject, notes: bodyText, contactId: contactEmailTarget.id, leadId: lead.id, companyId: lead.companyId })
+          }
         />
       )}
       {replyTarget && lead.email && (
