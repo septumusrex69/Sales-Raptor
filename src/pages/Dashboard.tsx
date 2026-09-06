@@ -262,7 +262,7 @@ export function Dashboard() {
         <button
           onClick={handleExport}
           className="inline-flex items-center gap-1.5 text-sm font-semibold px-3.5 py-2 rounded-lg text-navy-950 shadow-sm"
-          style={{ background: 'linear-gradient(135deg, #c69f54 0%, #d9b876 100%)' }}
+          style={{ background: 'var(--skin-gold-gradient)' }}
         >
           <Download size={15} /> Export
         </button>
@@ -433,14 +433,14 @@ export function Dashboard() {
         <div className="px-5 pb-5 divide-y divide-slate-50">
           {tasksDue.map((t) => (
             <div key={t.id} className="flex items-center gap-3 py-2.5">
-              <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: new Date().toISOString() })} className="text-slate-300 hover:text-[#406d58] shrink-0">
+              <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: new Date().toISOString() })} className="text-slate-300 hover:text-[var(--c-green)] shrink-0">
                 <Circle size={18} />
               </button>
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-medium text-slate-700 truncate flex items-center gap-1.5">
                   {t.title}
                   {t.autoRescheduledFrom && (
-                    <span title={`Missed — originally due ${formatDate(t.autoRescheduledFrom)}`} className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-[#b28e34] bg-[#f7f4eb] px-1 py-0.5 rounded">
+                    <span title={`Missed — originally due ${formatDate(t.autoRescheduledFrom)}`} className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-[var(--c-gold)] bg-[var(--tint-gold)] px-1 py-0.5 rounded">
                       Auto-moved
                     </span>
                   )}
@@ -448,7 +448,7 @@ export function Dashboard() {
                 <p className="text-[11px] text-slate-400">{t.relatedToLabel ?? t.type}</p>
               </div>
               <PriorityBadge priority={t.priority} />
-              <span className={`text-xs font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[#794234]' : 'text-slate-500'}`}>
+              <span className={`text-xs font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>
                 {daysAgoLabel(t.dueDate)}
               </span>
               <UserAvatar userId={t.ownerId} size={24} />
@@ -459,7 +459,7 @@ export function Dashboard() {
           ))}
           {tasksDue.length === 0 && (
             <div className="py-6 text-center text-sm text-slate-400 flex flex-col items-center gap-2">
-              <CheckCircle2 size={22} className="text-[#406d58]" />
+              <CheckCircle2 size={22} className="text-[var(--c-green)]" />
               All caught up — no tasks due.
             </div>
           )}

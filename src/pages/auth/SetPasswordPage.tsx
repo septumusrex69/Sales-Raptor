@@ -65,7 +65,7 @@ export function SetPasswordPage() {
                 required
               />
             </FormField>
-            {error && <p className="text-sm text-[#794234] mb-3.5">{error}</p>}
+            {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
             <button
               type="submit"
               disabled={submitting}

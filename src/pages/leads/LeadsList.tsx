@@ -58,8 +58,8 @@ function leadAgeLabel(iso: string) {
 function followUpTone(iso?: string) {
   if (!iso) return 'text-slate-400'
   const due = new Date(iso)
-  if (due < TODAY && due.toDateString() !== TODAY.toDateString()) return 'text-[#794234] font-medium'
-  if (due.toDateString() === TODAY.toDateString()) return 'text-[#b28e34] font-medium'
+  if (due < TODAY && due.toDateString() !== TODAY.toDateString()) return 'text-[var(--c-rust-deep)] font-medium'
+  if (due.toDateString() === TODAY.toDateString()) return 'text-[var(--c-gold)] font-medium'
   return 'text-slate-600'
 }
 
@@ -498,7 +498,7 @@ export function LeadsList() {
                           </div>
                           {staleContact && (
                             <span title="Class A lead — no recent contact">
-                              <AlertTriangle size={13} className="text-[#794234] shrink-0" />
+                              <AlertTriangle size={13} className="text-[var(--c-rust-deep)] shrink-0" />
                             </span>
                           )}
                         </div>
@@ -677,7 +677,7 @@ function paginationWindow(current: number, total: number): (number | '…')[] {
 }
 
 function ScorePill({ score }: { score: number }) {
-  const tone = score >= 81 ? 'bg-[#f6eeec] text-[#794234]' : score >= 61 ? 'bg-[#f7f4eb] text-[#b28e34]' : score >= 31 ? 'bg-[#edf1f5] text-[#6086a9]' : 'bg-slate-100 text-slate-500'
+  const tone = score >= 81 ? 'bg-[var(--tint-rust-deep)] text-[var(--c-rust-deep)]' : score >= 61 ? 'bg-[var(--tint-gold)] text-[var(--c-gold)]' : score >= 31 ? 'bg-[var(--tint-steel)] text-[var(--c-steel)]' : 'bg-slate-100 text-slate-500'
   return <span className={`inline-flex items-center justify-center w-9 h-6 rounded-md text-xs font-semibold ${tone}`}>{score}</span>
 }
 

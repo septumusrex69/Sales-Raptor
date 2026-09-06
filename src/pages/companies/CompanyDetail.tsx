@@ -160,7 +160,7 @@ export function CompanyDetail() {
               </div>
               <div>
                 <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Paid to Date</p>
-                <p className="text-2xl font-bold text-[#957323] mt-0.5">{formatCurrency(company.paymentsToDate ?? 0)}</p>
+                <p className="text-2xl font-bold text-[var(--c-gold-deep)] mt-0.5">{formatCurrency(company.paymentsToDate ?? 0)}</p>
               </div>
               {collectionsCoefficient !== undefined && (
                 <div>
@@ -440,7 +440,7 @@ export function CompanyDetail() {
                 {wonDeals.map((d) => (
                   <Link key={d.id} to={`/deals/${d.id}`} className="flex items-center justify-between py-2.5 hover:bg-slate-50/60 -mx-1 px-1 rounded-lg">
                     <span className="text-sm font-medium text-slate-700">{d.name}</span>
-                    <span className="text-sm font-semibold text-[#957323]">{formatCurrency(d.value)}</span>
+                    <span className="text-sm font-semibold text-[var(--c-gold-deep)]">{formatCurrency(d.value)}</span>
                   </Link>
                 ))}
               </div>

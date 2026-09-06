@@ -25,6 +25,6 @@ export function Avatar({ name, color, size = 28 }: { name: string; color: string
 export function UserAvatar({ userId, size = 28 }: { userId?: ID; size?: number }) {
   const { userById } = useAppStore()
   const user = userById(userId)
-  if (!user) return <Avatar name="?" color="#94a3b8" size={size} />
+  if (!user) return <Avatar name="?" color="var(--c-grey-light)" size={size} />
   return <Avatar name={user.name} color={user.avatarColor} size={size} />
 }

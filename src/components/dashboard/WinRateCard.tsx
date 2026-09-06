@@ -19,7 +19,7 @@ interface WinRateCardProps {
 }
 
 /** Neutral gray for a slice that's excluded from a given rate's own math — still shown for context, just visually de-emphasized so it doesn't read as "counted." */
-const EXCLUDED_HEX = '#cbd5e1'
+const EXCLUDED_HEX = 'var(--c-grey-pale)'
 
 export function WinRateCard({ deals, won, lost, winRate, newLeads, qualified, converted, periodLabel, periodParam }: WinRateCardProps) {
   const open = deals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected').length
@@ -43,9 +43,9 @@ export function WinRateCard({ deals, won, lost, winRate, newLeads, qualified, co
   ].filter((d) => d.value > 0)
 
   const pipeline = [
-    { label: 'New Leads', value: newLeads, color: '#6086a9', bg: '#edf1f5', to: buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam }) },
-    { label: 'Hot leads', value: qualified, color: '#406d58', bg: '#eef4f1', to: buildDrilldownUrl('/leads', { status: 'Hot Lead', [SALES_MONTH_PARAM]: periodParam }) },
-    { label: 'Converted to Deal', value: converted, color: '#957323', bg: '#f7f3eb', to: buildDrilldownUrl('/leads', { status: 'Converted', [SALES_MONTH_PARAM]: periodParam }) },
+    { label: 'New Leads', value: newLeads, color: 'var(--c-steel)', bg: 'var(--tint-steel)', to: buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam }) },
+    { label: 'Hot leads', value: qualified, color: 'var(--c-green)', bg: 'var(--tint-green)', to: buildDrilldownUrl('/leads', { status: 'Hot Lead', [SALES_MONTH_PARAM]: periodParam }) },
+    { label: 'Converted to Deal', value: converted, color: 'var(--c-gold-deep)', bg: 'var(--tint-gold-deep)', to: buildDrilldownUrl('/leads', { status: 'Converted', [SALES_MONTH_PARAM]: periodParam }) },
   ]
 
   return (

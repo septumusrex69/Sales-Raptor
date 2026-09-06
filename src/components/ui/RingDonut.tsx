@@ -17,7 +17,7 @@ export function RingDonut({
   data,
   centerValue,
   centerLabel,
-  centerColor = '#1e293b',
+  centerColor = 'var(--c-ink)',
   caption,
 }: {
   data: RingDonutSlice[]
@@ -41,7 +41,7 @@ export function RingDonut({
     <div className="flex flex-col items-center gap-2.5">
       <div className="h-40 w-40 relative">
         <svg viewBox={`0 0 ${DONUT_SIZE} ${DONUT_SIZE}`} className="h-full w-full -rotate-90">
-          <circle cx={DONUT_SIZE / 2} cy={DONUT_SIZE / 2} r={DONUT_R} fill="none" stroke="#eef1f6" strokeWidth={DONUT_STROKE} />
+          <circle cx={DONUT_SIZE / 2} cy={DONUT_SIZE / 2} r={DONUT_R} fill="none" stroke="var(--tint-steel-alt)" strokeWidth={DONUT_STROKE} />
           {arcs.map((a) => (
             <circle
               key={a.key}

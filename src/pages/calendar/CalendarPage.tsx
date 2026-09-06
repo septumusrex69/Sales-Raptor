@@ -61,7 +61,7 @@ export function CalendarPage() {
           type: t.type,
           note: t.relatedToLabel ? t.title : undefined,
           date,
-          color: TASK_TYPE_COLORS[t.type] ?? '#94a3b8',
+          color: TASK_TYPE_COLORS[t.type] ?? 'var(--c-grey-light)',
           ownerId: t.ownerId,
           href: tasksUrlForDate(date),
         }

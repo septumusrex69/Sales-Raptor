@@ -1,0 +1,246 @@
+/*
+ * RAPTOR — a visual skin.
+ *
+ * Selectors are qualified as `html[data-theme='raptor']` rather than the bare attribute on
+ * purpose: `:root` and `[data-theme]` carry identical specificity, and the default tokens are
+ * declared after this file in the bundle, so a bare selector would lose every override to
+ * source order and this file would appear to do nothing at all.
+ *
+ * This file changes nothing but appearance. It redefines the design tokens the application
+ * already draws from; no component knows it exists. Everything below is scoped to
+ * html[data-theme='raptor'], so with any other theme selected not one rule here applies and the
+ * app renders exactly as it did before this file was added.
+ *
+ * The character is deliberately restrained: navy and off-white do the structural work, and
+ * gold is spent only where something is active, selected or worth the eye. Large gold areas
+ * would make it look cheap rather than expensive.
+ */
+
+html[data-theme='raptor'] {
+  /* ── Structure ─────────────────────────────────────────────────────────── */
+  --color-surface: #f4f5f7;
+  --color-card: #ffffff;
+
+  /* Neutrals carry a slight blue bias, so white sits warm against them rather than
+     the greys reading as dead. */
+  --color-slate-50: #f8f9fa;
+  --color-slate-100: #eef1f4;
+  --color-slate-200: #e5e9ed;
+  --color-slate-300: #d3dae2;
+  --color-slate-400: #98a4b3;
+  --color-slate-500: #7e8b9b;
+  --color-slate-600: #6f7e90;
+  --color-slate-700: #33475c;
+  --color-slate-800: #1d2e44;
+  --color-slate-900: #142033;
+
+  --color-navy-950: #0b1620;
+  --color-navy-900: #0e1b27;
+  --color-navy-800: #132433;
+  --color-navy-700: #1b3145;
+  --color-navy-600: #2c465c;
+
+  --color-gold-600: #9b772f;
+  --color-gold-500: #c9a052;
+  --color-gold-400: #d8b56f;
+  --color-gold-300: #f1d79a;
+
+  --color-brand-50: #f5f7f9;
+  --color-brand-100: #e6ebf0;
+  --color-brand-500: #2c465c;
+  --color-brand-600: #142433;
+  --color-brand-700: #0b1620;
+
+  --color-positive: #3f745b;
+  --color-negative: #b65e4a;
+
+  /* Status colour stays desaturated — a traffic-light red would undo the restraint
+     everything else is buying. */
+  --color-red-50: #f8ece9;
+  --color-red-100: #f1dbd6;
+  --color-red-200: #e4c3bb;
+  --color-red-500: #b65e4a;
+  --color-red-600: #aa5e4d;
+  --color-red-700: #8f4b3c;
+
+  /* ── Categorical palette ───────────────────────────────────────────────── */
+  --c-navy-deep: #1e3448;
+  --c-navy: #2c465c;
+  --c-navy-mid: #314f68;
+  --c-navy-slate: #26405a;
+  --c-steel-deep: #456a88;
+  --c-steel: #557a9a;
+  --c-steel-soft: #6089aa;
+  --c-steel-bright: #4a7396;
+  --c-ink: #142033;
+  --c-gold-bright: #c9a052;
+  --c-grey-warm: #7e8b9b;
+  --c-gold-brand: #c9a052;
+  --c-navy-ink: #1b3145;
+  --c-gold-bronze: #9b772f;
+  --c-navy-steel: #3d5f7d;
+  --c-steel-light: #6e8ca5;
+  --c-steel-pale: #a9bccb;
+  --c-gold: #c49a43;
+  --c-gold-deep: #9b772f;
+  --c-gold-dark: #8a6a28;
+  --c-green: #4c7a61;
+  --c-green-bright: #3f745b;
+  --c-green-muted: #5f8570;
+  --c-rust: #b7624d;
+  --c-rust-deep: #9a4e3c;
+  --c-grey: #88939f;
+  --c-grey-light: #a7b1bc;
+
+  --tint-steel: #edf3f8;
+  --tint-steel-soft: #eaf1f8;
+  --tint-steel-alt: #eef1f4;
+  --tint-gold: #f6f0e3;
+  --tint-gold-deep: #f4eee1;
+  --tint-gold-dark: #f3eddd;
+  --tint-green: #edf5f0;
+  --tint-green-bright: #eaf3ee;
+  --tint-rust: #f8ece9;
+  --tint-rust-deep: #f6e9e5;
+
+  --stage-new-deal: #314f68;
+  --stage-quotation-sent: #c49a43;
+  --stage-won: #9b772f;
+  --stage-rejected: #b7624d;
+
+  --c-gold-light: #d8b56f;
+  --c-gold-deep-hover: #86672a;
+  --c-rust-hover: #9a4e3c;
+  --c-rust-deep-hover: #833f30;
+  --c-grey-blue: #8d99a6;
+  --c-grey-pale: #c7d0d9;
+  --tint-gold-pale: #e8d9b4;
+  --tint-neutral: #eef1f4;
+  --tint-neutral-soft: #f8f9fa;
+
+  /* Metallic gold, used only for logo-like decorative elements — never for body text or a
+     whole button, where it would read as costume jewellery rather than restraint. */
+  --skin-gold-gradient: var(--raptor-gold-metal);
+  --skin-gold-gradient-deep: linear-gradient(135deg, #9b772f 0%, #c9a052 100%);
+
+  /* ── Surfaces ──────────────────────────────────────────────────────────── */
+  --skin-card-radius: 14px;
+  --skin-card-border: #e6e9ed;
+  --skin-card-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), 0 6px 18px rgba(15, 23, 42, 0.04);
+  --skin-card-shadow-hover: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 30px rgba(15, 23, 42, 0.08);
+  --skin-body-text: #142033;
+  --skin-scrollbar: #ccd4dd;
+
+  /* The hero is the one place imagery is allowed to carry the brand. The overlay is part of
+     the background rather than a separate layer, so text contrast can't drift as the image
+     changes behind it. */
+  --skin-hero-background:
+    linear-gradient(100deg, rgba(11, 22, 32, 0.97) 0%, rgba(11, 22, 32, 0.86) 42%, rgba(14, 27, 39, 0.55) 100%);
+  --skin-hero-image: url('/brand/raptor-ridge.jpg');
+  --skin-hero-image-opacity: 1;
+  --skin-hero-radius: 18px;
+
+  --skin-sidebar-art: url('/brand/raptor-ridge-tall.jpg');
+  --skin-sidebar-art-opacity: 0.22;
+
+  --raptor-gold-metal: linear-gradient(
+    135deg,
+    #9d722d 0%,
+    #d9b66d 35%,
+    #f1d79a 55%,
+    #c5943b 78%,
+    #8a642a 100%
+  );
+}
+
+/* Gradient and photograph are one background rather than two stacked layers, so the copy's
+   contrast can't drift as the image changes behind it. */
+html[data-theme='raptor'] .app-hero {
+  background:
+    var(--skin-hero-background),
+    var(--skin-hero-image) center 62% / cover no-repeat;
+}
+html[data-theme='raptor'] .app-hero::before {
+  content: none;
+}
+
+/* ── Typography ──────────────────────────────────────────────────────────── */
+html[data-theme='raptor'] h1,
+html[data-theme='raptor'] h2,
+html[data-theme='raptor'] h3 {
+  letter-spacing: -0.012em;
+}
+
+/* Figures line up in columns across the app, so they're set in tabular numerals — ragged
+   digits are the fastest way to make a considered layout look careless. */
+html[data-theme='raptor'] table,
+html[data-theme='raptor'] .app-hero {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+html[data-theme='raptor'] .card {
+  transition: box-shadow 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+html[data-theme='raptor'] .app-sidebar {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Dark, atmospheric, and low enough in the frame that it never competes with a nav item. */
+html[data-theme='raptor'] .app-sidebar::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 46%;
+  z-index: -1;
+  background:
+    linear-gradient(180deg, #0b1620 0%, rgba(11, 22, 32, 0.72) 38%, rgba(11, 22, 32, 0.9) 100%),
+    var(--skin-sidebar-art) center bottom / cover no-repeat;
+  opacity: var(--skin-sidebar-art-opacity);
+  pointer-events: none;
+}
+
+html[data-theme='raptor'] .app-sidebar nav a[aria-current='page'] {
+  background: linear-gradient(180deg, #d8b56f 0%, #c9a052 100%);
+  color: #101820;
+}
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
+html[data-theme='raptor'] tbody tr:hover {
+  background-color: #f8f9fa;
+}
+
+/* ── Inputs and controls ─────────────────────────────────────────────────── */
+html[data-theme='raptor'] input:not([type='checkbox']):not([type='radio']),
+html[data-theme='raptor'] select,
+html[data-theme='raptor'] textarea {
+  border-radius: 10px;
+}
+
+html[data-theme='raptor'] input:focus-visible,
+html[data-theme='raptor'] select:focus-visible,
+html[data-theme='raptor'] textarea:focus-visible,
+html[data-theme='raptor'] button:focus-visible,
+html[data-theme='raptor'] a:focus-visible {
+  outline: 2px solid rgba(201, 160, 82, 0.55);
+  outline-offset: 1px;
+}
+
+/* ── Motion ──────────────────────────────────────────────────────────────── */
+html[data-theme='raptor'] button,
+html[data-theme='raptor'] a {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 180ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme='raptor'] *,
+  html[data-theme='raptor'] *::before,
+  html[data-theme='raptor'] *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

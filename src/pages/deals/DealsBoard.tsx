@@ -167,7 +167,7 @@ export function DealsBoard() {
         </Card>
         <Card className="p-4">
           <p className="text-xs text-slate-400">Revenue Won</p>
-          <p className="text-xl font-bold text-[#957323] mt-1">{formatCurrency(totals.won)}</p>
+          <p className="text-xl font-bold text-[var(--c-gold-deep)] mt-1">{formatCurrency(totals.won)}</p>
         </Card>
       </div>
 

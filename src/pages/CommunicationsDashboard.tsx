@@ -39,7 +39,7 @@ function coefficientTone(pct: number): 'good' | 'mid' | 'low' {
   if (pct >= 15) return 'mid'
   return 'low'
 }
-const TONE_HEX: Record<'good' | 'mid' | 'low', string> = { good: '#406d58', mid: '#a9822f', low: '#794234' }
+const TONE_HEX: Record<'good' | 'mid' | 'low', string> = { good: 'var(--c-green)', mid: 'var(--c-gold-bronze)', low: 'var(--c-rust-deep)' }
 
 function rollupsFor(subset: Company[], companies: Company[]) {
   return subset
@@ -235,8 +235,8 @@ export function CommunicationsDashboard() {
   const meetingDonut: RingDonutSlice[] =
     kpis.curr.meetings > 0
       ? [
-          { name: 'In-Person', value: kpis.curr.inPerson, color: '#283d50' },
-          { name: 'Virtual', value: kpis.curr.virtualMeetings, color: '#d9b876' },
+          { name: 'In-Person', value: kpis.curr.inPerson, color: 'var(--c-navy-ink)' },
+          { name: 'Virtual', value: kpis.curr.virtualMeetings, color: 'var(--c-gold-light)' },
         ]
       : []
 
@@ -277,7 +277,7 @@ export function CommunicationsDashboard() {
         <button
           onClick={handleExport}
           className="inline-flex items-center gap-1.5 text-sm font-semibold px-3.5 py-2 rounded-lg text-navy-950 shadow-sm"
-          style={{ background: 'linear-gradient(135deg, #c69f54 0%, #d9b876 100%)' }}
+          style={{ background: 'var(--skin-gold-gradient)' }}
         >
           <Download size={15} /> Export
         </button>
@@ -307,7 +307,7 @@ export function CommunicationsDashboard() {
             <RingDonut
               data={recoveryDonut}
               centerValue={`${Math.round(bookCoefficient ?? 0)}%`}
-              centerColor={coefficientTone(bookCoefficient ?? 0) === 'good' ? POSITIVE_HEX : coefficientTone(bookCoefficient ?? 0) === 'mid' ? '#a9822f' : NEGATIVE_HEX}
+              centerColor={coefficientTone(bookCoefficient ?? 0) === 'good' ? POSITIVE_HEX : coefficientTone(bookCoefficient ?? 0) === 'mid' ? 'var(--c-gold-bronze)' : NEGATIVE_HEX}
               centerLabel={coefficientScopeLabel}
               caption="Paid to date ÷ handover amount"
             />
@@ -322,9 +322,9 @@ export function CommunicationsDashboard() {
           <div className="flex flex-col gap-2.5">
             <span className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">This period's servicing activity</span>
             {[
-              { label: 'Courtesy Calls Made', value: kpis.curr.courtesyCalls, color: '#355069', bg: '#edf1f5', to: buildDrilldownUrl('/activities', { type: 'Courtesy Call', [SALES_MONTH_PARAM]: periodParam }) },
-              { label: 'Handovers Received', value: kpis.curr.handovers, color: '#957323', bg: '#f7f3eb', to: buildDrilldownUrl('/activities', { type: 'Handover Received', [SALES_MONTH_PARAM]: periodParam }) },
-              { label: 'Deals Closed by Communications', value: kpis.curr.dealsWon, color: '#406d58', bg: '#eef4f1', to: buildDrilldownUrl('/deals', { stage: 'Won', view: 'table' }) },
+              { label: 'Courtesy Calls Made', value: kpis.curr.courtesyCalls, color: 'var(--c-navy)', bg: 'var(--tint-steel)', to: buildDrilldownUrl('/activities', { type: 'Courtesy Call', [SALES_MONTH_PARAM]: periodParam }) },
+              { label: 'Handovers Received', value: kpis.curr.handovers, color: 'var(--c-gold-deep)', bg: 'var(--tint-gold-deep)', to: buildDrilldownUrl('/activities', { type: 'Handover Received', [SALES_MONTH_PARAM]: periodParam }) },
+              { label: 'Deals Closed by Communications', value: kpis.curr.dealsWon, color: 'var(--c-green)', bg: 'var(--tint-green)', to: buildDrilldownUrl('/deals', { stage: 'Won', view: 'table' }) },
             ].map((p) => (
               <Link key={p.label} to={p.to} className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl border border-slate-100 hover:bg-slate-50/60">
                 <span className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-extrabold shrink-0" style={{ backgroundColor: p.bg, color: p.color }}>
@@ -569,14 +569,14 @@ export function CommunicationsDashboard() {
         <div className="px-5 pb-5 divide-y divide-slate-50">
           {tasksDue.map((t) => (
             <div key={t.id} className="flex items-center gap-3 py-2.5">
-              <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: new Date().toISOString() })} className="text-slate-300 hover:text-[#406d58] shrink-0">
+              <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: new Date().toISOString() })} className="text-slate-300 hover:text-[var(--c-green)] shrink-0">
                 <Circle size={18} />
               </button>
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-medium text-slate-700 truncate">{t.title}</p>
                 <p className="text-[11px] text-slate-400">{t.relatedToLabel ?? t.type}</p>
               </div>
-              <span className={`text-xs font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[#794234]' : 'text-slate-500'}`}>{daysAgoLabel(t.dueDate)}</span>
+              <span className={`text-xs font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>{daysAgoLabel(t.dueDate)}</span>
               <UserAvatar userId={t.ownerId} size={24} />
               <button onClick={() => setRescheduleTask(t)} className="text-xs font-medium text-brand-600 hover:underline shrink-0">
                 Reschedule
@@ -585,7 +585,7 @@ export function CommunicationsDashboard() {
           ))}
           {tasksDue.length === 0 && (
             <div className="py-6 text-center text-sm text-slate-400 flex flex-col items-center gap-2">
-              <CheckCircle2 size={22} className="text-[#406d58]" />
+              <CheckCircle2 size={22} className="text-[var(--c-green)]" />
               All caught up — no tasks due.
             </div>
           )}
@@ -619,7 +619,7 @@ function ComparisonGauge({ individualPct, teamPct }: { individualPct: number; te
     <div className="flex flex-col items-center gap-2.5">
       <div className="h-40 w-40 relative">
         <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full -rotate-90">
-          <circle cx={SIZE / 2} cy={SIZE / 2} r={OUTER_R} fill="none" stroke="#eef1f6" strokeWidth={STROKE} />
+          <circle cx={SIZE / 2} cy={SIZE / 2} r={OUTER_R} fill="none" stroke="var(--tint-steel-alt)" strokeWidth={STROKE} />
           <circle
             cx={SIZE / 2}
             cy={SIZE / 2}
@@ -631,7 +631,7 @@ function ComparisonGauge({ individualPct, teamPct }: { individualPct: number; te
             strokeOpacity={0.45}
             strokeDasharray={`${outerLen} ${outerCirc - outerLen}`}
           />
-          <circle cx={SIZE / 2} cy={SIZE / 2} r={INNER_R} fill="none" stroke="#eef1f6" strokeWidth={STROKE} />
+          <circle cx={SIZE / 2} cy={SIZE / 2} r={INNER_R} fill="none" stroke="var(--tint-steel-alt)" strokeWidth={STROKE} />
           <circle
             cx={SIZE / 2}
             cy={SIZE / 2}

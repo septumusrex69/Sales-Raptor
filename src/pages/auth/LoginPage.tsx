@@ -73,8 +73,8 @@ export function LoginPage() {
                 required
               />
             </FormField>
-            {error && <p className="text-sm text-[#794234] mb-3.5">{error}</p>}
-            {resetSent && <p className="text-sm text-[#406d58] mb-3.5">If that email has an account, a password reset link has been sent.</p>}
+            {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
+            {resetSent && <p className="text-sm text-[var(--c-green)] mb-3.5">If that email has an account, a password reset link has been sent.</p>}
             <button
               type="submit"
               disabled={submitting}

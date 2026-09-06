@@ -86,7 +86,7 @@ export function MarkWonModal({ defaultService, onClose, onSave }: { defaultServi
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
             Cancel
           </button>
-          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[#957323] text-white hover:bg-[#7d5f1d]">
+          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[var(--c-gold-deep)] text-white hover:bg-[var(--c-gold-deep-hover)]">
             Confirm Won
           </button>
         </div>
@@ -125,7 +125,7 @@ export function MarkRejectedModal({ onClose, onSave }: { onClose: () => void; on
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
             Cancel
           </button>
-          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[#794234] text-white hover:bg-[#622f24]">
+          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[var(--c-rust-deep)] text-white hover:bg-[var(--c-rust-deep-hover)]">
             Reject Deal
           </button>
         </div>

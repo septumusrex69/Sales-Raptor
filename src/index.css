@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./styles/raptor.css";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -27,6 +28,97 @@
   --color-negative: #794234;
 }
 
+/*
+ * Skin tokens.
+ *
+ * Everything a visual theme is allowed to change is named here, and these defaults are the
+ * exact values they replaced in the components — so the Original theme renders identically to
+ * before this file existed. A skin overrides the same names under its own [data-theme] block;
+ * it never edits a component. Adding a future skin is therefore a second block of variables,
+ * not a second pass through the app.
+ */
+:root {
+  /* Categorical palette. The Original theme keeps exactly the values these replaced;
+     a skin redefines the same names, so charts and badges re-skin with everything else. */
+  --c-gold: #b28e34;
+  --c-gold-dark: #9a7b1f;
+  --c-gold-deep: #957323;
+  --c-green: #406d58;
+  --c-green-bright: #3a7a5c;
+  --c-green-muted: #5c7d5f;
+  --c-grey: #64748b;
+  --c-grey-light: #94a3b8;
+  --c-navy: #355069;
+  --c-navy-deep: #2b4055;
+  --c-navy-mid: #416281;
+  --c-navy-slate: #30465a;
+  --c-rust: #ad6452;
+  --c-rust-deep: #794234;
+  --c-steel: #6086a9;
+  --c-steel-soft: #5f86ab;
+  --c-steel-bright: #4a7ba7;
+  --c-ink: #1e293b;
+  --c-gold-bright: #c9a227;
+  --c-grey-warm: #6b7280;
+  --c-gold-brand: #c69f54;
+  --c-navy-ink: #283d50;
+  --c-gold-bronze: #a9822f;
+  --c-navy-steel: #3f5d78;
+  --c-steel-deep: #4d7193;
+  --c-steel-light: #799ab9;
+  --c-steel-pale: #a1b8ce;
+  --tint-gold: #f7f4eb;
+  --tint-gold-dark: #f7f2e2;
+  --tint-gold-deep: #f7f3eb;
+  --tint-green: #eef4f1;
+  --tint-green-bright: #e9f4ee;
+  --tint-rust: #f5eeed;
+  --tint-rust-deep: #f6eeec;
+  --tint-steel: #edf1f5;
+  --tint-steel-soft: #eaf1f8;
+  --tint-steel-alt: #eef1f6;
+
+  /* Deal stages, kept separate from the categorical hues: a skin may want its pipeline to
+     read as one progression while its chart colours stay categorical. */
+  --stage-new-deal: #6086a9;
+  --stage-quotation-sent: #b28e34;
+  --stage-won: #957323;
+  --stage-rejected: #794234;
+
+  /* Extra families that only appeared inline in pages: hover-darker variants and pale
+     borders, named the same way so a skin overrides them alongside the rest. */
+  --c-gold-light: #d9b876;
+  --c-gold-deep-hover: #7d5f1d;
+  --c-rust-hover: #6a3a2d;
+  --c-rust-deep-hover: #622f24;
+  --c-grey-blue: #7d8f9e;
+  --c-grey-pale: #cbd5e1;
+  --tint-gold-pale: #e7dbb2;
+  --tint-neutral: #f1f5f9;
+  --tint-neutral-soft: #f8fafc;
+
+  --skin-gold-gradient: linear-gradient(135deg, #c69f54 0%, #d9b876 100%);
+  --skin-gold-gradient-deep: linear-gradient(135deg, #c69f54, #a9822f);
+
+  /* Surfaces and structure */
+  --skin-card-radius: 1rem;
+  --skin-card-border: #eceff5;
+  --skin-card-shadow: 0 1px 2px rgba(16, 24, 64, 0.04);
+  --skin-card-shadow-hover: 0 1px 2px rgba(16, 24, 64, 0.04);
+  --skin-body-text: #1c2233;
+  --skin-scrollbar: #d3d8e6;
+
+  /* The hero band at the top of a dashboard or record page. */
+  --skin-hero-background: linear-gradient(120deg, #12212f 0%, #2c4054 52%, #46607b 100%);
+  --skin-hero-image: none;
+  --skin-hero-image-opacity: 0;
+  --skin-hero-radius: 1rem;
+
+  /* Decorative treatment at the foot of the sidebar. */
+  --skin-sidebar-art: none;
+  --skin-sidebar-art-opacity: 0;
+}
+
 html,
 body,
 #root {
@@ -36,7 +128,7 @@ body,
 body {
   margin: 0;
   background-color: var(--color-surface);
-  color: #1c2233;
+  color: var(--skin-body-text);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
@@ -46,7 +138,7 @@ body {
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background-color: #d3d8e6;
+  background-color: var(--skin-scrollbar);
   border-radius: 999px;
 }
 ::-webkit-scrollbar-track {
@@ -55,9 +147,34 @@ body {
 
 .card {
   background-color: var(--color-card);
-  border-radius: 1rem;
-  border: 1px solid #eceff5;
-  box-shadow: 0 1px 2px rgba(16, 24, 64, 0.04);
+  border-radius: var(--skin-card-radius);
+  border: 1px solid var(--skin-card-border);
+  box-shadow: var(--skin-card-shadow);
+}
+
+/*
+ * The hero band. Its background lived inline on the component, which put it out of reach of
+ * the skin layer; it reads from a token now so a theme can replace the gradient with its own
+ * treatment — including atmospheric imagery — without the component knowing.
+ */
+.app-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--skin-hero-radius);
+  background: var(--skin-hero-background);
+}
+.app-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--skin-hero-image);
+  background-size: cover;
+  background-position: center 62%;
+  opacity: var(--skin-hero-image-opacity);
+  pointer-events: none;
+}
+.app-hero > * {
+  position: relative;
 }
 
 .badge {

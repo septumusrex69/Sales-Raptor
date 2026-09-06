@@ -833,7 +833,7 @@ export function ReportsPage() {
                     <PieChart>
                       <Pie data={lostByReason} dataKey="value" nameKey="name" innerRadius={45} outerRadius={80} paddingAngle={2} isAnimationActive={false}>
                         {lostByReason.map((_, i) => (
-                          <Cell key={i} fill={['#794234', '#b28e34', '#5f86ab', '#406d58', '#ad6452', '#3f5d78', '#957323', '#94a3b8', '#799ab9', '#a1b8ce'][i % 10]} />
+                          <Cell key={i} fill={['var(--c-rust-deep)', 'var(--c-gold)', 'var(--c-steel-soft)', 'var(--c-green)', 'var(--c-rust)', 'var(--c-navy-steel)', 'var(--c-gold-deep)', 'var(--c-grey-light)', 'var(--c-steel-light)', 'var(--c-steel-pale)'][i % 10]} />
                         ))}
                       </Pie>
                       <Tooltip />
@@ -866,10 +866,10 @@ function ChartBar({ data }: { data: { name: string; value: number }[] }) {
     <div className="h-64">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ left: -20 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-          <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} interval={0} angle={-20} textAnchor="end" height={50} />
-          <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} allowDecimals={false} />
-          <Tooltip cursor={{ fill: '#f8fafc' }} />
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--tint-neutral)" />
+          <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'var(--c-grey-light)' }} interval={0} angle={-20} textAnchor="end" height={50} />
+          <YAxis tick={{ fontSize: 11, fill: 'var(--c-grey-light)' }} allowDecimals={false} />
+          <Tooltip cursor={{ fill: 'var(--tint-neutral-soft)' }} />
           <Bar dataKey="value" fill={BAR_COLOR} radius={[4, 4, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>

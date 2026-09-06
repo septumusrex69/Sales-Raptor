@@ -8,11 +8,13 @@ import { customFields as initialCustomFields, industries, leadSources as initial
 import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
+import { useTheme } from '../../store/ThemeContext'
+import { THEMES } from '../../lib/themes'
 import { supabase, PRODUCTION_APP_URL } from '../../lib/supabase'
 import type { CustomField, CustomFieldType, Team, TeamKind, User, UserRole } from '../../types'
 import { DEAL_STAGES } from '../../types'
 
-const TABS = ['Profile', 'Users', 'Teams', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations'] as const
+const TABS = ['Profile', 'Appearance', 'Users', 'Teams', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations'] as const
 type Tab = (typeof TABS)[number]
 
 export function SettingsPage() {
@@ -33,6 +35,7 @@ export function SettingsPage() {
       </nav>
       <div className="flex-1 min-w-0">
         {tab === 'Profile' && <ProfileTab />}
+        {tab === 'Appearance' && <AppearanceTab />}
         {tab === 'Users' && <UsersTab />}
         {tab === 'Teams' && <TeamsTab />}
         {tab === 'Pipelines' && <PipelinesTab />}
@@ -68,7 +71,7 @@ function ProfileTab() {
     <Card>
       <CardHeader title="Profile" subtitle="Your personal account settings" />
       <div className="flex items-center gap-4 mb-6">
-        <Avatar name={form.fullName} color={currentUser?.avatarColor ?? '#355069'} size={64} />
+        <Avatar name={form.fullName} color={currentUser?.avatarColor ?? 'var(--c-navy)'} size={64} />
         <div>
           <p className="font-semibold text-slate-800">{form.fullName}</p>
           <p className="text-sm text-slate-400">{currentUser?.role}</p>
@@ -162,7 +165,7 @@ function ProfileTab() {
             Save Changes
           </button>
           {saved && (
-            <span className="inline-flex items-center gap-1 text-xs font-medium text-[#406d58]">
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-[var(--c-green)]">
               <Check size={13} /> Saved
             </span>
           )}
@@ -252,12 +255,12 @@ function UsersTab() {
                   {isAdmin ? (
                     <button
                       onClick={() => updateUser(u.id, { status: u.status === 'Active' ? 'Inactive' : 'Active' })}
-                      className={`badge ${u.status === 'Active' ? 'bg-[#eef4f1] text-[#406d58]' : 'bg-slate-100 text-slate-500'}`}
+                      className={`badge ${u.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}
                     >
                       {u.status}
                     </button>
                   ) : (
-                    <span className={`badge ${u.status === 'Active' ? 'bg-[#eef4f1] text-[#406d58]' : 'bg-slate-100 text-slate-500'}`}>{u.status}</span>
+                    <span className={`badge ${u.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}>{u.status}</span>
                   )}
                 </td>
                 {isAdmin && (
@@ -278,7 +281,7 @@ function UsersTab() {
                         <Pencil size={14} />
                       </button>
                       {u.id !== currentUser?.id && (
-                        <button onClick={() => setRemovingUser(u)} className="text-slate-400 hover:text-[#794234]" title="Remove user">
+                        <button onClick={() => setRemovingUser(u)} className="text-slate-400 hover:text-[var(--c-rust-deep)]" title="Remove user">
                           <Trash2 size={14} />
                         </button>
                       )}
@@ -491,14 +494,14 @@ function ResetLoginButton({ email }: { email: string }) {
   }
 
   if (state === 'sent') {
-    return <span className="text-xs text-[#406d58]">Reset link sent</span>
+    return <span className="text-xs text-[var(--c-green)]">Reset link sent</span>
   }
   return (
     <div>
       <button onClick={handleClick} disabled={state === 'sending'} className="text-xs font-medium text-brand-600 hover:underline disabled:opacity-50">
         {state === 'sending' ? 'Sending…' : 'Send login link'}
       </button>
-      {error && <p className="text-[11px] text-[#794234] mt-0.5 max-w-[160px]">{error}</p>}
+      {error && <p className="text-[11px] text-[var(--c-rust-deep)] mt-0.5 max-w-[160px]">{error}</p>}
     </div>
   )
 }
@@ -560,7 +563,7 @@ function EditUserModal({
         {email.trim() !== user.email && (
           <p className="text-xs text-slate-400 mb-3.5 -mt-2">Changing the email changes their login — they'll need to sign in with the new address.</p>
         )}
-        {error && <p className="text-sm text-[#794234] mb-3.5">{error}</p>}
+        {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
             Cancel
@@ -620,8 +623,8 @@ function RemoveUserModal({
       <p className="text-sm text-slate-600 leading-relaxed mb-1">
         Remove <b>{user.name}</b> ({user.email})? They'll no longer be able to log in. Records they own (leads, deals, etc.) are kept, not deleted.
       </p>
-      <p className="text-sm text-[#794234] mb-3.5">This can't be undone.</p>
-      {error && <p className="text-sm text-[#794234] mb-3.5">{error}</p>}
+      <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">This can't be undone.</p>
+      {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
       <div className="flex justify-end gap-2 pt-1">
         <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
           Cancel
@@ -630,7 +633,7 @@ function RemoveUserModal({
           type="button"
           onClick={handleConfirm}
           disabled={submitting}
-          className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[#794234] text-white hover:bg-[#622f24] disabled:opacity-50"
+          className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[var(--c-rust-deep)] text-white hover:bg-[var(--c-rust-deep-hover)] disabled:opacity-50"
         >
           {submitting ? 'Removing…' : 'Remove User'}
         </button>
@@ -716,7 +719,7 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
             ))}
           </select>
         </FormField>
-        {error && <p className="text-sm text-[#794234] mb-3.5">{error}</p>}
+        {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
         <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
             Cancel
@@ -777,7 +780,7 @@ function TeamsTab() {
                     <div className="flex items-center gap-1.5">
                       <p className="text-sm font-semibold text-slate-700">{t.name}</p>
                       <span
-                        className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${t.kind === 'Communications' ? 'bg-[#edf1f5] text-[#355069]' : 'bg-[#f7f4eb] text-[#957323]'}`}
+                        className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${t.kind === 'Communications' ? 'bg-[var(--tint-steel)] text-[var(--c-navy)]' : 'bg-[var(--tint-gold)] text-[var(--c-gold-deep)]'}`}
                       >
                         {t.kind}
                       </span>
@@ -806,7 +809,7 @@ function TeamsTab() {
                     >
                       <Pencil size={14} />
                     </button>
-                    <button onClick={() => setRemovingTeam({ id: t.id, name: t.name })} className="text-slate-400 hover:text-[#794234]" title="Delete team">
+                    <button onClick={() => setRemovingTeam({ id: t.id, name: t.name })} className="text-slate-400 hover:text-[var(--c-rust-deep)]" title="Delete team">
                       <Trash2 size={14} />
                     </button>
                   </div>
@@ -820,7 +823,7 @@ function TeamsTab() {
                       <UserAvatar userId={id} size={20} />
                       <span className="text-xs text-slate-600">{member?.name ?? 'Unknown'}</span>
                       {isAdmin && (
-                        <button onClick={() => updateUser(id, { teamId: undefined })} className="text-slate-400 hover:text-[#794234]" title="Remove from team">
+                        <button onClick={() => updateUser(id, { teamId: undefined })} className="text-slate-400 hover:text-[var(--c-rust-deep)]" title="Remove from team">
                           <X size={12} />
                         </button>
                       )}
@@ -883,7 +886,7 @@ function TeamsTab() {
                 deleteTeam(removingTeam.id)
                 setRemovingTeam(null)
               }}
-              className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[#794234] text-white hover:bg-[#6a3a2d]"
+              className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[var(--c-rust-deep)] text-white hover:bg-[var(--c-rust-hover)]"
             >
               Remove
             </button>
@@ -963,7 +966,7 @@ function CustomFieldsTab() {
                 <td className="px-3 py-2.5 text-slate-500">{f.relatedTo}</td>
                 <td className="px-3 py-2.5 text-slate-500">{f.type}</td>
                 <td className="px-3 py-2.5">
-                  <span className={`badge ${f.status === 'Active' ? 'bg-[#eef4f1] text-[#406d58]' : 'bg-slate-100 text-slate-500'}`}>{f.status}</span>
+                  <span className={`badge ${f.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}>{f.status}</span>
                 </td>
                 <td className="px-3 py-2.5">
                   <button onClick={() => setFields((prev) => prev.filter((x) => x.id !== f.id))} className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50">
@@ -1024,6 +1027,61 @@ function AddCustomFieldModal({ onClose, onSave }: { onClose: () => void; onSave:
         </div>
       </form>
     </Modal>
+  )
+}
+
+/**
+ * Picking a skin. Each option is shown as the thing it produces rather than described in
+ * words — a name and a paragraph can't tell you what an interface will feel like, and a
+ * three-colour tile can.
+ */
+function AppearanceTab() {
+  const { themeId, setTheme } = useTheme()
+  return (
+    <Card>
+      <CardHeader title="Appearance" subtitle="Choose how Romulus looks. This changes nothing but the styling, and applies to you only." />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+        {THEMES.map((t) => {
+          const selected = t.id === themeId
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTheme(t.id)}
+              aria-pressed={selected}
+              className={`text-left rounded-xl border p-3 transition-colors ${
+                selected ? 'border-gold-500 ring-1 ring-gold-500/40 bg-gold-500/5' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+              }`}
+            >
+              <span
+                className="flex h-20 rounded-lg overflow-hidden border border-black/5"
+                style={{ backgroundColor: t.swatch.surface }}
+                aria-hidden="true"
+              >
+                <span className="w-1/3 flex flex-col justify-between p-1.5" style={{ backgroundColor: t.swatch.ground }}>
+                  <span className="block h-1.5 w-8 rounded-full" style={{ backgroundColor: t.swatch.accent }} />
+                  <span className="block h-1 w-6 rounded-full bg-white/25" />
+                </span>
+                <span className="flex-1 p-2 flex flex-col gap-1.5">
+                  <span className="block h-2.5 w-2/3 rounded" style={{ backgroundColor: t.swatch.ground, opacity: 0.85 }} />
+                  <span className="block h-1.5 w-1/2 rounded bg-black/10" />
+                  <span className="mt-auto block h-1.5 w-1/3 rounded-full" style={{ backgroundColor: t.swatch.accent }} />
+                </span>
+              </span>
+              <span className="flex items-center justify-between gap-2 mt-2.5">
+                <span className="text-sm font-semibold text-slate-700">{t.name}</span>
+                {selected && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gold-600">
+                    <Check size={12} /> Selected
+                  </span>
+                )}
+              </span>
+              <span className="block text-xs text-slate-400 mt-0.5">{t.description}</span>
+            </button>
+          )
+        })}
+      </div>
+    </Card>
   )
 }
 
@@ -1128,7 +1186,7 @@ function IntegrationsTab() {
             </div>
             <button
               onClick={() => setConnected((prev) => ({ ...prev, [i.name]: !prev[i.name] }))}
-              className={`text-xs font-medium px-3 py-1.5 rounded-lg shrink-0 ${connected[i.name] ? 'bg-[#eef4f1] text-[#406d58]' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+              className={`text-xs font-medium px-3 py-1.5 rounded-lg shrink-0 ${connected[i.name] ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
             >
               {connected[i.name] ? 'Connected' : 'Connect'}
             </button>
@@ -1232,7 +1290,7 @@ function EmailIntegrationCard() {
     <Card className="p-4 md:col-span-2">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div className="w-9 h-9 rounded-lg bg-[#eef4f1] text-[#406d58] flex items-center justify-center shrink-0">
+          <div className="w-9 h-9 rounded-lg bg-[var(--tint-green)] text-[var(--c-green)] flex items-center justify-center shrink-0">
             <Mail size={16} />
           </div>
           <div>

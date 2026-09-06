@@ -17,8 +17,8 @@ type Direction = 'sent' | 'received'
  * either way, so surfacing a third colour for them just made the list harder to read.
  */
 export const EMAIL_KINDS: Record<Direction, { label: string; color: string; tint: string; hint: string }> = {
-  sent: { label: 'Sent', color: '#4a7ba7', tint: '#eaf1f8', hint: 'Sent from the CRM by one of your team' },
-  received: { label: 'Received', color: '#3a7a5c', tint: '#e9f4ee', hint: "Arrived in your team's inbox from this client" },
+  sent: { label: 'Sent', color: 'var(--c-steel-bright)', tint: 'var(--tint-steel-soft)', hint: 'Sent from the CRM by one of your team' },
+  received: { label: 'Received', color: 'var(--c-green-bright)', tint: 'var(--tint-green-bright)', hint: "Arrived in your team's inbox from this client" },
 }
 
 function directionOf(parsed: ReturnType<typeof parseEmailActivity>): Direction {

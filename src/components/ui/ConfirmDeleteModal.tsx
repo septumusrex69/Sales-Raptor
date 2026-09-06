@@ -26,7 +26,7 @@ export function ConfirmDeleteModal({
             onConfirm()
             onClose()
           }}
-          className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[#794234] text-white hover:bg-[#622f24]"
+          className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[var(--c-rust-deep)] text-white hover:bg-[var(--c-rust-deep-hover)]"
         >
           Delete
         </button>

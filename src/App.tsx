@@ -1,6 +1,7 @@
 import { Route, Routes } from 'react-router-dom'
 import { AppStoreProvider } from './store/AppStore'
 import { AuthProvider } from './store/AuthContext'
+import { ThemeProvider } from './store/ThemeContext'
 import { RequireAuth } from './components/auth/RequireAuth'
 import { NewVersionWatcher } from './components/NewVersionWatcher'
 import { LoginPage } from './pages/auth/LoginPage'
@@ -23,37 +24,39 @@ import { RepDetailPage } from './pages/reps/RepDetailPage'
 
 function App() {
   return (
-    <AuthProvider>
-      <AppStoreProvider>
-        <NewVersionWatcher />
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route
-            element={
-              <RequireAuth>
-                <AppLayout />
-              </RequireAuth>
-            }
-          >
-            <Route path="/" element={<DashboardRouter />} handle={{ title: 'Dashboard' }} />
-            <Route path="/leads" element={<LeadsList />} handle={{ title: 'Leads' }} />
-            <Route path="/leads/:id" element={<LeadDetail />} handle={{ title: 'Lead Details' }} />
-            <Route path="/deals" element={<DealsBoard />} handle={{ title: 'Deals' }} />
-            <Route path="/deals/:id" element={<DealDetail />} handle={{ title: 'Deal Details' }} />
-            <Route path="/contacts" element={<ContactsList />} handle={{ title: 'Contacts' }} />
-            <Route path="/contacts/:id" element={<ContactDetail />} handle={{ title: 'Contact Details' }} />
-            <Route path="/companies" element={<CompaniesList />} handle={{ title: 'Clients' }} />
-            <Route path="/companies/:id" element={<CompanyDetail />} handle={{ title: 'Client Details' }} />
-            <Route path="/tasks" element={<TasksPage />} handle={{ title: 'Tasks' }} />
-            <Route path="/calendar" element={<CalendarPage />} handle={{ title: 'Calendar' }} />
-            <Route path="/activities" element={<ActivitiesPage />} handle={{ title: 'Activities' }} />
-            <Route path="/reports" element={<ReportsPage />} handle={{ title: 'Reports' }} />
-            <Route path="/settings" element={<SettingsPage />} handle={{ title: 'Settings' }} />
-            <Route path="/reps/:id" element={<RepDetailPage />} handle={{ title: 'Rep Performance' }} />
-          </Route>
-        </Routes>
-      </AppStoreProvider>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <AppStoreProvider>
+          <NewVersionWatcher />
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route
+              element={
+                <RequireAuth>
+                  <AppLayout />
+                </RequireAuth>
+              }
+            >
+              <Route path="/" element={<DashboardRouter />} handle={{ title: 'Dashboard' }} />
+              <Route path="/leads" element={<LeadsList />} handle={{ title: 'Leads' }} />
+              <Route path="/leads/:id" element={<LeadDetail />} handle={{ title: 'Lead Details' }} />
+              <Route path="/deals" element={<DealsBoard />} handle={{ title: 'Deals' }} />
+              <Route path="/deals/:id" element={<DealDetail />} handle={{ title: 'Deal Details' }} />
+              <Route path="/contacts" element={<ContactsList />} handle={{ title: 'Contacts' }} />
+              <Route path="/contacts/:id" element={<ContactDetail />} handle={{ title: 'Contact Details' }} />
+              <Route path="/companies" element={<CompaniesList />} handle={{ title: 'Clients' }} />
+              <Route path="/companies/:id" element={<CompanyDetail />} handle={{ title: 'Client Details' }} />
+              <Route path="/tasks" element={<TasksPage />} handle={{ title: 'Tasks' }} />
+              <Route path="/calendar" element={<CalendarPage />} handle={{ title: 'Calendar' }} />
+              <Route path="/activities" element={<ActivitiesPage />} handle={{ title: 'Activities' }} />
+              <Route path="/reports" element={<ReportsPage />} handle={{ title: 'Reports' }} />
+              <Route path="/settings" element={<SettingsPage />} handle={{ title: 'Settings' }} />
+              <Route path="/reps/:id" element={<RepDetailPage />} handle={{ title: 'Rep Performance' }} />
+            </Route>
+          </Routes>
+        </AppStoreProvider>
+      </AuthProvider>
+    </ThemeProvider>
   )
 }
 

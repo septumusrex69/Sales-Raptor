@@ -38,7 +38,7 @@ function tintOf(hex: string): string {
 
 function TypeBadge({ activity, size }: { activity: Activity; size: 'full' | 'quiet' }) {
   const isDownload = downloadedFilename(activity) !== null
-  const color = isDownload ? '#7d8f9e' : ACTIVITY_TYPE_COLORS[activity.type]
+  const color = isDownload ? 'var(--c-grey-blue)' : ACTIVITY_TYPE_COLORS[activity.type]
   const Icon = isDownload ? Download : TYPE_ICONS[activity.type] ?? StickyNote
   const box = size === 'full' ? 'w-[26px] h-[26px]' : 'w-[22px] h-[22px]'
   return (
