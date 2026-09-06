@@ -47,7 +47,7 @@ export function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-6">
           <img src="/brand/wordmark-dark.svg" alt="Bredell Ferreira" className="h-6 w-auto mb-3" />
-          <p className="text-sm text-slate-400 mt-0.5">Sign in to Sales Raptor</p>
+          <p className="text-sm text-slate-400 mt-0.5">Sign in to Romulus</p>
         </div>
 
         <Card>

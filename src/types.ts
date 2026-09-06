@@ -296,7 +296,7 @@ export interface User {
   status: 'Active' | 'Inactive'
   phone?: string
   avatarColor: string
-  /** Appended under the body of any email sent from Sales Raptor via this person's connected inbox. */
+  /** Appended under the body of any email sent from Romulus via this person's connected inbox. */
   emailSignature?: string
   /** Optional signature image (e.g. a scanned signature or logo), stored in the 'email-signatures' bucket. */
   emailSignatureImageUrl?: string

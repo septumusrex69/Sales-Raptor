@@ -243,7 +243,7 @@ export function CommunicationsDashboard() {
   return (
     <div className="space-y-6">
       <DashboardHero
-        eyebrow="Bredell Ferreira · Raptor"
+        eyebrow="Bredell Ferreira · Romulus"
         title="Communications Dashboard"
         subtitle="Client servicing overview — courtesy calls, handovers and meetings"
       >

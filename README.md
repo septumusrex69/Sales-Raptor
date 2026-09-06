@@ -1,4 +1,4 @@
-# Sales Raptor CRM
+# Romulus
 
 A lightweight internal sales & lead management CRM built for Bredell Ferreira. Tracks the full sales process — lead capture, qualification, deal pipeline, tasks, activities and reporting — in one clear workflow from first enquiry to signed client.
 

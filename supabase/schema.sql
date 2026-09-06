@@ -1,4 +1,4 @@
--- Sales Raptor — Phase 1 schema
+-- Romulus — Phase 1 schema
 -- Run this once in Supabase: Dashboard → SQL Editor → paste → Run.
 -- Safe to re-run (uses IF NOT EXISTS / OR REPLACE / drop-if-exists guards).
 
@@ -29,7 +29,7 @@ create table if not exists public.profiles (
   phone text,
   avatar_color text not null default '#355069',
   created_at timestamptz not null default now(),
-  -- Appended under the body of any email sent from Sales Raptor via this person's connected inbox.
+  -- Appended under the body of any email sent from Romulus via this person's connected inbox.
   email_signature text,
   -- Optional signature image (e.g. a scanned handwritten signature or logo), stored in the
   -- 'email-signatures' Storage bucket, laid out under the text signature at send time.
@@ -492,7 +492,7 @@ create policy "teams_write" on public.teams for all
   with check (public.current_user_role() = 'Administrator');
 
 -- ---------- Email connections (SMTP/IMAP, e.g. Xneelo-hosted mail) ----------
--- One row per person who has connected their own mailbox so Sales Raptor
+-- One row per person who has connected their own mailbox so Romulus
 -- can send email as them and log incoming mail against matching CRM
 -- records. encrypted_password is AES-256-GCM ciphertext (see
 -- api/_lib/crypto.ts) -- never plaintext -- and like the mailbox

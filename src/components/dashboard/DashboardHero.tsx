@@ -10,7 +10,7 @@ import type { ReactNode } from 'react'
  */
 export function DashboardHero({
   children,
-  eyebrow = 'Bredell Ferreira · Raptor',
+  eyebrow = 'Bredell Ferreira · Romulus',
   title = 'Sales Dashboard',
   subtitle = 'Real-time overview of your sales performance',
 }: {
