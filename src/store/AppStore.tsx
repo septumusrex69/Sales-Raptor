@@ -574,7 +574,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         accountsCount: details.accountsCount,
         contractStartDate: details.startDate,
         wonAt: nowIso(),
-        notes: `${deal?.notes ?? ''}\nContract start: ${details.startDate}. Duration: ${details.contractDuration}.`.trim(),
       }
       let previous: Deal | undefined
       setDeals((prev) => {
@@ -594,7 +593,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         type: 'Deal Won',
         subject: isHandover
           ? `${deal?.name ?? 'Deal'} — mandate signed, ${details.accountsCount ?? 0} accounts`
-          : `${deal?.name ?? 'Deal'} marked Won — ${details.service}, starting ${details.startDate}`,
+          : `${deal?.name ?? 'Deal'} marked Won — ${details.service}, starting ${details.startDate} for ${details.contractDuration}`,
         dealId: id,
         companyId: deal?.companyId,
       })

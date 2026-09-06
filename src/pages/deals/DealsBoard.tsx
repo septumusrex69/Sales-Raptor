@@ -65,7 +65,8 @@ export function DealsBoard() {
       if (search) {
         const q = search.toLowerCase()
         const company = companyById(d.companyId)?.name.toLowerCase() ?? ''
-        if (!d.name.toLowerCase().includes(q) && !company.includes(q)) return false
+        const haystack = `${d.name} ${company} ${d.service ?? ''} ${d.notes ?? ''}`.toLowerCase()
+        if (!haystack.includes(q)) return false
       }
       return true
     })
@@ -280,6 +281,7 @@ export function DealsBoard() {
                       <Link to={`/deals/${deal.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
                         {deal.name}
                       </Link>
+                      {deal.notes && <p className="text-xs text-slate-400 truncate max-w-[28ch]" title={deal.notes}>{deal.notes}</p>}
                     </td>
                     <td className="px-3 py-2 text-slate-500">{companyById(deal.companyId)?.name}</td>
                     <td className="px-3 py-2 text-right font-medium text-slate-700">{formatCurrency(deal.value)}</td>
@@ -330,7 +332,11 @@ function DealCard({ deal, canDrag, onDragStart, onOpen }: { deal: Deal; canDrag:
       className={`bg-white rounded-lg border border-slate-200 p-3 hover:shadow-md hover:border-slate-300 transition-shadow ${canDrag ? 'cursor-pointer' : 'cursor-default'}`}
     >
       <p className="text-sm font-semibold text-slate-800 truncate">{company?.name ?? deal.name}</p>
-      {contact && <p className="text-xs text-slate-400 truncate">{contact.firstName} {contact.lastName}</p>}
+      <p className="text-xs text-slate-500 truncate">
+        {deal.service ?? deal.name}
+        {contact ? ` · ${contact.firstName} ${contact.lastName}` : ''}
+      </p>
+      {deal.notes && <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">{deal.notes}</p>}
       {dealKind(deal) === 'Handover' ? (
         <p className="text-base font-bold text-slate-800 mt-1.5">
           {deal.handoverAmount != null ? formatCurrency(deal.handoverAmount) : '—'}
