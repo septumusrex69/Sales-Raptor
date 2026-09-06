@@ -8,18 +8,18 @@ import { Card, CardHeader } from '../../components/ui/Card'
 import { StatusBadge, StageBadge, ClassificationBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
-import { QuickLogModal, ScheduleFollowUpModal, ScheduleMeetingModal } from '../../components/QuickModals'
+import { AddDealModal, QuickLogModal, ScheduleFollowUpModal, ScheduleMeetingModal } from '../../components/QuickModals'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { EditContactModal } from '../../components/contacts/EditContactModal'
 import { AddContactModal } from '../../components/contacts/AddContactModal'
-import { formatCurrency, formatDate, services } from '../../data/mockData'
+import { formatCurrency, formatDate } from '../../data/mockData'
 import { parseEmailActivity } from '../../lib/emailActivity'
 import { buildDrilldownUrl } from '../../lib/drilldown'
 import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/ui/RowLimitSelect'
 import { RecordOwner } from '../../components/RecordOwner'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
-import type { Company, Contact, ProductService } from '../../types'
+import type { Company, Contact } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
 
 export function CompanyDetail() {
@@ -591,7 +591,7 @@ export function CompanyDetail() {
           onSave={(accountOwnerId) => updateCompany(company.id, { accountOwnerId })}
         />
       )}
-      {dealOpen && <AddClientDealModal onClose={() => setDealOpen(false)} onSave={(input) => addDeal({ ...input, companyId: company.id })} />}
+      {dealOpen && <AddDealModal onClose={() => setDealOpen(false)} onSave={(input) => addDeal({ ...input, companyId: company.id })} />}
       {followUpOpen && (
         <ScheduleFollowUpModal
           onClose={() => setFollowUpOpen(false)}
@@ -791,53 +791,6 @@ function EditOwnerModal({
   )
 }
 
-function AddClientDealModal({ onClose, onSave }: { onClose: () => void; onSave: (input: { name: string; value: number; service: ProductService; expectedCloseDate: string }) => void }) {
-  const [form, setForm] = useState({ name: '', value: '', service: services[0], expectedCloseDate: '' })
-  return (
-    <Modal title="Add Deal" onClose={onClose} width={420}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (!form.name) return
-          onSave({
-            name: form.name,
-            value: Number(form.value) || 0,
-            service: form.service,
-            expectedCloseDate: form.expectedCloseDate ? new Date(form.expectedCloseDate).toISOString() : new Date().toISOString(),
-          })
-          onClose()
-        }}
-      >
-        <FormField label="Deal Name" required>
-          <input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required autoFocus placeholder="e.g. Annual renewal" />
-        </FormField>
-        <div className="grid grid-cols-2 gap-3">
-          <FormField label="Value (R)">
-            <input type="number" className={inputClass} value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
-          </FormField>
-          <FormField label="Expected Close Date">
-            <input type="date" className={inputClass} value={form.expectedCloseDate} onChange={(e) => setForm({ ...form, expectedCloseDate: e.target.value })} />
-          </FormField>
-        </div>
-        <FormField label="Service">
-          <select className={inputClass} value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value as ProductService })}>
-            {services.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-        </FormField>
-        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
-          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
-            Cancel
-          </button>
-          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
-            Add Deal
-          </button>
-        </div>
-      </form>
-    </Modal>
-  )
-}
 
 function DeleteClientModal({
   company,

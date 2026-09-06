@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { supabase } from '../lib/supabase'
 import { useAuth } from './AuthContext'
 import { TODAY } from '../data/mockData'
-import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, LossReason, Proposal, RejectionReason, Task, TaskType, Team, TeamKind, User } from '../types'
+import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, LossReason, ProductService, Proposal, RejectionReason, Task, TaskType, Team, TeamKind, User } from '../types'
 
 /**
  * Generic camelCase(app) <-> snake_case(Postgres) row mapping. The SQL
@@ -168,6 +168,28 @@ export interface WonDealDetails {
   accountsCount?: number
 }
 
+/**
+ * One deal being confirmed as part of converting a lead. `dealId` is set when the rep already
+ * created the deal on the lead; without it the deal is created from the service the lead was
+ * interested in.
+ */
+export interface ConvertDealConfirmation {
+  dealId?: ID
+  name: string
+  service?: string
+  value: number
+  /** Debt Collection only — outstanding balance being handed over. */
+  handoverAmount?: number
+  /** Debt Collection only — number of accounts/matters in the handover. */
+  accountsCount?: number
+}
+
+export interface ConvertConfirmation {
+  /** Service commencement date, applied to every deal confirmed in this conversion. */
+  startDate: string
+  deals: ConvertDealConfirmation[]
+}
+
 interface AppActions {
   addLead: (input: Partial<Lead> & { firstName: string; lastName: string; companyName: string }) => Lead
   updateLead: (id: ID, patch: Partial<Lead>) => void
@@ -176,7 +198,13 @@ interface AppActions {
    * its contact people across, and opens a Deal per service so the handover can be tracked.
    * The lead itself stays on file as 'Converted' rather than disappearing.
    */
-  convertLeadToClient: (leadId: ID, dealValue?: number) => { companyId: ID; deal: Deal } | undefined
+  convertLeadToClient: (leadId: ID, confirm: ConvertConfirmation) => { companyId: ID; deal?: Deal } | undefined
+  /**
+   * Opens a deal against a lead, before there's a client. A lead saying "I'm interested in
+   * Executive Listing" is a real opportunity worth tracking from that moment, not only once
+   * they sign — so the deal is created now and confirmed at conversion.
+   */
+  addLeadDeal: (leadId: ID, input: { name: string; value: number; service: ProductService; expectedCloseDate: string }) => Deal | undefined
   rejectLead: (leadId: ID, reason: RejectionReason, note?: string) => void
   deleteLead: (leadId: ID) => void
 
@@ -220,6 +248,21 @@ interface AppActions {
 }
 
 const AppContext = createContext<(AppState & AppActions) | null>(null)
+
+/**
+ * Rejection reasons are written in the sales team's language; deals record loss reasons in
+ * their own, older vocabulary. Mapping here keeps a rejected lead's deals consistent with
+ * the rest of the Lost Deals reporting instead of introducing a second set of labels.
+ */
+const LOSS_REASON_FOR_REJECTION: Record<RejectionReason, LossReason> = {
+  'Not interested anymore': 'Other',
+  'Too expensive': 'Price',
+  'Went with another provider': 'Competitor',
+  'No response': 'No response',
+  'We declined them': 'Service not suitable',
+  Other: 'Other',
+}
+
 
 export function AppStoreProvider({ children }: { children: ReactNode }) {
   const { session, currentUser: authUser } = useAuth()
@@ -432,16 +475,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       })
     },
     [showError],
-  )
-
-  const rejectLead = useCallback<AppActions['rejectLead']>(
-    (leadId, reason, note) => {
-      updateLead(leadId, { status: 'Rejected', rejectionReason: reason, rejectionNote: note || undefined })
-      // The reason goes in the subject so it reads at a glance on the timeline; a rejection
-      // nobody can explain six months later is the same as no record at all.
-      addActivity({ type: 'Status change', subject: `Lead rejected — ${reason}`, notes: note || undefined, leadId })
-    },
-    [updateLead, addActivity],
   )
 
   const deleteLead = useCallback<AppActions['deleteLead']>(
@@ -720,18 +753,84 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [showError, addActivity],
   )
 
+  /**
+   * The Company a lead's deals hang off. A lead often has no client record yet, and a Deal
+   * can't exist without one, so the client is created here the first time it's needed. It
+   * stays out of the Clients list until one of its deals is Won, so opening a deal on a lead
+   * doesn't quietly promote them to a client.
+   */
+  const ensureLeadCompany = useCallback(
+    (lead: Lead): { companyId: ID; newCompany?: Company } => {
+      if (lead.companyId) return { companyId: lead.companyId }
+      const newCompany: Company = {
+        id: crypto.randomUUID(),
+        accountOwnerId: ownerId,
+        createdAt: nowIso(),
+        name: lead.companyName,
+        industry: lead.industry,
+        province: lead.province,
+        city: lead.city,
+      }
+      setCompanies((prev) => [newCompany, ...prev])
+      return { companyId: newCompany.id, newCompany }
+    },
+    [ownerId],
+  )
+
+  const addLeadDeal = useCallback<AppActions['addLeadDeal']>(
+    (leadId, input) => {
+      const lead = leads.find((l) => l.id === leadId)
+      if (!lead) return undefined
+      const { companyId, newCompany } = ensureLeadCompany(lead)
+
+      const deal: Deal = {
+        id: crypto.randomUUID(),
+        name: input.name,
+        companyId,
+        ownerId: lead.ownerId,
+        stage: 'Qualified',
+        value: input.value,
+        probability: 40,
+        expectedCloseDate: input.expectedCloseDate,
+        service: input.service,
+        source: lead.source,
+        createdAt: nowIso(),
+        leadId,
+      }
+      setDeals((prev) => [deal, ...prev])
+      addActivity({ type: 'Deal update', subject: `Deal opened on lead: ${deal.name}`, leadId, dealId: deal.id, companyId })
+
+      // The company has to land before the deal that references it, or the deal insert fails
+      // its foreign key and the row only ever exists in this browser tab.
+      void (async () => {
+        if (newCompany) {
+          const companyError = await insertRow('companies', newCompany, 'addLeadDeal:company')
+          if (companyError) {
+            setCompanies((prev) => prev.filter((c) => c.id !== newCompany.id))
+            setDeals((prev) => prev.filter((d) => d.id !== deal.id))
+            showError(companyError)
+            return
+          }
+          updateLead(leadId, { companyId })
+        }
+        const dealError = await insertRow('deals', deal, 'addLeadDeal:deal')
+        if (dealError) {
+          setDeals((prev) => prev.filter((d) => d.id !== deal.id))
+          showError(dealError)
+        }
+      })()
+
+      return deal
+    },
+    [leads, ensureLeadCompany, addActivity, updateLead, showError],
+  )
+
   const convertLeadToClient = useCallback<AppActions['convertLeadToClient']>(
-    (leadId, dealValue) => {
+    (leadId, confirm) => {
       const lead = leads.find((l) => l.id === leadId)
       if (!lead) return undefined
 
-      let companyId = lead.companyId
-      let newCompany: Company | undefined
-      if (!companyId) {
-        newCompany = { id: crypto.randomUUID(), accountOwnerId: ownerId, createdAt: nowIso(), name: lead.companyName, industry: lead.industry, province: lead.province, city: lead.city }
-        companyId = newCompany.id
-        setCompanies((prev) => [newCompany!, ...prev])
-      }
+      const { companyId, newCompany } = ensureLeadCompany(lead)
 
       let contactId: ID | undefined
       let newContact: Contact | undefined
@@ -755,35 +854,62 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         setContacts((prev) => [newContact!, ...prev])
       }
 
-      // One Deal per selected service, each carrying its own value — a lead
-      // interested in both Executive Listing and Credit Check becomes two
-      // independently trackable deals rather than one blended number. Falls
-      // back to the legacy single-deal behavior for leads saved before
-      // per-service values existed (serviceValues undefined/empty).
-      const serviceEntries = lead.serviceValues && lead.serviceValues.length > 0 ? lead.serviceValues : undefined
-      const dealDefs: { service?: string; value: number }[] = serviceEntries
-        ? serviceEntries.map((sv) => ({ service: sv.service, value: (sv.service === 'Debt Collection' ? sv.handoverAmount : sv.value) ?? 0 }))
-        : [{ service: lead.serviceInterested, value: dealValue ?? lead.estimatedValue }]
+      // Converting means they signed, so every deal in the confirmation is marked Won with
+      // the value confirmed at conversion — that's what starts the handover and puts them in
+      // the Clients list. A deal the rep already opened while working the lead is confirmed
+      // in place; a service they were interested in but never opened a deal for is created
+      // and confirmed in one go.
+      const wonAt = nowIso()
+      const dealsToCreate: Deal[] = []
+      const dealsToConfirm: { id: ID; name: string; patch: Partial<Deal> }[] = []
 
-      const dealsToCreate: Deal[] = dealDefs.map((def) => ({
-        id: crypto.randomUUID(),
-        name: def.service ? `${lead.companyName} — ${def.service}` : `${lead.companyName} Deal`,
-        companyId,
-        contactId,
-        ownerId: lead.ownerId,
-        stage: 'Qualified',
-        value: def.value,
-        probability: 40,
-        expectedCloseDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
-        service: def.service,
-        source: lead.source,
-        createdAt: nowIso(),
-        leadId: lead.id,
-      }))
-      const firstDeal = dealsToCreate[0]
-      setDeals((prev) => [...dealsToCreate, ...prev])
+      for (const entry of confirm.deals) {
+        const won: Partial<Deal> = {
+          stage: 'Won',
+          value: entry.value,
+          handoverAmount: entry.handoverAmount,
+          accountsCount: entry.accountsCount,
+          contractStartDate: confirm.startDate,
+          wonAt,
+        }
+        if (entry.dealId) {
+          dealsToConfirm.push({ id: entry.dealId, name: entry.name, patch: won })
+        } else {
+          dealsToCreate.push({
+            id: crypto.randomUUID(),
+            name: entry.name,
+            companyId,
+            contactId,
+            ownerId: lead.ownerId,
+            probability: 100,
+            expectedCloseDate: confirm.startDate,
+            service: entry.service,
+            source: lead.source,
+            createdAt: nowIso(),
+            leadId: lead.id,
+            stage: 'Won',
+            value: entry.value,
+            handoverAmount: entry.handoverAmount,
+            accountsCount: entry.accountsCount,
+            contractStartDate: confirm.startDate,
+            wonAt,
+          })
+        }
+      }
 
-      updateLead(leadId, { status: 'Converted', convertedDealId: firstDeal.id })
+      setDeals((prev) => [
+        ...dealsToCreate,
+        ...prev.map((d) => {
+          const confirmed = dealsToConfirm.find((c) => c.id === d.id)
+          return confirmed ? { ...d, ...confirmed.patch } : d
+        }),
+      ])
+      for (const confirmed of dealsToConfirm) {
+        updateRow('deals', confirmed.id, confirmed.patch, 'convertLeadToClient:confirmDeal')
+      }
+      const firstDeal = dealsToCreate[0] ?? deals.find((d) => d.id === dealsToConfirm[0]?.id)
+
+      updateLead(leadId, { status: 'Converted', convertedDealId: firstDeal?.id })
 
       // Contact people captured while this was still a lead belong to the client now — without
       // this they'd stay pointed only at the lead and vanish from the record everyone actually
@@ -793,8 +919,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         setContacts((prev) => prev.map((c) => (c.id === contact.id ? { ...c, companyId } : c)))
         updateRow('contacts', contact.id, { companyId }, 'convertLeadToClient:contactCompany')
       }
-      for (const deal of dealsToCreate) {
-        addActivity({ type: 'Status change', subject: `Lead converted to deal: ${deal.name}`, leadId, dealId: deal.id, companyId })
+      addActivity({ type: 'Status change', subject: `Lead converted to client: ${lead.companyName}`, leadId, companyId })
+      for (const deal of [...dealsToCreate, ...dealsToConfirm]) {
+        addActivity({ type: 'Deal Won', subject: `Deal confirmed on conversion: ${deal.name}`, leadId, dealId: deal.id, companyId })
       }
 
       // Persist strictly in dependency order: contacts/deals reference
@@ -828,6 +955,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
             return
           }
         }
+        if (dealsToCreate.length === 0) return
         const results = await Promise.all(dealsToCreate.map((deal) => insertRow('deals', deal, 'convertLeadToClient:deal')))
         const failedIds = dealsToCreate.filter((_, i) => results[i]).map((d) => d.id)
         if (failedIds.length > 0) {
@@ -838,7 +966,24 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
       return { companyId, deal: firstDeal }
     },
-    [leads, contacts, updateLead, addActivity, showError, ownerId],
+    [leads, deals, contacts, ensureLeadCompany, updateLead, addActivity, showError],
+  )
+
+  const rejectLead = useCallback<AppActions['rejectLead']>(
+    (leadId, reason, note) => {
+      updateLead(leadId, { status: 'Rejected', rejectionReason: reason, rejectionNote: note || undefined })
+      // The reason goes in the subject so it reads at a glance on the timeline; a rejection
+      // nobody can explain six months later is the same as no record at all.
+      addActivity({ type: 'Status change', subject: `Lead rejected — ${reason}`, notes: note || undefined, leadId })
+
+      // A deal opened while working this lead has nowhere left to go once the lead itself is
+      // rejected. Leaving it open would keep it sitting in the pipeline and the forecast for
+      // business that is definitively not happening.
+      for (const deal of deals.filter((d) => d.leadId === leadId && d.stage !== 'Won' && d.stage !== 'Lost')) {
+        markDealLost(deal.id, LOSS_REASON_FOR_REJECTION[reason])
+      }
+    },
+    [updateLead, addActivity, deals, markDealLost],
   )
 
   const updateUser = useCallback<AppActions['updateUser']>(
@@ -928,6 +1073,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       addLead,
       updateLead,
       convertLeadToClient,
+      addLeadDeal,
       rejectLead,
       deleteLead,
       addDeal,
@@ -977,6 +1123,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       addLead,
       updateLead,
       convertLeadToClient,
+      addLeadDeal,
       rejectLead,
       deleteLead,
       addDeal,

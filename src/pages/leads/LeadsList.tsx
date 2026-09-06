@@ -33,6 +33,7 @@ import { LeadForm } from '../../components/layout/QuickAdd'
 import { LeadsPeriodBar } from '../../components/leads/LeadsPeriodBar'
 import { LeadsKpiRow, type LeadsKpiValues } from '../../components/leads/LeadsKpiRow'
 import { RejectLeadModal } from '../../components/leads/RejectLeadModal'
+import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
 import { formatCurrency, formatDate, formatLeadNumber, daysAgoLabel, industries, leadClassifications, leadSources, provinces, services, TODAY } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
 import { decodeSalesMonthParam, isWithinPeriod, type SalesMonthPeriod } from '../../lib/salesMonth'
@@ -70,7 +71,7 @@ function isStaleClassAContact(lead: Lead) {
 
 export function LeadsList() {
   const store = useAppStore()
-  const { leads, activities, users, userById, updateLead, rejectLead, deleteLead, convertLeadToClient, addActivity } = store
+  const { leads, deals, activities, users, userById, updateLead, rejectLead, deleteLead, convertLeadToClient, addActivity } = store
   const { currentUser } = useAuth()
   const canReassign = canReassignRole(currentUser)
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
@@ -102,6 +103,7 @@ export function LeadsList() {
   const [reassignLead, setReassignLead] = useState<Lead | null>(null)
   const [deleteLeadTarget, setDeleteLeadTarget] = useState<Lead | null>(null)
   const [rejectLeadTarget, setRejectLeadTarget] = useState<Lead | null>(null)
+  const [convertLeadTarget, setConvertLeadTarget] = useState<Lead | null>(null)
   const [openServicesFor, setOpenServicesFor] = useState<string | null>(null)
 
   // One-time drill-down filters carried in from Dashboard/Reports links — not exposed as UI controls.
@@ -490,10 +492,7 @@ export function LeadsList() {
                                 {
                                   label: 'Convert to client',
                                   icon: <ArrowRightLeft size={14} />,
-                                  onClick: () => {
-                                    const result = convertLeadToClient(lead.id)
-                                    if (result) navigate(`/companies/${result.companyId}`)
-                                  },
+                                  onClick: () => setConvertLeadTarget(lead),
                                 },
                               ]
                             : []),
@@ -501,7 +500,9 @@ export function LeadsList() {
                           ...(canEditOwned(currentUser, lead.ownerId)
                             ? [
                                 { label: 'Reject', icon: <XCircle size={14} />, danger: true, onClick: () => setRejectLeadTarget(lead) },
-                                { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onClick: () => setDeleteLeadTarget(lead) },
+                                ...(lead.status === 'Converted'
+                                  ? [] // deleting it would cascade to the client's deals
+                                  : [{ label: 'Delete', icon: <Trash2 size={14} />, danger: true, onClick: () => setDeleteLeadTarget(lead) }]),
                               ]
                             : []),
                         ]}
@@ -595,6 +596,17 @@ export function LeadsList() {
             ))}
           </div>
         </Modal>
+      )}
+      {convertLeadTarget && (
+        <ConvertLeadModal
+          lead={convertLeadTarget}
+          openDeals={deals.filter((d) => d.leadId === convertLeadTarget.id && d.stage !== 'Won' && d.stage !== 'Lost')}
+          onClose={() => setConvertLeadTarget(null)}
+          onConfirm={(confirmation) => {
+            const result = convertLeadToClient(convertLeadTarget.id, confirmation)
+            if (result) navigate(`/companies/${result.companyId}`)
+          }}
+        />
       )}
       {rejectLeadTarget && (
         <RejectLeadModal

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Pencil, UserPlus, StickyNote, CalendarClock, Users2, XCircle, Phone, Mail, Trash2, Plus } from 'lucide-react'
+import { ArrowLeft, Pencil, UserPlus, StickyNote, CalendarClock, Users2, XCircle, Phone, Mail, Trash2, Plus, Handshake } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { canEditOwned, canReassign, isAssignableOwner} from '../../lib/permissions'
@@ -14,8 +14,10 @@ import { StatusBadge, ServiceBadge, StageBadge, ClassificationBadge } from '../.
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
-import { QuickLogModal, ScheduleFollowUpModal, ScheduleMeetingModal } from '../../components/QuickModals'
+import { AddDealModal, QuickLogModal, ScheduleFollowUpModal, ScheduleMeetingModal } from '../../components/QuickModals'
 import { RejectLeadModal } from '../../components/leads/RejectLeadModal'
+import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
+import { InlineSelect } from '../../components/ui/InlineSelect'
 import { LEAD_STATUSES, isActiveLead } from '../../lib/leadStatus'
 import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/ui/RowLimitSelect'
 import { EmailActivityList } from '../../components/EmailActivityRow'
@@ -23,17 +25,19 @@ import { NoteActivityList } from '../../components/NoteActivityRow'
 import { parseEmailActivity } from '../../lib/emailActivity'
 import { buildDrilldownUrl } from '../../lib/drilldown'
 import { formatCurrency, formatDate, formatLeadNumber, industries, leadSources } from '../../data/mockData'
+import { leadClassifications } from '../../data/mockData'
 import type { Contact, LeadStatus } from '../../types'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, serviceValueLabel, leadServiceValueList } from '../../components/leads/LeadOpportunityFields'
 
 export function LeadDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { leads, deals, contacts, activities, tasks, users, userById, updateLead, convertLeadToClient, rejectLead, deleteLead, addActivity, addContact, updateContact, addTask } = useAppStore()
+  const { leads, deals, contacts, activities, tasks, users, userById, updateLead, convertLeadToClient, addLeadDeal, rejectLead, deleteLead, addActivity, addContact, updateContact, addTask } = useAppStore()
   const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const lead = leads.find((l) => l.id === id)
   const resultingDeals = useMemo(() => deals.filter((d) => d.leadId === id), [deals, id])
+  const openLeadDeals = useMemo(() => resultingDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Lost'), [resultingDeals])
   const canEdit = canEditOwned(currentUser, lead?.ownerId)
 
   const [editOpen, setEditOpen] = useState(false)
@@ -42,6 +46,8 @@ export function LeadDetail() {
   const [followUpOpen, setFollowUpOpen] = useState(false)
   const [meetingOpen, setMeetingOpen] = useState(false)
   const [rejectOpen, setRejectOpen] = useState(false)
+  const [convertOpen, setConvertOpen] = useState(false)
+  const [dealOpen, setDealOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [emailOpen, setEmailOpen] = useState(false)
   const [emailLimit, setEmailLimit] = useState<RowLimit>(5)
@@ -103,18 +109,38 @@ export function LeadDetail() {
           <RecordOwner ownerId={lead.ownerId} label="Salesperson" />
           <div>
             <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide mb-1.5">Class</p>
-            {lead.classification ? (
-              <ClassificationBadge classification={lead.classification} />
-            ) : (
-              // A lead often hasn't been graded yet; saying so is more useful than an empty gap
-              // that reads as though the field doesn't exist.
-              <span className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-md px-2 py-1">Not yet graded</span>
-            )}
+            <InlineSelect
+              value={lead.classification}
+              options={leadClassifications}
+              disabled={!canEdit}
+              onChange={(classification) => updateLead(lead.id, { classification })}
+            >
+              {lead.classification ? (
+                <ClassificationBadge classification={lead.classification} />
+              ) : (
+                // A lead often hasn't been graded yet; saying so is more useful than an empty gap
+                // that reads as though the field doesn't exist.
+                <span className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-md px-2 py-1">Not yet graded</span>
+              )}
+            </InlineSelect>
           </div>
           <div>
             <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Status</p>
             <div className="mt-1.5">
-              <StatusBadge status={lead.status} />
+              <InlineSelect
+                value={lead.status}
+                options={LEAD_STATUSES}
+                disabled={!canEdit}
+                onChange={(status) => {
+                  // Rejection needs a reason, so route that one through the proper flow rather
+                  // than letting a dropdown close a lead off with nothing recorded.
+                  if (status === 'Rejected') setRejectOpen(true)
+                  else if (status === 'Converted') setConvertOpen(true)
+                  else updateLead(lead.id, { status })
+                }}
+              >
+                <StatusBadge status={lead.status} />
+              </InlineSelect>
             </div>
           </div>
           {estimatedAccounts !== undefined && (
@@ -163,23 +189,26 @@ export function LeadDetail() {
         <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-slate-100">
           {canEdit && <ActionButton icon={Pencil} label="Edit" onClick={() => setEditOpen(true)} />}
           {canEdit && active && (
-            <ActionButton
-              icon={UserPlus}
-              label="Convert to Client"
-              onClick={() => {
-                const result = convertLeadToClient(lead.id)
-                // The client record is where the handover actually gets worked, so that's where
-                // the person doing the converting should land — not on one of the deals it made.
-                if (result) navigate(`/companies/${result.companyId}`)
-              }}
-            />
+            <ActionButton icon={UserPlus} label="Convert to Client" onClick={() => setConvertOpen(true)} />
           )}
+          {canEdit && active && <ActionButton icon={Handshake} label="Add Deal" onClick={() => setDealOpen(true)} />}
           <ActionButton icon={Phone} label="Log Call" onClick={() => setCallOpen(true)} />
           <ActionButton icon={CalendarClock} label="Schedule Follow-up" onClick={() => setFollowUpOpen(true)} />
           <ActionButton icon={Users2} label="Schedule Meeting" onClick={() => setMeetingOpen(true)} />
           <ActionButton icon={StickyNote} label="Add Note" onClick={() => setNoteOpen(true)} />
           {canEdit && active && <ActionButton icon={XCircle} label="Reject" tone="danger" onClick={() => setRejectOpen(true)} />}
-          {canEdit && <ActionButton icon={Trash2} label="Delete" tone="danger" onClick={() => setDeleteOpen(true)} />}
+          {/* Deleting a converted lead takes its deals with it (the DB cascades on lead_id),
+              which would wipe the client's won business and drop them out of Clients entirely. */}
+          {canEdit && (
+            <ActionButton
+              icon={Trash2}
+              label="Delete"
+              tone="danger"
+              onClick={() => setDeleteOpen(true)}
+              disabled={lead.status === 'Converted'}
+              title={lead.status === 'Converted' ? 'Converted leads can\u2019t be deleted \u2014 it would remove the client\u2019s deals too.' : undefined}
+            />
+          )}
         </div>
       </Card>
 
@@ -341,7 +370,7 @@ export function LeadDetail() {
 
           {resultingDeals.length > 0 && (
             <Card>
-              <CardHeader title="Resulting Deal(s)" />
+              <CardHeader title="Deals" subtitle={`${resultingDeals.length} on this lead`} />
               <div className="space-y-2">
                 {resultingDeals.map((d) => (
                   <Link
@@ -483,6 +512,28 @@ export function LeadDetail() {
           onSave={(input) => addTask({ ...input, type: 'Meeting', leadId: lead.id, companyId: lead.companyId, relatedToLabel: `${lead.firstName} ${lead.lastName}` })}
         />
       )}
+      {convertOpen && (
+        <ConvertLeadModal
+          lead={lead}
+          openDeals={openLeadDeals}
+          onClose={() => setConvertOpen(false)}
+          onConfirm={(confirmation) => {
+            const result = convertLeadToClient(lead.id, confirmation)
+            // The client record is where the handover actually gets worked, so that's where the
+            // person doing the converting should land — not on one of the deals it confirmed.
+            if (result) navigate(`/companies/${result.companyId}`)
+          }}
+        />
+      )}
+      {dealOpen && (
+        <AddDealModal
+          defaultName={`${lead.companyName} — `}
+          defaultService={lead.services?.[0]}
+          namePlaceholder={`e.g. ${lead.companyName} — Executive Listing`}
+          onClose={() => setDealOpen(false)}
+          onSave={(input) => addLeadDeal(lead.id, input)}
+        />
+      )}
       {rejectOpen && (
         <RejectLeadModal
           leadName={`${lead.firstName} ${lead.lastName}`}
@@ -543,11 +594,12 @@ export function LeadDetail() {
 }
 
 /** Deliberately identical in weight to the Client page's action row — same size, same padding. */
-function ActionButton({ icon: Icon, label, onClick, tone, disabled }: { icon: typeof Pencil; label: string; onClick: () => void; tone?: 'danger'; disabled?: boolean }) {
+function ActionButton({ icon: Icon, label, onClick, tone, disabled, title }: { icon: typeof Pencil; label: string; onClick: () => void; tone?: 'danger'; disabled?: boolean; title?: string }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
         tone === 'danger' ? 'border-red-200 text-red-500 hover:bg-red-50' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
       }`}
