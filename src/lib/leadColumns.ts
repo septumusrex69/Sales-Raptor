@@ -34,7 +34,7 @@ export const COLUMN_LABELS: Record<ColumnKey, string> = {
   handoverAmount: 'Handover Amount',
   owner: 'Owner',
   nextFollowUp: 'Next Follow-up',
-  dateAdded: 'Date Added',
+  dateAdded: 'Added',
   lastContact: 'Last Contact',
   source: 'Source',
   city: 'City',
@@ -47,11 +47,11 @@ export const COLUMN_LABELS: Record<ColumnKey, string> = {
 
 /** Default column order per spec — everything here starts visible. */
 export const DEFAULT_COLUMNS: ColumnKey[] = [
-  // When a lead came in is the first thing anyone wants to know, so it opens the table and
-  // stays pinned while you scroll — rather than sitting twelfth, off the right-hand edge.
-  'dateAdded',
   'leadNumber',
   'companyLead',
+  // Third, right behind the columns that say which lead this is: when it came in is the next
+  // thing anyone asks, and it was previously twelfth — off the right-hand edge of the scroll.
+  'dateAdded',
   'contactPerson',
   'status',
   'classification',

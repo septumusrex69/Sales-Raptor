@@ -1,3 +1,5 @@
+import { relativeDayLabel } from './dateLabels'
+
 export interface ParsedEmailActivity {
   direction: 'sent' | 'received'
   isSpam: boolean
@@ -12,23 +14,12 @@ const PREFIXES: { prefix: string; direction: ParsedEmailActivity['direction']; i
 ]
 
 /**
- * "Today" / "Yesterday" / "Friday 4 September" / "4 September 2025" — the heading a run of
- * emails sits under, so each row can show just a time instead of repeating the full date
- * twenty-one times down the list.
+ * The heading a run of emails sits under, so each row shows just a time instead of repeating
+ * the full date twenty-one times down the list. Shares one definition with the leads and deals
+ * tables — a date should read the same wherever it appears.
  */
 export function emailDayLabel(iso: string): string {
-  const date = new Date(iso)
-  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
-  const dayDiff = Math.round((startOfDay(new Date()) - startOfDay(date)) / 86400000)
-  if (dayDiff === 0) return 'Today'
-  if (dayDiff === 1) return 'Yesterday'
-  const sameYear = date.getFullYear() === new Date().getFullYear()
-  return date.toLocaleDateString('en-ZA', {
-    weekday: dayDiff < 7 ? 'long' : undefined,
-    day: 'numeric',
-    month: 'long',
-    year: sameYear ? undefined : 'numeric',
-  })
+  return relativeDayLabel(iso)
 }
 
 /** Just the clock time — the day heading above the row carries the date. */

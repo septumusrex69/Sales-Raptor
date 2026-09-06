@@ -7,6 +7,7 @@ import { canEditOwned, useDefaultOwnerFilter, isAssignableOwner} from '../../lib
 import { Card } from '../../components/ui/Card'
 import { StageBadge } from '../../components/ui/Badge'
 import { SortHeader } from '../../components/ui/SortHeader'
+import { relativeDayLabel } from '../../lib/dateLabels'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { DealForm } from '../../components/layout/QuickAdd'
 import { MarkRejectedModal, MarkWonModal } from './DealStageModals'
@@ -278,7 +279,9 @@ export function DealsBoard() {
                         <span className="text-slate-500 text-xs">{userById(deal.ownerId)?.name.split(' ')[0]}</span>
                       </div>
                     </td>
-                    <td className="px-3 py-3 text-slate-500">{formatDate(deal.createdAt)}</td>
+                    <td className="px-3 py-3 text-slate-500 whitespace-nowrap" title={formatDate(deal.createdAt)}>
+                      {relativeDayLabel(deal.createdAt)}
+                    </td>
                     <td className="px-3 py-3 text-slate-500">{formatDate(deal.expectedCloseDate)}</td>
                   </tr>
                 ))}
@@ -323,7 +326,7 @@ function DealCard({ deal, canDrag, onDragStart, onOpen }: { deal: Deal; canDrag:
       <div className="mt-2 pt-2 border-t border-slate-50 text-[11px] text-slate-400 space-y-0.5">
         <div className="flex items-center justify-between">
           <span>Opened</span>
-          <span>{formatDate(deal.createdAt)}</span>
+          <span title={formatDate(deal.createdAt)}>{relativeDayLabel(deal.createdAt)}</span>
         </div>
         <div className="flex items-center justify-between">
           <span>Close</span>
