@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from './AuthContext'
 import { TODAY } from '../data/mockData'
 import { DEAL_STAGE_PROBABILITY } from '../types'
+import { normalizeDeal, normalizeLead } from '../lib/legacyValues'
 import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, ProductService, Proposal, RejectionReason, Task, TaskType, Team, TeamKind, User } from '../types'
 
 /**
@@ -308,8 +309,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     ])
       .then(([l, d, ct, co, tk, ac, pr, us, tm, nt]) => {
         if (!active) return
-        setLeads(l)
-        setDeals(d)
+        // A row still carrying a retired stage or status would render in no column at all —
+        // not last, gone — so map anything stale onto the current vocabulary on the way in.
+        setLeads(l.map(normalizeLead))
+        setDeals(d.map(normalizeDeal))
         setContacts(ct)
         setCompanies(co)
         setTasks(rollOverMissedTasks(tk))

@@ -32,7 +32,6 @@ const LEAD_STATUS_TONE: Record<string, BadgeTone> = {
 const DEAL_STAGE_TONE: Record<string, BadgeTone> = {
   'New Deal': 'new',
   'Quotation Sent': 'proposal',
-  'Invoice Sent': 'negotiation',
   Won: 'won',
   Rejected: 'lost',
 }

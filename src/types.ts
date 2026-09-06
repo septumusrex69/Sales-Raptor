@@ -116,16 +116,16 @@ export interface Lead {
 }
 
 /**
- * A deal moves through the same three steps wherever it was raised — off a lead or off an
+ * A deal moves through the same two steps wherever it was raised — off a lead or off an
  * existing client — then ends Won or Rejected. Anything finer than this was stages nobody
  * moved a deal into.
  */
-export type DealStage = 'New Deal' | 'Quotation Sent' | 'Invoice Sent' | 'Won' | 'Rejected'
+export type DealStage = 'New Deal' | 'Quotation Sent' | 'Won' | 'Rejected'
 
-export const DEAL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Invoice Sent', 'Won', 'Rejected']
+export const DEAL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Won', 'Rejected']
 
 /** The steps a deal is still being worked in — everything before it ends one way or the other. */
-export const OPEN_DEAL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Invoice Sent']
+export const OPEN_DEAL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent']
 
 /**
  * How likely a deal at each step is to close, used for the weighted forecast. Derived from the
@@ -134,8 +134,7 @@ export const OPEN_DEAL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Inv
  */
 export const DEAL_STAGE_PROBABILITY: Record<DealStage, number> = {
   'New Deal': 20,
-  'Quotation Sent': 50,
-  'Invoice Sent': 80,
+  'Quotation Sent': 60,
   Won: 100,
   Rejected: 0,
 }

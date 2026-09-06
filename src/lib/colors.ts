@@ -9,8 +9,7 @@ import type { ActivityType, DealStage, LeadClassification, LeadSource, ProductSe
 
 export const STAGE_COLORS: Record<DealStage, string> = {
   'New Deal': '#6086a9',
-  'Quotation Sent': '#416281',
-  'Invoice Sent': '#b28e34',
+  'Quotation Sent': '#b28e34',
   Won: '#957323',
   Rejected: '#794234',
 }
@@ -123,7 +122,7 @@ export const CLASSIFICATION_TAILWIND: Record<LeadClassification, string> = {
 export const DEAL_CLOSE_EVENT_COLOR = '#ad6452'
 
 /** The open-pipeline-through-Won stages, in funnel order (Rejected is shown separately). */
-export const FUNNEL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Invoice Sent', 'Won']
+export const FUNNEL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Won']
 export const FUNNEL_COLORS: string[] = FUNNEL_STAGES.map((s) => STAGE_COLORS[s])
 
 /** Semantic tokens for KPI deltas / positive-negative indicators (mirrors --color-positive/--color-negative in index.css). */
