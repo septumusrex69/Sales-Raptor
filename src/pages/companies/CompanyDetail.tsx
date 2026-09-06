@@ -602,7 +602,7 @@ export function CompanyDetail() {
           onSave={(accountOwnerId) => updateCompany(company.id, { accountOwnerId })}
         />
       )}
-      {dealOpen && <AddDealModal onClose={() => setDealOpen(false)} onSave={(input) => addDeal({ ...input, companyId: company.id })} />}
+      {dealOpen && <AddDealModal subjectName={company.name} onClose={() => setDealOpen(false)} onSave={(input) => addDeal({ ...input, companyId: company.id })} />}
       {followUpOpen && (
         <ScheduleFollowUpModal
           onClose={() => setFollowUpOpen(false)}

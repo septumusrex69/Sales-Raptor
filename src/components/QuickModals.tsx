@@ -153,45 +153,74 @@ export function ScheduleMeetingModal({
  * means the same thing wherever it was raised.
  */
 export function AddDealModal({
+  subjectName,
   onClose,
   onSave,
-  defaultName = '',
   defaultService,
-  namePlaceholder = 'e.g. Annual renewal',
 }: {
+  /** The client or lead the deal is for — the deal takes its name from this and the service. */
+  subjectName: string
   onClose: () => void
-  onSave: (input: { name: string; value: number; service: ProductService; expectedCloseDate: string }) => void
-  defaultName?: string
+  onSave: (input: {
+    name: string
+    value: number
+    service: ProductService
+    expectedCloseDate: string
+    handoverAmount?: number
+    accountsCount?: number
+    notes?: string
+  }) => void
   defaultService?: ProductService
-  namePlaceholder?: string
 }) {
-  const [form, setForm] = useState({ name: defaultName, value: '', service: defaultService ?? services[0], expectedCloseDate: '' })
-  // A handover is billed on what's recovered, so there's no figure to enter here — the book
-  // is agreed when the mandate is signed, and even that is what the client says.
+  const [form, setForm] = useState({
+    service: defaultService ?? services[0],
+    value: '',
+    handoverAmount: '',
+    accountsCount: '',
+    expectedCloseDate: '',
+    notes: '',
+  })
   const isHandover = isHandoverService(form.service)
+
   return (
     <Modal title="Add Deal" onClose={onClose} width={420}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          if (!form.name) return
           onSave({
-            name: form.name,
-            value: isHandover ? 0 : Number(form.value) || 0,
+            // Named from the subject and the service rather than asked for — that's what
+            // anyone typed anyway, and a blank required field is a toll on the way to the
+            // information that actually matters.
+            name: `${subjectName} — ${form.service}`,
             service: form.service,
+            value: isHandover ? 0 : Number(form.value) || 0,
+            handoverAmount: isHandover && form.handoverAmount !== '' ? Number(form.handoverAmount) : undefined,
+            accountsCount: isHandover && form.accountsCount !== '' ? Number(form.accountsCount) : undefined,
+            notes: form.notes.trim() || undefined,
             expectedCloseDate: form.expectedCloseDate ? new Date(form.expectedCloseDate).toISOString() : new Date().toISOString(),
           })
           onClose()
         }}
       >
-        <FormField label="Deal Name" required>
-          <input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required autoFocus placeholder={namePlaceholder} />
+        <FormField label="Service" required>
+          <select className={inputClass} value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value as ProductService })} autoFocus>
+            {services.map((s: ProductService) => (
+              <option key={s}>{s}</option>
+            ))}
+          </select>
         </FormField>
+        {/* What "how much" means depends entirely on the service: a book to collect against,
+            or a fee to invoice. */}
         <div className="grid grid-cols-2 gap-3">
           {isHandover ? (
-            <FormField label="Value">
-              <p className="text-sm text-slate-400 py-2">Billed on recovery — no value yet</p>
-            </FormField>
+            <>
+              <FormField label="Handover Value (R)">
+                <input type="number" className={inputClass} value={form.handoverAmount} onChange={(e) => setForm({ ...form, handoverAmount: e.target.value })} placeholder="e.g. 750000" />
+              </FormField>
+              <FormField label="Number of Accounts">
+                <input type="number" className={inputClass} value={form.accountsCount} onChange={(e) => setForm({ ...form, accountsCount: e.target.value })} placeholder="e.g. 40" />
+              </FormField>
+            </>
           ) : (
             <FormField label="Value (R)">
               <input type="number" className={inputClass} value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
@@ -201,12 +230,14 @@ export function AddDealModal({
             <input type="date" className={inputClass} value={form.expectedCloseDate} onChange={(e) => setForm({ ...form, expectedCloseDate: e.target.value })} />
           </FormField>
         </div>
-        <FormField label="Service">
-          <select className={inputClass} value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value as ProductService })}>
-            {services.map((s: ProductService) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
+        <FormField label="Description">
+          <textarea
+            className={inputClass}
+            rows={2}
+            value={form.notes}
+            onChange={(e) => setForm({ ...form, notes: e.target.value })}
+            placeholder="Optional — e.g. lease agreement for the Sandton premises"
+          />
         </FormField>
         <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">

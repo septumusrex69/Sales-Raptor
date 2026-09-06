@@ -530,9 +530,8 @@ export function LeadDetail() {
       )}
       {dealOpen && (
         <AddDealModal
-          defaultName={`${lead.companyName} — `}
+          subjectName={lead.companyName}
           defaultService={lead.services?.[0]}
-          namePlaceholder={`e.g. ${lead.companyName} — Executive Listing`}
           onClose={() => setDealOpen(false)}
           onSave={(input) => addLeadDeal(lead.id, input)}
         />

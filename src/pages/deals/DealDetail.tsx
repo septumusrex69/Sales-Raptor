@@ -145,7 +145,7 @@ export function DealDetail() {
             ))}
           </select>
           <div className="flex flex-wrap gap-2 ml-auto">
-            {canEdit && !isClosed && !deal.quotationSentAt && (
+            {canEdit && !isClosed && !isHandover && !deal.quotationSentAt && (
               <ActionButton icon={FileText} label="Quotation Sent" onClick={() => logDealDocument(deal.id, 'quotation')} />
             )}
             {canEdit && !isClosed && isHandover && !deal.mandateSentAt && (
@@ -375,7 +375,7 @@ export function DealDetail() {
       {editOpen && (
         <EditDealModal deal={deal} reps={reps} canReassign={canReassign(currentUser)} onClose={() => setEditOpen(false)} onSave={(patch) => updateDeal(deal.id, patch)} />
       )}
-      {wonOpen && <MarkWonModal defaultService={deal.service} onClose={() => setWonOpen(false)} onSave={(details: WonDealDetails) => markDealWon(deal.id, details)} />}
+      {wonOpen && <MarkWonModal deal={deal} onClose={() => setWonOpen(false)} onSave={(details: WonDealDetails) => markDealWon(deal.id, details)} />}
       {rejectOpen && (
         <MarkRejectedModal
           onClose={() => setRejectOpen(false)}

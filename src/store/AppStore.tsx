@@ -208,7 +208,7 @@ interface AppActions {
    * Executive Listing" is a real opportunity worth tracking from that moment, not only once
    * they sign — so the deal is created now and confirmed at conversion.
    */
-  addLeadDeal: (leadId: ID, input: { name: string; value: number; service: ProductService; expectedCloseDate: string }) => Deal | undefined
+  addLeadDeal: (leadId: ID, input: { name: string; value: number; service: ProductService; expectedCloseDate: string; handoverAmount?: number; accountsCount?: number; notes?: string }) => Deal | undefined
   rejectLead: (leadId: ID, reason: RejectionReason, note?: string) => void
   deleteLead: (leadId: ID) => void
 
@@ -850,6 +850,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         probability: DEAL_STAGE_PROBABILITY['New Deal'],
         expectedCloseDate: input.expectedCloseDate,
         service: input.service,
+        handoverAmount: input.handoverAmount,
+        accountsCount: input.accountsCount,
+        notes: input.notes,
         source: lead.source,
         createdAt: nowIso(),
         leadId,
