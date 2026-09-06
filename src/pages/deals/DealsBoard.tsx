@@ -158,20 +158,22 @@ export function DealsBoard() {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-4">
-        <Card className="p-4">
-          <p className="text-xs text-slate-400">Total Deals</p>
-          <p className="text-xl font-bold text-slate-800 mt-1">{totals.count}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs text-slate-400">Pipeline Value</p>
-          <p className="text-xl font-bold text-slate-800 mt-1">{formatCurrency(totals.pipeline)}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs text-slate-400">Revenue Won</p>
-          <p className="text-xl font-bold text-[var(--c-gold-deep)] mt-1">{formatCurrency(totals.won)}</p>
-        </Card>
-      </div>
+      <Card className="px-4 py-3">
+        <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2">
+          <span className="flex items-baseline gap-2">
+            <span className="text-xs text-slate-400">Total Deals</span>
+            <span className="text-lg font-bold text-slate-800 tabular-nums">{totals.count}</span>
+          </span>
+          <span className="flex items-baseline gap-2">
+            <span className="text-xs text-slate-400">Pipeline Value</span>
+            <span className="text-lg font-bold text-slate-800 tabular-nums">{formatCurrency(totals.pipeline)}</span>
+          </span>
+          <span className="flex items-baseline gap-2">
+            <span className="text-xs text-slate-400">Revenue Won</span>
+            <span className="text-lg font-bold text-[var(--c-gold-deep)] tabular-nums">{formatCurrency(totals.won)}</span>
+          </span>
+        </div>
+      </Card>
 
       <div className="flex flex-wrap items-center gap-2.5">
         <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 w-64">
@@ -329,35 +331,36 @@ function DealCard({ deal, canDrag, onDragStart, onOpen }: { deal: Deal; canDrag:
       onDragStart={onDragStart}
       onClick={onOpen}
       title={canDrag ? undefined : "Only this deal's owner, a Sales Manager, or an Administrator can move its stage"}
-      className={`bg-white rounded-lg border border-slate-200 p-3 hover:shadow-md hover:border-slate-300 transition-shadow ${canDrag ? 'cursor-pointer' : 'cursor-default'}`}
+      className={`bg-white rounded-lg border border-slate-200 px-3 py-2.5 hover:shadow-md hover:border-slate-300 transition-shadow ${canDrag ? 'cursor-pointer' : 'cursor-default'}`}
     >
-      <p className="text-sm font-semibold text-slate-800 truncate">{company?.name ?? deal.name}</p>
-      <p className="text-xs text-slate-500 truncate">
-        {deal.service ?? deal.name}
-        {contact ? ` · ${contact.firstName} ${contact.lastName}` : ''}
-      </p>
-      {deal.notes && <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">{deal.notes}</p>}
-      {dealKind(deal) === 'Handover' ? (
-        <p className="text-base font-bold text-slate-800 mt-1.5">
-          {deal.handoverAmount != null ? formatCurrency(deal.handoverAmount) : '—'}
-          <span className="text-[11px] font-medium text-slate-400 ml-1.5">book</span>
-        </p>
-      ) : (
-        <p className="text-base font-bold text-slate-800 mt-1.5">{formatCurrency(deal.value)}</p>
-      )}
-      <div className="flex items-center justify-between mt-2.5">
-        <UserAvatar userId={deal.ownerId} size={22} />
-        <span className="text-xs font-medium text-slate-500">{deal.probability}%</span>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-slate-800 truncate">{company?.name ?? deal.name}</p>
+          <p className="text-xs text-slate-500 truncate">
+            {deal.service ?? deal.name}
+            {contact ? ` · ${contact.firstName} ${contact.lastName}` : ''}
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          {dealKind(deal) === 'Handover' ? (
+            <p className="text-sm font-bold text-slate-800 tabular-nums">
+              {deal.handoverAmount != null ? formatCurrency(deal.handoverAmount) : '—'}
+              <span className="text-[10px] font-medium text-slate-400 ml-1">book</span>
+            </p>
+          ) : (
+            <p className="text-sm font-bold text-slate-800 tabular-nums">{formatCurrency(deal.value)}</p>
+          )}
+          <p className="text-[11px] text-slate-400 tabular-nums">{deal.probability}%</p>
+        </div>
       </div>
-      <div className="mt-2 pt-2 border-t border-slate-50 text-[11px] text-slate-400 space-y-0.5">
-        <div className="flex items-center justify-between">
-          <span>Opened</span>
-          <span title={formatDate(deal.createdAt)}>{relativeDayLabel(deal.createdAt)}</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span>Close</span>
-          <span>{formatDate(deal.expectedCloseDate)}</span>
-        </div>
+
+      {deal.notes && <p className="text-[11px] text-slate-400 mt-1.5 line-clamp-2">{deal.notes}</p>}
+
+      <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-50 text-[11px] text-slate-400">
+        <UserAvatar userId={deal.ownerId} size={18} />
+        <span className="truncate" title={`Opened ${formatDate(deal.createdAt)} · Close ${formatDate(deal.expectedCloseDate)}`}>
+          {relativeDayLabel(deal.createdAt)} · closes {formatDate(deal.expectedCloseDate)}
+        </span>
       </div>
     </div>
   )
