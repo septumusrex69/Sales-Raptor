@@ -119,6 +119,15 @@ html[data-theme='raptor'] {
   --stage-won: #2e7d6b;
   --stage-rejected: #c75b5b;
 
+  /* Won takes the gold: it's the outcome the whole page is about, and gold is what this skin
+     spends on the thing worth looking at. Rejected steps back to a muted slate rather than a
+     warning red — a ring is a proportion, not an alarm, and half a card of red was shouting
+     over everything around it. */
+  --outcome-won: #c9a052;
+  --outcome-open: #6f8ba3;
+  --outcome-rejected: #48606f;
+  --outcome-value: #142433;
+
   /* ── Surfaces ──────────────────────────────────────────────────────────── */
   --skin-card-radius: 14px;
   --skin-card-border: #e6e9ed;

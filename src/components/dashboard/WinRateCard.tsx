@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Card, CardHeader } from '../ui/Card'
 import { RingDonut, type RingDonutSlice } from '../ui/RingDonut'
-import { POSITIVE_HEX, NEGATIVE_HEX, OPEN_HEX } from '../../lib/colors'
+import { OUTCOME_WON, OUTCOME_OPEN, OUTCOME_REJECTED, OUTCOME_VALUE } from '../../lib/colors'
 import { buildDrilldownUrl, SALES_MONTH_PARAM } from '../../lib/drilldown'
 import type { Deal } from '../../types'
 
@@ -29,17 +29,17 @@ export function WinRateCard({ deals, won, lost, winRate, newLeads, qualified, co
   // Overall Conversion counts Open toward the denominator, so it's colored in full —
   // every slice here contributes to the percentage shown.
   const overallDonutData: RingDonutSlice[] = [
-    { name: 'Won', value: won, color: POSITIVE_HEX },
-    { name: 'Open', value: open, color: OPEN_HEX },
-    { name: 'Rejected', value: lost, color: NEGATIVE_HEX },
+    { name: 'Won', value: won, color: OUTCOME_WON },
+    { name: 'Open', value: open, color: OUTCOME_OPEN },
+    { name: 'Rejected', value: lost, color: OUTCOME_REJECTED },
   ].filter((d) => d.value > 0)
 
   // Win Rate excludes Open from its math entirely, so its wedge is grayed out here
   // rather than reusing the amber "Open" color — a visual cue that it isn't counted.
   const winRateDonutData: RingDonutSlice[] = [
-    { name: 'Won', value: won, color: POSITIVE_HEX },
+    { name: 'Won', value: won, color: OUTCOME_WON },
     { name: 'Open', value: open, color: EXCLUDED_HEX, muted: true },
-    { name: 'Rejected', value: lost, color: NEGATIVE_HEX },
+    { name: 'Rejected', value: lost, color: OUTCOME_REJECTED },
   ].filter((d) => d.value > 0)
 
   const pipeline = [
@@ -56,8 +56,8 @@ export function WinRateCard({ deals, won, lost, winRate, newLeads, qualified, co
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-[176px_176px_1fr] gap-6 items-start">
-        <RingDonut data={overallDonutData} centerValue={`${overallRate}%`} centerColor={POSITIVE_HEX} centerLabel="OVERALL CONVERSION" caption="Of everything in the pipeline" />
-        <RingDonut data={winRateDonutData} centerValue={`${winRate}%`} centerColor={POSITIVE_HEX} centerLabel="WIN RATE" caption="Of deals that closed" />
+        <RingDonut data={overallDonutData} centerValue={`${overallRate}%`} centerColor={OUTCOME_VALUE} centerLabel="OVERALL CONVERSION" caption="Of everything in the pipeline" />
+        <RingDonut data={winRateDonutData} centerValue={`${winRate}%`} centerColor={OUTCOME_VALUE} centerLabel="WIN RATE" caption="Of deals that closed" />
 
         <div className="flex flex-col gap-2.5">
           <span className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">Lead pipeline, same period</span>

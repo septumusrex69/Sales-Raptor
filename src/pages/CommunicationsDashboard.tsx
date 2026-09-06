@@ -17,7 +17,7 @@ import { getCurrentSalesMonth, getPreviousSalesMonth, isWithinPeriod, encodeSale
 import { buildDrilldownUrl, SALES_MONTH_PARAM } from '../lib/drilldown'
 import { downloadCsv } from '../lib/csvExport'
 import { topLevelClients, rollupClient, collectionsCoefficient, type ClientRollup } from '../lib/companyRollup'
-import { POSITIVE_HEX, NEGATIVE_HEX } from '../lib/colors'
+import { OUTCOME_WON, OUTCOME_REJECTED, OUTCOME_VALUE } from '../lib/colors'
 import type { Company, ID, Task, Team, User } from '../types'
 
 function daysAgoLabel(dateIso: string) {
@@ -228,8 +228,8 @@ export function CommunicationsDashboard() {
   const recoveryDonut: RingDonutSlice[] =
     bookHandover > 0
       ? [
-          { name: 'Paid', value: Math.round(bookPaid), color: POSITIVE_HEX },
-          { name: 'Outstanding', value: Math.max(Math.round(bookHandover - bookPaid), 0), color: NEGATIVE_HEX },
+          { name: 'Paid', value: Math.round(bookPaid), color: OUTCOME_WON },
+          { name: 'Outstanding', value: Math.max(Math.round(bookHandover - bookPaid), 0), color: OUTCOME_REJECTED },
         ]
       : []
   const meetingDonut: RingDonutSlice[] =
@@ -306,7 +306,7 @@ export function CommunicationsDashboard() {
             <RingDonut
               data={recoveryDonut}
               centerValue={`${Math.round(bookCoefficient ?? 0)}%`}
-              centerColor={coefficientTone(bookCoefficient ?? 0) === 'good' ? POSITIVE_HEX : coefficientTone(bookCoefficient ?? 0) === 'mid' ? 'var(--c-gold-bronze)' : NEGATIVE_HEX}
+              centerColor={OUTCOME_VALUE}
               centerLabel={coefficientScopeLabel}
               caption="Paid to date ÷ handover amount"
             />

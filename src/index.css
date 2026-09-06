@@ -85,6 +85,12 @@
   --stage-won: #957323;
   --stage-rejected: #794234;
 
+  /* Ring-chart outcomes — today's values, so the Original theme is unchanged. */
+  --outcome-won: #406d58;
+  --outcome-open: #b28e34;
+  --outcome-rejected: #794234;
+  --outcome-value: #406d58;
+
   /* Extra families that only appeared inline in pages: hover-darker variants and pale
      borders, named the same way so a skin overrides them alongside the rest. */
   --c-gold-light: #d9b876;

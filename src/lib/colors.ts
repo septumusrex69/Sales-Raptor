@@ -125,6 +125,17 @@ export const DEAL_CLOSE_EVENT_COLOR = 'var(--c-rust)'
 export const FUNNEL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Won']
 export const FUNNEL_COLORS: string[] = FUNNEL_STAGES.map((s) => STAGE_COLORS[s])
 
+/**
+ * Ring-chart outcomes. Separate from the KPI delta colours on purpose: an arrow saying a
+ * number went up must read as good or bad, but a ring showing how a pipeline resolved is
+ * telling a proportional story, and a skin may well want it told in its own colours rather
+ * than in traffic lights.
+ */
+export const OUTCOME_WON = 'var(--outcome-won)'
+export const OUTCOME_OPEN = 'var(--outcome-open)'
+export const OUTCOME_REJECTED = 'var(--outcome-rejected)'
+export const OUTCOME_VALUE = 'var(--outcome-value)'
+
 /** Semantic tokens for KPI deltas / positive-negative indicators (mirrors --color-positive/--color-negative in index.css). */
 export const POSITIVE_HEX = 'var(--c-green)'
 export const NEGATIVE_HEX = 'var(--c-rust-deep)'
