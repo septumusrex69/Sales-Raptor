@@ -4,6 +4,12 @@ import { ArrowRight, Eye, EyeOff, Lock, Mail } from 'lucide-react'
 import { useAuth } from '../../store/AuthContext'
 import { supabase } from '../../lib/supabase'
 
+// Kept out of the component so the long gradient strings don't drown the markup.
+const EDGE_FADE =
+  'linear-gradient(to right, #000 0%, #000 48%, rgba(0,0,0,0.97) 58%, rgba(0,0,0,0.88) 66%, rgba(0,0,0,0.71) 74%, rgba(0,0,0,0.48) 81%, rgba(0,0,0,0.27) 87%, rgba(0,0,0,0.12) 92%, rgba(0,0,0,0.04) 96%, rgba(0,0,0,0) 100%)'
+const CORNER_SHADE =
+  'linear-gradient(to bottom right, rgba(4,12,20,0.78) 0%, rgba(4,12,20,0.56) 24%, rgba(4,12,20,0.28) 44%, rgba(4,12,20,0.08) 64%, rgba(4,12,20,0) 80%)'
+
 export function LoginPage() {
   const { session, loading, signIn } = useAuth()
   const location = useLocation()
@@ -51,13 +57,27 @@ export function LoginPage() {
         The photograph is decorative and heavy, so it's hidden below large screens rather than
         stacked above the form — a login is one thing, and on a phone that thing is the fields.
       */}
-      <div
-        className="relative hidden lg:block lg:w-[46%] shrink-0 bg-[#0b1620] bg-cover bg-center"
-        style={{ backgroundImage: "url('/brand/raptor-login.jpg')" }}
-        aria-hidden="true"
-      >
-        {/* Feathered into the panel beside it, so the two halves read as one surface. */}
-        <div className="absolute inset-0 bg-gradient-to-r from-[#0b1620]/45 via-transparent to-[#f7f8fa]" />
+      <div className="relative hidden lg:block lg:w-[42%] shrink-0" aria-hidden="true">
+        {/*
+          The photograph dissolves rather than stopping. Painting a light gradient on top of a
+          full-width image only ever produces a washed band with the image's own edge still
+          visible behind it — the edge has to actually stop existing, so the alpha mask fades
+          the photo itself out and the page's own background is what's left. The colour ramp
+          rides along with it so the luminance arrives at the same place the opacity does.
+        */}
+        <div
+          className="absolute inset-y-0 left-0 w-[128%]"
+          style={{ WebkitMaskImage: EDGE_FADE, maskImage: EDGE_FADE }}
+        >
+          <div
+            className="absolute inset-0 bg-[#0b1620] bg-cover"
+            style={{ backgroundImage: "url('/brand/raptor-login.jpg')", backgroundPosition: '32% center' }}
+          />
+          {/* Weighted to the top-left corner, where the words sit. */}
+          <div className="absolute inset-0" style={{ background: CORNER_SHADE }} />
+          <div className="absolute inset-0 bg-[#040c14]/18" />
+        </div>
+
         <p className="relative z-[1] pt-24 pl-14 text-[13px] font-semibold uppercase leading-[2.2] tracking-[0.32em] text-[#d8b56f]">
           Discipline
           <br />
@@ -68,14 +88,15 @@ export function LoginPage() {
         <span className="relative z-[1] block ml-14 mt-4 h-px w-14 bg-[#d8b56f]/70" />
       </div>
 
-      <div className="flex-1 flex items-center justify-center px-6 py-10 overflow-y-auto">
+      {/* Sits above the photo's tail, which runs on past the column edge behind it. */}
+      <div className="relative z-10 flex-1 flex items-center justify-center px-6 py-10 overflow-y-auto">
         <div className="w-full max-w-[420px]">
           <div className="flex flex-col items-center text-center">
-            <img src="/brand/raptor-mark.png" alt="" className="h-16 w-auto" />
-            <p className="mt-4 text-[34px] font-semibold leading-none tracking-[0.32em] text-[#12233a] pl-[0.32em]">RAPTOR</p>
-            <p className="mt-2.5 text-[10px] font-medium uppercase tracking-[0.3em] text-slate-400 pl-[0.3em]">by Bredell Ferreira</p>
+            {/* The real lockup, not the mark with the wordmark re-set beside it — the spacing
+                between the wing and the letterforms is part of the mark. */}
+            <img src="/brand/raptor-lockup-navy.png" alt="Raptor by Bredell Ferreira" className="w-[290px] max-w-full h-auto" />
 
-            <h1 className="mt-8 text-[13px] font-semibold uppercase tracking-[0.22em] text-[#12233a] pl-[0.22em]">Sign in to Raptor</h1>
+            <h1 className="mt-9 text-[13px] font-semibold uppercase tracking-[0.22em] text-[#12233a] pl-[0.22em]">Sign in to Raptor</h1>
             <p className="mt-2 text-sm text-slate-400">Recover. Rise. Take flight.</p>
           </div>
 
