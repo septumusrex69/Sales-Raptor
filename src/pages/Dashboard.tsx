@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Download, CheckCircle2, Circle } from 'lucide-react'
 import { useAppStore } from '../store/AppStore'
@@ -57,7 +57,14 @@ function minutesToLabel(mins: number): string {
   return `${Math.round(mins / (60 * 24))}d`
 }
 
-export function Dashboard() {
+interface DashboardProps {
+  /** Rendered among the hero's controls, so the page's own banner stays directly below the top bar. */
+  viewSwitcher?: ReactNode
+  /** Given the page's selected period, so a combined view reports one month throughout. */
+  communicationsSnapshot?: (period: SalesMonthPeriod) => ReactNode
+}
+
+export function Dashboard({ viewSwitcher, communicationsSnapshot }: DashboardProps = {}) {
   const { leads, deals, tasks, activities, users, teams, userById, companyById, updateTask } = useAppStore()
   const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
@@ -234,6 +241,7 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       <DashboardHero>
+        {viewSwitcher}
         <SalesMonthPicker value={period} onChange={setPeriod} referenceDate={TODAY} variant="dark" />
         <CompareSelector value={compareMode} onChange={setCompareMode} variant="dark" />
         <select
@@ -279,6 +287,8 @@ export function Dashboard() {
         periodLabel={period.label}
         periodParam={periodParam}
       />
+
+      {communicationsSnapshot?.(period)}
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatTile

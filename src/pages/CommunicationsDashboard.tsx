@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Download, CheckCircle2, Circle, Phone, Inbox, Users2, Handshake, ClipboardCheck, Percent } from 'lucide-react'
 import { useAppStore } from '../store/AppStore'
@@ -64,7 +64,7 @@ function scopeIdsFor(scope: Scope, members: User[], teams: Team[]): ID[] {
   return members.map((m) => m.id)
 }
 
-export function CommunicationsDashboard() {
+export function CommunicationsDashboard({ viewSwitcher }: { viewSwitcher?: ReactNode } = {}) {
   const { deals, tasks, activities, companies, users, teams, userById, companyById, updateTask } = useAppStore()
   const { currentUser } = useAuth()
 
@@ -246,6 +246,7 @@ export function CommunicationsDashboard() {
         title="Communications Dashboard"
         subtitle="Client servicing overview — courtesy calls, handovers and meetings"
       >
+        {viewSwitcher}
         <SalesMonthPicker value={period} onChange={setPeriod} referenceDate={TODAY} variant="dark" />
         <CompareSelector value={compareMode} onChange={setCompareMode} variant="dark" />
         <select
