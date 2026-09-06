@@ -64,14 +64,17 @@ function ViewMenu({ view, onChange }: { view: View; onChange: (v: View) => void 
 
   return (
     <div className="relative" ref={ref}>
+      {/* The arrow alone: the page title already says where you are, and repeating the view
+          name beside it spends header width on something the open menu tells you anyway. */}
       <button
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg px-2.5 py-1.5 hover:bg-slate-50 transition-colors"
+        aria-label={`Change dashboard view — showing ${current.label}`}
+        title={current.label}
+        className="inline-flex items-center justify-center h-7 w-7 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
       >
-        {current.label}
-        <ChevronDown size={14} className={`text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown size={16} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
         <div role="menu" className="absolute left-0 top-full mt-1.5 w-64 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-50">

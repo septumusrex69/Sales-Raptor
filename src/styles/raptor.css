@@ -18,38 +18,40 @@
 
 html[data-theme='raptor'] {
   /* ── Structure ─────────────────────────────────────────────────────────── */
-  --color-surface: #f4f6f9;          /* Cloud Grey */
+  --color-surface: #f4f5f7;
   --color-card: #ffffff;
 
   /* Neutrals run from Cloud Grey down to Raptor Navy, so every grey in the app belongs to
      the same family as the brand rather than sitting beside it. */
-  --color-slate-50: #f8fafc;
-  --color-slate-100: #eef1f6;
-  --color-slate-200: #e2e8f0;        /* Neutral Grey */
-  --color-slate-300: #cdd6e3;
-  --color-slate-400: #94a3b8;
-  --color-slate-500: #7c8ba1;
-  --color-slate-600: #64748b;
-  --color-slate-700: #33475f;
-  --color-slate-800: #1c3350;
-  --color-slate-900: #0b1f3b;        /* Raptor Navy */
+  --color-slate-50: #f8f9fa;
+  --color-slate-100: #eef1f4;
+  --color-slate-200: #e5e9ed;
+  --color-slate-300: #d3dae2;
+  --color-slate-400: #98a4b3;
+  --color-slate-500: #7e8b9b;
+  --color-slate-600: #6f7e90;
+  --color-slate-700: #33475c;
+  --color-slate-800: #1d2e44;
+  --color-slate-900: #142033;
 
-  --color-navy-950: #0b1f3b;         /* Raptor Navy */
-  --color-navy-900: #0f2745;
-  --color-navy-800: #16314e;
-  --color-navy-700: #223851;
-  --color-navy-600: #2e4257;         /* Mountain Slate */
+  /* Unchanged from the first Raptor build: the sidebar, hero and primary buttons were
+     right, and only the widgets needed the new palette. */
+  --color-navy-950: #0b1620;
+  --color-navy-900: #0e1b27;
+  --color-navy-800: #132433;
+  --color-navy-700: #1b3145;
+  --color-navy-600: #2c465c;
 
-  --color-gold-600: #a8802f;
-  --color-gold-500: #d4a853;         /* Raptor Gold */
-  --color-gold-400: #e0bc77;
-  --color-gold-300: #f0d9a7;
+  --color-gold-600: #9b772f;
+  --color-gold-500: #c9a052;
+  --color-gold-400: #d8b56f;
+  --color-gold-300: #f1d79a;
 
-  --color-brand-50: #f4f6f9;
-  --color-brand-100: #e2e8f0;
-  --color-brand-500: #2e4257;
-  --color-brand-600: #16314e;
-  --color-brand-700: #0b1f3b;
+  --color-brand-50: #f5f7f9;
+  --color-brand-100: #e6ebf0;
+  --color-brand-500: #2c465c;
+  --color-brand-600: #142433;
+  --color-brand-700: #0b1620;
 
   --color-positive: #2e7d6b;         /* Success Green */
   --color-negative: #c75b5b;         /* Error Red */
@@ -119,17 +121,17 @@ html[data-theme='raptor'] {
 
   /* ── Surfaces ──────────────────────────────────────────────────────────── */
   --skin-card-radius: 14px;
-  --skin-card-border: #e2e8f0;
-  --skin-card-shadow: 0 1px 2px rgba(11, 31, 59, 0.03), 0 6px 18px rgba(11, 31, 59, 0.05);
-  --skin-card-shadow-hover: 0 1px 2px rgba(11, 31, 59, 0.04), 0 12px 30px rgba(11, 31, 59, 0.09);
-  --skin-body-text: #0b1f3b;
-  --skin-scrollbar: #cdd6e3;
+  --skin-card-border: #e6e9ed;
+  --skin-card-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), 0 6px 18px rgba(15, 23, 42, 0.04);
+  --skin-card-shadow-hover: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 30px rgba(15, 23, 42, 0.08);
+  --skin-body-text: #142033;
+  --skin-scrollbar: #ccd4dd;
 
   /* The hero is the one place imagery is allowed to carry the brand. Gradient and photograph
      are one background rather than two stacked layers, so the copy's contrast can't drift as
      the image changes behind it. */
   --skin-hero-background:
-    linear-gradient(100deg, rgba(11, 31, 59, 0.97) 0%, rgba(11, 31, 59, 0.86) 42%, rgba(15, 39, 69, 0.55) 100%);
+    linear-gradient(100deg, rgba(11, 22, 32, 0.97) 0%, rgba(11, 22, 32, 0.86) 42%, rgba(14, 27, 39, 0.55) 100%);
   --skin-hero-image: url('/brand/raptor-hero.jpg');
   --skin-hero-radius: 18px;
 
@@ -138,17 +140,17 @@ html[data-theme='raptor'] {
 
   --raptor-gold-metal: linear-gradient(
     135deg,
-    #a8802f 0%,
-    #d4a853 35%,
-    #f0d9a7 55%,
-    #d4a853 78%,
-    #8c6a26 100%
+    #9d722d 0%,
+    #d9b66d 35%,
+    #f1d79a 55%,
+    #c5943b 78%,
+    #8a642a 100%
   );
 
   /* Metallic gold, used only for logo-like decorative elements — never for body text or a
      whole button, where it would read as costume jewellery rather than restraint. */
   --skin-gold-gradient: var(--raptor-gold-metal);
-  --skin-gold-gradient-deep: linear-gradient(135deg, #a8802f 0%, #d4a853 100%);
+  --skin-gold-gradient-deep: linear-gradient(135deg, #9b772f 0%, #c9a052 100%);
 }
 
 /* Gradient and photograph are one background rather than two stacked layers, so the copy's
@@ -192,20 +194,20 @@ html[data-theme='raptor'] .app-sidebar::after {
   height: 46%;
   z-index: -1;
   background:
-    linear-gradient(180deg, #0b1f3b 0%, rgba(11, 31, 59, 0.72) 38%, rgba(11, 31, 59, 0.9) 100%),
+    linear-gradient(180deg, #0b1620 0%, rgba(11, 22, 32, 0.72) 38%, rgba(11, 22, 32, 0.9) 100%),
     var(--skin-sidebar-art) center bottom / cover no-repeat;
   opacity: var(--skin-sidebar-art-opacity);
   pointer-events: none;
 }
 
 html[data-theme='raptor'] .app-sidebar nav a[aria-current='page'] {
-  background: linear-gradient(180deg, #e0bc77 0%, #d4a853 100%);
-  color: #0b1f3b;
+  background: linear-gradient(180deg, #d8b56f 0%, #c9a052 100%);
+  color: #101820;
 }
 
 /* ── Tables ──────────────────────────────────────────────────────────────── */
 html[data-theme='raptor'] tbody tr:hover {
-  background-color: #f8fafc;
+  background-color: #f8f9fa;
 }
 
 /* ── Inputs and controls ─────────────────────────────────────────────────── */
@@ -220,7 +222,7 @@ html[data-theme='raptor'] select:focus-visible,
 html[data-theme='raptor'] textarea:focus-visible,
 html[data-theme='raptor'] button:focus-visible,
 html[data-theme='raptor'] a:focus-visible {
-  outline: 2px solid rgba(212, 168, 83, 0.55);
+  outline: 2px solid rgba(201, 160, 82, 0.55);
   outline-offset: 1px;
 }
 
