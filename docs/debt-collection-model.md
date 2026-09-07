@@ -435,11 +435,17 @@ node --experimental-strip-types scripts/swordfish/reconcile.mjs \
 It imports the app's own tariff rather than restating the rates, so it cannot pass against
 numbers the app does not actually use. It exits non-zero on a failure, so it can gate an import.
 
-Against the 7 Sep 2026 exports it passes on balances, payments and in duplum, and fails on the
-population mismatch and on three billable action names it refuses to guess at — "Correspondence"
-(ambiguous between a letter and an email), "Necessary Costs" and "Team Leader Assistance".
-Those three need a decision before import; the harness naming them rather than filing them
-under the nearest match is the point.
+Against the 7 Sep 2026 exports it passes on balances, payments, in duplum and action
+identification. The one remaining failure is the population mismatch, which is a matter of how
+the exports are pulled rather than anything wrong with the data.
+
+Two ideas earn their place here. **Evidenced overrides** resolve a vague legacy name against
+what the record shows was actually done — "Correspondence" is an outgoing email because all 25
+charged instances are commented "Emailed debtor" at the R21 email rate — and the evidence is
+written down beside the mapping so it can be argued with later. **Quarantine** handles the
+opposite case: "Necessary Costs" and "Team Leader Assistance" import as history but their
+R193 is held out of the balances, because a fee filed under a guessed Annexure B item is a wrong
+statement waiting to be reissued, and dropping it silently is no better.
 
 ## 10. Open items, collected
 
