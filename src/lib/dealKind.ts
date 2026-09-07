@@ -52,3 +52,21 @@ export function openStageForDeal(deal: Pick<Deal, 'kind' | 'service'>): Deal['st
 export function hasDealValue(deal: Pick<Deal, 'kind' | 'service'>): boolean {
   return dealKind(deal) === 'Service'
 }
+
+/**
+ * What a deal is worth, in whichever currency that kind of deal is measured in.
+ *
+ * A handover's `value` is deliberately zero — a signed book earns nothing at signature — so
+ * ranking a mixed list by `value` alone puts every mandate at the bottom, and the debt
+ * collection side of the business disappears from any "largest deals" table entirely. This
+ * returns the figure that actually describes the deal's size, and `dealSizeLabel` says which
+ * one it is so the two are never silently added together.
+ */
+export function dealSize(deal: Pick<Deal, 'kind' | 'service' | 'value' | 'handoverAmount'>): number {
+  return dealKind(deal) === 'Handover' ? (deal.handoverAmount ?? 0) : deal.value
+}
+
+/** The word for what `dealSize` returned, so a column of mixed deals stays honest. */
+export function dealSizeLabel(deal: Pick<Deal, 'kind' | 'service'>): string {
+  return dealKind(deal) === 'Handover' ? 'book' : 'fee'
+}
