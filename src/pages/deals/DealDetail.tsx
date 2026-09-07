@@ -15,7 +15,8 @@ import type { ActivityType, ProposalStatus, TaskType } from '../../types'
 import { NoteActivityList } from '../../components/NoteActivityRow'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
-import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/ui/RowLimitSelect'
+import { RowLimitSelect, applyRowLimitKeeping, type RowLimit } from '../../components/ui/RowLimitSelect'
+import { useFocusedEmailId } from '../../lib/focusedEmail'
 import type { WonDealDetails } from '../../store/AppStore'
 
 
@@ -27,6 +28,7 @@ interface MockDocument {
 }
 
 export function DealDetail() {
+  const focusedEmailId = useFocusedEmailId()
   const { id } = useParams()
   const navigate = useNavigate()
   const store = useAppStore()
@@ -272,7 +274,7 @@ export function DealDetail() {
             {showClientEmails ? 'No emails on this client yet.' : 'No emails on this deal yet.'}
           </p>
         ) : (
-          <EmailActivityList activities={applyRowLimit(visibleEmails, emailLimit)} />
+          <EmailActivityList activities={applyRowLimitKeeping(visibleEmails, emailLimit, focusedEmailId)} focusId={focusedEmailId} />
         )}
       </Card>
 

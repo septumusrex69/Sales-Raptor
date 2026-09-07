@@ -20,3 +20,18 @@ export function RowLimitSelect({ value, onChange }: { value: RowLimit; onChange:
 export function applyRowLimit<T>(rows: T[], limit: RowLimit): T[] {
   return limit === 'All' ? rows : rows.slice(0, limit)
 }
+
+/**
+ * The same page of rows, plus one specific row that has to be on it.
+ *
+ * Following a link to a particular message and landing on a list that has trimmed it off is
+ * indistinguishable from the link being broken. Whatever is being pointed at is kept, in its
+ * proper place in the order, however far down it would otherwise fall.
+ */
+export function applyRowLimitKeeping<T extends { id: string }>(rows: T[], limit: RowLimit, keepId?: string | null): T[] {
+  const limited = applyRowLimit(rows, limit)
+  if (!keepId || limited.some((r) => r.id === keepId)) return limited
+  const kept = rows.find((r) => r.id === keepId)
+  if (!kept) return limited
+  return [...limited, kept].sort((a, b) => rows.indexOf(a) - rows.indexOf(b))
+}

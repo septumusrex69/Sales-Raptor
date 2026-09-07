@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowDownLeft, ArrowUpRight, Paperclip, Mail, Handshake } from 'lucide-react'
 import { emailDayLabel, emailTimeLabel, parseEmailActivity } from '../lib/emailActivity'
@@ -242,13 +242,36 @@ export function EmailActivityList({
   activities,
   onReply,
   showDeal,
+  focusId,
 }: {
   activities: Activity[]
   onReply?: (activity: Activity) => void
   showDeal?: boolean
+  /**
+   * A specific message to open and scroll to, named in the URL by whatever linked here.
+   *
+   * Sending someone to the record a message belongs to is not the same as showing them the
+   * message: these pages are long, the email card sits well down them, and the reader arrives
+   * at the top with no idea which of thirty rows they were meant to read. Opening it and
+   * bringing it into view is the difference between a link that works and one that appears
+   * to do nothing.
+   */
+  focusId?: string | null
 }) {
   // One at a time. Opening a message closes whatever was open before it.
   const [openId, setOpenId] = useState<string | null>(null)
+  const focusRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!focusId || !activities.some((a) => a.id === focusId)) return
+    setOpenId(focusId)
+    // After paint, so the row has expanded to its full height before it is scrolled to.
+    const timer = window.setTimeout(() => {
+      focusRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 60)
+    return () => window.clearTimeout(timer)
+  }, [focusId, activities])
+
   let lastDay: string | null = null
   return (
     <div className="-mx-1">
@@ -259,7 +282,7 @@ export function EmailActivityList({
           const showDay = day !== lastDay
           lastDay = day
           return (
-            <div key={a.id}>
+            <div key={a.id} ref={a.id === focusId ? focusRef : undefined} className={a.id === focusId ? 'rounded-lg ring-2 ring-brand-500/40' : undefined}>
               {showDay && (
                 <DateGroupHeading label={day} />
               )}
