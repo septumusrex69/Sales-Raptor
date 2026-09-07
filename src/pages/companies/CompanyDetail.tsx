@@ -16,7 +16,8 @@ import { AddContactModal } from '../../components/contacts/AddContactModal'
 import { formatCurrency, formatDate, leadClassifications } from '../../data/mockData'
 import { parseEmailActivity } from '../../lib/emailActivity'
 import { buildDrilldownUrl } from '../../lib/drilldown'
-import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/ui/RowLimitSelect'
+import { RowLimitSelect, applyRowLimitKeeping, type RowLimit } from '../../components/ui/RowLimitSelect'
+import { useFocusedEmailId } from '../../lib/focusedEmail'
 import { HeroOwner } from '../../components/RecordOwner'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
@@ -27,6 +28,7 @@ import { isAssignableOwner } from '../../lib/permissions'
 import { summaryLine } from '../../lib/summaryLine'
 
 export function CompanyDetail() {
+  const focusedEmailId = useFocusedEmailId()
   const { id } = useParams()
   const navigate = useNavigate()
   const { currentUser } = useAuth()
@@ -413,7 +415,8 @@ export function CompanyDetail() {
           <p className="text-sm text-slate-400">No emails yet.</p>
         ) : (
           <EmailActivityList
-            activities={applyRowLimit(emailActivities, emailLimit)}
+            activities={applyRowLimitKeeping(emailActivities, emailLimit, focusedEmailId)}
+              focusId={focusedEmailId}
             showDeal
             onReply={(a) => {
               const replyToAddress = a.contactId ? contacts.find((c) => c.id === a.contactId)?.email : company.email

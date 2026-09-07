@@ -19,7 +19,8 @@ import { RejectLeadModal } from '../../components/leads/RejectLeadModal'
 import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
 import { InlineSelect } from '../../components/ui/InlineSelect'
 import { LEAD_STATUSES, isActiveLead } from '../../lib/leadStatus'
-import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/ui/RowLimitSelect'
+import { RowLimitSelect, applyRowLimitKeeping, type RowLimit } from '../../components/ui/RowLimitSelect'
+import { useFocusedEmailId } from '../../lib/focusedEmail'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
 import { parseEmailActivity } from '../../lib/emailActivity'
@@ -32,6 +33,7 @@ import { summaryLine } from '../../lib/summaryLine'
 import { hasDealValue } from '../../lib/dealKind'
 
 export function LeadDetail() {
+  const focusedEmailId = useFocusedEmailId()
   const { id } = useParams()
   const navigate = useNavigate()
   const { leads, deals, contacts, activities, tasks, users, userById, updateLead, convertLeadToClient, addLeadDeal, rejectLead, deleteLead, addActivity, addContact, updateContact, addTask } = useAppStore()
@@ -358,7 +360,8 @@ export function LeadDetail() {
             <p className="text-sm text-slate-400">No emails yet.</p>
           ) : (
             <EmailActivityList
-              activities={applyRowLimit(emailActivities, emailLimit)}
+              activities={applyRowLimitKeeping(emailActivities, emailLimit, focusedEmailId)}
+              focusId={focusedEmailId}
               showDeal
               onReply={
                 lead.email

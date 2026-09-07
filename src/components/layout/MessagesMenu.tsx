@@ -14,10 +14,13 @@ import type { Activity } from '../../types'
  * reading a reply usually needs. Falling back through client, lead, then the bare contact.
  */
 function destinationFor(a: Activity): string | undefined {
-  if (a.dealId) return `/deals/${a.dealId}`
-  if (a.companyId) return `/companies/${a.companyId}`
-  if (a.leadId) return `/leads/${a.leadId}`
-  if (a.contactId) return `/contacts/${a.contactId}`
+  // The message id rides along so the page can open that exact row and scroll to it. Landing on
+  // the right client with the message thirty rows down and closed reads as a broken link.
+  const focus = `?email=${encodeURIComponent(a.id)}`
+  if (a.dealId) return `/deals/${a.dealId}${focus}`
+  if (a.companyId) return `/companies/${a.companyId}${focus}`
+  if (a.leadId) return `/leads/${a.leadId}${focus}`
+  if (a.contactId) return `/contacts/${a.contactId}${focus}`
   return undefined
 }
 
@@ -33,6 +36,7 @@ export function MessagesMenu() {
   const { activities, updateActivity } = useAppStore()
   const { currentUser } = useAuth()
   const [open, setOpen] = useState(false)
+  const [stranded, setStranded] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
 
@@ -68,9 +72,13 @@ export function MessagesMenu() {
   function handleSelect(a: Activity) {
     setOpen(false)
     const to = destinationFor(a)
-    // Left unread deliberately: opening the record is not the same as having read the message,
-    // and the row it lands on marks itself read when it is actually expanded.
-    if (to) navigate(to)
+    if (to) {
+      navigate(to)
+      return
+    }
+    // No client, lead, deal or contact on the record — nowhere to send anyone. Say so rather
+    // than closing the menu and appearing to have done nothing.
+    setStranded(a.id)
   }
 
   function markAllRead() {
@@ -121,6 +129,11 @@ export function MessagesMenu() {
                     <span className="block text-[13px] font-medium text-slate-800 leading-snug truncate">{subject}</span>
                     {preview && <span className="block text-[12px] text-slate-400 leading-snug truncate">{preview}</span>}
                     <span className="block text-[11px] text-slate-400 mt-0.5">{timeAgo(a.activityDate)}</span>
+                    {stranded === a.id && (
+                      <span className="block text-[11px] text-[var(--c-rust-deep)] mt-1">
+                        Not linked to a client, lead or deal yet — find it under Activities.
+                      </span>
+                    )}
                   </span>
                 </button>
               )
