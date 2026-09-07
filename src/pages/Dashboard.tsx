@@ -15,6 +15,9 @@ import { WinRateCard } from '../components/dashboard/WinRateCard'
 import { DashboardHero } from '../components/dashboard/DashboardHero'
 import { RevenueTrendChart } from '../components/dashboard/RevenueTrendChart'
 import { ActivityBreakdownChart } from '../components/dashboard/ActivityBreakdownChart'
+import { WinRateByKind } from '../components/dashboard/WinRateByKind'
+import { LossReasonsCard } from '../components/dashboard/LossReasonsCard'
+import { dealKind } from '../lib/dealKind'
 import { RepLeaderboard, type LeaderboardRow } from '../components/dashboard/RepLeaderboard'
 import { formatCurrency, formatDate, timeAgo, TODAY } from '../data/mockData'
 import { getCurrentSalesMonth, getPreviousSalesMonth, isWithinPeriod, encodeSalesMonthParam, type SalesMonthPeriod } from '../lib/salesMonth'
@@ -105,9 +108,25 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
       const converted = scopedLeads.filter((l) => isWithinPeriod(l.createdAt, p) && l.status === 'Converted')
       const won = scopedDeals.filter((d) => d.wonAt && isWithinPeriod(d.wonAt, p))
       const lost = scopedDeals.filter((d) => d.rejectedAt && isWithinPeriod(d.rejectedAt, p))
-      const revenueWon = won.reduce((s, d) => s + d.value, 0)
+
+      // A handover earns nothing at signature, so it carries no deal value — which meant the
+      // whole debt collection side of the business summed to zero here and showed up in no
+      // figure on the page. Its size is the book signed and the accounts that come with it:
+      // separate numbers, deliberately not added to revenue, because they aren't revenue.
+      const wonHandovers = won.filter((d) => dealKind(d) === 'Handover')
+      const wonServices = won.filter((d) => dealKind(d) !== 'Handover')
+      const lostHandovers = lost.filter((d) => dealKind(d) === 'Handover')
+      const lostServices = lost.filter((d) => dealKind(d) !== 'Handover')
+
+      const revenueWon = wonServices.reduce((s, d) => s + d.value, 0)
+      const bookSigned = wonHandovers.reduce((s, d) => s + (d.handoverAmount ?? 0), 0)
+      const accountsSigned = wonHandovers.reduce((s, d) => s + (d.accountsCount ?? 0), 0)
+
       const closed = won.length + lost.length
       const winRate = closed > 0 ? Math.round((won.length / closed) * 100) : 0
+      // A quotation accepted and a mandate signed are different things won in different ways.
+      // One blended rate describes neither, so each is kept on its own terms.
+      const rate = (w: number, l: number) => (w + l > 0 ? Math.round((w / (w + l)) * 100) : null)
       return {
         newLeads: newLeads.length,
         activities: meaningfulActivities.length,
@@ -116,7 +135,13 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
         won: won.length,
         lost: lost.length,
         revenueWon,
+        bookSigned,
+        accountsSigned,
         winRate,
+        serviceWinRate: rate(wonServices.length, lostServices.length),
+        serviceClosed: wonServices.length + lostServices.length,
+        handoverWinRate: rate(wonHandovers.length, lostHandovers.length),
+        handoverClosed: wonHandovers.length + lostHandovers.length,
       }
     }
     const curr = compute(period)
@@ -201,6 +226,17 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
   const periodParam = encodeSalesMonthParam(period)
 
   const recentActivities = scopedActivities.slice(0, 6)
+  // Rejections that happened in the selected period, from both sides of the funnel: a lead
+  // turned down before anyone opened a deal is lost business just the same.
+  const rejectedLeads = useMemo(
+    () => scopedLeads.filter((l) => l.status === 'Rejected' && isWithinPeriod(l.createdAt, period)),
+    [scopedLeads, period],
+  )
+  const rejectedDeals = useMemo(
+    () => scopedDeals.filter((d) => d.rejectedAt && isWithinPeriod(d.rejectedAt, period)),
+    [scopedDeals, period],
+  )
+
   const topDeals = useMemo(() => [...scopedDeals].filter((d) => d.stage !== 'Rejected').sort((a, b) => b.value - a.value).slice(0, 5), [scopedDeals])
   const tasksDue = useMemo(() => {
     const recentOverdueFloor = new Date(TODAY.getTime() - 14 * 24 * 60 * 60 * 1000)
@@ -287,7 +323,7 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
 
       {communicationsSnapshot?.(period)}
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatTile
           label="New Leads"
           value={kpis.curr.newLeads.toString()}
@@ -317,6 +353,20 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
           value={formatCurrency(kpis.curr.revenueWon)}
           pctChange={kpis.prev ? pctDelta(kpis.curr.revenueWon, kpis.prev.revenueWon) : undefined}
           to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
+        />
+        {/* Deliberately its own figure rather than part of revenue. A signed book is work won,
+            not money earned — the commission only arrives as accounts are collected. */}
+        <StatTile
+          label="Book Signed"
+          value={formatCurrency(kpis.curr.bookSigned)}
+          pctChange={kpis.prev ? pctDelta(kpis.curr.bookSigned, kpis.prev.bookSigned) : undefined}
+          to={buildDrilldownUrl('/deals', { stage: 'Won', service: 'Debt Collection', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          label="Accounts Signed"
+          value={kpis.curr.accountsSigned.toLocaleString()}
+          pctChange={kpis.prev ? pctDelta(kpis.curr.accountsSigned, kpis.prev.accountsSigned) : undefined}
+          to={buildDrilldownUrl('/deals', { stage: 'Won', service: 'Debt Collection', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
         />
         <StatTile
           label="Win Rate"
@@ -372,6 +422,17 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
           <SalesFunnelChart deals={scopedDeals} />
         </div>
         <ActivityBreakdownChart activities={scopedActivities.filter((a) => isWithinPeriod(a.activityDate, period))} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <WinRateByKind
+          serviceWinRate={kpis.curr.serviceWinRate}
+          serviceClosed={kpis.curr.serviceClosed}
+          handoverWinRate={kpis.curr.handoverWinRate}
+          handoverClosed={kpis.curr.handoverClosed}
+          periodLabel={period.label}
+        />
+        <LossReasonsCard leads={rejectedLeads} deals={rejectedDeals} periodLabel={period.label} />
       </div>
 
       <RevenueTrendChart deals={scopedDeals} referenceDate={TODAY} />
