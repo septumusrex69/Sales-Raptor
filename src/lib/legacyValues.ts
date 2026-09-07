@@ -17,6 +17,8 @@ const LEGACY_DEAL_STAGES: Record<string, DealStage> = {
   'Proposal Sent': 'Quotation Sent',
   Negotiation: 'Quotation Sent',
   'Invoice Sent': 'Quotation Sent',
+  // Before mandates had a stage of their own, a handover awaiting one sat here.
+  'Quotation / Mandate Sent': 'Quotation Sent',
   Lost: 'Rejected',
 }
 

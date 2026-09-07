@@ -34,7 +34,7 @@ export function DealsBoard() {
   const [searchParams] = useSearchParams()
 
   // One-time drill-down filters carried in from Dashboard links — not exposed as UI controls.
-  const [stageFilter] = useState(() => readParam(searchParams, 'stage'))
+  const [stageFilter, setStageFilter] = useState(() => readParam(searchParams, 'stage'))
   // "atLeast" matches the Sales Funnel's "at this stage or further" framing (deals pile up
   // further down the pipeline in a snapshot, so an exact-stage match would undercount).
   const [stageAtLeast] = useState(() => readParam(searchParams, 'atLeast') === '1')
@@ -180,6 +180,21 @@ export function DealsBoard() {
           <Search size={15} className="text-slate-400" />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search deals..." className="text-sm outline-none flex-1 min-w-0" />
         </div>
+        {/* Working a stage is how the day is actually organised — every mandate that has gone
+            out and is waiting, all in one list — so it needs a control, not only a drill-down
+            link from somewhere else. */}
+        <select
+          value={stageFilter ?? ''}
+          onChange={(e) => setStageFilter(e.target.value || undefined)}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none"
+        >
+          <option value="">All Stages</option>
+          {DEAL_STAGES.map((stage) => (
+            <option key={stage} value={stage}>
+              {stage}
+            </option>
+          ))}
+        </select>
         <select value={owner} onChange={(e) => setOwner(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none">
           <option value="All">All Owners</option>
           {reps.map((r) => (
@@ -288,7 +303,17 @@ export function DealsBoard() {
                     <td className="px-3 py-2 text-slate-500">{companyById(deal.companyId)?.name}</td>
                     <td className="px-3 py-2 text-right font-medium text-slate-700">{formatCurrency(deal.value)}</td>
                     <td className="px-3 py-2">
-                      <StageBadge stage={deal.stage} label={dealStageLabel(deal)} />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setStageFilter(deal.stage)
+                        }}
+                        title={`Show only ${deal.stage}`}
+                        className="cursor-pointer"
+                      >
+                        <StageBadge stage={deal.stage} label={dealStageLabel(deal)} />
+                      </button>
                     </td>
                     <td className="px-3 py-2 text-slate-500">{deal.probability}%</td>
                     <td className="px-3 py-2">

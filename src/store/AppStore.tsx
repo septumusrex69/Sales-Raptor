@@ -774,10 +774,12 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const field = document === 'quotation' ? 'quotationSentAt' : document === 'mandate' ? 'mandateSentAt' : 'invoiceSentAt'
       const patch: Partial<Deal> = { [field]: sentAt }
       // Sending the quotation or the mandate is what moves a deal along; an invoice follows a
-      // deal that's already won, so it records the fact without touching the stage.
+      // deal that's already won, so it records the fact without touching the stage. Which stage
+      // it moves to depends on the document: they are different asks and now different columns.
       if (document !== 'invoice' && deal?.stage === 'New Deal') {
-        patch.stage = 'Quotation Sent'
-        patch.probability = DEAL_STAGE_PROBABILITY['Quotation Sent']
+        const next: DealStage = document === 'mandate' ? 'Mandate Sent' : 'Quotation Sent'
+        patch.stage = next
+        patch.probability = DEAL_STAGE_PROBABILITY[next]
       }
       let previous: Deal | undefined
       setDeals((prev) => {
@@ -820,6 +822,22 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const addHandover = useCallback<AppActions['addHandover']>(
     (input) => {
+      // A mandate is authority to collect. Without one there is nothing entitling BF to work
+      // these accounts, so a book cannot be loaded against the client no matter what else they
+      // have signed — an accepted quotation makes them a client, not a handover client.
+      const hasMandate = dealsRef.current.some(
+        (d) => d.companyId === input.companyId && d.stage === 'Won' && dealKind(d) === 'Handover',
+      )
+      if (!hasMandate) {
+        showError('No signed mandate on this client, so a handover cannot be loaded. Mark the debt collection deal as won once the mandate is signed.')
+        return {
+          id: crypto.randomUUID(),
+          companyId: input.companyId,
+          receivedAt: nowIso(),
+          capitalAmount: input.capitalAmount,
+          createdAt: nowIso(),
+        }
+      }
       const handover: Handover = {
         id: crypto.randomUUID(),
         receivedAt: nowIso(),

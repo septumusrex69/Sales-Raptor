@@ -27,18 +27,25 @@ export function kindForService(service?: ProductService | string): DealKind {
  * that needed both says so.
  */
 export function dealStageLabel(deal: Pick<Deal, 'kind' | 'service' | 'stage' | 'quotationSentAt' | 'mandateSentAt'>): string {
-  if (deal.stage !== 'Quotation Sent') return deal.stage
-  const quoted = Boolean(deal.quotationSentAt)
-  const mandated = Boolean(deal.mandateSentAt)
-  if (quoted && mandated) return 'Quotation & Mandate Sent'
-  if (mandated) return 'Mandate Sent'
-  if (quoted) return 'Quotation Sent'
-  return dealKind(deal) === 'Handover' ? 'Mandate Sent' : 'Quotation Sent'
+  // Mandate Sent is a stage in its own right now, so the label is simply the stage. The one
+  // case worth spelling out is a service deal that has had both documents go out.
+  if (deal.stage === 'Quotation Sent' && deal.quotationSentAt && deal.mandateSentAt) return 'Quotation & Mandate Sent'
+  return deal.stage
 }
 
-/** The heading for that stage's column, which has to cover both kinds at once. */
+/** Kept as a seam for headings that once had to cover two kinds at once; they no longer do. */
 export function stageColumnLabel(stage: Deal['stage']): string {
-  return stage === 'Quotation Sent' ? 'Quotation / Mandate Sent' : stage
+  return stage
+}
+
+/**
+ * Which open stage a deal of this kind belongs in.
+ *
+ * A service deal goes out for quotation; a handover goes out for mandate. They are different
+ * documents asking for different things, and now different columns.
+ */
+export function openStageForDeal(deal: Pick<Deal, 'kind' | 'service'>): Deal['stage'] {
+  return dealKind(deal) === 'Handover' ? 'Mandate Sent' : 'Quotation Sent'
 }
 
 /** A handover earns nothing at signature, so it has no deal value to show — only a book. */
