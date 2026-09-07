@@ -14,6 +14,22 @@
 export type AnnexureBItemId =
   | '1a' | '1b' | '1c' | '2' | '3' | '4a' | '4b' | '4c' | '5' | '6' | '7' | '8' | '9'
 
+/**
+ * Item 4(a) is the one tariff line that isn't a single figure: the Magistrates' Courts Rules
+ * band it by the size of the debt. Both amounts exclude VAT.
+ */
+export interface FeeBand {
+  /** Applies while the debt is below this figure. The last band has no ceiling. */
+  below?: number
+  /** Rands, excluding VAT. */
+  amount: number
+}
+
+export const ACKNOWLEDGEMENT_OF_DEBT_BANDS: FeeBand[] = [
+  { below: 50000, amount: 161 },
+  { amount: 209 },
+]
+
 export interface AnnexureBItem {
   id: AnnexureBItemId
   description: string
@@ -30,6 +46,8 @@ export interface AnnexureBItem {
   countsTowardCap: boolean
   /** True where the tariff gives a total rather than a per-occurrence rate. */
   isTotal?: boolean
+  /** Set where the amount depends on the size of the debt rather than being fixed. */
+  bandedAmounts?: FeeBand[]
 }
 
 export interface AnnexureBSchedule {
@@ -90,6 +108,8 @@ export const ANNEXURE_B_2026: AnnexureBSchedule = {
       description: 'Acknowledgement of debt and undertaking to pay (section 57 or 58), including the necessary consultation',
       amount: null,
       externalTariff: "Items 9 and 10 of Annexure 2, Table A, Part II of the Magistrates' Courts Rules",
+      // Banded by the size of the debt rather than a single amount — see acknowledgementOfDebtFee.
+      bandedAmounts: ACKNOWLEDGEMENT_OF_DEBT_BANDS,
       countsTowardCap: true,
     },
     {
@@ -146,6 +166,18 @@ export function feeCeiling(capitalAmount: number, schedule: AnnexureBSchedule = 
  */
 export function receiptFee(instalment: number, schedule: AnnexureBSchedule = ANNEXURE_B_2026): number {
   return Math.min(instalment * schedule.receiptFeeRate, schedule.receiptFeeMaximum)
+}
+
+/**
+ * Item 4(a), by debt size: R161 below R50,000, R209 at or above it. Both exclude VAT.
+ *
+ * UNCONFIRMED: which side of R50,000 the boundary itself falls on. "Under R50k" and "over
+ * R50k" leave exactly R50,000 unstated; this treats it as the higher band. Worth settling —
+ * it is the kind of edge that shows up once and is then argued about.
+ */
+export function acknowledgementOfDebtFee(debtAmount: number): number {
+  const band = ACKNOWLEDGEMENT_OF_DEBT_BANDS.find((b) => b.below !== undefined && debtAmount < b.below)
+  return band?.amount ?? ACKNOWLEDGEMENT_OF_DEBT_BANDS[ACKNOWLEDGEMENT_OF_DEBT_BANDS.length - 1].amount
 }
 
 export function annexureBItem(id: AnnexureBItemId, schedule: AnnexureBSchedule = ANNEXURE_B_2026): AnnexureBItem | undefined {
