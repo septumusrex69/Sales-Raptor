@@ -151,11 +151,14 @@ export function codeForLegacyName(name: string): ActionCode | undefined {
   if (x.includes('perusal')) return 'perusal'
   if (x.includes('consultation')) return 'consultation'
   if (x.includes('promisetopay')) return 'promise_to_pay'
-  if (x.includes('whatsapp')) return 'whatsapp'
-  if (x.includes('trace')) return 'trace'
+  if (x.includes('whatsapp') || x.includes('whatapp')) return 'whatsapp'
+  // 'trac', not 'trace' — "Tracing" does not contain "trace". XDS is the credit bureau these
+  // searches are run against, so an action named for the bureau is a trace by another name.
+  if (x.includes('trac') || x.includes('xds')) return 'trace'
   if (x === 'sms') return 'sms'
   if (x.includes('incomingemail') || x === 'emailincoming') return 'email_in'
   if (x.includes('outgoingemail') || x === 'emailoutgoing' || x === 'email') return 'email_out'
+  if (x.includes('correspondence') && x.includes('email')) return 'email_out'
   if (x.includes('letter')) return 'letter'
   if (x.includes('phone') || x.includes('call')) return 'phone_call'
   return undefined
