@@ -188,6 +188,16 @@ export interface WonDealDetails {
  * created the deal on the lead; without it the deal is created from the service the lead was
  * interested in.
  */
+/**
+ * What actually happened to one deal at the moment the lead was converted.
+ *
+ * Signing a client is not the same as signing everything discussed with them. The debt
+ * collection mandate can be signed while a quotation for another service is still sitting with
+ * them, or has been turned down. Booking all of it as Won would credit revenue nobody agreed
+ * to and quietly empty the pipeline of business that is still live.
+ */
+export type ConvertDealOutcome = 'signed' | 'open' | 'rejected'
+
 export interface ConvertDealConfirmation {
   dealId?: ID
   name: string
@@ -197,6 +207,10 @@ export interface ConvertDealConfirmation {
   handoverAmount?: number
   /** Debt Collection only — number of accounts/matters in the handover. */
   accountsCount?: number
+  outcome: ConvertDealOutcome
+  /** Required when the outcome is 'rejected'. */
+  rejectionReason?: RejectionReason
+  rejectionNote?: string
 }
 
 export interface ConvertConfirmation {
@@ -1023,27 +1037,51 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         setContacts((prev) => [newContact!, ...prev])
       }
 
-      // Converting means they signed, so every deal in the confirmation is marked Won with
-      // the value confirmed at conversion — that's what starts the handover and puts them in
-      // the Clients list. A deal the rep already opened while working the lead is confirmed
-      // in place; a service they were interested in but never opened a deal for is created
-      // and confirmed in one go.
-      const wonAt = nowIso()
+      // Each deal carries its own outcome. Converting used to mark every one of them Won,
+      // which only held when a client signed for everything at once — in practice the mandate
+      // is signed while a quotation is still out, or was declined, and forcing those to Won
+      // credited revenue nobody agreed to and removed live business from the pipeline.
+      //
+      // Whatever the outcome, the deal now belongs to the client rather than the lead: an
+      // undecided deal has to keep being worked, and it can only be found where the client is.
+      const stampedAt = nowIso()
       const dealsToCreate: Deal[] = []
-      const dealsToConfirm: { id: ID; name: string; patch: Partial<Deal> }[] = []
+      const dealsToConfirm: { id: ID; name: string; outcome: ConvertDealOutcome; patch: Partial<Deal> }[] = []
 
       for (const entry of confirm.deals) {
         const entryIsHandover = kindForService(entry.service) === 'Handover'
-        const won: Partial<Deal> = {
-          stage: 'Won',
-          value: entryIsHandover ? 0 : entry.value,
-          handoverAmount: entry.handoverAmount,
-          accountsCount: entry.accountsCount,
-          contractStartDate: confirm.startDate,
-          wonAt,
+
+        let patch: Partial<Deal>
+        if (entry.outcome === 'signed') {
+          patch = {
+            stage: 'Won',
+            probability: DEAL_STAGE_PROBABILITY.Won,
+            value: entryIsHandover ? 0 : entry.value,
+            handoverAmount: entry.handoverAmount,
+            accountsCount: entry.accountsCount,
+            contractStartDate: confirm.startDate,
+            wonAt: stampedAt,
+            companyId,
+            contactId,
+          }
+        } else if (entry.outcome === 'rejected') {
+          patch = {
+            stage: 'Rejected',
+            probability: DEAL_STAGE_PROBABILITY.Rejected,
+            rejectionReason: entry.rejectionReason,
+            rejectionNote: entry.rejectionNote || undefined,
+            rejectedAt: stampedAt,
+            companyId,
+            contactId,
+          }
+        } else {
+          // Left open: the stage it already reached is still the truth about it, so nothing
+          // about its progress is touched — only who it now belongs to.
+          patch = { companyId, contactId }
         }
+
         if (entry.dealId) {
-          dealsToConfirm.push({ id: entry.dealId, name: entry.name, patch: won })
+          dealsToConfirm.push({ id: entry.dealId, name: entry.name, outcome: entry.outcome, patch })
         } else {
           dealsToCreate.push({
             id: crypto.randomUUID(),
@@ -1051,19 +1089,29 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
             companyId,
             contactId,
             ownerId: lead.ownerId,
-            probability: DEAL_STAGE_PROBABILITY.Won,
             expectedCloseDate: confirm.startDate,
             service: entry.service,
             source: lead.source,
             createdAt: nowIso(),
             leadId: lead.id,
             kind: kindForService(entry.service),
-            stage: 'Won',
-            value: entryIsHandover ? 0 : entry.value,
-            handoverAmount: entry.handoverAmount,
-            accountsCount: entry.accountsCount,
-            contractStartDate: confirm.startDate,
-            wonAt,
+            // A service they were interested in but never opened a deal for still needs one,
+            // whatever its outcome — including a rejected one, so the business that was
+            // offered and turned down is on the record instead of silently disappearing.
+            stage: entry.outcome === 'signed' ? 'Won' : entry.outcome === 'rejected' ? 'Rejected' : 'New Deal',
+            probability:
+              entry.outcome === 'signed'
+                ? DEAL_STAGE_PROBABILITY.Won
+                : entry.outcome === 'rejected'
+                  ? DEAL_STAGE_PROBABILITY.Rejected
+                  : DEAL_STAGE_PROBABILITY['New Deal'],
+            value: entry.outcome === 'signed' && !entryIsHandover ? entry.value : 0,
+            handoverAmount: entry.outcome === 'signed' ? entry.handoverAmount : undefined,
+            accountsCount: entry.outcome === 'signed' ? entry.accountsCount : undefined,
+            ...(entry.outcome === 'signed' ? { contractStartDate: confirm.startDate, wonAt: stampedAt } : {}),
+            ...(entry.outcome === 'rejected'
+              ? { rejectionReason: entry.rejectionReason, rejectionNote: entry.rejectionNote || undefined, rejectedAt: stampedAt }
+              : {}),
           })
         }
       }
@@ -1078,12 +1126,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       for (const confirmed of dealsToConfirm) {
         updateRow('deals', confirmed.id, confirmed.patch, 'convertLeadToClient:confirmDeal')
       }
-      const firstDeal = dealsToCreate[0] ?? deals.find((d) => d.id === dealsToConfirm[0]?.id)
+      // The deal the lead points at afterwards is a signed one — an undecided or rejected deal
+      // is not what made them a client.
+      const firstSignedNew = dealsToCreate.find((d) => d.stage === 'Won')
+      const firstSignedExisting = dealsToConfirm.find((c) => c.outcome === 'signed')
+      const firstDeal = firstSignedNew ?? deals.find((d) => d.id === firstSignedExisting?.id)
 
       // The estimate's working life ends here. It moves to the client as a labelled record of
       // what was promised — never a forecast, never summed with the real figures that arrive
       // once accounts are actually handed over.
-      const estimatedBook = confirm.deals.find((d) => kindForService(d.service) === 'Handover')
+      // Only a signed mandate carries the book across. If the debt collection deal is still
+      // out or was declined, there is no mandate and no book to estimate — stamping one would
+      // tell the Communications team to expect a handover that isn't coming.
+      const estimatedBook = confirm.deals.find((d) => kindForService(d.service) === 'Handover' && d.outcome === 'signed')
       if (estimatedBook) {
         const estimate = {
           estimatedHandoverAmount: estimatedBook.handoverAmount,
@@ -1108,7 +1163,26 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }
       addActivity({ type: 'Status change', subject: `Lead converted to client: ${lead.companyName}`, leadId, companyId })
       for (const deal of dealsToConfirm) {
-        addActivity({ type: 'Deal Won', subject: `Deal confirmed on conversion: ${deal.name}`, leadId, dealId: deal.id, companyId })
+        if (deal.outcome === 'signed') {
+          addActivity({ type: 'Deal Won', subject: `Deal confirmed on conversion: ${deal.name}`, leadId, dealId: deal.id, companyId })
+        } else if (deal.outcome === 'rejected') {
+          addActivity({
+            type: 'Status change',
+            subject: `Deal rejected at conversion: ${deal.name} — ${deal.patch.rejectionReason}`,
+            notes: deal.patch.rejectionNote,
+            leadId,
+            dealId: deal.id,
+            companyId,
+          })
+        } else {
+          addActivity({
+            type: 'Status change',
+            subject: `Deal still open at conversion: ${deal.name}`,
+            leadId,
+            dealId: deal.id,
+            companyId,
+          })
+        }
       }
 
       // Persist strictly in dependency order: contacts/deals reference
@@ -1152,7 +1226,20 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         // Logged only for the deals that actually landed — an activity naming a deal that
         // failed to insert is the foreign-key error all over again.
         for (const deal of dealsToCreate.filter((d) => !failedIds.includes(d.id))) {
-          addActivity({ type: 'Deal Won', subject: `Deal confirmed on conversion: ${deal.name}`, leadId, dealId: deal.id, companyId })
+          if (deal.stage === 'Won') {
+            addActivity({ type: 'Deal Won', subject: `Deal confirmed on conversion: ${deal.name}`, leadId, dealId: deal.id, companyId })
+          } else if (deal.stage === 'Rejected') {
+            addActivity({
+              type: 'Status change',
+              subject: `Deal rejected at conversion: ${deal.name} — ${deal.rejectionReason}`,
+              notes: deal.rejectionNote,
+              leadId,
+              dealId: deal.id,
+              companyId,
+            })
+          } else {
+            addActivity({ type: 'Status change', subject: `Deal opened at conversion: ${deal.name}`, leadId, dealId: deal.id, companyId })
+          }
         }
       })()
 
