@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from './AuthContext'
 import { TODAY } from '../data/mockData'
@@ -396,14 +396,28 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const ownerId = authUser?.id ?? session?.user?.id ?? ''
   const nowIso = () => new Date().toISOString()
 
+  // Read through a ref so addActivity keeps a stable identity. It's a dependency of half the
+  // actions in here, and rebuilding it on every change to the deal list would cascade.
+  const dealsRef = useRef<Deal[]>([])
+  useEffect(() => {
+    dealsRef.current = deals
+  }, [deals])
+
   const addActivity = useCallback<AppActions['addActivity']>(
     (input) => {
+      // A deal already knows which lead it came from and which client it belongs to, so
+      // anything logged against one can fill in the rest itself. That's what makes a note
+      // written on a deal show up on the lead while it's still a lead, and on the client once
+      // it's been converted — without every caller having to remember to pass all three.
+      const deal = input.dealId ? dealsRef.current.find((d) => d.id === input.dealId) : undefined
       const activity: Activity = {
         id: crypto.randomUUID(),
         userId: ownerId,
         activityDate: nowIso(),
         createdAt: nowIso(),
         ...input,
+        leadId: input.leadId ?? deal?.leadId,
+        companyId: input.companyId ?? deal?.companyId,
       }
       setActivities((prev) => [activity, ...prev])
       insertRow('activities', activity, 'addActivity', (message) => {

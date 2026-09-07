@@ -12,6 +12,8 @@ import { MarkRejectedModal, MarkWonModal } from './DealStageModals'
 import { dealKind, dealStageLabel } from '../../lib/dealKind'
 import { formatCurrency, formatDate, formatDateTime, services } from '../../data/mockData'
 import type { ActivityType, ProposalStatus, TaskType } from '../../types'
+import { NoteActivityList } from '../../components/NoteActivityRow'
+import { RowLimitSelect, type RowLimit } from '../../components/ui/RowLimitSelect'
 import type { WonDealDetails } from '../../store/AppStore'
 
 const TABS = ['Overview', 'Activities', 'Tasks', 'Documents', 'Proposals', 'Notes', 'History'] as const
@@ -57,6 +59,7 @@ export function DealDetail() {
   const [wonOpen, setWonOpen] = useState(false)
   const [rejectOpen, setRejectOpen] = useState(false)
   const [activityOpen, setActivityOpen] = useState(false)
+  const [noteLimit, setNoteLimit] = useState<RowLimit>(5)
   const [taskOpen, setTaskOpen] = useState(false)
   const [proposalOpen, setProposalOpen] = useState(false)
   const [docs, setDocs] = useState<MockDocument[]>([
@@ -66,7 +69,6 @@ export function DealDetail() {
   const dealActivities = useMemo(() => activities.filter((a) => a.dealId === id).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()), [activities, id])
   const dealTasks = useMemo(() => tasks.filter((t) => t.dealId === id), [tasks, id])
   const dealProposals = useMemo(() => proposals.filter((p) => p.dealId === id), [proposals, id])
-  const dealNotes = useMemo(() => dealActivities.filter((a) => a.type === 'Note'), [dealActivities])
 
   if (!deal) {
     return (
@@ -166,6 +168,7 @@ export function DealDetail() {
           <CardHeader title="Deal Information" />
           <dl className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3.5 text-sm">
             <Field label="Deal Name" value={deal.name} />
+            <Field label="Date Created" value={deal.createdAt ? formatDate(deal.createdAt) : undefined} />
             <Field label="Company" value={company?.name} />
             <Field label="Contact" value={contact ? `${contact.firstName} ${contact.lastName}` : undefined} />
             <Field label="Owner" value={userById(deal.ownerId)?.name} />
@@ -319,19 +322,24 @@ export function DealDetail() {
       {tab === 'Notes' && (
         <Card padded={false}>
           <div className="p-5 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-800 text-[15px]">Notes</h3>
-            <button onClick={() => setActivityOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline">
-              <Plus size={13} /> Add Note
-            </button>
+            <h3 className="font-semibold text-slate-800 text-[15px]">Notes &amp; Updates</h3>
+            <div className="flex items-center gap-3">
+              <RowLimitSelect value={noteLimit} onChange={setNoteLimit} />
+              <button onClick={() => setActivityOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline">
+                <Plus size={13} /> Add Note
+              </button>
+            </div>
           </div>
-          <div className="px-5 pb-5 space-y-3">
-            {dealNotes.length === 0 && <p className="text-sm text-slate-400">No notes yet.</p>}
-            {dealNotes.map((n) => (
-              <div key={n.id} className="bg-[var(--tint-gold)] border border-[var(--tint-gold-pale)] rounded-lg p-3">
-                <p className="text-sm text-slate-700">{n.notes || n.subject}</p>
-                <p className="text-[11px] text-slate-400 mt-1">{formatDateTime(n.activityDate)} · {userById(n.userId)?.name}</p>
-              </div>
-            ))}
+          {/* Everything that happened to this deal, not only what someone typed. "When did the
+              quotation go out?" is answered here, next to the notes about it, rather than
+              being a date on its own in another tab — and the same list, in the same shape, is
+              what a client's page shows. */}
+          <div className="px-5 pb-5">
+            {dealActivities.length === 0 ? (
+              <p className="text-sm text-slate-400">Nothing recorded yet.</p>
+            ) : (
+              <NoteActivityList activities={dealActivities} limit={noteLimit} />
+            )}
           </div>
         </Card>
       )}
