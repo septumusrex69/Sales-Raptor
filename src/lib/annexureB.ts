@@ -55,10 +55,20 @@ export interface AnnexureBSchedule {
   effectiveFrom: string
   citation: string
   /**
+   * Every amount in this schedule excludes VAT; VAT is added on top when the fee is raised.
+   * Recorded explicitly because the gazette itself doesn't say, and reading these figures as
+   * VAT-inclusive would understate every fee on every account by the VAT rate.
+   */
+  vatBasis: 'exclusive'
+  /**
    * "The total amount to be recovered from the debtor in respect of items 1 to 7 of the
    * Annexure shall not exceed the capital amount of the debt or R1225,00, whichever is the
    * lesser." Note this binds recovery, so it has to be enforced as fees accrue — work done
    * beyond it was never recoverable, and discovering that at settlement is too late.
+   */
+  /**
+   * On the same VAT-exclusive basis as the amounts themselves — the consistent reading of a
+   * single gazetted tariff, though the gazette does not spell it out.
    */
   itemsOneToSevenCeiling: number
   /** Item 9: a fee of 10% of the instalment received. */
@@ -71,6 +81,7 @@ export interface AnnexureBSchedule {
 export const ANNEXURE_B_2026: AnnexureBSchedule = {
   effectiveFrom: '2026-03-06',
   citation: 'GN R.7207, GG 54273, 6 March 2026',
+  vatBasis: 'exclusive',
   itemsOneToSevenCeiling: 1225,
   receiptFeeRate: 0.1,
   receiptFeeMaximum: 610,

@@ -95,22 +95,29 @@ or from the next compounding date?
 
 ## 5. In duplum
 
-Confirmed as applying. It needs pinning down, because there are two versions and they cap
-different things:
+**An account cannot more than double.** Interest and fees *together* may not exceed the
+capital: a R100 account cannot become more than R200, whatever the mix of interest and fees.
 
-- **Common law:** arrear *interest* ceases to accrue once unpaid interest equals the
-  outstanding capital.
-- **National Credit Act s103(5):** for credit agreements under the Act, the total of interest,
-  fees, collection costs and other charges may not exceed the unpaid principal debt — a much
-  broader cap that catches the Annexure B fees too.
+That is the broad reading — the cap catches Annexure B fees as well as interest, not interest
+alone. It binds harder than the Annexure B ceiling on small debts, where capital is the lower
+figure anyway; on large debts the Annexure B ceiling limits items 1–7 to R1,225 while in duplum
+still allows interest to run up to capital less fees.
 
-**OPEN — needs your compliance answer:** which applies to your book? If any of these debts arise
-from NCA credit agreements, the broader cap applies to them and the engine needs to know which
-accounts are which. This is not a detail that can be retrofitted; it changes what the balance
-*is*.
+Three points of precision are still needed, and they change balances rather than presentation:
 
-Whichever applies, the cap is continuous: interest stops accruing at the ceiling and resumes
-if capital rises or is partly repaid.
+**OPEN — which capital?** The capital originally handed over, or the capital outstanding at the
+time? These diverge as soon as anything is paid. Taken literally ("an account outstanding for
+R100"), the ceiling moves down as capital is repaid, which means a payment can lower the
+ceiling at the same moment it reduces the charges beneath it.
+
+**OPEN — a stop on accrual, or a cap on recovery?** Do interest and fees stop being raised once
+the ceiling is reached, or do they keep accruing internally with only the capped amount
+recoverable from the debtor? The second version keeps BF's true cost visible; the first keeps
+the ledger simpler and the balance honest.
+
+**OPEN — the ceiling falling below charges already raised.** If capital reduces and the ceiling
+drops under interest and fees already accrued, is the excess written off permanently, or held
+suspended in case capital rises again?
 
 ---
 
@@ -118,13 +125,13 @@ if capital rises or is partly repaid.
 
 - On **commission**: yes
 - On **Annexure B fees**: yes
-- The AOD amounts in §2 are **VAT-exclusive**
+- **Every amount in the tariff is VAT-exclusive** — the gazetted figures, the AOD bands, all of
+  them. VAT is added when the fee is raised. Recorded on the schedule itself in
+  `src/lib/annexureB.ts`, because the gazette doesn't state it and reading those figures as
+  inclusive would understate every fee on every account.
 
-**OPEN:** are the other Annexure B amounts (R25 letter, R60 consultation, and the rest)
-VAT-exclusive too, with VAT added, or are the gazetted figures inclusive? The gazette does not
-say, and it changes every fee on every account by 15%.
-
-**OPEN:** is the items 1–7 ceiling measured on the VAT-exclusive or VAT-inclusive total?
+The items 1–7 ceiling is taken on the same VAT-exclusive basis — the consistent reading of a
+single tariff, though the gazette doesn't spell it out. Flagged rather than confirmed.
 
 The rate itself must be configurable with effective dates — VAT rates change, and a historical
 statement has to reproduce the rate that applied then.
@@ -237,9 +244,9 @@ before the data lands rather than after.
 | 1 | Which figure selects the commission band — capital handed over, or outstanding? | Commission |
 | 2 | Compounding date — from handover, first action, or month-end? | Interest |
 | 3 | Do fees earn interest from the date incurred? | Interest |
-| 4 | Common-law *in duplum* or NCA s103(5)? Which accounts are NCA? | Balance itself |
-| 5 | Are the gazetted Annexure B amounts VAT-inclusive or exclusive? | Every fee |
-| 6 | Is the items 1–7 ceiling measured VAT-inclusive or exclusive? | Fee cap |
+| 4 | In duplum — original capital or outstanding capital? | Balance itself |
+| 5 | In duplum — stop on accrual, or cap on recovery? | Balance itself |
+| 6 | In duplum — excess written off, or suspended if capital rises? | Balance itself |
 | 7 | Does surplus on the cost half flow to capital? | Allocation |
 | 8 | A payment smaller than accrued interest — split, or all to interest? | Allocation |
 | 9 | Item 4(a) at exactly R50,000 — which band? | Edge case |
