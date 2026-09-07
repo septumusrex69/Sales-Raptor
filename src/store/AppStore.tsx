@@ -7,8 +7,9 @@ import { normalizeDeal, normalizeLead } from '../lib/legacyValues'
 import { dealKind, kindForService } from '../lib/dealKind'
 import { RaptorCelebration } from '../components/ui/RaptorCelebration'
 import { celebrationForWin, type Celebration } from '../lib/celebration'
-import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, ProductService, Proposal, RejectionReason, Task, TaskType, Team, TeamKind, User,
-  Handover,
+import type {
+  Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, Handover, ID, Lead,
+  ProductService, Proposal, RejectionReason, Target, TargetMetric, Task, TaskType, Team, TeamKind, User,
 } from '../types'
 
 /**
@@ -168,6 +169,7 @@ interface AppState {
   activities: Activity[]
   proposals: Proposal[]
   handovers: Handover[]
+  targets: Target[]
   users: User[]
   teams: Team[]
   notifications: AppNotification[]
@@ -288,6 +290,14 @@ interface AppActions {
   deleteTeam: (id: ID) => void
 
   dismissToast: () => void
+  /**
+   * Sets or clears the number a team or person is measured against.
+   *
+   * A target of zero is not a target — passing 0 removes the row rather than storing a goal
+   * nobody could fail to meet.
+   */
+  setTarget: (input: { scopeType: 'team' | 'user'; scopeId: ID; metric: TargetMetric; periodKey?: string; targetValue: number; thresholdValue?: number }) => void
+  clearTarget: (id: ID) => void
   /** Fires the take-off animation. Reserved for things genuinely worth celebrating. */
   celebrate: (celebration: Celebration) => void
 
@@ -313,6 +323,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [activities, setActivities] = useState<Activity[]>([])
   const [proposals, setProposals] = useState<Proposal[]>([])
   const [handovers, setHandovers] = useState<Handover[]>([])
+  const [targets, setTargets] = useState<Target[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [teamRows, setTeamRows] = useState<{ id: ID; name: string; kind: TeamKind }[]>([])
   const [notifications, setNotifications] = useState<AppNotification[]>([])
@@ -328,6 +339,81 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const showError = useCallback((message: string) => setToast(friendlyError(message)), [])
   const dismissToast = useCallback(() => setToast(null), [])
+  const targetsRef = useRef<Target[]>([])
+  targetsRef.current = targets
+
+  const setTarget = useCallback<AppActions['setTarget']>(
+    (input) => {
+      const existing = targetsRef.current.find(
+        (t) =>
+          t.scopeType === input.scopeType &&
+          t.scopeId === input.scopeId &&
+          t.metric === input.metric &&
+          (t.periodKey ?? undefined) === (input.periodKey ?? undefined),
+      )
+
+      // Zero means "no target here" rather than "a target of nothing", so the row goes away.
+      if (input.targetValue <= 0) {
+        if (!existing) return
+        setTargets((prev) => prev.filter((t) => t.id !== existing.id))
+        deleteRow('targets', existing.id, 'setTarget:clear', (message) => {
+          setTargets((prev) => [...prev, existing])
+          showError(message)
+        })
+        return
+      }
+
+      const patch = { targetValue: input.targetValue, thresholdValue: input.thresholdValue, updatedAt: nowIso() }
+      if (existing) {
+        let previous: Target | undefined
+        setTargets((prev) => {
+          previous = prev.find((t) => t.id === existing.id)
+          return prev.map((t) => (t.id === existing.id ? { ...t, ...patch } : t))
+        })
+        updateRow('targets', existing.id, patch, 'setTarget', (message) => {
+          if (previous) setTargets((prev) => prev.map((t) => (t.id === existing.id ? previous! : t)))
+          showError(message)
+        })
+        return
+      }
+
+      const target: Target = {
+        id: crypto.randomUUID(),
+        scopeType: input.scopeType,
+        scopeId: input.scopeId,
+        metric: input.metric,
+        periodKey: input.periodKey,
+        targetValue: input.targetValue,
+        thresholdValue: input.thresholdValue,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      }
+      setTargets((prev) => [...prev, target])
+      void (async () => {
+        const error = await insertRow('targets', target, 'setTarget')
+        if (error) {
+          setTargets((prev) => prev.filter((t) => t.id !== target.id))
+          showError(error)
+        }
+      })()
+    },
+    [showError],
+  )
+
+  const clearTarget = useCallback<AppActions['clearTarget']>(
+    (id) => {
+      let previous: Target | undefined
+      setTargets((prev) => {
+        previous = prev.find((t) => t.id === id)
+        return prev.filter((t) => t.id !== id)
+      })
+      deleteRow('targets', id, 'clearTarget', (message) => {
+        if (previous) setTargets((prev) => [...prev, previous!])
+        showError(message)
+      })
+    },
+    [showError],
+  )
   const celebrate = useCallback((next: Celebration) => setCelebration(next), [])
 
   useEffect(() => {
@@ -338,6 +424,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       setCompanies([])
       setTasks([])
       setActivities([])
+      setTargets([])
       setProposals([])
       setHandovers([])
       setUsers([])
@@ -360,8 +447,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       fetchTable<User>('profiles', 'created_at'),
       fetchTable<{ id: ID; name: string; kind: TeamKind }>('teams', 'created_at'),
       fetchTable<AppNotification>('notifications', 'created_at'),
+      fetchTable<Target>('targets', 'created_at'),
     ])
-      .then(([l, d, ct, co, tk, ac, pr, hv, us, tm, nt]) => {
+      .then(([l, d, ct, co, tk, ac, pr, hv, us, tm, nt, tg]) => {
         if (!active) return
         // A row still carrying a retired stage or status would render in no column at all —
         // not last, gone — so map anything stale onto the current vocabulary on the way in.
@@ -376,6 +464,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         setUsers(us)
         setTeamRows(tm)
         setNotifications(nt)
+        setTargets(tg)
         setDataLoading(false)
       })
       .catch((err: unknown) => {
@@ -1467,6 +1556,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       activities,
       proposals,
       handovers,
+      targets,
       users,
       teams,
       notifications,
@@ -1507,6 +1597,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateTeam,
       deleteTeam,
       dismissToast,
+      setTarget,
+      clearTarget,
       celebrate,
       companyById,
       contactById,
@@ -1523,6 +1615,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       activities,
       proposals,
       handovers,
+      targets,
       users,
       teams,
       notifications,
@@ -1563,6 +1656,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateTeam,
       deleteTeam,
       dismissToast,
+      setTarget,
+      clearTarget,
       celebrate,
       companyById,
       contactById,

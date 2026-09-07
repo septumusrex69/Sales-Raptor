@@ -18,6 +18,9 @@ import { ActivityBreakdownChart } from '../components/dashboard/ActivityBreakdow
 import { WinRateByKind } from '../components/dashboard/WinRateByKind'
 import { LossReasonsCard } from '../components/dashboard/LossReasonsCard'
 import { NeedsAttention, type AttentionItem } from '../components/dashboard/NeedsAttention'
+import { TargetsCard } from '../components/dashboard/TargetsCard'
+import { TARGET_METRICS, periodElapsed, resolveTarget, targetProgress, type TargetProgress } from '../lib/targets'
+import type { Target, TargetMetric } from '../types'
 import { dealKind, dealSize, dealSizeLabel } from '../lib/dealKind'
 import { RepLeaderboard, type LeaderboardRow } from '../components/dashboard/RepLeaderboard'
 import { formatCurrency, formatDate, timeAgo, TODAY } from '../data/mockData'
@@ -63,7 +66,7 @@ interface DashboardProps {
 }
 
 export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
-  const { leads, deals, tasks, activities, users, teams, userById, companyById, updateTask } = useAppStore()
+  const { leads, deals, tasks, activities, users, teams, targets, userById, companyById, updateTask } = useAppStore()
   const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(TODAY))
@@ -126,6 +129,8 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
       const rate = (w: number, l: number) => (w + l > 0 ? Math.round((w / (w + l)) * 100) : null)
       return {
         newLeads: newLeads.length,
+        mandatesWon: wonHandovers.length,
+        serviceDealsWon: wonServices.length,
         activities: meaningfulActivities.length,
         qualified: qualified.length,
         converted: converted.length,
@@ -282,6 +287,55 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
       .slice(0, 6)
   }, [scopedTasks])
 
+  /**
+   * Progress against target, for whichever scope is being looked at.
+   *
+   * Which scope owns the number is a genuine question with no universal answer — "the team must
+   * sign 75" and "each of you must sign 15" are both real and neither follows from the other —
+   * so both are storable and the dashboard reads whichever fits the view. Looking at one rep
+   * shows that rep's own target; looking at a team shows the team's; the all-reps view sums the
+   * Sales teams' targets, which is the only honest way to total numbers that were set
+   * separately.
+   */
+  const targetProgressItems: TargetProgress[] = useMemo(() => {
+    const actuals: Record<TargetMetric, number> = {
+      leads: kpis.curr.newLeads,
+      mandates: kpis.curr.mandatesWon,
+      deals: kpis.curr.serviceDealsWon,
+      revenue: kpis.curr.revenueWon,
+      book: kpis.curr.bookSigned,
+      accounts: kpis.curr.accountsSigned,
+      activities: kpis.curr.activities,
+    }
+
+    function forMetric(metric: TargetMetric): Target | undefined {
+      if (scope.startsWith('rep:')) return resolveTarget(targets, 'user', scope.slice(4), metric, period.key)
+      if (scope.startsWith('team:')) return resolveTarget(targets, 'team', scope.slice(5), metric, period.key)
+
+      // All reps: add up what each Sales team was actually set. Summing is right here and
+      // wrong for a single team — two teams each asked for 40 mandates means 80 across the
+      // floor, which is exactly what this view is being asked.
+      const salesTeams = teams.filter((t) => t.kind !== 'Communications')
+      const found = salesTeams
+        .map((t) => resolveTarget(targets, 'team', t.id, metric, period.key))
+        .filter((t): t is Target => Boolean(t))
+      if (found.length === 0) return undefined
+      const thresholds = found.map((t) => t.thresholdValue).filter((v): v is number => v != null)
+      return {
+        ...found[0],
+        targetValue: found.reduce((sum, t) => sum + t.targetValue, 0),
+        thresholdValue: thresholds.length > 0 ? thresholds.reduce((sum, v) => sum + v, 0) : undefined,
+      }
+    }
+
+    return TARGET_METRICS.map((def) => targetProgress(actuals[def.id], forMetric(def.id))).filter(
+      (p): p is TargetProgress => Boolean(p),
+    )
+  }, [kpis, targets, teams, scope, period])
+
+  /** Only meaningful for the month actually in progress; a past month is simply finished. */
+  const elapsed = useMemo(() => (TODAY > period.end ? 1 : periodElapsed(period.start, period.end, TODAY)), [period])
+
   const attentionItems: AttentionItem[] = useMemo(
     () => [
       {
@@ -436,6 +490,17 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
           to={buildDrilldownUrl('/deals', { view: 'table' })}
         />
       </div>
+
+      <TargetsCard
+        title="Targets"
+        subtitle={
+          scope.startsWith('rep:')
+            ? `${userById(scope.slice(4))?.name ?? 'This rep'}'s targets for ${period.label} — the marker shows how far through the month we are`
+            : `Targets for ${period.label} — the marker shows how far through the month we are`
+        }
+        items={targetProgressItems}
+        elapsed={elapsed}
+      />
 
       <NeedsAttention items={attentionItems} />
 

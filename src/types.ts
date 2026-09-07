@@ -389,6 +389,28 @@ export interface Team {
   kind: TeamKind
 }
 
+/**
+ * What a target can be set against.
+ *
+ * Every one of these is already computed somewhere on the dashboard — a target is a line drawn
+ * on a number that exists, never a new number invented to be targeted.
+ */
+export type TargetMetric = 'leads' | 'mandates' | 'deals' | 'revenue' | 'book' | 'accounts' | 'activities'
+
+export interface Target {
+  id: ID
+  scopeType: 'team' | 'user'
+  scopeId: ID
+  metric: TargetMetric
+  /** Null/undefined = the standing target, used for every sales month with no override. */
+  periodKey?: string
+  targetValue: number
+  /** The floor, where the business has one: below this is a problem, not merely short. */
+  thresholdValue?: number
+  createdAt: string
+  updatedAt: string
+}
+
 export type CustomFieldType =
   | 'Text'
   | 'Number'
