@@ -52,6 +52,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const fullHtml = signatureHtml ? `${bodyHtml}<br><br>${signatureHtml}` : bodyHtml
 
+  let sentMessageId: string | null = null
   try {
     const transporter = nodemailer.createTransport({
       host: conn.smtp_host as string,
@@ -59,7 +60,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       secure: (conn.smtp_port as number) === 465,
       auth: { user: conn.email as string, pass: decrypt(conn.encrypted_password as string) },
     })
-    await transporter.sendMail({ from: conn.email as string, to, subject, html: fullHtml })
+    const info = await transporter.sendMail({ from: conn.email as string, to, subject, html: fullHtml })
+    // Kept so an inbound reply carrying this value in In-Reply-To can be threaded back to the
+    // exact deal the message was sent from. Without it a reply can only be matched on the
+    // sender's address, which finds the client but not which of its deals is being discussed.
+    sentMessageId = info.messageId ?? null
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to send email.' })
     return
@@ -78,5 +83,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ignore -- the send itself already succeeded
   }
 
-  res.status(200).json({ ok: true })
+  res.status(200).json({ ok: true, messageId: sentMessageId })
 }

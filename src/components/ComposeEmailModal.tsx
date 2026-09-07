@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useId, useState, type FormEvent } from 'react'
 import { Modal, FormField, inputClass } from './ui/Modal'
 import { useAuth } from '../store/AuthContext'
 
@@ -8,20 +8,34 @@ import { useAuth } from '../store/AuthContext'
  */
 export function ComposeEmailModal({
   to,
+  recipients,
   initialSubject,
   initialBody,
   onClose,
   onSent,
 }: {
-  to: string
+  /** Pre-filled recipient. Optional: a deal often has no contact of its own to default to. */
+  to?: string
+  /**
+   * Addresses to offer as suggestions — everyone already known on the client, lead or deal.
+   *
+   * The field stays typeable rather than becoming a locked dropdown. A deal frequently has no
+   * contact of its own, and the person who needs to receive a quotation is often someone whose
+   * address is in the salesperson's head and not yet in the CRM. Refusing to send until they
+   * stop and create a contact record is how a CRM gets worked around instead of used.
+   */
+  recipients?: { email: string; label?: string }[]
   /** Pre-filled subject, e.g. "Re: ..." when replying to a received email. */
   initialSubject?: string
   /** Pre-filled body, e.g. a quoted copy of the message being replied to. */
   initialBody?: string
   onClose: () => void
-  onSent: (subject: string, bodyText: string) => void
+  /** `emailMessageId` is the sent message's own Message-ID, so a reply can be threaded back. */
+  onSent: (subject: string, bodyText: string, emailMessageId?: string) => void
 }) {
   const { session } = useAuth()
+  const listId = useId()
+  const [address, setAddress] = useState(to ?? recipients?.[0]?.email ?? '')
   const [subject, setSubject] = useState(initialSubject ?? '')
   const [body, setBody] = useState(initialBody ?? '')
   const [submitting, setSubmitting] = useState(false)
@@ -29,7 +43,7 @@ export function ComposeEmailModal({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!subject.trim() || !body.trim()) return
+    if (!address.trim() || !subject.trim() || !body.trim()) return
     const accessToken = session?.access_token
     if (!accessToken) return
     setSubmitting(true)
@@ -38,7 +52,7 @@ export function ComposeEmailModal({
       const res = await fetch('/api/email/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ to, subject: subject.trim(), bodyHtml: body.trim().replace(/\n/g, '<br>') }),
+        body: JSON.stringify({ to: address.trim(), subject: subject.trim(), bodyHtml: body.trim().replace(/\n/g, '<br>') }),
       })
       const responseBody = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -46,7 +60,7 @@ export function ComposeEmailModal({
         setSubmitting(false)
         return
       }
-      onSent(`Email sent: ${subject.trim()}`, body.trim())
+      onSent(`Email sent: ${subject.trim()}`, body.trim(), responseBody.messageId ?? undefined)
       onClose()
     } catch {
       setError('Could not reach the server. Please try again.')
@@ -55,10 +69,28 @@ export function ComposeEmailModal({
   }
 
   return (
-    <Modal title={initialSubject ? `Reply to ${to}` : `Email ${to}`} onClose={onClose} width={480}>
+    <Modal title={initialSubject ? `Reply to ${to ?? address}` : 'New Email'} onClose={onClose} width={480}>
       <form onSubmit={handleSubmit}>
-        <FormField label="To">
-          <input className={inputClass} value={to} disabled />
+        <FormField label="To" required>
+          <input
+            className={inputClass}
+            type="email"
+            list={recipients && recipients.length > 0 ? listId : undefined}
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="name@company.co.za"
+            required
+            autoFocus={!address}
+          />
+          {recipients && recipients.length > 0 && (
+            <datalist id={listId}>
+              {recipients.map((r) => (
+                <option key={r.email} value={r.email}>
+                  {r.label ?? r.email}
+                </option>
+              ))}
+            </datalist>
+          )}
         </FormField>
         <FormField label="Subject" required>
           <input className={inputClass} value={subject} onChange={(e) => setSubject(e.target.value)} required autoFocus={!initialSubject} />

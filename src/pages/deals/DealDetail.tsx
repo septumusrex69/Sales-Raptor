@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Pencil, CheckCircle2, XCircle, StickyNote, CheckSquare, FileText, Send, Plus, Upload, Trash2, Mail } from 'lucide-react'
+import { ArrowLeft, Pencil, CheckCircle2, XCircle, StickyNote, CheckSquare, FileText, Send, Plus, Upload, Trash2, Mail, Building2 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { canEditOwned, canReassign, isAssignableOwner} from '../../lib/permissions'
@@ -36,6 +36,8 @@ export function DealDetail() {
     tasks,
     proposals,
     users,
+    contacts,
+    leads,
     companyById,
     contactById,
     userById,
@@ -61,6 +63,7 @@ export function DealDetail() {
   const [noteLimit, setNoteLimit] = useState<RowLimit>(5)
   const [emailLimit, setEmailLimit] = useState<RowLimit>(5)
   const [composeOpen, setComposeOpen] = useState(false)
+  const [showClientEmails, setShowClientEmails] = useState(false)
   const [taskOpen, setTaskOpen] = useState(false)
   const [proposalOpen, setProposalOpen] = useState(false)
   const [docs, setDocs] = useState<MockDocument[]>([
@@ -68,7 +71,55 @@ export function DealDetail() {
   ])
 
   const dealActivities = useMemo(() => activities.filter((a) => a.dealId === id).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()), [activities, id])
+  /**
+   * Everyone already known on this deal's client and originating lead.
+   *
+   * The Compose button used to appear only when the deal itself carried a contactId — and no
+   * code path has ever set one, on any deal, so email from a deal has never been available to
+   * anybody. Recipients are resolved from the client instead, and the address stays typeable
+   * for the common case where the right person isn't in the CRM yet.
+   */
+  const recipients = useMemo(() => {
+    const out: { email: string; label: string }[] = []
+    const seen = new Set<string>()
+    const add = (email?: string, label?: string) => {
+      const clean = email?.trim().toLowerCase()
+      if (!clean || seen.has(clean)) return
+      seen.add(clean)
+      out.push({ email: clean, label: label ? `${label} — ${clean}` : clean })
+    }
+    const dealContact = contactById(deal?.contactId)
+    add(dealContact?.email, dealContact ? `${dealContact.firstName} ${dealContact.lastName}` : undefined)
+    for (const c of contacts.filter((c) => deal?.companyId && c.companyId === deal.companyId)) {
+      add(c.email, `${c.firstName} ${c.lastName}`)
+    }
+    const lead = deal?.leadId ? leads.find((l) => l.id === deal.leadId) : undefined
+    add(lead?.email, lead ? `${lead.firstName} ${lead.lastName}`.trim() || lead.companyName : undefined)
+    for (const c of contacts.filter((c) => deal?.leadId && c.leadId === deal.leadId)) {
+      add(c.email, `${c.firstName} ${c.lastName}`)
+    }
+    return out
+  }, [deal, contacts, leads, contactById])
+
   const dealEmails = useMemo(() => dealActivities.filter((a) => a.type === 'Email'), [dealActivities])
+
+  /**
+   * The whole client's correspondence, on request.
+   *
+   * Deliberately a view rather than a copy. Writing an email row onto every deal a client has
+   * would double-count it in every activity figure on the dashboard — including the activity
+   * target — and make a client with six open deals show the same message six times. One record
+   * carrying its client and (where it has one) its deal answers both questions: the deal shows
+   * its own thread, and this toggle widens the same data to everything on the account.
+   */
+  const clientEmails = useMemo(() => {
+    if (!deal?.companyId) return []
+    return activities
+      .filter((a) => a.type === 'Email' && a.companyId === deal.companyId)
+      .sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime())
+  }, [activities, deal])
+
+  const visibleEmails = showClientEmails ? clientEmails : dealEmails
   const dealTasks = useMemo(() => tasks.filter((t) => t.dealId === id), [tasks, id])
   const dealProposals = useMemo(() => proposals.filter((p) => p.dealId === id), [proposals, id])
 
@@ -187,27 +238,41 @@ export function DealDetail() {
       <Card>
         <CardHeader
           title="Emails"
-          subtitle={`${dealEmails.length} message${dealEmails.length === 1 ? '' : 's'}`}
+          subtitle={
+            showClientEmails
+              ? `${visibleEmails.length} message${visibleEmails.length === 1 ? '' : 's'} across the whole client`
+              : `${dealEmails.length} message${dealEmails.length === 1 ? '' : 's'} on this deal`
+          }
           action={
             <div className="flex items-center gap-2">
-              {contact?.email && (
+              {company && (
                 <button
-                  onClick={() => setComposeOpen(true)}
-                  className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                  onClick={() => setShowClientEmails((v) => !v)}
+                  aria-pressed={showClientEmails}
+                  title="Show every email on this client, including messages raised from its other deals"
+                  className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border ${
+                    showClientEmails ? 'border-gold-500 bg-gold-500/5 text-gold-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
                 >
-                  <Mail size={12} /> Compose
+                  <Building2 size={12} /> Whole client
                 </button>
               )}
+              <button
+                onClick={() => setComposeOpen(true)}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+              >
+                <Mail size={12} /> Compose
+              </button>
               <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
             </div>
           }
         />
-        {dealEmails.length === 0 ? (
+        {visibleEmails.length === 0 ? (
           <p className="text-sm text-slate-400">
-            {contact?.email ? 'No emails yet.' : 'No contact with an email address on this deal yet.'}
+            {showClientEmails ? 'No emails on this client yet.' : 'No emails on this deal yet.'}
           </p>
         ) : (
-          <EmailActivityList activities={applyRowLimit(dealEmails, emailLimit)} />
+          <EmailActivityList activities={applyRowLimit(visibleEmails, emailLimit)} />
         )}
       </Card>
 
@@ -351,12 +416,16 @@ export function DealDetail() {
 
 
 
-      {composeOpen && contact?.email && (
+      {composeOpen && (
         <ComposeEmailModal
-          to={contact.email}
+          to={contact?.email ?? recipients[0]?.email}
+          recipients={recipients}
           onClose={() => setComposeOpen(false)}
-          onSent={(subject, bodyText) =>
-            addActivity({ type: 'Email', subject, notes: bodyText, dealId: deal.id, contactId: contact.id })
+          onSent={(subject, bodyText, emailMessageId) =>
+            // Carries the deal; addActivity fills the client in from it, so one record lands on
+            // both the deal's thread and the client's — no second copy. The Message-ID is what
+            // lets the recipient's reply find its way back to this deal specifically.
+            addActivity({ type: 'Email', subject, notes: bodyText, dealId: deal.id, contactId: contact?.id, emailMessageId })
           }
         />
       )}

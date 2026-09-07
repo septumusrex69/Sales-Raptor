@@ -343,6 +343,8 @@ export interface Activity {
   isRead?: boolean
   /** File names of attachments on a synced incoming email. The files themselves stay in the mailbox. */
   attachmentNames?: string[]
+  /** The message's own Message-ID, used to thread replies back to the record that sent it. */
+  emailMessageId?: string
 }
 
 export type ProposalStatus = 'Draft' | 'Sent' | 'Viewed' | 'Accepted' | 'Declined' | 'Expired'

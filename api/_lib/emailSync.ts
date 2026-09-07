@@ -214,13 +214,62 @@ async function syncMailbox(
         continue
       }
 
+      /*
+       * Thread first, sender second.
+       *
+       * Matching on the sender's address alone finds the client but cannot know which of its
+       * deals is being discussed — a client with five open deals gets every reply filed against
+       * none of them. A reply carries In-Reply-To (and References) naming the Message-ID of the
+       * message it answers, and outbound sends now record that id, so the reply can be filed
+       * against the exact deal it belongs to.
+       *
+       * References is checked as well as In-Reply-To because some clients drop the latter; it
+       * is walked newest-first so a long thread resolves to its most recent turn.
+       */
+      const threadIds: string[] = []
+      if (parsed.inReplyTo) threadIds.push(...parsed.inReplyTo.split(/\s+/).filter(Boolean))
+      const refs = parsed.references
+      if (refs) threadIds.push(...(Array.isArray(refs) ? refs : refs.split(/\s+/)).filter(Boolean).reverse())
+
+      let threadMatch: { dealId?: string; leadId?: string; companyId?: string; contactId?: string } | null = null
+      for (const rawId of threadIds) {
+        const id = rawId.trim()
+        if (!id) continue
+        const { data: parent } = await admin
+          .from('activities')
+          .select('deal_id, lead_id, company_id, contact_id')
+          .eq('email_message_id', id)
+          .limit(1)
+          .maybeSingle()
+        if (parent) {
+          threadMatch = {
+            dealId: (parent.deal_id as string | null) ?? undefined,
+            leadId: (parent.lead_id as string | null) ?? undefined,
+            companyId: (parent.company_id as string | null) ?? undefined,
+            contactId: (parent.contact_id as string | null) ?? undefined,
+          }
+          console.log(`[emailSync] ${path} UID ${uid}: threaded onto ${id} (deal=${threadMatch.dealId ?? '-'})`)
+          break
+        }
+      }
+
       const match = await findMatch(admin, fromAddress)
-      if (!match) {
-        console.log(`[emailSync] ${path} UID ${uid}: sender ${fromAddress} matches no Contact/Lead/Company, skipped`)
+      if (!match && !threadMatch) {
+        console.log(`[emailSync] ${path} UID ${uid}: sender ${fromAddress} matches no Contact/Lead/Company and no known thread, skipped`)
         continue
       }
+
+      // A reply from an address nobody has captured yet — a colleague of the contact, a new
+      // person on the account — still belongs on the record it is answering, so the thread
+      // stands on its own where the address lookup found nothing.
+      const filed = {
+        contactId: match?.contactId ?? threadMatch?.contactId,
+        leadId: match?.leadId ?? threadMatch?.leadId,
+        companyId: match?.companyId ?? threadMatch?.companyId,
+        dealId: threadMatch?.dealId,
+      }
       console.log(
-        `[emailSync] ${path} UID ${uid}: sender ${fromAddress} matched (contact=${match.contactId ?? '-'}, lead=${match.leadId ?? '-'}, company=${match.companyId ?? '-'}), writing activity...`,
+        `[emailSync] ${path} UID ${uid}: filed (contact=${filed.contactId ?? '-'}, lead=${filed.leadId ?? '-'}, company=${filed.companyId ?? '-'}, deal=${filed.dealId ?? '-'}), writing activity...`,
       )
       // Logged whenever a message carries parts at all, so a "my attachment vanished" report
       // can be answered from what the mail server actually sent rather than by guessing.
@@ -243,9 +292,10 @@ async function syncMailbox(
           {
             type: 'Email',
             user_id: conn.user_id,
-            contact_id: match.contactId ?? null,
-            lead_id: match.leadId ?? null,
-            company_id: match.companyId ?? null,
+            contact_id: filed.contactId ?? null,
+            lead_id: filed.leadId ?? null,
+            company_id: filed.companyId ?? null,
+            deal_id: filed.dealId ?? null,
             subject: `${subjectPrefix}: ${parsed.subject || '(no subject)'}`,
             notes: (parsed.text || '').slice(0, NOTES_MAX_LENGTH),
             activity_date: (parsed.date ?? new Date()).toISOString(),
@@ -270,8 +320,16 @@ async function syncMailbox(
       } else if (inserted && inserted.length > 0) {
         console.log(`[emailSync] ${path} UID ${uid}: activity ${inserted[0].id} inserted`)
         logged += 1
-        if (match.notifyUserId) {
-          const link = match.companyId ? `/companies/${match.companyId}` : match.leadId ? `/leads/${match.leadId}` : `/contacts/${match.contactId}`
+        if (match?.notifyUserId) {
+          // Straight to the deal when the reply threaded onto one — that is the page the
+          // person reading the notification actually needs to be on.
+          const link = filed.dealId
+            ? `/deals/${filed.dealId}`
+            : filed.companyId
+              ? `/companies/${filed.companyId}`
+              : filed.leadId
+                ? `/leads/${filed.leadId}`
+                : `/contacts/${filed.contactId}`
           await admin.from('notifications').insert({
             user_id: match.notifyUserId,
             type: 'Email received',
