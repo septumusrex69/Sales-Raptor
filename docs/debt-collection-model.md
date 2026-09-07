@@ -306,3 +306,41 @@ before the data lands rather than after.
 |---|---|---|
 | 1 | The daily interest rate — 2% ÷ days in month, or 24% ÷ 365? | Interest |
 | 2 | Item 1(b), registered letter under s57 — the Magistrates' Courts figure. **Awaiting; BF to supply.** Rarely used, so it does not block the build. | Tariff |
+
+---
+
+## 11. Scale
+
+The book is **over 100,000 accounts** with around **50 people working it concurrently**.
+
+Postgres is untroubled by that. A hundred thousand rows is a small table, and fifty concurrent
+users is a light load. The database is not the constraint.
+
+**The constraint is how this application currently loads data.** `AppStore.fetchTable` issues
+`select('*')` against every table on startup and filters in memory. That is the right shape for
+the CRM — a few hundred leads and deals — and the wrong shape for collections by three orders
+of magnitude. At roughly eleven actions per account the sample implies **over a million action
+rows today**, before fifty clerks add to it daily.
+
+It would also break before it got slow: PostgREST caps rows per request (Supabase's default is
+1,000), so a naive `select('*')` against the account table silently returns the first thousand
+and the rest simply aren't there. **Verify that cap on the project before the import.**
+
+So the collections module is built to a different pattern from the CRM, and the CRM is left
+alone:
+
+- **Nothing loads the book into memory.** A clerk works a queue: the server returns a page.
+  Search, filter and sort happen in the database, against indexes on the columns people actually
+  use — assigned clerk, bucket, diary date, prescription date, client, debtor reference.
+- **Interest is not computed in the browser.** Daily accrual across 100,000 accounts is a
+  server-side job that writes each day's position, so a list is a read rather than a hundred
+  thousand calculations. Only the account actually open computes live, to the minute.
+- **The financial engine runs server-side.** It is the authority on what an account owes; a
+  client that can calculate its own balances is a client that can disagree with the ledger.
+- **Concurrency is real at fifty users.** Two clerks can open the same account, and a payment
+  can land while one of them is working it. The optimistic-write pattern used in the CRM is
+  fine for a record you own; an account being worked needs freshness, and a payment allocation
+  needs to be the database's decision rather than the browser's.
+
+Sized this way, 100,000 accounts and 10,000,000 perform the same: the page size governs, not
+the table.
