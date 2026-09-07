@@ -264,34 +264,41 @@ export function LeadsList() {
 
   return (
     <div className="space-y-3">
-      {/* One toolbar. The four filters people actually reach for stay on the face of it; the
-          rest moved behind More Filters, which is what stopped this wrapping onto a second row
-          and pushing the table itself below the fold. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 w-52">
-          <Search size={15} className="text-slate-400" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search leads..." className="text-sm outline-none flex-1 min-w-0" />
-        </div>
-        <SimpleSelect value={status} onChange={(v) => setStatus(v as typeof status)} options={['All', ...ALL_STATUSES]} labels={{ All: 'All Statuses' }} />
-        <SimpleSelect value={classification} onChange={(v) => setClassification(v as typeof classification)} options={['All', ...leadClassifications]} labels={{ All: 'All Classes' }} />
-        <SimpleSelect value={owner} onChange={setOwner} options={['All', ...reps.map((r) => r.id)]} labels={{ All: 'All Owners', ...Object.fromEntries(reps.map((r) => [r.id, r.name])) }} />
-        <SimpleSelect value={service} onChange={(v) => setService(v as typeof service)} options={['All', ...services]} labels={{ All: 'All Services' }} />
-        <button
-          onClick={() => setShowMoreFilters((s) => !s)}
-          className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-        >
-          <SlidersHorizontal size={14} /> More Filters
-        </button>
-        <LeadsColumnsMenu visibleColumns={visibleColumns} onChange={setVisibleColumns} icon={<Columns3 size={14} />} />
-        <div className="ml-auto flex items-center gap-2">
-          <PeriodFilter period={period} onChange={setPeriod} referenceDate={TODAY} />
+      {/*
+        Two groups, wrapping as groups.
+        A flat row with `ml-auto` on the trailing pair looked fine until it wrapped: Columns fell
+        to the start of the second line and the date sat at its far end, leaving a stretch of
+        nothing between two controls that have no relationship. Filters now flow together and
+        take whatever width is left; the one action stays pinned to the right of the first line
+        and never joins the wrap.
+      */}
+      <div className="flex flex-wrap items-start gap-2">
+        <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+          <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 w-52">
+            <Search size={15} className="text-slate-400" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search leads..." className="text-sm outline-none flex-1 min-w-0" />
+          </div>
+          <SimpleSelect value={status} onChange={(v) => setStatus(v as typeof status)} options={['All', ...ALL_STATUSES]} labels={{ All: 'Status' }} />
+          <SimpleSelect value={classification} onChange={(v) => setClassification(v as typeof classification)} options={['All', ...leadClassifications]} labels={{ All: 'Class' }} />
+          <SimpleSelect value={owner} onChange={setOwner} options={['All', ...reps.map((r) => r.id)]} labels={{ All: 'Owner', ...Object.fromEntries(reps.map((r) => [r.id, r.name])) }} />
+          <SimpleSelect value={service} onChange={(v) => setService(v as typeof service)} options={['All', ...services]} labels={{ All: 'Service' }} />
           <button
-            onClick={() => setAddOpen(true)}
-            className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 whitespace-nowrap"
+            onClick={() => setShowMoreFilters((s) => !s)}
+            className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
           >
-            <Plus size={15} /> Add Lead
+            <SlidersHorizontal size={14} /> More Filters
           </button>
+          <LeadsColumnsMenu visibleColumns={visibleColumns} onChange={setVisibleColumns} icon={<Columns3 size={14} />} />
+          {/* The period is a filter, so it belongs with the filters rather than beside the one
+              button on the page that writes something. */}
+          <PeriodFilter period={period} onChange={setPeriod} referenceDate={TODAY} align="left" />
         </div>
+        <button
+          onClick={() => setAddOpen(true)}
+          className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 whitespace-nowrap shrink-0"
+        >
+          <Plus size={15} /> Add Lead
+        </button>
       </div>
 
       {showMoreFilters && (
