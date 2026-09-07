@@ -1,4 +1,5 @@
 {
+  "regions": ["cdg1"],
   "rewrites": [
     { "source": "/((?!api/|assets/|brand/|favicon\\.svg).*)", "destination": "/index.html" }
   ],
