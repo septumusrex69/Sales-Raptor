@@ -72,14 +72,14 @@ to the client**, never a single number on a settings page.
 
 VAT applies to commission.
 
-**OPEN:** which figure selects the band — the capital originally handed over, or the capital
-outstanding when the payment arrives? A R120,000 debt paid down to R80,000 would fall in
-different bands under the two readings.
+**The band is fixed at handover.** Whichever bracket the account falls into when it is handed
+over is the bracket it stays in — a R120,000 account paid down to R80,000 keeps the rate it
+started on. Like the in duplum ceiling, it is decided once and never recalculated.
 
-The in duplum ceiling was settled the same way this probably should be — fixed from the capital
-at handover, never recalculated — so the likely answer is the handover figure. Worth confirming
-rather than assuming, since it is the difference between a rate that is stable for the life of
-an account and one that improves for the debtor as they pay.
+Practically, that means the rate is stamped on the account at handover rather than looked up
+per payment: two accounts from the same client, handed over at different sizes, carry different
+rates for life, and re-reading the client's schedule later would silently change historical
+allocations.
 
 ---
 
@@ -254,11 +254,10 @@ before the data lands rather than after.
 
 | # | Question | Blocks |
 |---|---|---|
-| 1 | Which figure selects the commission band — capital handed over, or outstanding? | Commission |
-| 2 | Compounding date — from handover, first action, or month-end? | Interest |
-| 3 | Do fees earn interest from the date incurred? | Interest |
-| 4 | Does surplus on the cost half flow to capital? | Allocation |
-| 5 | A payment smaller than accrued interest — split, or all to interest? | Allocation |
-| 6 | Item 4(a) at exactly R50,000 — which band? | Edge case |
-| 7 | Item 1(b), registered letter under s57 — the Magistrates' Courts figure | Tariff |
-| 8 | Does the in duplum ceiling rise if more debt is later added to the account? | Edge case |
+| 1 | Compounding date — from handover, first action, or month-end? | Interest |
+| 2 | Do fees earn interest from the date incurred? | Interest |
+| 3 | Does surplus on the cost half flow to capital? | Allocation |
+| 4 | A payment smaller than accrued interest — split, or all to interest? | Allocation |
+| 5 | Item 4(a) at exactly R50,000 — which band? | Edge case |
+| 6 | Item 1(b), registered letter under s57 — the Magistrates' Courts figure | Tariff |
+| 7 | Does the in duplum ceiling rise if more debt is later added to the account? | Edge case |
