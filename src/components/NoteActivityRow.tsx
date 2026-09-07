@@ -67,11 +67,9 @@ export function NoteActivityRow({ group }: { group: GroupedActivity }) {
   const automatic = isAutomaticActivity(activity)
   const filename = downloadedFilename(activity)
 
-  const meta = [
-    emailTimeLabel(activity.activityDate),
-    actorName,
-    count > 1 ? (count === 2 ? 'twice' : `${count} times`) : null,
-  ]
+  // Who, then when. The day is already the heading above the row, so the time is the part
+  // that still says something here.
+  const meta = [actorName, emailTimeLabel(activity.activityDate), count > 1 ? (count === 2 ? 'twice' : `${count} times`) : null]
     .filter(Boolean)
     .join(' · ')
 
@@ -94,8 +92,12 @@ export function NoteActivityRow({ group }: { group: GroupedActivity }) {
             )}
           </>
         )}
-        <p className="text-[11.5px] text-slate-400 mt-0.5">{meta}</p>
       </div>
+      {/* Alongside rather than underneath. As a third line it doubled the height of every row,
+          including the one-line automatic ones, so a busy client scrolled twice as far to read
+          the same thing — and it puts the note rows on the same skeleton as the email rows,
+          which already carry their time out here. */}
+      <p className="text-[11.5px] text-slate-400 shrink-0 whitespace-nowrap tabular-nums pt-0.5">{meta}</p>
     </div>
   )
 }
