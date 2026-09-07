@@ -1,11 +1,16 @@
-import { addMonths, endOfDay, endOfMonth, endOfWeek, format, startOfDay, startOfMonth, startOfWeek, startOfYear, subMonths } from 'date-fns'
+import { endOfDay, endOfWeek, format, startOfDay, startOfWeek } from 'date-fns'
 import type { SalesMonthPeriod } from './salesMonth'
 
 /**
- * Calendar-based date ranges for the Leads page "Date Added" period filter —
- * deliberately separate from salesMonth.ts's fiscal 11th–10th Sales Month
- * system used by Dashboard/Reports. Shares the same {start,end,label,
- * rangeLabel,key} shape so it plugs straight into isWithinPeriod().
+ * The few ranges that aren't months at all — a day, a week, an arbitrary span, everything.
+ *
+ * The calendar-month helpers that used to live here are gone. They existed so the Leads page
+ * could filter on 1–30 September while the rest of Raptor counted the Sales Month of 11 Aug –
+ * 10 Sep, which meant a lead created on the 15th sat in one month on Leads and a different one
+ * on the dashboard. Months are now the business's months everywhere; see salesMonth.ts.
+ *
+ * These share the same {start,end,label,rangeLabel,key} shape so they plug straight into
+ * isWithinPeriod() alongside a real Sales Month.
  */
 
 function buildRange(start: Date, end: Date, label: string, key: string): SalesMonthPeriod {
@@ -32,27 +37,6 @@ export function getThisWeek(ref: Date): SalesMonthPeriod {
   return buildRange(start, end, 'This Week', `week-${format(start, 'yyyy-MM-dd')}`)
 }
 
-export function getThisCalendarMonth(ref: Date): SalesMonthPeriod {
-  const start = startOfMonth(ref)
-  const end = endOfMonth(ref)
-  return buildRange(start, end, format(ref, 'MMMM yyyy'), `month-${format(ref, 'yyyy-MM')}`)
-}
-
-export function getLastCalendarMonth(ref: Date): SalesMonthPeriod {
-  return getThisCalendarMonth(subMonths(ref, 1))
-}
-
-export function getLastNCalendarMonths(ref: Date, n: number): SalesMonthPeriod {
-  const start = startOfMonth(subMonths(ref, n - 1))
-  const end = endOfMonth(ref)
-  return buildRange(start, end, `Last ${n} Months`, `last-${n}-${format(ref, 'yyyy-MM')}`)
-}
-
-export function getThisCalendarYear(ref: Date): SalesMonthPeriod {
-  const start = startOfYear(ref)
-  return buildRange(start, endOfDay(ref), `${format(ref, 'yyyy')} Year to Date`, `year-${format(ref, 'yyyy')}`)
-}
-
 export function buildCustomDateRange(startStr: string, endStr: string): SalesMonthPeriod | undefined {
   if (!startStr || !endStr) return undefined
   const start = startOfDay(new Date(`${startStr}T00:00:00`))
@@ -61,16 +45,3 @@ export function buildCustomDateRange(startStr: string, endStr: string): SalesMon
   return buildRange(start, end, 'Custom Range', `custom-${startStr}-${endStr}`)
 }
 
-/** Steps a month-shaped period (as returned by getThisCalendarMonth) forward/back by one calendar month. */
-export function getAdjacentCalendarMonth(period: SalesMonthPeriod, direction: 1 | -1): SalesMonthPeriod {
-  const anchor = direction === 1 ? addMonths(period.start, 1) : subMonths(period.start, 1)
-  return getThisCalendarMonth(anchor)
-}
-
-/** The equivalent-length period immediately before `period`, for period-over-period comparison. */
-export function getPreviousEquivalentRange(period: SalesMonthPeriod): SalesMonthPeriod {
-  const lengthMs = period.end.getTime() - period.start.getTime()
-  const end = new Date(period.start.getTime() - 1)
-  const start = new Date(end.getTime() - lengthMs)
-  return buildRange(start, end, 'Previous Period', `prev-${period.key}`)
-}
