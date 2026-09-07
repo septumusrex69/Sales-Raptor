@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, ChevronRight } from 'lucide-react'
+import { AlertCircle, AlertTriangle, CheckCircle2, ChevronRight } from 'lucide-react'
 import { Card, CardHeader } from '../ui/Card'
 
 export interface AttentionItem {
@@ -8,6 +8,8 @@ export interface AttentionItem {
   detail: string
   count: number
   to: string
+  /** 'late' is already past a date; 'unattended' is merely sitting with nothing scheduled. */
+  severity?: 'late' | 'unattended'
 }
 
 /**
@@ -22,47 +24,66 @@ export interface AttentionItem {
  * absence of a problem is still visible rather than merely implied.
  */
 export function NeedsAttention({ items }: { items: AttentionItem[] }) {
-  const sorted = [...items].sort((a, b) => b.count - a.count)
+  // Already-late work leads regardless of size. Sorting on count alone put three overdue
+  // tasks behind thirteen deals that merely have nothing scheduled — the bigger number, but
+  // not the more urgent one, and the red card ended up third.
+  const rank = (i: AttentionItem) => (i.severity === 'late' ? 0 : 1)
+  const sorted = [...items].sort((a, b) => rank(a) - rank(b) || b.count - a.count)
   const problems = sorted.filter((i) => i.count > 0)
   const clear = sorted.filter((i) => i.count === 0)
-  const total = problems.reduce((s, i) => s + i.count, 0)
 
   return (
-    <Card padded={false}>
-      <div className="p-5 pb-3">
-        <CardHeader
-          title="Needs Attention"
-          subtitle={
-            total > 0
-              ? `${total} ${total === 1 ? 'item is' : 'items are'} unattended right now`
-              : 'Nothing unattended — every lead, deal and task has a next step'
-          }
-        />
-      </div>
+    <Card>
+      <CardHeader title="Needs Attention" subtitle="Key items requiring your action" />
 
       {problems.length === 0 ? (
-        <div className="px-5 pb-6 flex items-center gap-2.5 text-sm text-slate-500">
+        <div className="flex items-center gap-2.5 text-sm text-slate-500">
           <CheckCircle2 size={20} className="text-[var(--c-green)] shrink-0" />
           All clear. Nothing is sitting without a next action or past its date.
         </div>
       ) : (
-        <div className="divide-y divide-slate-50">
-          {problems.map((item) => (
-            <Link key={item.label} to={item.to} className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50/60 group">
-              <AlertTriangle size={16} className="text-[var(--c-gold)] shrink-0" />
-              <span className="w-11 text-lg font-extrabold text-slate-800 tabular-nums shrink-0">{item.count}</span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[13px] font-medium text-slate-700 leading-snug">{item.label}</span>
-                <span className="block text-[11.5px] text-slate-400">{item.detail}</span>
-              </span>
-              <ChevronRight size={15} className="text-slate-300 group-hover:text-brand-600 shrink-0" />
-            </Link>
-          ))}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          {problems.map((item) => {
+            // Overdue work is the only one of these that is already late rather than merely
+            // unattended, so it is the only one that gets the red.
+            const severe = item.severity === 'late'
+            return (
+              <Link
+                key={item.label}
+                to={item.to}
+                title={item.detail}
+                className="flex items-center gap-3 rounded-xl border border-slate-100 px-3.5 py-3 hover:bg-slate-50/60 hover:border-slate-200 group"
+              >
+                <span
+                  className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
+                  style={{ backgroundColor: severe ? 'var(--tint-rust)' : 'var(--tint-gold)' }}
+                >
+                  {severe ? (
+                    <AlertCircle size={17} style={{ color: 'var(--c-rust-deep)' }} />
+                  ) : (
+                    <AlertTriangle size={16} style={{ color: 'var(--c-gold-deep)' }} />
+                  )}
+                </span>
+
+                <span className="min-w-0 flex-1">
+                  <span className="block text-lg font-extrabold text-slate-800 leading-none tabular-nums">{item.count}</span>
+                  <span className="block text-[11.5px] text-slate-500 leading-snug mt-1">{item.label}</span>
+                </span>
+
+                <span
+                  className="text-[11px] font-semibold whitespace-nowrap shrink-0 inline-flex items-center gap-0.5"
+                  style={{ color: severe ? 'var(--c-rust-deep)' : 'var(--c-gold-deep)' }}
+                >
+                  Review <ChevronRight size={12} className="group-hover:translate-x-0.5 transition-transform" />
+                </span>
+              </Link>
+            )
+          })}
         </div>
       )}
 
       {clear.length > 0 && problems.length > 0 && (
-        <div className="px-5 py-3 border-t border-slate-50 flex flex-wrap gap-x-4 gap-y-1">
+        <div className="mt-3 pt-3 border-t border-slate-50 flex flex-wrap gap-x-4 gap-y-1">
           {clear.map((item) => (
             <span key={item.label} className="inline-flex items-center gap-1.5 text-[11.5px] text-slate-400">
               <CheckCircle2 size={12} className="text-[var(--c-green)]" />
