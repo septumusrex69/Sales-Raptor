@@ -421,6 +421,26 @@ collection activity running against it.
 Flagged for checking rather than as a finding: whether the Annexure B cap counts per account or
 per debtor, and exactly which action types fall inside it, is not yet confirmed.
 
+
+### The dry-run harness
+
+`scripts/swordfish/reconcile.mjs` checks whether our model reproduces Swordfish's numbers,
+and is meant to be run before any import writes a row:
+
+```
+node --experimental-strip-types scripts/swordfish/reconcile.mjs \
+  --summary accounts.csv --payments payments.csv --actions actions.csv
+```
+
+It imports the app's own tariff rather than restating the rates, so it cannot pass against
+numbers the app does not actually use. It exits non-zero on a failure, so it can gate an import.
+
+Against the 7 Sep 2026 exports it passes on balances, payments and in duplum, and fails on the
+population mismatch and on three billable action names it refuses to guess at — "Correspondence"
+(ambiguous between a letter and an email), "Necessary Costs" and "Team Leader Assistance".
+Those three need a decision before import; the harness naming them rather than filing them
+under the nearest match is the point.
+
 ## 10. Open items, collected
 
 - **What FCC is.** `All Fees (inc VAT + FCC)` exceeds the VAT-inclusive action costs by
