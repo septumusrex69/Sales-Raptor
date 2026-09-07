@@ -29,6 +29,7 @@ import { leadClassifications } from '../../data/mockData'
 import type { Contact, LeadStatus } from '../../types'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, serviceValueLabel, leadServiceValueList } from '../../components/leads/LeadOpportunityFields'
 import { summaryLine } from '../../lib/summaryLine'
+import { hasDealValue } from '../../lib/dealKind'
 
 export function LeadDetail() {
   const { id } = useParams()
@@ -39,6 +40,13 @@ export function LeadDetail() {
   const lead = leads.find((l) => l.id === id)
   const resultingDeals = useMemo(() => deals.filter((d) => d.leadId === id), [deals, id])
   const openLeadDeals = useMemo(() => resultingDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected'), [resultingDeals])
+  // Service deals only. A handover carries no deal value by design — its size is the book,
+  // which is shown as the Handover Amount — so including it here would either add zero or,
+  // worse, re-create the very sum this replaces.
+  const openDealValue = useMemo(
+    () => openLeadDeals.filter((d) => hasDealValue(d)).reduce((sum, d) => sum + d.value, 0),
+    [openLeadDeals],
+  )
   const canEdit = canEditOwned(currentUser, lead?.ownerId)
 
   const [editOpen, setEditOpen] = useState(false)
@@ -166,18 +174,22 @@ export function LeadDetail() {
               <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(estimatedHandover)}</p>
             </div>
           )}
-          <div>
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Estimated Value</p>
-            <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(lead.estimatedValue)}</p>
-          </div>
+          {/* Open deal value, not "estimated value". The old figure added the book to the
+              service deals and showed one number, which is the sum this whole model exists to
+              prevent: a book is work to be collected on commission, a service deal is a fee.
+              Adding them describes nothing. The book is the Handover Amount beside this; what
+              belongs here is the money the open service deals are actually worth. */}
+          <Link to={buildDrilldownUrl('/deals', { view: 'table' })} className="hover:opacity-70">
+            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Open Deal Value</p>
+            <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(openDealValue)}</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              {openLeadDeals.length} open deal{openLeadDeals.length === 1 ? '' : 's'}
+            </p>
+          </Link>
           <div>
             <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Lead Score</p>
             <p className="text-2xl font-bold text-slate-800 mt-0.5">{lead.score}</p>
           </div>
-          <Link to={buildDrilldownUrl('/deals', { view: 'table' })} className="hover:opacity-70">
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Open Deals</p>
-            <p className="text-2xl font-bold text-slate-800 mt-0.5">{openLeadDeals.length}</p>
-          </Link>
         </div>
 
         {lead.services && lead.services.length > 0 && (
