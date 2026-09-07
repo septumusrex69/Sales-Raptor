@@ -416,6 +416,22 @@ create table if not exists public.handovers (
 create index if not exists handovers_company_id_idx on public.handovers (company_id);
 create index if not exists handovers_received_at_idx on public.handovers (received_at desc);
 
+-- ---------- SECURITY DEFINER function exposure ----------
+-- A SECURITY DEFINER function runs with its owner's privileges, and every function in the
+-- public schema is reachable as a REST endpoint at /rest/v1/rpc/<name>. Left with the default
+-- grants, these three were callable by signed-out visitors — a documented way around RLS.
+--
+-- The two trigger functions are meant to fire from a trigger and never to be called directly.
+-- Postgres does not check EXECUTE when a trigger fires, so revoking costs nothing.
+revoke execute on function public.handle_new_user() from anon, authenticated, public;
+revoke execute on function public.protect_profile_privileged_fields() from anon, authenticated, public;
+
+-- current_user_role is different: RLS policies call it, and a policy expression is evaluated as
+-- the querying user, so `authenticated` must keep EXECUTE or every policy referencing it fails
+-- with a permission error. Signed-out callers have no business with it.
+revoke execute on function public.current_user_role() from anon, public;
+grant execute on function public.current_user_role() to authenticated;
+
 -- ---------- Base table grants ----------
 -- Tables created via the SQL Editor (as opposed to Supabase's Table Editor
 -- UI, which does this automatically) do NOT get default SELECT/INSERT/
