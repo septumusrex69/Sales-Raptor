@@ -416,6 +416,58 @@ create table if not exists public.handovers (
 create index if not exists handovers_company_id_idx on public.handovers (company_id);
 create index if not exists handovers_received_at_idx on public.handovers (received_at desc);
 
+-- ---------- Targets ----------
+-- What a team or a person is expected to produce in a sales month.
+--
+-- Two numbers per target, not one. The business talks about a floor and a goal in the same
+-- breath ("fifty is the minimum, we want seventy-five"), and collapsing that into a single
+-- figure loses the distinction that actually drives behaviour: below the floor is a problem,
+-- between floor and goal is acceptable, above the goal is the win.
+--
+-- period_key is null for a standing target — the number that applies every month unless
+-- something overrides it. A row with a period_key overrides the standing one for that single
+-- sales month, which is how a short December or a month with someone on leave gets handled
+-- without editing the permanent figure and forgetting to put it back.
+--
+-- scope_type says who owns the number. A team target is the team's total; a user target is one
+-- person's own. Both can exist at once — that is deliberate, because "the team must sign 75"
+-- and "each of you must sign at least 15" are both real and neither implies the other.
+create table if not exists public.targets (
+  id uuid primary key default gen_random_uuid(),
+  scope_type text not null check (scope_type in ('team', 'user')),
+  scope_id uuid not null,
+  metric text not null check (metric in ('leads', 'mandates', 'deals', 'revenue', 'book', 'accounts', 'activities')),
+  -- null = the standing target, applied to every sales month with no override of its own.
+  period_key text,
+  target_value numeric not null default 0,
+  -- The floor. Null where the business only has a goal and no separate minimum.
+  threshold_value numeric,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- One number per scope, metric and period. The partial index is what makes "null period_key"
+-- unique too — a plain unique constraint treats every null as distinct, which would silently
+-- allow two competing standing targets for the same thing.
+create unique index if not exists targets_scoped_period_idx
+  on public.targets (scope_type, scope_id, metric, period_key)
+  where period_key is not null;
+create unique index if not exists targets_scoped_standing_idx
+  on public.targets (scope_type, scope_id, metric)
+  where period_key is null;
+
+alter table public.targets enable row level security;
+
+-- Everyone sees the targets — a number nobody can see is not a target. Only an Administrator
+-- or a Sales Manager sets them.
+drop policy if exists "targets_select" on public.targets;
+create policy "targets_select" on public.targets for select using (auth.uid() is not null);
+
+drop policy if exists "targets_write" on public.targets;
+create policy "targets_write" on public.targets for all
+  using (public.current_user_role() in ('Administrator', 'Sales Manager'))
+  with check (public.current_user_role() in ('Administrator', 'Sales Manager'));
+
 -- ---------- SECURITY DEFINER function exposure ----------
 -- A SECURITY DEFINER function runs with its owner's privileges, and every function in the
 -- public schema is reachable as a REST endpoint at /rest/v1/rpc/<name>. Left with the default

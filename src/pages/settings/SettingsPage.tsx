@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
@@ -15,8 +15,12 @@ import { celebrationSoundEnabled, setCelebrationSoundEnabled } from '../../lib/c
 import { supabase, PRODUCTION_APP_URL } from '../../lib/supabase'
 import type { CustomField, CustomFieldType, Team, TeamKind, User, UserRole } from '../../types'
 import { DEAL_STAGES } from '../../types'
+import type { Target, TargetMetric } from '../../types'
+import { TARGET_METRICS, resolveTarget } from '../../lib/targets'
+import { getCurrentSalesMonth } from '../../lib/salesMonth'
+import { formatCurrency, TODAY } from '../../data/mockData'
 
-const TABS = ['Profile', 'Appearance', 'Users', 'Teams', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations'] as const
+const TABS = ['Profile', 'Appearance', 'Users', 'Teams', 'Targets', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations'] as const
 type Tab = (typeof TABS)[number]
 
 export function SettingsPage() {
@@ -40,6 +44,7 @@ export function SettingsPage() {
         {tab === 'Appearance' && <AppearanceTab />}
         {tab === 'Users' && <UsersTab />}
         {tab === 'Teams' && <TeamsTab />}
+        {tab === 'Targets' && <TargetsTab />}
         {tab === 'Pipelines' && <PipelinesTab />}
         {tab === 'Custom Fields' && <CustomFieldsTab />}
         {tab === 'Lead Sources' && <StringListTab title="Lead Sources" initial={initialLeadSources} />}
@@ -732,6 +737,183 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
         </div>
       </form>
     </Modal>
+  )
+}
+
+/**
+ * Where the numbers get set.
+ *
+ * Two scopes on purpose. A target on the team is the team's total; a target on a person is
+ * theirs alone. Neither implies the other and the business genuinely uses both — "we want 75
+ * mandates a month" is a team number, while "nobody signs fewer than 15" is a personal one —
+ * so this offers both rather than picking one and forcing the other to be derived from it.
+ *
+ * Each metric takes a goal and, optionally, a floor. That is how the targets were actually
+ * described ("fifty is the minimum, we want seventy-five"), and a single figure would throw
+ * away the half people are held to.
+ *
+ * A blank or zero goal clears the target rather than storing a goal of nothing.
+ */
+function TargetsTab() {
+  const { teams, users, targets, setTarget } = useAppStore()
+  const { currentUser } = useAuth()
+  const canEdit = currentUser?.role === 'Administrator' || currentUser?.role === 'Sales Manager'
+
+  const [scopeType, setScopeType] = useState<'team' | 'user'>('team')
+  const [scopeId, setScopeId] = useState<string>('')
+
+  const assignable = useMemo(() => users.filter((u) => u.status === 'Active'), [users])
+  const options: { id: string; name: string }[] = scopeType === 'team' ? teams : assignable
+  const effectiveScopeId = scopeId && options.some((o) => o.id === scopeId) ? scopeId : (options[0]?.id ?? '')
+  const periodKey = getCurrentSalesMonth(TODAY).key
+
+  return (
+    <Card>
+      <CardHeader
+        title="Targets"
+        subtitle="What a team or a person is expected to produce in a sales month. Set once and it applies every month until you change it."
+      />
+
+      <div className="flex flex-wrap gap-3 mb-5">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-slate-500">Set targets for</span>
+          <select
+            value={scopeType}
+            onChange={(e) => {
+              setScopeType(e.target.value as 'team' | 'user')
+              setScopeId('')
+            }}
+            className={inputClass}
+          >
+            <option value="team">A team</option>
+            <option value="user">One person</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 min-w-[220px]">
+          <span className="text-xs font-medium text-slate-500">{scopeType === 'team' ? 'Team' : 'Person'}</span>
+          <select value={effectiveScopeId} onChange={(e) => setScopeId(e.target.value)} className={inputClass}>
+            {options.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+            {options.length === 0 && <option value="">None yet</option>}
+          </select>
+        </label>
+      </div>
+
+      {!canEdit && (
+        <p className="text-sm text-slate-400 mb-4">
+          You can see the targets but not change them &mdash; that is an Administrator or Sales Manager job.
+        </p>
+      )}
+
+      {effectiveScopeId ? (
+        <div className="space-y-3 max-w-3xl">
+          <div className="hidden sm:grid grid-cols-[1fr_130px_130px] gap-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400 px-1">
+            <span>Metric</span>
+            <span>Target</span>
+            <span>Minimum</span>
+          </div>
+          {TARGET_METRICS.map((def) => (
+            <TargetRow
+              key={def.id}
+              metricId={def.id}
+              label={def.label}
+              description={def.description}
+              unit={def.unit}
+              existing={resolveTarget(targets, scopeType, effectiveScopeId, def.id, periodKey)}
+              disabled={!canEdit}
+              onSave={(targetValue, thresholdValue) =>
+                setTarget({ scopeType, scopeId: effectiveScopeId, metric: def.id, targetValue, thresholdValue })
+              }
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-slate-400">Create a {scopeType === 'team' ? 'team' : 'user'} first, then set its targets here.</p>
+      )}
+    </Card>
+  )
+}
+
+function TargetRow({
+  metricId,
+  label,
+  description,
+  unit,
+  existing,
+  disabled,
+  onSave,
+}: {
+  metricId: TargetMetric
+  label: string
+  description: string
+  unit: 'count' | 'currency'
+  existing?: Target
+  disabled: boolean
+  onSave: (targetValue: number, thresholdValue?: number) => void
+}) {
+  const [target, setTargetValue] = useState(existing ? String(existing.targetValue) : '')
+  const [floor, setFloor] = useState(existing?.thresholdValue != null ? String(existing.thresholdValue) : '')
+
+  // The stored value is the source of truth; re-sync when it changes underneath (another
+  // admin saving, or the scope selector switching to a different team).
+  useEffect(() => {
+    setTargetValue(existing ? String(existing.targetValue) : '')
+    setFloor(existing?.thresholdValue != null ? String(existing.thresholdValue) : '')
+  }, [existing?.id, existing?.targetValue, existing?.thresholdValue])
+
+  function commit() {
+    const t = Number(target)
+    const f = floor.trim() === '' ? undefined : Number(floor)
+    if (Number.isNaN(t) || (f !== undefined && Number.isNaN(f))) return
+    const nextTarget = target.trim() === '' ? 0 : t
+    if (nextTarget === (existing?.targetValue ?? 0) && f === existing?.thresholdValue) return
+    onSave(nextTarget, f)
+  }
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-[1fr_130px_130px] gap-3 items-center py-2 border-t border-slate-50">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-slate-700">
+          {label}
+          {unit === 'currency' && <span className="ml-1.5 text-[11px] font-normal text-slate-400">in rand</span>}
+        </p>
+        <p className="text-[11.5px] text-slate-400 leading-snug">{description}</p>
+      </div>
+      <input
+        type="number"
+        min={0}
+        inputMode="numeric"
+        value={target}
+        disabled={disabled}
+        onChange={(e) => setTargetValue(e.target.value)}
+        onBlur={commit}
+        placeholder="—"
+        aria-label={`${label} target`}
+        className={inputClass}
+      />
+      <input
+        type="number"
+        min={0}
+        inputMode="numeric"
+        value={floor}
+        disabled={disabled}
+        onChange={(e) => setFloor(e.target.value)}
+        onBlur={commit}
+        placeholder="optional"
+        aria-label={`${label} minimum`}
+        className={inputClass}
+      />
+      {existing && unit === 'currency' && (
+        <p className="sm:col-span-3 text-[11px] text-slate-400 -mt-1">
+          {formatCurrency(existing.targetValue)} a month
+          {existing.thresholdValue != null && `, minimum ${formatCurrency(existing.thresholdValue)}`}
+        </p>
+      )}
+      <input type="hidden" value={metricId} readOnly />
+    </div>
   )
 }
 
