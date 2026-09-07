@@ -29,7 +29,7 @@ import { RowMenu } from '../../components/ui/RowMenu'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { LeadForm } from '../../components/layout/QuickAdd'
-import { LeadsDateFilter } from '../../components/leads/LeadsDateFilter'
+import { PeriodFilter } from '../../components/ui/PeriodFilter'
 import { LeadsColumnsMenu } from '../../components/leads/LeadsColumnsMenu'
 import { LeadsKpiRow, type LeadsKpiValues } from '../../components/leads/LeadsKpiRow'
 import { RejectLeadModal } from '../../components/leads/RejectLeadModal'
@@ -39,8 +39,7 @@ import { dateGroupLabel, relativeDayLabel } from '../../lib/dateLabels'
 import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
 import { formatCurrency, formatDate, formatLeadNumber, daysAgoLabel, industries, leadClassifications, leadSources, provinces, services, TODAY } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
-import { decodeSalesMonthParam, isWithinPeriod, type SalesMonthPeriod } from '../../lib/salesMonth'
-import { getThisCalendarMonth } from '../../lib/dateRange'
+import { decodeSalesMonthParam, getCurrentSalesMonth, isWithinPeriod, type SalesMonthPeriod } from '../../lib/salesMonth'
 import { isMeaningfulActivity } from '../../lib/meaningfulActivity'
 import { ALL_COLUMNS, defaultVisibleColumns, SORTABLE_COLUMN_KEYS, type ColumnKey, type SortKey } from '../../lib/leadColumns'
 import type { Lead, LeadClassification, LeadStatus, ProductService } from '../../types'
@@ -95,7 +94,7 @@ export function LeadsList() {
   const [country, setCountry] = useState('All')
   const [city, setCity] = useState(() => readParam(searchParams, 'city') ?? 'All')
 
-  const [period, setPeriod] = useState<SalesMonthPeriod>(() => decodeSalesMonthParam(searchParams.get('salesMonth')) ?? getThisCalendarMonth(TODAY))
+  const [period, setPeriod] = useState<SalesMonthPeriod>(() => decodeSalesMonthParam(searchParams.get('salesMonth')) ?? getCurrentSalesMonth(TODAY))
   const [visibleColumns, setVisibleColumns] = useState<Record<ColumnKey, boolean>>(() => defaultVisibleColumns())
   const [sortKey, setSortKey] = useState<SortKey>('dateAdded')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
@@ -283,8 +282,9 @@ export function LeadsList() {
         >
           <SlidersHorizontal size={14} /> More Filters
         </button>
+        <LeadsColumnsMenu visibleColumns={visibleColumns} onChange={setVisibleColumns} icon={<Columns3 size={14} />} />
         <div className="ml-auto flex items-center gap-2">
-          <LeadsDateFilter period={period} onChange={setPeriod} referenceDate={TODAY} />
+          <PeriodFilter period={period} onChange={setPeriod} referenceDate={TODAY} />
           <button
             onClick={() => setAddOpen(true)}
             className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 whitespace-nowrap"
@@ -365,13 +365,7 @@ export function LeadsList() {
 
       <LeadsKpiRow current={kpiCurrent} />
 
-      <Card padded={false} className="relative">
-        {/* Columns sits on the header row itself rather than in a band above it — a strip of its
-            own cost 56px of the page to hold one small button. Positioned against the Card, not
-            inside the scroll container: within that overflow the dropdown would be clipped. */}
-        <div className="absolute right-2 top-1.5 z-40">
-          <LeadsColumnsMenu visibleColumns={visibleColumns} onChange={setVisibleColumns} icon={<Columns3 size={14} />} compact />
-        </div>
+      <Card padded={false}>
         {/* Bounded height so the header can freeze against it — and so the list, not the
             chrome, is what fills the screen. */}
         <div className="overflow-auto max-h-[calc(100vh-19rem)]">
@@ -410,7 +404,7 @@ export function LeadsList() {
                 {col.jobTitle && <th className="font-medium px-3 py-2 bg-white">Job Title</th>}
                 {col.phone && <th className="font-medium px-3 py-2 bg-white">Phone</th>}
                 {col.email && <th className="font-medium px-3 py-2 bg-white">Email</th>}
-                <th className="w-32"></th>
+                <th className="w-10"></th>
               </tr>
             </thead>
             <tbody>

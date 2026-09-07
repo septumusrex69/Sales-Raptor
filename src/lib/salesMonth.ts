@@ -108,6 +108,25 @@ export function getYTDRange(referenceDate: Date): SalesMonthPeriod {
   }
 }
 
+/**
+ * The Sales Month with a given name — "October 2026" is 11 Sep – 10 Oct 2026.
+ *
+ * `month` is 1-12 and names the month the period *ends* in, which is the month the period is
+ * called. Picking "October" therefore selects a range that mostly falls in September, which is
+ * exactly the point: the business's month is not the calendar's, and every figure in Raptor is
+ * counted on the business's.
+ */
+export function getSalesMonthForYearMonth(year: number, month: number): SalesMonthPeriod {
+  return getSalesMonthForDate(new Date(year, month - 1, 10))
+}
+
+/** The Sales Month a "yyyy-MM" key names, e.g. "2026-10". */
+export function getSalesMonthForKey(key: string): SalesMonthPeriod | undefined {
+  const match = /^(\d{4})-(\d{2})$/.exec(key)
+  if (!match) return undefined
+  return getSalesMonthForYearMonth(Number(match[1]), Number(match[2]))
+}
+
 export function isWithinPeriod(iso: string | undefined, period: SalesMonthPeriod): boolean {
   if (!iso) return false
   return isWithinInterval(parseISO(iso), { start: period.start, end: period.end })
