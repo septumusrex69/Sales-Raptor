@@ -20,6 +20,8 @@ import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/u
 import { HeroOwner } from '../../components/RecordOwner'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
+import { LogHandoverModal } from '../../components/companies/LogHandoverModal'
+import { HandoverBook } from '../../components/companies/HandoverBook'
 import type { Company, Contact } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
 import { summaryLine } from '../../lib/summaryLine'
@@ -37,6 +39,7 @@ export function CompanyDetail() {
     tasks,
     users,
     addActivity,
+    addHandover,
     updateCompany,
     updateContact,
     addContact,
@@ -71,6 +74,12 @@ export function CompanyDetail() {
   const companyContacts = useMemo(() => contacts.filter((c) => c.companyId === id), [contacts, id])
   const companyLeads = useMemo(() => leads.filter((l) => l.companyId === id), [leads, id])
   const companyDeals = useMemo(() => deals.filter((d) => d.companyId === id), [deals, id])
+  // The signed mandate a batch arrives under, so a handover is tied to the agreement it came
+  // in on rather than floating against the client in general.
+  const mandateDeal = useMemo(
+    () => companyDeals.find((d) => d.stage === 'Won' && d.handoverAmount != null),
+    [companyDeals],
+  )
   const openDeals = companyDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected')
   const wonDeals = companyDeals.filter((d) => d.stage === 'Won')
   const subAccounts = useMemo(() => companies.filter((c) => c.parentCompanyId === id), [companies, id])
@@ -433,6 +442,10 @@ export function CompanyDetail() {
         )}
       </Card>
 
+      {/* Above the deals: for a debt collection client this is the relationship. What they
+          signed is one line on a deal; what they actually send is the work. */}
+      <HandoverBook company={company} onLog={() => setHandoverOpen(true)} />
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 space-y-5">
           <Card>
@@ -599,13 +612,10 @@ export function CompanyDetail() {
         />
       )}
       {handoverOpen && (
-        <QuickLogModal
-          title="Log Handover Received"
-          fieldLabel="Details (optional)"
-          submitLabel="Log Handover"
-          required={false}
+        <LogHandoverModal
+          companyName={company.name}
           onClose={() => setHandoverOpen(false)}
-          onSave={(text) => addActivity({ type: 'Handover Received', subject: `Handover received — ${company.name}`, notes: text || undefined, companyId: company.id })}
+          onSave={(input) => addHandover({ ...input, companyId: company.id, dealId: mandateDeal?.id })}
         />
       )}
       {ownerOpen && (

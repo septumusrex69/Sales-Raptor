@@ -5,7 +5,9 @@ import { TODAY } from '../data/mockData'
 import { DEAL_STAGE_PROBABILITY } from '../types'
 import { normalizeDeal, normalizeLead } from '../lib/legacyValues'
 import { dealKind, kindForService } from '../lib/dealKind'
-import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, ProductService, Proposal, RejectionReason, Task, TaskType, Team, TeamKind, User } from '../types'
+import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, ProductService, Proposal, RejectionReason, Task, TaskType, Team, TeamKind, User,
+  Handover,
+} from '../types'
 
 /**
  * Generic camelCase(app) <-> snake_case(Postgres) row mapping. The SQL
@@ -163,6 +165,7 @@ interface AppState {
   tasks: Task[]
   activities: Activity[]
   proposals: Proposal[]
+  handovers: Handover[]
   users: User[]
   teams: Team[]
   notifications: AppNotification[]
@@ -262,6 +265,16 @@ interface AppActions {
   /** Re-reads activities + notifications after server-side email sync has written to them. */
   refreshSyncedData: () => Promise<void>
 
+  /**
+   * Records a batch of accounts a client actually handed over.
+   *
+   * Kept apart from the signed book on purpose: what a client says they have and what they
+   * send are different numbers, and only this one is a fact. Everything real about a handover
+   * client is a sum over these rows.
+   */
+  addHandover: (input: Partial<Handover> & { companyId: ID; capitalAmount: number }) => Handover
+  updateHandover: (id: ID, patch: Partial<Handover>) => void
+  deleteHandover: (id: ID) => void
   addProposal: (input: Partial<Proposal> & { dealId: ID; companyId: ID; service: string; pricing: number }) => Proposal
   updateProposal: (id: ID, patch: Partial<Proposal>) => void
 
@@ -295,6 +308,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [activities, setActivities] = useState<Activity[]>([])
   const [proposals, setProposals] = useState<Proposal[]>([])
+  const [handovers, setHandovers] = useState<Handover[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [teamRows, setTeamRows] = useState<{ id: ID; name: string; kind: TeamKind }[]>([])
   const [notifications, setNotifications] = useState<AppNotification[]>([])
@@ -319,6 +333,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       setTasks([])
       setActivities([])
       setProposals([])
+      setHandovers([])
       setUsers([])
       setTeamRows([])
       setNotifications([])
@@ -335,11 +350,12 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       fetchTable<Task>('tasks', 'created_at'),
       fetchTable<Activity>('activities', 'activity_date'),
       fetchTable<Proposal>('proposals', 'created_at'),
+      fetchTable<Handover>('handovers', 'received_at'),
       fetchTable<User>('profiles', 'created_at'),
       fetchTable<{ id: ID; name: string; kind: TeamKind }>('teams', 'created_at'),
       fetchTable<AppNotification>('notifications', 'created_at'),
     ])
-      .then(([l, d, ct, co, tk, ac, pr, us, tm, nt]) => {
+      .then(([l, d, ct, co, tk, ac, pr, hv, us, tm, nt]) => {
         if (!active) return
         // A row still carrying a retired stage or status would render in no column at all —
         // not last, gone — so map anything stale onto the current vocabulary on the way in.
@@ -350,6 +366,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         setTasks(rollOverMissedTasks(tk))
         setActivities(ac)
         setProposals(pr)
+        setHandovers(hv)
         setUsers(us)
         setTeamRows(tm)
         setNotifications(nt)
@@ -799,6 +816,69 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       addActivity({ type: 'Deal Rejected', subject: `${deal?.name ?? 'Deal'} rejected — ${reason}`, notes: note || undefined, dealId: id, companyId: deal?.companyId })
     },
     [deals, addActivity, showError],
+  )
+
+  const addHandover = useCallback<AppActions['addHandover']>(
+    (input) => {
+      const handover: Handover = {
+        id: crypto.randomUUID(),
+        receivedAt: nowIso(),
+        accountsCount: undefined,
+        loggedBy: ownerId,
+        createdAt: nowIso(),
+        ...input,
+      }
+      setHandovers((prev) => [handover, ...prev])
+      void (async () => {
+        const error = await insertRow('handovers', handover, 'addHandover')
+        if (error) {
+          setHandovers((prev) => prev.filter((h) => h.id !== handover.id))
+          showError(error)
+          return
+        }
+        // Logged only once the row is really there — an activity naming a batch that failed to
+        // insert points at nothing.
+        addActivity({
+          type: 'Handover Received',
+          subject: `Handover received: R${handover.capitalAmount.toLocaleString('en-ZA')}${handover.accountsCount ? ` · ${handover.accountsCount} accounts` : ''}`,
+          notes: [handover.reference, handover.notes].filter(Boolean).join(' — ') || undefined,
+          companyId: handover.companyId,
+          dealId: handover.dealId,
+        })
+      })()
+      return handover
+    },
+    [ownerId, addActivity, showError],
+  )
+
+  const updateHandover = useCallback<AppActions['updateHandover']>(
+    (id, patch) => {
+      let previous: Handover | undefined
+      setHandovers((prev) => {
+        previous = prev.find((h) => h.id === id)
+        return prev.map((h) => (h.id === id ? { ...h, ...patch } : h))
+      })
+      updateRow('handovers', id, patch, 'updateHandover', (message) => {
+        if (previous) setHandovers((prev) => prev.map((h) => (h.id === id ? previous! : h)))
+        showError(message)
+      })
+    },
+    [showError],
+  )
+
+  const deleteHandover = useCallback<AppActions['deleteHandover']>(
+    (id) => {
+      let previous: Handover | undefined
+      setHandovers((prev) => {
+        previous = prev.find((h) => h.id === id)
+        return prev.filter((h) => h.id !== id)
+      })
+      deleteRow('handovers', id, 'deleteHandover', (message) => {
+        if (previous) setHandovers((prev) => [previous!, ...prev])
+        showError(message)
+      })
+    },
+    [showError],
   )
 
   const addProposal = useCallback<AppActions['addProposal']>(
@@ -1358,6 +1438,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       tasks,
       activities,
       proposals,
+      handovers,
       users,
       teams,
       notifications,
@@ -1389,6 +1470,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       refreshSyncedData,
       addProposal,
       updateProposal,
+      addHandover,
+      updateHandover,
+      deleteHandover,
       updateUser,
       removeUserLocal,
       addTeam,
@@ -1409,6 +1493,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       tasks,
       activities,
       proposals,
+      handovers,
       users,
       teams,
       notifications,
@@ -1440,6 +1525,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       refreshSyncedData,
       addProposal,
       updateProposal,
+      addHandover,
+      updateHandover,
+      deleteHandover,
       updateUser,
       removeUserLocal,
       addTeam,

@@ -389,6 +389,33 @@ create table if not exists public.proposals (
   created_at timestamptz not null default now()
 );
 
+-- A handover is a batch of accounts a client actually sends, not a single event.
+-- A client signs a mandate saying "we have R1m to hand over" and then sends it in
+-- instalments over months. The signed figure is a claim; these rows are the facts.
+--
+-- capital_amount is the principal only. Annex B fees under the Debt Collectors Act
+-- and interest at 2% per month accrue on top of it as accounts are worked, so what a
+-- debtor owes and what was handed over are different numbers that diverge over time.
+--
+-- Deliberately a header table: debt collection agents will work individual accounts,
+-- and commission, legal fees and interest are all per-account, so account rows will
+-- reference a batch.
+create table if not exists public.handovers (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies (id) on delete cascade,
+  deal_id uuid references public.deals (id) on delete set null,
+  received_at timestamptz not null default now(),
+  capital_amount numeric not null default 0,
+  accounts_count integer,
+  reference text,
+  notes text,
+  logged_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists handovers_company_id_idx on public.handovers (company_id);
+create index if not exists handovers_received_at_idx on public.handovers (received_at desc);
+
 -- ---------- Base table grants ----------
 -- Tables created via the SQL Editor (as opposed to Supabase's Table Editor
 -- UI, which does this automatically) do NOT get default SELECT/INSERT/
@@ -424,6 +451,7 @@ alter table public.deals enable row level security;
 alter table public.tasks enable row level security;
 alter table public.activities enable row level security;
 alter table public.proposals enable row level security;
+alter table public.handovers enable row level security;
 
 -- companies/contacts/leads/deals/tasks/activities all follow the same
 -- shape: open read, open insert, and update/delete gated to the row's
@@ -494,6 +522,32 @@ create policy "proposals_delete" on public.proposals for delete
   using (
     public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
     or exists (select 1 from public.deals d where d.id = proposals.deal_id and d.owner_id = auth.uid())
+  );
+
+drop policy if exists "handovers_select" on public.handovers;
+create policy "handovers_select" on public.handovers for select using (auth.uid() is not null);
+
+drop policy if exists "handovers_insert" on public.handovers;
+create policy "handovers_insert" on public.handovers for insert with check (auth.uid() is not null);
+
+-- Correcting a batch is ordinary work — a client re-sends a corrected file, an amount
+-- is keyed wrong — so whoever logged it can fix it, alongside the managers.
+drop policy if exists "handovers_update" on public.handovers;
+create policy "handovers_update" on public.handovers for update
+  using (
+    public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
+    or logged_by = auth.uid()
+  )
+  with check (
+    public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
+    or logged_by = auth.uid()
+  );
+
+drop policy if exists "handovers_delete" on public.handovers;
+create policy "handovers_delete" on public.handovers for delete
+  using (
+    public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
+    or logged_by = auth.uid()
   );
 
 -- profiles: anyone can view the directory; you can edit your own row (name,

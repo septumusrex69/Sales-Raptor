@@ -130,6 +130,41 @@ export type DealStage = 'New Deal' | 'Quotation Sent' | 'Won' | 'Rejected'
  * at signature and the real numbers only exist once accounts are actually handed over. They
  * must never be added together: a signed book is not revenue.
  */
+/**
+ * One batch of accounts a client actually handed over.
+ *
+ * A client signs a mandate saying they have a million rand to hand over, then sends it in
+ * instalments across months — a hundred thousand at a time, or fifty thousand once and nothing
+ * after. The signed figure is a claim; these rows are what arrived. Every real measure of a
+ * handover client (received to date, run rate, how long since they last sent anything) is a
+ * sum over these, never the estimate.
+ *
+ * A header on purpose: agents work individual accounts, and commission, legal fees and
+ * interest all attach to an account, so account rows will reference a batch.
+ */
+export interface Handover {
+  id: ID
+  companyId: ID
+  /** The signed mandate this batch came in under, where there is one. */
+  dealId?: ID
+  receivedAt: string
+  /**
+   * The principal debt in this batch — capital only.
+   *
+   * Annex B fees under the Debt Collectors Act and interest at 2% per month accrue on top of
+   * this as accounts are worked, so what a debtor owes and what was handed over are different
+   * numbers that diverge over time. Commission is charged on capital collected; the fees and
+   * interest are recovered on top of it, and absorbed as a loss where nothing is collected.
+   */
+  capitalAmount: number
+  accountsCount?: number
+  /** What the team quotes back when a client asks what was received — a file name, a batch number. */
+  reference?: string
+  notes?: string
+  loggedBy?: ID
+  createdAt: string
+}
+
 export type DealKind = 'Service' | 'Handover'
 
 export const DEAL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Won', 'Rejected']
