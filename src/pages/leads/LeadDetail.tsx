@@ -359,6 +359,7 @@ export function LeadDetail() {
           ) : (
             <EmailActivityList
               activities={applyRowLimit(emailActivities, emailLimit)}
+              showDeal
               onReply={
                 lead.email
                   ? (a) => {

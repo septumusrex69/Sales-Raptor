@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { ArrowDownLeft, ArrowUpRight, Paperclip, Mail } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { ArrowDownLeft, ArrowUpRight, Paperclip, Mail, Handshake } from 'lucide-react'
 import { emailDayLabel, emailTimeLabel, parseEmailActivity } from '../lib/emailActivity'
 import { DateGroupHeading } from './ui/DateGroupHeading'
 import { useAppStore } from '../store/AppStore'
@@ -61,12 +62,29 @@ export function EmailLegend() {
  * received it belong to the message you've actually chosen, so they appear on open.
  * Shared by the Client and Lead pages so the two can't drift apart.
  */
-export function EmailActivityRow({ activity, onReply }: { activity: Activity; onReply?: () => void }) {
+export function EmailActivityRow({
+  activity,
+  onReply,
+  showDeal,
+}: {
+  activity: Activity
+  onReply?: () => void
+  /**
+   * Name the deal a message came from. On for the client and lead timelines, where an email
+   * arrives from somewhere and the reader has no way to tell which piece of business it was
+   * about — a client with a litigation matter and a collection mandate running at once has two
+   * conversations, and merging them without a label reads as one confusing one. Off on the deal
+   * page itself, where the answer is the page you are looking at.
+   */
+  showDeal?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const [downloading, setDownloading] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
-  const { userById, updateActivity, refreshSyncedData } = useAppStore()
+  const { userById, updateActivity, refreshSyncedData, deals } = useAppStore()
   const { session } = useAuth()
+
+  const dealLabel = showDeal && activity.dealId ? (deals.find((d) => d.id === activity.dealId)?.name ?? undefined) : undefined
 
   const parsed = parseEmailActivity(activity.subject)
   const kind = directionOf(parsed)
@@ -127,6 +145,16 @@ export function EmailActivityRow({ activity, onReply }: { activity: Activity; on
           {!open && body && <span className="text-[13.5px] text-slate-400 truncate min-w-0">{body}</span>}
         </span>
         <span className="flex items-center gap-2.5 shrink-0">
+          {dealLabel && (
+            <span
+              className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded-md max-w-[14rem] truncate"
+              style={{ backgroundColor: 'var(--tint-gold)', color: 'var(--c-gold-deep)' }}
+              title={`Sent from the deal: ${dealLabel}`}
+            >
+              <Handshake size={10} className="shrink-0" />
+              {dealLabel}
+            </span>
+          )}
           {attachments.length > 0 && <Paperclip size={13} className="text-slate-400" />}
           {isUnread && <span className="w-2 h-2 rounded-full bg-brand-500" title="Unread" />}
           <span className="text-[12px] text-slate-400 tabular-nums">{emailTimeLabel(activity.activityDate)}</span>
@@ -142,6 +170,13 @@ export function EmailActivityRow({ activity, onReply }: { activity: Activity; on
             {actorName && ` · ${parsed?.direction === 'sent' ? 'sent by' : 'received by'} ${actorName}`}
             {` · ${emailDayLabel(activity.activityDate)} at ${emailTimeLabel(activity.activityDate)}`}
           </p>
+          {dealLabel && activity.dealId && (
+            <p className="text-[11px] mb-2">
+              <Link to={`/deals/${activity.dealId}`} className="font-medium text-brand-600 hover:underline">
+                Open the {dealLabel} deal &rarr;
+              </Link>
+            </p>
+          )}
           {body && <p className="text-[13.5px] leading-relaxed text-slate-600 whitespace-pre-wrap max-w-[70ch]">{body}</p>}
           <div className="flex flex-wrap items-center gap-2 mt-3">
             {attachments.map((name, i) => (
@@ -190,7 +225,15 @@ export function EmailActivityRow({ activity, onReply }: { activity: Activity; on
  * each row only needs a time — "05 Sep 2026 at 21:55" repeated down every row was a large
  * share of what made the list feel bulky.
  */
-export function EmailActivityList({ activities, onReply }: { activities: Activity[]; onReply?: (activity: Activity) => void }) {
+export function EmailActivityList({
+  activities,
+  onReply,
+  showDeal,
+}: {
+  activities: Activity[]
+  onReply?: (activity: Activity) => void
+  showDeal?: boolean
+}) {
   let lastDay: string | null = null
   return (
     <div className="-mx-1">
@@ -205,7 +248,7 @@ export function EmailActivityList({ activities, onReply }: { activities: Activit
               {showDay && (
                 <DateGroupHeading label={day} />
               )}
-              <EmailActivityRow activity={a} onReply={onReply ? () => onReply(a) : undefined} />
+              <EmailActivityRow activity={a} onReply={onReply ? () => onReply(a) : undefined} showDeal={showDeal} />
             </div>
           )
         })}

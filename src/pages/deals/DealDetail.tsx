@@ -420,6 +420,7 @@ export function DealDetail() {
         <ComposeEmailModal
           to={contact?.email ?? recipients[0]?.email}
           recipients={recipients}
+          contextNote={`Filed against this deal${company ? ` and ${company.name}` : ''}${deal.leadId ? ", and the lead's history" : ''} — one record, visible on each.`}
           onClose={() => setComposeOpen(false)}
           onSent={(subject, bodyText, emailMessageId) =>
             // Carries the deal; addActivity fills the client in from it, so one record lands on
