@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../store/AuthContext'
 import { SetPasswordPage } from '../../pages/auth/SetPasswordPage'
+import { IdleTimeout } from './IdleTimeout'
 
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { session, loading, currentUser, signOut, passwordSetupRequired, profileError, reloadProfile } = useAuth()
@@ -50,5 +51,10 @@ export function RequireAuth({ children }: { children: ReactNode }) {
       </div>
     )
   }
-  return <>{children}</>
+  return (
+    <>
+      <IdleTimeout />
+      {children}
+    </>
+  )
 }

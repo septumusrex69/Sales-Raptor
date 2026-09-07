@@ -604,6 +604,13 @@ create policy "teams_write" on public.teams for all
 -- last_seen_uid_junk the same for the mailbox's Junk/Spam folder (a client's
 -- reply misfiled as spam is still a reply) -- IMAP UIDs are only unique
 -- within a single mailbox, so each folder needs its own watermark.
+-- email_connections deliberately has RLS enabled and NO policies, which means no browser can
+-- read it at all — only server-side code holding the service key, which is every route under
+-- api/email/. The rows hold mailbox credentials; they are encrypted on top of this, and the
+-- absence of a policy is the second lock rather than an oversight.
+--
+-- Supabase's security advisor reports this as "RLS enabled, no policy". That report is
+-- expected. Do not resolve it by adding a policy.
 create table if not exists public.email_connections (
   user_id uuid primary key references public.profiles (id) on delete cascade,
   email text not null,
