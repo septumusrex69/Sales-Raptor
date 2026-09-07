@@ -22,6 +22,7 @@ import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
 import type { Company, Contact } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
+import { summaryLine } from '../../lib/summaryLine'
 
 export function CompanyDetail() {
   const { id } = useParams()
@@ -132,9 +133,10 @@ export function CompanyDetail() {
                 <span className="text-white/30">·</span>
               </>
             )}
-            <span>
-              {company.industry} · {company.city}, {company.province}
-            </span>
+            {(() => {
+              const line = summaryLine([company.industry, summaryLine([company.city, company.province], ', ')])
+              return line ? <span>{line}</span> : null
+            })()}
           </span>
         }
       >

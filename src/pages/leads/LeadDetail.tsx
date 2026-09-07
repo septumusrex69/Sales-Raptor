@@ -28,6 +28,7 @@ import { formatCurrency, formatDate, formatLeadNumber, industries, leadSources }
 import { leadClassifications } from '../../data/mockData'
 import type { Contact, LeadStatus } from '../../types'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, serviceValueLabel, leadServiceValueList } from '../../components/leads/LeadOpportunityFields'
+import { summaryLine } from '../../lib/summaryLine'
 
 export function LeadDetail() {
   const { id } = useParams()
@@ -94,12 +95,17 @@ export function LeadDetail() {
         title={`${lead.firstName} ${lead.lastName}`}
         subtitle={
           <span className="inline-flex flex-wrap items-center gap-x-1.5">
-            <span>
-              {lead.jobTitle ? `${lead.jobTitle} at ` : ''}
-              {lead.companyName}
-            </span>
-            <span className="text-white/30">·</span>
-            <span>Source: {lead.source}</span>
+            {(() => {
+              const who = summaryLine([lead.jobTitle && lead.companyName ? `${lead.jobTitle} at ${lead.companyName}` : lead.jobTitle || lead.companyName])
+              const source = lead.source ? `Source: ${lead.source}` : ''
+              return (
+                <>
+                  {who && <span>{who}</span>}
+                  {who && source && <span className="text-white/30">·</span>}
+                  {source && <span>{source}</span>}
+                </>
+              )
+            })()}
           </span>
         }
       >
