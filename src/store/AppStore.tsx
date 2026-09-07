@@ -5,6 +5,7 @@ import { TODAY } from '../data/mockData'
 import { DEAL_STAGE_PROBABILITY } from '../types'
 import { normalizeDeal, normalizeLead } from '../lib/legacyValues'
 import { dealKind, kindForService } from '../lib/dealKind'
+import { RaptorCelebration } from '../components/ui/RaptorCelebration'
 import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, ProductService, Proposal, RejectionReason, Task, TaskType, Team, TeamKind, User,
   Handover,
 } from '../types'
@@ -286,6 +287,8 @@ interface AppActions {
   deleteTeam: (id: ID) => void
 
   dismissToast: () => void
+  /** Fires the take-off animation. Reserved for things genuinely worth celebrating. */
+  celebrate: (message: string) => void
 
   companyById: (id?: ID) => Company | undefined
   contactById: (id?: ID) => Contact | undefined
@@ -314,6 +317,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const [toast, setToast] = useState<string | null>(null)
+  const [celebration, setCelebration] = useState<string | null>(null)
 
   useEffect(() => {
     if (!toast) return
@@ -323,6 +327,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const showError = useCallback((message: string) => setToast(friendlyError(message)), [])
   const dismissToast = useCallback(() => setToast(null), [])
+  const celebrate = useCallback((message: string) => setCelebration(message), [])
 
   useEffect(() => {
     if (!session) {
@@ -755,6 +760,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         setCompanies((prev) => prev.map((c) => (c.id === deal.companyId ? { ...c, mandateSignedAt: signedAt } : c)))
         updateRow('companies', deal.companyId, { mandateSignedAt: signedAt }, 'markDealWon:mandateSigned')
       }
+      celebrate(isHandover ? 'Mandate signed' : 'Deal won')
       addActivity({
         type: 'Deal Won',
         subject: isHandover
@@ -764,7 +770,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         companyId: deal?.companyId,
       })
     },
-    [deals, addActivity, showError],
+    [deals, addActivity, showError, celebrate],
   )
 
   const logDealDocument = useCallback<AppActions['logDealDocument']>(
@@ -1273,6 +1279,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         setContacts((prev) => prev.map((c) => (c.id === contact.id ? { ...c, companyId } : c)))
         updateRow('contacts', contact.id, { companyId }, 'convertLeadToClient:contactCompany')
       }
+      celebrate('New client signed')
       addActivity({ type: 'Status change', subject: `Lead converted to client: ${lead.companyName}`, leadId, companyId })
       for (const deal of dealsToConfirm) {
         if (deal.outcome === 'signed') {
@@ -1357,7 +1364,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
       return { companyId, deal: firstDeal }
     },
-    [leads, deals, contacts, ensureLeadCompany, updateLead, addActivity, showError],
+    [leads, deals, contacts, ensureLeadCompany, updateLead, addActivity, showError, celebrate],
   )
 
   const rejectLead = useCallback<AppActions['rejectLead']>(
@@ -1497,6 +1504,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateTeam,
       deleteTeam,
       dismissToast,
+      celebrate,
       companyById,
       contactById,
       dealById,
@@ -1552,6 +1560,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateTeam,
       deleteTeam,
       dismissToast,
+      celebrate,
       companyById,
       contactById,
       dealById,
@@ -1563,6 +1572,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={value}>
       {children}
+      {celebration && <RaptorCelebration message={celebration} onDone={() => setCelebration(null)} />}
       {toast && (
         <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[100] bg-navy-950 text-white text-sm font-medium px-4 py-2.5 rounded-lg shadow-lg flex items-center gap-3">
           <span>{toast}</span>
