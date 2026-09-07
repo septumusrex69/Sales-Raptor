@@ -56,6 +56,11 @@ function friendlyError(message: string): string {
   if (message.includes('row-level security') || message.includes('JSON object requested')) {
     return "You don't have permission to do that."
   }
+  // An empty string where a uuid belongs means the app tried to stamp a record with the
+  // signed-in person's id before it knew who they were. Nobody can act on the Postgres text.
+  if (message.includes('invalid input syntax for type uuid')) {
+    return "That didn't save because the app hadn't finished signing you in. Reload the page and try again."
+  }
   return message
 }
 
@@ -370,7 +375,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [teamRows, users],
   )
 
-  const ownerId = authUser?.id ?? ''
+  // The profile row is a separate request that can lag or fail; the session is not, and it
+  // carries the same uuid as profiles.id. Preferring the profile but falling back to the
+  // session means a slow or failed profile fetch can no longer poison every write with an
+  // empty string — which Postgres rejects outright, losing the person's work.
+  const ownerId = authUser?.id ?? session?.user?.id ?? ''
   const nowIso = () => new Date().toISOString()
 
   const addActivity = useCallback<AppActions['addActivity']>(
