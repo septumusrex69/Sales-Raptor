@@ -291,6 +291,15 @@ for statement continuity.
 The interface is step 5 deliberately. An interface over a wrongly migrated book is worse than
 no interface: it looks authoritative while being wrong.
 
+**Every migrated client arrives with a mandate**, so the import does not have to handle
+clients without one. But that is a record to create, not a check to skip: a handover cannot be
+loaded against a client with no signed mandate on file, so if the import brings in accounts and
+books without also recording the mandate, the rule fires on the first new batch after go-live —
+for every migrated client at once, and for a reason that is true in Raptor and false in life.
+
+So each migrated client needs a Handover deal marked Won, standing for the mandate they already
+hold, dated from Swordfish where it records one and from the earliest handover otherwise.
+
 **Swordfish stays readable after cutover.** Statements covering periods it calculated will still
 be needed, and the Council can ask.
 
