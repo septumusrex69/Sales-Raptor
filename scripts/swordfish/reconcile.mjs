@@ -14,7 +14,7 @@
  */
 import fs from 'node:fs'
 import { parseCsv, num, date } from './csv.mjs'
-import { codeForLegacyName, rateFor, ACTION_BY_CODE } from '../../src/lib/actionTariff.ts'
+import { codeForLegacyName, rateFor, ACTION_BY_CODE, isQuarantinedLegacyName } from '../../src/lib/actionTariff.ts'
 
 const CENT = 0.011 // a cent, with room for float noise
 
@@ -125,12 +125,19 @@ if (actions.length) {
   // frozen — which belong in the history but were never billable and need no tariff.
   const unbilled = new Map()
   const billedGap = new Map()
+  const quarantined = new Map()
   let mapped = 0
   for (const a of actions) {
     const name = a['Action Name']
     if (!name) continue
     if (codeForLegacyName(name)) { mapped++; continue }
     const cost = num(a['Action Cost (excl VAT)']) ?? 0
+    if (isQuarantinedLegacyName(name)) {
+      const cur = quarantined.get(name) ?? { n: 0, total: 0 }
+      cur.n++; cur.total += cost
+      quarantined.set(name, cur)
+      continue
+    }
     const target = cost > 0 ? billedGap : unbilled
     const cur = target.get(name) ?? { n: 0, total: 0 }
     cur.n++; cur.total += cost
@@ -145,6 +152,12 @@ if (actions.length) {
           ...gaps.slice(0, 8).map(([n, v]) => `${v.n} x "${n}" — ${money(v.total)}`),
           'Add each to ACTION_DEFINITIONS, or confirm it is not billable.',
         ])
+  if (quarantined.size) {
+    check('fees held back pending classification', 'warn', [
+      ...[...quarantined.entries()].map(([n, v]) => `${v.n} x "${n}" — ${money(v.total)} not carried into balances`),
+      'These import as history. Classify them to release the money, or write them off.',
+    ])
+  }
 
   let priced = 0, atRate = 0, short = 0, over = 0
   const staleByClient = new Map()

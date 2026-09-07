@@ -145,8 +145,59 @@ export function rateFor(code: ActionCode, date: Date | string, segments = 1): nu
  * historical data is, and deliberately returns undefined rather than guessing — an action that
  * cannot be identified must be reported and looked at, not quietly filed under the nearest match.
  */
+
+/**
+ * Legacy names resolved by evidence rather than by pattern.
+ *
+ * Kept as an explicit list, with the evidence written down, because these are judgements about
+ * historical money and someone will eventually need to know why a 2024 fee is filed where it
+ * is. A fuzzy rule that quietly absorbed them would be unreviewable; this can be argued with.
+ */
+export const LEGACY_NAME_OVERRIDES: { legacy: string; code: ActionCode; evidence: string }[] = [
+  {
+    legacy: 'correspondence',
+    code: 'email_out',
+    evidence:
+      'All 25 charged instances carry the comment "Emailed debtor", and 24 of them are priced at ' +
+      'R21 — the outgoing-email rate in force at the time. The name is vague; what was done is not.',
+  },
+]
+
+/**
+ * Names that must come across as history but must not bring a fee with them.
+ *
+ * The action happened and the audit trail should say so, but nobody at the business can identify
+ * what was being charged for, and a fee filed under a guessed Annexure B item is a wrong
+ * statement waiting to be reissued. These import with their money held back for classification
+ * rather than being silently dropped or silently accepted.
+ */
+export const QUARANTINED_LEGACY_NAMES: { legacy: string; reason: string }[] = [
+  {
+    legacy: 'necessarycosts',
+    reason:
+      'Eight charges of R21, all raised on 2024-05-07, commented only "Necessary Costs". Nobody at ' +
+      'the business recognises the item. Looks like a one-off bulk entry.',
+  },
+  {
+    legacy: 'teamleaderassistance',
+    reason:
+      'A single R25 charge in Aug 2026 commented "WhatsApp Call - No Contact". Confirmed as not a ' +
+      'standard item, and the name and the comment disagree about what happened.',
+  },
+]
+
+/** Whether a legacy name is one whose fee is held back pending classification. */
+export function isQuarantinedLegacyName(name: string): boolean {
+  const x = name.toLowerCase().replace(/[^a-z]/g, '')
+  return QUARANTINED_LEGACY_NAMES.some((q) => q.legacy === x)
+}
+
 export function codeForLegacyName(name: string): ActionCode | undefined {
   const x = name.toLowerCase().replace(/[^a-z]/g, '')
+  // An evidenced override beats a pattern, and a quarantined name resolves to nothing at all.
+  const override = LEGACY_NAME_OVERRIDES.find((o) => o.legacy === x)
+  if (override) return override.code
+  if (QUARANTINED_LEGACY_NAMES.some((q) => q.legacy === x)) return undefined
   if (x.includes('aknowledg') || x.includes('acknowledg')) return 'acknowledgement_of_debt'
   if (x.includes('perusal')) return 'perusal'
   if (x.includes('consultation')) return 'consultation'
