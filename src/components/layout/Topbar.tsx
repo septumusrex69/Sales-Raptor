@@ -1,4 +1,5 @@
 import { GlobalSearch } from './GlobalSearch'
+import { MessagesMenu } from './MessagesMenu'
 import { NotificationsMenu } from './NotificationsMenu'
 import { QuickAdd } from './QuickAdd'
 import { useTitleSlotNode } from './TitleSlot'
@@ -15,6 +16,7 @@ export function Topbar({ title }: { title: string }) {
         <GlobalSearch />
       </div>
       <div className="flex items-center gap-2 shrink-0">
+        <MessagesMenu />
         <NotificationsMenu />
         <QuickAdd />
       </div>

@@ -66,6 +66,8 @@ export function EmailActivityRow({
   activity,
   onReply,
   showDeal,
+  open: openProp,
+  onToggleOpen,
 }: {
   activity: Activity
   onReply?: () => void
@@ -77,8 +79,19 @@ export function EmailActivityRow({
    * page itself, where the answer is the page you are looking at.
    */
   showDeal?: boolean
+  /**
+   * Which row is open is owned by the list, not by each row.
+   *
+   * With every row keeping its own state, reading five emails left five expanded at once and a
+   * page metres long — you lose your place, and the list stops being a list. One at a time
+   * keeps the thread scannable and means opening the next message needs no tidying up first.
+   */
+  open?: boolean
+  onToggleOpen?: (next: boolean) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [selfOpen, setSelfOpen] = useState(false)
+  const open = openProp ?? selfOpen
+  const setOpen = (next: boolean) => (onToggleOpen ? onToggleOpen(next) : setSelfOpen(next))
   const [downloading, setDownloading] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const { userById, updateActivity, refreshSyncedData, deals } = useAppStore()
@@ -97,7 +110,7 @@ export function EmailActivityRow({
 
   function toggle() {
     if (isUnread) updateActivity(activity.id, { isRead: true })
-    setOpen((v) => !v)
+    setOpen(!open)
   }
 
   /**
@@ -234,6 +247,8 @@ export function EmailActivityList({
   onReply?: (activity: Activity) => void
   showDeal?: boolean
 }) {
+  // One at a time. Opening a message closes whatever was open before it.
+  const [openId, setOpenId] = useState<string | null>(null)
   let lastDay: string | null = null
   return (
     <div className="-mx-1">
@@ -248,7 +263,13 @@ export function EmailActivityList({
               {showDay && (
                 <DateGroupHeading label={day} />
               )}
-              <EmailActivityRow activity={a} onReply={onReply ? () => onReply(a) : undefined} showDeal={showDeal} />
+              <EmailActivityRow
+                activity={a}
+                onReply={onReply ? () => onReply(a) : undefined}
+                showDeal={showDeal}
+                open={openId === a.id}
+                onToggleOpen={(next) => setOpenId(next ? a.id : null)}
+              />
             </div>
           )
         })}
