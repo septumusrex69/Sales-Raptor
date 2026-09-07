@@ -13,7 +13,7 @@ import { CompareSelector, type CompareMode } from '../components/ui/CompareSelec
 import { SalesFunnelChart } from '../components/dashboard/SalesFunnelChart'
 import { WinRateCard } from '../components/dashboard/WinRateCard'
 import { DashboardHero } from '../components/dashboard/DashboardHero'
-import { RevenueTrendChart } from '../components/dashboard/RevenueTrendChart'
+import { SalesTrendCard } from '../components/dashboard/SalesTrendCard'
 import { ActivityBreakdownChart } from '../components/dashboard/ActivityBreakdownChart'
 import { WinRateByKind } from '../components/dashboard/WinRateByKind'
 import { LossReasonsCard } from '../components/dashboard/LossReasonsCard'
@@ -339,33 +339,35 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
   const attentionItems: AttentionItem[] = useMemo(
     () => [
       {
-        label: 'Overdue tasks',
+        label: 'Overdue Tasks',
         detail: 'Past their due date and still not done',
         count: secondary.overdueTasksCount,
+        severity: 'late',
         to: buildDrilldownUrl('/tasks', { view: 'Overdue' }),
       },
       {
-        label: 'Leads untouched this month',
+        label: 'Untouched Leads',
         detail: 'Active leads with no call, meeting or email logged in this sales month',
         count: secondary.untouchedCount,
         to: buildDrilldownUrl('/leads', { touched: '0', [SALES_MONTH_PARAM]: periodParam }),
       },
       {
-        label: 'Leads with no next action',
+        label: 'Leads With No Next Action',
         detail: 'Nothing scheduled — they will go quiet unless someone books a follow-up',
         count: secondary.leadsNoNextActionCount,
         to: buildDrilldownUrl('/leads', { noNextAction: '1' }),
       },
       {
-        label: 'Deals with no next action',
+        label: 'Deals With No Next Action',
         detail: 'Open deals with nobody due to do anything next',
         count: secondary.dealsNoNextActionCount,
         to: buildDrilldownUrl('/deals', { noNextAction: '1', view: 'table' }),
       },
       {
-        label: 'Deals past their close date',
+        label: 'Deals Past Close Date',
         detail: 'Still open after the date they were expected to close',
         count: secondary.dealsOverdueCount,
+        severity: 'late',
         to: buildDrilldownUrl('/deals', { overdue: '1', view: 'table' }),
       },
     ],
@@ -437,59 +439,14 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
 
       {communicationsSnapshot?.(period)}
 
-      {/* Six numbers, not sixteen. These are the ones a manager is actually judged on; the
-          operational warnings that used to sit alongside them are now one panel below, where
-          they read as a worklist instead of competing with the results for attention. */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        <StatTile
-          label="Revenue Won"
-          value={formatCurrency(kpis.curr.revenueWon)}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.revenueWon, kpis.prev.revenueWon) : undefined}
-          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
-          hint="Fees on won service deals. Handovers are excluded — a signed book earns nothing at signature."
-          to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
-        />
-        {/* Deliberately its own figure rather than part of revenue. A signed book is work won,
-            not money earned — the commission only arrives as accounts are collected. */}
-        <StatTile
-          label="Book Signed"
-          value={formatCurrency(kpis.curr.bookSigned)}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.bookSigned, kpis.prev.bookSigned) : undefined}
-          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
-          hint="Total handover value on mandates signed this month. Not revenue — it becomes revenue only as it is collected."
-          to={buildDrilldownUrl('/deals', { stage: 'Won', service: 'Debt Collection', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
-        />
-        <StatTile
-          label="Accounts Signed"
-          value={kpis.curr.accountsSigned.toLocaleString()}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.accountsSigned, kpis.prev.accountsSigned) : undefined}
-          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
-          hint="Number of debtor accounts handed over on mandates signed this month."
-          to={buildDrilldownUrl('/deals', { stage: 'Won', service: 'Debt Collection', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
-        />
-        <StatTile
-          label="Deals Won"
-          value={kpis.curr.won.toString()}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.won, kpis.prev.won) : undefined}
-          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
-          hint="Every deal marked Won in this sales month — service deals and mandates together."
-          to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
-        />
-        <StatTile
-          label="Win Rate"
-          value={`${kpis.curr.winRate}%`}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.winRate, kpis.prev.winRate) : undefined}
-          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
-          hint="Of the deals that closed this month, the share that were won. Open deals are not counted."
-          accent="gold"
-        />
-        <StatTile
-          label="Pipeline"
-          value={formatCurrency(pipeline.value)}
-          hint={`Open service deals, right now — ${pipeline.count} open deals, of which ${formatCurrency(pipeline.book)} is handover book carrying no fee until collected. Not a monthly figure, so it has no comparison.`}
-          to={buildDrilldownUrl('/deals', { view: 'table' })}
-        />
-      </div>
+      <WinRateCard
+        cohort={cohort}
+        newLeads={kpis.curr.newLeads}
+        qualified={kpis.curr.qualified}
+        converted={kpis.curr.converted}
+        periodLabel={period.label}
+        periodParam={periodParam}
+      />
 
       <TargetsCard
         title="Targets"
@@ -501,6 +458,66 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
         items={targetProgressItems}
         elapsed={elapsed}
       />
+
+      {/* The month's results, in secondary size. They sit below the outcome and target cards
+          because those answer "how are we doing" — these are the components of that answer,
+          and giving them the page's largest type made the page a scoreboard with no verdict. */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+        <StatTile
+          size="secondary"
+          label="Revenue Won"
+          value={formatCurrency(kpis.curr.revenueWon)}
+          pctChange={kpis.prev ? pctDelta(kpis.curr.revenueWon, kpis.prev.revenueWon) : undefined}
+          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+          hint="Fees on won service deals. Handovers are excluded — a signed book earns nothing at signature."
+          to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
+        />
+        {/* Deliberately its own figure rather than part of revenue. A signed book is work won,
+            not money earned — the commission only arrives as accounts are collected. */}
+        <StatTile
+          size="secondary"
+          label="Book Signed"
+          value={formatCurrency(kpis.curr.bookSigned)}
+          pctChange={kpis.prev ? pctDelta(kpis.curr.bookSigned, kpis.prev.bookSigned) : undefined}
+          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+          hint="Total handover value on mandates signed this month. Not revenue — it becomes revenue only as it is collected."
+          to={buildDrilldownUrl('/deals', { stage: 'Won', service: 'Debt Collection', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          size="secondary"
+          label="Accounts Signed"
+          value={kpis.curr.accountsSigned.toLocaleString()}
+          pctChange={kpis.prev ? pctDelta(kpis.curr.accountsSigned, kpis.prev.accountsSigned) : undefined}
+          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+          hint="Number of debtor accounts handed over on mandates signed this month."
+          to={buildDrilldownUrl('/deals', { stage: 'Won', service: 'Debt Collection', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          size="secondary"
+          label="Deals Won"
+          value={kpis.curr.won.toString()}
+          pctChange={kpis.prev ? pctDelta(kpis.curr.won, kpis.prev.won) : undefined}
+          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+          hint="Every deal marked Won in this sales month — service deals and mandates together."
+          to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          size="secondary"
+          label="Win Rate"
+          value={`${kpis.curr.winRate}%`}
+          pctChange={kpis.prev ? pctDelta(kpis.curr.winRate, kpis.prev.winRate) : undefined}
+          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+          hint="Of the deals that closed this month, the share that were won. Open deals are not counted."
+          accent="gold"
+        />
+        <StatTile
+          size="secondary"
+          label="Pipeline"
+          value={formatCurrency(pipeline.value)}
+          hint={`Open service deals, right now — ${pipeline.count} open deals, of which ${formatCurrency(pipeline.book)} is handover book carrying no fee until collected. Not a monthly figure, so it has no comparison.`}
+          to={buildDrilldownUrl('/deals', { view: 'table' })}
+        />
+      </div>
 
       <NeedsAttention items={attentionItems} />
 
@@ -594,15 +611,6 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
         <ActivityBreakdownChart activities={scopedActivities.filter((a) => isWithinPeriod(a.activityDate, period))} />
       </div>
 
-      <WinRateCard
-        cohort={cohort}
-        newLeads={kpis.curr.newLeads}
-        qualified={kpis.curr.qualified}
-        converted={kpis.curr.converted}
-        periodLabel={period.label}
-        periodParam={periodParam}
-      />
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <WinRateByKind
           serviceWinRate={kpis.curr.serviceWinRate}
@@ -614,7 +622,7 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
         <LossReasonsCard leads={rejectedLeads} deals={rejectedDeals} periodLabel={period.label} />
       </div>
 
-      <RevenueTrendChart deals={scopedDeals} referenceDate={TODAY} />
+      <SalesTrendCard deals={scopedDeals} leads={scopedLeads} referenceDate={TODAY} />
 
       <RepLeaderboard rows={leaderboardRows} />
 
