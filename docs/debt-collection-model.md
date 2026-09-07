@@ -74,8 +74,12 @@ VAT applies to commission.
 
 **OPEN:** which figure selects the band — the capital originally handed over, or the capital
 outstanding when the payment arrives? A R120,000 debt paid down to R80,000 would fall in
-different bands under the two readings. The handover figure is the stabler choice, since the
-band then cannot move mid-life, but this needs confirming.
+different bands under the two readings.
+
+The in duplum ceiling was settled the same way this probably should be — fixed from the capital
+at handover, never recalculated — so the likely answer is the handover figure. Worth confirming
+rather than assuming, since it is the difference between a rate that is stable for the life of
+an account and one that improves for the debtor as they pay.
 
 ---
 
@@ -96,35 +100,44 @@ or from the next compounding date?
 ## 5. In duplum
 
 **An account cannot more than double.** Interest and fees *together* may not exceed the
-capital: a R100 account cannot become more than R200, whatever the mix of interest and fees.
+capital: a R1,000 account can never carry more than R1,000 of interest and fees, so the most it
+can ever reach is R2,000.
 
-That is the broad reading — the cap catches Annexure B fees as well as interest, not interest
-alone. It binds harder than the Annexure B ceiling on small debts, where capital is the lower
-figure anyway; on large debts the Annexure B ceiling limits items 1–7 to R1,225 while in duplum
-still allows interest to run up to capital less fees.
+**The ceiling is fixed at handover and never moves.** It is set from the capital as handed over
+and stays there for the life of the account. If capital is paid down to R750, or R700, the
+ceiling is still R1,000. It does not track the outstanding balance.
 
-Three points of precision are still needed, and they change balances rather than presentation:
+That makes this the simplest of the three rules to implement — one figure, stamped on the
+account at handover, never recalculated — and it removes the question of what happens to
+charges already raised when a ceiling drops, because it never drops.
 
-**OPEN — which capital?** The capital originally handed over, or the capital outstanding at the
-time? These diverge as soon as anything is paid. Taken literally ("an account outstanding for
-R100"), the ceiling moves down as capital is repaid, which means a payment can lower the
-ceiling at the same moment it reduces the charges beneath it.
+**Charges keep accruing past the ceiling; only the ceiling is recoverable.** Interest and fees
+continue to be raised against the account after the cap is reached, and the excess is simply
+not collectable from the debtor. This is deliberate: it keeps the true cost of the account
+visible, so the system can report what an account actually cost against what could be recovered
+from it. Freezing the charges at the cap would hide that, and the unrecovered cost is exactly
+the number BF carries the risk on.
 
-**OPEN — a stop on accrual, or a cap on recovery?** Do interest and fees stop being raised once
-the ceiling is reached, or do they keep accruing internally with only the capped amount
-recoverable from the debtor? The second version keeps BF's true cost visible; the first keeps
-the ledger simpler and the balance honest.
+It also tells you when to stop working an account: once recovery is capped and the cost keeps
+climbing, further work is money spent that can never come back.
 
-**OPEN — the ceiling falling below charges already raised.** If capital reduces and the ceiling
-drops under interest and fees already accrued, is the excess written off permanently, or held
-suspended in case capital rises again?
+### Interest is worth more than fees
 
----
+**Interest carries no VAT. Fees do.** Every rand of fee recovered has VAT inside it that must be
+paid over; a rand of interest recovered is kept whole.
+
+So where the in duplum cap limits what can be recovered, it is materially better for BF that
+the recovered amount is made up of interest rather than fees. The allocation order in §7 already
+clears interest before fees, which turns out to be both the agreed rule and the commercially
+better one — worth stating explicitly so nobody "simplifies" that order later without realising
+it costs money.
 
 ## 6. VAT
 
 - On **commission**: yes
 - On **Annexure B fees**: yes
+- On **interest**: no — interest is recovered whole (see §5, which is why interest is cleared
+  first)
 - **Every amount in the tariff is VAT-exclusive** — the gazetted figures, the AOD bands, all of
   them. VAT is added when the fee is raised. Recorded on the schedule itself in
   `src/lib/annexureB.ts`, because the gazette doesn't state it and reading those figures as
@@ -244,10 +257,8 @@ before the data lands rather than after.
 | 1 | Which figure selects the commission band — capital handed over, or outstanding? | Commission |
 | 2 | Compounding date — from handover, first action, or month-end? | Interest |
 | 3 | Do fees earn interest from the date incurred? | Interest |
-| 4 | In duplum — original capital or outstanding capital? | Balance itself |
-| 5 | In duplum — stop on accrual, or cap on recovery? | Balance itself |
-| 6 | In duplum — excess written off, or suspended if capital rises? | Balance itself |
-| 7 | Does surplus on the cost half flow to capital? | Allocation |
-| 8 | A payment smaller than accrued interest — split, or all to interest? | Allocation |
-| 9 | Item 4(a) at exactly R50,000 — which band? | Edge case |
-| 10 | Item 1(b), registered letter under s57 — the Magistrates' Courts figure | Tariff |
+| 4 | Does surplus on the cost half flow to capital? | Allocation |
+| 5 | A payment smaller than accrued interest — split, or all to interest? | Allocation |
+| 6 | Item 4(a) at exactly R50,000 — which band? | Edge case |
+| 7 | Item 1(b), registered letter under s57 — the Magistrates' Courts figure | Tariff |
+| 8 | Does the in duplum ceiling rise if more debt is later added to the account? | Edge case |
