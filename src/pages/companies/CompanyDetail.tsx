@@ -134,10 +134,11 @@ export function CompanyDetail() {
                 </Link>
                 <button
                   onClick={() => updateCompany(company.id, { parentCompanyId: undefined })}
-                  className="inline-flex items-center text-white/40 hover:text-white"
-                  title="Remove from parent"
+                  className="inline-flex items-center text-white/60 hover:text-white"
+                  title="Make this an independent client"
+                  aria-label="Make this an independent client"
                 >
-                  <Unlink size={11} />
+                  <Unlink size={12} />
                 </button>
                 <span className="text-white/30">·</span>
               </>
@@ -642,6 +643,7 @@ export function CompanyDetail() {
       {parentOpen && (
         <AssignParentModal
           currentParentId={company.parentCompanyId}
+          currentParentName={companies.find((c) => c.id === company.parentCompanyId)?.name}
           candidates={companies.filter((c) => c.id !== company.id && !c.parentCompanyId)}
           onClose={() => setParentOpen(false)}
           onAssignExisting={(parentId) => updateCompany(company.id, { parentCompanyId: parentId })}
@@ -649,6 +651,7 @@ export function CompanyDetail() {
             const parent = addCompany({ name, code: code || undefined, accountOwnerId: company.accountOwnerId })
             updateCompany(company.id, { parentCompanyId: parent.id })
           }}
+          onMakeIndependent={() => updateCompany(company.id, { parentCompanyId: undefined })}
         />
       )}
       {deleteOpen && (
@@ -882,18 +885,30 @@ function DeleteClientModal({
   )
 }
 
+/**
+ * Assigning a client to a parent, and taking it back out again.
+ *
+ * Both directions live here because they are one decision, and because the way out was
+ * previously an eleven-pixel icon at forty percent opacity in the hero band — present, working,
+ * and findable by nobody. A relationship you can enter and not leave isn't a setting, it's a
+ * trap.
+ */
 function AssignParentModal({
   currentParentId,
+  currentParentName,
   candidates,
   onClose,
   onAssignExisting,
   onCreateNew,
+  onMakeIndependent,
 }: {
   currentParentId?: string
+  currentParentName?: string
   candidates: Company[]
   onClose: () => void
   onAssignExisting: (parentId: string) => void
   onCreateNew: (name: string, code: string) => void
+  onMakeIndependent: () => void
 }) {
   const [mode, setMode] = useState<'existing' | 'new'>(candidates.length > 0 ? 'existing' : 'new')
   const [selectedId, setSelectedId] = useState(currentParentId ?? candidates[0]?.id ?? '')
@@ -901,7 +916,7 @@ function AssignParentModal({
   const [newCode, setNewCode] = useState('')
 
   return (
-    <Modal title="Assign to Parent Client" onClose={onClose} width={420}>
+    <Modal title={currentParentId ? 'Parent Client' : 'Assign to Parent Client'} onClose={onClose} width={420}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
@@ -961,10 +976,29 @@ function AssignParentModal({
             Cancel
           </button>
           <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
-            Assign
+            {currentParentId ? 'Move' : 'Assign'}
           </button>
         </div>
       </form>
+
+      {currentParentId && (
+        <div className="mt-4 pt-3 border-t border-slate-100">
+          <p className="text-xs text-slate-400 mb-2">
+            Currently a sub-account of {currentParentName ?? 'another client'}. Making it independent leaves it a client in
+            its own right — nothing else about it changes, and its own sub-accounts stay with it.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              onMakeIndependent()
+              onClose()
+            }}
+            className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+          >
+            <Unlink size={13} /> Make independent
+          </button>
+        </div>
+      )}
     </Modal>
   )
 }
