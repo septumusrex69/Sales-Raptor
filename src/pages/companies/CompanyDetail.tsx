@@ -414,6 +414,7 @@ export function CompanyDetail() {
         ) : (
           <EmailActivityList
             activities={applyRowLimit(emailActivities, emailLimit)}
+            showDeal
             onReply={(a) => {
               const replyToAddress = a.contactId ? contacts.find((c) => c.id === a.contactId)?.email : company.email
               if (!replyToAddress) return

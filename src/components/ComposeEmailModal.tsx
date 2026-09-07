@@ -11,6 +11,7 @@ export function ComposeEmailModal({
   recipients,
   initialSubject,
   initialBody,
+  contextNote,
   onClose,
   onSent,
 }: {
@@ -25,6 +26,14 @@ export function ComposeEmailModal({
    * stop and create a contact record is how a CRM gets worked around instead of used.
    */
   recipients?: { email: string; label?: string }[]
+  /**
+   * Where this message will end up, said before it is sent rather than discovered afterwards.
+   *
+   * Sending from inside a deal files the message on the deal, the client and the lead at once,
+   * which is not obvious from a modal that only shows a To field — and someone who assumes it
+   * vanished into the deal alone will go and send it from somewhere else instead.
+   */
+  contextNote?: string
   /** Pre-filled subject, e.g. "Re: ..." when replying to a received email. */
   initialSubject?: string
   /** Pre-filled body, e.g. a quoted copy of the message being replied to. */
@@ -98,6 +107,7 @@ export function ComposeEmailModal({
         <FormField label="Message" required>
           <textarea className={inputClass} rows={7} value={body} onChange={(e) => setBody(e.target.value)} required autoFocus={!!initialSubject} />
         </FormField>
+        {contextNote && <p className="text-[11.5px] text-slate-400 mb-3 -mt-1">{contextNote}</p>}
         {error && <p className="text-xs text-red-600 mb-3">{error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="text-sm font-medium px-4 py-2 rounded-lg text-slate-500 hover:bg-slate-100">
