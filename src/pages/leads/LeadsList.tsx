@@ -12,6 +12,7 @@ import {
   XCircle,
   Search,
   SlidersHorizontal,
+  Columns3,
   Plus,
   Trash2,
   ChevronLeft,
@@ -28,7 +29,8 @@ import { RowMenu } from '../../components/ui/RowMenu'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { LeadForm } from '../../components/layout/QuickAdd'
-import { LeadsPeriodBar } from '../../components/leads/LeadsPeriodBar'
+import { LeadsDateFilter } from '../../components/leads/LeadsDateFilter'
+import { LeadsColumnsMenu } from '../../components/leads/LeadsColumnsMenu'
 import { LeadsKpiRow, type LeadsKpiValues } from '../../components/leads/LeadsKpiRow'
 import { RejectLeadModal } from '../../components/leads/RejectLeadModal'
 import { SortHeader } from '../../components/ui/SortHeader'
@@ -38,7 +40,7 @@ import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
 import { formatCurrency, formatDate, formatLeadNumber, daysAgoLabel, industries, leadClassifications, leadSources, provinces, services, TODAY } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
 import { decodeSalesMonthParam, isWithinPeriod, type SalesMonthPeriod } from '../../lib/salesMonth'
-import { getPreviousEquivalentRange, getThisCalendarMonth } from '../../lib/dateRange'
+import { getThisCalendarMonth } from '../../lib/dateRange'
 import { isMeaningfulActivity } from '../../lib/meaningfulActivity'
 import { ALL_COLUMNS, defaultVisibleColumns, SORTABLE_COLUMN_KEYS, type ColumnKey, type SortKey } from '../../lib/leadColumns'
 import type { Lead, LeadClassification, LeadStatus, ProductService } from '../../types'
@@ -157,12 +159,6 @@ export function LeadsList() {
     })
   }, [leads, activities, period, status, source, owner, industry, province, country, city, service, classification, scoreThreshold, search, noNextActionFilter, touchedFilter])
 
-  const previousPeriod = useMemo(() => getPreviousEquivalentRange(period), [period])
-  const filteredPrevious = useMemo(
-    () => leads.filter((l) => isWithinPeriod(l.createdAt, previousPeriod) && matchesLeadFilters(l) && matchesSearch(l)),
-    [leads, previousPeriod, status, source, owner, industry, province, country, city, service, classification, scoreThreshold, search],
-  )
-
   function computeKpis(rows: Lead[]): LeadsKpiValues {
     return {
       totalLeads: rows.length,
@@ -174,7 +170,6 @@ export function LeadsList() {
     }
   }
   const kpiCurrent = useMemo(() => computeKpis(filtered), [filtered])
-  const kpiPrevious = useMemo(() => computeKpis(filteredPrevious), [filteredPrevious])
 
   function getSortValue(l: Lead, key: SortKey): string | number | undefined {
     switch (key) {
@@ -269,38 +264,34 @@ export function LeadsList() {
   const visibleColumnCount = ALL_COLUMNS.filter((key) => col[key]).length + 1
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
-          Leads
-        </h2>
-        <p className="text-sm text-slate-400 mt-0.5">Manage, track and convert your leads</p>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2.5">
-        <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 w-64">
+    <div className="space-y-3">
+      {/* One toolbar. The four filters people actually reach for stay on the face of it; the
+          rest moved behind More Filters, which is what stopped this wrapping onto a second row
+          and pushing the table itself below the fold. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 w-52">
           <Search size={15} className="text-slate-400" />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search leads..." className="text-sm outline-none flex-1 min-w-0" />
         </div>
         <SimpleSelect value={status} onChange={(v) => setStatus(v as typeof status)} options={['All', ...ALL_STATUSES]} labels={{ All: 'All Statuses' }} />
         <SimpleSelect value={classification} onChange={(v) => setClassification(v as typeof classification)} options={['All', ...leadClassifications]} labels={{ All: 'All Classes' }} />
-        <SimpleSelect value={scoreThreshold} onChange={(v) => setScoreThreshold(v as typeof scoreThreshold)} options={[...SCORE_THRESHOLDS]} labels={{ All: 'All Scores', '80': '80+', '60': '60+', '40': '40+', '20': '20+' }} />
         <SimpleSelect value={owner} onChange={setOwner} options={['All', ...reps.map((r) => r.id)]} labels={{ All: 'All Owners', ...Object.fromEntries(reps.map((r) => [r.id, r.name])) }} />
         <SimpleSelect value={service} onChange={(v) => setService(v as typeof service)} options={['All', ...services]} labels={{ All: 'All Services' }} />
-        <SimpleSelect value={province} onChange={setProvince} options={['All', ...provinces]} labels={{ All: 'All Provinces' }} />
-        <SimpleSelect value={source} onChange={setSource} options={['All', ...leadSources]} labels={{ All: 'All Sources' }} />
         <button
           onClick={() => setShowMoreFilters((s) => !s)}
           className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
         >
           <SlidersHorizontal size={14} /> More Filters
         </button>
-        <button
-          onClick={() => setAddOpen(true)}
-          className="ml-auto inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700"
-        >
-          <Plus size={15} /> Add Lead
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <LeadsDateFilter period={period} onChange={setPeriod} referenceDate={TODAY} />
+          <button
+            onClick={() => setAddOpen(true)}
+            className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 whitespace-nowrap"
+          >
+            <Plus size={15} /> Add Lead
+          </button>
+        </div>
       </div>
 
       {showMoreFilters && (
@@ -328,12 +319,40 @@ export function LeadsList() {
                 ))}
               </select>
             </FormField>
+            <FormField label="Score">
+              <select className={inputClass} value={scoreThreshold} onChange={(e) => setScoreThreshold(e.target.value as typeof scoreThreshold)}>
+                {SCORE_THRESHOLDS.map((v) => (
+                  <option key={v} value={v}>
+                    {v === 'All' ? 'All Scores' : `${v}+`}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+            <FormField label="Province">
+              <select className={inputClass} value={province} onChange={(e) => setProvince(e.target.value)}>
+                <option>All</option>
+                {provinces.map((p) => (
+                  <option key={p}>{p}</option>
+                ))}
+              </select>
+            </FormField>
+            <FormField label="Source">
+              <select className={inputClass} value={source} onChange={(e) => setSource(e.target.value)}>
+                <option>All</option>
+                {leadSources.map((sc) => (
+                  <option key={sc}>{sc}</option>
+                ))}
+              </select>
+            </FormField>
             <div className="flex items-end">
               <button
                 onClick={() => {
                   setIndustry('All')
                   setCountry('All')
                   setCity('All')
+                  setScoreThreshold('All')
+                  setProvince('All')
+                  setSource('All')
                 }}
                 className="text-sm font-medium text-slate-500 hover:text-slate-700"
               >
@@ -344,44 +363,54 @@ export function LeadsList() {
         </Card>
       )}
 
-      <LeadsPeriodBar period={period} onChange={setPeriod} referenceDate={TODAY} visibleColumns={visibleColumns} onChangeColumns={setVisibleColumns} />
+      <LeadsKpiRow current={kpiCurrent} />
 
-      <LeadsKpiRow current={kpiCurrent} previous={period.key === 'all-time' ? undefined : kpiPrevious} compareLabel="vs previous period" />
-
-      <Card padded={false}>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-slate-400">
+      <Card padded={false} className="relative">
+        {/* Columns sits on the header row itself rather than in a band above it — a strip of its
+            own cost 56px of the page to hold one small button. Positioned against the Card, not
+            inside the scroll container: within that overflow the dropdown would be clipped. */}
+        <div className="absolute right-2 top-1.5 z-40">
+          <LeadsColumnsMenu visibleColumns={visibleColumns} onChange={setVisibleColumns} icon={<Columns3 size={14} />} compact />
+        </div>
+        {/* Bounded height so the header can freeze against it — and so the list, not the
+            chrome, is what fills the screen. */}
+        <div className="overflow-auto max-h-[calc(100vh-19rem)]">
+          {/* Sizes to its content and scrolls rather than compressing every column to fit.
+              Squeezed to the container width, short values broke onto two lines — "No Contact
+              / Yet", "Debt / Collection" — which quietly doubled the row height and undid the
+              space the compact header just bought. */}
+          <table className="min-w-full text-sm whitespace-nowrap">
+            <thead className="sticky top-0 z-20 bg-white">
+              <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
                 {col.leadNumber && (
-                  <th className="font-medium px-5 py-2.5 sticky z-10 bg-white min-w-[100px]" style={{ left: pinnedLeft.leadNumber }}>
+                  <th className="font-medium px-5 py-2 sticky z-30 bg-white min-w-[100px]" style={{ left: pinnedLeft.leadNumber }}>
                     {sortableHeader('leadNumber', 'Lead #')}
                   </th>
                 )}
                 {col.companyLead && (
-                  <th className="font-medium px-3 py-2.5 sticky z-10 bg-white min-w-[180px]" style={{ left: pinnedLeft.companyLead }}>
+                  <th className="font-medium px-3 py-2 bg-white sticky z-10 bg-white min-w-[180px]" style={{ left: pinnedLeft.companyLead }}>
                     {sortableHeader('companyLead', 'Company / Lead')}
                   </th>
                 )}
-                {col.dateAdded && <th className="font-medium px-3 py-2.5">{sortableHeader('dateAdded', 'Added')}</th>}
-                {col.contactPerson && <th className="font-medium px-3 py-2.5">Contact Person</th>}
-                {col.status && <th className="font-medium px-3 py-2.5">{sortableHeader('status', 'Status')}</th>}
-                {col.classification && <th className="font-medium px-3 py-2.5">{sortableHeader('classification', 'Class')}</th>}
-                {col.score && <th className="font-medium px-3 py-2.5">{sortableHeader('score', 'Score')}</th>}
-                {col.services && <th className="font-medium px-3 py-2.5">Service(s)</th>}
-                {col.estValue && <th className="font-medium px-3 py-2.5 text-right">{sortableHeader('estValue', 'Est. Value', 'right')}</th>}
-                {col.handoverAmount && <th className="font-medium px-3 py-2.5 text-right">{sortableHeader('handoverAmount', 'Handover Amount', 'right')}</th>}
-                {col.owner && <th className="font-medium px-3 py-2.5">Owner</th>}
-                {col.nextFollowUp && <th className="font-medium px-3 py-2.5">{sortableHeader('nextFollowUp', 'Next Follow-up')}</th>}
-                {col.lastContact && <th className="font-medium px-3 py-2.5">{sortableHeader('lastContact', 'Last Contact')}</th>}
-                {col.source && <th className="font-medium px-3 py-2.5">Source</th>}
-                {col.city && <th className="font-medium px-3 py-2.5">City</th>}
-                {col.province && <th className="font-medium px-3 py-2.5">Province</th>}
-                {col.leadAge && <th className="font-medium px-3 py-2.5">Lead Age</th>}
-                {col.jobTitle && <th className="font-medium px-3 py-2.5">Job Title</th>}
-                {col.phone && <th className="font-medium px-3 py-2.5">Phone</th>}
-                {col.email && <th className="font-medium px-3 py-2.5">Email</th>}
-                <th className="w-10"></th>
+                {col.dateAdded && <th className="font-medium px-3 py-2 bg-white">{sortableHeader('dateAdded', 'Added')}</th>}
+                {col.contactPerson && <th className="font-medium px-3 py-2 bg-white">Contact Person</th>}
+                {col.status && <th className="font-medium px-3 py-2 bg-white">{sortableHeader('status', 'Status')}</th>}
+                {col.classification && <th className="font-medium px-3 py-2 bg-white">{sortableHeader('classification', 'Class')}</th>}
+                {col.score && <th className="font-medium px-3 py-2 bg-white">{sortableHeader('score', 'Score')}</th>}
+                {col.services && <th className="font-medium px-3 py-2 bg-white">Service(s)</th>}
+                {col.estValue && <th className="font-medium px-3 py-2 bg-white text-right">{sortableHeader('estValue', 'Est. Value', 'right')}</th>}
+                {col.handoverAmount && <th className="font-medium px-3 py-2 bg-white text-right">{sortableHeader('handoverAmount', 'Handover Amount', 'right')}</th>}
+                {col.owner && <th className="font-medium px-3 py-2 bg-white">Owner</th>}
+                {col.nextFollowUp && <th className="font-medium px-3 py-2 bg-white">{sortableHeader('nextFollowUp', 'Next Follow-up')}</th>}
+                {col.lastContact && <th className="font-medium px-3 py-2 bg-white">{sortableHeader('lastContact', 'Last Contact')}</th>}
+                {col.source && <th className="font-medium px-3 py-2 bg-white">Source</th>}
+                {col.city && <th className="font-medium px-3 py-2 bg-white">City</th>}
+                {col.province && <th className="font-medium px-3 py-2 bg-white">Province</th>}
+                {col.leadAge && <th className="font-medium px-3 py-2 bg-white">Lead Age</th>}
+                {col.jobTitle && <th className="font-medium px-3 py-2 bg-white">Job Title</th>}
+                {col.phone && <th className="font-medium px-3 py-2 bg-white">Phone</th>}
+                {col.email && <th className="font-medium px-3 py-2 bg-white">Email</th>}
+                <th className="w-32"></th>
               </tr>
             </thead>
             <tbody>

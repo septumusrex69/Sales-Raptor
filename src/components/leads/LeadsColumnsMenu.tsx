@@ -6,10 +6,13 @@ export function LeadsColumnsMenu({
   visibleColumns,
   onChange,
   icon,
+  compact,
 }: {
   visibleColumns: Record<ColumnKey, boolean>
   onChange: (next: Record<ColumnKey, boolean>) => void
   icon?: ReactNode
+  /** Sits inside the table's own header strip, so it wears less padding than a page control. */
+  compact?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -31,7 +34,11 @@ export function LeadsColumnsMenu({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+        className={
+          compact
+            ? 'inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+            : 'inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+        }
       >
         {icon} Columns
       </button>
