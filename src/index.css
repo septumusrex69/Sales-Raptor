@@ -58,6 +58,9 @@
   --c-steel-soft: #5f86ab;
   --c-steel-bright: #4a7ba7;
   --c-ink: #1e293b;
+  /* The halo behind an autofilled field while it has focus. Gold in both skins today, but a
+     skin can say otherwise. */
+  --skin-autofill-ring: rgb(201 160 82 / 0.25);
   --c-gold-bright: #c9a227;
   --c-grey-warm: #6b7280;
   --c-gold-brand: #c69f54;
@@ -147,6 +150,49 @@ body {
 }
 ::-webkit-scrollbar-track {
   background-color: transparent;
+}
+
+/*
+ * Autofill.
+ *
+ * Safari and Chrome paint their own pale yellow over a field they filled in, which lands on
+ * the sign-in page looking like a validation warning rather than a convenience. The colour
+ * can't be set directly — the browser applies it below the reach of background-color — so an
+ * inset shadow the depth of the field is what covers it, and -webkit-text-fill-color is what
+ * the text obeys instead of `color`.
+ *
+ * Both come from skin tokens, so a theme that changes its card or ink colour takes the filled
+ * state with it rather than leaving a white patch behind.
+ *
+ * Written as separate blocks on purpose: one invalid selector invalidates a whole list, and
+ * Firefox knows :autofill while WebKit knows :-webkit-autofill. Sharing a list would mean
+ * neither of them applied it.
+ */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:active,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: var(--c-ink);
+  caret-color: var(--c-ink);
+  -webkit-box-shadow: 0 0 0 100px var(--color-card) inset;
+  box-shadow: 0 0 0 100px var(--color-card) inset;
+  /* The yellow arrives as a transition. One that never finishes never arrives. */
+  transition: background-color 100000s ease-in-out 0s;
+}
+
+/* The fill covers the focus ring, which is a box-shadow too — so put the ring back. */
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 3px var(--skin-autofill-ring), 0 0 0 100px var(--color-card) inset;
+  box-shadow: 0 0 0 3px var(--skin-autofill-ring), 0 0 0 100px var(--color-card) inset;
+}
+
+input:autofill,
+textarea:autofill,
+select:autofill {
+  box-shadow: 0 0 0 100px var(--color-card) inset;
 }
 
 .card {
