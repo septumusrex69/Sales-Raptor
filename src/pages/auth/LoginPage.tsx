@@ -103,7 +103,7 @@ export function LoginPage() {
             />
 
             <h1 className="mt-9 text-[13px] font-semibold uppercase tracking-[0.22em] text-[#12233a] pl-[0.22em]">Sign in to Raptor</h1>
-            <p className="mt-2 text-sm text-slate-400">Recover. Rise. Take flight.</p>
+            <p className="mt-2 text-sm text-slate-400">Turn the tide. Take flight.</p>
           </div>
 
           <div className="mt-7 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_12px_30px_rgba(15,23,42,0.06)]">
