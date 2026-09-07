@@ -2,10 +2,12 @@ import { useEffect, useMemo } from 'react'
 
 /** Long enough to land, short enough that nobody waits for it. */
 const DURATION_MS = 2400
-const SPARK_COUNT = 14
+const STAR_COUNT = 18
+/** The stars wait for the burst instead of trailing the spin. */
+const BURST_AT_MS = 1500
 
 /**
- * The bird takes off when something is actually won.
+ * The bird spins up when something is actually won, then bursts into stars.
  *
  * Deliberately the Raptor mark rather than generic confetti: this is the one moment the app has
  * to feel like it belongs to this business, and a floor of fifty people signing mandates should
@@ -13,7 +15,7 @@ const SPARK_COUNT = 14
  *
  * It stays out of the way of the work — no pointer events, nothing to dismiss, no layout shift,
  * and it never blocks navigation. Anyone who has asked their system not to animate gets a quiet
- * fade instead, because a flying bird is delightful once and unbearable when it makes you ill.
+ * fade instead, because a spinning bird is delightful once and unbearable when it makes you ill.
  */
 export function RaptorCelebration({ message, onDone }: { message: string; onDone: () => void }) {
   useEffect(() => {
@@ -21,17 +23,17 @@ export function RaptorCelebration({ message, onDone }: { message: string; onDone
     return () => window.clearTimeout(timer)
   }, [onDone])
 
-  // Fixed per mount so the sparks don't reshuffle on every render mid-flight.
+  // Fixed per mount so the stars don't reshuffle on every render mid-burst.
   const sparks = useMemo(
     () =>
-      Array.from({ length: SPARK_COUNT }, (_, i) => {
-        const angle = (i / SPARK_COUNT) * Math.PI * 2 + Math.random() * 0.4
-        const distance = 90 + Math.random() * 120
+      Array.from({ length: STAR_COUNT }, (_, i) => {
+        const angle = (i / STAR_COUNT) * Math.PI * 2 + Math.random() * 0.3
+        const distance = 130 + Math.random() * 170
         return {
           dx: `${Math.cos(angle) * distance}px`,
-          dy: `${Math.sin(angle) * distance - 40}px`,
-          delay: `${Math.random() * 220}ms`,
-          size: 4 + Math.random() * 4,
+          dy: `${Math.sin(angle) * distance}px`,
+          delay: `${BURST_AT_MS + Math.random() * 90}ms`,
+          size: 9 + Math.random() * 9,
         }
       }),
     [],

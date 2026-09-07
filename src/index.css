@@ -246,9 +246,13 @@ select:autofill {
 /*
  * The celebration when a deal is won or a mandate signed.
  *
- * Two nested transforms on purpose: the outer element carries the flight path and the inner one
- * the wing beat, so they compose instead of overwriting each other — one transform property
- * cannot hold both, and animating them on the same element makes the last one win.
+ * The bird spins up in the middle, growing as it turns, then bursts into stars. Two nested
+ * transforms on purpose: the outer element carries the growth and the inner one the spin, so
+ * they compose instead of overwriting each other — one transform property cannot hold both,
+ * and animating them on the same element makes the last declaration win.
+ *
+ * The stars are held back until the burst rather than thrown from the start, so the moment
+ * reads as one thing happening and not two things overlapping.
  */
 .raptor-celebration {
   position: fixed;
@@ -273,32 +277,35 @@ select:autofill {
   top: 0;
   display: block;
   transform-origin: center;
-  animation: raptor-take-flight 2.4s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+  animation: raptor-grow 2.4s cubic-bezier(0.34, 0.9, 0.5, 1) forwards;
 }
 
 .raptor-celebration__bird {
   display: block;
-  width: 84px;
+  width: 96px;
   height: auto;
   /* The stage is a zero-size anchor point, so a percentage max-width — which the base reset
      applies to every image — resolves against zero and collapses the bird to nothing. */
   max-width: none;
-  margin: -42px 0 0 -42px;
-  filter: drop-shadow(0 10px 24px rgb(15 23 42 / 0.28));
-  animation: raptor-flap 260ms ease-in-out 6 alternate;
+  margin: -48px 0 0 -48px;
+  transform-origin: center;
+  filter: drop-shadow(0 10px 26px rgb(15 23 42 / 0.3));
+  animation: raptor-spin 2.4s cubic-bezier(0.3, 0.7, 0.4, 1) forwards;
 }
 
 .raptor-celebration__spark {
   position: absolute;
   left: 0;
   top: 0;
-  border-radius: 999px;
   background: var(--c-gold, #c9a052);
-  animation: raptor-spark 1.1s ease-out forwards;
+  /* A five-pointed star, so what bursts out is stars rather than dots. */
+  clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+  opacity: 0;
+  animation: raptor-star 900ms cubic-bezier(0.15, 0.8, 0.3, 1) forwards;
 }
 
 .raptor-celebration__caption {
-  margin-top: 92px;
+  margin-top: 104px;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.24em;
@@ -308,26 +315,34 @@ select:autofill {
   animation: raptor-caption 2.4s ease-out forwards;
 }
 
-@keyframes raptor-take-flight {
-  0% { transform: translate3d(0, 26px, 0) scale(0.42); opacity: 0; }
-  14% { opacity: 1; }
-  100% { transform: translate3d(0, -230px, 0) scale(1.3); opacity: 0; }
+@keyframes raptor-grow {
+  0% { transform: scale(0.2); opacity: 0; }
+  10% { opacity: 1; }
+  55% { transform: scale(1.15); opacity: 1; }
+  /* Hold full strength right up to the burst, then go in a few frames. Fading out slowly
+     while still growing turns the bird into a pale smudge over the page. */
+  64% { transform: scale(1.45); opacity: 1; }
+  68% { transform: scale(1.6); opacity: 0.85; }
+  72% { transform: scale(1.8); opacity: 0; }
+  100% { transform: scale(1.8); opacity: 0; }
 }
 
-@keyframes raptor-flap {
-  from { transform: scaleX(1) rotate(-5deg); }
-  to { transform: scaleX(0.6) rotate(7deg); }
+@keyframes raptor-spin {
+  0% { transform: rotate(0deg); }
+  72% { transform: rotate(1080deg); }
+  100% { transform: rotate(1080deg); }
 }
 
-@keyframes raptor-spark {
-  0% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.9; }
-  100% { transform: translate3d(var(--dx), var(--dy), 0) scale(0.2); opacity: 0; }
+@keyframes raptor-star {
+  0% { transform: translate3d(0, 0, 0) scale(0.2) rotate(0deg); opacity: 0; }
+  15% { opacity: 1; }
+  100% { transform: translate3d(var(--dx), var(--dy), 0) scale(1) rotate(200deg); opacity: 0; }
 }
 
 @keyframes raptor-caption {
-  0% { opacity: 0; transform: translateY(10px); }
-  18% { opacity: 1; transform: translateY(0); }
-  72% { opacity: 1; }
+  0%, 55% { opacity: 0; transform: translateY(10px); }
+  68% { opacity: 1; transform: translateY(0); }
+  86% { opacity: 1; }
   100% { opacity: 0; }
 }
 
