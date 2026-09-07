@@ -263,6 +263,17 @@ select:autofill {
   align-items: center;
   justify-content: center;
   pointer-events: none;
+  /* One knob per tier. The component picks the tier; every duration below reads from here so
+     the two never drift apart. */
+  --celebrate-duration: 2.4s;
+  --celebrate-scale: 1.8;
+  --celebrate-spin: 1080deg;
+}
+
+.raptor-celebration--milestone {
+  --celebrate-duration: 3.4s;
+  --celebrate-scale: 2.4;
+  --celebrate-spin: 1440deg;
 }
 
 .raptor-celebration__stage {
@@ -277,7 +288,7 @@ select:autofill {
   top: 0;
   display: block;
   transform-origin: center;
-  animation: raptor-grow 2.4s cubic-bezier(0.34, 0.9, 0.5, 1) forwards;
+  animation: raptor-grow var(--celebrate-duration) cubic-bezier(0.34, 0.9, 0.5, 1) forwards;
 }
 
 .raptor-celebration__bird {
@@ -290,7 +301,28 @@ select:autofill {
   margin: -48px 0 0 -48px;
   transform-origin: center;
   filter: drop-shadow(0 10px 26px rgb(15 23 42 / 0.3));
-  animation: raptor-spin 2.4s cubic-bezier(0.3, 0.7, 0.4, 1) forwards;
+  animation: raptor-spin var(--celebrate-duration) cubic-bezier(0.3, 0.7, 0.4, 1) forwards;
+}
+
+.raptor-celebration--milestone .raptor-celebration__bird {
+  width: 128px;
+  margin: -64px 0 0 -64px;
+}
+
+/* The shockwave a milestone gets and an ordinary win doesn't.
+   Grown by width and height rather than by transform: a scaled ring scales its border with it,
+   which turns a hairline into a 20px gold band by the time it crosses the screen. */
+.raptor-celebration__ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 60px;
+  height: 60px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  border: 2px solid var(--c-gold, #c9a052);
+  opacity: 0;
+  animation: raptor-ring 850ms cubic-bezier(0.12, 0.75, 0.3, 1) 2.35s forwards;
 }
 
 .raptor-celebration__spark {
@@ -304,39 +336,79 @@ select:autofill {
   animation: raptor-star 900ms cubic-bezier(0.15, 0.8, 0.3, 1) forwards;
 }
 
+.raptor-celebration--milestone .raptor-celebration__spark {
+  animation-duration: 1200ms;
+}
+
 .raptor-celebration__caption {
   margin-top: 104px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  animation: raptor-caption var(--celebrate-duration) ease-out forwards;
+}
+
+.raptor-celebration--milestone .raptor-celebration__caption {
+  /* Clear of the bird at its largest, which is half again the size of the everyday one. */
+  margin-top: 196px;
+}
+
+.raptor-celebration__eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--c-gold, #c9a052);
+  opacity: 0.75;
+  padding-left: 0.34em;
+}
+
+.raptor-celebration__message {
+  margin: 0;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.24em;
   text-transform: uppercase;
   color: var(--c-gold, #c9a052);
   padding-left: 0.24em;
-  animation: raptor-caption 2.4s ease-out forwards;
+}
+
+.raptor-celebration--milestone .raptor-celebration__message {
+  font-size: 18px;
+  letter-spacing: 0.18em;
+  padding-left: 0.18em;
 }
 
 @keyframes raptor-grow {
   0% { transform: scale(0.2); opacity: 0; }
   10% { opacity: 1; }
-  55% { transform: scale(1.15); opacity: 1; }
+  55% { transform: scale(calc(var(--celebrate-scale) * 0.64)); opacity: 1; }
   /* Hold full strength right up to the burst, then go in a few frames. Fading out slowly
      while still growing turns the bird into a pale smudge over the page. */
-  64% { transform: scale(1.45); opacity: 1; }
-  68% { transform: scale(1.6); opacity: 0.85; }
-  72% { transform: scale(1.8); opacity: 0; }
-  100% { transform: scale(1.8); opacity: 0; }
+  64% { transform: scale(calc(var(--celebrate-scale) * 0.81)); opacity: 1; }
+  68% { transform: scale(calc(var(--celebrate-scale) * 0.89)); opacity: 0.85; }
+  72% { transform: scale(var(--celebrate-scale)); opacity: 0; }
+  100% { transform: scale(var(--celebrate-scale)); opacity: 0; }
 }
 
 @keyframes raptor-spin {
   0% { transform: rotate(0deg); }
-  72% { transform: rotate(1080deg); }
-  100% { transform: rotate(1080deg); }
+  72% { transform: rotate(var(--celebrate-spin)); }
+  100% { transform: rotate(var(--celebrate-spin)); }
 }
 
 @keyframes raptor-star {
   0% { transform: translate3d(0, 0, 0) scale(0.2) rotate(0deg); opacity: 0; }
   15% { opacity: 1; }
   100% { transform: translate3d(var(--dx), var(--dy), 0) scale(1) rotate(200deg); opacity: 0; }
+}
+
+@keyframes raptor-ring {
+  0% { width: 60px; height: 60px; opacity: 0; }
+  20% { opacity: 0.85; }
+  100% { width: 660px; height: 660px; opacity: 0; }
 }
 
 @keyframes raptor-caption {
@@ -356,14 +428,15 @@ select:autofill {
  * specificity is what lets a deliberate animation opt out of a blanket one.
  */
 @media (prefers-reduced-motion: reduce) {
-  .raptor-celebration__spark {
+  .raptor-celebration__spark,
+  .raptor-celebration__ring {
     display: none;
   }
   html .raptor-celebration__flight,
   html .raptor-celebration__bird,
   html .raptor-celebration__caption {
-    animation: raptor-quiet 2.4s ease-out forwards !important;
-    animation-duration: 2.4s !important;
+    animation: raptor-quiet var(--celebrate-duration) ease-out forwards !important;
+    animation-duration: var(--celebrate-duration) !important;
   }
   @keyframes raptor-quiet {
     0%, 100% { opacity: 0; }

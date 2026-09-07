@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
@@ -10,6 +10,8 @@ import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { useTheme } from '../../store/ThemeContext'
 import { THEMES } from '../../lib/themes'
+import { DEAL_MILESTONE_EVERY, MANDATE_MILESTONE_EVERY } from '../../lib/celebration'
+import { celebrationSoundEnabled, setCelebrationSoundEnabled } from '../../lib/chime'
 import { supabase, PRODUCTION_APP_URL } from '../../lib/supabase'
 import type { CustomField, CustomFieldType, Team, TeamKind, User, UserRole } from '../../types'
 import { DEAL_STAGES } from '../../types'
@@ -1038,6 +1040,7 @@ function AddCustomFieldModal({ onClose, onSave }: { onClose: () => void; onSave:
 function AppearanceTab() {
   const { themeId, setTheme, theme } = useTheme()
   const { celebrate } = useAppStore()
+  const [sound, setSound] = useState(celebrationSoundEnabled)
   return (
     <Card>
       <CardHeader title="Appearance" subtitle={`Choose how ${theme.productName} looks. This changes nothing but the styling, and applies to you only.`} />
@@ -1089,16 +1092,42 @@ function AppearanceTab() {
       <div className="mt-6 pt-5 border-t border-slate-100">
         <p className="text-sm font-medium text-slate-600">Celebration</p>
         <p className="text-xs text-slate-400 mt-0.5 mb-2.5 max-w-md">
-          The bird takes off when a deal is won, a mandate is signed, or a lead becomes a client. If your device has
-          Reduce Motion switched on, you'll get the wording without the flight.
+          The bird takes off when a deal is won, a mandate is signed, or a lead becomes a client. Every{' '}
+          {MANDATE_MILESTONE_EVERY} mandates and every {DEAL_MILESTONE_EVERY} deals you close in a sales month, it
+          comes back bigger and with a sound. If your device has Reduce Motion switched on, you'll get the wording
+          without the flight.
         </p>
-        <button
-          type="button"
-          onClick={() => celebrate('Mandate signed')}
-          className="text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-        >
-          Preview
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => celebrate({ message: 'Mandate signed', intensity: 'win' })}
+            className="text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+          >
+            Preview a win
+          </button>
+          <button
+            type="button"
+            onClick={() => celebrate({ message: `${MANDATE_MILESTONE_EVERY} mandates this month`, intensity: 'milestone' })}
+            className="text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+          >
+            Preview a milestone
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const next = !sound
+              setSound(next)
+              setCelebrationSoundEnabled(next)
+            }}
+            aria-pressed={sound}
+            className={`inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border transition-colors ${
+              sound ? 'border-gold-500 bg-gold-500/5 text-gold-600' : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            {sound ? <Volume2 size={14} /> : <VolumeX size={14} />}
+            Milestone sound {sound ? 'on' : 'off'}
+          </button>
+        </div>
       </div>
     </Card>
   )

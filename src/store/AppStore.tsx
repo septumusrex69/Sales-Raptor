@@ -6,6 +6,7 @@ import { DEAL_STAGE_PROBABILITY } from '../types'
 import { normalizeDeal, normalizeLead } from '../lib/legacyValues'
 import { dealKind, kindForService } from '../lib/dealKind'
 import { RaptorCelebration } from '../components/ui/RaptorCelebration'
+import { celebrationForWin, type Celebration } from '../lib/celebration'
 import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, ProductService, Proposal, RejectionReason, Task, TaskType, Team, TeamKind, User,
   Handover,
 } from '../types'
@@ -288,7 +289,7 @@ interface AppActions {
 
   dismissToast: () => void
   /** Fires the take-off animation. Reserved for things genuinely worth celebrating. */
-  celebrate: (message: string) => void
+  celebrate: (celebration: Celebration) => void
 
   companyById: (id?: ID) => Company | undefined
   contactById: (id?: ID) => Contact | undefined
@@ -317,7 +318,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const [toast, setToast] = useState<string | null>(null)
-  const [celebration, setCelebration] = useState<string | null>(null)
+  const [celebration, setCelebration] = useState<Celebration | null>(null)
 
   useEffect(() => {
     if (!toast) return
@@ -327,7 +328,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const showError = useCallback((message: string) => setToast(friendlyError(message)), [])
   const dismissToast = useCallback(() => setToast(null), [])
-  const celebrate = useCallback((message: string) => setCelebration(message), [])
+  const celebrate = useCallback((next: Celebration) => setCelebration(next), [])
 
   useEffect(() => {
     if (!session) {
@@ -760,7 +761,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         setCompanies((prev) => prev.map((c) => (c.id === deal.companyId ? { ...c, mandateSignedAt: signedAt } : c)))
         updateRow('companies', deal.companyId, { mandateSignedAt: signedAt }, 'markDealWon:mandateSigned')
       }
-      celebrate(isHandover ? 'Mandate signed' : 'Deal won')
+      // Counted against the deals already on hand, so the tenth mandate of the month lands
+      // differently from the ninth.
+      if (deal) celebrate(celebrationForWin({ ...deal, ...patch }, deals))
       addActivity({
         type: 'Deal Won',
         subject: isHandover
@@ -1279,7 +1282,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         setContacts((prev) => prev.map((c) => (c.id === contact.id ? { ...c, companyId } : c)))
         updateRow('contacts', contact.id, { companyId }, 'convertLeadToClient:contactCompany')
       }
-      celebrate('New client signed')
+      celebrate({ message: 'New client signed', intensity: 'win' })
       addActivity({ type: 'Status change', subject: `Lead converted to client: ${lead.companyName}`, leadId, companyId })
       for (const deal of dealsToConfirm) {
         if (deal.outcome === 'signed') {
@@ -1572,7 +1575,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={value}>
       {children}
-      {celebration && <RaptorCelebration message={celebration} onDone={() => setCelebration(null)} />}
+      {celebration && <RaptorCelebration celebration={celebration} onDone={() => setCelebration(null)} />}
       {toast && (
         <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[100] bg-navy-950 text-white text-sm font-medium px-4 py-2.5 rounded-lg shadow-lg flex items-center gap-3">
           <span>{toast}</span>
