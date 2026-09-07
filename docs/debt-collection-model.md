@@ -83,6 +83,24 @@ allocations.
 
 ---
 
+## 3a. Sliding-scale commission
+
+Some clients — Growthpoint among them — are not on a flat commission rate. The rate moves in
+bands with the amount, so the same client earns us a different percentage at different points.
+
+Swordfish does not model this at all, which is one of the reasons it has to be replaced rather
+than lived with. Commission there is a single figure per client, so a sliding scale has to be
+worked out by hand every month and cannot be reconciled against anything.
+
+The model is therefore: commission is a **set of bands per client, effective-dated**, not a
+rate. A flat-rate client is the one-band case, which keeps the common path simple without
+making the sliding-scale client a special case bolted on afterwards.
+
+> **Open:** what the bands are measured against — the size of the individual payment, the
+> cumulative amount collected on that client to date, or the cumulative amount within a period.
+> The three give materially different answers on the same money and the difference compounds
+> over a year. Needs the actual agreement before anything is built.
+
 ## 4. Interest
 
 - **2% per month, accrued daily**
@@ -106,6 +124,23 @@ more than a day in March), or an annual 24% divided by 365 (so every day is wort
 a 31-day month accrues slightly more than 2%). The month-end fixing described above points at
 the first, which is the reading assumed here — but it needs a yes, because the two diverge on
 every account.
+
+## 4a. Interest rates are negotiated, and dated
+
+The standard rate is 24% per annum. It is not universal: in the export, two accounts of 214 run
+at 12%, and the rate can be lowered by negotiation with a client.
+
+Two rules follow, and both matter more than they look:
+
+- **A change carries the date it takes effect.** Interest already accrued at the old rate stays
+  accrued at the old rate. A rate that is edited in place silently rewrites every statement ever
+  issued on that account.
+- **A rate can be set on a client or on a single account.** Client is the normal case — a
+  negotiated concession applies to everything they hand over. Account is the exception, and the
+  more specific setting wins.
+
+So the resolution order for the rate applying to an account on a given day is: account rate
+effective on that day, else client rate effective on that day, else the 24% standard.
 
 ## 5. In duplum
 
@@ -247,6 +282,35 @@ This example is stated VAT-exclusive on the fees, pending §6.
 
 ---
 
+## 7a. Paid To Client (PTC)
+
+A debtor sometimes pays the client directly instead of paying us. Swordfish calls this a
+"Client Direct" payment; the house term is **PTC — paid to client**. It was 25 of 1,070 payments
+in the export, so roughly 2%, but the amounts are not small and the accounting is not the same.
+
+**The allocation is identical to any other payment.** Fees, interest, commission and the receipt
+fee are all earned exactly as they would have been. Nothing about the debtor's account changes:
+the balance comes down, the split is the split.
+
+**What differs is only where the cash sits.** The money is in the client's bank account, so
+instead of us owing the client their share, the client owes us ours.
+
+That produces a running two-sided position per client, and a month-end net:
+
+| | |
+|---|---|
+| Money we collected | we owe the client their share |
+| Money paid to the client (PTC) | the client owes us our share — fees, interest, commission, receipt fee |
+
+At month end the two are netted per client. Usually we owe them and remit the difference.
+Sometimes their PTC share exceeds what we hold, and then **the client owes us and we invoice
+them**. Both directions have to be first-class: a remittance system that can only pay out will
+quietly under-bill every client whose debtors pay them directly.
+
+This is also why PTC cannot be modelled as "a payment we did not receive". It is a full payment
+for every purpose except custody of the cash, and treating it as anything less loses real
+revenue.
+
 ## 8. Records
 
 Two rules, both about being able to answer a question years later.
@@ -309,7 +373,63 @@ before the data lands rather than after.
 
 ---
 
+
+### What the 7 Sep 2026 exports proved
+
+Three reports were analysed: Client Account Summary (214 accounts), All Payments per Client
+(1,070 payments across 167 accounts) and Actions performed per Client (59,158 actions across
+735 accounts).
+
+**Reconciles cleanly.** Payments matched `Payments To Date` to the cent on all 65 accounts
+present in both reports. `Current Balance = capital + interest + All Fees` held on all 214,
+worst error one cent. `Fees & Expenses` is exactly the action costs excluding VAT. In duplum
+behaves as described: of 14 flagged accounts the highest (balance − capital) ÷ capital is
+exactly 1.000, and one sits below zero — paid under capital but still flagged, which is the
+ceiling being fixed at handover and not falling.
+
+**The three exports are three different populations.** 214 / 167 / 735 accounts, with only 65
+in common between the first two. Migrating from exports pulled this way would lose most of the
+payment and fee history. Every extract for the real migration must be taken over one identical
+account list.
+
+**"Client" in Swordfish means handover tranche.** Growthpoint appears as four clients
+(2024-1, 2024-2, 2025-1, 2025-2) and Adowa as two; ten Swordfish clients are about six real
+ones. The importer has to collapse these into one client with dated handover batches.
+
+**The tariff is effective-dated, and this is provable.** Every billed action type steps on
+1 April 2026 — phone call, email and letter R21 → R25, consultation R52 → R60, promise to pay
+R41 → R50, SMS R3 → R3.50 per part, and acknowledgement of debt R210 → R161. See
+`src/lib/actionTariff.ts`.
+
+**Two earlier conclusions of mine were wrong, and are corrected here.**
+
+- I reported SMS as under-charged by R5,441 because charges appeared at R3 against a R6 rate.
+  They are billed per message part: every one of 5,779 pre-April SMS charges is an exact
+  multiple of R3, splitting 1,472 / 3,251 / 1,037 across one, two and three parts. There was no
+  under-charging. The R6 I took for the unit rate is simply the commonest case, a two-part
+  message.
+- I reported R12,022 of over-charging as a compliance risk. Measured against the rate in force
+  on the day rather than against today's rate, over-charging is R274 across ten actions.
+  The real figure is 91.6% of billed non-SMS actions at exactly the right rate, and the
+  remainder almost entirely under-charged — R10,098 excl VAT foregone. It is a revenue leak,
+  not a compliance exposure.
+
+**One account is already prescribed** — "Prescribed 191 days ago" — and still Active with
+collection activity running against it.
+
+**287 account-months exceed ten electronic communications**, the highest being 46 in one month.
+Flagged for checking rather than as a finding: whether the Annexure B cap counts per account or
+per debtor, and exactly which action types fall inside it, is not yet confirmed.
+
 ## 10. Open items, collected
+
+- **What FCC is.** `All Fees (inc VAT + FCC)` exceeds the VAT-inclusive action costs by
+  R190,200 across 213 accounts — 53% of all fees. It is not proportional to fees and not fixed
+  per account. Being clarified.
+- **What the sliding-scale commission bands are measured against** (see 3a).
+- **Whether the electronic-communication cap is per account or per debtor**, and which action
+  types count toward it.
+- **Item 1(b)**, the registered-letter fee, still to be confirmed.
 
 | # | Question | Blocks |
 |---|---|---|
