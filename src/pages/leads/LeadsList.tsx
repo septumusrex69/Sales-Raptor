@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Phone,
@@ -14,15 +14,13 @@ import {
   SlidersHorizontal,
   Plus,
   Trash2,
-  ChevronUp,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   AlertTriangle,
 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
-import { canEditOwned, canReassign as canReassignRole, useDefaultOwnerFilter } from '../../lib/permissions'
+import { canEditOwned, canReassign as canReassignRole, useDefaultOwnerFilter, isAssignableOwner} from '../../lib/permissions'
 import { Card } from '../../components/ui/Card'
 import { StatusBadge, ServiceBadge, ClassificationBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
@@ -32,6 +30,11 @@ import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { LeadForm } from '../../components/layout/QuickAdd'
 import { LeadsPeriodBar } from '../../components/leads/LeadsPeriodBar'
 import { LeadsKpiRow, type LeadsKpiValues } from '../../components/leads/LeadsKpiRow'
+import { RejectLeadModal } from '../../components/leads/RejectLeadModal'
+import { SortHeader } from '../../components/ui/SortHeader'
+import { DATE_GROUP_CLASS } from '../../components/ui/DateGroupHeading'
+import { dateGroupLabel, relativeDayLabel } from '../../lib/dateLabels'
+import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
 import { formatCurrency, formatDate, formatLeadNumber, daysAgoLabel, industries, leadClassifications, leadSources, provinces, services, TODAY } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
 import { decodeSalesMonthParam, isWithinPeriod, type SalesMonthPeriod } from '../../lib/salesMonth'
@@ -39,8 +42,9 @@ import { getPreviousEquivalentRange, getThisCalendarMonth } from '../../lib/date
 import { isMeaningfulActivity } from '../../lib/meaningfulActivity'
 import { ALL_COLUMNS, defaultVisibleColumns, SORTABLE_COLUMN_KEYS, type ColumnKey, type SortKey } from '../../lib/leadColumns'
 import type { Lead, LeadClassification, LeadStatus, ProductService } from '../../types'
+import { LEAD_STATUSES, isActiveLead } from '../../lib/leadStatus'
 
-const ALL_STATUSES: LeadStatus[] = ['New', 'Attempting Contact', 'Contacted', 'Qualified', 'Unqualified', 'Proposal Required', 'Converted', 'Lost']
+const ALL_STATUSES: LeadStatus[] = LEAD_STATUSES
 const SCORE_THRESHOLDS = ['All', '80', '60', '40', '20'] as const
 const PAGE_SIZES = [10, 25, 50, 100]
 
@@ -54,8 +58,8 @@ function leadAgeLabel(iso: string) {
 function followUpTone(iso?: string) {
   if (!iso) return 'text-slate-400'
   const due = new Date(iso)
-  if (due < TODAY && due.toDateString() !== TODAY.toDateString()) return 'text-[#794234] font-medium'
-  if (due.toDateString() === TODAY.toDateString()) return 'text-[#b28e34] font-medium'
+  if (due < TODAY && due.toDateString() !== TODAY.toDateString()) return 'text-[var(--c-rust-deep)] font-medium'
+  if (due.toDateString() === TODAY.toDateString()) return 'text-[var(--c-gold)] font-medium'
   return 'text-slate-600'
 }
 
@@ -68,10 +72,10 @@ function isStaleClassAContact(lead: Lead) {
 
 export function LeadsList() {
   const store = useAppStore()
-  const { leads, activities, users, userById, updateLead, markLeadLost, deleteLead, convertLeadToDeal, addActivity } = store
+  const { leads, deals, activities, users, userById, updateLead, rejectLead, deleteLead, convertLeadToClient, addActivity } = store
   const { currentUser } = useAuth()
   const canReassign = canReassignRole(currentUser)
-  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
+  const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
@@ -99,6 +103,8 @@ export function LeadsList() {
   const [addOpen, setAddOpen] = useState(false)
   const [reassignLead, setReassignLead] = useState<Lead | null>(null)
   const [deleteLeadTarget, setDeleteLeadTarget] = useState<Lead | null>(null)
+  const [rejectLeadTarget, setRejectLeadTarget] = useState<Lead | null>(null)
+  const [convertLeadTarget, setConvertLeadTarget] = useState<Lead | null>(null)
   const [openServicesFor, setOpenServicesFor] = useState<string | null>(null)
 
   // One-time drill-down filters carried in from Dashboard/Reports links — not exposed as UI controls.
@@ -108,11 +114,11 @@ export function LeadsList() {
   const cityOptions = useMemo(() => Array.from(new Set(leads.map((l) => l.city).filter((c): c is string => Boolean(c)))).sort(), [leads])
 
   function matchesLeadFilters(l: Lead) {
-    // Once converted, a lead is no longer an active thing to chase — it's
-    // tracked as a Deal from here on. The default (no explicit status
-    // chosen) view excludes them so the working list stays about leads
-    // still worth pursuing; picking "Converted" explicitly still shows them.
-    if (status === 'All' && l.status === 'Converted') return false
+    // A lead stays on this list until it ends one way or the other — converted into a
+    // client, or rejected. Both are still on file and still reportable; they just drop
+    // out of the default working view so it stays about leads worth chasing today.
+    // Picking "Converted" or "Rejected" explicitly still shows them.
+    if (status === 'All' && !isActiveLead(l)) return false
     if (status !== 'All' && l.status !== status) return false
     if (source !== 'All' && l.source !== source) return false
     if (owner !== 'All' && l.ownerId !== owner) return false
@@ -160,8 +166,8 @@ export function LeadsList() {
   function computeKpis(rows: Lead[]): LeadsKpiValues {
     return {
       totalLeads: rows.length,
-      newLeads: rows.filter((l) => l.status === 'New').length,
-      qualified: rows.filter((l) => l.status === 'Qualified').length,
+      newLeads: rows.filter((l) => l.status === 'No Contact Yet').length,
+      qualified: rows.filter((l) => l.status === 'Hot Lead').length,
       converted: rows.filter((l) => l.status === 'Converted').length,
       estValueTotal: rows.reduce((s, l) => s + (l.estimatedValue ?? 0), 0),
       handoverTotal: rows.reduce((s, l) => s + (l.estimatedHandoverAmount ?? 0), 0),
@@ -192,6 +198,10 @@ export function LeadsList() {
         return l.createdAt
       case 'lastContact':
         return l.lastContactAt
+      case 'owner':
+        return userById(l.ownerId)?.name?.toLowerCase()
+      case 'source':
+        return l.source
     }
   }
 
@@ -231,16 +241,14 @@ export function LeadsList() {
 
   function sortableHeader(colKey: ColumnKey, label: string, align: 'left' | 'right' | 'center' = 'left') {
     const sortKeyForCol = SORTABLE_COLUMN_KEYS[colKey]
-    const active = sortKeyForCol && sortKey === sortKeyForCol
     return (
-      <button
-        type="button"
-        onClick={sortKeyForCol ? () => handleSort(colKey) : undefined}
-        className={`inline-flex items-center gap-1 ${sortKeyForCol ? 'cursor-pointer hover:text-slate-600' : 'cursor-default'} ${align === 'right' ? 'flex-row-reverse' : ''}`}
-      >
-        {label}
-        {active && (sortDir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
-      </button>
+      <SortHeader
+        label={label}
+        align={align}
+        active={Boolean(sortKeyForCol) && sortKey === sortKeyForCol}
+        dir={sortDir}
+        onSort={sortKeyForCol ? () => handleSort(colKey) : undefined}
+      />
     )
   }
 
@@ -253,6 +261,12 @@ export function LeadsList() {
   }
 
   const col = visibleColumns
+
+  // The two columns that say which lead a row is stay put while the table scrolls sideways.
+  // Their offsets are measured from what's actually showing rather than baked into class
+  // names, so hiding one via the Columns menu doesn't strand a gap where it used to sit.
+  const pinnedLeft = { leadNumber: 0, companyLead: col.leadNumber ? 100 : 0 }
+  const visibleColumnCount = ALL_COLUMNS.filter((key) => col[key]).length + 1
 
   return (
     <div className="space-y-4">
@@ -339,51 +353,76 @@ export function LeadsList() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-slate-400">
-                {col.leadNumber && <th className="font-medium px-5 py-3 sticky left-0 z-10 bg-white min-w-[100px]">{sortableHeader('leadNumber', 'Lead #')}</th>}
-                {col.companyLead && <th className="font-medium px-3 py-3 sticky left-[100px] z-10 bg-white min-w-[180px]">{sortableHeader('companyLead', 'Company / Lead')}</th>}
-                {col.contactPerson && <th className="font-medium px-3 py-3">Contact Person</th>}
-                {col.status && <th className="font-medium px-3 py-3">{sortableHeader('status', 'Status')}</th>}
-                {col.classification && <th className="font-medium px-3 py-3">{sortableHeader('classification', 'Class')}</th>}
-                {col.score && <th className="font-medium px-3 py-3">{sortableHeader('score', 'Score')}</th>}
-                {col.services && <th className="font-medium px-3 py-3">Service(s)</th>}
-                {col.estValue && <th className="font-medium px-3 py-3 text-right">{sortableHeader('estValue', 'Est. Value', 'right')}</th>}
-                {col.handoverAmount && <th className="font-medium px-3 py-3 text-right">{sortableHeader('handoverAmount', 'Handover Amount', 'right')}</th>}
-                {col.owner && <th className="font-medium px-3 py-3">Owner</th>}
-                {col.nextFollowUp && <th className="font-medium px-3 py-3">{sortableHeader('nextFollowUp', 'Next Follow-up')}</th>}
-                {col.dateAdded && <th className="font-medium px-3 py-3">{sortableHeader('dateAdded', 'Date Added')}</th>}
-                {col.lastContact && <th className="font-medium px-3 py-3">{sortableHeader('lastContact', 'Last Contact')}</th>}
-                {col.source && <th className="font-medium px-3 py-3">Source</th>}
-                {col.city && <th className="font-medium px-3 py-3">City</th>}
-                {col.province && <th className="font-medium px-3 py-3">Province</th>}
-                {col.leadAge && <th className="font-medium px-3 py-3">Lead Age</th>}
-                {col.jobTitle && <th className="font-medium px-3 py-3">Job Title</th>}
-                {col.phone && <th className="font-medium px-3 py-3">Phone</th>}
-                {col.email && <th className="font-medium px-3 py-3">Email</th>}
+                {col.leadNumber && (
+                  <th className="font-medium px-5 py-2.5 sticky z-10 bg-white min-w-[100px]" style={{ left: pinnedLeft.leadNumber }}>
+                    {sortableHeader('leadNumber', 'Lead #')}
+                  </th>
+                )}
+                {col.companyLead && (
+                  <th className="font-medium px-3 py-2.5 sticky z-10 bg-white min-w-[180px]" style={{ left: pinnedLeft.companyLead }}>
+                    {sortableHeader('companyLead', 'Company / Lead')}
+                  </th>
+                )}
+                {col.dateAdded && <th className="font-medium px-3 py-2.5">{sortableHeader('dateAdded', 'Added')}</th>}
+                {col.contactPerson && <th className="font-medium px-3 py-2.5">Contact Person</th>}
+                {col.status && <th className="font-medium px-3 py-2.5">{sortableHeader('status', 'Status')}</th>}
+                {col.classification && <th className="font-medium px-3 py-2.5">{sortableHeader('classification', 'Class')}</th>}
+                {col.score && <th className="font-medium px-3 py-2.5">{sortableHeader('score', 'Score')}</th>}
+                {col.services && <th className="font-medium px-3 py-2.5">Service(s)</th>}
+                {col.estValue && <th className="font-medium px-3 py-2.5 text-right">{sortableHeader('estValue', 'Est. Value', 'right')}</th>}
+                {col.handoverAmount && <th className="font-medium px-3 py-2.5 text-right">{sortableHeader('handoverAmount', 'Handover Amount', 'right')}</th>}
+                {col.owner && <th className="font-medium px-3 py-2.5">Owner</th>}
+                {col.nextFollowUp && <th className="font-medium px-3 py-2.5">{sortableHeader('nextFollowUp', 'Next Follow-up')}</th>}
+                {col.lastContact && <th className="font-medium px-3 py-2.5">{sortableHeader('lastContact', 'Last Contact')}</th>}
+                {col.source && <th className="font-medium px-3 py-2.5">Source</th>}
+                {col.city && <th className="font-medium px-3 py-2.5">City</th>}
+                {col.province && <th className="font-medium px-3 py-2.5">Province</th>}
+                {col.leadAge && <th className="font-medium px-3 py-2.5">Lead Age</th>}
+                {col.jobTitle && <th className="font-medium px-3 py-2.5">Job Title</th>}
+                {col.phone && <th className="font-medium px-3 py-2.5">Phone</th>}
+                {col.email && <th className="font-medium px-3 py-2.5">Email</th>}
                 <th className="w-10"></th>
               </tr>
             </thead>
             <tbody>
-              {pageItems.map((lead) => {
+              {pageItems.map((lead, i) => {
                 const leadServices = lead.services ?? []
                 const staleContact = isStaleClassAContact(lead)
+                // Headings only make sense while the rows are in date order — under a sort by
+                // score or value they'd be dividing the list on something it isn't sorted by.
+                const group = sortKey === 'dateAdded' ? dateGroupLabel(lead.createdAt) : null
+                const isFirstOfGroup = group !== null && (i === 0 || group !== dateGroupLabel(pageItems[i - 1].createdAt))
                 return (
-                  <tr key={lead.id} onClick={() => navigate(`/leads/${lead.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
+                  <Fragment key={lead.id}>
+                  {isFirstOfGroup && (
+                    <tr>
+                      <td colSpan={visibleColumnCount} className={DATE_GROUP_CLASS}>
+                        {group}
+                      </td>
+                    </tr>
+                  )}
+                  <tr onClick={() => navigate(`/leads/${lead.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
                     {col.leadNumber && (
-                      <td className="px-5 py-3 sticky left-0 z-10 bg-white">
+                      <td className="px-5 py-2 sticky z-10 bg-white" style={{ left: pinnedLeft.leadNumber }}>
                         <Link to={`/leads/${lead.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
                           {formatLeadNumber(lead.leadNumber)}
                         </Link>
                       </td>
                     )}
                     {col.companyLead && (
-                      <td className="px-3 py-3 sticky left-[100px] z-10 bg-white">
+                      <td className="px-3 py-2 sticky z-10 bg-white" style={{ left: pinnedLeft.companyLead }}>
                         <Link to={`/leads/${lead.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
                           {lead.companyName || `${lead.firstName} ${lead.lastName}`}
                         </Link>
                       </td>
                     )}
+                    {col.dateAdded && (
+                      <td className="px-3 py-2 text-slate-500 whitespace-nowrap" title={formatDate(lead.createdAt)}>
+                        {relativeDayLabel(lead.createdAt)}
+                      </td>
+                    )}
                     {col.contactPerson && (
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2">
                         <p className="text-slate-700">
                           {lead.firstName} {lead.lastName}
                         </p>
@@ -391,20 +430,20 @@ export function LeadsList() {
                       </td>
                     )}
                     {col.status && (
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2">
                         <StatusBadge status={lead.status} />
                       </td>
                     )}
                     {col.classification && (
-                      <td className="px-3 py-3">{lead.classification ? <ClassificationBadge classification={lead.classification} /> : <span className="text-slate-300">—</span>}</td>
+                      <td className="px-3 py-2">{lead.classification ? <ClassificationBadge classification={lead.classification} /> : <span className="text-slate-300">—</span>}</td>
                     )}
                     {col.score && (
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2">
                         <ScorePill score={lead.score} />
                       </td>
                     )}
                     {col.services && (
-                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                         {leadServices.length === 0 ? (
                           <span className="text-slate-300">—</span>
                         ) : (
@@ -431,12 +470,12 @@ export function LeadsList() {
                         )}
                       </td>
                     )}
-                    {col.estValue && <td className="px-3 py-3 text-right font-medium text-slate-700">{formatCurrency(lead.estimatedValue)}</td>}
+                    {col.estValue && <td className="px-3 py-2 text-right font-medium text-slate-700">{formatCurrency(lead.estimatedValue)}</td>}
                     {col.handoverAmount && (
-                      <td className="px-3 py-3 text-right text-slate-600">{lead.estimatedHandoverAmount != null ? formatCurrency(lead.estimatedHandoverAmount) : '—'}</td>
+                      <td className="px-3 py-2 text-right text-slate-600">{lead.estimatedHandoverAmount != null ? formatCurrency(lead.estimatedHandoverAmount) : '—'}</td>
                     )}
                     {col.owner && (
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2">
                         <div className="flex items-center gap-1.5">
                           <UserAvatar userId={lead.ownerId} size={22} />
                           <span className="text-slate-500 text-xs">{userById(lead.ownerId)?.name.split(' ')[0]}</span>
@@ -444,15 +483,14 @@ export function LeadsList() {
                       </td>
                     )}
                     {col.nextFollowUp && (
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2">
                         <Link to={`/leads/${lead.id}`} onClick={(e) => e.stopPropagation()} className={`hover:underline ${followUpTone(lead.nextFollowUpAt)}`}>
                           {formatDate(lead.nextFollowUpAt)}
                         </Link>
                       </td>
                     )}
-                    {col.dateAdded && <td className="px-3 py-3 text-slate-500">{formatDate(lead.createdAt)}</td>}
                     {col.lastContact && (
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2">
                         <div className="flex items-center gap-1.5">
                           <div>
                             <p className="text-slate-600">{formatDate(lead.lastContactAt)}</p>
@@ -460,20 +498,20 @@ export function LeadsList() {
                           </div>
                           {staleContact && (
                             <span title="Class A lead — no recent contact">
-                              <AlertTriangle size={13} className="text-[#794234] shrink-0" />
+                              <AlertTriangle size={13} className="text-[var(--c-rust-deep)] shrink-0" />
                             </span>
                           )}
                         </div>
                       </td>
                     )}
-                    {col.source && <td className="px-3 py-3 text-slate-500">{lead.source}</td>}
-                    {col.city && <td className="px-3 py-3 text-slate-500">{lead.city ?? '—'}</td>}
-                    {col.province && <td className="px-3 py-3 text-slate-500">{lead.province ?? '—'}</td>}
-                    {col.leadAge && <td className="px-3 py-3 text-slate-500">{leadAgeLabel(lead.createdAt)}</td>}
-                    {col.jobTitle && <td className="px-3 py-3 text-slate-500">{lead.jobTitle ?? '—'}</td>}
-                    {col.phone && <td className="px-3 py-3 text-slate-500">{lead.phone ?? '—'}</td>}
-                    {col.email && <td className="px-3 py-3 text-slate-500">{lead.email ?? '—'}</td>}
-                    <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                    {col.source && <td className="px-3 py-2 text-slate-500">{lead.source}</td>}
+                    {col.city && <td className="px-3 py-2 text-slate-500">{lead.city ?? '—'}</td>}
+                    {col.province && <td className="px-3 py-2 text-slate-500">{lead.province ?? '—'}</td>}
+                    {col.leadAge && <td className="px-3 py-2 text-slate-500">{leadAgeLabel(lead.createdAt)}</td>}
+                    {col.jobTitle && <td className="px-3 py-2 text-slate-500">{lead.jobTitle ?? '—'}</td>}
+                    {col.phone && <td className="px-3 py-2 text-slate-500">{lead.phone ?? '—'}</td>}
+                    {col.email && <td className="px-3 py-2 text-slate-500">{lead.email ?? '—'}</td>}
+                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                       <RowMenu
                         items={[
                           { label: 'Call', icon: <Phone size={14} />, onClick: () => logQuickAction(lead, 'Call') },
@@ -485,26 +523,26 @@ export function LeadsList() {
                           ...(canEditOwned(currentUser, lead.ownerId)
                             ? [
                                 {
-                                  label: 'Convert to deal',
+                                  label: 'Convert to client',
                                   icon: <ArrowRightLeft size={14} />,
-                                  onClick: () => {
-                                    const deal = convertLeadToDeal(lead.id)
-                                    if (deal) navigate(`/deals/${deal.id}`)
-                                  },
+                                  onClick: () => setConvertLeadTarget(lead),
                                 },
                               ]
                             : []),
                           ...(canReassign ? [{ label: 'Reassign', icon: <UserCog size={14} />, onClick: () => setReassignLead(lead) }] : []),
                           ...(canEditOwned(currentUser, lead.ownerId)
                             ? [
-                                { label: 'Mark lost', icon: <XCircle size={14} />, danger: true, onClick: () => markLeadLost(lead.id) },
-                                { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onClick: () => setDeleteLeadTarget(lead) },
+                                { label: 'Reject', icon: <XCircle size={14} />, danger: true, onClick: () => setRejectLeadTarget(lead) },
+                                ...(lead.status === 'Converted'
+                                  ? [] // deleting it would cascade to the client's deals
+                                  : [{ label: 'Delete', icon: <Trash2 size={14} />, danger: true, onClick: () => setDeleteLeadTarget(lead) }]),
                               ]
                             : []),
                         ]}
                       />
                     </td>
                   </tr>
+                  </Fragment>
                 )
               })}
               {pageItems.length === 0 && (
@@ -593,6 +631,24 @@ export function LeadsList() {
           </div>
         </Modal>
       )}
+      {convertLeadTarget && (
+        <ConvertLeadModal
+          lead={convertLeadTarget}
+          openDeals={deals.filter((d) => d.leadId === convertLeadTarget.id && d.stage !== 'Won' && d.stage !== 'Rejected')}
+          onClose={() => setConvertLeadTarget(null)}
+          onConfirm={(confirmation) => {
+            const result = convertLeadToClient(convertLeadTarget.id, confirmation)
+            if (result) navigate(`/companies/${result.companyId}`)
+          }}
+        />
+      )}
+      {rejectLeadTarget && (
+        <RejectLeadModal
+          leadName={`${rejectLeadTarget.firstName} ${rejectLeadTarget.lastName}`}
+          onClose={() => setRejectLeadTarget(null)}
+          onConfirm={(reason, note) => rejectLead(rejectLeadTarget.id, reason, note)}
+        />
+      )}
       {deleteLeadTarget && (
         <ConfirmDeleteModal
           title="Delete Lead"
@@ -621,7 +677,7 @@ function paginationWindow(current: number, total: number): (number | '…')[] {
 }
 
 function ScorePill({ score }: { score: number }) {
-  const tone = score >= 81 ? 'bg-[#f6eeec] text-[#794234]' : score >= 61 ? 'bg-[#f7f4eb] text-[#b28e34]' : score >= 31 ? 'bg-[#edf1f5] text-[#6086a9]' : 'bg-slate-100 text-slate-500'
+  const tone = score >= 81 ? 'bg-[var(--tint-rust-deep)] text-[var(--c-rust-deep)]' : score >= 61 ? 'bg-[var(--tint-gold)] text-[var(--c-gold)]' : score >= 31 ? 'bg-[var(--tint-steel)] text-[var(--c-steel)]' : 'bg-slate-100 text-slate-500'
   return <span className={`inline-flex items-center justify-center w-9 h-6 rounded-md text-xs font-semibold ${tone}`}>{score}</span>
 }
 

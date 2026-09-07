@@ -1,6 +1,7 @@
 import type { Activity, Deal, ID, Lead, Task } from '../types'
 import { isMeaningfulActivity } from './meaningfulActivity'
 import { isWithinPeriod, type SalesMonthPeriod } from './salesMonth'
+import { isActiveLead, isContactedLead, isEngagedLead } from './leadStatus'
 
 export interface ScoreBreakdownItem {
   label: string
@@ -79,7 +80,7 @@ function activityScore(repId: ID, period: SalesMonthPeriod, activities: Activity
 }
 
 function leadCoverageScore(repId: ID, period: SalesMonthPeriod, leads: Lead[], activities: Activity[]): SubScore {
-  const assigned = leads.filter((l) => l.ownerId === repId && l.status !== 'Converted' && l.status !== 'Lost')
+  const assigned = leads.filter((l) => l.ownerId === repId && isActiveLead(l))
   const touchedLeadIds = new Set(
     activities.filter((a) => a.leadId && isMeaningfulActivity(a) && isWithinPeriod(a.activityDate, period)).map((a) => a.leadId as string),
   )
@@ -100,7 +101,7 @@ function followUpScore(repId: ID, period: SalesMonthPeriod, tasks: Task[], deals
   const dueInPeriod = tasks.filter((t) => t.ownerId === repId && t.status !== 'Cancelled' && isWithinPeriod(t.dueDate, period))
   const completedOnTime = dueInPeriod.filter((t) => t.completedAt && new Date(t.completedAt) <= new Date(t.dueDate))
   const overdue = tasks.filter((t) => t.ownerId === repId && t.status !== 'Completed' && t.status !== 'Cancelled' && new Date(t.dueDate) < referenceDate)
-  const openNoNextAction = deals.filter((d) => d.ownerId === repId && d.stage !== 'Won' && d.stage !== 'Lost' && !d.nextActionAt)
+  const openNoNextAction = deals.filter((d) => d.ownerId === repId && d.stage !== 'Won' && d.stage !== 'Rejected' && !d.nextActionAt)
   const onTimePct = pct(completedOnTime.length, dueInPeriod.length, 100)
   const overduePenaltyScore = Math.max(0, 100 - overdue.length * 10)
   return {
@@ -119,8 +120,8 @@ function conversionScore(repId: ID, period: SalesMonthPeriod, leads: Lead[]): Su
   // stored qualifiedAt), so this reads current status of leads created in
   // the period — the same known limitation as the dashboard's Sales Funnel.
   const newLeads = leads.filter((l) => l.ownerId === repId && isWithinPeriod(l.createdAt, period))
-  const contacted = newLeads.filter((l) => l.status !== 'New')
-  const qualifiedPlus = newLeads.filter((l) => ['Qualified', 'Proposal Required', 'Converted'].includes(l.status))
+  const contacted = newLeads.filter(isContactedLead)
+  const qualifiedPlus = newLeads.filter(isEngagedLead)
   const contactRate = pct(contacted.length, newLeads.length, 100)
   const qualificationRate = pct(qualifiedPlus.length, newLeads.length, 100)
   return {
@@ -128,7 +129,7 @@ function conversionScore(repId: ID, period: SalesMonthPeriod, leads: Lead[]): Su
     breakdown: [
       { label: 'New leads this period', contribution: newLeads.length },
       { label: 'Contacted', contribution: contacted.length },
-      { label: 'Qualified or further', contribution: qualifiedPlus.length },
+      { label: 'Interested or hotter', contribution: qualifiedPlus.length },
       { label: 'Contact rate %', contribution: Math.round(contactRate) },
     ],
   }
@@ -136,7 +137,7 @@ function conversionScore(repId: ID, period: SalesMonthPeriod, leads: Lead[]): Su
 
 function winScore(repId: ID, period: SalesMonthPeriod, deals: Deal[]): SubScore {
   const won = deals.filter((d) => d.ownerId === repId && d.wonAt && isWithinPeriod(d.wonAt, period))
-  const lost = deals.filter((d) => d.ownerId === repId && d.lostAt && isWithinPeriod(d.lostAt, period))
+  const lost = deals.filter((d) => d.ownerId === repId && d.rejectedAt && isWithinPeriod(d.rejectedAt, period))
   const closed = won.length + lost.length
   const winRate = pct(won.length, closed, 50)
   return {

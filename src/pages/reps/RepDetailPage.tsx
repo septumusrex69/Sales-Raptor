@@ -10,6 +10,7 @@ import { formatCurrency, TODAY } from '../../data/mockData'
 import { decodeSalesMonthParam, getCurrentSalesMonth, isWithinPeriod, type SalesMonthPeriod } from '../../lib/salesMonth'
 import { isContactActivity, isMeaningfulActivity, MEANINGFUL_ACTIVITY_TYPES } from '../../lib/meaningfulActivity'
 import { computeRepScorecard } from '../../lib/repScore'
+import { isActiveLead, isContactedLead, isEngagedLead } from '../../lib/leadStatus'
 
 const TABS = ['Workload', 'Activity', 'Effectiveness', 'Commercial Performance', 'Discipline'] as const
 type Tab = (typeof TABS)[number]
@@ -41,7 +42,7 @@ export function RepDetailPage() {
   const data = useMemo(() => {
     if (!id) return undefined
     const ownLeads = leads.filter((l) => l.ownerId === id)
-    const activeLeads = ownLeads.filter((l) => l.status !== 'Converted' && l.status !== 'Lost')
+    const activeLeads = ownLeads.filter(isActiveLead)
     const newLeads = ownLeads.filter((l) => isWithinPeriod(l.createdAt, period))
     const touchedIds = new Set(
       activities.filter((a) => a.userId === id && a.leadId && isMeaningfulActivity(a) && isWithinPeriod(a.activityDate, period)).map((a) => a.leadId as string),
@@ -49,9 +50,9 @@ export function RepDetailPage() {
     const touched = activeLeads.filter((l) => touchedIds.has(l.id) || (l.lastContactAt && isWithinPeriod(l.lastContactAt, period)))
 
     const ownDeals = deals.filter((d) => d.ownerId === id)
-    const openDeals = ownDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Lost')
+    const openDeals = ownDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected')
     const won = ownDeals.filter((d) => d.wonAt && isWithinPeriod(d.wonAt, period))
-    const lost = ownDeals.filter((d) => d.lostAt && isWithinPeriod(d.lostAt, period))
+    const lost = ownDeals.filter((d) => d.rejectedAt && isWithinPeriod(d.rejectedAt, period))
     const closed = won.length + lost.length
     const revenueWon = won.reduce((s, d) => s + d.value, 0)
 
@@ -82,9 +83,9 @@ export function RepDetailPage() {
     const sortedValues = [...won.map((d) => d.value)].sort((a, b) => a - b)
     const medianDealValue = sortedValues.length > 0 ? sortedValues[Math.floor(sortedValues.length / 2)] : 0
 
-    const contactRate = newLeads.length > 0 ? Math.round((newLeads.filter((l) => l.status !== 'New').length / newLeads.length) * 100) : 0
+    const contactRate = newLeads.length > 0 ? Math.round((newLeads.filter(isContactedLead).length / newLeads.length) * 100) : 0
     const qualificationRate =
-      newLeads.length > 0 ? Math.round((newLeads.filter((l) => ['Qualified', 'Proposal Required', 'Converted'].includes(l.status)).length / newLeads.length) * 100) : 0
+      newLeads.length > 0 ? Math.round((newLeads.filter(isEngagedLead).length / newLeads.length) * 100) : 0
     const winRate = closed > 0 ? Math.round((won.length / closed) * 100) : 0
     const leadToWinRate = newLeads.length > 0 ? Math.round((won.length / newLeads.length) * 100) : 0
 
@@ -223,7 +224,7 @@ export function RepDetailPage() {
             <Field label="Win Rate" value={`${data.winRate}%`} />
             <Field label="Lead → Win Rate" value={`${data.leadToWinRate}%`} />
             <Field label="Deals Won" value={data.won.length.toString()} />
-            <Field label="Deals Lost" value={data.lost.length.toString()} />
+            <Field label="Deals Rejected" value={data.lost.length.toString()} />
           </dl>
         </Card>
       )}
@@ -233,7 +234,7 @@ export function RepDetailPage() {
           <CardHeader title="Commercial Performance" subtitle={period.rangeLabel} />
           <dl className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3.5 text-sm">
             <Field label="Deals Won" value={data.won.length.toString()} />
-            <Field label="Deals Lost" value={data.lost.length.toString()} />
+            <Field label="Deals Rejected" value={data.lost.length.toString()} />
             <Field label="Revenue Won" value={formatCurrency(data.revenueWon)} />
             <Field label="Average Deal Value" value={formatCurrency(data.avgDealValue)} />
             <Field label="Median Deal Value" value={formatCurrency(data.medianDealValue)} />

@@ -31,7 +31,7 @@ export function ActivityBreakdownChart({ activities }: { activities: Activity[] 
       <CardHeader title="Activity Breakdown" subtitle={`${total} meaningful activities`} />
       <div className="h-44 relative flex items-center justify-center">
         <svg viewBox={`0 0 ${DONUT_SIZE} ${DONUT_SIZE}`} className="h-44 w-44 -rotate-90">
-          <circle cx={DONUT_SIZE / 2} cy={DONUT_SIZE / 2} r={DONUT_R} fill="none" stroke="#eef1f6" strokeWidth={DONUT_STROKE} />
+          <circle cx={DONUT_SIZE / 2} cy={DONUT_SIZE / 2} r={DONUT_R} fill="none" stroke="var(--tint-steel-alt)" strokeWidth={DONUT_STROKE} />
           {arcs.map((a) => (
             <circle
               key={a.key}

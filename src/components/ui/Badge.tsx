@@ -5,14 +5,14 @@ import { CLASSIFICATION_TAILWIND, SERVICE_TAILWIND } from '../../lib/colors'
 
 const TONES = {
   slate: 'bg-slate-100 text-slate-600',
-  new: 'bg-[#edf1f5] text-[#6086a9]',
-  contacted: 'bg-[#edf1f5] text-[#416281]',
-  attempting: 'bg-[#f5eeed] text-[#ad6452]',
-  qualified: 'bg-[#eef4f1] text-[#406d58]',
-  proposal: 'bg-[#f7f4eb] text-[#b28e34]',
-  negotiation: 'bg-[#edf1f5] text-[#2b4055]',
-  won: 'bg-[#f7f3eb] text-[#957323]',
-  lost: 'bg-[#f6eeec] text-[#794234]',
+  new: 'bg-[var(--tint-steel)] text-[var(--c-steel)]',
+  contacted: 'bg-[var(--tint-steel)] text-[var(--c-navy-mid)]',
+  attempting: 'bg-[var(--tint-rust)] text-[var(--c-rust)]',
+  qualified: 'bg-[var(--tint-green)] text-[var(--c-green)]',
+  proposal: 'bg-[var(--tint-gold)] text-[var(--c-gold)]',
+  negotiation: 'bg-[var(--tint-steel)] text-[var(--c-navy-deep)]',
+  won: 'bg-[var(--tint-gold-deep)] text-[var(--c-gold-deep)]',
+  lost: 'bg-[var(--tint-rust-deep)] text-[var(--c-rust-deep)]',
 } as const
 
 export type BadgeTone = keyof typeof TONES
@@ -22,24 +22,18 @@ export function Badge({ children, tone = 'slate', className }: { children: React
 }
 
 const LEAD_STATUS_TONE: Record<string, BadgeTone> = {
-  New: 'new',
-  'Attempting Contact': 'attempting',
-  Contacted: 'contacted',
-  Qualified: 'qualified',
-  Unqualified: 'slate',
-  'Proposal Required': 'proposal',
+  'No Contact Yet': 'new',
+  Interested: 'contacted',
+  'Hot Lead': 'qualified',
   Converted: 'won',
-  Lost: 'lost',
+  Rejected: 'lost',
 }
 
 const DEAL_STAGE_TONE: Record<string, BadgeTone> = {
-  'New Lead': 'new',
-  Contacted: 'contacted',
-  Qualified: 'qualified',
-  'Proposal Sent': 'proposal',
-  Negotiation: 'negotiation',
+  'New Deal': 'new',
+  'Quotation Sent': 'proposal',
   Won: 'won',
-  Lost: 'lost',
+  Rejected: 'lost',
 }
 
 const PRIORITY_TONE: Record<string, BadgeTone> = {
@@ -60,8 +54,9 @@ export function StatusBadge({ status }: { status: string }) {
   return <Badge tone={LEAD_STATUS_TONE[status] ?? 'slate'}>{status}</Badge>
 }
 
-export function StageBadge({ stage }: { stage: string }) {
-  return <Badge tone={DEAL_STAGE_TONE[stage] ?? 'slate'}>{stage}</Badge>
+/** `label` lets a deal say "Mandate Sent" where another says "Quotation Sent" — same stage, right word. */
+export function StageBadge({ stage, label }: { stage: string; label?: string }) {
+  return <Badge tone={DEAL_STAGE_TONE[stage] ?? 'slate'}>{label ?? stage}</Badge>
 }
 
 export function PriorityBadge({ priority }: { priority: string }) {

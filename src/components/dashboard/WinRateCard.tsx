@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Card, CardHeader } from '../ui/Card'
-import { POSITIVE_HEX, NEGATIVE_HEX, OPEN_HEX } from '../../lib/colors'
+import { RingDonut, type RingDonutSlice } from '../ui/RingDonut'
+import { OUTCOME_WON, OUTCOME_OPEN, OUTCOME_REJECTED, OUTCOME_VALUE } from '../../lib/colors'
 import { buildDrilldownUrl, SALES_MONTH_PARAM } from '../../lib/drilldown'
 import type { Deal } from '../../types'
 
@@ -17,100 +18,34 @@ interface WinRateCardProps {
   periodParam: string
 }
 
-interface DonutSlice {
-  name: string
-  value: number
-  color: string
-  /** Muted slices (excluded from that donut's own rate) get de-emphasized legend text too. */
-  muted?: boolean
-}
-
 /** Neutral gray for a slice that's excluded from a given rate's own math — still shown for context, just visually de-emphasized so it doesn't read as "counted." */
-const EXCLUDED_HEX = '#cbd5e1'
-
-/** SVG geometry for the rounded-stroke ring — a plain stroked circle per slice (round caps, small gaps), not a filled pie wedge. */
-const DONUT_SIZE = 160
-const DONUT_STROKE = 22
-const DONUT_R = (DONUT_SIZE - DONUT_STROKE) / 2
-const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_R
-
-function RateDonut({ data, rate, rateLabel, caption }: { data: DonutSlice[]; rate: number; rateLabel: string; caption: string }) {
-  const total = data.reduce((s, d) => s + d.value, 0)
-  const gap = data.length > 1 ? 3 : 0
-  let cumulative = 0
-  const arcs = data.map((d) => {
-    const raw = total > 0 ? (d.value / total) * DONUT_CIRCUMFERENCE : 0
-    const length = Math.max(raw - gap, 0)
-    const offset = -cumulative
-    cumulative += raw
-    return { color: d.color, length, offset, key: d.name }
-  })
-
-  return (
-    <div className="flex flex-col items-center gap-2.5">
-      <div className="h-40 w-40 relative">
-        <svg viewBox={`0 0 ${DONUT_SIZE} ${DONUT_SIZE}`} className="h-full w-full -rotate-90">
-          <circle cx={DONUT_SIZE / 2} cy={DONUT_SIZE / 2} r={DONUT_R} fill="none" stroke="#eef1f6" strokeWidth={DONUT_STROKE} />
-          {arcs.map((a) => (
-            <circle
-              key={a.key}
-              cx={DONUT_SIZE / 2}
-              cy={DONUT_SIZE / 2}
-              r={DONUT_R}
-              fill="none"
-              stroke={a.color}
-              strokeWidth={DONUT_STROKE}
-              strokeLinecap="round"
-              strokeDasharray={`${a.length} ${DONUT_CIRCUMFERENCE - a.length}`}
-              strokeDashoffset={a.offset}
-            />
-          ))}
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-2">
-          <span className="text-[26px] font-extrabold leading-none" style={{ color: POSITIVE_HEX }}>
-            {rate}%
-          </span>
-          <span className="text-[9px] font-semibold text-slate-400 mt-1 tracking-wide text-center leading-tight max-w-[86px]">{rateLabel}</span>
-        </div>
-      </div>
-      <span className="text-[11px] text-slate-400 text-center -mt-1">{caption}</span>
-      <div className="flex items-center gap-3 text-[11px] flex-wrap justify-center">
-        {data.map((d) => (
-          <span key={d.name} className={`flex items-center gap-1 ${d.muted ? 'text-slate-400' : 'text-slate-600'}`}>
-            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: d.color }} />
-            {d.name} <b className={d.muted ? 'font-semibold' : 'font-bold'}>{d.value}</b>
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
+const EXCLUDED_HEX = 'var(--c-grey-pale)'
 
 export function WinRateCard({ deals, won, lost, winRate, newLeads, qualified, converted, periodLabel, periodParam }: WinRateCardProps) {
-  const open = deals.filter((d) => d.stage !== 'Won' && d.stage !== 'Lost').length
+  const open = deals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected').length
   const total = won + open + lost
   const overallRate = total > 0 ? Math.round((won / total) * 100) : 0
 
   // Overall Conversion counts Open toward the denominator, so it's colored in full —
   // every slice here contributes to the percentage shown.
-  const overallDonutData: DonutSlice[] = [
-    { name: 'Won', value: won, color: POSITIVE_HEX },
-    { name: 'Open', value: open, color: OPEN_HEX },
-    { name: 'Lost', value: lost, color: NEGATIVE_HEX },
+  const overallDonutData: RingDonutSlice[] = [
+    { name: 'Won', value: won, color: OUTCOME_WON },
+    { name: 'Open', value: open, color: OUTCOME_OPEN },
+    { name: 'Rejected', value: lost, color: OUTCOME_REJECTED },
   ].filter((d) => d.value > 0)
 
   // Win Rate excludes Open from its math entirely, so its wedge is grayed out here
   // rather than reusing the amber "Open" color — a visual cue that it isn't counted.
-  const winRateDonutData: DonutSlice[] = [
-    { name: 'Won', value: won, color: POSITIVE_HEX },
+  const winRateDonutData: RingDonutSlice[] = [
+    { name: 'Won', value: won, color: OUTCOME_WON },
     { name: 'Open', value: open, color: EXCLUDED_HEX, muted: true },
-    { name: 'Lost', value: lost, color: NEGATIVE_HEX },
+    { name: 'Rejected', value: lost, color: OUTCOME_REJECTED },
   ].filter((d) => d.value > 0)
 
   const pipeline = [
-    { label: 'New Leads', value: newLeads, color: '#6086a9', bg: '#edf1f5', to: buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam }) },
-    { label: 'Qualified', value: qualified, color: '#406d58', bg: '#eef4f1', to: buildDrilldownUrl('/leads', { status: 'Qualified', [SALES_MONTH_PARAM]: periodParam }) },
-    { label: 'Converted to Deal', value: converted, color: '#957323', bg: '#f7f3eb', to: buildDrilldownUrl('/leads', { status: 'Converted', [SALES_MONTH_PARAM]: periodParam }) },
+    { label: 'New Leads', value: newLeads, color: 'var(--c-steel)', bg: 'var(--tint-steel)', to: buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam }) },
+    { label: 'Hot leads', value: qualified, color: 'var(--c-green)', bg: 'var(--tint-green)', to: buildDrilldownUrl('/leads', { status: 'Hot Lead', [SALES_MONTH_PARAM]: periodParam }) },
+    { label: 'Converted to Deal', value: converted, color: 'var(--c-gold-deep)', bg: 'var(--tint-gold-deep)', to: buildDrilldownUrl('/leads', { status: 'Converted', [SALES_MONTH_PARAM]: periodParam }) },
   ]
 
   return (
@@ -121,8 +56,8 @@ export function WinRateCard({ deals, won, lost, winRate, newLeads, qualified, co
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-[176px_176px_1fr] gap-6 items-start">
-        <RateDonut data={overallDonutData} rate={overallRate} rateLabel="OVERALL CONVERSION" caption="Of everything in the pipeline" />
-        <RateDonut data={winRateDonutData} rate={winRate} rateLabel="WIN RATE" caption="Of deals that closed" />
+        <RingDonut data={overallDonutData} centerValue={`${overallRate}%`} centerColor={OUTCOME_VALUE} centerLabel="OVERALL CONVERSION" caption="Of everything in the pipeline" />
+        <RingDonut data={winRateDonutData} centerValue={`${winRate}%`} centerColor={OUTCOME_VALUE} centerLabel="WIN RATE" caption="Of deals that closed" />
 
         <div className="flex flex-col gap-2.5">
           <span className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">Lead pipeline, same period</span>
@@ -141,7 +76,7 @@ export function WinRateCard({ deals, won, lost, winRate, newLeads, qualified, co
       </div>
 
       <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 text-xs text-slate-400">
-        <span>Overall Conversion = Won ÷ (Won + Open + Lost) &nbsp;·&nbsp; Win Rate = Won ÷ (Won + Lost)</span>
+        <span>Overall Conversion = Won ÷ (Won + Open + Rejected) &nbsp;·&nbsp; Win Rate = Won ÷ (Won + Rejected)</span>
         <Link to={buildDrilldownUrl('/deals', { view: 'table', [SALES_MONTH_PARAM]: periodParam })} className="font-semibold text-brand-600 hover:underline shrink-0">
           View all deals →
         </Link>

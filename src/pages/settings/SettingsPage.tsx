@@ -1,16 +1,22 @@
-import { useState, type FormEvent } from 'react'
-import { Plus, Trash2, Pencil, Check, X } from 'lucide-react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
-import { customFields as initialCustomFields, industries, leadSources as initialLeadSources, lossReasons as initialLossReasons } from '../../data/mockData'
+import { SignatureEditor } from '../../components/settings/SignatureEditor'
+import { customFields as initialCustomFields, industries, leadSources as initialLeadSources } from '../../data/mockData'
+import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
+import { useTheme } from '../../store/ThemeContext'
+import { THEMES } from '../../lib/themes'
+import { DEAL_MILESTONE_EVERY, MANDATE_MILESTONE_EVERY } from '../../lib/celebration'
+import { celebrationSoundEnabled, setCelebrationSoundEnabled } from '../../lib/chime'
 import { supabase, PRODUCTION_APP_URL } from '../../lib/supabase'
-import type { CustomField, CustomFieldType, User, UserRole } from '../../types'
+import type { CustomField, CustomFieldType, Team, TeamKind, User, UserRole } from '../../types'
 import { DEAL_STAGES } from '../../types'
 
-const TABS = ['Profile', 'Users', 'Teams', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Lost Reasons', 'Notifications', 'Integrations'] as const
+const TABS = ['Profile', 'Appearance', 'Users', 'Teams', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations'] as const
 type Tab = (typeof TABS)[number]
 
 export function SettingsPage() {
@@ -31,12 +37,13 @@ export function SettingsPage() {
       </nav>
       <div className="flex-1 min-w-0">
         {tab === 'Profile' && <ProfileTab />}
+        {tab === 'Appearance' && <AppearanceTab />}
         {tab === 'Users' && <UsersTab />}
         {tab === 'Teams' && <TeamsTab />}
         {tab === 'Pipelines' && <PipelinesTab />}
         {tab === 'Custom Fields' && <CustomFieldsTab />}
         {tab === 'Lead Sources' && <StringListTab title="Lead Sources" initial={initialLeadSources} />}
-        {tab === 'Lost Reasons' && <StringListTab title="Lost Reasons" initial={initialLossReasons} />}
+        {tab === 'Rejection Reasons' && <StringListTab title="Rejection Reasons" initial={REJECTION_REASONS} />}
         {tab === 'Notifications' && <NotificationsTab />}
         {tab === 'Integrations' && <IntegrationsTab />}
       </div>
@@ -51,6 +58,10 @@ function ProfileTab() {
     fullName: currentUser?.name ?? '',
     email: currentUser?.email ?? '',
     phone: currentUser?.phone ?? '',
+    emailSignature: currentUser?.emailSignature ?? '',
+    emailSignatureImageUrl: currentUser?.emailSignatureImageUrl,
+    emailSignatureImageWidth: currentUser?.emailSignatureImageWidth,
+    emailSignatureImageAlign: currentUser?.emailSignatureImageAlign,
     language: 'English',
     timezone: '(GMT+02:00) Johannesburg',
     dateFormat: 'DD MMM YYYY',
@@ -62,7 +73,7 @@ function ProfileTab() {
     <Card>
       <CardHeader title="Profile" subtitle="Your personal account settings" />
       <div className="flex items-center gap-4 mb-6">
-        <Avatar name={form.fullName} color={currentUser?.avatarColor ?? '#355069'} size={64} />
+        <Avatar name={form.fullName} color={currentUser?.avatarColor ?? 'var(--c-navy)'} size={64} />
         <div>
           <p className="font-semibold text-slate-800">{form.fullName}</p>
           <p className="text-sm text-slate-400">{currentUser?.role}</p>
@@ -72,7 +83,14 @@ function ProfileTab() {
         onSubmit={(e) => {
           e.preventDefault()
           if (currentUser) {
-            const patch = { name: form.fullName, phone: form.phone || undefined }
+            const patch = {
+              name: form.fullName,
+              phone: form.phone || undefined,
+              emailSignature: form.emailSignature || undefined,
+              emailSignatureImageUrl: form.emailSignatureImageUrl,
+              emailSignatureImageWidth: form.emailSignatureImageWidth,
+              emailSignatureImageAlign: form.emailSignatureImageAlign,
+            }
             updateUser(currentUser.id, patch)
             updateCurrentUserLocal(patch)
           }
@@ -95,6 +113,26 @@ function ProfileTab() {
             <FormField label="Role">
               <input className={inputClass} value={currentUser?.role ?? ''} disabled />
             </FormField>
+            {currentUser && (
+              <SignatureEditor
+                userId={currentUser.id}
+                value={{
+                  text: form.emailSignature,
+                  imageUrl: form.emailSignatureImageUrl,
+                  imageWidth: form.emailSignatureImageWidth,
+                  imageAlign: form.emailSignatureImageAlign,
+                }}
+                onChange={(patch) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    ...(patch.text !== undefined ? { emailSignature: patch.text } : {}),
+                    ...('imageUrl' in patch ? { emailSignatureImageUrl: patch.imageUrl } : {}),
+                    ...('imageWidth' in patch ? { emailSignatureImageWidth: patch.imageWidth } : {}),
+                    ...('imageAlign' in patch ? { emailSignatureImageAlign: patch.imageAlign } : {}),
+                  }))
+                }
+              />
+            )}
           </div>
           <div>
             <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Preferences</h4>
@@ -129,7 +167,7 @@ function ProfileTab() {
             Save Changes
           </button>
           {saved && (
-            <span className="inline-flex items-center gap-1 text-xs font-medium text-[#406d58]">
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-[var(--c-green)]">
               <Check size={13} /> Saved
             </span>
           )}
@@ -146,6 +184,8 @@ function UsersTab() {
   const [addOpen, setAddOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<User | null>(null)
   const [removingUser, setRemovingUser] = useState<User | null>(null)
+  const [emailUser, setEmailUser] = useState<User | null>(null)
+  const [signatureUser, setSignatureUser] = useState<User | null>(null)
 
   return (
     <Card padded={false}>
@@ -186,7 +226,7 @@ function UsersTab() {
                       value={u.role}
                       onChange={(e) => updateUser(u.id, { role: e.target.value as UserRole })}
                     >
-                      {(['Administrator', 'Sales Manager', 'Sales Representative', 'Read Only'] as UserRole[]).map((r) => (
+                      {(['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Read Only'] as UserRole[]).map((r) => (
                         <option key={r}>{r}</option>
                       ))}
                     </select>
@@ -217,12 +257,12 @@ function UsersTab() {
                   {isAdmin ? (
                     <button
                       onClick={() => updateUser(u.id, { status: u.status === 'Active' ? 'Inactive' : 'Active' })}
-                      className={`badge ${u.status === 'Active' ? 'bg-[#eef4f1] text-[#406d58]' : 'bg-slate-100 text-slate-500'}`}
+                      className={`badge ${u.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}
                     >
                       {u.status}
                     </button>
                   ) : (
-                    <span className={`badge ${u.status === 'Active' ? 'bg-[#eef4f1] text-[#406d58]' : 'bg-slate-100 text-slate-500'}`}>{u.status}</span>
+                    <span className={`badge ${u.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}>{u.status}</span>
                   )}
                 </td>
                 {isAdmin && (
@@ -233,11 +273,17 @@ function UsersTab() {
                 {isAdmin && (
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-2.5">
+                      <button onClick={() => setEmailUser(u)} className="text-slate-400 hover:text-brand-600" title="Manage email connection">
+                        <Mail size={14} />
+                      </button>
+                      <button onClick={() => setSignatureUser(u)} className="text-slate-400 hover:text-brand-600" title="Manage email signature">
+                        <ImageIcon size={14} />
+                      </button>
                       <button onClick={() => setEditingUser(u)} className="text-slate-400 hover:text-brand-600" title="Edit user">
                         <Pencil size={14} />
                       </button>
                       {u.id !== currentUser?.id && (
-                        <button onClick={() => setRemovingUser(u)} className="text-slate-400 hover:text-[#794234]" title="Remove user">
+                        <button onClick={() => setRemovingUser(u)} className="text-slate-400 hover:text-[var(--c-rust-deep)]" title="Remove user">
                           <Trash2 size={14} />
                         </button>
                       )}
@@ -249,7 +295,7 @@ function UsersTab() {
           </tbody>
         </table>
       </div>
-      {addOpen && session && <InviteUserModal accessToken={session.access_token} onClose={() => setAddOpen(false)} />}
+      {addOpen && session && <InviteUserModal accessToken={session.access_token} teams={teams} onClose={() => setAddOpen(false)} />}
       {editingUser && session && (
         <EditUserModal
           user={editingUser}
@@ -266,7 +312,163 @@ function UsersTab() {
           onRemoved={() => removeUserLocal(removingUser.id)}
         />
       )}
+      {emailUser && session && (
+        <AdminEmailConnectModal user={emailUser} accessToken={session.access_token} onClose={() => setEmailUser(null)} />
+      )}
+      {signatureUser && (
+        <AdminSignatureModal user={signatureUser} onClose={() => setSignatureUser(null)} onSave={(patch) => updateUser(signatureUser.id, patch)} />
+      )}
     </Card>
+  )
+}
+
+function AdminSignatureModal({ user, onClose, onSave }: { user: User; onClose: () => void; onSave: (patch: Partial<User>) => void }) {
+  const [value, setValue] = useState({
+    text: user.emailSignature ?? '',
+    imageUrl: user.emailSignatureImageUrl,
+    imageWidth: user.emailSignatureImageWidth,
+    imageAlign: user.emailSignatureImageAlign,
+  })
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    onSave({
+      emailSignature: value.text || undefined,
+      emailSignatureImageUrl: value.imageUrl,
+      emailSignatureImageWidth: value.imageWidth,
+      emailSignatureImageAlign: value.imageAlign,
+    })
+    onClose()
+  }
+
+  return (
+    <Modal title={`Email Signature — ${user.name}`} onClose={onClose} width={460}>
+      <form onSubmit={handleSubmit}>
+        <SignatureEditor userId={user.id} value={value} onChange={(patch) => setValue((prev) => ({ ...prev, ...patch }))} />
+        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
+          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
+            Cancel
+          </button>
+          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
+            Save Changes
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function AdminEmailConnectModal({ user, accessToken, onClose }: { user: User; accessToken: string; onClose: () => void }) {
+  const [status, setStatus] = useState<EmailStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [form, setForm] = useState({ email: user.email, password: '', smtpHost: '', smtpPort: '587', imapHost: '', imapPort: '993' })
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    fetch(`/api/email/status?targetUserId=${encodeURIComponent(user.id)}`, { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then((res) => res.json())
+      .then((body) => setStatus(body))
+      .catch(() => setStatus({ connected: false }))
+      .finally(() => setLoading(false))
+  }, [accessToken, user.id])
+
+  async function handleConnect(e: FormEvent) {
+    e.preventDefault()
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/email/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          targetUserId: user.id,
+          email: form.email.trim(),
+          password: form.password,
+          smtpHost: form.smtpHost.trim(),
+          smtpPort: Number(form.smtpPort),
+          imapHost: form.imapHost.trim(),
+          imapPort: Number(form.imapPort),
+        }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(body.error ?? 'Could not connect that mailbox.')
+        setSubmitting(false)
+        return
+      }
+      setStatus({ connected: true, email: form.email.trim(), lastSyncedAt: null })
+    } catch {
+      setError('Could not reach the server. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleDisconnect() {
+    if (!confirm(`Disconnect ${user.name}'s mailbox?`)) return
+    await fetch('/api/email/disconnect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ targetUserId: user.id }),
+    })
+    setStatus({ connected: false })
+  }
+
+  return (
+    <Modal title={`Email — ${user.name}`} onClose={onClose} width={480}>
+      {loading ? (
+        <p className="text-sm text-slate-400">Checking connection…</p>
+      ) : status?.connected ? (
+        <div>
+          <p className="text-sm text-slate-700">
+            Connected as <span className="font-medium">{status.email}</span>
+          </p>
+          {status.lastSyncedAt && <p className="text-xs text-slate-400 mt-1">Last synced {new Date(status.lastSyncedAt).toLocaleString()}</p>}
+          <div className="flex justify-end mt-4">
+            <button onClick={handleDisconnect} className="text-sm font-medium px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">
+              Disconnect
+            </button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={handleConnect}>
+          <p className="text-xs text-slate-400 mb-4">
+            Enter {user.name}'s mailbox credentials to connect it on their behalf. Find the SMTP/IMAP host and port under Email Accounts →
+            Connect Devices (or Configure Mail Client) in ConsoleH / webmail.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <FormField label="Email Address" required>
+              <input className={inputClass} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
+            </FormField>
+            <FormField label="Password" required>
+              <input className={inputClass} type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
+            </FormField>
+            <FormField label="SMTP Host" required>
+              <input className={inputClass} placeholder="mail.yourdomain.co.za" value={form.smtpHost} onChange={(e) => setForm({ ...form, smtpHost: e.target.value })} required />
+            </FormField>
+            <FormField label="SMTP Port" required>
+              <input className={inputClass} type="number" value={form.smtpPort} onChange={(e) => setForm({ ...form, smtpPort: e.target.value })} required />
+            </FormField>
+            <FormField label="IMAP Host" required>
+              <input className={inputClass} placeholder="mail.yourdomain.co.za" value={form.imapHost} onChange={(e) => setForm({ ...form, imapHost: e.target.value })} required />
+            </FormField>
+            <FormField label="IMAP Port" required>
+              <input className={inputClass} type="number" value={form.imapPort} onChange={(e) => setForm({ ...form, imapPort: e.target.value })} required />
+            </FormField>
+          </div>
+          {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+          <div className="flex justify-end gap-2 mt-4">
+            <button type="button" onClick={onClose} className="text-sm font-medium px-4 py-2 rounded-lg text-slate-500 hover:bg-slate-100">
+              Cancel
+            </button>
+            <button type="submit" disabled={submitting} className="text-sm font-medium px-4 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+              {submitting ? 'Connecting…' : 'Connect Mailbox'}
+            </button>
+          </div>
+        </form>
+      )}
+    </Modal>
   )
 }
 
@@ -294,14 +496,14 @@ function ResetLoginButton({ email }: { email: string }) {
   }
 
   if (state === 'sent') {
-    return <span className="text-xs text-[#406d58]">Reset link sent</span>
+    return <span className="text-xs text-[var(--c-green)]">Reset link sent</span>
   }
   return (
     <div>
       <button onClick={handleClick} disabled={state === 'sending'} className="text-xs font-medium text-brand-600 hover:underline disabled:opacity-50">
         {state === 'sending' ? 'Sending…' : 'Send login link'}
       </button>
-      {error && <p className="text-[11px] text-[#794234] mt-0.5 max-w-[160px]">{error}</p>}
+      {error && <p className="text-[11px] text-[var(--c-rust-deep)] mt-0.5 max-w-[160px]">{error}</p>}
     </div>
   )
 }
@@ -363,7 +565,7 @@ function EditUserModal({
         {email.trim() !== user.email && (
           <p className="text-xs text-slate-400 mb-3.5 -mt-2">Changing the email changes their login — they'll need to sign in with the new address.</p>
         )}
-        {error && <p className="text-sm text-[#794234] mb-3.5">{error}</p>}
+        {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
             Cancel
@@ -423,8 +625,8 @@ function RemoveUserModal({
       <p className="text-sm text-slate-600 leading-relaxed mb-1">
         Remove <b>{user.name}</b> ({user.email})? They'll no longer be able to log in. Records they own (leads, deals, etc.) are kept, not deleted.
       </p>
-      <p className="text-sm text-[#794234] mb-3.5">This can't be undone.</p>
-      {error && <p className="text-sm text-[#794234] mb-3.5">{error}</p>}
+      <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">This can't be undone.</p>
+      {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
       <div className="flex justify-end gap-2 pt-1">
         <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
           Cancel
@@ -433,7 +635,7 @@ function RemoveUserModal({
           type="button"
           onClick={handleConfirm}
           disabled={submitting}
-          className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[#794234] text-white hover:bg-[#622f24] disabled:opacity-50"
+          className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[var(--c-rust-deep)] text-white hover:bg-[var(--c-rust-deep-hover)] disabled:opacity-50"
         >
           {submitting ? 'Removing…' : 'Remove User'}
         </button>
@@ -442,9 +644,13 @@ function RemoveUserModal({
   )
 }
 
-function InviteUserModal({ accessToken, onClose }: { accessToken: string; onClose: () => void }) {
-  const [email, setEmail] = useState('')
+const INVITE_ROLES: UserRole[] = ['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Read Only']
+
+function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string; teams: Team[]; onClose: () => void }) {
   const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [role, setRole] = useState<UserRole>('Sales Representative')
+  const [teamId, setTeamId] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sent, setSent] = useState(false)
@@ -458,7 +664,7 @@ function InviteUserModal({ accessToken, onClose }: { accessToken: string; onClos
       const res = await fetch('/api/invite-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ email, name: name || undefined }),
+        body: JSON.stringify({ email, name: name || undefined, role, teamId: teamId || undefined }),
       })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -478,7 +684,7 @@ function InviteUserModal({ accessToken, onClose }: { accessToken: string; onClos
       <Modal title="Add User" onClose={onClose} width={420}>
         <p className="text-sm text-slate-600 leading-relaxed">
           Invite sent to <span className="font-medium text-slate-800">{email}</span>. They'll get an email to set their password, and will appear in this
-          list automatically once they accept — just set their role and team here.
+          list with the role{teamId ? ' and team' : ''} you just set once they accept.
         </p>
         <div className="flex justify-end mt-4 pt-3 border-t border-slate-100">
           <button onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
@@ -492,13 +698,30 @@ function InviteUserModal({ accessToken, onClose }: { accessToken: string; onClos
   return (
     <Modal title="Add User" onClose={onClose} width={420}>
       <form onSubmit={handleSubmit}>
-        <FormField label="Email" required>
-          <input type="email" className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
-        </FormField>
         <FormField label="Full Name (optional)">
-          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </FormField>
-        {error && <p className="text-sm text-[#794234] mb-3.5">{error}</p>}
+        <FormField label="Email" required>
+          <input type="email" className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} required />
+        </FormField>
+        <FormField label="Role" required>
+          <select className={inputClass} value={role} onChange={(e) => setRole(e.target.value as UserRole)}>
+            {INVITE_ROLES.map((r) => (
+              <option key={r}>{r}</option>
+            ))}
+          </select>
+        </FormField>
+        <FormField label="Team (optional)">
+          <select className={inputClass} value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+            <option value="">No team</option>
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </FormField>
+        {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
         <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
             Cancel
@@ -517,6 +740,7 @@ function TeamsTab() {
   const { currentUser } = useAuth()
   const isAdmin = currentUser?.role === 'Administrator'
   const [name, setName] = useState('')
+  const [kind, setKind] = useState<TeamKind>('Sales')
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
   const [removingTeam, setRemovingTeam] = useState<{ id: string; name: string } | null>(null)
@@ -555,12 +779,28 @@ function TeamsTab() {
                   </form>
                 ) : (
                   <div>
-                    <p className="text-sm font-semibold text-slate-700">{t.name}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-semibold text-slate-700">{t.name}</p>
+                      <span
+                        className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${t.kind === 'Communications' ? 'bg-[var(--tint-steel)] text-[var(--c-navy)]' : 'bg-[var(--tint-gold)] text-[var(--c-gold-deep)]'}`}
+                      >
+                        {t.kind}
+                      </span>
+                    </div>
                     <p className="text-xs text-slate-400">{t.memberIds.length} members</p>
                   </div>
                 )}
                 {isAdmin && editingTeamId !== t.id && (
                   <div className="flex items-center gap-2.5 shrink-0">
+                    <select
+                      value={t.kind}
+                      onChange={(e) => updateTeam(t.id, { kind: e.target.value as TeamKind })}
+                      className="text-xs text-slate-500 border border-slate-200 rounded-lg px-2 py-1 bg-white outline-none"
+                      title="Which dashboard this team's members land on"
+                    >
+                      <option value="Sales">Sales</option>
+                      <option value="Communications">Communications</option>
+                    </select>
                     <button
                       onClick={() => {
                         setEditingTeamId(t.id)
@@ -571,7 +811,7 @@ function TeamsTab() {
                     >
                       <Pencil size={14} />
                     </button>
-                    <button onClick={() => setRemovingTeam({ id: t.id, name: t.name })} className="text-slate-400 hover:text-[#794234]" title="Delete team">
+                    <button onClick={() => setRemovingTeam({ id: t.id, name: t.name })} className="text-slate-400 hover:text-[var(--c-rust-deep)]" title="Delete team">
                       <Trash2 size={14} />
                     </button>
                   </div>
@@ -585,7 +825,7 @@ function TeamsTab() {
                       <UserAvatar userId={id} size={20} />
                       <span className="text-xs text-slate-600">{member?.name ?? 'Unknown'}</span>
                       {isAdmin && (
-                        <button onClick={() => updateUser(id, { teamId: undefined })} className="text-slate-400 hover:text-[#794234]" title="Remove from team">
+                        <button onClick={() => updateUser(id, { teamId: undefined })} className="text-slate-400 hover:text-[var(--c-rust-deep)]" title="Remove from team">
                           <X size={12} />
                         </button>
                       )}
@@ -618,12 +858,17 @@ function TeamsTab() {
           onSubmit={(e) => {
             e.preventDefault()
             if (!name.trim()) return
-            addTeam({ name })
+            addTeam({ name, kind })
             setName('')
+            setKind('Sales')
           }}
           className="flex gap-2 mt-4 pt-4 border-t border-slate-100"
         >
           <input className={inputClass} placeholder="New team name" value={name} onChange={(e) => setName(e.target.value)} />
+          <select value={kind} onChange={(e) => setKind(e.target.value as TeamKind)} className={`${inputClass} w-40 shrink-0`}>
+            <option value="Sales">Sales</option>
+            <option value="Communications">Communications</option>
+          </select>
           <button type="submit" className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 shrink-0">
             <Plus size={15} /> Add Team
           </button>
@@ -643,7 +888,7 @@ function TeamsTab() {
                 deleteTeam(removingTeam.id)
                 setRemovingTeam(null)
               }}
-              className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[#794234] text-white hover:bg-[#6a3a2d]"
+              className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[var(--c-rust-deep)] text-white hover:bg-[var(--c-rust-hover)]"
             >
               Remove
             </button>
@@ -665,7 +910,7 @@ function PipelinesTab() {
           <div key={s} className="flex items-center gap-3 border border-slate-100 rounded-lg px-3.5 py-2.5">
             <span className="text-xs text-slate-400 w-5">{i + 1}</span>
             <span className="text-sm font-medium text-slate-700 flex-1">{s}</span>
-            {!(['Won', 'Lost'] as string[]).includes(s) && (
+            {!(['Won', 'Rejected'] as string[]).includes(s) && (
               <button onClick={() => setStages((prev) => prev.filter((x) => x !== s))} className="p-1 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50">
                 <X size={14} />
               </button>
@@ -723,7 +968,7 @@ function CustomFieldsTab() {
                 <td className="px-3 py-2.5 text-slate-500">{f.relatedTo}</td>
                 <td className="px-3 py-2.5 text-slate-500">{f.type}</td>
                 <td className="px-3 py-2.5">
-                  <span className={`badge ${f.status === 'Active' ? 'bg-[#eef4f1] text-[#406d58]' : 'bg-slate-100 text-slate-500'}`}>{f.status}</span>
+                  <span className={`badge ${f.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}>{f.status}</span>
                 </td>
                 <td className="px-3 py-2.5">
                   <button onClick={() => setFields((prev) => prev.filter((x) => x.id !== f.id))} className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50">
@@ -784,6 +1029,107 @@ function AddCustomFieldModal({ onClose, onSave }: { onClose: () => void; onSave:
         </div>
       </form>
     </Modal>
+  )
+}
+
+/**
+ * Picking a skin. Each option is shown as the thing it produces rather than described in
+ * words — a name and a paragraph can't tell you what an interface will feel like, and a
+ * three-colour tile can.
+ */
+function AppearanceTab() {
+  const { themeId, setTheme, theme } = useTheme()
+  const { celebrate } = useAppStore()
+  const [sound, setSound] = useState(celebrationSoundEnabled)
+  return (
+    <Card>
+      <CardHeader title="Appearance" subtitle={`Choose how ${theme.productName} looks. This changes nothing but the styling, and applies to you only.`} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+        {THEMES.map((t) => {
+          const selected = t.id === themeId
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTheme(t.id)}
+              aria-pressed={selected}
+              className={`text-left rounded-xl border p-3 transition-colors ${
+                selected ? 'border-gold-500 ring-1 ring-gold-500/40 bg-gold-500/5' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+              }`}
+            >
+              <span
+                className="flex h-20 rounded-lg overflow-hidden border border-black/5"
+                style={{ backgroundColor: t.swatch.surface }}
+                aria-hidden="true"
+              >
+                <span className="w-1/3 flex flex-col justify-between p-1.5" style={{ backgroundColor: t.swatch.ground }}>
+                  <span className="block h-1.5 w-8 rounded-full" style={{ backgroundColor: t.swatch.accent }} />
+                  <span className="block h-1 w-6 rounded-full bg-white/25" />
+                </span>
+                <span className="flex-1 p-2 flex flex-col gap-1.5">
+                  <span className="block h-2.5 w-2/3 rounded" style={{ backgroundColor: t.swatch.ground, opacity: 0.85 }} />
+                  <span className="block h-1.5 w-1/2 rounded bg-black/10" />
+                  <span className="mt-auto block h-1.5 w-1/3 rounded-full" style={{ backgroundColor: t.swatch.accent }} />
+                </span>
+              </span>
+              <span className="flex items-center justify-between gap-2 mt-2.5">
+                <span className="text-sm font-semibold text-slate-700">{t.name}</span>
+                {selected && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gold-600">
+                    <Check size={12} /> Selected
+                  </span>
+                )}
+              </span>
+              <span className="block text-xs text-slate-400 mt-0.5">{t.description}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* A way to fire the celebration without closing a real deal. It exists because "I can't
+          see it" and "it isn't working" look identical from here, and one button settles it —
+          it also lets someone show the team what they're working towards. */}
+      <div className="mt-6 pt-5 border-t border-slate-100">
+        <p className="text-sm font-medium text-slate-600">Celebration</p>
+        <p className="text-xs text-slate-400 mt-0.5 mb-2.5 max-w-md">
+          The bird takes off when a deal is won, a mandate is signed, or a lead becomes a client. Every{' '}
+          {MANDATE_MILESTONE_EVERY} mandates and every {DEAL_MILESTONE_EVERY} deals you close in a sales month, it
+          comes back bigger and with a sound. If your device has Reduce Motion switched on, you'll get the wording
+          without the flight.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => celebrate({ message: 'Mandate signed', intensity: 'win' })}
+            className="text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+          >
+            Preview a win
+          </button>
+          <button
+            type="button"
+            onClick={() => celebrate({ message: `${MANDATE_MILESTONE_EVERY} mandates this month`, intensity: 'milestone' })}
+            className="text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+          >
+            Preview a milestone
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const next = !sound
+              setSound(next)
+              setCelebrationSoundEnabled(next)
+            }}
+            aria-pressed={sound}
+            className={`inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border transition-colors ${
+              sound ? 'border-gold-500 bg-gold-500/5 text-gold-600' : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            {sound ? <Volume2 size={14} /> : <VolumeX size={14} />}
+            Milestone sound {sound ? 'on' : 'off'}
+          </button>
+        </div>
+      </div>
+    </Card>
   )
 }
 
@@ -869,16 +1215,16 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 const INTEGRATIONS = [
   { name: 'Google Calendar', desc: 'Sync meetings and tasks to Google Calendar' },
   { name: 'Outlook Calendar', desc: 'Sync meetings and tasks to Outlook' },
-  { name: 'Email', desc: 'Send and log emails from the CRM' },
   { name: 'WhatsApp', desc: 'Log WhatsApp conversations with leads' },
   { name: 'Website Forms', desc: 'Auto-capture leads from your website' },
   { name: 'Google Ads', desc: 'Import leads from Google Ads campaigns' },
 ]
 
 function IntegrationsTab() {
-  const [connected, setConnected] = useState<Record<string, boolean>>({ Email: true })
+  const [connected, setConnected] = useState<Record<string, boolean>>({})
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <EmailIntegrationCard />
       {INTEGRATIONS.map((i) => (
         <Card key={i.name} className="p-4">
           <div className="flex items-start justify-between gap-3">
@@ -888,7 +1234,7 @@ function IntegrationsTab() {
             </div>
             <button
               onClick={() => setConnected((prev) => ({ ...prev, [i.name]: !prev[i.name] }))}
-              className={`text-xs font-medium px-3 py-1.5 rounded-lg shrink-0 ${connected[i.name] ? 'bg-[#eef4f1] text-[#406d58]' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+              className={`text-xs font-medium px-3 py-1.5 rounded-lg shrink-0 ${connected[i.name] ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
             >
               {connected[i.name] ? 'Connected' : 'Connect'}
             </button>
@@ -896,5 +1242,182 @@ function IntegrationsTab() {
         </Card>
       ))}
     </div>
+  )
+}
+
+type EmailStatus = { connected: boolean; email?: string; lastSyncedAt?: string | null }
+
+function EmailIntegrationCard() {
+  const { session } = useAuth()
+  const { refreshSyncedData } = useAppStore()
+  const accessToken = session?.access_token
+  const [status, setStatus] = useState<EmailStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ email: '', password: '', smtpHost: '', smtpPort: '587', imapHost: '', imapPort: '993' })
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMessage, setSyncMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!accessToken) return
+    fetch('/api/email/status', { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then((res) => res.json())
+      .then((body) => setStatus(body))
+      .catch(() => setStatus({ connected: false }))
+      .finally(() => setLoading(false))
+  }, [accessToken])
+
+  async function handleConnect(e: FormEvent) {
+    e.preventDefault()
+    if (!accessToken) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/email/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          email: form.email.trim(),
+          password: form.password,
+          smtpHost: form.smtpHost.trim(),
+          smtpPort: Number(form.smtpPort),
+          imapHost: form.imapHost.trim(),
+          imapPort: Number(form.imapPort),
+        }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(body.error ?? 'Could not connect that mailbox.')
+        setSubmitting(false)
+        return
+      }
+      setStatus({ connected: true, email: form.email.trim(), lastSyncedAt: null })
+      setShowForm(false)
+      setForm({ email: '', password: '', smtpHost: '', smtpPort: '587', imapHost: '', imapPort: '993' })
+    } catch {
+      setError('Could not reach the server. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleDisconnect() {
+    if (!accessToken) return
+    if (!confirm('Disconnect this mailbox? Sending and automatic email logging will stop.')) return
+    await fetch('/api/email/disconnect', { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } })
+    setStatus({ connected: false })
+  }
+
+  async function handleSync() {
+    if (!accessToken) return
+    setSyncing(true)
+    setSyncMessage(null)
+    try {
+      const res = await fetch('/api/email/sync', { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSyncMessage(body.error ?? 'Sync failed.')
+      } else {
+        setSyncMessage(`Synced — ${body.logged ?? 0} new message${body.logged === 1 ? '' : 's'} logged.`)
+        setStatus((prev) => (prev ? { ...prev, lastSyncedAt: new Date().toISOString() } : prev))
+        // Sync writes the new Activities and notifications server-side, so this session
+        // is holding stale data until it re-reads them — without this a just-synced email
+        // only appeared on the client/lead after a full page refresh.
+        await refreshSyncedData()
+      }
+    } catch {
+      setSyncMessage('Could not reach the server.')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  return (
+    <Card className="p-4 md:col-span-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <div className="w-9 h-9 rounded-lg bg-[var(--tint-green)] text-[var(--c-green)] flex items-center justify-center shrink-0">
+            <Mail size={16} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Email (SMTP / IMAP)</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {loading
+                ? 'Checking connection…'
+                : status?.connected
+                ? `Connected as ${status.email}`
+                : 'Send email and automatically log matching replies as CRM activity'}
+            </p>
+            {status?.connected && status.lastSyncedAt && (
+              <p className="text-xs text-slate-400 mt-0.5">Last synced {new Date(status.lastSyncedAt).toLocaleString()}</p>
+            )}
+          </div>
+        </div>
+        {!loading && !status?.connected && !showForm && (
+          <button
+            onClick={() => setShowForm(true)}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg shrink-0 bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center gap-1.5"
+          >
+            <Link2 size={13} /> Connect
+          </button>
+        )}
+        {status?.connected && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              className="text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} /> Sync now
+            </button>
+            <button
+              onClick={handleDisconnect}
+              className="text-xs font-medium px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 flex items-center gap-1.5"
+            >
+              <Unlink size={13} /> Disconnect
+            </button>
+          </div>
+        )}
+      </div>
+
+      {syncMessage && <p className="text-xs text-slate-500 mt-2">{syncMessage}</p>}
+
+      {showForm && !status?.connected && (
+        <form onSubmit={handleConnect} className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <FormField label="Email Address" required>
+            <input className={inputClass} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
+          </FormField>
+          <FormField label="Password" required>
+            <input className={inputClass} type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
+          </FormField>
+          <FormField label="SMTP Host" required>
+            <input className={inputClass} placeholder="mail.yourdomain.co.za" value={form.smtpHost} onChange={(e) => setForm({ ...form, smtpHost: e.target.value })} required />
+          </FormField>
+          <FormField label="SMTP Port" required>
+            <input className={inputClass} type="number" value={form.smtpPort} onChange={(e) => setForm({ ...form, smtpPort: e.target.value })} required />
+          </FormField>
+          <FormField label="IMAP Host" required>
+            <input className={inputClass} placeholder="mail.yourdomain.co.za" value={form.imapHost} onChange={(e) => setForm({ ...form, imapHost: e.target.value })} required />
+          </FormField>
+          <FormField label="IMAP Port" required>
+            <input className={inputClass} type="number" value={form.imapPort} onChange={(e) => setForm({ ...form, imapPort: e.target.value })} required />
+          </FormField>
+          <p className="text-xs text-slate-400 md:col-span-2 -mt-1">
+            Find these under Email Accounts → Connect Devices (or Configure Mail Client) in ConsoleH / your webmail control panel.
+          </p>
+          {error && <p className="text-xs text-red-600 md:col-span-2">{error}</p>}
+          <div className="md:col-span-2 flex items-center gap-2">
+            <button type="submit" disabled={submitting} className="text-xs font-medium px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+              {submitting ? 'Connecting…' : 'Connect Mailbox'}
+            </button>
+            <button type="button" onClick={() => { setShowForm(false); setError(null) }} className="text-xs font-medium px-3 py-1.5 rounded-lg text-slate-500 hover:bg-slate-100">
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+    </Card>
   )
 }

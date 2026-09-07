@@ -1,14 +1,25 @@
 export type ID = string
 
 export type LeadStatus =
-  | 'New'
-  | 'Attempting Contact'
-  | 'Contacted'
-  | 'Qualified'
-  | 'Unqualified'
-  | 'Proposal Required'
+  | 'No Contact Yet'
+  | 'Interested'
+  | 'Hot Lead'
   | 'Converted'
-  | 'Lost'
+  | 'Rejected'
+
+/**
+ * Why a lead or a deal ended without being signed. One vocabulary for both, so "why did we
+ * lose it" is answered the same way whichever record you're looking at. 'We declined them'
+ * is deliberately its own reason: a book turned down on our side isn't a loss, and lumping
+ * it in with the rest would make a deliberately selective month read as a bad one.
+ */
+export type RejectionReason =
+  | 'Not interested anymore'
+  | 'Too expensive'
+  | 'Went with another provider'
+  | 'No response'
+  | 'We declined them'
+  | 'Other'
 
 export type LeadSource =
   | 'Website'
@@ -98,38 +109,81 @@ export interface Lead {
   createdAt: string
   updatedAt: string
   convertedDealId?: ID
+  /** Set when status is 'Rejected'. */
+  rejectionReason?: RejectionReason
+  /** Free-text detail captured alongside the rejection reason. */
+  rejectionNote?: string
 }
 
-export type DealStage =
-  | 'New Lead'
-  | 'Contacted'
-  | 'Qualified'
-  | 'Proposal Sent'
-  | 'Negotiation'
-  | 'Won'
-  | 'Lost'
+/**
+ * A deal moves through the same two steps wherever it was raised — off a lead or off an
+ * existing client — then ends Won or Rejected. Anything finer than this was stages nobody
+ * moved a deal into.
+ */
+export type DealStage = 'New Deal' | 'Quotation Sent' | 'Mandate Sent' | 'Won' | 'Rejected'
 
-export const DEAL_STAGES: DealStage[] = [
-  'New Lead',
-  'Contacted',
-  'Qualified',
-  'Proposal Sent',
-  'Negotiation',
-  'Won',
-  'Lost',
-]
+/**
+ * Two different businesses sharing one pipeline.
+ *
+ * A Service is quoted, delivered and invoiced — the fee is known up front and earned on
+ * completion. A Handover is a book of accounts we collect on commission, so nothing is earned
+ * at signature and the real numbers only exist once accounts are actually handed over. They
+ * must never be added together: a signed book is not revenue.
+ */
+/**
+ * One batch of accounts a client actually handed over.
+ *
+ * A client signs a mandate saying they have a million rand to hand over, then sends it in
+ * instalments across months — a hundred thousand at a time, or fifty thousand once and nothing
+ * after. The signed figure is a claim; these rows are what arrived. Every real measure of a
+ * handover client (received to date, run rate, how long since they last sent anything) is a
+ * sum over these, never the estimate.
+ *
+ * A header on purpose: agents work individual accounts, and commission, legal fees and
+ * interest all attach to an account, so account rows will reference a batch.
+ */
+export interface Handover {
+  id: ID
+  companyId: ID
+  /** The signed mandate this batch came in under, where there is one. */
+  dealId?: ID
+  receivedAt: string
+  /**
+   * The principal debt in this batch — capital only.
+   *
+   * Annex B fees under the Debt Collectors Act and interest at 2% per month accrue on top of
+   * this as accounts are worked, so what a debtor owes and what was handed over are different
+   * numbers that diverge over time. Commission is charged on capital collected; the fees and
+   * interest are recovered on top of it, and absorbed as a loss where nothing is collected.
+   */
+  capitalAmount: number
+  accountsCount?: number
+  /** What the team quotes back when a client asks what was received — a file name, a batch number. */
+  reference?: string
+  notes?: string
+  loggedBy?: ID
+  createdAt: string
+}
 
-export type LossReason =
-  | 'Price'
-  | 'No budget'
-  | 'Competitor'
-  | 'No response'
-  | 'Project cancelled'
-  | 'Not decision-maker'
-  | 'Service not suitable'
-  | 'Timing'
-  | 'Duplicate'
-  | 'Other'
+export type DealKind = 'Service' | 'Handover'
+
+export const DEAL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Mandate Sent', 'Won', 'Rejected']
+
+/** The steps a deal is still being worked in — everything before it ends one way or the other. */
+export const OPEN_DEAL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Mandate Sent']
+
+/**
+ * How likely a deal at each step is to close, used for the weighted forecast. Derived from the
+ * stage rather than typed in per deal — nobody keeps a hand-entered percentage honest, and a
+ * quote that's out is genuinely further along than one that isn't.
+ */
+export const DEAL_STAGE_PROBABILITY: Record<DealStage, number> = {
+  'New Deal': 20,
+  'Quotation Sent': 60,
+  'Mandate Sent': 60,
+  Won: 100,
+  Rejected: 0,
+}
 
 export interface Deal {
   id: ID
@@ -145,10 +199,19 @@ export interface Deal {
   source: LeadSource
   competitor?: string
   notes?: string
-  lossReason?: LossReason
+  /** Absent on deals created before the two kinds were distinguished — derive with dealKind(). */
+  kind?: DealKind
+  /** When each document went out. Recorded as facts rather than stages, because one deal can need both a quotation and a mandate. */
+  quotationSentAt?: string
+  mandateSentAt?: string
+  invoiceSentAt?: string
+  /** Set when stage is 'Rejected'. */
+  rejectionReason?: RejectionReason
+  /** Free-text detail captured alongside the rejection reason. */
+  rejectionNote?: string
   createdAt: string
   wonAt?: string
-  lostAt?: string
+  rejectedAt?: string
   nextActionAt?: string
   leadId?: ID
   /** Handover-type deals only (e.g. Debt Collection) — the outstanding balance being handed over, distinct from `value` (the contract/project value). */
@@ -165,6 +228,8 @@ export interface Contact {
   lastName: string
   jobTitle?: string
   companyId?: ID
+  /** Set for a contact person captured against a lead, before there's a company to attach them to. */
+  leadId?: ID
   email?: string
   phone?: string
   mobile?: string
@@ -186,6 +251,31 @@ export interface Company {
   address?: string
   accountOwnerId: ID
   createdAt: string
+  /** Groups this Company as a sub-account under another Company (e.g. "Bonitas" under "Marara Pharmacy"). Undefined for a standalone client or a parent itself. */
+  parentCompanyId?: ID
+  /** Short reference code — either the real Swordfish client prefix (e.g. "MPY"), or an internal-only code we invent for a parent that has no Swordfish code of its own (e.g. "MARARA"). */
+  code?: string
+  /** Debt-collection servicing totals, synced from Swordfish per sub-account. A parent with children has no totals of its own — sum its children instead. */
+  accountCount?: number
+  handoverAmount?: number
+  paymentsToDate?: number
+  /** Name of the closer who originally signed this client (Swordfish's "Marketing Agent"), where known. */
+  marketingAgent?: string
+  /** Swordfish's client classification (A/B/C/D), where known. Set at the level a Swordfish code actually exists — a parent container invented by us has none of its own. */
+  classification?: LeadClassification
+  /**
+   * What the lead was estimated to hand over, captured at conversion.
+   *
+   * Historical context only: what a client says they'll hand over is reliably not what
+   * arrives, so this never feeds a forecast or a total once the mandate is signed. It's kept
+   * because it's the only record of what was promised, and because estimate-versus-actual is
+   * worth grading per rep once real handover data exists.
+   */
+  estimatedHandoverAmount?: number
+  estimatedAccountsCount?: number
+  estimatedAtConversion?: string
+  /** When the collection mandate was signed — the clock on "signed, but nothing handed over yet". */
+  mandateSignedAt?: string
 }
 
 export type TaskType =
@@ -233,7 +323,9 @@ export type ActivityType =
   | 'Deal update'
   | 'Deal Stage Change'
   | 'Deal Won'
-  | 'Deal Lost'
+  | 'Deal Rejected'
+  | 'Courtesy Call'
+  | 'Handover Received'
 
 export interface Activity {
   id: ID
@@ -247,6 +339,10 @@ export interface Activity {
   notes?: string
   activityDate: string
   createdAt: string
+  /** Only meaningful for type 'Email': false until a freshly-synced incoming email has been opened. */
+  isRead?: boolean
+  /** File names of attachments on a synced incoming email. The files themselves stay in the mailbox. */
+  attachmentNames?: string[]
 }
 
 export type ProposalStatus = 'Draft' | 'Sent' | 'Viewed' | 'Accepted' | 'Declined' | 'Expired'
@@ -265,7 +361,7 @@ export interface Proposal {
   createdAt: string
 }
 
-export type UserRole = 'Administrator' | 'Sales Manager' | 'Sales Representative' | 'Read Only'
+export type UserRole = 'Administrator' | 'Sales Manager' | 'Sales Representative' | 'Liaison Manager' | 'Liaison' | 'Read Only'
 
 export interface User {
   id: ID
@@ -276,12 +372,21 @@ export interface User {
   status: 'Active' | 'Inactive'
   phone?: string
   avatarColor: string
+  /** Appended under the body of any email sent from Romulus via this person's connected inbox. */
+  emailSignature?: string
+  /** Optional signature image (e.g. a scanned signature or logo), stored in the 'email-signatures' bucket. */
+  emailSignatureImageUrl?: string
+  emailSignatureImageWidth?: number
+  emailSignatureImageAlign?: 'left' | 'center' | 'right'
 }
+
+export type TeamKind = 'Sales' | 'Communications'
 
 export interface Team {
   id: ID
   name: string
   memberIds: ID[]
+  kind: TeamKind
 }
 
 export type CustomFieldType =
@@ -326,6 +431,7 @@ export type NotificationType =
   | 'Deal moved'
   | 'Deal won'
   | 'Lead reassigned'
+  | 'Email received'
 
 export interface AppNotification {
   id: ID
@@ -333,4 +439,6 @@ export interface AppNotification {
   message: string
   createdAt: string
   read: boolean
+  /** App-relative path to open when clicked, e.g. "/companies/<id>". */
+  link?: string
 }

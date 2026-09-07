@@ -41,9 +41,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const { email, name } = (req.body ?? {}) as { email?: string; name?: string }
+  const { email, name, role, teamId } = (req.body ?? {}) as { email?: string; name?: string; role?: string; teamId?: string }
   if (!email || typeof email !== 'string') {
     res.status(400).json({ error: 'Email is required.' })
+    return
+  }
+  const ALLOWED_ROLES = ['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Read Only']
+  if (role !== undefined && !ALLOWED_ROLES.includes(role)) {
+    res.status(400).json({ error: 'Invalid role.' })
     return
   }
 
@@ -57,6 +62,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (error) {
     res.status(400).json({ error: error.message })
     return
+  }
+
+  // handle_new_user() has already created the profile row (defaulting to
+  // Sales Representative, no team) by the time inviteUserByEmail resolves —
+  // apply the role/team the admin actually chose on top of it.
+  if (data.user?.id && (role || teamId)) {
+    const patch: Record<string, string> = {}
+    if (role) patch.role = role
+    if (teamId) patch.team_id = teamId
+    await admin.from('profiles').update(patch).eq('id', data.user.id)
   }
 
   res.status(200).json({ ok: true, userId: data.user?.id })

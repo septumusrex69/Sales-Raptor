@@ -155,7 +155,7 @@ export function SalesMonthPicker({
           <p className={clsx('font-semibold text-[13px] leading-tight flex items-center gap-1.5', dark ? 'text-white' : 'text-slate-700')}>
             {value.label}
             {isInProgress && (
-              <span className="font-medium text-[9.5px] uppercase tracking-wide text-[#b28e34] bg-[#f7f4eb] px-1.5 py-0.5 rounded">In progress</span>
+              <span className="font-medium text-[9.5px] uppercase tracking-wide text-[var(--c-gold)] bg-[var(--tint-gold)] px-1.5 py-0.5 rounded">In progress</span>
             )}
           </p>
           <p className={clsx('text-[11px] leading-tight', dark ? 'text-white/50' : 'text-slate-400')}>{value.rangeLabel}</p>

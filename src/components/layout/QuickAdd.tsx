@@ -2,11 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Target, Users, Building2, Handshake, CheckSquare, Calendar, FileText, ChevronDown } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
+import { isHandoverService } from '../../lib/dealKind'
+import { SearchableSelect } from '../ui/SearchableSelect'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { leadSources, services } from '../../data/mockData'
 import type { LeadSource, ProductService } from '../../types'
 import { LeadOpportunityFields, emptyLeadOpportunityValue, leadOpportunityPatch } from '../leads/LeadOpportunityFields'
+import { isAssignableOwner } from '../../lib/permissions'
 
 type QuickAddType = 'lead' | 'contact' | 'company' | 'deal' | 'task' | 'meeting' | 'note'
 
@@ -89,7 +92,7 @@ export type Store = ReturnType<typeof useAppStore>
 
 export function LeadForm({ onClose, store, navigate }: { onClose: () => void; store: Store; navigate: ReturnType<typeof useNavigate> }) {
   const { currentUser } = useAuth()
-  const reps = useMemo(() => store.users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [store.users])
+  const reps = useMemo(() => store.users.filter((u) => isAssignableOwner(u.role)), [store.users])
   const [form, setForm] = useState({
     firstName: '',
     lastName: '',
@@ -244,50 +247,96 @@ export function CompanyForm({ onClose, store }: { onClose: () => void; store: St
 }
 
 export function DealForm({ onClose, store, navigate }: { onClose: () => void; store: Store; navigate: ReturnType<typeof useNavigate> }) {
-  const [form, setForm] = useState({ name: '', companyId: store.companies[0]?.id ?? '', value: '', service: services[0], expectedCloseDate: '' })
+  const [form, setForm] = useState({
+    companyId: store.companies[0]?.id ?? '',
+    service: services[0],
+    value: '',
+    handoverAmount: '',
+    accountsCount: '',
+    expectedCloseDate: '',
+    notes: '',
+  })
+  const isHandover = isHandoverService(form.service)
+  const company = store.companies.find((c) => c.id === form.companyId)
+  // Sub-accounts share a parent's name closely enough that the code is what tells them apart.
+  const clientOptions = useMemo(
+    () =>
+      [...store.companies]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((c) => ({ id: c.id, label: c.name, hint: c.code ?? undefined })),
+    [store.companies],
+  )
+
   return (
     <Modal title="Add Deal" onClose={onClose}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          if (!form.name || !form.companyId) return
+          if (!form.companyId || !company) return
           const deal = store.addDeal({
-            name: form.name,
+            // Named from the client and the service rather than asked for. Every deal name
+            // anyone typed was one of these two things anyway, and a blank required field is
+            // a toll on the way to the information that matters.
+            name: `${company.name} — ${form.service}`,
             companyId: form.companyId,
-            value: Number(form.value) || 0,
             service: form.service,
+            value: isHandover ? 0 : Number(form.value) || 0,
+            handoverAmount: isHandover && form.handoverAmount !== '' ? Number(form.handoverAmount) : undefined,
+            accountsCount: isHandover && form.accountsCount !== '' ? Number(form.accountsCount) : undefined,
+            notes: form.notes.trim() || undefined,
             expectedCloseDate: form.expectedCloseDate ? new Date(form.expectedCloseDate).toISOString() : new Date().toISOString(),
           })
           onClose()
           navigate(`/deals/${deal.id}`)
         }}
       >
-        <FormField label="Deal Name" required>
-          <input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+        <FormField label="Client" required>
+          <SearchableSelect
+            ariaLabel="Client"
+            value={form.companyId}
+            onChange={(companyId) => setForm({ ...form, companyId })}
+            placeholder="Search clients…"
+            emptyLabel="No client matches that name"
+            options={clientOptions}
+          />
         </FormField>
-        <FormField label="Company" required>
-          <select className={inputClass} value={form.companyId} onChange={(e) => setForm({ ...form, companyId: e.target.value })}>
-            {store.companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </FormField>
-        <div className="grid grid-cols-2 gap-3">
-          <FormField label="Value (R)">
-            <input type="number" className={inputClass} value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
-          </FormField>
-          <FormField label="Expected Close Date">
-            <input type="date" className={inputClass} value={form.expectedCloseDate} onChange={(e) => setForm({ ...form, expectedCloseDate: e.target.value })} />
-          </FormField>
-        </div>
-        <FormField label="Service">
+        <FormField label="Service" required>
           <select className={inputClass} value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value as ProductService })}>
             {services.map((s) => (
               <option key={s}>{s}</option>
             ))}
           </select>
+        </FormField>
+        {/* What "how much" means depends entirely on the service: a book to collect against,
+            or a fee to invoice. Asking for the wrong one is how a book ends up counted as
+            revenue. */}
+        <div className="grid grid-cols-2 gap-3">
+          {isHandover ? (
+            <>
+              <FormField label="Handover Value (R)">
+                <input type="number" className={inputClass} value={form.handoverAmount} onChange={(e) => setForm({ ...form, handoverAmount: e.target.value })} placeholder="e.g. 750000" />
+              </FormField>
+              <FormField label="Number of Accounts">
+                <input type="number" className={inputClass} value={form.accountsCount} onChange={(e) => setForm({ ...form, accountsCount: e.target.value })} placeholder="e.g. 40" />
+              </FormField>
+            </>
+          ) : (
+            <FormField label="Value (R)">
+              <input type="number" className={inputClass} value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
+            </FormField>
+          )}
+          <FormField label="Expected Close Date">
+            <input type="date" className={inputClass} value={form.expectedCloseDate} onChange={(e) => setForm({ ...form, expectedCloseDate: e.target.value })} />
+          </FormField>
+        </div>
+        <FormField label="Description">
+          <textarea
+            className={inputClass}
+            rows={2}
+            value={form.notes}
+            onChange={(e) => setForm({ ...form, notes: e.target.value })}
+            placeholder="Optional — e.g. lease agreement for the Sandton premises"
+          />
         </FormField>
         <SubmitRow onClose={onClose} label="Add Deal" />
       </form>

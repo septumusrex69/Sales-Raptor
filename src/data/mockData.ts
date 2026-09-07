@@ -9,7 +9,6 @@ import type {
   Lead,
   LeadClassification,
   LeadSource,
-  LossReason,
   ProductService,
   Proposal,
   Task,
@@ -22,21 +21,21 @@ const TODAY = new Date()
 
 // ---------- Users & Teams ----------
 export const users: User[] = [
-  { id: 'u1', name: 'Stephan Ferreira', email: 'stephan@bredellferreira.co.za', role: 'Administrator', teamId: 't5', status: 'Active', phone: '082 123 4567', avatarColor: '#c9a227' },
-  { id: 'u2', name: 'Rinda Marais', email: 'rinda@bredellferreira.co.za', role: 'Sales Manager', teamId: 't2', status: 'Active', phone: '082 234 5678', avatarColor: '#416281' },
-  { id: 'u3', name: 'Nicole Loder', email: 'nicole@bredellferreira.co.za', role: 'Sales Representative', teamId: 't2', status: 'Active', phone: '082 345 6789', avatarColor: '#406d58' },
-  { id: 'u4', name: 'Kea Mokoena', email: 'kea@bredellferreira.co.za', role: 'Sales Representative', teamId: 't3', status: 'Active', phone: '082 456 7890', avatarColor: '#ad6452' },
-  { id: 'u5', name: 'Vusi Nkosi', email: 'vusi@bredellferreira.co.za', role: 'Sales Representative', teamId: 't4', status: 'Active', phone: '082 567 8901', avatarColor: '#2b4055' },
-  { id: 'u6', name: 'Thandiwe Zulu', email: 'thandiwe@bredellferreira.co.za', role: 'Sales Representative', teamId: 't3', status: 'Active', phone: '082 678 9012', avatarColor: '#6086a9' },
-  { id: 'u7', name: 'Pieter van Wyk', email: 'pieter@bredellferreira.co.za', role: 'Read Only', teamId: 't5', status: 'Inactive', phone: '082 789 0123', avatarColor: '#6b7280' },
+  { id: 'u1', name: 'Stephan Ferreira', email: 'stephan@bredellferreira.co.za', role: 'Administrator', teamId: 't5', status: 'Active', phone: '082 123 4567', avatarColor: 'var(--c-gold-bright)' },
+  { id: 'u2', name: 'Rinda Marais', email: 'rinda@bredellferreira.co.za', role: 'Sales Manager', teamId: 't2', status: 'Active', phone: '082 234 5678', avatarColor: 'var(--c-navy-mid)' },
+  { id: 'u3', name: 'Nicole Loder', email: 'nicole@bredellferreira.co.za', role: 'Sales Representative', teamId: 't2', status: 'Active', phone: '082 345 6789', avatarColor: 'var(--c-green)' },
+  { id: 'u4', name: 'Kea Mokoena', email: 'kea@bredellferreira.co.za', role: 'Sales Representative', teamId: 't3', status: 'Active', phone: '082 456 7890', avatarColor: 'var(--c-rust)' },
+  { id: 'u5', name: 'Vusi Nkosi', email: 'vusi@bredellferreira.co.za', role: 'Sales Representative', teamId: 't4', status: 'Active', phone: '082 567 8901', avatarColor: 'var(--c-navy-deep)' },
+  { id: 'u6', name: 'Thandiwe Zulu', email: 'thandiwe@bredellferreira.co.za', role: 'Sales Representative', teamId: 't3', status: 'Active', phone: '082 678 9012', avatarColor: 'var(--c-steel)' },
+  { id: 'u7', name: 'Pieter van Wyk', email: 'pieter@bredellferreira.co.za', role: 'Read Only', teamId: 't5', status: 'Inactive', phone: '082 789 0123', avatarColor: 'var(--c-grey-warm)' },
 ]
 
 export const teams: Team[] = [
-  { id: 't1', name: 'New Business', memberIds: ['u3', 'u4'] },
-  { id: 't2', name: 'Corporate Sales', memberIds: ['u2', 'u3'] },
-  { id: 't3', name: 'SME Sales', memberIds: ['u4', 'u6'] },
-  { id: 't4', name: 'Key Accounts', memberIds: ['u5'] },
-  { id: 't5', name: 'Management', memberIds: ['u1', 'u7'] },
+  { id: 't1', name: 'New Business', memberIds: ['u3', 'u4'], kind: 'Sales' },
+  { id: 't2', name: 'Corporate Sales', memberIds: ['u2', 'u3'], kind: 'Sales' },
+  { id: 't3', name: 'SME Sales', memberIds: ['u4', 'u6'], kind: 'Sales' },
+  { id: 't4', name: 'Key Accounts', memberIds: ['u5'], kind: 'Sales' },
+  { id: 't5', name: 'Management', memberIds: ['u1', 'u7'], kind: 'Sales' },
 ]
 
 export const currentUser = users[0]
@@ -44,10 +43,6 @@ export const currentUser = users[0]
 // ---------- Reference data ----------
 export const leadSources: LeadSource[] = [
   'Website', 'Google Ads', 'Referral', 'LinkedIn', 'Facebook', 'Direct', 'Email', 'Existing Client', 'Sales Rep', 'Event', 'ChatGPT', 'Claude', 'Gemini', 'Other',
-]
-
-export const lossReasons: LossReason[] = [
-  'Price', 'No budget', 'Competitor', 'No response', 'Project cancelled', 'Not decision-maker', 'Service not suitable', 'Timing', 'Duplicate', 'Other',
 ]
 
 export const industries = ['Construction', 'Legal', 'Education', 'Property', 'IT Services', 'Retail', 'Manufacturing', 'Healthcare', 'Hospitality', 'Financial Services']

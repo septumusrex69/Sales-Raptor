@@ -1,4 +1,4 @@
--- Sales Raptor — Phase 1 schema
+-- Romulus — Phase 1 schema
 -- Run this once in Supabase: Dashboard → SQL Editor → paste → Run.
 -- Safe to re-run (uses IF NOT EXISTS / OR REPLACE / drop-if-exists guards).
 
@@ -8,7 +8,11 @@ create extension if not exists pgcrypto;
 create table if not exists public.teams (
   id uuid primary key default gen_random_uuid(),
   name text not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Which dashboard members of this team land on — 'Sales' is the
+  -- long-standing default, 'Communications' opts a team into the
+  -- Communications Dashboard instead.
+  kind text not null default 'Sales' check (kind in ('Sales', 'Communications'))
 );
 
 -- ---------- Profiles (mirrors types.ts `User`) ----------
@@ -19,12 +23,19 @@ create table if not exists public.profiles (
   name text not null default '',
   email text not null,
   role text not null default 'Sales Representative'
-    check (role in ('Administrator', 'Sales Manager', 'Sales Representative', 'Read Only')),
+    check (role in ('Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Read Only')),
   team_id uuid references public.teams (id) on delete set null,
   status text not null default 'Active' check (status in ('Active', 'Inactive')),
   phone text,
   avatar_color text not null default '#355069',
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Appended under the body of any email sent from Romulus via this person's connected inbox.
+  email_signature text,
+  -- Optional signature image (e.g. a scanned handwritten signature or logo), stored in the
+  -- 'email-signatures' Storage bucket, laid out under the text signature at send time.
+  email_signature_image_url text,
+  email_signature_image_width integer,
+  email_signature_image_align text not null default 'left' check (email_signature_image_align in ('left', 'center', 'right'))
 );
 
 -- Auto-create a profile the moment someone accepts a Supabase invite /
@@ -111,7 +122,29 @@ create table if not exists public.companies (
   city text,
   address text,
   account_owner_id uuid not null references public.profiles (id),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Groups this company as a sub-account under another (e.g. "Bonitas" under
+  -- "Marara Pharmacy"). Short reference code is either a real Swordfish
+  -- client prefix, or an internal-only code invented for a parent that has
+  -- no Swordfish code of its own. account_count/handover_amount/
+  -- payments_to_date are debt-collection servicing totals synced per
+  -- sub-account; a parent with children has no totals of its own.
+  parent_company_id uuid references public.companies (id) on delete set null,
+  code text,
+  account_count integer,
+  handover_amount numeric,
+  payments_to_date numeric,
+  marketing_agent text,
+  -- Swordfish's client classification (A/B/C/D), where known.
+  classification text check (classification in ('A', 'B', 'C', 'D')),
+  -- What the lead was estimated to hand over, captured at conversion. Historical only: what a
+  -- client says they'll hand over is reliably not what arrives, so this never feeds a forecast
+  -- or a total. Kept as the record of what was promised, and to grade estimate against actual.
+  estimated_handover_amount numeric,
+  estimated_accounts_count integer,
+  estimated_at_conversion timestamptz,
+  -- When the collection mandate was signed — the clock on "signed, nothing handed over yet".
+  mandate_signed_at timestamptz
 );
 
 -- ---------- Contacts ----------
@@ -121,6 +154,8 @@ create table if not exists public.contacts (
   last_name text not null,
   job_title text,
   company_id uuid references public.companies (id) on delete set null,
+  -- contacts.lead_id is added after the leads table below: this table is created first, so
+  -- the foreign key can't be declared here without a forward reference.
   email text,
   phone text,
   mobile text,
@@ -145,7 +180,11 @@ create table if not exists public.leads (
   website text,
   source text not null,
   campaign text,
-  status text not null default 'New',
+  -- 'No Contact Yet' | 'Interested' | 'Hot Lead' | 'Converted' | 'Rejected'.
+  -- Deliberately unconstrained text: the vocabulary lives in src/lib/leadStatus.ts
+  -- and has already changed once; a CHECK here would mean a migration every time
+  -- the sales team renames a stage.
+  status text not null default 'No Contact Yet',
   score integer not null default 10,
   estimated_value numeric not null default 0,
   owner_id uuid not null references public.profiles (id),
@@ -173,13 +212,25 @@ create table if not exists public.leads (
   next_follow_up_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  converted_deal_id uuid
+  converted_deal_id uuid,
+  -- Set together when a lead is rejected: why, and anything worth remembering if
+  -- they come back. 'We declined them' is one of the reasons, so a selective month
+  -- doesn't read as a bad one.
+  rejection_reason text,
+  rejection_note text
 );
 
 -- Covers re-running this script against a database where `leads` already
 -- existed before service_values was added (create table if not exists
 -- above is a no-op in that case, so this catches it separately).
 alter table public.leads add column if not exists service_values jsonb;
+
+-- Contact persons captured against a lead, before there's a company to hang them off — at a
+-- prospect you're usually dealing with more than one person (whoever enquired, plus whoever
+-- actually signs). Declared here rather than in the contacts table above, which is created
+-- first and so can't reference leads yet. Cleared rather than deleted if the lead goes, and
+-- convertLeadToDeal re-points these at the new company so they survive conversion.
+alter table public.contacts add column if not exists lead_id uuid references public.leads (id) on delete set null;
 
 -- ---------- Deals ----------
 create table if not exists public.deals (
@@ -188,7 +239,10 @@ create table if not exists public.deals (
   company_id uuid not null references public.companies (id) on delete cascade,
   contact_id uuid references public.contacts (id) on delete set null,
   owner_id uuid not null references public.profiles (id),
-  stage text not null default 'New Lead',
+  -- 'New Deal' | 'Quotation Sent' | 'Won' | 'Rejected'.
+  -- Unconstrained text for the same reason lead status is: the vocabulary belongs in
+  -- src/types.ts, not behind a migration every time a step is renamed.
+  stage text not null default 'New Deal',
   value numeric not null default 0,
   probability integer not null default 10,
   expected_close_date timestamptz not null,
@@ -196,10 +250,21 @@ create table if not exists public.deals (
   source text not null,
   competitor text,
   notes text,
-  loss_reason text,
+  -- 'Service' (quoted, delivered, invoiced) or 'Handover' (a book of accounts collected on
+  -- commission). A Handover earns nothing at signature, so it carries no `value` at all —
+  -- its book lives in handover_amount and is never summed into revenue.
+  kind text not null default 'Service',
+  -- Which documents have gone out. Facts rather than stages: one deal can need both a
+  -- quotation and a mandate, which a single stage can't express.
+  quotation_sent_at timestamptz,
+  mandate_sent_at timestamptz,
+  invoice_sent_at timestamptz,
+  -- Set when stage is 'Rejected'. Same vocabulary as leads.rejection_reason.
+  rejection_reason text,
+  rejection_note text,
   created_at timestamptz not null default now(),
   won_at timestamptz,
-  lost_at timestamptz,
+  rejected_at timestamptz,
   next_action_at timestamptz,
   -- cascade: a converted lead's Deal is that lead's outcome, not an
   -- independent record — deleting the lead removes the Deal it produced.
@@ -258,8 +323,56 @@ create table if not exists public.activities (
   subject text not null,
   notes text,
   activity_date timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  -- Set only for Activities logged from a synced incoming email (the message's Message-ID
+  -- header). Lets emailSync.ts upsert with ON CONFLICT DO NOTHING so the same email can never
+  -- be logged twice for the same person, however many times a sync happens to reprocess it.
+  email_message_id text,
+  -- Only meaningful for type = 'Email': true for every non-email Activity and for an
+  -- outgoing sent email (nothing to "read"); false for a freshly-synced incoming email
+  -- until someone opens it in the Emails card.
+  is_read boolean not null default true,
+  -- File names of any attachments on a synced incoming email. The files themselves are
+  -- NOT stored -- they stay in the connected mailbox -- but without this the CRM gave no
+  -- indication an email carried an attachment at all, so a mandate or invoice could be
+  -- sitting in someone's inbox with nothing here hinting it exists.
+  attachment_names text[],
+  -- Where this email lives in the mailbox, so /api/email/attachment can go back and fetch
+  -- an attachment on demand instead of the CRM warehousing every file it ever receives
+  -- (this mailbox takes thousands of attachments a week). A UID is only unique within its
+  -- own folder, hence storing both; if the message has since been moved, the endpoint
+  -- falls back to searching for it by Message-ID.
+  email_folder text,
+  email_uid integer
+);
+-- Deliberately NOT partial (no `where email_message_id is not null`): Postgres can't use a
+-- partial index as an ON CONFLICT (user_id, email_message_id) inference target unless the
+-- upsert also repeats that predicate, so a partial version here made every synced-email
+-- upsert fail with "no unique or exclusion constraint matching the ON CONFLICT specification"
+-- -- confirmed via emailSync diagnostic logging. A plain unique index already treats NULLs as
+-- mutually distinct, so every non-email Activity and outgoing sent-email Activity (both have
+-- no email_message_id) is unaffected -- only genuine duplicate Message-IDs collide.
+create unique index if not exists activities_user_email_message_id_key
+  on public.activities (user_id, email_message_id);
+
+-- ---------- Notifications ----------
+-- One row per person per notifyable event. Only ever written by service_role (server-side
+-- code, e.g. emailSync.ts logging a new incoming email) in this pass -- no insert policy for
+-- authenticated/anon, so a person can read and mark their own notifications read but never
+-- forge one for themselves or anyone else.
+create table if not exists public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  type text not null,
+  message text not null,
+  -- App-relative path to open when clicked, e.g. "/companies/<id>".
+  link text,
+  read boolean not null default false,
   created_at timestamptz not null default now()
 );
+alter table public.notifications enable row level security;
+create policy "notifications_select" on public.notifications for select using (user_id = auth.uid());
+create policy "notifications_update" on public.notifications for update using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 -- ---------- Proposals ----------
 create table if not exists public.proposals (
@@ -275,6 +388,49 @@ create table if not exists public.proposals (
   status text not null default 'Draft' check (status in ('Draft', 'Sent', 'Viewed', 'Accepted', 'Declined', 'Expired')),
   created_at timestamptz not null default now()
 );
+
+-- A handover is a batch of accounts a client actually sends, not a single event.
+-- A client signs a mandate saying "we have R1m to hand over" and then sends it in
+-- instalments over months. The signed figure is a claim; these rows are the facts.
+--
+-- capital_amount is the principal only. Annex B fees under the Debt Collectors Act
+-- and interest at 2% per month accrue on top of it as accounts are worked, so what a
+-- debtor owes and what was handed over are different numbers that diverge over time.
+--
+-- Deliberately a header table: debt collection agents will work individual accounts,
+-- and commission, legal fees and interest are all per-account, so account rows will
+-- reference a batch.
+create table if not exists public.handovers (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies (id) on delete cascade,
+  deal_id uuid references public.deals (id) on delete set null,
+  received_at timestamptz not null default now(),
+  capital_amount numeric not null default 0,
+  accounts_count integer,
+  reference text,
+  notes text,
+  logged_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists handovers_company_id_idx on public.handovers (company_id);
+create index if not exists handovers_received_at_idx on public.handovers (received_at desc);
+
+-- ---------- SECURITY DEFINER function exposure ----------
+-- A SECURITY DEFINER function runs with its owner's privileges, and every function in the
+-- public schema is reachable as a REST endpoint at /rest/v1/rpc/<name>. Left with the default
+-- grants, these three were callable by signed-out visitors — a documented way around RLS.
+--
+-- The two trigger functions are meant to fire from a trigger and never to be called directly.
+-- Postgres does not check EXECUTE when a trigger fires, so revoking costs nothing.
+revoke execute on function public.handle_new_user() from anon, authenticated, public;
+revoke execute on function public.protect_profile_privileged_fields() from anon, authenticated, public;
+
+-- current_user_role is different: RLS policies call it, and a policy expression is evaluated as
+-- the querying user, so `authenticated` must keep EXECUTE or every policy referencing it fails
+-- with a permission error. Signed-out callers have no business with it.
+revoke execute on function public.current_user_role() from anon, public;
+grant execute on function public.current_user_role() to authenticated;
 
 -- ---------- Base table grants ----------
 -- Tables created via the SQL Editor (as opposed to Supabase's Table Editor
@@ -311,6 +467,7 @@ alter table public.deals enable row level security;
 alter table public.tasks enable row level security;
 alter table public.activities enable row level security;
 alter table public.proposals enable row level security;
+alter table public.handovers enable row level security;
 
 -- companies/contacts/leads/deals/tasks/activities all follow the same
 -- shape: open read, open insert, and update/delete gated to the row's
@@ -343,13 +500,13 @@ begin
 
     execute format('drop policy if exists "%s_update" on public.%I;', t, t);
     execute format(
-      'create policy "%s_update" on public.%I for update using (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager'')) with check (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager''));',
+      'create policy "%s_update" on public.%I for update using (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager'', ''Liaison Manager'')) with check (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager'', ''Liaison Manager''));',
       t, t, owner_col, owner_col
     );
 
     execute format('drop policy if exists "%s_delete" on public.%I;', t, t);
     execute format(
-      'create policy "%s_delete" on public.%I for delete using (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager''));',
+      'create policy "%s_delete" on public.%I for delete using (%I = auth.uid() or public.current_user_role() in (''Administrator'', ''Sales Manager'', ''Liaison Manager''));',
       t, t, owner_col
     );
   end loop;
@@ -368,19 +525,45 @@ create policy "proposals_insert" on public.proposals for insert with check (auth
 drop policy if exists "proposals_update" on public.proposals;
 create policy "proposals_update" on public.proposals for update
   using (
-    public.current_user_role() in ('Administrator', 'Sales Manager')
+    public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
     or exists (select 1 from public.deals d where d.id = proposals.deal_id and d.owner_id = auth.uid())
   )
   with check (
-    public.current_user_role() in ('Administrator', 'Sales Manager')
+    public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
     or exists (select 1 from public.deals d where d.id = proposals.deal_id and d.owner_id = auth.uid())
   );
 
 drop policy if exists "proposals_delete" on public.proposals;
 create policy "proposals_delete" on public.proposals for delete
   using (
-    public.current_user_role() in ('Administrator', 'Sales Manager')
+    public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
     or exists (select 1 from public.deals d where d.id = proposals.deal_id and d.owner_id = auth.uid())
+  );
+
+drop policy if exists "handovers_select" on public.handovers;
+create policy "handovers_select" on public.handovers for select using (auth.uid() is not null);
+
+drop policy if exists "handovers_insert" on public.handovers;
+create policy "handovers_insert" on public.handovers for insert with check (auth.uid() is not null);
+
+-- Correcting a batch is ordinary work — a client re-sends a corrected file, an amount
+-- is keyed wrong — so whoever logged it can fix it, alongside the managers.
+drop policy if exists "handovers_update" on public.handovers;
+create policy "handovers_update" on public.handovers for update
+  using (
+    public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
+    or logged_by = auth.uid()
+  )
+  with check (
+    public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
+    or logged_by = auth.uid()
+  );
+
+drop policy if exists "handovers_delete" on public.handovers;
+create policy "handovers_delete" on public.handovers for delete
+  using (
+    public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
+    or logged_by = auth.uid()
   );
 
 -- profiles: anyone can view the directory; you can edit your own row (name,
@@ -408,6 +591,71 @@ drop policy if exists "teams_write" on public.teams;
 create policy "teams_write" on public.teams for all
   using (public.current_user_role() = 'Administrator')
   with check (public.current_user_role() = 'Administrator');
+
+-- ---------- Email connections (SMTP/IMAP, e.g. Xneelo-hosted mail) ----------
+-- One row per person who has connected their own mailbox so Romulus
+-- can send email as them and log incoming mail against matching CRM
+-- records. encrypted_password is AES-256-GCM ciphertext (see
+-- api/_lib/crypto.ts) -- never plaintext -- and like the mailbox
+-- credentials themselves, is only ever read or written by the service_role
+-- API routes under /api/email/*, never the browser. RLS is enabled with no
+-- policies for authenticated/anon, so even a compromised anon/authenticated
+-- key can't read a row. last_seen_uid is the INBOX IMAP UID watermark, and
+-- last_seen_uid_junk the same for the mailbox's Junk/Spam folder (a client's
+-- reply misfiled as spam is still a reply) -- IMAP UIDs are only unique
+-- within a single mailbox, so each folder needs its own watermark.
+-- email_connections deliberately has RLS enabled and NO policies, which means no browser can
+-- read it at all — only server-side code holding the service key, which is every route under
+-- api/email/. The rows hold mailbox credentials; they are encrypted on top of this, and the
+-- absence of a policy is the second lock rather than an oversight.
+--
+-- Supabase's security advisor reports this as "RLS enabled, no policy". That report is
+-- expected. Do not resolve it by adding a policy.
+create table if not exists public.email_connections (
+  user_id uuid primary key references public.profiles (id) on delete cascade,
+  email text not null,
+  smtp_host text not null,
+  smtp_port integer not null default 587,
+  imap_host text not null,
+  imap_port integer not null default 993,
+  encrypted_password text not null,
+  last_seen_uid integer,
+  last_seen_uid_junk integer,
+  last_synced_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.email_connections enable row level security;
+
+-- ---------- Email signature image storage ----------
+-- Public bucket (an outgoing email's <img> tag needs a URL any mail client
+-- can fetch without auth). Writes are restricted to the owning user's own
+-- folder (path "<user_id>/...") or an Administrator uploading on someone
+-- else's behalf, mirroring the profiles_update policy below.
+insert into storage.buckets (id, name, public)
+values ('email-signatures', 'email-signatures', true)
+on conflict (id) do nothing;
+
+create policy "email_signatures_read" on storage.objects
+  for select using (bucket_id = 'email-signatures');
+
+create policy "email_signatures_insert" on storage.objects
+  for insert with check (
+    bucket_id = 'email-signatures'
+    and (auth.uid()::text = (storage.foldername(name))[1] or public.current_user_role() = 'Administrator')
+  );
+
+create policy "email_signatures_update" on storage.objects
+  for update using (
+    bucket_id = 'email-signatures'
+    and (auth.uid()::text = (storage.foldername(name))[1] or public.current_user_role() = 'Administrator')
+  );
+
+create policy "email_signatures_delete" on storage.objects
+  for delete using (
+    bucket_id = 'email-signatures'
+    and (auth.uid()::text = (storage.foldername(name))[1] or public.current_user_role() = 'Administrator')
+  );
 
 -- ---------- Function hardening ----------
 -- handle_new_user and protect_profile_privileged_fields only ever run as

@@ -11,6 +11,7 @@ import { RescheduleTaskModal } from '../../components/ui/RescheduleTaskModal'
 import { formatDate, TODAY } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
 import type { Task, TaskPriority, TaskType, User } from '../../types'
+import { isAssignableOwner } from '../../lib/permissions'
 
 const VIEWS = ['My Tasks', 'Team Tasks', 'Overdue', 'Today', 'Tomorrow', 'This Week', 'Completed'] as const
 type View = (typeof VIEWS)[number]
@@ -33,7 +34,7 @@ function formatLongDate(dateParam: string) {
 export function TasksPage() {
   const { tasks, users, updateTask, addTask } = useAppStore()
   const { currentUser } = useAuth()
-  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
+  const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const [searchParams, setSearchParams] = useSearchParams()
   const [view, setView] = useState<View>(() => {
     const fromUrl = readParam(searchParams, 'view')
@@ -131,7 +132,7 @@ export function TasksPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="p-4">
           <p className="text-xs text-slate-400">Overdue</p>
-          <p className="text-xl font-bold text-[#794234] mt-1">{counts.overdue}</p>
+          <p className="text-xl font-bold text-[var(--c-rust-deep)] mt-1">{counts.overdue}</p>
         </Card>
         <Card className="p-4">
           <p className="text-xs text-slate-400">Due Today</p>
@@ -143,7 +144,7 @@ export function TasksPage() {
         </Card>
         <Card className="p-4">
           <p className="text-xs text-slate-400">Completed</p>
-          <p className="text-xl font-bold text-[#406d58] mt-1">{counts.completed}</p>
+          <p className="text-xl font-bold text-[var(--c-green)] mt-1">{counts.completed}</p>
         </Card>
       </div>
 
@@ -197,7 +198,7 @@ export function TasksPage() {
                     {t.autoRescheduledFrom && t.status !== 'Completed' && (
                       <span
                         title={`Originally due ${formatDate(t.autoRescheduledFrom)} — missed and auto-moved to today`}
-                        className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[#b28e34] bg-[#f7f4eb] px-1.5 py-0.5 rounded normal-case"
+                        className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[var(--c-gold)] bg-[var(--tint-gold)] px-1.5 py-0.5 rounded normal-case"
                       >
                         Auto-moved from {formatDate(t.autoRescheduledFrom)}
                       </span>
@@ -209,7 +210,7 @@ export function TasksPage() {
                 </div>
                 <PriorityBadge priority={t.priority} />
                 <TaskStatusBadge status={t.status} />
-                <span className={`text-xs font-medium w-24 text-right shrink-0 ${overdue ? 'text-[#794234]' : 'text-slate-500'}`}>{formatDate(t.dueDate)}</span>
+                <span className={`text-xs font-medium w-24 text-right shrink-0 ${overdue ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>{formatDate(t.dueDate)}</span>
                 <UserAvatar userId={t.ownerId} size={24} />
                 <button onClick={() => setRescheduleTask(t)} className="text-xs font-medium text-brand-600 hover:underline shrink-0">
                   Reschedule

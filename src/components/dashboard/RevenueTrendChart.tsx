@@ -50,13 +50,13 @@ export function RevenueTrendChart({ deals, referenceDate }: { deals: Deal[]; ref
       <div className="h-64">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={data} margin={{ left: -10 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-            <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} />
-            <YAxis yAxisId="left" tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(v: number) => `R${Math.round(v / 1000)}k`} />
-            <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: '#94a3b8' }} allowDecimals={false} />
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--tint-neutral)" />
+            <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'var(--c-grey-light)' }} />
+            <YAxis yAxisId="left" tick={{ fontSize: 11, fill: 'var(--c-grey-light)' }} tickFormatter={(v: number) => `R${Math.round(v / 1000)}k`} />
+            <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: 'var(--c-grey-light)' }} allowDecimals={false} />
             <Tooltip content={<TrendTooltip />} />
-            <Bar yAxisId="left" dataKey="revenue" fill="#355069" radius={[4, 4, 0, 0]} barSize={28} />
-            <Line yAxisId="right" type="monotone" dataKey="dealsWon" stroke="#957323" strokeWidth={2} dot={{ r: 3 }} />
+            <Bar yAxisId="left" dataKey="revenue" fill="var(--c-navy)" radius={[4, 4, 0, 0]} barSize={28} />
+            <Line yAxisId="right" type="monotone" dataKey="dealsWon" stroke="var(--c-gold-deep)" strokeWidth={2} dot={{ r: 3 }} />
           </ComposedChart>
         </ResponsiveContainer>
       </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Download, CheckCircle2, Circle } from 'lucide-react'
 import { useAppStore } from '../store/AppStore'
@@ -15,6 +15,9 @@ import { WinRateCard } from '../components/dashboard/WinRateCard'
 import { DashboardHero } from '../components/dashboard/DashboardHero'
 import { RevenueTrendChart } from '../components/dashboard/RevenueTrendChart'
 import { ActivityBreakdownChart } from '../components/dashboard/ActivityBreakdownChart'
+import { WinRateByKind } from '../components/dashboard/WinRateByKind'
+import { LossReasonsCard } from '../components/dashboard/LossReasonsCard'
+import { dealKind } from '../lib/dealKind'
 import { RepLeaderboard, type LeaderboardRow } from '../components/dashboard/RepLeaderboard'
 import { formatCurrency, formatDate, timeAgo, TODAY } from '../data/mockData'
 import { getCurrentSalesMonth, getPreviousSalesMonth, isWithinPeriod, encodeSalesMonthParam, type SalesMonthPeriod } from '../lib/salesMonth'
@@ -23,6 +26,8 @@ import { computeAllRepScorecards } from '../lib/repScore'
 import { buildDrilldownUrl, SALES_MONTH_PARAM } from '../lib/drilldown'
 import { downloadCsv } from '../lib/csvExport'
 import type { ID, Task, Team, User } from '../types'
+import { isAssignableOwner } from '../lib/permissions'
+import { isActiveLead, isEngagedLead } from '../lib/leadStatus'
 
 function daysAgoLabel(dateIso: string) {
   const diff = Math.round((new Date(dateIso).getTime() - TODAY.getTime()) / (1000 * 60 * 60 * 24))
@@ -55,10 +60,15 @@ function minutesToLabel(mins: number): string {
   return `${Math.round(mins / (60 * 24))}d`
 }
 
-export function Dashboard() {
+interface DashboardProps {
+  /** Given the page's selected period, so a combined view reports one month throughout. */
+  communicationsSnapshot?: (period: SalesMonthPeriod) => ReactNode
+}
+
+export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
   const { leads, deals, tasks, activities, users, teams, userById, companyById, updateTask } = useAppStore()
   const { currentUser } = useAuth()
-  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
+  const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(TODAY))
   const [compareMode, setCompareMode] = useState<CompareMode>('previous')
   // Reps land on their own numbers by default (their own dashboard, not the
@@ -94,15 +104,29 @@ export function Dashboard() {
     function compute(p: SalesMonthPeriod) {
       const newLeads = scopedLeads.filter((l) => isWithinPeriod(l.createdAt, p))
       const meaningfulActivities = scopedActivities.filter((a) => isMeaningfulActivity(a) && isWithinPeriod(a.activityDate, p))
-      const qualified = scopedLeads.filter(
-        (l) => isWithinPeriod(l.createdAt, p) && ['Qualified', 'Proposal Required', 'Converted'].includes(l.status),
-      )
+      const qualified = scopedLeads.filter((l) => isWithinPeriod(l.createdAt, p) && isEngagedLead(l))
       const converted = scopedLeads.filter((l) => isWithinPeriod(l.createdAt, p) && l.status === 'Converted')
       const won = scopedDeals.filter((d) => d.wonAt && isWithinPeriod(d.wonAt, p))
-      const lost = scopedDeals.filter((d) => d.lostAt && isWithinPeriod(d.lostAt, p))
-      const revenueWon = won.reduce((s, d) => s + d.value, 0)
+      const lost = scopedDeals.filter((d) => d.rejectedAt && isWithinPeriod(d.rejectedAt, p))
+
+      // A handover earns nothing at signature, so it carries no deal value — which meant the
+      // whole debt collection side of the business summed to zero here and showed up in no
+      // figure on the page. Its size is the book signed and the accounts that come with it:
+      // separate numbers, deliberately not added to revenue, because they aren't revenue.
+      const wonHandovers = won.filter((d) => dealKind(d) === 'Handover')
+      const wonServices = won.filter((d) => dealKind(d) !== 'Handover')
+      const lostHandovers = lost.filter((d) => dealKind(d) === 'Handover')
+      const lostServices = lost.filter((d) => dealKind(d) !== 'Handover')
+
+      const revenueWon = wonServices.reduce((s, d) => s + d.value, 0)
+      const bookSigned = wonHandovers.reduce((s, d) => s + (d.handoverAmount ?? 0), 0)
+      const accountsSigned = wonHandovers.reduce((s, d) => s + (d.accountsCount ?? 0), 0)
+
       const closed = won.length + lost.length
       const winRate = closed > 0 ? Math.round((won.length / closed) * 100) : 0
+      // A quotation accepted and a mandate signed are different things won in different ways.
+      // One blended rate describes neither, so each is kept on its own terms.
+      const rate = (w: number, l: number) => (w + l > 0 ? Math.round((w / (w + l)) * 100) : null)
       return {
         newLeads: newLeads.length,
         activities: meaningfulActivities.length,
@@ -111,7 +135,13 @@ export function Dashboard() {
         won: won.length,
         lost: lost.length,
         revenueWon,
+        bookSigned,
+        accountsSigned,
         winRate,
+        serviceWinRate: rate(wonServices.length, lostServices.length),
+        serviceClosed: wonServices.length + lostServices.length,
+        handoverWinRate: rate(wonHandovers.length, lostHandovers.length),
+        handoverClosed: wonHandovers.length + lostHandovers.length,
       }
     }
     const curr = compute(period)
@@ -120,7 +150,7 @@ export function Dashboard() {
   }, [scopedLeads, scopedDeals, scopedActivities, period, previousPeriod, compareMode])
 
   const secondary = useMemo(() => {
-    const activeLeads = scopedLeads.filter((l) => l.status !== 'Converted' && l.status !== 'Lost')
+    const activeLeads = scopedLeads.filter(isActiveLead)
     const newLeadsThisPeriod = scopedLeads.filter((l) => isWithinPeriod(l.createdAt, period))
     const touchedLeadIds = new Set(
       scopedActivities.filter((a) => a.leadId && isMeaningfulActivity(a) && isWithinPeriod(a.activityDate, period)).map((a) => a.leadId as string),
@@ -145,7 +175,7 @@ export function Dashboard() {
     const overdueTasks = scopedTasks.filter((t) => t.status !== 'Completed' && t.status !== 'Cancelled' && new Date(t.dueDate) < TODAY)
 
     const leadsNoNextAction = activeLeads.filter((l) => !l.nextFollowUpAt)
-    const openDeals = scopedDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Lost')
+    const openDeals = scopedDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected')
     const dealsNoNextAction = openDeals.filter((d) => !d.nextActionAt)
     const dealsOverdue = openDeals.filter((d) => new Date(d.expectedCloseDate) < TODAY)
 
@@ -168,14 +198,14 @@ export function Dashboard() {
       repIds.map((repId) => {
         const rep = userById(repId)
         const ownLeads = leads.filter((l) => l.ownerId === repId)
-        const activeOwnLeads = ownLeads.filter((l) => l.status !== 'Converted' && l.status !== 'Lost')
+        const activeOwnLeads = ownLeads.filter(isActiveLead)
         const touchedIds = new Set(
           activities.filter((a) => a.userId === repId && a.leadId && isMeaningfulActivity(a) && isWithinPeriod(a.activityDate, period)).map((a) => a.leadId as string),
         )
         const touched = activeOwnLeads.filter((l) => touchedIds.has(l.id) || (l.lastContactAt && isWithinPeriod(l.lastContactAt, period)))
         const repActivities = activities.filter((a) => a.userId === repId && isMeaningfulActivity(a) && isWithinPeriod(a.activityDate, period))
         const won = deals.filter((d) => d.ownerId === repId && d.wonAt && isWithinPeriod(d.wonAt, period))
-        const lost = deals.filter((d) => d.ownerId === repId && d.lostAt && isWithinPeriod(d.lostAt, period))
+        const lost = deals.filter((d) => d.ownerId === repId && d.rejectedAt && isWithinPeriod(d.rejectedAt, period))
         const closed = won.length + lost.length
         const scorecard = scorecards.find((s) => s.repId === repId)
         return {
@@ -196,7 +226,18 @@ export function Dashboard() {
   const periodParam = encodeSalesMonthParam(period)
 
   const recentActivities = scopedActivities.slice(0, 6)
-  const topDeals = useMemo(() => [...scopedDeals].filter((d) => d.stage !== 'Lost').sort((a, b) => b.value - a.value).slice(0, 5), [scopedDeals])
+  // Rejections that happened in the selected period, from both sides of the funnel: a lead
+  // turned down before anyone opened a deal is lost business just the same.
+  const rejectedLeads = useMemo(
+    () => scopedLeads.filter((l) => l.status === 'Rejected' && isWithinPeriod(l.createdAt, period)),
+    [scopedLeads, period],
+  )
+  const rejectedDeals = useMemo(
+    () => scopedDeals.filter((d) => d.rejectedAt && isWithinPeriod(d.rejectedAt, period)),
+    [scopedDeals, period],
+  )
+
+  const topDeals = useMemo(() => [...scopedDeals].filter((d) => d.stage !== 'Rejected').sort((a, b) => b.value - a.value).slice(0, 5), [scopedDeals])
   const tasksDue = useMemo(() => {
     const recentOverdueFloor = new Date(TODAY.getTime() - 14 * 24 * 60 * 60 * 1000)
     return scopedTasks
@@ -262,7 +303,7 @@ export function Dashboard() {
         <button
           onClick={handleExport}
           className="inline-flex items-center gap-1.5 text-sm font-semibold px-3.5 py-2 rounded-lg text-navy-950 shadow-sm"
-          style={{ background: 'linear-gradient(135deg, #c69f54 0%, #d9b876 100%)' }}
+          style={{ background: 'var(--skin-gold-gradient)' }}
         >
           <Download size={15} /> Export
         </button>
@@ -280,7 +321,9 @@ export function Dashboard() {
         periodParam={periodParam}
       />
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      {communicationsSnapshot?.(period)}
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatTile
           label="New Leads"
           value={kpis.curr.newLeads.toString()}
@@ -297,7 +340,7 @@ export function Dashboard() {
           label="Qualified Leads"
           value={kpis.curr.qualified.toString()}
           pctChange={kpis.prev ? pctDelta(kpis.curr.qualified, kpis.prev.qualified) : undefined}
-          to={buildDrilldownUrl('/leads', { status: 'Qualified', [SALES_MONTH_PARAM]: periodParam })}
+          to={buildDrilldownUrl('/leads', { status: 'Hot Lead', [SALES_MONTH_PARAM]: periodParam })}
         />
         <StatTile
           label="Deals Won"
@@ -310,6 +353,20 @@ export function Dashboard() {
           value={formatCurrency(kpis.curr.revenueWon)}
           pctChange={kpis.prev ? pctDelta(kpis.curr.revenueWon, kpis.prev.revenueWon) : undefined}
           to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
+        />
+        {/* Deliberately its own figure rather than part of revenue. A signed book is work won,
+            not money earned — the commission only arrives as accounts are collected. */}
+        <StatTile
+          label="Book Signed"
+          value={formatCurrency(kpis.curr.bookSigned)}
+          pctChange={kpis.prev ? pctDelta(kpis.curr.bookSigned, kpis.prev.bookSigned) : undefined}
+          to={buildDrilldownUrl('/deals', { stage: 'Won', service: 'Debt Collection', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          label="Accounts Signed"
+          value={kpis.curr.accountsSigned.toLocaleString()}
+          pctChange={kpis.prev ? pctDelta(kpis.curr.accountsSigned, kpis.prev.accountsSigned) : undefined}
+          to={buildDrilldownUrl('/deals', { stage: 'Won', service: 'Debt Collection', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
         />
         <StatTile
           label="Win Rate"
@@ -365,6 +422,17 @@ export function Dashboard() {
           <SalesFunnelChart deals={scopedDeals} />
         </div>
         <ActivityBreakdownChart activities={scopedActivities.filter((a) => isWithinPeriod(a.activityDate, period))} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <WinRateByKind
+          serviceWinRate={kpis.curr.serviceWinRate}
+          serviceClosed={kpis.curr.serviceClosed}
+          handoverWinRate={kpis.curr.handoverWinRate}
+          handoverClosed={kpis.curr.handoverClosed}
+          periodLabel={period.label}
+        />
+        <LossReasonsCard leads={rejectedLeads} deals={rejectedDeals} periodLabel={period.label} />
       </div>
 
       <RevenueTrendChart deals={scopedDeals} referenceDate={TODAY} />
@@ -433,14 +501,14 @@ export function Dashboard() {
         <div className="px-5 pb-5 divide-y divide-slate-50">
           {tasksDue.map((t) => (
             <div key={t.id} className="flex items-center gap-3 py-2.5">
-              <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: new Date().toISOString() })} className="text-slate-300 hover:text-[#406d58] shrink-0">
+              <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: new Date().toISOString() })} className="text-slate-300 hover:text-[var(--c-green)] shrink-0">
                 <Circle size={18} />
               </button>
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-medium text-slate-700 truncate flex items-center gap-1.5">
                   {t.title}
                   {t.autoRescheduledFrom && (
-                    <span title={`Missed — originally due ${formatDate(t.autoRescheduledFrom)}`} className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-[#b28e34] bg-[#f7f4eb] px-1 py-0.5 rounded">
+                    <span title={`Missed — originally due ${formatDate(t.autoRescheduledFrom)}`} className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-[var(--c-gold)] bg-[var(--tint-gold)] px-1 py-0.5 rounded">
                       Auto-moved
                     </span>
                   )}
@@ -448,7 +516,7 @@ export function Dashboard() {
                 <p className="text-[11px] text-slate-400">{t.relatedToLabel ?? t.type}</p>
               </div>
               <PriorityBadge priority={t.priority} />
-              <span className={`text-xs font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[#794234]' : 'text-slate-500'}`}>
+              <span className={`text-xs font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>
                 {daysAgoLabel(t.dueDate)}
               </span>
               <UserAvatar userId={t.ownerId} size={24} />
@@ -459,7 +527,7 @@ export function Dashboard() {
           ))}
           {tasksDue.length === 0 && (
             <div className="py-6 text-center text-sm text-slate-400 flex flex-col items-center gap-2">
-              <CheckCircle2 size={22} className="text-[#406d58]" />
+              <CheckCircle2 size={22} className="text-[var(--c-green)]" />
               All caught up — no tasks due.
             </div>
           )}

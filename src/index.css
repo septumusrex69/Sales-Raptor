@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./styles/raptor.css";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -27,6 +28,105 @@
   --color-negative: #794234;
 }
 
+/*
+ * Skin tokens.
+ *
+ * Everything a visual theme is allowed to change is named here, and these defaults are the
+ * exact values they replaced in the components — so the Original theme renders identically to
+ * before this file existed. A skin overrides the same names under its own [data-theme] block;
+ * it never edits a component. Adding a future skin is therefore a second block of variables,
+ * not a second pass through the app.
+ */
+:root {
+  /* Categorical palette. The Original theme keeps exactly the values these replaced;
+     a skin redefines the same names, so charts and badges re-skin with everything else. */
+  --c-gold: #b28e34;
+  --c-gold-dark: #9a7b1f;
+  --c-gold-deep: #957323;
+  --c-green: #406d58;
+  --c-green-bright: #3a7a5c;
+  --c-green-muted: #5c7d5f;
+  --c-grey: #64748b;
+  --c-grey-light: #94a3b8;
+  --c-navy: #355069;
+  --c-navy-deep: #2b4055;
+  --c-navy-mid: #416281;
+  --c-navy-slate: #30465a;
+  --c-rust: #ad6452;
+  --c-rust-deep: #794234;
+  --c-steel: #6086a9;
+  --c-steel-soft: #5f86ab;
+  --c-steel-bright: #4a7ba7;
+  --c-ink: #1e293b;
+  /* The halo behind an autofilled field while it has focus. Gold in both skins today, but a
+     skin can say otherwise. */
+  --skin-autofill-ring: rgb(201 160 82 / 0.25);
+  --c-gold-bright: #c9a227;
+  --c-grey-warm: #6b7280;
+  --c-gold-brand: #c69f54;
+  --c-navy-ink: #283d50;
+  --c-gold-bronze: #a9822f;
+  --c-navy-steel: #3f5d78;
+  --c-steel-deep: #4d7193;
+  --c-steel-light: #799ab9;
+  --c-steel-pale: #a1b8ce;
+  --tint-gold: #f7f4eb;
+  --tint-gold-dark: #f7f2e2;
+  --tint-gold-deep: #f7f3eb;
+  --tint-green: #eef4f1;
+  --tint-green-bright: #e9f4ee;
+  --tint-rust: #f5eeed;
+  --tint-rust-deep: #f6eeec;
+  --tint-steel: #edf1f5;
+  --tint-steel-soft: #eaf1f8;
+  --tint-steel-alt: #eef1f6;
+
+  /* Deal stages, kept separate from the categorical hues: a skin may want its pipeline to
+     read as one progression while its chart colours stay categorical. */
+  --stage-new-deal: #6086a9;
+  --stage-quotation-sent: #b28e34;
+  --stage-mandate-sent: #8a6f2a;
+  --stage-won: #957323;
+  --stage-rejected: #794234;
+
+  /* Ring-chart outcomes — today's values, so the Original theme is unchanged. */
+  --outcome-won: #406d58;
+  --outcome-open: #b28e34;
+  --outcome-rejected: #794234;
+  --outcome-value: #406d58;
+
+  /* Extra families that only appeared inline in pages: hover-darker variants and pale
+     borders, named the same way so a skin overrides them alongside the rest. */
+  --c-gold-light: #d9b876;
+  --c-gold-deep-hover: #7d5f1d;
+  --c-rust-hover: #6a3a2d;
+  --c-rust-deep-hover: #622f24;
+  --c-grey-blue: #7d8f9e;
+  --c-grey-pale: #cbd5e1;
+  --tint-gold-pale: #e7dbb2;
+  --tint-neutral: #f1f5f9;
+  --tint-neutral-soft: #f8fafc;
+
+  --skin-gold-gradient: linear-gradient(135deg, #c69f54 0%, #d9b876 100%);
+  --skin-gold-gradient-deep: linear-gradient(135deg, #c69f54, #a9822f);
+
+  /* Surfaces and structure */
+  --skin-card-radius: 1rem;
+  --skin-card-border: #eceff5;
+  --skin-card-shadow: 0 1px 2px rgba(16, 24, 64, 0.04);
+  --skin-card-shadow-hover: 0 1px 2px rgba(16, 24, 64, 0.04);
+  --skin-body-text: #1c2233;
+  --skin-scrollbar: #d3d8e6;
+
+  /* The hero band at the top of a dashboard or record page. */
+  --skin-hero-background: linear-gradient(120deg, #12212f 0%, #2c4054 52%, #46607b 100%);
+  --skin-hero-radius: 1rem;
+
+  /* Decorative treatment at the foot of the sidebar. */
+  --skin-sidebar-art: none;
+  --skin-sidebar-art-opacity: 0;
+}
+
 html,
 body,
 #root {
@@ -36,7 +136,7 @@ body,
 body {
   margin: 0;
   background-color: var(--color-surface);
-  color: #1c2233;
+  color: var(--skin-body-text);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
@@ -46,18 +146,302 @@ body {
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background-color: #d3d8e6;
+  background-color: var(--skin-scrollbar);
   border-radius: 999px;
 }
 ::-webkit-scrollbar-track {
   background-color: transparent;
 }
 
+/*
+ * Autofill.
+ *
+ * Safari and Chrome paint their own pale yellow over a field they filled in, which lands on
+ * the sign-in page looking like a validation warning rather than a convenience. The colour
+ * can't be set directly — the browser applies it below the reach of background-color — so an
+ * inset shadow the depth of the field is what covers it, and -webkit-text-fill-color is what
+ * the text obeys instead of `color`.
+ *
+ * Both come from skin tokens, so a theme that changes its card or ink colour takes the filled
+ * state with it rather than leaving a white patch behind.
+ *
+ * Written as separate blocks on purpose: one invalid selector invalidates a whole list, and
+ * Firefox knows :autofill while WebKit knows :-webkit-autofill. Sharing a list would mean
+ * neither of them applied it.
+ */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:active,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: var(--c-ink);
+  caret-color: var(--c-ink);
+  -webkit-box-shadow: 0 0 0 100px var(--color-card) inset;
+  box-shadow: 0 0 0 100px var(--color-card) inset;
+  /* The yellow arrives as a transition. One that never finishes never arrives. */
+  transition: background-color 100000s ease-in-out 0s;
+}
+
+/* The fill covers the focus ring, which is a box-shadow too — so put the ring back. */
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 3px var(--skin-autofill-ring), 0 0 0 100px var(--color-card) inset;
+  box-shadow: 0 0 0 3px var(--skin-autofill-ring), 0 0 0 100px var(--color-card) inset;
+}
+
+input:autofill,
+textarea:autofill,
+select:autofill {
+  box-shadow: 0 0 0 100px var(--color-card) inset;
+}
+
 .card {
   background-color: var(--color-card);
-  border-radius: 1rem;
-  border: 1px solid #eceff5;
-  box-shadow: 0 1px 2px rgba(16, 24, 64, 0.04);
+  border-radius: var(--skin-card-radius);
+  border: 1px solid var(--skin-card-border);
+  box-shadow: var(--skin-card-shadow);
+}
+
+/*
+ * The hero band. Its background lived inline on the component, which put it out of reach of
+ * the skin layer; it reads from a token now so a theme can replace the gradient with its own
+ * treatment — including atmospheric imagery — without the component knowing.
+ */
+.app-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--skin-hero-radius);
+  background: var(--skin-hero-background);
+}
+
+/*
+ * The sign-in photograph.
+ *
+ * A background rather than an <img> on purpose: the panel is hidden below lg, and a browser
+ * never fetches a background on a display:none element, whereas it will happily download an
+ * <img> inside one. A phone shouldn't pay for a picture it is never shown.
+ *
+ * Three declarations of one property, each overriding the last where it's understood. Anything
+ * modern takes the standard image-set; Safari 14-16 takes the -webkit- form and gets the same
+ * files; anything older keeps the plain JPEG. A browser that chokes on the last declaration
+ * falls back to the one above it and still ends up with WebP, so the ordering is the safety
+ * net rather than a guess about support.
+ *
+ * The 2x file is only ever fetched by a screen dense enough to need it — an ordinary monitor
+ * pays 257KB, not 409KB.
+ */
+.login-photo {
+  background-image: url('/brand/raptor-login.jpg');
+  background-image: -webkit-image-set(url('/brand/raptor-login.webp') 1x, url('/brand/raptor-login@2x.webp') 2x);
+  background-image: image-set(
+    url('/brand/raptor-login.webp') type('image/webp') 1x,
+    url('/brand/raptor-login@2x.webp') type('image/webp') 2x,
+    url('/brand/raptor-login.jpg') type('image/jpeg') 1x
+  );
+  background-size: cover;
+  background-position: 32% center;
+}
+
+/*
+ * The celebration when a deal is won or a mandate signed.
+ *
+ * The bird spins up in the middle, growing as it turns, then bursts into stars. Two nested
+ * transforms on purpose: the outer element carries the growth and the inner one the spin, so
+ * they compose instead of overwriting each other — one transform property cannot hold both,
+ * and animating them on the same element makes the last declaration win.
+ *
+ * The stars are held back until the burst rather than thrown from the start, so the moment
+ * reads as one thing happening and not two things overlapping.
+ */
+.raptor-celebration {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  /* One knob per tier. The component picks the tier; every duration below reads from here so
+     the two never drift apart. */
+  --celebrate-duration: 2.4s;
+  --celebrate-scale: 1.8;
+  --celebrate-spin: 1080deg;
+}
+
+.raptor-celebration--milestone {
+  --celebrate-duration: 3.4s;
+  --celebrate-scale: 2.4;
+  --celebrate-spin: 1440deg;
+}
+
+.raptor-celebration__stage {
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+.raptor-celebration__flight {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  transform-origin: center;
+  animation: raptor-grow var(--celebrate-duration) cubic-bezier(0.34, 0.9, 0.5, 1) forwards;
+}
+
+.raptor-celebration__bird {
+  display: block;
+  width: 96px;
+  height: auto;
+  /* The stage is a zero-size anchor point, so a percentage max-width — which the base reset
+     applies to every image — resolves against zero and collapses the bird to nothing. */
+  max-width: none;
+  margin: -48px 0 0 -48px;
+  transform-origin: center;
+  filter: drop-shadow(0 10px 26px rgb(15 23 42 / 0.3));
+  animation: raptor-spin var(--celebrate-duration) cubic-bezier(0.3, 0.7, 0.4, 1) forwards;
+}
+
+.raptor-celebration--milestone .raptor-celebration__bird {
+  width: 128px;
+  margin: -64px 0 0 -64px;
+}
+
+/* The shockwave a milestone gets and an ordinary win doesn't.
+   Grown by width and height rather than by transform: a scaled ring scales its border with it,
+   which turns a hairline into a 20px gold band by the time it crosses the screen. */
+.raptor-celebration__ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 60px;
+  height: 60px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  border: 2px solid var(--c-gold, #c9a052);
+  opacity: 0;
+  animation: raptor-ring 850ms cubic-bezier(0.12, 0.75, 0.3, 1) 2.35s forwards;
+}
+
+.raptor-celebration__spark {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: var(--c-gold, #c9a052);
+  /* A five-pointed star, so what bursts out is stars rather than dots. */
+  clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+  opacity: 0;
+  animation: raptor-star 900ms cubic-bezier(0.15, 0.8, 0.3, 1) forwards;
+}
+
+.raptor-celebration--milestone .raptor-celebration__spark {
+  animation-duration: 1200ms;
+}
+
+.raptor-celebration__caption {
+  margin-top: 104px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  animation: raptor-caption var(--celebrate-duration) ease-out forwards;
+}
+
+.raptor-celebration--milestone .raptor-celebration__caption {
+  /* Clear of the bird at its largest, which is half again the size of the everyday one. */
+  margin-top: 196px;
+}
+
+.raptor-celebration__eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--c-gold, #c9a052);
+  opacity: 0.75;
+  padding-left: 0.34em;
+}
+
+.raptor-celebration__message {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--c-gold, #c9a052);
+  padding-left: 0.24em;
+}
+
+.raptor-celebration--milestone .raptor-celebration__message {
+  font-size: 18px;
+  letter-spacing: 0.18em;
+  padding-left: 0.18em;
+}
+
+@keyframes raptor-grow {
+  0% { transform: scale(0.2); opacity: 0; }
+  10% { opacity: 1; }
+  55% { transform: scale(calc(var(--celebrate-scale) * 0.64)); opacity: 1; }
+  /* Hold full strength right up to the burst, then go in a few frames. Fading out slowly
+     while still growing turns the bird into a pale smudge over the page. */
+  64% { transform: scale(calc(var(--celebrate-scale) * 0.81)); opacity: 1; }
+  68% { transform: scale(calc(var(--celebrate-scale) * 0.89)); opacity: 0.85; }
+  72% { transform: scale(var(--celebrate-scale)); opacity: 0; }
+  100% { transform: scale(var(--celebrate-scale)); opacity: 0; }
+}
+
+@keyframes raptor-spin {
+  0% { transform: rotate(0deg); }
+  72% { transform: rotate(var(--celebrate-spin)); }
+  100% { transform: rotate(var(--celebrate-spin)); }
+}
+
+@keyframes raptor-star {
+  0% { transform: translate3d(0, 0, 0) scale(0.2) rotate(0deg); opacity: 0; }
+  15% { opacity: 1; }
+  100% { transform: translate3d(var(--dx), var(--dy), 0) scale(1) rotate(200deg); opacity: 0; }
+}
+
+@keyframes raptor-ring {
+  0% { width: 60px; height: 60px; opacity: 0; }
+  20% { opacity: 0.85; }
+  100% { width: 660px; height: 660px; opacity: 0; }
+}
+
+@keyframes raptor-caption {
+  0%, 55% { opacity: 0; transform: translateY(10px); }
+  68% { opacity: 1; transform: translateY(0); }
+  86% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/*
+ * Asked not to be animated: say the same thing, hold still.
+ *
+ * Qualified with `html` and marked important on purpose. The Raptor skin carries a blanket
+ * reduced-motion rule that forces `animation-duration: .01ms !important` onto every element
+ * under it, which is right for decorative transitions and wrong here: it crushed this to less
+ * than a frame, so the bird fired and vanished invisibly with nothing to debug. The extra
+ * specificity is what lets a deliberate animation opt out of a blanket one.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .raptor-celebration__spark,
+  .raptor-celebration__ring {
+    display: none;
+  }
+  html .raptor-celebration__flight,
+  html .raptor-celebration__bird,
+  html .raptor-celebration__caption {
+    animation: raptor-quiet var(--celebrate-duration) ease-out forwards !important;
+    animation-duration: var(--celebrate-duration) !important;
+  }
+  @keyframes raptor-quiet {
+    0%, 100% { opacity: 0; }
+    18%, 72% { opacity: 1; }
+  }
 }
 
 .badge {

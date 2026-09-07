@@ -4,9 +4,9 @@ import { SCORE_LABELS, type RepScorecard as RepScorecardType, type ScoreKey } fr
 const SCORE_KEYS: ScoreKey[] = ['activity', 'leadCoverage', 'followUp', 'conversion', 'win', 'revenue']
 
 function scoreColor(value: number) {
-  if (value >= 75) return '#406d58'
-  if (value >= 50) return '#b28e34'
-  return '#794234'
+  if (value >= 75) return 'var(--c-green)'
+  if (value >= 50) return 'var(--c-gold)'
+  return 'var(--c-rust-deep)'
 }
 
 export function ScoreBar({ label, value }: { label: string; value: number }) {

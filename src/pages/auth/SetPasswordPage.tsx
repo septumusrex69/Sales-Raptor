@@ -39,7 +39,7 @@ export function SetPasswordPage() {
         <div className="flex flex-col items-center mb-6">
           <img src="/brand/wordmark-dark.svg" alt="Bredell Ferreira" className="h-6 w-auto mb-3" />
           <h1 className="font-semibold text-lg text-navy-950">Set your password</h1>
-          <p className="text-sm text-slate-400 mt-0.5 text-center">Choose a password to finish setting up your Sales Raptor login.</p>
+          <p className="text-sm text-slate-400 mt-0.5 text-center">Choose a password to finish setting up your Romulus login.</p>
         </div>
 
         <Card>
@@ -65,7 +65,7 @@ export function SetPasswordPage() {
                 required
               />
             </FormField>
-            {error && <p className="text-sm text-[#794234] mb-3.5">{error}</p>}
+            {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
             <button
               type="submit"
               disabled={submitting}

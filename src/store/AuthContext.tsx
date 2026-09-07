@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import type { User, UserRole } from '../types'
@@ -12,6 +12,10 @@ interface ProfileRow {
   status: 'Active' | 'Inactive'
   phone: string | null
   avatar_color: string
+  email_signature: string | null
+  email_signature_image_url: string | null
+  email_signature_image_width: number | null
+  email_signature_image_align: 'left' | 'center' | 'right' | null
 }
 
 function mapProfileRow(row: ProfileRow): User {
@@ -24,6 +28,10 @@ function mapProfileRow(row: ProfileRow): User {
     status: row.status,
     phone: row.phone ?? undefined,
     avatarColor: row.avatar_color,
+    emailSignature: row.email_signature ?? undefined,
+    emailSignatureImageUrl: row.email_signature_image_url ?? undefined,
+    emailSignatureImageWidth: row.email_signature_image_width ?? undefined,
+    emailSignatureImageAlign: row.email_signature_image_align ?? undefined,
   }
 }
 
@@ -36,6 +44,11 @@ interface AuthContextValue {
   signOut: () => Promise<void>
   /** Patches the locally-held profile immediately (e.g. after Settings → Profile saves a name/phone change), so the UI doesn't wait on a refetch to reflect it. */
   updateCurrentUserLocal: (patch: Partial<User>) => void
+  /** Set when the profile row could not be fetched after several tries. The app can't safely
+   *  write anything without knowing who the person is, so this is surfaced rather than ignored. */
+  profileError: string | null
+  /** Try the profile fetch again after a failure. */
+  reloadProfile: () => void
   /** True when this session came from an invite/recovery email link — the person has a session but never set a password, so RequireAuth should force them through SetPasswordPage before anything else. */
   passwordSetupRequired: boolean
   /** Sets the password for the current session (invite/recovery flow) and clears passwordSetupRequired on success. */
@@ -55,27 +68,77 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [passwordSetupRequired, setPasswordSetupRequired] = useState(cameFromInviteOrRecoveryLink)
+  const [profileError, setProfileError] = useState<string | null>(null)
+  // Held in a ref as well as state so the retry can read the current session without being
+  // rebuilt — the effect that owns it deliberately runs once.
+  const sessionRef = useRef<Session | null>(null)
+  const [reloadProfile, setReloadProfile] = useState<() => void>(() => () => {})
 
   useEffect(() => {
     let active = true
+    let inFlightFor: string | null = null
 
+    /**
+     * Fetching the profile is a second request made moments after sign-in, and it can lose a
+     * race: the sign-in call resolves fractionally before the new token is attached to outgoing
+     * requests, so the first read comes back 401.
+     *
+     * This used to run once and throw the error away. One lost race then left the app not
+     * knowing who was using it for the rest of the session — and because every write stamps the
+     * signed-in person's id, Postgres rejected all of them ("invalid input syntax for type
+     * uuid") while the only visible symptom was the sidebar reading "Loading…". So read the
+     * error, and retry with a widening gap instead of failing silently.
+     */
     async function loadProfile(userId: string) {
-      const { data } = await supabase.from('profiles').select('*').eq('id', userId).single<ProfileRow>()
-      if (active && data) setCurrentUser(mapProfileRow(data))
+      if (inFlightFor === userId) return
+      inFlightFor = userId
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const { data } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle<ProfileRow>()
+        if (!active) return
+        if (data) {
+          setCurrentUser(mapProfileRow(data))
+          setProfileError(null)
+          inFlightFor = null
+          return
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200 * 2 ** attempt))
+        if (!active) return
+      }
+      inFlightFor = null
+      setProfileError('We could not load your profile. Check your connection and try again.')
     }
+
+    setReloadProfile(() => () => {
+      const userId = sessionRef.current?.user.id
+      if (!userId) return
+      inFlightFor = null
+      setProfileError(null)
+      void loadProfile(userId)
+    })
 
     supabase.auth.getSession().then(({ data }) => {
       if (!active) return
+      sessionRef.current = data.session
       setSession(data.session)
-      if (data.session) loadProfile(data.session.user.id)
+      if (data.session) void loadProfile(data.session.user.id)
       setLoading(false)
     })
 
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
       if (!active) return
+      sessionRef.current = newSession
       setSession(newSession)
-      if (newSession) loadProfile(newSession.user.id)
-      else setCurrentUser(null)
+      if (!newSession) {
+        setCurrentUser(null)
+        setProfileError(null)
+        return
+      }
+      // Deferred out of the callback: supabase-js runs these listeners while holding its own
+      // auth lock, and calling back into the client from inside can stall.
+      const userId = newSession.user.id
+      setTimeout(() => {
+        if (active) void loadProfile(userId)
+      }, 0)
     })
 
     return () => {
@@ -105,7 +168,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ session, currentUser, loading, signIn, signOut, updateCurrentUserLocal, passwordSetupRequired, completePasswordSetup }}
+      value={{
+        session,
+        currentUser,
+        loading,
+        signIn,
+        signOut,
+        updateCurrentUserLocal,
+        passwordSetupRequired,
+        completePasswordSetup,
+        profileError,
+        reloadProfile,
+      }}
     >
       {children}
     </AuthContext.Provider>

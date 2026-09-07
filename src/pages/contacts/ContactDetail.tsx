@@ -1,18 +1,22 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Mail, Phone, StickyNote, Building2 } from 'lucide-react'
+import { ArrowLeft, Mail, Phone, StickyNote, Building2, Pencil } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { Avatar } from '../../components/ui/Avatar'
 import { StageBadge } from '../../components/ui/Badge'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
+import { ComposeEmailModal } from '../../components/ComposeEmailModal'
+import { EditContactModal } from '../../components/contacts/EditContactModal'
 import { companyById, formatCurrency, formatDate, formatDateTime, userById } from '../../data/mockData'
 
 export function ContactDetail() {
   const { id } = useParams()
-  const { contacts, deals, activities, tasks, addActivity } = useAppStore()
+  const { contacts, deals, activities, tasks, addActivity, updateContact } = useAppStore()
   const contact = contacts.find((c) => c.id === id)
   const [noteOpen, setNoteOpen] = useState(false)
+  const [emailOpen, setEmailOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
 
   const contactDeals = useMemo(() => deals.filter((d) => d.contactId === id), [deals, id])
   const contactActivities = useMemo(
@@ -41,15 +45,18 @@ export function ContactDetail() {
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-3.5">
-            <Avatar name={`${contact.firstName} ${contact.lastName}`} color="#416281" size={48} />
+            <Avatar name={`${contact.firstName} ${contact.lastName}`} color="var(--c-navy-mid)" size={48} />
             <div>
               <h2 className="text-lg font-semibold text-slate-800">{contact.firstName} {contact.lastName}</h2>
               <p className="text-sm text-slate-500">{contact.jobTitle}{company ? ` at ${company.name}` : ''}</p>
               <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
                 {contact.email && (
-                  <a href={`mailto:${contact.email}`} className="inline-flex items-center gap-1 hover:text-brand-600">
-                    <Mail size={12} /> {contact.email}
-                  </a>
+                  <span className="inline-flex items-center gap-1">
+                    <button onClick={() => setEmailOpen(true)} className="text-slate-400 hover:text-brand-600" title="Send email">
+                      <Mail size={12} />
+                    </button>
+                    {contact.email}
+                  </span>
                 )}
                 {(contact.phone || contact.mobile) && (
                   <a href={`tel:${contact.phone ?? contact.mobile}`} className="inline-flex items-center gap-1 hover:text-brand-600">
@@ -59,9 +66,14 @@ export function ContactDetail() {
               </div>
             </div>
           </div>
-          <button onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-            <StickyNote size={14} /> Add Note
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setEditOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+              <Pencil size={14} /> Edit
+            </button>
+            <button onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+              <StickyNote size={14} /> Add Note
+            </button>
+          </div>
         </div>
       </Card>
 
@@ -109,7 +121,7 @@ export function ContactDetail() {
             ) : (
               <div className="space-y-2.5">
                 {notes.map((n) => (
-                  <div key={n.id} className="bg-[#f7f4eb] border border-[#e7dbb2] rounded-lg p-3">
+                  <div key={n.id} className="bg-[var(--tint-gold)] border border-[var(--tint-gold-pale)] rounded-lg p-3">
                     <p className="text-sm text-slate-700">{n.notes || n.subject}</p>
                     <p className="text-[11px] text-slate-400 mt-1">{formatDateTime(n.activityDate)}</p>
                   </div>
@@ -173,6 +185,16 @@ export function ContactDetail() {
           onClose={() => setNoteOpen(false)}
           onSave={(text) => addActivity({ type: 'Note', subject: 'Note added', notes: text, contactId: contact.id, companyId: contact.companyId })}
         />
+      )}
+      {emailOpen && contact.email && (
+        <ComposeEmailModal
+          to={contact.email}
+          onClose={() => setEmailOpen(false)}
+          onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, contactId: contact.id, companyId: contact.companyId })}
+        />
+      )}
+      {editOpen && (
+        <EditContactModal contact={contact} onClose={() => setEditOpen(false)} onSave={(patch) => updateContact(contact.id, patch)} />
       )}
     </div>
   )

@@ -17,7 +17,7 @@ export function RescheduleTaskModal({ task, onClose, onSave }: { task: Task; onC
       >
         <p className="text-sm text-slate-600 mb-3">{task.title}</p>
         {task.autoRescheduledFrom && (
-          <p className="text-xs text-[#b28e34] bg-[#f7f4eb] rounded-lg px-2.5 py-1.5 mb-3">
+          <p className="text-xs text-[var(--c-gold)] bg-[var(--tint-gold)] rounded-lg px-2.5 py-1.5 mb-3">
             This task was missed and auto-moved to today. Pick a new date to reschedule it properly.
           </p>
         )}

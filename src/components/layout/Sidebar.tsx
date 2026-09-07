@@ -17,6 +17,7 @@ import {
 import clsx from 'clsx'
 import { useAuth } from '../../store/AuthContext'
 import { UserAvatar } from '../ui/Avatar'
+import { useTheme } from '../../store/ThemeContext'
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -33,6 +34,7 @@ const NAV = [
 
 export function Sidebar() {
   const { currentUser, signOut } = useAuth()
+  const { theme } = useTheme()
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -45,9 +47,9 @@ export function Sidebar() {
   }, [])
 
   return (
-    <aside className="w-60 shrink-0 bg-navy-950 text-slate-300 flex flex-col h-full">
+    <aside className="app-sidebar w-60 shrink-0 bg-navy-950 text-slate-300 flex flex-col h-full">
       <div className="flex items-center px-5 h-16 border-b border-white/10">
-        <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="w-full h-auto" />
+        <img src={theme.lockupLight} alt="Bredell Ferreira" className="w-full h-auto" />
       </div>
 
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">

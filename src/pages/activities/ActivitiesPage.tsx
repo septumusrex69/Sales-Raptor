@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Phone, Mail, MessageCircle, Calendar, StickyNote, FileText, CheckSquare, ArrowRightLeft, Trophy, XOctagon } from 'lucide-react'
+import { Phone, Mail, MessageCircle, Calendar, StickyNote, FileText, CheckSquare, ArrowRightLeft, Trophy, XOctagon, Inbox } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
@@ -9,8 +9,24 @@ import { ACTIVITY_TYPE_TAILWIND } from '../../lib/colors'
 import { readParam } from '../../lib/drilldown'
 import { decodeSalesMonthParam, isWithinPeriod } from '../../lib/salesMonth'
 import type { ActivityType } from '../../types'
+import { isAssignableOwner } from '../../lib/permissions'
 
-const ACTIVITY_TYPES: ActivityType[] = ['Call', 'Email', 'WhatsApp', 'Meeting', 'Note', 'Proposal', 'Task', 'Status change', 'Deal update', 'Deal Stage Change', 'Deal Won', 'Deal Lost']
+const ACTIVITY_TYPES: ActivityType[] = [
+  'Call',
+  'Email',
+  'WhatsApp',
+  'Meeting',
+  'Note',
+  'Proposal',
+  'Task',
+  'Status change',
+  'Deal update',
+  'Deal Stage Change',
+  'Deal Won',
+  'Deal Rejected',
+  'Courtesy Call',
+  'Handover Received',
+]
 
 const ICONS: Record<ActivityType, typeof Phone> = {
   Call: Phone,
@@ -24,14 +40,16 @@ const ICONS: Record<ActivityType, typeof Phone> = {
   'Deal update': ArrowRightLeft,
   'Deal Stage Change': ArrowRightLeft,
   'Deal Won': Trophy,
-  'Deal Lost': XOctagon,
+  'Deal Rejected': XOctagon,
+  'Courtesy Call': Phone,
+  'Handover Received': Inbox,
 }
 
 const ICON_COLORS = ACTIVITY_TYPE_TAILWIND
 
 export function ActivitiesPage() {
   const { activities, deals, companies, users, companyById, leadById } = useAppStore()
-  const reps = useMemo(() => users.filter((u) => u.role.includes('Sales') || u.role === 'Administrator'), [users])
+  const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const [searchParams] = useSearchParams()
   const [user, setUser] = useState(() => readParam(searchParams, 'owner') ?? 'All')
   const [type, setType] = useState(() => readParam(searchParams, 'type') ?? 'All')

@@ -1,7 +1,7 @@
 import { addMonths, endOfDay, format, isWithinInterval, parseISO, setDate, startOfDay, startOfYear, subMonths } from 'date-fns'
 
 /**
- * Sales Raptor's fiscal reporting period: the 11th of a month through the
+ * Romulus's fiscal reporting period: the 11th of a month through the
  * 10th of the following month, inclusive. Named after the month it ends in
  * (e.g. 11 Aug – 10 Sep is the "September" Sales Month).
  */

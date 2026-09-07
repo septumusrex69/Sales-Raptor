@@ -34,7 +34,7 @@ export const COLUMN_LABELS: Record<ColumnKey, string> = {
   handoverAmount: 'Handover Amount',
   owner: 'Owner',
   nextFollowUp: 'Next Follow-up',
-  dateAdded: 'Date Added',
+  dateAdded: 'Added',
   lastContact: 'Last Contact',
   source: 'Source',
   city: 'City',
@@ -58,13 +58,16 @@ export const DEFAULT_COLUMNS: ColumnKey[] = [
   'handoverAmount',
   'owner',
   'nextFollowUp',
-  'dateAdded',
   'lastContact',
   'source',
 ]
 
-/** Extra columns available via the Columns menu — hidden by default. */
-export const OPTIONAL_COLUMNS: ColumnKey[] = ['city', 'province', 'leadAge', 'jobTitle', 'phone', 'email']
+/**
+ * Extra columns available via the Columns menu — hidden by default. 'dateAdded' lives here
+ * rather than in the defaults because the table groups rows under day headings instead, the
+ * way the email list does; the column stays available for anyone who wants the date inline.
+ */
+export const OPTIONAL_COLUMNS: ColumnKey[] = ['dateAdded', 'city', 'province', 'leadAge', 'jobTitle', 'phone', 'email']
 
 export const ALL_COLUMNS: ColumnKey[] = [...DEFAULT_COLUMNS, ...OPTIONAL_COLUMNS]
 
@@ -85,6 +88,8 @@ export type SortKey =
   | 'nextFollowUp'
   | 'dateAdded'
   | 'lastContact'
+  | 'owner'
+  | 'source'
 
 export const SORTABLE_COLUMN_KEYS: Partial<Record<ColumnKey, SortKey>> = {
   leadNumber: 'leadNumber',
@@ -97,4 +102,6 @@ export const SORTABLE_COLUMN_KEYS: Partial<Record<ColumnKey, SortKey>> = {
   nextFollowUp: 'nextFollowUp',
   dateAdded: 'dateAdded',
   lastContact: 'lastContact',
+  owner: 'owner',
+  source: 'source',
 }

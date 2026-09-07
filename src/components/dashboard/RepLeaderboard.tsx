@@ -79,7 +79,7 @@ export function RepLeaderboard({ rows }: { rows: LeaderboardRow[] }) {
                         'inline-flex items-center justify-center w-5 h-5 rounded-md text-[10.5px] font-extrabold shrink-0',
                         i === 0 ? 'text-white' : 'bg-slate-100 text-slate-400',
                       )}
-                      style={i === 0 ? { background: 'linear-gradient(135deg, #c69f54, #a9822f)' } : undefined}
+                      style={i === 0 ? { background: 'var(--skin-gold-gradient-deep)' } : undefined}
                     >
                       {i + 1}
                     </span>

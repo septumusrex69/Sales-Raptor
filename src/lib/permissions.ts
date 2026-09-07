@@ -11,13 +11,18 @@ import type { User } from '../types'
  */
 export function canEditOwned(user: Pick<User, 'id' | 'role'> | null | undefined, ownerId: string | undefined): boolean {
   if (!user) return false
-  if (user.role === 'Administrator' || user.role === 'Sales Manager') return true
+  if (user.role === 'Administrator' || user.role === 'Sales Manager' || user.role === 'Liaison Manager') return true
   return !!ownerId && user.id === ownerId
 }
 
 /** Reassigning a record to a different owner is a managerial action, independent of who currently owns it. */
 export function canReassign(user: Pick<User, 'role'> | null | undefined): boolean {
-  return user?.role === 'Administrator' || user?.role === 'Sales Manager'
+  return user?.role === 'Administrator' || user?.role === 'Sales Manager' || user?.role === 'Liaison Manager'
+}
+
+/** Roles eligible to own a Lead/Deal/Task/Contact/Company — i.e. show up in "assign to" / "Client Liaison" pickers. */
+export function isAssignableOwner(role: Pick<User, 'role'>['role']): boolean {
+  return role === 'Administrator' || role.includes('Sales') || role === 'Liaison' || role === 'Liaison Manager'
 }
 
 /**

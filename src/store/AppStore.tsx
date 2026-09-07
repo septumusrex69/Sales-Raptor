@@ -1,8 +1,15 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from './AuthContext'
 import { TODAY } from '../data/mockData'
-import type { Activity, ActivityType, Company, Contact, Deal, DealStage, ID, Lead, LeadStatus, LossReason, Proposal, Task, Team, User } from '../types'
+import { DEAL_STAGE_PROBABILITY } from '../types'
+import { normalizeDeal, normalizeLead } from '../lib/legacyValues'
+import { dealKind, kindForService } from '../lib/dealKind'
+import { RaptorCelebration } from '../components/ui/RaptorCelebration'
+import { celebrationForWin, type Celebration } from '../lib/celebration'
+import type { Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, ID, Lead, ProductService, Proposal, RejectionReason, Task, TaskType, Team, TeamKind, User,
+  Handover,
+} from '../types'
 
 /**
  * Generic camelCase(app) <-> snake_case(Postgres) row mapping. The SQL
@@ -44,8 +51,19 @@ function reportError(action: string, message: string) {
 
 /** Turns raw Postgrest/RLS errors into something worth showing a user. */
 function friendlyError(message: string): string {
+  // Postgrest says this when a write matched no row: either the record isn't on the server
+  // (an earlier save failed and it only exists in this tab) or RLS is hiding it. Neither is
+  // something "Cannot coerce the result to a single JSON object" helps anyone with.
+  if (message.includes('coerce the result')) {
+    return "That record couldn't be found on the server — it may not have saved. Reload the page and try again."
+  }
   if (message.includes('row-level security') || message.includes('JSON object requested')) {
     return "You don't have permission to do that."
+  }
+  // An empty string where a uuid belongs means the app tried to stamp a record with the
+  // signed-in person's id before it knew who they were. Nobody can act on the Postgres text.
+  if (message.includes('invalid input syntax for type uuid')) {
+    return "That didn't save because the app hadn't finished signing you in. Reload the page and try again."
   }
   return message
 }
@@ -93,6 +111,24 @@ function deleteRow(table: string, id: ID, action: string, onError?: (message: st
     })
 }
 
+/**
+ * A completed task is logged as the kind of thing it actually was, so a meeting that happened
+ * reads as a Meeting on the client's file — with the meeting colour — rather than as generic
+ * admin. The types that don't describe a client interaction fall back to Task.
+ */
+function taskCompletionActivityType(taskType: TaskType): ActivityType {
+  switch (taskType) {
+    case 'Call':
+    case 'Email':
+    case 'Meeting':
+    case 'WhatsApp':
+    case 'Proposal':
+      return taskType
+    default:
+      return 'Task'
+  }
+}
+
 function startOfDay(d: Date) {
   const x = new Date(d)
   x.setHours(0, 0, 0, 0)
@@ -131,14 +167,17 @@ interface AppState {
   tasks: Task[]
   activities: Activity[]
   proposals: Proposal[]
+  handovers: Handover[]
   users: User[]
   teams: Team[]
+  notifications: AppNotification[]
   dataLoading: boolean
   /** Message from the most recent failed write (e.g. permission denied). Null when nothing to show. */
   toast: string | null
 }
 
 export interface WonDealDetails {
+  /** Zero for a Handover: nothing is earned at signature, so there is no value to record. */
   finalValue: number
   startDate: string
   service: string
@@ -149,26 +188,95 @@ export interface WonDealDetails {
   accountsCount?: number
 }
 
+/**
+ * One deal being confirmed as part of converting a lead. `dealId` is set when the rep already
+ * created the deal on the lead; without it the deal is created from the service the lead was
+ * interested in.
+ */
+/**
+ * What actually happened to one deal at the moment the lead was converted.
+ *
+ * Signing a client is not the same as signing everything discussed with them. The debt
+ * collection mandate can be signed while a quotation for another service is still sitting with
+ * them, or has been turned down. Booking all of it as Won would credit revenue nobody agreed
+ * to and quietly empty the pipeline of business that is still live.
+ */
+export type ConvertDealOutcome = 'signed' | 'open' | 'rejected'
+
+export interface ConvertDealConfirmation {
+  dealId?: ID
+  name: string
+  service?: string
+  value: number
+  /** Debt Collection only — outstanding balance being handed over. */
+  handoverAmount?: number
+  /** Debt Collection only — number of accounts/matters in the handover. */
+  accountsCount?: number
+  outcome: ConvertDealOutcome
+  /** Required when the outcome is 'rejected'. */
+  rejectionReason?: RejectionReason
+  rejectionNote?: string
+}
+
+export interface ConvertConfirmation {
+  /** Service commencement date, applied to every deal confirmed in this conversion. */
+  startDate: string
+  deals: ConvertDealConfirmation[]
+}
+
 interface AppActions {
   addLead: (input: Partial<Lead> & { firstName: string; lastName: string; companyName: string }) => Lead
   updateLead: (id: ID, patch: Partial<Lead>) => void
-  convertLeadToDeal: (leadId: ID, dealValue?: number) => Deal | undefined
-  markLeadLost: (leadId: ID) => void
+  /**
+   * Turns a won lead into a real client: creates the Company (if there isn't one yet), carries
+   * its contact people across, and opens a Deal per service so the handover can be tracked.
+   * The lead itself stays on file as 'Converted' rather than disappearing.
+   */
+  convertLeadToClient: (leadId: ID, confirm: ConvertConfirmation) => { companyId: ID; deal?: Deal } | undefined
+  /**
+   * Opens a deal against a lead, before there's a client. A lead saying "I'm interested in
+   * Executive Listing" is a real opportunity worth tracking from that moment, not only once
+   * they sign — so the deal is created now and confirmed at conversion.
+   */
+  addLeadDeal: (leadId: ID, input: { name: string; value: number; service: ProductService; expectedCloseDate: string; handoverAmount?: number; accountsCount?: number; notes?: string }) => Deal | undefined
+  rejectLead: (leadId: ID, reason: RejectionReason, note?: string) => void
   deleteLead: (leadId: ID) => void
 
   addDeal: (input: Partial<Deal> & { name: string; companyId: ID }) => Deal
   updateDeal: (id: ID, patch: Partial<Deal>) => void
   moveDealStage: (id: ID, stage: DealStage) => void
   markDealWon: (id: ID, details: WonDealDetails) => void
-  markDealLost: (id: ID, reason: LossReason) => void
+  markDealRejected: (id: ID, reason: RejectionReason, note?: string) => void
+  /**
+   * Records that a document went out. Kept as dates on the deal rather than pipeline stages,
+   * because a single deal can need both a quotation and a mandate — which one stage can't say.
+   */
+  logDealDocument: (id: ID, document: 'quotation' | 'mandate' | 'invoice') => void
 
   addContact: (input: Partial<Contact> & { firstName: string; lastName: string }) => Contact
+  updateContact: (id: ID, patch: Partial<Contact>) => void
   addCompany: (input: Partial<Company> & { name: string }) => Company
   updateCompany: (id: ID, patch: Partial<Company>) => void
+  deleteCompany: (id: ID) => void
   addTask: (input: Partial<Task> & { title: string; dueDate: string }) => Task
   updateTask: (id: ID, patch: Partial<Task>) => void
   addActivity: (input: Partial<Activity> & { type: ActivityType; subject: string }) => Activity
+  updateActivity: (id: ID, patch: Partial<Activity>) => void
+  markNotificationRead: (id: ID) => void
+  markAllNotificationsRead: () => void
+  /** Re-reads activities + notifications after server-side email sync has written to them. */
+  refreshSyncedData: () => Promise<void>
 
+  /**
+   * Records a batch of accounts a client actually handed over.
+   *
+   * Kept apart from the signed book on purpose: what a client says they have and what they
+   * send are different numbers, and only this one is a fact. Everything real about a handover
+   * client is a sum over these rows.
+   */
+  addHandover: (input: Partial<Handover> & { companyId: ID; capitalAmount: number }) => Handover
+  updateHandover: (id: ID, patch: Partial<Handover>) => void
+  deleteHandover: (id: ID) => void
   addProposal: (input: Partial<Proposal> & { dealId: ID; companyId: ID; service: string; pricing: number }) => Proposal
   updateProposal: (id: ID, patch: Partial<Proposal>) => void
 
@@ -176,10 +284,12 @@ interface AppActions {
   /** Drops a user from local state after the server has actually deleted their account (via /api/delete-user) -- there's no client-side delete of auth.users, so this just syncs the UI. */
   removeUserLocal: (id: ID) => void
   addTeam: (input: Partial<Team> & { name: string }) => Team
-  updateTeam: (id: ID, patch: Partial<Pick<Team, 'name'>>) => void
+  updateTeam: (id: ID, patch: Partial<Pick<Team, 'name' | 'kind'>>) => void
   deleteTeam: (id: ID) => void
 
   dismissToast: () => void
+  /** Fires the take-off animation. Reserved for things genuinely worth celebrating. */
+  celebrate: (celebration: Celebration) => void
 
   companyById: (id?: ID) => Company | undefined
   contactById: (id?: ID) => Contact | undefined
@@ -189,6 +299,8 @@ interface AppActions {
 }
 
 const AppContext = createContext<(AppState & AppActions) | null>(null)
+
+
 
 export function AppStoreProvider({ children }: { children: ReactNode }) {
   const { session, currentUser: authUser } = useAuth()
@@ -200,10 +312,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [activities, setActivities] = useState<Activity[]>([])
   const [proposals, setProposals] = useState<Proposal[]>([])
+  const [handovers, setHandovers] = useState<Handover[]>([])
   const [users, setUsers] = useState<User[]>([])
-  const [teamRows, setTeamRows] = useState<{ id: ID; name: string }[]>([])
+  const [teamRows, setTeamRows] = useState<{ id: ID; name: string; kind: TeamKind }[]>([])
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const [toast, setToast] = useState<string | null>(null)
+  const [celebration, setCelebration] = useState<Celebration | null>(null)
 
   useEffect(() => {
     if (!toast) return
@@ -213,6 +328,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const showError = useCallback((message: string) => setToast(friendlyError(message)), [])
   const dismissToast = useCallback(() => setToast(null), [])
+  const celebrate = useCallback((next: Celebration) => setCelebration(next), [])
 
   useEffect(() => {
     if (!session) {
@@ -223,8 +339,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       setTasks([])
       setActivities([])
       setProposals([])
+      setHandovers([])
       setUsers([])
       setTeamRows([])
+      setNotifications([])
       setDataLoading(false)
       return
     }
@@ -238,20 +356,26 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       fetchTable<Task>('tasks', 'created_at'),
       fetchTable<Activity>('activities', 'activity_date'),
       fetchTable<Proposal>('proposals', 'created_at'),
+      fetchTable<Handover>('handovers', 'received_at'),
       fetchTable<User>('profiles', 'created_at'),
-      fetchTable<{ id: ID; name: string }>('teams', 'created_at'),
+      fetchTable<{ id: ID; name: string; kind: TeamKind }>('teams', 'created_at'),
+      fetchTable<AppNotification>('notifications', 'created_at'),
     ])
-      .then(([l, d, ct, co, tk, ac, pr, us, tm]) => {
+      .then(([l, d, ct, co, tk, ac, pr, hv, us, tm, nt]) => {
         if (!active) return
-        setLeads(l)
-        setDeals(d)
+        // A row still carrying a retired stage or status would render in no column at all —
+        // not last, gone — so map anything stale onto the current vocabulary on the way in.
+        setLeads(l.map(normalizeLead))
+        setDeals(d.map(normalizeDeal))
         setContacts(ct)
         setCompanies(co)
         setTasks(rollOverMissedTasks(tk))
         setActivities(ac)
         setProposals(pr)
+        setHandovers(hv)
         setUsers(us)
         setTeamRows(tm)
+        setNotifications(nt)
         setDataLoading(false)
       })
       .catch((err: unknown) => {
@@ -270,26 +394,112 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }
   }, [session])
 
+  /**
+   * Re-reads the tables that server-side code (not this browser) writes to.
+   * Email sync runs entirely on the server, so a freshly-logged incoming email
+   * and its notification exist in the database but not in this session's state
+   * until something re-fetches — previously only a full page reload did, which
+   * is why a synced email wouldn't appear on the client until you refreshed.
+   */
+  const refreshSyncedData = useCallback<AppActions['refreshSyncedData']>(async () => {
+    const [ac, nt] = await Promise.all([fetchTable<Activity>('activities', 'activity_date'), fetchTable<AppNotification>('notifications', 'created_at')])
+    setActivities(ac)
+    setNotifications(nt)
+  }, [])
+
   const teams = useMemo<Team[]>(
-    () => teamRows.map((t) => ({ id: t.id, name: t.name, memberIds: users.filter((u) => u.teamId === t.id).map((u) => u.id) })),
+    () => teamRows.map((t) => ({ id: t.id, name: t.name, kind: t.kind, memberIds: users.filter((u) => u.teamId === t.id).map((u) => u.id) })),
     [teamRows, users],
   )
 
-  const ownerId = authUser?.id ?? ''
+  // The profile row is a separate request that can lag or fail; the session is not, and it
+  // carries the same uuid as profiles.id. Preferring the profile but falling back to the
+  // session means a slow or failed profile fetch can no longer poison every write with an
+  // empty string — which Postgres rejects outright, losing the person's work.
+  const ownerId = authUser?.id ?? session?.user?.id ?? ''
   const nowIso = () => new Date().toISOString()
+
+  // Read through a ref so addActivity keeps a stable identity. It's a dependency of half the
+  // actions in here, and rebuilding it on every change to the deal list would cascade.
+  const dealsRef = useRef<Deal[]>([])
+  useEffect(() => {
+    dealsRef.current = deals
+  }, [deals])
 
   const addActivity = useCallback<AppActions['addActivity']>(
     (input) => {
+      // A deal already knows which lead it came from and which client it belongs to, so
+      // anything logged against one can fill in the rest itself. That's what makes a note
+      // written on a deal show up on the lead while it's still a lead, and on the client once
+      // it's been converted — without every caller having to remember to pass all three.
+      const deal = input.dealId ? dealsRef.current.find((d) => d.id === input.dealId) : undefined
       const activity: Activity = {
         id: crypto.randomUUID(),
         userId: ownerId,
-        activityDate: TODAY.toISOString(),
+        activityDate: nowIso(),
         createdAt: nowIso(),
         ...input,
+        leadId: input.leadId ?? deal?.leadId,
+        companyId: input.companyId ?? deal?.companyId,
       }
       setActivities((prev) => [activity, ...prev])
-      insertRow('activities', activity, 'addActivity')
+      insertRow('activities', activity, 'addActivity', (message) => {
+        setActivities((prev) => prev.filter((a) => a.id !== activity.id))
+        showError(message)
+      })
       return activity
+    },
+    [ownerId],
+  )
+
+  const updateActivity = useCallback<AppActions['updateActivity']>(
+    (id, patch) => {
+      let previous: Activity | undefined
+      setActivities((prev) => {
+        previous = prev.find((a) => a.id === id)
+        return prev.map((a) => (a.id === id ? { ...a, ...patch } : a))
+      })
+      updateRow('activities', id, patch, 'updateActivity', (message) => {
+        if (previous) setActivities((prev) => prev.map((a) => (a.id === id ? previous! : a)))
+        showError(message)
+      })
+    },
+    [showError],
+  )
+
+  const markNotificationRead = useCallback<AppActions['markNotificationRead']>((id) => {
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)))
+    updateRow('notifications', id, { read: true }, 'markNotificationRead')
+  }, [])
+
+  const markAllNotificationsRead = useCallback<AppActions['markAllNotificationsRead']>(() => {
+    setNotifications((prev) => {
+      const unreadIds = prev.filter((n) => !n.read).map((n) => n.id)
+      for (const id of unreadIds) updateRow('notifications', id, { read: true }, 'markAllNotificationsRead')
+      return prev.map((n) => ({ ...n, read: true }))
+    })
+  }, [])
+
+  /**
+   * The Company a lead's deals hang off. A lead often has no client record yet, and a Deal
+   * can't exist without one, so the client is created here the first time it's needed. It
+   * stays out of the Clients list until one of its deals is Won, so opening a deal on a lead
+   * doesn't quietly promote them to a client.
+   */
+  const ensureLeadCompany = useCallback(
+    (lead: Lead): { companyId: ID; newCompany?: Company } => {
+      if (lead.companyId) return { companyId: lead.companyId }
+      const newCompany: Company = {
+        id: crypto.randomUUID(),
+        accountOwnerId: ownerId,
+        createdAt: nowIso(),
+        name: lead.companyName,
+        industry: lead.industry,
+        province: lead.province,
+        city: lead.city,
+      }
+      setCompanies((prev) => [newCompany, ...prev])
+      return { companyId: newCompany.id, newCompany }
     },
     [ownerId],
   )
@@ -298,45 +508,124 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     (input) => {
       const id = crypto.randomUUID()
       const optimisticLeadNumber = leads.reduce((max, l) => Math.max(max, l.leadNumber), 0) + 1
-      const lead: Lead = {
+      const draft: Lead = {
         id,
         leadNumber: optimisticLeadNumber,
-        status: 'New',
+        status: 'No Contact Yet',
         source: 'Direct',
         score: 10,
         estimatedValue: 0,
         ownerId,
-        createdAt: TODAY.toISOString(),
-        updatedAt: TODAY.toISOString(),
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
         ...input,
       }
+
+      // Each service the lead is interested in is a live opportunity, so it becomes a deal
+      // straight away rather than waiting for conversion — which is the point at which they
+      // used to appear, long after anyone needed to see them.
+      const serviceEntries = draft.serviceValues && draft.serviceValues.length > 0 ? draft.serviceValues : undefined
+      const dealDefs: { service?: ProductService; value: number; handoverAmount?: number; accountsCount?: number }[] = serviceEntries
+        ? serviceEntries.map((sv) => ({
+            service: sv.service,
+            value: kindForService(sv.service) === 'Handover' ? 0 : sv.value ?? 0,
+            handoverAmount: sv.handoverAmount,
+            accountsCount: sv.accountsCount,
+          }))
+        : (draft.services ?? []).map((service) => ({ service, value: 0 }))
+
+      // Deals need a client to hang off, and the client has to exist before either the lead
+      // or its deals reference it. It stays out of the Clients list until a deal is Won.
+      const { companyId, newCompany } = dealDefs.length > 0 ? ensureLeadCompany(draft) : { companyId: draft.companyId, newCompany: undefined }
+      const lead: Lead = { ...draft, companyId }
+
+      const dealsToCreate: Deal[] = dealDefs.map((def) => ({
+        id: crypto.randomUUID(),
+        name: def.service ? `${lead.companyName} — ${def.service}` : `${lead.companyName} Deal`,
+        companyId: companyId!,
+        ownerId: lead.ownerId,
+        stage: 'New Deal',
+        kind: kindForService(def.service),
+        value: def.value,
+        probability: DEAL_STAGE_PROBABILITY['New Deal'],
+        expectedCloseDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
+        service: def.service,
+        handoverAmount: def.handoverAmount,
+        accountsCount: def.accountsCount,
+        source: lead.source,
+        createdAt: nowIso(),
+        leadId: id,
+      }))
+
       setLeads((prev) => [lead, ...prev])
-      addActivity({ type: 'Note', subject: `New lead created: ${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId })
+      if (dealsToCreate.length > 0) setDeals((prev) => [...dealsToCreate, ...prev])
 
       const row = appToRow(lead)
       delete row.lead_number // DB identity column assigns the real, gap-free number
-      supabase
-        .from('leads')
-        .insert(row)
-        .select('id, lead_number')
-        .single()
-        .then(({ data, error }) => {
-          if (error) {
-            reportError('addLead', error.message)
+
+      // Strict order, because every one of these is a foreign key on the next: client, then
+      // lead, then its deals, and only then the activities that point at them. Firing the
+      // activity alongside the lead is what produced "violates foreign key constraint
+      // activities_lead_id_fkey" — whichever request reached Postgres first decided whether
+      // it worked.
+      void (async () => {
+        const rollback = () => {
+          setLeads((prev) => prev.filter((l) => l.id !== id))
+          setDeals((prev) => prev.filter((d) => d.leadId !== id))
+          if (newCompany) setCompanies((prev) => prev.filter((c) => c.id !== newCompany.id))
+        }
+
+        if (newCompany) {
+          const companyError = await insertRow('companies', newCompany, 'addLead:company')
+          if (companyError) {
+            rollback()
+            showError(companyError)
             return
           }
-          if (data && data.lead_number !== optimisticLeadNumber) {
-            setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, leadNumber: data.lead_number as number } : l)))
-          }
-        })
+        }
+
+        const { data, error } = await supabase.from('leads').insert(row).select('id, lead_number').single()
+        if (error) {
+          rollback()
+          reportError('addLead', error.message)
+          showError(error.message)
+          return
+        }
+        if (data && data.lead_number !== optimisticLeadNumber) {
+          setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, leadNumber: data.lead_number as number } : l)))
+        }
+
+        addActivity({ type: 'Note', subject: `New lead created: ${lead.firstName} ${lead.lastName}`, leadId: id, companyId })
+
+        const results = await Promise.all(dealsToCreate.map((deal) => insertRow('deals', deal, 'addLead:deal')))
+        const failedIds = dealsToCreate.filter((_, i) => results[i]).map((d) => d.id)
+        if (failedIds.length > 0) {
+          setDeals((prev) => prev.filter((d) => !failedIds.includes(d.id)))
+          showError(results.find((r) => r)!)
+        }
+        // Logged only for the deals that actually landed — an activity naming a deal that
+        // failed to insert is the foreign-key error all over again.
+        for (const deal of dealsToCreate.filter((d) => !failedIds.includes(d.id))) {
+          addActivity({ type: 'Deal update', subject: `Deal opened on lead: ${deal.name}`, leadId: id, dealId: deal.id, companyId })
+        }
+      })()
+
       return lead
     },
-    [ownerId, leads, addActivity],
+    [ownerId, leads, addActivity, ensureLeadCompany, showError],
   )
 
   const updateLead = useCallback<AppActions['updateLead']>(
     (id, patch) => {
-      const fullPatch = { ...patch, updatedAt: TODAY.toISOString() }
+      // Edit forms hand back the whole lead object rather than just the changed fields, so
+      // strip the columns Postgres won't accept in an UPDATE before it reaches the DB.
+      // leadNumber is the one that actually breaks: it's GENERATED ALWAYS AS IDENTITY, so
+      // including it -- even set to its own current value -- fails the entire update with
+      // 'column "lead_number" can only be updated to DEFAULT', which silently killed every
+      // Edit Lead save. id and createdAt are stripped for the same reason in principle:
+      // neither is ever a legitimate thing to change on an existing record.
+      const { leadNumber: _leadNumber, id: _id, createdAt: _createdAt, ...safePatch } = patch
+      const fullPatch = { ...safePatch, updatedAt: nowIso() }
       let previous: Lead | undefined
       setLeads((prev) => {
         previous = prev.find((l) => l.id === id)
@@ -348,14 +637,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       })
     },
     [showError],
-  )
-
-  const markLeadLost = useCallback<AppActions['markLeadLost']>(
-    (leadId) => {
-      updateLead(leadId, { status: 'Lost' as LeadStatus })
-      addActivity({ type: 'Status change', subject: 'Lead marked as Lost', leadId })
-    },
-    [updateLead, addActivity],
   )
 
   const deleteLead = useCallback<AppActions['deleteLead']>(
@@ -378,17 +659,33 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const deal: Deal = {
         id: crypto.randomUUID(),
         ownerId,
-        stage: 'New Lead',
+        stage: 'New Deal',
         value: 0,
-        probability: 10,
-        expectedCloseDate: TODAY.toISOString(),
+        probability: DEAL_STAGE_PROBABILITY['New Deal'],
+        kind: kindForService(input.service),
+        expectedCloseDate: nowIso(),
         source: 'Direct',
-        createdAt: TODAY.toISOString(),
+        createdAt: nowIso(),
         ...input,
       }
+      // Enforced after the spread, so a caller can't hand a handover a fee by accident. The
+      // whole "a signed book is not revenue" rule rests on this staying zero: every revenue
+      // total in the app sums deal.value, so a handover contributes nothing to any of them.
+      if (kindForService(deal.service) === 'Handover') {
+        deal.kind = 'Handover'
+        deal.value = 0
+      }
       setDeals((prev) => [deal, ...prev])
-      insertRow('deals', deal, 'addDeal')
-      addActivity({ type: 'Deal update', subject: `New deal created: ${deal.name}`, dealId: deal.id, companyId: deal.companyId })
+      // The activity points at this deal, so it can only be written once the deal is there.
+      void (async () => {
+        const error = await insertRow('deals', deal, 'addDeal')
+        if (error) {
+          setDeals((prev) => prev.filter((d) => d.id !== deal.id))
+          showError(error)
+          return
+        }
+        addActivity({ type: 'Deal update', subject: `New deal created: ${deal.name}`, dealId: deal.id, companyId: deal.companyId })
+      })()
       return deal
     },
     [ownerId, addActivity],
@@ -411,9 +708,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const moveDealStage = useCallback<AppActions['moveDealStage']>(
     (id, stage) => {
-      const patch: Partial<Deal> = { stage }
-      if (stage === 'Won') patch.wonAt = TODAY.toISOString()
-      if (stage === 'Lost') patch.lostAt = TODAY.toISOString()
+      const patch: Partial<Deal> = { stage, probability: DEAL_STAGE_PROBABILITY[stage] }
+      if (stage === 'Won') patch.wonAt = nowIso()
+      if (stage === 'Rejected') patch.rejectedAt = nowIso()
       let previous: Deal | undefined
       setDeals((prev) => {
         previous = prev.find((d) => d.id === id)
@@ -425,7 +722,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       })
       const deal = deals.find((d) => d.id === id)
       addActivity({
-        type: stage === 'Won' ? 'Deal Won' : stage === 'Lost' ? 'Deal Lost' : 'Deal Stage Change',
+        type: stage === 'Won' ? 'Deal Won' : stage === 'Rejected' ? 'Deal Rejected' : 'Deal Stage Change',
         subject: `${deal?.name ?? 'Deal'} moved to ${stage}`,
         dealId: id,
         companyId: deal?.companyId,
@@ -437,15 +734,18 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const markDealWon = useCallback<AppActions['markDealWon']>(
     (id, details) => {
       const deal = deals.find((d) => d.id === id)
+      // A signed book is not revenue: a Handover's value stays at zero and its size lives in
+      // handoverAmount, so nothing downstream can add the two kinds of money together.
+      const isHandover = deal ? dealKind(deal) === 'Handover' : false
       const patch: Partial<Deal> = {
-        stage: 'Won' as DealStage,
-        value: details.finalValue,
+        stage: 'Won',
+        probability: DEAL_STAGE_PROBABILITY.Won,
+        value: isHandover ? 0 : details.finalValue,
         service: details.service,
         handoverAmount: details.handoverAmount,
         accountsCount: details.accountsCount,
         contractStartDate: details.startDate,
-        wonAt: TODAY.toISOString(),
-        notes: `${deal?.notes ?? ''}\nContract start: ${details.startDate}. Duration: ${details.contractDuration}.`.trim(),
+        wonAt: nowIso(),
       }
       let previous: Deal | undefined
       setDeals((prev) => {
@@ -456,27 +756,156 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         if (previous) setDeals((prev) => prev.map((d) => (d.id === id ? previous! : d)))
         showError(message)
       })
-      addActivity({ type: 'Deal Won', subject: `${deal?.name ?? 'Deal'} marked Won — ${details.service}, starting ${details.startDate}`, dealId: id, companyId: deal?.companyId })
+      if (isHandover && deal?.companyId) {
+        const signedAt = nowIso()
+        setCompanies((prev) => prev.map((c) => (c.id === deal.companyId ? { ...c, mandateSignedAt: signedAt } : c)))
+        updateRow('companies', deal.companyId, { mandateSignedAt: signedAt }, 'markDealWon:mandateSigned')
+      }
+      // Counted against the deals already on hand, so the tenth mandate of the month lands
+      // differently from the ninth.
+      if (deal) celebrate(celebrationForWin({ ...deal, ...patch }, deals))
+      addActivity({
+        type: 'Deal Won',
+        subject: isHandover
+          ? `${deal?.name ?? 'Deal'} — mandate signed, ${details.accountsCount ?? 0} accounts`
+          : `${deal?.name ?? 'Deal'} marked Won — ${details.service}, starting ${details.startDate} for ${details.contractDuration}`,
+        dealId: id,
+        companyId: deal?.companyId,
+      })
     },
-    [deals, addActivity, showError],
+    [deals, addActivity, showError, celebrate],
   )
 
-  const markDealLost = useCallback<AppActions['markDealLost']>(
-    (id, reason) => {
-      const patch: Partial<Deal> = { stage: 'Lost' as DealStage, lossReason: reason, lostAt: TODAY.toISOString() }
+  const logDealDocument = useCallback<AppActions['logDealDocument']>(
+    (id, document) => {
+      const deal = deals.find((d) => d.id === id)
+      const sentAt = nowIso()
+      const field = document === 'quotation' ? 'quotationSentAt' : document === 'mandate' ? 'mandateSentAt' : 'invoiceSentAt'
+      const patch: Partial<Deal> = { [field]: sentAt }
+      // Sending the quotation or the mandate is what moves a deal along; an invoice follows a
+      // deal that's already won, so it records the fact without touching the stage. Which stage
+      // it moves to depends on the document: they are different asks and now different columns.
+      if (document !== 'invoice' && deal?.stage === 'New Deal') {
+        const next: DealStage = document === 'mandate' ? 'Mandate Sent' : 'Quotation Sent'
+        patch.stage = next
+        patch.probability = DEAL_STAGE_PROBABILITY[next]
+      }
       let previous: Deal | undefined
       setDeals((prev) => {
         previous = prev.find((d) => d.id === id)
         return prev.map((d) => (d.id === id ? { ...d, ...patch } : d))
       })
-      updateRow('deals', id, patch, 'markDealLost', (message) => {
+      updateRow('deals', id, patch, 'logDealDocument', (message) => {
+        if (previous) setDeals((prev) => prev.map((d) => (d.id === id ? previous! : d)))
+        showError(message)
+      })
+      const label = document === 'quotation' ? 'Quotation' : document === 'mandate' ? 'Mandate' : 'Invoice'
+      addActivity({ type: 'Deal update', subject: `${label} sent: ${deal?.name ?? 'Deal'}`, dealId: id, companyId: deal?.companyId })
+    },
+    [deals, addActivity, showError],
+  )
+
+  const markDealRejected = useCallback<AppActions['markDealRejected']>(
+    (id, reason, note) => {
+      const patch: Partial<Deal> = {
+        stage: 'Rejected',
+        probability: DEAL_STAGE_PROBABILITY.Rejected,
+        rejectionReason: reason,
+        rejectionNote: note || undefined,
+        rejectedAt: nowIso(),
+      }
+      let previous: Deal | undefined
+      setDeals((prev) => {
+        previous = prev.find((d) => d.id === id)
+        return prev.map((d) => (d.id === id ? { ...d, ...patch } : d))
+      })
+      updateRow('deals', id, patch, 'markDealRejected', (message) => {
         if (previous) setDeals((prev) => prev.map((d) => (d.id === id ? previous! : d)))
         showError(message)
       })
       const deal = deals.find((d) => d.id === id)
-      addActivity({ type: 'Deal Lost', subject: `${deal?.name ?? 'Deal'} marked Lost — reason: ${reason}`, dealId: id, companyId: deal?.companyId })
+      addActivity({ type: 'Deal Rejected', subject: `${deal?.name ?? 'Deal'} rejected — ${reason}`, notes: note || undefined, dealId: id, companyId: deal?.companyId })
     },
     [deals, addActivity, showError],
+  )
+
+  const addHandover = useCallback<AppActions['addHandover']>(
+    (input) => {
+      // A mandate is authority to collect. Without one there is nothing entitling BF to work
+      // these accounts, so a book cannot be loaded against the client no matter what else they
+      // have signed — an accepted quotation makes them a client, not a handover client.
+      const hasMandate = dealsRef.current.some(
+        (d) => d.companyId === input.companyId && d.stage === 'Won' && dealKind(d) === 'Handover',
+      )
+      if (!hasMandate) {
+        showError('No signed mandate on this client, so a handover cannot be loaded. Mark the debt collection deal as won once the mandate is signed.')
+        return {
+          id: crypto.randomUUID(),
+          companyId: input.companyId,
+          receivedAt: nowIso(),
+          capitalAmount: input.capitalAmount,
+          createdAt: nowIso(),
+        }
+      }
+      const handover: Handover = {
+        id: crypto.randomUUID(),
+        receivedAt: nowIso(),
+        accountsCount: undefined,
+        loggedBy: ownerId,
+        createdAt: nowIso(),
+        ...input,
+      }
+      setHandovers((prev) => [handover, ...prev])
+      void (async () => {
+        const error = await insertRow('handovers', handover, 'addHandover')
+        if (error) {
+          setHandovers((prev) => prev.filter((h) => h.id !== handover.id))
+          showError(error)
+          return
+        }
+        // Logged only once the row is really there — an activity naming a batch that failed to
+        // insert points at nothing.
+        addActivity({
+          type: 'Handover Received',
+          subject: `Handover received: R${handover.capitalAmount.toLocaleString('en-ZA')}${handover.accountsCount ? ` · ${handover.accountsCount} accounts` : ''}`,
+          notes: [handover.reference, handover.notes].filter(Boolean).join(' — ') || undefined,
+          companyId: handover.companyId,
+          dealId: handover.dealId,
+        })
+      })()
+      return handover
+    },
+    [ownerId, addActivity, showError],
+  )
+
+  const updateHandover = useCallback<AppActions['updateHandover']>(
+    (id, patch) => {
+      let previous: Handover | undefined
+      setHandovers((prev) => {
+        previous = prev.find((h) => h.id === id)
+        return prev.map((h) => (h.id === id ? { ...h, ...patch } : h))
+      })
+      updateRow('handovers', id, patch, 'updateHandover', (message) => {
+        if (previous) setHandovers((prev) => prev.map((h) => (h.id === id ? previous! : h)))
+        showError(message)
+      })
+    },
+    [showError],
+  )
+
+  const deleteHandover = useCallback<AppActions['deleteHandover']>(
+    (id) => {
+      let previous: Handover | undefined
+      setHandovers((prev) => {
+        previous = prev.find((h) => h.id === id)
+        return prev.filter((h) => h.id !== id)
+      })
+      deleteRow('handovers', id, 'deleteHandover', (message) => {
+        if (previous) setHandovers((prev) => [previous!, ...prev])
+        showError(message)
+      })
+    },
+    [showError],
   )
 
   const addProposal = useCallback<AppActions['addProposal']>(
@@ -484,12 +913,15 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const proposal: Proposal = {
         id: crypto.randomUUID(),
         status: 'Draft',
-        validityDate: new Date(TODAY.getTime() + 1000 * 60 * 60 * 24 * 30).toISOString(),
-        createdAt: TODAY.toISOString(),
+        validityDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
+        createdAt: nowIso(),
         ...input,
       }
       setProposals((prev) => [proposal, ...prev])
-      insertRow('proposals', proposal, 'addProposal')
+      insertRow('proposals', proposal, 'addProposal', (message) => {
+        setProposals((prev) => prev.filter((p) => p.id !== proposal.id))
+        showError(message)
+      })
       addActivity({ type: 'Proposal', subject: `Proposal created: ${proposal.service}`, dealId: proposal.dealId, companyId: proposal.companyId })
       return proposal
     },
@@ -515,11 +947,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     const company: Company = {
       id: crypto.randomUUID(),
       accountOwnerId: ownerId,
-      createdAt: TODAY.toISOString(),
+      createdAt: nowIso(),
       ...input,
     }
     setCompanies((prev) => [company, ...prev])
-    insertRow('companies', company, 'addCompany')
+    insertRow('companies', company, 'addCompany', (message) => {
+      setCompanies((prev) => prev.filter((c) => c.id !== company.id))
+      showError(message)
+    })
     return company
   }
 
@@ -540,19 +975,53 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [showError],
   )
 
+  const deleteCompany = useCallback<AppActions['deleteCompany']>(
+    (id) => {
+      let previous: Company | undefined
+      setCompanies((prev) => {
+        previous = prev.find((c) => c.id === id)
+        return prev.filter((c) => c.id !== id)
+      })
+      setCompanies((prev) => prev.map((c) => (c.parentCompanyId === id ? { ...c, parentCompanyId: undefined } : c)))
+      deleteRow('companies', id, 'deleteCompany', (message) => {
+        if (previous) setCompanies((prev) => [previous!, ...prev])
+        showError(message)
+      })
+    },
+    [showError],
+  )
+
   const addContact = useCallback<AppActions['addContact']>(
     (input) => {
       const contact: Contact = {
         id: crypto.randomUUID(),
         ownerId,
-        createdAt: TODAY.toISOString(),
+        createdAt: nowIso(),
         ...input,
       }
       setContacts((prev) => [contact, ...prev])
-      insertRow('contacts', contact, 'addContact')
+      insertRow('contacts', contact, 'addContact', (message) => {
+        setContacts((prev) => prev.filter((c) => c.id !== contact.id))
+        showError(message)
+      })
       return contact
     },
     [ownerId],
+  )
+
+  const updateContact = useCallback<AppActions['updateContact']>(
+    (id, patch) => {
+      let previous: Contact | undefined
+      setContacts((prev) => {
+        previous = prev.find((c) => c.id === id)
+        return prev.map((c) => (c.id === id ? { ...c, ...patch } : c))
+      })
+      updateRow('contacts', id, patch, 'updateContact', (message) => {
+        if (previous) setContacts((prev) => prev.map((c) => (c.id === id ? previous! : c)))
+        showError(message)
+      })
+    },
+    [showError],
   )
 
   const addTask = useCallback<AppActions['addTask']>(
@@ -563,11 +1032,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         status: 'Not Started',
         priority: 'Medium',
         ownerId,
-        createdAt: TODAY.toISOString(),
+        createdAt: nowIso(),
         ...input,
       }
       setTasks((prev) => [task, ...prev])
-      insertRow('tasks', task, 'addTask')
+      insertRow('tasks', task, 'addTask', (message) => {
+        setTasks((prev) => prev.filter((t) => t.id !== task.id))
+        showError(message)
+      })
       addActivity({ type: 'Task', subject: `Task created: ${task.title}`, leadId: task.leadId, dealId: task.dealId, companyId: task.companyId })
       return task
     },
@@ -585,22 +1057,84 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         if (previous) setTasks((prev) => prev.map((t) => (t.id === id ? previous! : t)))
         showError(message)
       })
+
+      // Creating a task was already logged on the client's file; finishing one wasn't, so a
+      // meeting that actually happened left no trace anywhere except the task disappearing
+      // off a list. Logged here rather than at each tick-box so it holds wherever a task gets
+      // completed — dashboard, tasks page, or anywhere added later.
+      if (previous && patch.status === 'Completed' && previous.status !== 'Completed') {
+        addActivity({
+          type: taskCompletionActivityType(previous.type),
+          subject: `${previous.type} completed: ${previous.title}`,
+          leadId: previous.leadId,
+          dealId: previous.dealId,
+          companyId: previous.companyId,
+        })
+      }
     },
-    [showError],
+    [showError, addActivity],
   )
 
-  const convertLeadToDeal = useCallback<AppActions['convertLeadToDeal']>(
-    (leadId, dealValue) => {
+  const addLeadDeal = useCallback<AppActions['addLeadDeal']>(
+    (leadId, input) => {
+      const lead = leads.find((l) => l.id === leadId)
+      if (!lead) return undefined
+      const { companyId, newCompany } = ensureLeadCompany(lead)
+
+      const deal: Deal = {
+        id: crypto.randomUUID(),
+        name: input.name,
+        companyId,
+        ownerId: lead.ownerId,
+        stage: 'New Deal',
+        // A handover earns nothing at signature, so it carries no deal value — only a book.
+        kind: kindForService(input.service),
+        value: kindForService(input.service) === 'Handover' ? 0 : input.value,
+        probability: DEAL_STAGE_PROBABILITY['New Deal'],
+        expectedCloseDate: input.expectedCloseDate,
+        service: input.service,
+        handoverAmount: input.handoverAmount,
+        accountsCount: input.accountsCount,
+        notes: input.notes,
+        source: lead.source,
+        createdAt: nowIso(),
+        leadId,
+      }
+      setDeals((prev) => [deal, ...prev])
+
+      // The company has to land before the deal that references it, or the deal insert fails
+      // its foreign key and the row only ever exists in this browser tab.
+      void (async () => {
+        if (newCompany) {
+          const companyError = await insertRow('companies', newCompany, 'addLeadDeal:company')
+          if (companyError) {
+            setCompanies((prev) => prev.filter((c) => c.id !== newCompany.id))
+            setDeals((prev) => prev.filter((d) => d.id !== deal.id))
+            showError(companyError)
+            return
+          }
+          updateLead(leadId, { companyId })
+        }
+        const dealError = await insertRow('deals', deal, 'addLeadDeal:deal')
+        if (dealError) {
+          setDeals((prev) => prev.filter((d) => d.id !== deal.id))
+          showError(dealError)
+          return
+        }
+        addActivity({ type: 'Deal update', subject: `Deal opened on lead: ${deal.name}`, leadId, dealId: deal.id, companyId })
+      })()
+
+      return deal
+    },
+    [leads, ensureLeadCompany, addActivity, updateLead, showError],
+  )
+
+  const convertLeadToClient = useCallback<AppActions['convertLeadToClient']>(
+    (leadId, confirm) => {
       const lead = leads.find((l) => l.id === leadId)
       if (!lead) return undefined
 
-      let companyId = lead.companyId
-      let newCompany: Company | undefined
-      if (!companyId) {
-        newCompany = { id: crypto.randomUUID(), accountOwnerId: ownerId, createdAt: TODAY.toISOString(), name: lead.companyName, industry: lead.industry, province: lead.province, city: lead.city }
-        companyId = newCompany.id
-        setCompanies((prev) => [newCompany!, ...prev])
-      }
+      const { companyId, newCompany } = ensureLeadCompany(lead)
 
       let contactId: ID | undefined
       let newContact: Contact | undefined
@@ -618,43 +1152,159 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           phone: lead.phone,
           mobile: lead.mobile,
           ownerId: lead.ownerId,
-          createdAt: TODAY.toISOString(),
+          createdAt: nowIso(),
         }
         contactId = newContact.id
         setContacts((prev) => [newContact!, ...prev])
       }
 
-      // One Deal per selected service, each carrying its own value — a lead
-      // interested in both Executive Listing and Credit Check becomes two
-      // independently trackable deals rather than one blended number. Falls
-      // back to the legacy single-deal behavior for leads saved before
-      // per-service values existed (serviceValues undefined/empty).
-      const serviceEntries = lead.serviceValues && lead.serviceValues.length > 0 ? lead.serviceValues : undefined
-      const dealDefs: { service?: string; value: number }[] = serviceEntries
-        ? serviceEntries.map((sv) => ({ service: sv.service, value: (sv.service === 'Debt Collection' ? sv.handoverAmount : sv.value) ?? 0 }))
-        : [{ service: lead.serviceInterested, value: dealValue ?? lead.estimatedValue }]
+      // Each deal carries its own outcome. Converting used to mark every one of them Won,
+      // which only held when a client signed for everything at once — in practice the mandate
+      // is signed while a quotation is still out, or was declined, and forcing those to Won
+      // credited revenue nobody agreed to and removed live business from the pipeline.
+      //
+      // Whatever the outcome, the deal now belongs to the client rather than the lead: an
+      // undecided deal has to keep being worked, and it can only be found where the client is.
+      const stampedAt = nowIso()
+      const dealsToCreate: Deal[] = []
+      const dealsToConfirm: { id: ID; name: string; outcome: ConvertDealOutcome; patch: Partial<Deal> }[] = []
 
-      const dealsToCreate: Deal[] = dealDefs.map((def) => ({
-        id: crypto.randomUUID(),
-        name: def.service ? `${lead.companyName} — ${def.service}` : `${lead.companyName} Deal`,
-        companyId,
-        contactId,
-        ownerId: lead.ownerId,
-        stage: 'Qualified',
-        value: def.value,
-        probability: 40,
-        expectedCloseDate: new Date(TODAY.getTime() + 1000 * 60 * 60 * 24 * 30).toISOString(),
-        service: def.service,
-        source: lead.source,
-        createdAt: TODAY.toISOString(),
-        leadId: lead.id,
-      }))
-      const firstDeal = dealsToCreate[0]
-      setDeals((prev) => [...dealsToCreate, ...prev])
+      for (const entry of confirm.deals) {
+        const entryIsHandover = kindForService(entry.service) === 'Handover'
 
-      updateLead(leadId, { status: 'Converted' as LeadStatus, convertedDealId: firstDeal.id })
-      for (const deal of dealsToCreate) {
-        addActivity({ type: 'Status change', subject: `Lead converted to deal: ${deal.name}`, leadId, dealId: deal.id, companyId })
+        let patch: Partial<Deal>
+        if (entry.outcome === 'signed') {
+          patch = {
+            stage: 'Won',
+            probability: DEAL_STAGE_PROBABILITY.Won,
+            value: entryIsHandover ? 0 : entry.value,
+            handoverAmount: entry.handoverAmount,
+            accountsCount: entry.accountsCount,
+            contractStartDate: confirm.startDate,
+            wonAt: stampedAt,
+            companyId,
+            contactId,
+          }
+        } else if (entry.outcome === 'rejected') {
+          patch = {
+            stage: 'Rejected',
+            probability: DEAL_STAGE_PROBABILITY.Rejected,
+            rejectionReason: entry.rejectionReason,
+            rejectionNote: entry.rejectionNote || undefined,
+            rejectedAt: stampedAt,
+            companyId,
+            contactId,
+          }
+        } else {
+          // Left open: the stage it already reached is still the truth about it, so nothing
+          // about its progress is touched — only who it now belongs to.
+          patch = { companyId, contactId }
+        }
+
+        if (entry.dealId) {
+          dealsToConfirm.push({ id: entry.dealId, name: entry.name, outcome: entry.outcome, patch })
+        } else {
+          dealsToCreate.push({
+            id: crypto.randomUUID(),
+            name: entry.name,
+            companyId,
+            contactId,
+            ownerId: lead.ownerId,
+            expectedCloseDate: confirm.startDate,
+            service: entry.service,
+            source: lead.source,
+            createdAt: nowIso(),
+            leadId: lead.id,
+            kind: kindForService(entry.service),
+            // A service they were interested in but never opened a deal for still needs one,
+            // whatever its outcome — including a rejected one, so the business that was
+            // offered and turned down is on the record instead of silently disappearing.
+            stage: entry.outcome === 'signed' ? 'Won' : entry.outcome === 'rejected' ? 'Rejected' : 'New Deal',
+            probability:
+              entry.outcome === 'signed'
+                ? DEAL_STAGE_PROBABILITY.Won
+                : entry.outcome === 'rejected'
+                  ? DEAL_STAGE_PROBABILITY.Rejected
+                  : DEAL_STAGE_PROBABILITY['New Deal'],
+            value: entry.outcome === 'signed' && !entryIsHandover ? entry.value : 0,
+            handoverAmount: entry.outcome === 'signed' ? entry.handoverAmount : undefined,
+            accountsCount: entry.outcome === 'signed' ? entry.accountsCount : undefined,
+            ...(entry.outcome === 'signed' ? { contractStartDate: confirm.startDate, wonAt: stampedAt } : {}),
+            ...(entry.outcome === 'rejected'
+              ? { rejectionReason: entry.rejectionReason, rejectionNote: entry.rejectionNote || undefined, rejectedAt: stampedAt }
+              : {}),
+          })
+        }
+      }
+
+      setDeals((prev) => [
+        ...dealsToCreate,
+        ...prev.map((d) => {
+          const confirmed = dealsToConfirm.find((c) => c.id === d.id)
+          return confirmed ? { ...d, ...confirmed.patch } : d
+        }),
+      ])
+      for (const confirmed of dealsToConfirm) {
+        updateRow('deals', confirmed.id, confirmed.patch, 'convertLeadToClient:confirmDeal')
+      }
+      // The deal the lead points at afterwards is a signed one — an undecided or rejected deal
+      // is not what made them a client.
+      const firstSignedNew = dealsToCreate.find((d) => d.stage === 'Won')
+      const firstSignedExisting = dealsToConfirm.find((c) => c.outcome === 'signed')
+      const firstDeal = firstSignedNew ?? deals.find((d) => d.id === firstSignedExisting?.id)
+
+      // The estimate's working life ends here. It moves to the client as a labelled record of
+      // what was promised — never a forecast, never summed with the real figures that arrive
+      // once accounts are actually handed over.
+      // Only a signed mandate carries the book across. If the debt collection deal is still
+      // out or was declined, there is no mandate and no book to estimate — stamping one would
+      // tell the Communications team to expect a handover that isn't coming.
+      const estimatedBook = confirm.deals.find((d) => kindForService(d.service) === 'Handover' && d.outcome === 'signed')
+      if (estimatedBook) {
+        const estimate = {
+          estimatedHandoverAmount: estimatedBook.handoverAmount,
+          estimatedAccountsCount: estimatedBook.accountsCount,
+          estimatedAtConversion: nowIso(),
+          mandateSignedAt: nowIso(),
+        }
+        setCompanies((prev) => prev.map((c) => (c.id === companyId ? { ...c, ...estimate } : c)))
+        if (!newCompany) updateRow('companies', companyId, estimate, 'convertLeadToClient:signupEstimate')
+        else Object.assign(newCompany, estimate)
+      }
+
+      updateLead(leadId, { status: 'Converted', convertedDealId: firstDeal?.id })
+
+      // Contact people captured while this was still a lead belong to the client now — without
+      // this they'd stay pointed only at the lead and vanish from the record everyone actually
+      // works from afterwards.
+      const carriedOverContacts = contacts.filter((c) => c.leadId === leadId && !c.companyId)
+      for (const contact of carriedOverContacts) {
+        setContacts((prev) => prev.map((c) => (c.id === contact.id ? { ...c, companyId } : c)))
+        updateRow('contacts', contact.id, { companyId }, 'convertLeadToClient:contactCompany')
+      }
+      celebrate({ message: 'New client signed', intensity: 'win' })
+      addActivity({ type: 'Status change', subject: `Lead converted to client: ${lead.companyName}`, leadId, companyId })
+      for (const deal of dealsToConfirm) {
+        if (deal.outcome === 'signed') {
+          addActivity({ type: 'Deal Won', subject: `Deal confirmed on conversion: ${deal.name}`, leadId, dealId: deal.id, companyId })
+        } else if (deal.outcome === 'rejected') {
+          addActivity({
+            type: 'Status change',
+            subject: `Deal rejected at conversion: ${deal.name} — ${deal.patch.rejectionReason}`,
+            notes: deal.patch.rejectionNote,
+            leadId,
+            dealId: deal.id,
+            companyId,
+          })
+        } else {
+          addActivity({
+            type: 'Status change',
+            subject: `Deal still open at conversion: ${deal.name}`,
+            leadId,
+            dealId: deal.id,
+            companyId,
+          })
+        }
       }
 
       // Persist strictly in dependency order: contacts/deals reference
@@ -680,7 +1330,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           }
         }
         if (newContact) {
-          const contactError = await insertRow('contacts', newContact, 'convertLeadToDeal:contact')
+          const contactError = await insertRow('contacts', newContact, 'convertLeadToClient:contact')
           if (contactError) {
             setContacts((prev) => prev.filter((c) => c.id !== newContact!.id))
             setDeals((prev) => prev.filter((d) => !dealIds.includes(d.id)))
@@ -688,17 +1338,53 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
             return
           }
         }
-        const results = await Promise.all(dealsToCreate.map((deal) => insertRow('deals', deal, 'convertLeadToDeal:deal')))
+        if (dealsToCreate.length === 0) return
+        const results = await Promise.all(dealsToCreate.map((deal) => insertRow('deals', deal, 'convertLeadToClient:deal')))
         const failedIds = dealsToCreate.filter((_, i) => results[i]).map((d) => d.id)
         if (failedIds.length > 0) {
           setDeals((prev) => prev.filter((d) => !failedIds.includes(d.id)))
           showError(results.find((r) => r)!)
         }
+        // Logged only for the deals that actually landed — an activity naming a deal that
+        // failed to insert is the foreign-key error all over again.
+        for (const deal of dealsToCreate.filter((d) => !failedIds.includes(d.id))) {
+          if (deal.stage === 'Won') {
+            addActivity({ type: 'Deal Won', subject: `Deal confirmed on conversion: ${deal.name}`, leadId, dealId: deal.id, companyId })
+          } else if (deal.stage === 'Rejected') {
+            addActivity({
+              type: 'Status change',
+              subject: `Deal rejected at conversion: ${deal.name} — ${deal.rejectionReason}`,
+              notes: deal.rejectionNote,
+              leadId,
+              dealId: deal.id,
+              companyId,
+            })
+          } else {
+            addActivity({ type: 'Status change', subject: `Deal opened at conversion: ${deal.name}`, leadId, dealId: deal.id, companyId })
+          }
+        }
       })()
 
-      return firstDeal
+      return { companyId, deal: firstDeal }
     },
-    [leads, contacts, updateLead, addActivity, showError, ownerId],
+    [leads, deals, contacts, ensureLeadCompany, updateLead, addActivity, showError, celebrate],
+  )
+
+  const rejectLead = useCallback<AppActions['rejectLead']>(
+    (leadId, reason, note) => {
+      updateLead(leadId, { status: 'Rejected', rejectionReason: reason, rejectionNote: note || undefined })
+      // The reason goes in the subject so it reads at a glance on the timeline; a rejection
+      // nobody can explain six months later is the same as no record at all.
+      addActivity({ type: 'Status change', subject: `Lead rejected — ${reason}`, notes: note || undefined, leadId })
+
+      // A deal opened while working this lead has nowhere left to go once the lead itself is
+      // rejected. Leaving it open would keep it sitting in the pipeline and the forecast for
+      // business that is definitively not happening.
+      for (const deal of deals.filter((d) => d.leadId === leadId && d.stage !== 'Won' && d.stage !== 'Rejected')) {
+        markDealRejected(deal.id, reason)
+      }
+    },
+    [updateLead, addActivity, deals, markDealRejected],
   )
 
   const updateUser = useCallback<AppActions['updateUser']>(
@@ -723,9 +1409,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const addTeam = useCallback<AppActions['addTeam']>(
     (input) => {
       const id = crypto.randomUUID()
-      const team: Team = { memberIds: [], ...input, id }
-      setTeamRows((prev) => [...prev, { id, name: team.name }])
-      insertRow('teams', { id, name: team.name }, 'addTeam', (message) => {
+      const team: Team = { memberIds: [], kind: 'Sales', ...input, id }
+      setTeamRows((prev) => [...prev, { id, name: team.name, kind: team.kind }])
+      insertRow('teams', { id, name: team.name, kind: team.kind }, 'addTeam', (message) => {
         setTeamRows((prev) => prev.filter((t) => t.id !== id))
         showError(message)
       })
@@ -736,7 +1422,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const updateTeam = useCallback<AppActions['updateTeam']>(
     (id, patch) => {
-      let previous: { id: ID; name: string } | undefined
+      let previous: { id: ID; name: string; kind: TeamKind } | undefined
       setTeamRows((prev) => {
         previous = prev.find((t) => t.id === id)
         return prev.map((t) => (t.id === id ? { ...t, ...patch } : t))
@@ -751,7 +1437,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const deleteTeam = useCallback<AppActions['deleteTeam']>(
     (id) => {
-      let previous: { id: ID; name: string } | undefined
+      let previous: { id: ID; name: string; kind: TeamKind } | undefined
       setTeamRows((prev) => {
         previous = prev.find((t) => t.id === id)
         return prev.filter((t) => t.id !== id)
@@ -780,34 +1466,48 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       tasks,
       activities,
       proposals,
+      handovers,
       users,
       teams,
+      notifications,
       dataLoading,
       toast,
       addLead,
       updateLead,
-      convertLeadToDeal,
-      markLeadLost,
+      convertLeadToClient,
+      addLeadDeal,
+      rejectLead,
       deleteLead,
       addDeal,
       updateDeal,
       moveDealStage,
       markDealWon,
-      markDealLost,
+      markDealRejected,
+      logDealDocument,
       addContact,
+      updateContact,
       addCompany,
       updateCompany,
+      deleteCompany,
       addTask,
       updateTask,
       addActivity,
+      updateActivity,
+      markNotificationRead,
+      markAllNotificationsRead,
+      refreshSyncedData,
       addProposal,
       updateProposal,
+      addHandover,
+      updateHandover,
+      deleteHandover,
       updateUser,
       removeUserLocal,
       addTeam,
       updateTeam,
       deleteTeam,
       dismissToast,
+      celebrate,
       companyById,
       contactById,
       dealById,
@@ -822,34 +1522,48 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       tasks,
       activities,
       proposals,
+      handovers,
       users,
       teams,
+      notifications,
       dataLoading,
       toast,
       addLead,
       updateLead,
-      convertLeadToDeal,
-      markLeadLost,
+      convertLeadToClient,
+      addLeadDeal,
+      rejectLead,
       deleteLead,
       addDeal,
       updateDeal,
       moveDealStage,
       markDealWon,
-      markDealLost,
+      markDealRejected,
+      logDealDocument,
       addContact,
+      updateContact,
       addCompany,
       updateCompany,
+      deleteCompany,
       addTask,
       updateTask,
       addActivity,
+      updateActivity,
+      markNotificationRead,
+      markAllNotificationsRead,
+      refreshSyncedData,
       addProposal,
       updateProposal,
+      addHandover,
+      updateHandover,
+      deleteHandover,
       updateUser,
       removeUserLocal,
       addTeam,
       updateTeam,
       deleteTeam,
       dismissToast,
+      celebrate,
       companyById,
       contactById,
       dealById,
@@ -861,6 +1575,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={value}>
       {children}
+      {celebration && <RaptorCelebration celebration={celebration} onDone={() => setCelebration(null)} />}
       {toast && (
         <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[100] bg-navy-950 text-white text-sm font-medium px-4 py-2.5 rounded-lg shadow-lg flex items-center gap-3">
           <span>{toast}</span>
