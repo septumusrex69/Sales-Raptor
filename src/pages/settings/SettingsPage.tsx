@@ -1037,6 +1037,7 @@ function AddCustomFieldModal({ onClose, onSave }: { onClose: () => void; onSave:
  */
 function AppearanceTab() {
   const { themeId, setTheme, theme } = useTheme()
+  const { celebrate } = useAppStore()
   return (
     <Card>
       <CardHeader title="Appearance" subtitle={`Choose how ${theme.productName} looks. This changes nothing but the styling, and applies to you only.`} />
@@ -1080,6 +1081,24 @@ function AppearanceTab() {
             </button>
           )
         })}
+      </div>
+
+      {/* A way to fire the celebration without closing a real deal. It exists because "I can't
+          see it" and "it isn't working" look identical from here, and one button settles it —
+          it also lets someone show the team what they're working towards. */}
+      <div className="mt-6 pt-5 border-t border-slate-100">
+        <p className="text-sm font-medium text-slate-600">Celebration</p>
+        <p className="text-xs text-slate-400 mt-0.5 mb-2.5 max-w-md">
+          The bird takes off when a deal is won, a mandate is signed, or a lead becomes a client. If your device has
+          Reduce Motion switched on, you'll get the wording without the flight.
+        </p>
+        <button
+          type="button"
+          onClick={() => celebrate('Mandate signed')}
+          className="text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+        >
+          Preview
+        </button>
       </div>
     </Card>
   )

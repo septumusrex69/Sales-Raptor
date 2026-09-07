@@ -331,15 +331,24 @@ select:autofill {
   100% { opacity: 0; }
 }
 
-/* Asked not to be animated: say the same thing, hold still. */
+/*
+ * Asked not to be animated: say the same thing, hold still.
+ *
+ * Qualified with `html` and marked important on purpose. The Raptor skin carries a blanket
+ * reduced-motion rule that forces `animation-duration: .01ms !important` onto every element
+ * under it, which is right for decorative transitions and wrong here: it crushed this to less
+ * than a frame, so the bird fired and vanished invisibly with nothing to debug. The extra
+ * specificity is what lets a deliberate animation opt out of a blanket one.
+ */
 @media (prefers-reduced-motion: reduce) {
   .raptor-celebration__spark {
     display: none;
   }
-  .raptor-celebration__flight,
-  .raptor-celebration__bird,
-  .raptor-celebration__caption {
-    animation: raptor-quiet 2.4s ease-out forwards;
+  html .raptor-celebration__flight,
+  html .raptor-celebration__bird,
+  html .raptor-celebration__caption {
+    animation: raptor-quiet 2.4s ease-out forwards !important;
+    animation-duration: 2.4s !important;
   }
   @keyframes raptor-quiet {
     0%, 100% { opacity: 0; }
