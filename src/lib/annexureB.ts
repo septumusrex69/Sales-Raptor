@@ -180,11 +180,9 @@ export function receiptFee(instalment: number, schedule: AnnexureBSchedule = ANN
 }
 
 /**
- * Item 4(a), by debt size: R161 below R50,000, R209 at or above it. Both exclude VAT.
+ * Item 4(a), by debt size: R161 up to R49,999 and R209 from R50,000 up. Both exclude VAT.
  *
- * UNCONFIRMED: which side of R50,000 the boundary itself falls on. "Under R50k" and "over
- * R50k" leave exactly R50,000 unstated; this treats it as the higher band. Worth settling —
- * it is the kind of edge that shows up once and is then argued about.
+ * The boundary is confirmed: exactly R50,000 falls in the higher band.
  */
 export function acknowledgementOfDebtFee(debtAmount: number): number {
   const band = ACKNOWLEDGEMENT_OF_DEBT_BANDS.find((b) => b.below !== undefined && debtAmount < b.below)

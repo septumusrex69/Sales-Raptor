@@ -57,8 +57,8 @@ fee shall be charged for any attendance in connection with the receipt or paymen
 instalment"* — an agent may not bill a call for chasing or receipting a payment, which the
 interface has to prevent rather than merely discourage.
 
-**Item 4(a), acknowledgement of debt**, is banded by debt size: **R161 below R50,000, R209 at
-or above**, both excluding VAT.
+**Item 4(a), acknowledgement of debt**, is banded by debt size: **R161 up to R49,999 and R209
+from R50,000 up**, both excluding VAT.
 
 ---
 
@@ -85,17 +85,27 @@ allocations.
 
 ## 4. Interest
 
-- **2% per month, compound**
-- Accrues on **capital + fees + interest already accrued** — the whole running balance
-- Subject to *in duplum*
+- **2% per month, accrued daily**
+- On the **total outstanding balance** — capital + fees + interest already capitalised
+- A fee starts earning interest **immediately**, from the day it is raised
+- Subject to in duplum (§5)
 
-**OPEN:** the compounding date. Monthly from the handover date, from the first action, or
-calendar month-end? Different answers give different balances on the same account.
+**Daily accrual, monthly capitalisation.** Interest is not a monthly step. Every day adds a
+day's interest, so the balance on the 7th reflects seven days and the balance on the 6th
+reflects six. At month-end the accrued interest is fixed and written into the balance, and from
+then on it earns interest itself — which is what makes it compound.
 
-**OPEN:** interest on fees — does a fee start earning interest from the date it is incurred,
-or from the next compounding date?
+This has a consequence worth stating plainly: **a balance is only meaningful with a date
+attached.** Every quote, statement and settlement figure must record the date it was calculated
+for, because the same account gives a different answer tomorrow. A settlement figure sent to a
+debtor without a date on it is wrong the moment it is opened.
 
----
+**OPEN — the daily rate.** "2% per month, calculated daily" can mean either 2% divided by the
+number of days in that month (so exactly 2% accrues each month, and a day in February is worth
+more than a day in March), or an annual 24% divided by 365 (so every day is worth the same and
+a 31-day month accrues slightly more than 2%). The month-end fixing described above points at
+the first, which is the reading assumed here — but it needs a yes, because the two diverge on
+every account.
 
 ## 5. In duplum
 
@@ -103,13 +113,15 @@ or from the next compounding date?
 capital: a R1,000 account can never carry more than R1,000 of interest and fees, so the most it
 can ever reach is R2,000.
 
-**The ceiling is fixed at handover and never moves.** It is set from the capital as handed over
-and stays there for the life of the account. If capital is paid down to R750, or R700, the
-ceiling is still R1,000. It does not track the outstanding balance.
+**The ceiling never falls, but it does rise.** It is set from the capital handed over and does
+not track the outstanding balance: capital paid down to R750, or R700, leaves the ceiling at
+R1,000. But if further debt for the same debtor is later handed over and added to the account,
+the ceiling rises with it.
 
-That makes this the simplest of the three rules to implement — one figure, stamped on the
-account at handover, never recalculated — and it removes the question of what happens to
-charges already raised when a ceiling drops, because it never drops.
+So the ceiling is **the total capital ever handed over on that account** — increased by each new
+handover, never reduced by payment. One figure held on the account, recalculated only when
+capital is added, which also removes any question of what happens to charges already raised when
+a ceiling drops: it cannot drop.
 
 **Charges keep accruing past the ceiling; only the ceiling is recoverable.** Interest and fees
 continue to be raised against the account after the cap is reached, and the excess is simply
@@ -169,15 +181,18 @@ On a payment `P` received on date `D`:
    - commission at the client's banded rate
    - VAT on that commission
    - the remainder is the client's
-7. **Surplus.** Where the cost half exceeds what interest and fees actually require, the
-   surplus goes to capital — which is what produces the intended behaviour of later payments
-   returning more to the client as fees are worked off.
+7. **Surplus goes to capital.** Where the cost half exceeds what interest and fees actually
+   require, the remainder is applied to capital. So once fees are worked off, the client
+   receives *more* than half of each payment — which is the intended behaviour, and the reason
+   later payments are worth more to the client than early ones.
 
-   **OPEN:** confirm. The alternative — surplus held against future fees — behaves very
-   differently over the life of an account.
+   Example: cost half R250, interest and fees together only R80. Interest is cleared, then
+   fees, and the remaining R170 goes to capital on top of the R250 capital half.
 
-**OPEN:** a payment smaller than the accrued interest. Does the whole payment go to interest,
-or does the 50/50 split still apply and leave interest partly unpaid?
+**The 50/50 split is absolute.** It applies to every payment without exception, including one
+smaller than the interest owed. A R100 payment against R300 of accrued interest still splits
+R50 / R50 — it does not all go to interest merely because interest is cleared first. The
+ordering governs what the cost half pays for, never how much the cost half is.
 
 ### Worked example
 
@@ -254,10 +269,5 @@ before the data lands rather than after.
 
 | # | Question | Blocks |
 |---|---|---|
-| 1 | Compounding date — from handover, first action, or month-end? | Interest |
-| 2 | Do fees earn interest from the date incurred? | Interest |
-| 3 | Does surplus on the cost half flow to capital? | Allocation |
-| 4 | A payment smaller than accrued interest — split, or all to interest? | Allocation |
-| 5 | Item 4(a) at exactly R50,000 — which band? | Edge case |
-| 6 | Item 1(b), registered letter under s57 — the Magistrates' Courts figure | Tariff |
-| 7 | Does the in duplum ceiling rise if more debt is later added to the account? | Edge case |
+| 1 | The daily interest rate — 2% ÷ days in month, or 24% ÷ 365? | Interest |
+| 2 | Item 1(b), registered letter under s57 — the Magistrates' Courts figure. **Awaiting; BF to supply.** Rarely used, so it does not block the build. | Tariff |
