@@ -24,7 +24,7 @@ export function SalesFunnelChart({ deals }: { deals: Deal[] }) {
 
   return (
     <Card>
-      <CardHeader title="Sales Funnel" subtitle="Deals at this stage or further — as of today" />
+      <CardHeader title="Sales Funnel" subtitle="Deals at this stage or further — the whole pipeline as it stands today, not just this month" />
       <div className="space-y-2">
         {FUNNEL_STAGES.map((stage, i) => {
           const count = cumulative[i]
@@ -50,7 +50,7 @@ export function SalesFunnelChart({ deals }: { deals: Deal[] }) {
         })}
       </div>
       <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100 text-xs">
-        <span className="text-slate-500">Overall Conversion: New Lead → Won</span>
+        <span className="text-slate-500">Reach Won: New Deal → Won</span>
         <span className="font-semibold text-slate-700">{total > 0 ? Math.round((cumulative[cumulative.length - 1] / total) * 100) : 0}%</span>
       </div>
     </Card>

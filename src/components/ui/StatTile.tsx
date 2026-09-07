@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowUpRight, ArrowDownRight } from 'lucide-react'
+import { ArrowUpRight, ArrowDownRight, Info } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from './Card'
 
@@ -9,7 +9,13 @@ export interface StatTileProps {
   value: string
   /** e.g. "vs August" — shown after the % change */
   compareLabel?: string
-  pctChange?: number
+  /**
+   * `undefined` shows no comparison at all. `null` means a comparison was asked for and
+   * genuinely cannot be computed — the prior period was zero — and says so in words rather
+   * than reporting a fabricated 100% rise, which is what a zero base produces arithmetically
+   * and what makes a dashboard stop being believed.
+   */
+  pctChange?: number | null
   absChange?: string
   /** renders the tile as a Link */
   to?: string
@@ -18,20 +24,32 @@ export interface StatTileProps {
   icon?: ReactNode
   /** Gold top border + gold value — for the one number on a page that matters most. Use sparingly. */
   accent?: 'gold'
+  /** What this number actually counts, for the terms that aren't self-evident. */
+  hint?: string
 }
 
-export function StatTile({ label, value, compareLabel, pctChange, absChange, to, onClick, size = 'primary', icon, accent }: StatTileProps) {
+export function StatTile({ label, value, compareLabel, pctChange, absChange, to, onClick, size = 'primary', icon, accent, hint }: StatTileProps) {
   const interactive = Boolean(to || onClick)
-  const positive = pctChange !== undefined && pctChange >= 0
+  const positive = pctChange !== undefined && pctChange !== null && pctChange >= 0
 
   const body = (
     <>
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-medium text-slate-400">{label}</p>
+        <p className="text-xs font-medium text-slate-400 flex items-center gap-1">
+          {label}
+          {hint && (
+            <span title={hint} className="inline-flex text-slate-300 cursor-help" aria-label={hint}>
+              <Info size={11} />
+            </span>
+          )}
+        </p>
         {icon}
       </div>
       <p className={clsx('font-bold mt-1', size === 'primary' ? 'text-2xl' : 'text-xl', accent === 'gold' ? 'text-gold-600' : 'text-slate-800')}>{value}</p>
-      {pctChange !== undefined && (
+      {pctChange === null && (
+        <p className="text-xs font-medium mt-1.5 text-slate-300">No prior data{compareLabel ? ` ${compareLabel}` : ''}</p>
+      )}
+      {pctChange !== undefined && pctChange !== null && (
         <p
           className={clsx(
             'flex items-center gap-1 text-xs font-medium mt-1.5',

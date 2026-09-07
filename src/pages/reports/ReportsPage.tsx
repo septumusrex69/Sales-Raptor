@@ -13,6 +13,7 @@ import { countries, formatCurrency, leadClassifications, leadSources, provinces,
 import { DEAL_STAGES } from '../../types'
 import type { Deal, Lead, LeadClassification, LeadSource, LeadStatus, ProductService } from '../../types'
 import { getCurrentSalesMonth, getPreviousSalesMonth, isWithinPeriod, encodeSalesMonthParam, type SalesMonthPeriod } from '../../lib/salesMonth'
+import { pctDelta } from '../../lib/pctDelta'
 import { isMeaningfulActivity } from '../../lib/meaningfulActivity'
 import { parseEmailActivity } from '../../lib/emailActivity'
 import { buildDrilldownUrl, SALES_MONTH_PARAM } from '../../lib/drilldown'
@@ -25,11 +26,6 @@ const TABS = ['Overview', 'Leads', 'Pipeline', 'Products & Services', 'Debt Coll
 type Tab = (typeof TABS)[number]
 const ALL_STATUSES: LeadStatus[] = LEAD_STATUSES
 const BAR_COLOR = STAGE_COLORS['Quotation Sent']
-
-function pctDelta(curr: number, prev: number): number {
-  if (prev === 0) return curr === 0 ? 0 : 100
-  return Math.round(((curr - prev) / prev) * 100)
-}
 
 export function ReportsPage() {
   const { leads, deals, activities, users } = useAppStore()

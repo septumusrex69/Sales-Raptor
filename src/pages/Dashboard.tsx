@@ -17,13 +17,15 @@ import { RevenueTrendChart } from '../components/dashboard/RevenueTrendChart'
 import { ActivityBreakdownChart } from '../components/dashboard/ActivityBreakdownChart'
 import { WinRateByKind } from '../components/dashboard/WinRateByKind'
 import { LossReasonsCard } from '../components/dashboard/LossReasonsCard'
-import { dealKind } from '../lib/dealKind'
+import { NeedsAttention, type AttentionItem } from '../components/dashboard/NeedsAttention'
+import { dealKind, dealSize, dealSizeLabel } from '../lib/dealKind'
 import { RepLeaderboard, type LeaderboardRow } from '../components/dashboard/RepLeaderboard'
 import { formatCurrency, formatDate, timeAgo, TODAY } from '../data/mockData'
 import { getCurrentSalesMonth, getPreviousSalesMonth, isWithinPeriod, encodeSalesMonthParam, type SalesMonthPeriod } from '../lib/salesMonth'
 import { isMeaningfulActivity, isContactActivity } from '../lib/meaningfulActivity'
 import { computeAllRepScorecards } from '../lib/repScore'
 import { buildDrilldownUrl, SALES_MONTH_PARAM } from '../lib/drilldown'
+import { pctDelta } from '../lib/pctDelta'
 import { downloadCsv } from '../lib/csvExport'
 import type { ID, Task, Team, User } from '../types'
 import { isAssignableOwner } from '../lib/permissions'
@@ -47,11 +49,6 @@ function repIdsForScope(scope: Scope, reps: User[], teams: Team[]): ID[] {
     return team ? reps.filter((r) => team.memberIds.includes(r.id)).map((r) => r.id) : []
   }
   return reps.map((r) => r.id)
-}
-
-function pctDelta(curr: number, prev: number): number {
-  if (prev === 0) return curr === 0 ? 0 : 100
-  return Math.round(((curr - prev) / prev) * 100)
 }
 
 function minutesToLabel(mins: number): string {
@@ -149,6 +146,29 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
     return { curr, prev }
   }, [scopedLeads, scopedDeals, scopedActivities, period, previousPeriod, compareMode])
 
+  /**
+   * What is still in play — right now, not within the selected month.
+   *
+   * Deliberately outside the period compute: an open deal is open today whichever month you
+   * are looking at, so running it through the previous period would return the identical
+   * figure and report a permanent "0% change" that means nothing. It carries no comparison
+   * for the same reason.
+   *
+   * Service value and handover book stay separate here for the same reason they do everywhere
+   * else — a fee we will invoice and a book we will collect against are not the same promise.
+   */
+  const pipeline = useMemo(() => {
+    const open = scopedDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected')
+    return {
+      count: open.length,
+      value: open.filter((d) => dealKind(d) !== 'Handover').reduce((sum, d) => sum + d.value, 0),
+      book: open.filter((d) => dealKind(d) === 'Handover').reduce((sum, d) => sum + (d.handoverAmount ?? 0), 0),
+    }
+  }, [scopedDeals])
+
+  /** The deals *opened* in the selected month, followed to wherever they stand today. */
+  const cohort = useMemo(() => scopedDeals.filter((d) => isWithinPeriod(d.createdAt, period)), [scopedDeals, period])
+
   const secondary = useMemo(() => {
     const activeLeads = scopedLeads.filter(isActiveLead)
     const newLeadsThisPeriod = scopedLeads.filter((l) => isWithinPeriod(l.createdAt, period))
@@ -237,7 +257,23 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
     [scopedDeals, period],
   )
 
-  const topDeals = useMemo(() => [...scopedDeals].filter((d) => d.stage !== 'Rejected').sort((a, b) => b.value - a.value).slice(0, 5), [scopedDeals])
+  /**
+   * The biggest things still to be closed.
+   *
+   * Ranked by `dealSize`, not `value`. A handover's `value` is zero by design — the fee only
+   * arrives as accounts are collected — so sorting a mixed list on `value` put every mandate
+   * at the bottom and the entire debt collection side of the business never appeared in this
+   * table once. Each deal is now ranked and shown in the money that actually describes it,
+   * with the column saying which is which so the two are never read as one total.
+   */
+  const topDeals = useMemo(
+    () =>
+      scopedDeals
+        .filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected')
+        .sort((a, b) => dealSize(b) - dealSize(a))
+        .slice(0, 5),
+    [scopedDeals],
+  )
   const tasksDue = useMemo(() => {
     const recentOverdueFloor = new Date(TODAY.getTime() - 14 * 24 * 60 * 60 * 1000)
     return scopedTasks
@@ -245,6 +281,42 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
       .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
       .slice(0, 6)
   }, [scopedTasks])
+
+  const attentionItems: AttentionItem[] = useMemo(
+    () => [
+      {
+        label: 'Overdue tasks',
+        detail: 'Past their due date and still not done',
+        count: secondary.overdueTasksCount,
+        to: buildDrilldownUrl('/tasks', { view: 'Overdue' }),
+      },
+      {
+        label: 'Leads untouched this month',
+        detail: 'Active leads with no call, meeting or email logged in this sales month',
+        count: secondary.untouchedCount,
+        to: buildDrilldownUrl('/leads', { touched: '0', [SALES_MONTH_PARAM]: periodParam }),
+      },
+      {
+        label: 'Leads with no next action',
+        detail: 'Nothing scheduled — they will go quiet unless someone books a follow-up',
+        count: secondary.leadsNoNextActionCount,
+        to: buildDrilldownUrl('/leads', { noNextAction: '1' }),
+      },
+      {
+        label: 'Deals with no next action',
+        detail: 'Open deals with nobody due to do anything next',
+        count: secondary.dealsNoNextActionCount,
+        to: buildDrilldownUrl('/deals', { noNextAction: '1', view: 'table' }),
+      },
+      {
+        label: 'Deals past their close date',
+        detail: 'Still open after the date they were expected to close',
+        count: secondary.dealsOverdueCount,
+        to: buildDrilldownUrl('/deals', { overdue: '1', view: 'table' }),
+      },
+    ],
+    [secondary, periodParam],
+  )
 
   function handleExport() {
     downloadCsv(`sales-dashboard-${period.key}`, [
@@ -309,49 +381,18 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
         </button>
       </DashboardHero>
 
-      <WinRateCard
-        deals={scopedDeals}
-        won={kpis.curr.won}
-        lost={kpis.curr.lost}
-        winRate={kpis.curr.winRate}
-        newLeads={kpis.curr.newLeads}
-        qualified={kpis.curr.qualified}
-        converted={kpis.curr.converted}
-        periodLabel={period.label}
-        periodParam={periodParam}
-      />
-
       {communicationsSnapshot?.(period)}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatTile
-          label="New Leads"
-          value={kpis.curr.newLeads.toString()}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.newLeads, kpis.prev.newLeads) : undefined}
-          to={buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam })}
-        />
-        <StatTile
-          label="Total Activities"
-          value={kpis.curr.activities.toString()}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.activities, kpis.prev.activities) : undefined}
-          to={buildDrilldownUrl('/activities', { [SALES_MONTH_PARAM]: periodParam })}
-        />
-        <StatTile
-          label="Qualified Leads"
-          value={kpis.curr.qualified.toString()}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.qualified, kpis.prev.qualified) : undefined}
-          to={buildDrilldownUrl('/leads', { status: 'Hot Lead', [SALES_MONTH_PARAM]: periodParam })}
-        />
-        <StatTile
-          label="Deals Won"
-          value={kpis.curr.won.toString()}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.won, kpis.prev.won) : undefined}
-          to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
-        />
+      {/* Six numbers, not sixteen. These are the ones a manager is actually judged on; the
+          operational warnings that used to sit alongside them are now one panel below, where
+          they read as a worklist instead of competing with the results for attention. */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <StatTile
           label="Revenue Won"
           value={formatCurrency(kpis.curr.revenueWon)}
           pctChange={kpis.prev ? pctDelta(kpis.curr.revenueWon, kpis.prev.revenueWon) : undefined}
+          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+          hint="Fees on won service deals. Handovers are excluded — a signed book earns nothing at signature."
           to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
         />
         {/* Deliberately its own figure rather than part of revenue. A signed book is work won,
@@ -360,139 +401,43 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
           label="Book Signed"
           value={formatCurrency(kpis.curr.bookSigned)}
           pctChange={kpis.prev ? pctDelta(kpis.curr.bookSigned, kpis.prev.bookSigned) : undefined}
+          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+          hint="Total handover value on mandates signed this month. Not revenue — it becomes revenue only as it is collected."
           to={buildDrilldownUrl('/deals', { stage: 'Won', service: 'Debt Collection', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
         />
         <StatTile
           label="Accounts Signed"
           value={kpis.curr.accountsSigned.toLocaleString()}
           pctChange={kpis.prev ? pctDelta(kpis.curr.accountsSigned, kpis.prev.accountsSigned) : undefined}
+          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+          hint="Number of debtor accounts handed over on mandates signed this month."
           to={buildDrilldownUrl('/deals', { stage: 'Won', service: 'Debt Collection', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          label="Deals Won"
+          value={kpis.curr.won.toString()}
+          pctChange={kpis.prev ? pctDelta(kpis.curr.won, kpis.prev.won) : undefined}
+          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+          hint="Every deal marked Won in this sales month — service deals and mandates together."
+          to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
         />
         <StatTile
           label="Win Rate"
           value={`${kpis.curr.winRate}%`}
           pctChange={kpis.prev ? pctDelta(kpis.curr.winRate, kpis.prev.winRate) : undefined}
+          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+          hint="Of the deals that closed this month, the share that were won. Open deals are not counted."
           accent="gold"
         />
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatTile
-          label="Avg Response Time"
-          value={secondary.avgResponseMins !== undefined ? minutesToLabel(secondary.avgResponseMins) : '—'}
-          size="secondary"
-          to={buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam })}
-        />
-        <StatTile
-          label="Leads Touched"
-          value={`${secondary.touchedPct}%`}
-          size="secondary"
-          to={buildDrilldownUrl('/leads', { touched: '1', [SALES_MONTH_PARAM]: periodParam })}
-        />
-        <StatTile
-          label="Tasks Completed On Time"
-          value={`${secondary.onTimePct}%`}
-          size="secondary"
-          to={buildDrilldownUrl('/tasks', { view: 'Completed' })}
-        />
-        <StatTile label="Overdue Tasks" value={secondary.overdueTasksCount.toString()} size="secondary" to={buildDrilldownUrl('/tasks', { view: 'Overdue' })} />
-        <StatTile
-          label="Leads With No Next Action"
-          value={secondary.leadsNoNextActionCount.toString()}
-          size="secondary"
-          to={buildDrilldownUrl('/leads', { noNextAction: '1' })}
-        />
-        <StatTile
-          label="Deals With No Next Action"
-          value={secondary.dealsNoNextActionCount.toString()}
-          size="secondary"
-          to={buildDrilldownUrl('/deals', { noNextAction: '1', view: 'table' })}
-        />
-        <StatTile label="Deals Overdue" value={secondary.dealsOverdueCount.toString()} size="secondary" to={buildDrilldownUrl('/deals', { overdue: '1', view: 'table' })} />
-        <StatTile
-          label="Leads Untouched"
-          value={secondary.untouchedCount.toString()}
-          size="secondary"
-          to={buildDrilldownUrl('/leads', { touched: '0', [SALES_MONTH_PARAM]: periodParam })}
+          label="Pipeline"
+          value={formatCurrency(pipeline.value)}
+          hint={`Open service deals, right now — ${pipeline.count} open deals, of which ${formatCurrency(pipeline.book)} is handover book carrying no fee until collected. Not a monthly figure, so it has no comparison.`}
+          to={buildDrilldownUrl('/deals', { view: 'table' })}
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2">
-          <SalesFunnelChart deals={scopedDeals} />
-        </div>
-        <ActivityBreakdownChart activities={scopedActivities.filter((a) => isWithinPeriod(a.activityDate, period))} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <WinRateByKind
-          serviceWinRate={kpis.curr.serviceWinRate}
-          serviceClosed={kpis.curr.serviceClosed}
-          handoverWinRate={kpis.curr.handoverWinRate}
-          handoverClosed={kpis.curr.handoverClosed}
-          periodLabel={period.label}
-        />
-        <LossReasonsCard leads={rejectedLeads} deals={rejectedDeals} periodLabel={period.label} />
-      </div>
-
-      <RevenueTrendChart deals={scopedDeals} referenceDate={TODAY} />
-
-      <RepLeaderboard rows={leaderboardRows} />
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <Card className="lg:col-span-2" padded={false}>
-          <div className="p-5 pb-0">
-            <CardHeader title="Top Deals" action={<Link to="/deals" className="text-xs font-medium text-brand-600 hover:underline">View all deals</Link>} />
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
-                  <th className="font-medium px-5 py-2.5">Deal</th>
-                  <th className="font-medium px-3 py-2.5">Company</th>
-                  <th className="font-medium px-3 py-2.5 text-right">Value</th>
-                  <th className="font-medium px-3 py-2.5">Stage</th>
-                  <th className="font-medium px-3 py-2.5">Close Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {topDeals.map((d) => (
-                  <tr key={d.id} className="border-t border-slate-50 hover:bg-slate-50/60">
-                    <td className="px-5 py-2.5">
-                      <Link to={`/deals/${d.id}`} className="font-medium text-slate-700 hover:text-brand-600">
-                        {d.name}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2.5 text-slate-500">{companyById(d.companyId)?.name}</td>
-                    <td className="px-3 py-2.5 text-right font-medium text-slate-700">{formatCurrency(d.value)}</td>
-                    <td className="px-3 py-2.5">
-                      <StageBadge stage={d.stage} />
-                    </td>
-                    <td className="px-3 py-2.5 text-slate-500">{formatDate(d.expectedCloseDate)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-
-        <Card padded={false}>
-          <div className="p-5 pb-0">
-            <CardHeader title="Recent Activities" action={<Link to="/activities" className="text-xs font-medium text-brand-600 hover:underline">View all</Link>} />
-          </div>
-          <div className="px-5 pb-5 space-y-3.5 max-h-80 overflow-y-auto">
-            {recentActivities.map((a) => (
-              <div key={a.id} className="flex gap-3">
-                <UserAvatar userId={a.userId} size={26} />
-                <div className="min-w-0">
-                  <p className="text-[13px] text-slate-700 leading-snug">{a.subject}</p>
-                  <p className="text-[11px] text-slate-400">{timeAgo(a.activityDate)}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
+      <NeedsAttention items={attentionItems} />
 
       <Card padded={false}>
         <div className="p-5 pb-0">
@@ -533,6 +478,142 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
           )}
         </div>
       </Card>
+
+      {/* How the month is being worked, as distinct from what it produced. Secondary size on
+          purpose — these are rhythm, not results. */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        <StatTile
+          label="New Leads"
+          value={kpis.curr.newLeads.toString()}
+          size="secondary"
+          pctChange={kpis.prev ? pctDelta(kpis.curr.newLeads, kpis.prev.newLeads) : undefined}
+          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+          to={buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          label="Activities Logged"
+          value={kpis.curr.activities.toString()}
+          size="secondary"
+          pctChange={kpis.prev ? pctDelta(kpis.curr.activities, kpis.prev.activities) : undefined}
+          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+          hint="Calls, meetings, emails and notes that move work forward. Automatic system entries and status changes are not counted."
+          to={buildDrilldownUrl('/activities', { [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          label="Leads Touched"
+          value={`${secondary.touchedPct}%`}
+          size="secondary"
+          hint="Share of active leads that had at least one call, meeting or email logged against them in this sales month."
+          to={buildDrilldownUrl('/leads', { touched: '1', [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          label="Avg Response Time"
+          value={secondary.avgResponseMins !== undefined ? minutesToLabel(secondary.avgResponseMins) : '—'}
+          size="secondary"
+          hint="Average time between a lead being created and the first call, meeting or email logged against it."
+          to={buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam })}
+        />
+        <StatTile
+          label="Tasks On Time"
+          value={`${secondary.onTimePct}%`}
+          size="secondary"
+          hint="Share of tasks due in this sales month that were completed on or before their due date."
+          to={buildDrilldownUrl('/tasks', { view: 'Completed' })}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="lg:col-span-2">
+          <SalesFunnelChart deals={scopedDeals} />
+        </div>
+        <ActivityBreakdownChart activities={scopedActivities.filter((a) => isWithinPeriod(a.activityDate, period))} />
+      </div>
+
+      <WinRateCard
+        cohort={cohort}
+        newLeads={kpis.curr.newLeads}
+        qualified={kpis.curr.qualified}
+        converted={kpis.curr.converted}
+        periodLabel={period.label}
+        periodParam={periodParam}
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <WinRateByKind
+          serviceWinRate={kpis.curr.serviceWinRate}
+          serviceClosed={kpis.curr.serviceClosed}
+          handoverWinRate={kpis.curr.handoverWinRate}
+          handoverClosed={kpis.curr.handoverClosed}
+          periodLabel={period.label}
+        />
+        <LossReasonsCard leads={rejectedLeads} deals={rejectedDeals} periodLabel={period.label} />
+      </div>
+
+      <RevenueTrendChart deals={scopedDeals} referenceDate={TODAY} />
+
+      <RepLeaderboard rows={leaderboardRows} />
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <Card className="lg:col-span-2" padded={false}>
+          <div className="p-5 pb-0">
+            <CardHeader
+              title="Largest Open Deals"
+              subtitle="Still to be closed — service deals by fee, mandates by book"
+              action={<Link to="/deals" className="text-xs font-medium text-brand-600 hover:underline">View all deals</Link>}
+            />
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
+                  <th className="font-medium px-5 py-2.5">Deal</th>
+                  <th className="font-medium px-3 py-2.5">Company</th>
+                  <th className="font-medium px-3 py-2.5 text-right">Size</th>
+                  <th className="font-medium px-3 py-2.5">Stage</th>
+                  <th className="font-medium px-3 py-2.5">Close Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topDeals.map((d) => (
+                  <tr key={d.id} className="border-t border-slate-50 hover:bg-slate-50/60">
+                    <td className="px-5 py-2.5">
+                      <Link to={`/deals/${d.id}`} className="font-medium text-slate-700 hover:text-brand-600">
+                        {d.name}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-500">{companyById(d.companyId)?.name}</td>
+                    <td className="px-3 py-2.5 text-right font-medium text-slate-700 tabular-nums whitespace-nowrap">
+                      {formatCurrency(dealSize(d))}
+                      <span className="ml-1.5 text-[10.5px] font-normal text-slate-400">{dealSizeLabel(d)}</span>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <StageBadge stage={d.stage} />
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-500">{formatDate(d.expectedCloseDate)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+        <Card padded={false}>
+          <div className="p-5 pb-0">
+            <CardHeader title="Recent Activities" action={<Link to="/activities" className="text-xs font-medium text-brand-600 hover:underline">View all</Link>} />
+          </div>
+          <div className="px-5 pb-5 space-y-3.5 max-h-80 overflow-y-auto">
+            {recentActivities.map((a) => (
+              <div key={a.id} className="flex gap-3">
+                <UserAvatar userId={a.userId} size={26} />
+                <div className="min-w-0">
+                  <p className="text-[13px] text-slate-700 leading-snug">{a.subject}</p>
+                  <p className="text-[11px] text-slate-400">{timeAgo(a.activityDate)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
 
       {rescheduleTask && (
         <RescheduleTaskModal
