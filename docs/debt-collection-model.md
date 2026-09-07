@@ -133,6 +133,20 @@ the number BF carries the risk on.
 It also tells you when to stop working an account: once recovery is capped and the cost keeps
 climbing, further work is money spent that can never come back.
 
+**Confirmed against live data.** In the sample export, every account flagged `In Duplum = Yes`
+has interest plus fees equal to capital to the cent — a ratio of exactly 1.000 across all six.
+So the rule as described is the rule as operated.
+
+The sample also shows what Swordfish does *not* do. On those capped accounts the interest
+figure derives negative (−R356.65 on a R812 capital with R1,168.65 of fees), because Swordfish
+presents the capped total rather than the true accrual: once fees alone exceed the ceiling, the
+interest it reports is whatever makes the arithmetic land on the cap. The real cost of that
+account is gone.
+
+That is precisely the visibility BF asked for and cannot currently get. Raptor should hold both
+figures — what actually accrued, and what is recoverable — so the difference between them is
+reportable as the loss it is.
+
 ### Interest is worth more than fees
 
 **Interest carries no VAT. Fees do.** Every rand of fee recovered has VAT inside it that must be
@@ -143,6 +157,27 @@ the recovered amount is made up of interest rather than fees. The allocation ord
 clears interest before fees, which turns out to be both the agreed rule and the commercially
 better one — worth stating explicitly so nobody "simplifies" that order later without realising
 it costs money.
+
+## 5a. Prescription
+
+**Not previously in this document, and it has to be.** Swordfish tracks `Is Prescribed`,
+`Days To Prescription`, and an `Interruptor Before Handover` date on every account. A prescribed
+debt is unenforceable, so this is not a reporting nicety — it decides whether an account may
+lawfully be worked at all.
+
+What the sample shows: every account carries a live countdown (1,055 and 1,092 days in the two
+rows examined), and a handover date that acts as the interrupter. So the model needs, per
+account: the date prescription currently runs from, the resulting prescription date, and a
+record of each act that interrupts and restarts it — acknowledgement of debt, part payment,
+summons.
+
+This connects directly to the clerk portal. An acknowledgement of debt is both a chargeable item
+4(a) *and* a prescription interrupter; a part payment is both an allocation *and* an interrupter.
+The same action has to do both jobs, and an account approaching prescription is the most urgent
+thing on a clerk's queue by a distance.
+
+**OPEN:** the prescription period per debt type (three years for most, thirty for judgment
+debts and mortgage bonds), and exactly which acts BF counts as interrupting.
 
 ## 6. VAT
 
