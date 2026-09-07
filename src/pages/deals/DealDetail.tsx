@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Pencil, CheckCircle2, XCircle, StickyNote, CheckSquare, FileText, Send, Plus, Upload, Trash2 } from 'lucide-react'
+import { ArrowLeft, Pencil, CheckCircle2, XCircle, StickyNote, CheckSquare, FileText, Send, Plus, Upload, Trash2, Mail } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { canEditOwned, canReassign, isAssignableOwner} from '../../lib/permissions'
@@ -13,11 +13,11 @@ import { dealKind, dealStageLabel } from '../../lib/dealKind'
 import { formatCurrency, formatDate, formatDateTime, services } from '../../data/mockData'
 import type { ActivityType, ProposalStatus, TaskType } from '../../types'
 import { NoteActivityList } from '../../components/NoteActivityRow'
-import { RowLimitSelect, type RowLimit } from '../../components/ui/RowLimitSelect'
+import { EmailActivityList } from '../../components/EmailActivityRow'
+import { ComposeEmailModal } from '../../components/ComposeEmailModal'
+import { RowLimitSelect, applyRowLimit, type RowLimit } from '../../components/ui/RowLimitSelect'
 import type { WonDealDetails } from '../../store/AppStore'
 
-const TABS = ['Overview', 'Activities', 'Tasks', 'Documents', 'Proposals', 'Notes', 'History'] as const
-type Tab = (typeof TABS)[number]
 
 interface MockDocument {
   id: string
@@ -54,12 +54,13 @@ export function DealDetail() {
   const deal = deals.find((d) => d.id === id)
   const canEdit = canEditOwned(currentUser, deal?.ownerId)
 
-  const [tab, setTab] = useState<Tab>('Overview')
   const [editOpen, setEditOpen] = useState(false)
   const [wonOpen, setWonOpen] = useState(false)
   const [rejectOpen, setRejectOpen] = useState(false)
   const [activityOpen, setActivityOpen] = useState(false)
   const [noteLimit, setNoteLimit] = useState<RowLimit>(5)
+  const [emailLimit, setEmailLimit] = useState<RowLimit>(5)
+  const [composeOpen, setComposeOpen] = useState(false)
   const [taskOpen, setTaskOpen] = useState(false)
   const [proposalOpen, setProposalOpen] = useState(false)
   const [docs, setDocs] = useState<MockDocument[]>([
@@ -67,6 +68,7 @@ export function DealDetail() {
   ])
 
   const dealActivities = useMemo(() => activities.filter((a) => a.dealId === id).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()), [activities, id])
+  const dealEmails = useMemo(() => dealActivities.filter((a) => a.type === 'Email'), [dealActivities])
   const dealTasks = useMemo(() => tasks.filter((t) => t.dealId === id), [tasks, id])
   const dealProposals = useMemo(() => proposals.filter((p) => p.dealId === id), [proposals, id])
 
@@ -147,23 +149,6 @@ export function DealDetail() {
         </div>
       </Card>
 
-      <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px ${
-              tab === t ? 'border-brand-600 text-brand-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            {t}
-            {t === 'Tasks' && dealTasks.length > 0 && <span className="ml-1.5 text-xs text-slate-400">({dealTasks.length})</span>}
-            {t === 'Proposals' && dealProposals.length > 0 && <span className="ml-1.5 text-xs text-slate-400">({dealProposals.length})</span>}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'Overview' && (
         <Card>
           <CardHeader title="Deal Information" />
           <dl className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3.5 text-sm">
@@ -194,33 +179,61 @@ export function DealDetail() {
             </div>
           )}
         </Card>
-      )}
 
-      {tab === 'Activities' && (
+      {/* Email on the deal, not only on the client. Working a deal means writing to the person
+          about that deal, and having to leave for the client page to do it is how a thread ends
+          up recorded against no deal at all. Every message logged here carries the deal, and
+          addActivity fills in the client from it, so it lands on both records. */}
+      <Card>
+        <CardHeader
+          title="Emails"
+          subtitle={`${dealEmails.length} message${dealEmails.length === 1 ? '' : 's'}`}
+          action={
+            <div className="flex items-center gap-2">
+              {contact?.email && (
+                <button
+                  onClick={() => setComposeOpen(true)}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                >
+                  <Mail size={12} /> Compose
+                </button>
+              )}
+              <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
+            </div>
+          }
+        />
+        {dealEmails.length === 0 ? (
+          <p className="text-sm text-slate-400">
+            {contact?.email ? 'No emails yet.' : 'No contact with an email address on this deal yet.'}
+          </p>
+        ) : (
+          <EmailActivityList activities={applyRowLimit(dealEmails, emailLimit)} />
+        )}
+      </Card>
+
         <Card padded={false}>
           <div className="p-5 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-800 text-[15px]">Activities</h3>
-            <button onClick={() => setActivityOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline">
-              <Plus size={13} /> Log Activity
-            </button>
+            <h3 className="font-semibold text-slate-800 text-[15px]">Notes &amp; Updates</h3>
+            <div className="flex items-center gap-3">
+              <RowLimitSelect value={noteLimit} onChange={setNoteLimit} />
+              <button onClick={() => setActivityOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline">
+                <Plus size={13} /> Add Note
+              </button>
+            </div>
           </div>
-          <div className="px-5 pb-5 space-y-4">
-            {dealActivities.length === 0 && <p className="text-sm text-slate-400">No activities logged yet.</p>}
-            {dealActivities.map((a) => (
-              <div key={a.id} className="flex gap-3 pb-3 border-b border-slate-50 last:border-0">
-                <UserAvatar userId={a.userId} size={26} />
-                <div>
-                  <p className="text-sm font-medium text-slate-700">{a.subject}</p>
-                  {a.notes && <p className="text-xs text-slate-500 mt-0.5">{a.notes}</p>}
-                  <p className="text-[11px] text-slate-400 mt-0.5">{formatDateTime(a.activityDate)}</p>
-                </div>
-              </div>
-            ))}
+          {/* Everything that happened to this deal, not only what someone typed. "When did the
+              quotation go out?" is answered here, next to the notes about it, rather than
+              being a date on its own in another tab — and the same list, in the same shape, is
+              what a client's page shows. */}
+          <div className="px-5 pb-5">
+            {dealActivities.length === 0 ? (
+              <p className="text-sm text-slate-400">Nothing recorded yet.</p>
+            ) : (
+              <NoteActivityList activities={dealActivities} limit={noteLimit} />
+            )}
           </div>
         </Card>
-      )}
 
-      {tab === 'Tasks' && (
         <Card padded={false}>
           <div className="p-5 flex items-center justify-between">
             <h3 className="font-semibold text-slate-800 text-[15px]">Tasks</h3>
@@ -247,39 +260,7 @@ export function DealDetail() {
             ))}
           </div>
         </Card>
-      )}
 
-      {tab === 'Documents' && (
-        <Card padded={false}>
-          <div className="p-5 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-800 text-[15px]">Documents</h3>
-            <button
-              onClick={() =>
-                setDocs((prev) => [{ id: `doc${prev.length + 1}`, name: `Document_${prev.length + 1}.pdf`, uploadedAt: new Date().toISOString(), size: `${(Math.random() * 500 + 50).toFixed(0)} KB` }, ...prev])
-              }
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline"
-            >
-              <Upload size={13} /> Upload Document
-            </button>
-          </div>
-          <div className="px-5 pb-5 divide-y divide-slate-50">
-            {docs.map((d) => (
-              <div key={d.id} className="flex items-center gap-3 py-2.5">
-                <FileText size={18} className="text-slate-400 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-700 truncate">{d.name}</p>
-                  <p className="text-xs text-slate-400">{d.size} · Uploaded {formatDate(d.uploadedAt)}</p>
-                </div>
-                <button onClick={() => setDocs((prev) => prev.filter((x) => x.id !== d.id))} className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50">
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {tab === 'Proposals' && (
         <Card padded={false}>
           <div className="p-5 flex items-center justify-between">
             <h3 className="font-semibold text-slate-800 text-[15px]">Quotes / Proposals</h3>
@@ -317,34 +298,35 @@ export function DealDetail() {
             ))}
           </div>
         </Card>
-      )}
 
-      {tab === 'Notes' && (
         <Card padded={false}>
           <div className="p-5 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-800 text-[15px]">Notes &amp; Updates</h3>
-            <div className="flex items-center gap-3">
-              <RowLimitSelect value={noteLimit} onChange={setNoteLimit} />
-              <button onClick={() => setActivityOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline">
-                <Plus size={13} /> Add Note
-              </button>
-            </div>
+            <h3 className="font-semibold text-slate-800 text-[15px]">Documents</h3>
+            <button
+              onClick={() =>
+                setDocs((prev) => [{ id: `doc${prev.length + 1}`, name: `Document_${prev.length + 1}.pdf`, uploadedAt: new Date().toISOString(), size: `${(Math.random() * 500 + 50).toFixed(0)} KB` }, ...prev])
+              }
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline"
+            >
+              <Upload size={13} /> Upload Document
+            </button>
           </div>
-          {/* Everything that happened to this deal, not only what someone typed. "When did the
-              quotation go out?" is answered here, next to the notes about it, rather than
-              being a date on its own in another tab — and the same list, in the same shape, is
-              what a client's page shows. */}
-          <div className="px-5 pb-5">
-            {dealActivities.length === 0 ? (
-              <p className="text-sm text-slate-400">Nothing recorded yet.</p>
-            ) : (
-              <NoteActivityList activities={dealActivities} limit={noteLimit} />
-            )}
+          <div className="px-5 pb-5 divide-y divide-slate-50">
+            {docs.map((d) => (
+              <div key={d.id} className="flex items-center gap-3 py-2.5">
+                <FileText size={18} className="text-slate-400 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-700 truncate">{d.name}</p>
+                  <p className="text-xs text-slate-400">{d.size} · Uploaded {formatDate(d.uploadedAt)}</p>
+                </div>
+                <button onClick={() => setDocs((prev) => prev.filter((x) => x.id !== d.id))} className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
           </div>
         </Card>
-      )}
 
-      {tab === 'History' && (
         <Card padded={false}>
           <div className="p-5">
             <h3 className="font-semibold text-slate-800 text-[15px]">History</h3>
@@ -360,8 +342,24 @@ export function DealDetail() {
             {deal.rejectedAt && <HistoryRow label="Deal rejected" date={deal.rejectedAt} />}
           </div>
         </Card>
-      )}
 
+
+
+
+
+
+
+
+
+      {composeOpen && contact?.email && (
+        <ComposeEmailModal
+          to={contact.email}
+          onClose={() => setComposeOpen(false)}
+          onSent={(subject, bodyText) =>
+            addActivity({ type: 'Email', subject, notes: bodyText, dealId: deal.id, contactId: contact.id })
+          }
+        />
+      )}
       {editOpen && (
         <EditDealModal deal={deal} reps={reps} canReassign={canReassign(currentUser)} onClose={() => setEditOpen(false)} onSave={(patch) => updateDeal(deal.id, patch)} />
       )}
