@@ -118,6 +118,71 @@ R2,075 x 10% x 1.15 is exactly R238.625 and the statement shows R238.63. As a do
 account. `roundToCents` in `annexureB.ts` rounds half up through the representation gap, and
 every rand figure the module returns goes through it.
 
+## 2b. The fee ceiling — a cap nobody had told us about
+
+Found by building the importer, and it is the single most important thing the migration turned up.
+
+**No account in the book has ever been charged more than R1,288.00 excl VAT in action fees.**
+Not one, in 735 accounts, across capitals from R1,899 to R423,823. 304 of them (41%) sit between
+R1,000 and R1,300, with 209 packed into the R1,000–R1,099 band alone.
+
+That ceiling is flat, not proportional. Split the accounts by capital and the picture does not
+move:
+
+| Capital at handover | Accounts past the ceiling | Fees charged, excl VAT |
+|---|---|---|
+| under R10,000 | 18 | median R1,225 |
+| R10,000–R25,000 | 83 | median R1,029 |
+| R25,000–R50,000 | 80 | median R1,023 |
+| R50,000–R100,000 | 1 | R1,023 |
+| over R100,000 | 4 | median R1,225 |
+
+A R424,000 farm debt and a R1,900 gym membership stop at the same number.
+
+### What it explains
+
+**18,187 billable actions carry no charge.** 40% of phone calls, 46% of SMSes, 47% of outgoing
+emails, 31% of letters. At tariff that is roughly R300,000 of apparently unbilled work, and the
+obvious reading — that we have been giving away a third of our collections effort — is wrong.
+
+The giveaway is in the timing. Charge-free actions are rare in the month after a handover and
+almost universal two years later:
+
+| Month | Free share of billable actions |
+|---|---|
+| 2024/05 (Adowa + Growthpoint handover) | 3% |
+| 2024/08 | 8% |
+| 2024/11 | 43% |
+| 2025/05 | 70% |
+| 2025/09 | 89% |
+| 2025/10 (Growthpoint 2025 handover) | 46% |
+| 2026/07 (Accelerate Fitness handover) | 22% |
+
+Every dip is a fresh cohort arriving. The free rate is account age, not client policy or
+operator laziness — the same client shows 3% and 89% eighteen months apart. Consultations are
+the exception at 1% free, which fits: a consultation is a completed engagement, and they are
+rare enough that no account reaches the ceiling on them.
+
+A separate and smaller effect: `Status = "Action Cancel without Charge"` is always free (142
+actions), against `"Action Cancel with Charge"` which is billed (1 action). This refines the
+earlier finding that a cancelled action keeps its fee — it usually does, and Swordfish records
+explicitly when it does not.
+
+### What we do not know
+
+The exact rule. Only that a ceiling exists, that it is flat, and that R1,288 is the highest
+figure it has ever permitted. The totals bunch at R1,023, R1,225 and R1,288 rather than at one
+number, so it is not a simple "stop before exceeding X" — and guessing the formula would be
+guessing about the one number that decides whether our billing is lawful.
+
+**This blocks the fee engine.** Raptor must enforce the same ceiling before it raises a single
+fee of its own; without it, every account past this point would be over-billed, which is a
+compliance failure and not merely a bug. `account_fees.counts_toward_fee_cap` already exists for
+it. The rule needs to come from Annexure B or from the Swordfish configuration — it is not
+derivable from the exports.
+
+---
+
 ## 3. Commission
 
 Per client, negotiated — 10%, 25%, 30% have all been used.
@@ -203,6 +268,43 @@ wrong. Somebody knows the rule; it is being applied by hand and by memory.
 That is the argument for computing it: the mandate's bands belong on the client record, the rate
 follows from the account's capital, and a handover that departs from it has to be deliberate and
 visible rather than an accident nobody notices for two years.
+
+### The other two mandates are clean
+
+Two more signed mandates, checked the same way against the same account data:
+
+**ABSTO Industrial Supplies** — signed 12 September 2025.
+
+| No | Capital Handover Amount | Commission |
+|---|---|---|
+| 1 | R0 < R250,000 | 21% |
+| 2 | R250,001 < R500,000 | 15% |
+| 3 | R500,001 < R1,000,000 | 12% |
+| 4 | R1,000,000 + | 10% |
+
+19 accounts, **0 on the wrong rate.** AIS20001 at R370,232 is correctly in the 15% band; every
+other account is under R250,000 and correctly on 21%.
+
+**Agri Saad** — signed 2 September 2024, client Etienne Olivier.
+
+| No | Capital Handover Amount | Commission |
+|---|---|---|
+| 1 | R0 < R100,000 | 25% |
+| 2 | R100,001 < R500,000 | 20% |
+| 3 | R500,001 + | 15% |
+
+4 accounts, **0 on the wrong rate.** AID20001 (R423,823), AID20003 (R140,835) and AID20002
+(R137,884) are all correctly on 20%; AID10001 (R19,422) correctly on 25%.
+
+**0 of 23 wrong here against 60 of 285 at Growthpoint.** That is a scale effect, not a different
+standard: the same manual process holds up over twenty accounts and drifts over two hundred and
+eighty-five. It is the strongest argument yet for computing the rate — the failure appears
+exactly where a person cannot check every line, which is also exactly where the money is.
+
+Note the shape all three share: bands are **half-open on the capital handed over**, the first
+band starts at R0, and the boundary rand (R25,000 / R250,000 / R100,000) belongs to the *lower*
+band — "R0 < R25,000" then "R25,001 +". An account at exactly R25,000 is 25%, not 22.5%. The
+importer implements that literally rather than rounding to the nearest band.
 
 ### Two other things the mandate confirms
 
@@ -606,19 +708,97 @@ opposite case: "Necessary Costs" and "Team Leader Assistance" import as history 
 R193 is held out of the balances, because a fee filed under a guessed Annexure B item is a wrong
 statement waiting to be reissued, and dropping it silently is no better.
 
+### The importer
+
+`scripts/swordfish/import.mjs`. Reads the four exports and produces the collections book:
+clients, handover batches, debtor accounts, payments, fees, interest accruals.
+
+```
+node --experimental-strip-types scripts/swordfish/import.mjs \
+  --summary <accounts.csv> --payments <payments.csv> \
+  --actions <actions.csv> --interest <interest.csv> \
+  --owner <profile uuid> --out ./out
+```
+
+It is a dry run unless given `--apply`, and deletes nothing without `--wipe`. `--only <client>`
+runs a real slice of real data, small enough to check by eye and to undo — and refuses to
+combine with `--wipe`, which would clear the whole book to insert a fragment of it.
+
+Three rules it exists to enforce:
+
+1. **It will not run if `reconcile.mjs` fails.** A migration our own model disagrees with is
+   not a migration; it is six weeks of wrong statements nobody has noticed yet.
+2. **It never invents money.** Where Swordfish's figure and ours differ, Swordfish's is written
+   and the difference is reported — above all for commission, where 60 Growthpoint accounts
+   arrived on a rate their signed mandate does not allow. Correcting those silently would
+   rewrite what a client has already been invoiced.
+3. **`--owner` has no default.** Every client lands on somebody's desk, and a wrong default is
+   invisible: the import succeeds and 735 accounts quietly belong to the wrong person.
+
+**The opening position is the handover, not today.** The exports carry complete history from the
+day each account arrived, so the ledgers replay it and today's balance is derived rather than
+asserted. Opening at today's figures would be the one number nothing could ever check — and it
+would double-count: an account paid in full would open owing its whole capital again. Swordfish's
+closing balance is kept in `swordfish_balance_at_import` purely so the replay can be checked
+against it.
+
+### What the run produces
+
+| | |
+|---|---|
+| clients | 7 (2 as children of Adowa) |
+| handover batches | 34 |
+| debtor accounts | 735 — R14,486,249.16 capital |
+| payments | 1,070 — R1,826,939.00, of which 25 paid to client |
+| fees | 59,158 — R693,093.86 incl VAT |
+| interest accruals | 12,078 — R5,850,284.39 |
+
+Reconciles: the actions export sums to R602,695 excl VAT against the summary's `Fees & Expenses`
+of R605,011 — a 0.38% gap. The larger gap to `All Fees (inc VAT + FCC)` of R1,232,240 is FCC,
+which is a settlement quotation and not a fee (2a).
+
+### What building it found
+
+Four defects, each caught before a row was written, and each of a kind that only shows up when
+real data meets a real schema:
+
+- **`account_interest_accruals` could not hold the data.** Its key was `unique (account_id,
+  accrued_on)` — one accrual stream per account per day. 804 accounts have two periods starting
+  on the same date. No two periods are identical, so the key is now the period.
+- **`capital_outstanding` is `not null`**, and the importer was writing null into it. Caught by
+  a live trial of one account, not by checking column names — which is why there is now a
+  not-null guard that runs in the dry run.
+- **`commission_rate` was `not null default 0`**, making "no rate resolved" and "we charge
+  nothing" the same value. Now nullable.
+- **571 accounts carry a Sub-status of the literal string `"N/A"`.** Text columns need the same
+  no-value vocabulary the numeric ones already had.
+
+### Client data quality, as found
+
+- 89 of 735 ID numbers are not 13-digit SA IDs — phone numbers, company registrations, and in
+  one case a client prefix. Imported as found; it is Swordfish's data, not a mapping fault.
+- `Capital Portion`, `Interest Portion`, `Legal Fee Portion`, `Date Opened`, `Current Legal
+  Stage` and `Old Client Reference` are empty for every account. The handover split has to come
+  from the mandate's 50/50 rule, not from these columns.
+- `Capital Paid` is present on all 1,070 payments and zero on all of them, so Swordfish's own
+  allocation cannot be imported. The allocation engine has to derive it.
+
 ## 10. Open items, collected
 
 - **How the R610 FCC ceiling behaves on an in duplum account.** The 21 accounts that do not
   fit the confirmed formula are almost all in duplum, so the two ceilings appear to interact.
-- **What the sliding-scale commission bands are measured against** (see 3a).
+- ~~**What the sliding-scale commission bands are measured against**~~ — resolved (3a): capital
+  at handover, per account, on bands the signed mandate sets out.
 - **Whether the electronic-communication cap is per account or per debtor**, and which action
-  types count toward it.
+  types count toward it. Partly answered by 2b, which shows an absolute per-account fee
+  ceiling of at most R1,288 excl VAT exists and is being enforced — but not what the rule is.
 - **Item 1(b)**, the registered-letter fee, still to be confirmed.
 
 | # | Question | Blocks |
 |---|---|---|
 | 1 | The daily interest rate — 2% ÷ days in month, or 24% ÷ 365? | Interest |
 | 2 | Item 1(b), registered letter under s57 — the Magistrates' Courts figure. **Awaiting; BF to supply.** Rarely used, so it does not block the build. | Tariff |
+| 3 | **The fee ceiling rule** (2b). A cap of at most R1,288 excl VAT per account is demonstrably being enforced, and 18,187 actions are free because of it, but the formula is not derivable from the exports. Needed from Annexure B or the Swordfish configuration. | The fee engine — nothing may raise a fee until this is known |
 
 ---
 
