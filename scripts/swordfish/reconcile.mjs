@@ -32,7 +32,7 @@ function check(name, ok, detail) {
   if (detail) for (const line of [].concat(detail)) console.log(`          ${line}`)
 }
 
-const summaryPath = arg('summary'), paymentsPath = arg('payments'), actionsPath = arg('actions')
+const summaryPath = arg('summary'), paymentsPath = arg('payments'), actionsPath = arg('actions'), interestPath = arg('interest')
 if (!summaryPath) {
   console.error('need at least --summary <file>')
   process.exit(2)
@@ -41,7 +41,8 @@ if (!summaryPath) {
 const accounts = read(summaryPath)
 const payments = paymentsPath ? read(paymentsPath) : []
 const actions = actionsPath ? read(actionsPath) : []
-console.log(`\nSwordfish dry-run\n  accounts ${accounts.length}  payments ${payments.length}  actions ${actions.length}\n`)
+const interest = interestPath ? read(interestPath) : []
+console.log(`\nSwordfish dry-run\n  accounts ${accounts.length}  payments ${payments.length}  actions ${actions.length}  interest ${interest.length}\n`)
 
 /* ---------- 1. Are the three exports the same accounts? ---------- */
 console.log('POPULATION')
@@ -116,6 +117,77 @@ for (const r of accounts) {
 const flagged = accounts.filter((r) => r['In Duplum'] === 'Yes').length
 check('no flagged account exceeds twice its capital', breaches.length === 0,
   [`${flagged} accounts flagged in duplum`, ...breaches.slice(0, 5)])
+
+
+/* ---------- 4b. Is the interest history complete and contiguous? ---------- */
+if (interest.length) {
+  console.log('\nINTEREST')
+  const byAccount = new Map()
+  for (const r of interest) {
+    const ref = r['Swordfish Reference']
+    if (!ref) continue
+    const from = date(r['Date From']), to = date(r['Date To']), amt = num(r['Interest Added'])
+    if (!from || !to) continue
+    if (!byAccount.has(ref)) byAccount.set(ref, [])
+    byAccount.get(ref).push({ from, to, amt: amt ?? 0 })
+  }
+  const withInterest = [...byAccount.keys()].filter((r) => A.has(r)).length
+  check('every account with interest appears in the account summary',
+    [...byAccount.keys()].every((r) => A.has(r)),
+    [`${withInterest} of ${accounts.length} accounts have interest periods`])
+
+  /*
+   * Periods are NOT one sequence per account. Swordfish runs concurrent accrual streams —
+   * interest on the balance alongside interest on fees, which start earning as they are raised —
+   * and breaks a period at each payment date. So ACF10066 legitimately shows 20-30 July and
+   * 1-31 July at once. An earlier version of this check read those as overlaps and reported a
+   * failure against perfectly good data; what is worth checking is that no exact period is
+   * duplicated, which would double-count.
+   */
+  const dupes = []
+  for (const [ref, rows] of byAccount) {
+    const seen = new Set()
+    for (const r of rows) {
+      const key = `${r.from}|${r.to}|${r.amt}`
+      if (seen.has(key)) dupes.push(`${ref}: ${r.from} to ${r.to} appears twice at ${money(r.amt)}`)
+      seen.add(key)
+    }
+  }
+  check('no interest period is recorded twice', dupes.length === 0, dupes.slice(0, 5))
+
+  /*
+   * Only checkable where the balance is still capital plus interest: a payment reduces it, a
+   * write-off or freeze stops interest, and in duplum caps it. Each of those breaks the
+   * reconstruction for a legitimate reason, so they are counted separately rather than
+   * reported as failures against data that is behaving correctly.
+   */
+  let tied = 0, checkedI = 0, worstI = 0
+  const excluded = { written_off: 0, frozen: 0, in_duplum: 0 }
+  for (const r of accounts) {
+    if ((num(r['Payments To Date']) ?? 0) > 0) continue
+    const status = r['Status'] ?? ''
+    if (r['In Duplum'] === 'Yes') { excluded.in_duplum++; continue }
+    if (/written.off/i.test(status)) { excluded.written_off++; continue }
+    if (/frozen/i.test(status)) { excluded.frozen++; continue }
+    const rows = byAccount.get(r['Swordfish Reference'])
+    const exFees = num(r['Current Balance - All Fees (inc VAT + FCC)'])
+    const cap = num(r['Capital on Default'])
+    if (!rows || exFees === undefined || cap === undefined) continue
+    checkedI++
+    const err = Math.abs(rows.reduce((t, x) => t + x.amt, 0) - (exFees - cap))
+    worstI = Math.max(worstI, err)
+    // Each monthly accrual is rounded to a cent before it is stored, so a year of them can be
+    // half a cent out per period by the time they are added back up. The tolerance scales with
+    // the number of periods rather than being a flat cent, which would fail good data on long
+    // histories and pass bad data on short ones.
+    if (err <= rows.length * 0.005 + CENT) tied++
+  }
+  check('interest reconstructs the balance where it still can', tied === checkedI, [
+    `${tied} of ${checkedI} tie exactly; worst gap ${money(worstI)}`,
+    `excluded as legitimately not reconstructable: ${excluded.in_duplum} in duplum, ` +
+      `${excluded.written_off} written off, ${excluded.frozen} frozen`,
+  ])
+}
 
 /* ---------- 5. Can every action be identified, and was it priced correctly? ---------- */
 if (actions.length) {

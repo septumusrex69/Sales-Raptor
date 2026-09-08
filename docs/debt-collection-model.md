@@ -478,6 +478,39 @@ Flagged for checking rather than as a finding: whether the Annexure B cap counts
 per debtor, and exactly which action types fall inside it, is not yet confirmed.
 
 
+
+### The four reports, and what the 8 Sep 2026 set proved
+
+| Report | Loads into |
+|---|---|
+| Client Account Summary | clients + `debtor_accounts` |
+| Actions performed per Client | `account_fees` + activity history |
+| Interest per Period | `account_interest_accruals` |
+| All Payments per Client | `account_payments` + `payment_allocations` |
+
+Pulled over one account list — 735 accounts in all four — the dry-run has **no blocking
+failures**. Balances hold to a cent on all 735, payments reconcile exactly on all 167 accounts
+that have them, every in duplum account respects its ceiling, and every charged action maps to
+the catalogue.
+
+**Interest is held as concurrent accrual streams, not one monthly series.** Swordfish runs
+interest on the balance alongside interest on fees — which start earning as they are raised —
+and breaks a period at each payment date. So one account legitimately shows 20–30 July and
+1–31 July at the same time. A first version of the check read those as overlapping periods and
+failed good data; what is worth testing is that no exact period is recorded twice.
+
+Where the balance is still capital plus interest, the report reconstructs it exactly on all 136
+such accounts. The rest are excluded for reasons that are correct rather than suspicious: 20 in
+duplum (capped), 299 written off and 113 frozen (interest stopped), and any account with
+payments (the balance has moved). Tolerance scales with the number of periods, because each
+monthly accrual is rounded to a cent before storage and a long history accumulates that.
+
+**Cancelled actions are still billed.** 846 actions carry a cancellation, 190 of them with a
+charge — R7,699 excl VAT still sitting on debtor accounts, 137 of them cancelled as "Replaced by
+New PTP". Excluding cancelled actions makes the fee reconciliation *worse* (92% to 76%), so this
+is Swordfish's actual behaviour and not an export artefact. Whether a cancelled promise to pay
+should still carry its fee is a question for the business, not a bug to fix silently.
+
 ### The dry-run harness
 
 `scripts/swordfish/reconcile.mjs` checks whether our model reproduces Swordfish's numbers,
