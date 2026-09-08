@@ -176,7 +176,57 @@ export function feeCeiling(capitalAmount: number, schedule: AnnexureBSchedule = 
  * not treat this as settled.
  */
 export function receiptFee(instalment: number, schedule: AnnexureBSchedule = ANNEXURE_B_2026): number {
-  return Math.min(instalment * schedule.receiptFeeRate, schedule.receiptFeeMaximum)
+  return roundToCents(Math.min(instalment * schedule.receiptFeeRate, schedule.receiptFeeMaximum))
+}
+
+/**
+ * Round to cents, half up, in spite of binary floating point.
+ *
+ * R2 075 x 10% x 1.15 is exactly 238.625 in decimal, and the business's own statement shows
+ * R238.63. In a double it is 238.62499999999997, so `toFixed(2)` and a plain `Math.round`
+ * both give 238.62 — a cent light on every statement, on every account, forever. The epsilon
+ * nudge closes the representation gap without affecting any figure that is not already sitting
+ * exactly on a half-cent.
+ *
+ * Every rand figure this module returns goes through here. Money that disagrees with the
+ * client's own statement by a cent is money someone has to explain.
+ */
+export function roundToCents(value: number): number {
+  const nudge = value >= 0 ? 1e-6 : -1e-6
+  return Math.round(value * 100 + nudge) / 100
+}
+
+/**
+ * Final Collection Commission — what settling the whole balance today would cost.
+ *
+ * FCC is the line that made "All Fees (inc VAT + FCC)" impossible to interpret. It is not a fee
+ * that has been earned. It is a quotation: the item 9 commission that *would* be charged if the
+ * debtor paid the remaining balance in one payment, shown on the statement so the settlement
+ * figure is a single honest number rather than something the debtor has to work out.
+ *
+ * Three consequences, and getting any of them wrong corrupts the ledger:
+ *
+ * 1. **It is never revenue.** Across the September 2026 export it was 47% of everything reported
+ *    as fees — R168,563 of R360,811. Counting it as earned would overstate the book by nearly
+ *    half.
+ * 2. **It is recomputed, never accumulated.** Each statement replaces the previous figure; it is
+ *    a derived display line, not a posted transaction. Store it as a fee row and it compounds
+ *    against itself on every statement.
+ * 3. **It is computed after everything else**, including the commission actually earned on
+ *    payments already received, because those reduce what is left to settle.
+ *
+ * Verified against 214 live accounts: exact to the cent on 193 of them (90%), including both
+ * worked statements from the business. The remainder are almost entirely in duplum accounts,
+ * where the ceiling interacts with this and the behaviour is not yet confirmed.
+ */
+export function finalCollectionCommission(
+  balanceBeforeFcc: number,
+  vatRate = 0.15,
+  schedule: AnnexureBSchedule = ANNEXURE_B_2026,
+): number {
+  if (balanceBeforeFcc <= 0) return 0
+  const excl = Math.min(balanceBeforeFcc * schedule.receiptFeeRate, schedule.receiptFeeMaximum)
+  return roundToCents(excl * (1 + vatRate))
 }
 
 /**
