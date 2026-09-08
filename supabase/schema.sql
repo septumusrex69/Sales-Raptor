@@ -749,7 +749,9 @@ create table if not exists public.debtor_accounts (
   -- once, at handover, and never recalculated as the balance falls (§5).
   in_duplum_ceiling numeric,
 
-  -- Stamped at handover and never recalculated (§3).
+  -- Stamped at handover and never recalculated (§3). Nullable on purpose: "no rate resolved"
+  -- and "we charge nothing" are different facts, and a not-null default of 0 made them the
+  -- same value — an account whose rate could not be worked out would have read as free.
   commission_rate numeric,
 
   -- 2% per month is standard but negotiable, per client or per account, and a renegotiation
@@ -881,6 +883,10 @@ create index if not exists account_interest_account_idx on public.account_intere
 -- columns exist to answer "where did this row come from and does it still agree with the system
 -- it came from" — a question that stops mattering once the migration is old, but which is
 -- unanswerable after the fact if the columns were never there.
+-- See the commission_rate comment above: an unresolved rate must not read as zero.
+alter table public.debtor_accounts alter column commission_rate drop not null;
+alter table public.debtor_accounts alter column commission_rate drop default;
+
 alter table public.debtor_accounts
   add column if not exists swordfish_reference text,
   add column if not exists in_duplum boolean not null default false,
@@ -890,6 +896,11 @@ alter table public.debtor_accounts
   add column if not exists handover_interest numeric,
   add column if not exists handover_legal_fees numeric,
   add column if not exists payments_to_date numeric,
+  -- Swordfish's closing position on the day of the import. Never read as a balance: the
+  -- ledgers replay the account from handover and derive that. This is what the replay is
+  -- checked against, and the only reason a migrated account can be proved rather than trusted.
+  add column if not exists swordfish_balance_at_import numeric,
+  add column if not exists swordfish_fees_at_import numeric,
   -- What the client's mandate bands call for on the capital handed over, beside what the
   -- account is actually billed at. They are allowed to differ: a difference may be a keying
   -- error or a later negotiation, and the two cannot be told apart from the data — so the
