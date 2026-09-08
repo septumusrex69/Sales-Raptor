@@ -62,6 +62,62 @@ from R50,000 up**, both excluding VAT.
 
 ---
 
+## 2a. FCC — Final Collection Commission
+
+Resolved. FCC is **Final Collection Commission**: what the item 9 commission *would* be if the
+debtor settled the whole remaining balance in one payment. It appears on every statement so the
+settlement figure is one honest number instead of something the debtor has to work out.
+
+```
+FCC = min( 10% x balance-before-FCC , R610 ) x 1.15
+```
+
+where balance-before-FCC is capital + interest + fees already raised + commission already
+earned on payments received.
+
+Confirmed against both worked statements the business supplied, and against 214 live accounts —
+exact to the cent on **193 of them (90%)**, with 88 sitting precisely on the R610 ceiling. The
+21 that do not fit are almost entirely in duplum accounts, where the ceiling interacts with this
+in a way not yet established.
+
+### Three rules that fall out of it, and all three matter
+
+**FCC is never revenue.** It is a quotation, not an earned fee. Across the September 2026 export
+it was **47% of everything reported as fees** — R168,563 of R360,811. Any figure that treats
+`All Fees (inc VAT + FCC)` as income overstates the book by nearly half. Earned fees are the
+other 53%.
+
+**FCC is recomputed, never accumulated.** Each statement replaces the previous figure. It is a
+derived display line, not a posted transaction — visible in the worked statements, where the
+first statement's R238.63 does not appear anywhere in the second. Store it as a fee row and it
+compounds against itself every time a statement is produced.
+
+**FCC is computed last**, after the commission actually earned on payments received, because
+those reduce what is left to settle.
+
+### What *is* earned: the receipt fee
+
+Distinct from FCC and often confused with it. When a payment arrives, 10% of that payment
+(excl VAT, capped at R610 per payment — Annexure B item 9) is charged as **Collection
+Commission**. That one is real revenue, posted as a transaction, and it stays on the account.
+
+The order on receiving a payment is therefore:
+
+1. credit the payment against the balance
+2. debit the receipt fee — 10% of the payment, plus VAT
+3. recompute FCC on the new balance
+
+Worked through on the business's own second statement: a R100 payment reduces R2,075 to R1,975;
+the R11.50 receipt fee takes it to R1,986.50; FCC recomputes to R228.45; the statement closes at
+R2,214.95.
+
+### Rounding
+
+R2,075 x 10% x 1.15 is exactly R238.625 and the statement shows R238.63. As a double it is
+238.62499999999997, so `toFixed(2)` returns 238.62 — a cent light on every statement, on every
+account. `roundToCents` in `annexureB.ts` rounds half up through the representation gap, and
+every rand figure the module returns goes through it.
+
 ## 3. Commission
 
 Per client, negotiated — 10%, 25%, 30% have all been used.
@@ -449,9 +505,8 @@ statement waiting to be reissued, and dropping it silently is no better.
 
 ## 10. Open items, collected
 
-- **What FCC is.** `All Fees (inc VAT + FCC)` exceeds the VAT-inclusive action costs by
-  R190,200 across 213 accounts — 53% of all fees. It is not proportional to fees and not fixed
-  per account. Being clarified.
+- **How the R610 FCC ceiling behaves on an in duplum account.** The 21 accounts that do not
+  fit the confirmed formula are almost all in duplum, so the two ceilings appear to interact.
 - **What the sliding-scale commission bands are measured against** (see 3a).
 - **Whether the electronic-communication cap is per account or per debtor**, and which action
   types count toward it.
