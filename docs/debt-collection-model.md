@@ -139,23 +139,57 @@ allocations.
 
 ---
 
-## 3a. Sliding-scale commission
+## 3a. Sliding-scale commission — how Swordfish fakes it
 
-Some clients — Growthpoint among them — are not on a flat commission rate. The rate moves in
-bands with the amount, so the same client earns us a different percentage at different points.
+Resolved by the January 2026 client list, which carries a `PERCENTAGE` per client and a `Prefix`
+that joins exactly to the account data.
 
-Swordfish does not model this at all, which is one of the reasons it has to be replaced rather
-than lived with. Commission there is a single figure per client, so a sliding scale has to be
-worked out by hand every month and cannot be reconciled against anything.
+**The rate falls as the account gets bigger, and Swordfish implements the scale by splitting one
+client into several client records — one per tier.** The "-1", "-2" suffixes are not only
+handover batches; they are commission bands.
 
-The model is therefore: commission is a **set of bands per client, effective-dated**, not a
-rate. A flat-rate client is the one-band case, which keeps the common path simple without
-making the sliding-scale client a special case bolted on afterwards.
+| Client | Swordfish record | Accounts | Mean capital | Rate |
+|---|---|---|---|---|
+| ABSTO | AIS | 18 | R29,824 | 21% |
+| ABSTO | AIS2 | 1 | R370,232 | **15%** |
+| Agri Saad | AID1 | 1 | R19,422 | 25% |
+| Agri Saad | AID2 | 3 | R234,181 | **20%** |
+| Growthpoint | GPS3/1 | 108 | R15,120 | 25% |
+| Growthpoint | GPS3/2 | 71 | R21,515 | **22.5%** |
+| Growthpoint | GPS4/1 | 81 | R13,393 | 25% |
+| Growthpoint | GPS4/2 | 25 | R33,473 | **22.5%** |
+| Adowa Ellis Park | APM | 194 | R28,236 | 30% |
+| Adowa Frederick St | APM2 | 103 | R19,906 | 30% |
+| Accelerate Fitness | ACF1 | 130 | R1,899 | 30% |
 
-> **Open:** what the bands are measured against — the size of the individual payment, the
-> cumulative amount collected on that client to date, or the cumulative amount within a period.
-> The three give materially different answers on the same money and the difference compounds
-> over a year. Needs the actual agreement before anything is built.
+Across the whole book the rates are: 30% (1,088 clients), 25% (859), 20% (180), 15% (141),
+27.5% (111), 10% (80), 22.5% (25), and a long tail. Most clients are flat — one record, one
+rate. The tiered ones are the exception.
+
+### What can and cannot be derived
+
+**The historical rate is exact.** Every account belongs to a Swordfish client record, every
+record has a prefix, and every prefix has a percentage. So `debtor_accounts.commission_rate` can
+be populated per account with certainty, and no inference is involved.
+
+**The band boundaries cannot be derived, and must not be guessed.** The capital ranges overlap:
+Growthpoint's 25% tier runs R410–R31,120 while its 22.5% tier runs R5,005–R39,341, and GPS4 is
+the same — R1,605–R29,665 against R25,301–R49,680. An account at R28,000 sits in both. So the
+tier was assigned by a person at handover, not computed from a threshold.
+
+That is the difference between importing history and calculating forward:
+
+- **Import:** carry the rate each account actually has. Exact, no judgement.
+- **Forward:** a new handover needs the agreement's real bands, because the data cannot supply
+  them. Still outstanding, and now precisely scoped — it is one question per tiered client, not
+  a general design problem.
+
+### Why this has to be modelled properly
+
+Swordfish's workaround is why the client list shows Growthpoint four times and why a
+parent-level view of the relationship does not exist there. In Raptor the client is one record
+and the rate lives on the account, so the sliding scale stops being a filing convention and
+starts being a rule the system can apply and audit.
 
 ## 4. Interest
 
