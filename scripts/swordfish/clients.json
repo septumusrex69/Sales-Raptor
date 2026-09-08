@@ -1,0 +1,100 @@
+{
+  "_comment": [
+    "How Swordfish's client names become clients in Raptor. Held as data, not code, because",
+    "these are business judgements that were made in conversation and will be revisited — a",
+    "reviewer should be able to check them without reading an importer.",
+    "",
+    "Swordfish conflates three different things in one 'Client' field: the client, the",
+    "sub-entity, and the handover batch. Growthpoint appears four times and is one client with",
+    "four handovers; Adowa appears twice and is one parent with two properties that each keep",
+    "their own book. Importing the field as-is would produce eleven unrelated clients and no",
+    "parent-level view of anything.",
+    "",
+    "Superseded by the client report once that is supplied — this exists so the account import",
+    "is not blocked waiting for it.",
+    "",
+    "Superseded in part by the Jan 2026 client list: that file is authoritative for the",
+    "commission rate, BF reference, owner, banking and contact details, joined on Prefix.",
+    "What stays here is the grouping judgement the client list cannot express — that four",
+    "Growthpoint records are one client, and that Adowa's two properties are children of one",
+    "parent. Swordfish's rates are per record because that is how it fakes a sliding scale."
+  ],
+  "clients": [
+    {
+      "name": "ABSTO Industrial Supplies (Pty) Ltd",
+      "swordfish": [
+        "ABSTO Industrial Supplies (Pty)Ltd -1",
+        "ABSTO Industrial Supplies (Pty)Ltd -2"
+      ],
+      "industry": "Service Providers",
+      "commission_by_prefix": {
+        "AIS": 0.21,
+        "AIS2": 0.15
+      }
+    },
+    {
+      "name": "Accelerate Fitness",
+      "swordfish": [
+        "Accelerate Fitness - 1"
+      ],
+      "industry": "Health",
+      "commission_by_prefix": {
+        "ACF1": 0.3
+      }
+    },
+    {
+      "name": "Adowa Property Managers (Pty) Ltd",
+      "industry": "Rentals",
+      "_note": "Parent only. Two properties, each with its own account book, so they are children rather than sequential handovers of one relationship.",
+      "children": [
+        {
+          "name": "Adowa Property Managers — Ellis Park",
+          "swordfish": [
+            "Adowa Property Managers (Pty) Ltd - Ellis Park"
+          ],
+          "commission_by_prefix": {
+            "APM": 0.3
+          }
+        },
+        {
+          "name": "Adowa Property Managers — Frederick Street",
+          "swordfish": [
+            "Adowa Property Managers (Pty) Ltd -Frederick Street"
+          ],
+          "commission_by_prefix": {
+            "APM2": 0.3
+          }
+        }
+      ]
+    },
+    {
+      "name": "Agri Saad",
+      "swordfish": [
+        "Agri Saad -1",
+        "Agri Saad -2"
+      ],
+      "industry": "Products",
+      "commission_by_prefix": {
+        "AID1": 0.25,
+        "AID2": 0.2
+      }
+    },
+    {
+      "name": "Growthpoint Student Accommodation Holdings (RF) Ltd",
+      "swordfish": [
+        "Growthpoint Student Accommodation Holdings (RF) Ltd 2024 - 1",
+        "Growthpoint Student Accommodation Holdings (RF) Ltd 2024 - 2",
+        "Growthpoint Student Accommodation Holdings (RF) Ltd 2025 - 1",
+        "Growthpoint Student Accommodation Holdings (RF) Ltd 2025 - 2"
+      ],
+      "industry": "Rentals",
+      "_note": "One client, four handovers. Swordfish splits it across two client codes (GPS3/GPS4) and files them under different groups (Rentals/Schools), but it is one relationship — and one sliding-scale commission agreement, which only works if the client is one record.",
+      "commission_by_prefix": {
+        "GPS3/1": 0.25,
+        "GPS3/2": 0.225,
+        "GPS4/1": 0.25,
+        "GPS4/2": 0.225
+      }
+    }
+  ]
+}
