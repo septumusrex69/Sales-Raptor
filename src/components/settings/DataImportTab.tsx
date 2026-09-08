@@ -28,6 +28,27 @@ import { formatCurrency } from '../../data/mockData'
  * by hand. Insisting on plain CSV meant a conversion step before every import — one more thing to
  * forget, and one that lets Excel's regional date formatting change what a sign date means.
  */
+/**
+ * Database errors, said in words.
+ *
+ * "new row violates row-level security policy" is precise and tells the person reading it
+ * nothing about what to do. The two that have actually happened during this migration get an
+ * explanation; everything else is passed through unchanged rather than guessed at.
+ */
+function explain(table: string, row: number, message: string): string {
+  const where = `${table.replace(/_/g, ' ')}, row ${row}`
+  if (/row-level security/i.test(message)) {
+    return `${where}: your account is not allowed to write to this table. That is a permission `
+      + `gap in the database rather than anything wrong with the files — send this message on `
+      + `and it can be fixed in a minute. Nothing after this point was written.`
+  }
+  if (/duplicate key value/i.test(message)) {
+    return `${where}: two rows are claiming to be the same record (${message}). Either the import `
+      + `has already been run without clearing first, or the exports contain a genuine duplicate.`
+  }
+  return `${where}: ${message}`
+}
+
 async function readTable(file: File): Promise<CsvRow[]> {
   const name = file.name.toLowerCase()
   if (name.endsWith('.zip')) return parseCsv(await readSingleCsvFromZip(await file.arrayBuffer()))
@@ -173,7 +194,7 @@ export function DataImportTab() {
           if (abort.current) throw new Error('Stopped. The import is partial — run it again with "delete everything" ticked.')
           const chunk = all.slice(i, i + 500)
           const { error: e } = await supabase.from(table).insert(chunk)
-          if (e) throw new Error(`${table}, row ${i}: ${e.message}`)
+          if (e) throw new Error(explain(table, i, e.message))
           written += chunk.length
           setPhase({ step: `Writing ${table.replace(/_/g, ' ')}`, done: written, total: totalRows })
         }

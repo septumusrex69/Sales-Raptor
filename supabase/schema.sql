@@ -1047,6 +1047,18 @@ create policy "account_fees_insert" on public.account_fees for insert with check
 drop policy if exists "account_interest_select" on public.account_interest_accruals;
 create policy "account_interest_select" on public.account_interest_accruals for select using (auth.uid() is not null);
 
+-- Narrower than the other two ledgers, on purpose. Interest is *derived*, never *recorded*: a
+-- payment arrives and a person enters it, a fee is raised and a person raises it, but nobody
+-- types an accrual — the engine computes them, and a collections agent has no business inserting
+-- interest by hand. An import is run by an administrator or a manager, and the accrual engine
+-- will run server-side under the service role, which bypasses RLS entirely.
+--
+-- It had no insert policy at all until the migration tried to write one and could not. The
+-- distinction above was right; having nothing able to write was not.
+drop policy if exists "account_interest_insert" on public.account_interest_accruals;
+create policy "account_interest_insert" on public.account_interest_accruals for insert
+  with check (public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager'));
+
 -- ---------- Function hardening ----------
 -- handle_new_user and protect_profile_privileged_fields only ever run as
 -- triggers (they reference NEW/OLD, which only exist in trigger context),
