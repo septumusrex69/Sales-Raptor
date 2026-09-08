@@ -175,24 +175,27 @@ export interface AccountLedgers {
 }
 
 /**
- * An account's three ledgers.
+ * An account's three ledgers, complete.
  *
- * Fees are capped at the most recent few hundred: a two-year-old account can carry a thousand
- * actions, almost all of them zero-charge contact attempts, and nobody scrolls that. The totals
- * are computed over everything regardless, so the summary is never a total of what happens to be
- * on screen.
+ * Everything, not a page of it: the balance is computed from these rows, and a balance derived
+ * from the most recent few hundred of anything is a wrong number wearing a confident face. The
+ * busiest account in the migrated book carries 822 actions, 28 payments and 56 accrual periods,
+ * which is a single unremarkable request.
+ *
+ * Only 77 of those 822 were ever charged. The rest are contact attempts made past the Annexure B
+ * ceiling — real history, no money — so the statement stays short while the activity timeline
+ * does not.
  */
-export async function fetchLedgers(accountId: string, feeLimit = 300): Promise<AccountLedgers> {
-  const [payments, fees, accruals, allFees] = await Promise.all([
+export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
+  const [payments, fees, accruals] = await Promise.all([
     supabase.from('account_payments').select('*').eq('account_id', accountId).order('received_at', { ascending: false }),
-    supabase.from('account_fees').select('*').eq('account_id', accountId).order('incurred_at', { ascending: false }).limit(feeLimit),
+    supabase.from('account_fees').select('*').eq('account_id', accountId).order('incurred_at', { ascending: false }),
     supabase.from('account_interest_accruals').select('*').eq('account_id', accountId).order('accrued_on', { ascending: false }),
-    supabase.from('account_fees').select('amount_excl_vat,vat_amount').eq('account_id', accountId),
   ])
-  for (const r of [payments, fees, accruals, allFees]) if (r.error) throw new Error(r.error.message)
+  for (const r of [payments, fees, accruals]) if (r.error) throw new Error(r.error.message)
 
   /* eslint-disable @typescript-eslint/no-explicit-any */
-  const feeRows = (allFees.data ?? []) as any[]
+  const feeRows = (fees.data ?? []) as any[]
   return {
     payments: (payments.data ?? []).map((r: any) => ({
       id: r.id,

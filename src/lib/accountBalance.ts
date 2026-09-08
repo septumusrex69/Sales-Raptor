@@ -26,7 +26,7 @@
  * flagged rather than silently absorbed: in duplum, where accrual stops at the ceiling, and
  * write-off, where the account stopped and accrual stopped with it.
  */
-import { receiptFee, settlementReceiptFee, roundToCents, scheduleFor, type AnnexureBSchedule } from './annexureB'
+import { receiptFee, settlementReceiptFee, roundToCents, scheduleFor, type AnnexureBSchedule } from './annexureB.ts'
 
 export interface LedgerLines {
   /** Every payment received, oldest first. Reversed payments are excluded by the caller. */
