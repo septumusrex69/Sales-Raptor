@@ -1072,3 +1072,113 @@ create policy "account_interest_insert" on public.account_interest_accruals for 
 revoke execute on function public.handle_new_user() from public;
 revoke execute on function public.protect_profile_privileged_fields() from public;
 revoke execute on function public.current_user_role() from anon;
+-- ---------- The collector's workspace ----------
+-- Three tables the account page needs in order to be a place someone works, rather than a place
+-- someone reads. Everything above this point is the record of what the debt IS; these are the
+-- record of what people DO about it.
+
+-- Who you can actually reach, and on what.
+--
+-- None of the five Swordfish exports carry a debtor phone number, email or address, so this
+-- starts empty on all 735 migrated accounts. That is exactly why it is a table and not a set of
+-- columns: the numbers will arrive one at a time, from collectors who get them on a call, and
+-- an account accumulates several over the years. A verified number is worth more than an
+-- unverified one, so the fact of verification is recorded rather than assumed.
+create table if not exists public.account_contacts (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  kind text not null check (kind in ('mobile', 'phone', 'work', 'email', 'address', 'employer', 'other')),
+  value text not null,
+  -- "Mother", "Neighbour", "HR department" -- whose number this is, when it is not the debtor's.
+  label text,
+  is_primary boolean not null default false,
+  -- Verified means someone confirmed it reaches the debtor. Nulls are the normal state.
+  verified_at timestamptz,
+  verified_by uuid references public.profiles (id) on delete set null,
+  -- A number that rang out, a wrong number, a line that has been disconnected: the reason we
+  -- stop using it, kept rather than deleted so nobody re-traces the same dead number.
+  retired_at timestamptz,
+  retired_reason text,
+  notes text,
+  source text not null default 'manual',
+  created_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists account_contacts_account_idx on public.account_contacts (account_id);
+
+-- What was said. The 58,192 Swordfish action comments are not imported yet and land here when
+-- they are, which is why source exists and body is plain text rather than anything structured.
+create table if not exists public.account_notes (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  body text not null,
+  -- Pinned notes lead the timeline: "speaks Zulu", "do not call at work".
+  pinned boolean not null default false,
+  source text not null default 'manual',
+  -- Free text as well as a reference, for the same reason swordfish_assigned_to is free text:
+  -- an imported comment was written by someone who may never have a Raptor login.
+  author_name text,
+  created_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists account_notes_account_idx on public.account_notes (account_id, created_at desc);
+
+-- A promise to pay: the single most important thing a collector produces.
+--
+-- It is a claim about the future, so it is never a payment and never touches a balance. It is
+-- kept or it is broken, and which of those happened is the measure of whether a collector's day
+-- was worth anything. Deliberately NOT auto-resolved here: matching a promise to an incoming
+-- payment is the collections engine's job, and a promise silently marked kept by a rule nobody
+-- can see is worse than one a person closes.
+create table if not exists public.promises_to_pay (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  amount numeric not null check (amount > 0),
+  due_on date not null,
+  method text,
+  -- open: not yet due, or due and not yet resolved by a person.
+  -- kept / broken: what actually happened. cancelled: withdrawn before it fell due.
+  status text not null default 'open' check (status in ('open', 'kept', 'broken', 'cancelled')),
+  -- Set when a person closes it, with the payment that satisfied it where there is one.
+  resolved_at timestamptz,
+  resolved_by uuid references public.profiles (id) on delete set null,
+  payment_id uuid references public.account_payments (id) on delete set null,
+  notes text,
+  created_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists promises_account_idx on public.promises_to_pay (account_id, due_on desc);
+create index if not exists promises_open_idx on public.promises_to_pay (due_on) where status = 'open';
+
+alter table public.account_contacts enable row level security;
+alter table public.account_notes enable row level security;
+alter table public.promises_to_pay enable row level security;
+
+-- Collectors write all three: capturing a number, recording what was said and taking a promise
+-- IS the job. Nothing here changes what is owed, so the write policies are as wide as the read
+-- ones -- unlike the ledgers, where a wrong row moves money.
+drop policy if exists "account_contacts_select" on public.account_contacts;
+create policy "account_contacts_select" on public.account_contacts for select using (auth.uid() is not null);
+drop policy if exists "account_contacts_write" on public.account_contacts;
+create policy "account_contacts_write" on public.account_contacts for all
+  using (auth.uid() is not null) with check (auth.uid() is not null);
+
+drop policy if exists "account_notes_select" on public.account_notes;
+create policy "account_notes_select" on public.account_notes for select using (auth.uid() is not null);
+drop policy if exists "account_notes_insert" on public.account_notes;
+create policy "account_notes_insert" on public.account_notes for insert with check (auth.uid() is not null);
+-- A note is a contemporaneous record of what was said. Editing one after the fact defeats the
+-- point, so there is no update policy: correct it with another note.
+drop policy if exists "account_notes_update" on public.account_notes;
+create policy "account_notes_update" on public.account_notes for update
+  using (public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager'))
+  with check (public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager'));
+
+drop policy if exists "promises_select" on public.promises_to_pay;
+create policy "promises_select" on public.promises_to_pay for select using (auth.uid() is not null);
+drop policy if exists "promises_write" on public.promises_to_pay;
+create policy "promises_write" on public.promises_to_pay for all
+  using (auth.uid() is not null) with check (auth.uid() is not null);

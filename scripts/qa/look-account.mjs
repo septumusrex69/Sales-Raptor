@@ -94,8 +94,30 @@ const profiles = [{
   role: 'Administrator', team_id: null, avatar_url: null, is_active: true,
 }]
 
+const contacts = [
+  { id: 'c1', account_id: ACC, kind: 'mobile', value: '+27 82 123 4567', label: null, is_primary: true, verified_at: '2026-08-06T09:00:00Z', retired_at: null, retired_reason: null, notes: null, created_at: '2026-08-06T09:00:00Z' },
+  { id: 'c2', account_id: ACC, kind: 'work', value: '+27 11 987 6543', label: 'Build It Construction', is_primary: false, verified_at: null, retired_at: null, retired_reason: null, notes: null, created_at: '2026-08-06T09:05:00Z' },
+  { id: 'c3', account_id: ACC, kind: 'email', value: 'thandiwe.m@example.co.za', label: null, is_primary: false, verified_at: null, retired_at: null, retired_reason: null, notes: null, created_at: '2026-08-06T09:06:00Z' },
+  { id: 'c4', account_id: ACC, kind: 'address', value: '123 Madiba Street, Diepkloof, Soweto, 1864', label: null, is_primary: false, verified_at: null, retired_at: null, retired_reason: null, notes: null, created_at: '2026-08-06T09:07:00Z' },
+  { id: 'c5', account_id: ACC, kind: 'mobile', value: '+27 71 000 1111', label: null, is_primary: false, verified_at: null, retired_at: '2026-07-01T09:00:00Z', retired_reason: 'disconnected', notes: null, created_at: '2025-11-02T09:00:00Z' },
+]
+
+const notes = [
+  { id: 'n1', account_id: ACC, body: 'Spoke to Thandiwe. She confirmed payment will be made today and asked for the bank details again -- sent via WhatsApp.', pinned: false, author_name: 'Amanda Coertze', created_by: null, created_at: '2026-08-05T09:12:00Z' },
+  { id: 'n2', account_id: ACC, body: 'Requested a 7-day extension. Advised of the collection process and the fee position.', pinned: false, author_name: 'Amanda Coertze', created_by: null, created_at: '2026-06-04T11:18:00Z' },
+]
+
+const promises = [
+  { id: 'pr1', account_id: ACC, amount: 5000, due_on: '2026-09-07', method: 'EFT', status: 'open', resolved_at: null, notes: 'Client confirmed payment today.', created_by: null, created_at: '2026-08-05T09:12:00Z' },
+  { id: 'pr2', account_id: ACC, amount: 1500, due_on: '2026-06-05', method: 'Debit order', status: 'kept', resolved_at: '2026-06-05T10:00:00Z', notes: null, created_by: null, created_at: '2026-05-20T09:00:00Z' },
+  { id: 'pr3', account_id: ACC, amount: 1500, due_on: '2026-04-05', method: 'EFT', status: 'broken', resolved_at: '2026-04-12T10:00:00Z', notes: null, created_by: null, created_at: '2026-03-18T09:00:00Z' },
+]
+
 const TABLES = {
   debtor_accounts: [account],
+  account_contacts: contacts,
+  account_notes: notes,
+  promises_to_pay: promises,
   account_payments: payments,
   account_fees: feeRows,
   account_interest_accruals: accruals,
@@ -133,10 +155,10 @@ const seed = ({ ref, user }) => {
 }
 await page.addInitScript(seed, { ref: REF, user: USER })
 
-for (const tab of ['Overview', 'Statement', 'Activity']) {
+for (const tab of ['Workspace', 'Statement']) {
   await page.goto(`${ORIGIN}/accounts/${ACC}`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(1500)
-  if (tab !== 'Overview') {
+  if (tab !== 'Workspace') {
     const b = page.getByRole('button', { name: new RegExp('^' + tab) })
     if (await b.count()) { await b.first().click(); await page.waitForTimeout(700) }
     else console.log(`!! tab button not found: ${tab}`)
