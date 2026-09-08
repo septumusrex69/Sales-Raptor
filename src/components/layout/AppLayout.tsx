@@ -19,11 +19,16 @@ const TITLES: { test: RegExp; title: string }[] = [
   { test: /^\/reports/, title: 'Reports' },
   { test: /^\/settings/, title: 'Settings' },
   { test: /^\/reps\/[^/]+$/, title: 'Rep Performance' },
+  { test: /^\/accounts\/[^/]+$/, title: 'Account' },
+  { test: /^\/accounts/, title: 'Accounts' },
 ]
 
 export function AppLayout() {
   const location = useLocation()
-  const title = TITLES.find((t) => t.test.test(location.pathname))?.title ?? 'Dashboard'
+  // No fallback to 'Dashboard': a route missing from this table would then sit under a heading
+  // naming a different page, which is how /accounts spent its first day calling itself Dashboard.
+  // An empty heading is visibly unfinished; a wrong one is not.
+  const title = TITLES.find((t) => t.test.test(location.pathname))?.title ?? ''
 
   return (
     <TitleSlotProvider>

@@ -266,9 +266,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Field({ label, value }: { label: string; value?: string | null }) {
   return (
-    <div className="flex justify-between gap-3 text-sm">
+    // flex-wrap, so a value too wide to sit beside its label drops to its own full-width line
+    // instead of being squeezed and broken mid-way. A reference number split across two lines
+    // with one stray digit is a number someone will read out wrong over the phone.
+    <div className="flex flex-wrap justify-between gap-x-3 text-sm">
       <span className="text-slate-500 shrink-0">{label}</span>
-      <span className="text-slate-800 text-right min-w-0 break-words">{value || '—'}</span>
+      <span className="text-slate-800 text-right min-w-0 break-words ml-auto">{value || '—'}</span>
     </div>
   )
 }
@@ -366,7 +369,7 @@ function ActivityList({ ledgers }: { ledgers: AccountLedgers | null }) {
             <span className="tabular-nums w-20 text-right shrink-0">
               {f.billed
                 ? <span className="text-slate-700">{formatCurrency(f.amountExclVat + f.vatAmount)}</span>
-                : <span className="text-slate-300">free</span>}
+                : <span className="text-slate-300" title="Work done past the Annexure B ceiling. Real history, no money.">not charged</span>}
             </span>
           </div>
         ))}
