@@ -90,7 +90,8 @@ export function DebtorDetailsPanel({ account, name, workspace, onChange, userId,
       {err && <p className="text-xs text-negative-700 mb-2">{err}</p>}
 
       <dl className="space-y-3">
-        <Slot icon="name" label="Full Name" value={name} />
+        <Slot icon="name" label="Full Name" value={name}
+          note={[account.debtorTitle, account.debtorInitials, account.debtorSurname].filter(Boolean).join(' ') || null} />
         <Slot icon="id" label="ID Number" value={account.debtorIdNumber} />
 
         <ContactSlot icon="mobile" label="Mobile (Primary)" contact={primaryPhone}
@@ -167,8 +168,16 @@ const Blank = ({ onAdd }: { onAdd?: () => void }) =>
     ? <button onClick={onAdd} className="text-slate-300 hover:text-brand-600 hover:underline">Not recorded</button>
     : <span className="text-slate-300">Not recorded</span>
 
-function Slot({ icon, label, value }: { icon: keyof typeof SLOT_ICON; label: string; value?: string | null }) {
-  return <SlotShell icon={icon} label={label}>{value || <Blank />}</SlotShell>
+function Slot({ icon, label, value, note }: {
+  icon: keyof typeof SLOT_ICON; label: string; value?: string | null; note?: string | null
+}) {
+  return (
+    <SlotShell icon={icon} label={label}>
+      {value || <Blank />}
+      {/* How a letter of demand would address them, where we have the title and initials. */}
+      {note && note !== value && <span className="block text-[11px] text-slate-400">{note}</span>}
+    </SlotShell>
+  )
 }
 
 function ContactSlot({ icon, label, contact, onAdd, userId, busy, run, onOpen }: {

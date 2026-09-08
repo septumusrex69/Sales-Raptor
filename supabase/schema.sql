@@ -1254,3 +1254,33 @@ create policy "account_documents_remove" on storage.objects
     bucket_id = 'account-documents'
     and public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
   );
+
+-- ---------- Debtors Per Client ----------
+-- The sixth Swordfish export, and the one that carries the debtor themselves: 691 cellphones,
+-- 678 email addresses and 721 main comments on a book of 735, none of which appeared in any of
+-- the other five. Everything it adds is about the PERSON and how to reach them; the money still
+-- comes from the account summary and the three ledgers.
+alter table public.debtor_accounts
+  -- For addressing a letter of demand properly. "Mr T Mokoena" is not the same document as
+  -- "thabo mokoena", and 723 of 735 rows carry initials.
+  add column if not exists debtor_title text,
+  add column if not exists debtor_initials text,
+  add column if not exists debtor_second_name text,
+  -- Swordfish's own operational flags, semicolon-separated as exported: "Debtor avoiding
+  -- contact; Section 129 in process". Kept as the original string rather than split into a
+  -- lookup — they are a note from another system, and inventing a taxonomy for them here would
+  -- be inventing meaning we have not been told.
+  add column if not exists account_flags text,
+  add column if not exists account_rating integer,
+  add column if not exists last_contact_method text,
+  -- How often this debtor keeps a promise, per Swordfish. Worth having beside a new promise.
+  add column if not exists ptp_success_ratio numeric;
+
+alter table public.promises_to_pay
+  -- How the promise was obtained: a phone call, WhatsApp, email. Distinct from `method`, which
+  -- is how they said they would pay.
+  add column if not exists origin text,
+  add column if not exists source text not null default 'manual';
+
+create index if not exists debtor_accounts_flags_idx
+  on public.debtor_accounts (account_flags) where account_flags is not null;

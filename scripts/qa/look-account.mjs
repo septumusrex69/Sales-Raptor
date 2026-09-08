@@ -49,6 +49,9 @@ const account = {
   main_comment: 'Debit order in place since June, R1,500 a month, holding. Thandiwe asked for the total to settle -- quoted, waiting. Do not call at work.',
   main_comment_at: '2026-08-05T09:20:00Z',
   preferred_language: 'English', contact_preference: 'Phone, WhatsApp', consent_status: 'Consented',
+  debtor_title: 'Ms', debtor_initials: 'T', debtor_second_name: null,
+  account_flags: 'Debtor avoiding contact; Section 129 in process',
+  account_rating: 7, last_contact_method: 'Email (Outgoing)', ptp_success_ratio: 7,
   diary_date: '2026-09-22', last_action_at: '2026-09-02', last_payment_at: '2026-08-05',
 }
 

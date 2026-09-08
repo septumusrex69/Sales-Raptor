@@ -93,6 +93,12 @@ const SOURCES = [
     hint: 'Who the clients are: registration numbers, commission tiers, banking and contacts.',
     required: false,
   },
+  {
+    key: 'debtors',
+    label: 'Debtors Per Client',
+    hint: 'The debtor themselves: phone numbers, email addresses, the main comment, promises to pay.',
+    required: false,
+  },
   { key: 'accounts', label: 'Client Account Summary', hint: 'One row per debtor account. The spine of the import.', required: true },
   { key: 'payments', label: 'All Payments per Client', hint: 'Every payment received, including client-direct.', required: true },
   { key: 'actions', label: 'Actions performed per Client', hint: 'Every action and what it cost. The largest file by far.', required: true },
@@ -145,6 +151,7 @@ export function DataImportTab() {
           actions: parsed.actions,
           interest: parsed.interest,
           clients: parsed.clients,
+          debtors: parsed.debtors,
         },
         { ownerId, only: only.trim() || undefined },
       ))
@@ -284,7 +291,8 @@ export function DataImportTab() {
           <p className="text-xs text-slate-400 mt-2">
             The four account exports are needed — balances cannot be checked without them. Without the
             client register the clients are worked out from their names instead, which is a guess where
-            the register is a record.
+            the register is a record. Without Debtors Per Client there are no phone numbers, no email
+            addresses and no main comments: the book imports, but nobody can be phoned.
           </p>
         )}
       </Card>
@@ -420,6 +428,13 @@ function PlanReview({ plan }: { plan: ImportPlan }) {
     { label: 'Payments', value: plan.payments.length.toLocaleString('en-ZA'), note: `${formatCurrency(stats.paid)}${stats.paidToClient ? ` · ${stats.paidToClient} paid to client` : ''}` },
     { label: 'Fees', value: plan.fees.length.toLocaleString('en-ZA'), note: `${formatCurrency(stats.feesInclVat)} incl VAT` },
     { label: 'Interest accruals', value: plan.accruals.length.toLocaleString('en-ZA'), note: formatCurrency(stats.interest) },
+    {
+      label: 'Contact details',
+      value: plan.contacts.length.toLocaleString('en-ZA'),
+      note: `${plan.contacts.filter((c) => c.kind === 'mobile').length} mobile · ${plan.contacts.filter((c) => c.kind === 'email').length} email`,
+    },
+    { label: 'Promises to pay', value: plan.promises.length.toLocaleString('en-ZA'), note: 'open or broken in Swordfish' },
+    { label: 'Comments', value: plan.accountNotes.length.toLocaleString('en-ZA'), note: 'last and sub-status comments' },
   ]), [plan, stats])
 
   return (

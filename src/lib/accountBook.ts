@@ -48,6 +48,14 @@ export interface DebtorAccount {
   preferredLanguage: string | null
   contactPreference: string | null
   consentStatus: string | null
+  debtorTitle: string | null
+  debtorInitials: string | null
+  debtorSecondName: string | null
+  /** Swordfish's own operational flags, semicolon-separated: "Debtor avoiding contact; ...". */
+  accountFlags: string | null
+  accountRating: number | null
+  lastContactMethod: string | null
+  ptpSuccessRatio: number | null
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON from PostgREST. */
@@ -88,7 +96,19 @@ const toAccount = (r: any): DebtorAccount => ({
   preferredLanguage: r.preferred_language ?? null,
   contactPreference: r.contact_preference ?? null,
   consentStatus: r.consent_status ?? null,
+  debtorTitle: r.debtor_title ?? null,
+  debtorInitials: r.debtor_initials ?? null,
+  debtorSecondName: r.debtor_second_name ?? null,
+  accountFlags: r.account_flags ?? null,
+  accountRating: r.account_rating === null || r.account_rating === undefined ? null : Number(r.account_rating),
+  lastContactMethod: r.last_contact_method ?? null,
+  ptpSuccessRatio: r.ptp_success_ratio === null || r.ptp_success_ratio === undefined ? null : Number(r.ptp_success_ratio),
 })
+
+/** The flags as separate items. Swordfish exports them semicolon-separated in one column. */
+export function accountFlagList(a: DebtorAccount): string[] {
+  return (a.accountFlags ?? '').split(';').map((f) => f.trim()).filter(Boolean)
+}
 
 export interface AccountQuery {
   companyId?: string

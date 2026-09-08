@@ -9,7 +9,7 @@ import { DashboardHero } from '../../components/dashboard/DashboardHero'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { StatusPill } from './AccountsList'
-import { fetchAccount, fetchLedgers, hasCommissionDrift, type AccountLedgers, type DebtorAccount } from '../../lib/accountBook'
+import { accountFlagList, fetchAccount, fetchLedgers, hasCommissionDrift, type AccountLedgers, type DebtorAccount } from '../../lib/accountBook'
 import { buildStatement, type BalanceInput, type BalanceBreakdown, type StatementLine } from '../../lib/accountBalance'
 import {
   addNote, addPromise, fetchDocuments, fetchWorkspace, isOverdue, nextPromise, resolvePromise,
@@ -208,6 +208,20 @@ export function AccountDetail() {
         />
       </div>
 
+      {accountFlagList(account).length > 0 && (
+        // Swordfish's own flags. They change how the account is worked — "Debtor avoiding
+        // contact" and "Section 129 in process" are not the same conversation — so they sit
+        // above the fold rather than among the fields at the bottom of a panel.
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] uppercase tracking-wide text-slate-400">Flags</span>
+          {accountFlagList(account).map((f) => (
+            <span key={f} className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+              {f}
+            </span>
+          ))}
+        </div>
+      )}
+
       <MainComment account={account} busy={savingComment}
         onSave={(text) => runComment(() => saveMainComment(account.id, text, currentUser?.id ?? null))} />
 
@@ -276,6 +290,7 @@ export function AccountDetail() {
               onChange={reload}
               open={promiseOpen}
               setOpen={setPromiseOpen}
+              successRatio={account.ptpSuccessRatio}
             />
             <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0} />
           </div>
@@ -588,13 +603,15 @@ function SummaryPanel({ account, breakdown }: { account: DebtorAccount; breakdow
  * never touches a balance — it is kept or it is broken, and a person says which. Matching one
  * against an incoming payment is the collections engine's job, and that does not exist yet.
  */
-function PromisePanel({ accountId, promises, userId, onChange, open, setOpen }: {
+function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, successRatio }: {
   accountId: string
   promises: PromiseToPay[]
   userId: string | null
   onChange: () => Promise<void>
   open: boolean
   setOpen: (v: boolean) => void
+  /** Swordfish's score for how reliably this debtor keeps one, out of ten. */
+  successRatio: number | null
 }) {
   const [amount, setAmount] = useState('')
   const [dueOn, setDueOn] = useState('')
@@ -619,6 +636,15 @@ function PromisePanel({ accountId, promises, userId, onChange, open, setOpen }: 
           {open ? <><X size={12} /> Cancel</> : <><Plus size={12} /> Take one</>}
         </button>
       }>Promise to pay</PanelTitle>
+
+      {successRatio !== null && (
+        // Worth knowing before you take another one: a debtor who has kept none of the last ten
+        // is a different conversation from one who has kept eight.
+        <p className="text-[11px] text-slate-500 mb-3">
+          Keeps <span className="font-medium text-slate-700 tabular-nums">{successRatio}</span> of 10 promises,
+          per Swordfish.
+        </p>
+      )}
 
       {open && (
         <form onSubmit={submit} className="space-y-2 p-3 rounded-lg bg-slate-50 border border-slate-100 mb-3">
@@ -727,6 +753,7 @@ function PositionPanel({ account, ceiling, chargedExclVat }: {
         <Field label="Prescribes" value={account.prescriptionDate ? formatDate(account.prescriptionDate) : null} />
         <Field label="Diary date" value={account.diaryDate ? formatDate(account.diaryDate) : null} />
         <Field label="Last action" value={account.lastActionAt ? formatDate(account.lastActionAt) : null} />
+        <Field label="Last contact by" value={account.lastContactMethod} />
         <Field label="Written off" value={account.writeOffReason} />
       </div>
     </Card>

@@ -26,6 +26,7 @@ import { num, isoDate, text, type CsvRow } from './csv.ts'
 import { codeForLegacyName, isQuarantinedLegacyName } from './actionTariff.ts'
 import { rateForCapital, type CommissionSchedule } from './commission.ts'
 import { SWORDFISH_CLIENTS, type SwordfishClientSpec } from './swordfishClients.ts'
+import { readDebtorsPerClient, type ContactRow, type NoteRow, type PromiseRow } from './swordfishDebtors.ts'
 
 export interface SwordfishExports {
   accounts: CsvRow[]
@@ -38,6 +39,12 @@ export interface SwordfishExports {
    * judgements in swordfishClients.ts, which is how this worked before the register existed.
    */
   clients?: CsvRow[]
+  /**
+   * Debtors Per Client — the debtor themselves: phone numbers, email addresses, the main comment
+   * and any promise they are on. Optional, because the first five exports were imported without
+   * it; supplying it is what turns a ledger into an account someone can work.
+   */
+  debtors?: CsvRow[]
 }
 
 export interface CompanyRow {
@@ -189,6 +196,9 @@ export interface ImportPlan {
   payments: PaymentRow[]
   fees: FeeRow[]
   accruals: AccrualRow[]
+  contacts: ContactRow[]
+  promises: PromiseRow[]
+  accountNotes: NoteRow[]
   /** Things that need a person's attention. A plan with problems still imports; it just says so. */
   problems: string[]
   /** Things worth knowing that are not faults. */
@@ -815,6 +825,53 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
   const ceiling = Math.max(0, ...chargedPerAccount.values())
   const feeCeilingHit = [...chargedPerAccount.values()].filter((v) => v >= ceiling * 0.75).length
 
+  /* ------------------------------------------------- debtors per client */
+
+  /*
+   * The sixth export, applied last because it enriches accounts the other five built.
+   *
+   * It is matched on Swordfish Reference, and a row that matches nothing is REPORTED rather than
+   * dropped in silence: a debtor whose account is missing means the two exports were taken at
+   * different times, which is worth knowing before anybody works from the result.
+   */
+  const contacts: ContactRow[] = []
+  const promises: PromiseRow[] = []
+  const accountNotes: NoteRow[] = []
+
+  if (exports.debtors?.length) {
+    const d = readDebtorsPerClient(exports.debtors, now)
+    problems.push(...d.problems)
+    notes.push(...d.notes)
+
+    let matched = 0
+    let unmatched = 0
+    for (const [ref, patch] of d.patches) {
+      const account = accountByRef.get(ref)
+      if (!account) { unmatched++; continue }
+      matched++
+      // Only overwrite where this export actually has something. A blank column here must not
+      // erase a name the account summary supplied.
+      for (const [k, v] of Object.entries(patch)) {
+        if (v !== null && v !== undefined) (account as unknown as Record<string, unknown>)[k] = v
+      }
+      for (const c of d.contactsByRef.get(ref) ?? []) contacts.push({ ...c, account_id: account.id })
+      for (const p of d.promisesByRef.get(ref) ?? []) promises.push({ ...p, account_id: account.id })
+      for (const n of d.notesByRef.get(ref) ?? []) accountNotes.push({ ...n, account_id: account.id })
+    }
+
+    notes.push(`Debtor details matched ${matched.toLocaleString('en-ZA')} of ${d.stats.rows.toLocaleString('en-ZA')} rows.`)
+    if (unmatched) {
+      problems.push(
+        `${unmatched} debtors in Debtors Per Client have no matching account in the Client Account `
+        + `Summary. The two exports were probably taken at different times.`,
+      )
+    }
+    const withoutDetails = debtorAccounts.length - matched
+    if (withoutDetails > 0) {
+      notes.push(`${withoutDetails.toLocaleString('en-ZA')} accounts got no debtor details — they are not in that export.`)
+    }
+  }
+
   return {
     companies,
     handovers,
@@ -822,6 +879,9 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
     payments,
     fees,
     accruals,
+    contacts,
+    promises,
+    accountNotes,
     problems,
     notes,
     stats: {
@@ -845,7 +905,7 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
  */
 export const IMPORT_TABLES = [
   'companies', 'handovers', 'debtor_accounts', 'account_payments', 'account_fees',
-  'account_interest_accruals',
+  'account_interest_accruals', 'account_contacts', 'promises_to_pay', 'account_notes',
 ] as const
 
 /**
@@ -855,6 +915,7 @@ export const IMPORT_TABLES = [
  * configuration a person set up by hand, and an import must never be the thing that deletes them.
  */
 export const WIPE_TABLES = [
+  'account_documents', 'account_notes', 'promises_to_pay', 'account_contacts',
   'account_interest_accruals', 'account_fees', 'payment_allocations', 'account_payments',
   'debtor_accounts', 'handovers', 'notifications', 'activities', 'tasks', 'proposals',
   'deals', 'contacts', 'leads', 'companies',
@@ -868,5 +929,8 @@ export function planRows(plan: ImportPlan): Record<(typeof IMPORT_TABLES)[number
     account_payments: plan.payments,
     account_fees: plan.fees,
     account_interest_accruals: plan.accruals,
+    account_contacts: plan.contacts,
+    promises_to_pay: plan.promises,
+    account_notes: plan.accountNotes,
   }
 }
