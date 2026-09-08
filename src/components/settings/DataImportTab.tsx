@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, CheckCircle2, FileUp, Info, Loader2, Upload } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Database, FileUp, Info, Loader2, Upload } from 'lucide-react'
 import { Card, CardHeader } from '../ui/Card'
 import { inputClass } from '../ui/Modal'
 import { useAuth } from '../../store/AuthContext'
@@ -10,6 +10,17 @@ import {
   buildImportPlan, planRows, IMPORT_TABLES, WIPE_TABLES, type ImportPlan,
 } from '../../lib/swordfishImport'
 import { formatCurrency } from '../../data/mockData'
+
+/**
+ * Which database this app is actually pointed at.
+ *
+ * Shown because the person about to press a button labelled "delete everything" deserves to know
+ * which database they are deleting everything from, and because a deployment's environment
+ * variables are not something you can check from inside the deployment without being told.
+ */
+const DATABASE_HOST = (() => {
+  try { return new URL(import.meta.env.VITE_SUPABASE_URL as string).hostname } catch { return 'unknown' }
+})()
 
 /**
  * Bringing the book across from Swordfish.
@@ -83,6 +94,24 @@ export function DataImportTab() {
     const rows = planRows(plan)
     const totalRows = IMPORT_TABLES.reduce((t, k) => t + rows[k].length, 0)
     try {
+      /*
+       * Before deleting anything, prove the destination can actually receive the import. A
+       * database without the collections tables is one the migration never reached — half-wiping
+       * it and then failing on the first insert leaves a mess that looks like data loss, because
+       * it is. The read is cheap and the alternative is unrecoverable by the person clicking.
+       */
+      setPhase({ step: 'Checking the database is ready', done: 0, total: 0 })
+      for (const table of IMPORT_TABLES) {
+        const { error: e } = await supabase.from(table).select('id').limit(1)
+        if (e) {
+          throw new Error(
+            `This database is missing "${table}" (${e.message}). It has not had the collections `
+            + `migration applied, so nothing has been changed. Check you are pointed at the right `
+            + `database — this app is connected to ${DATABASE_HOST}.`,
+          )
+        }
+      }
+
       if (wipe) {
         for (const [i, table] of WIPE_TABLES.entries()) {
           setPhase({ step: `Clearing ${table.replace(/_/g, ' ')}`, done: i, total: WIPE_TABLES.length })
@@ -129,6 +158,13 @@ export function DataImportTab() {
           title="Import from Swordfish"
           subtitle="Reading the exports shows what would change and writes nothing. Importing is a separate step."
         />
+
+        <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-slate-50 text-sm">
+          <Database size={15} className="text-slate-400 shrink-0" />
+          <span className="text-slate-600">
+            Connected to <span className="font-mono font-medium text-slate-800">{DATABASE_HOST}</span>
+          </span>
+        </div>
 
         <div className="space-y-3">
           {SOURCES.map((s) => (
@@ -239,6 +275,9 @@ export function DataImportTab() {
               Delete everything first — every client, lead, deal, contact, task, activity and account.
               <span className="block text-[11px] text-slate-400 mt-0.5">
                 People, teams and targets are kept. Without this, the import adds to whatever is already there.
+              </span>
+              <span className="block text-[11px] text-slate-500 mt-1">
+                On <span className="font-mono font-medium">{DATABASE_HOST}</span>.
               </span>
             </span>
           </label>
