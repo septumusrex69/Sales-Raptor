@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Screenshots from scripts/qa/screenshot.mjs. Throwaway output, never committed.
+.qa-screenshots/
