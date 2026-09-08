@@ -46,6 +46,9 @@ const account = {
   write_off_reason: null, handover_date: '2024-04-18',
   payments_to_date: 4300, swordfish_balance_at_import: 21114.62, swordfish_fees_at_import: 1225,
   swordfish_assigned_to: 'Amanda Coertze',
+  main_comment: 'Debit order in place since June, R1,500 a month, holding. Thandiwe asked for the total to settle -- quoted, waiting. Do not call at work.',
+  main_comment_at: '2026-08-05T09:20:00Z',
+  preferred_language: 'English', contact_preference: 'Phone, WhatsApp', consent_status: 'Consented',
   diary_date: '2026-09-22', last_action_at: '2026-09-02', last_payment_at: '2026-08-05',
 }
 
@@ -116,6 +119,11 @@ const promises = [
 const TABLES = {
   debtor_accounts: [account],
   account_contacts: contacts,
+  account_documents: [
+    { id: 'd1', account_id: ACC, name: 'Letter of demand - 20 Aug 2024.pdf', storage_path: 'x/1.pdf', mime_type: 'application/pdf', size_bytes: 184320, kind: 'Letter of Demand', uploaded_by_name: 'Amanda Coertze', created_at: '2024-08-20T10:00:00Z' },
+    { id: 'd2', account_id: ACC, name: 'Acknowledgement of debt (signed).pdf', storage_path: 'x/2.pdf', mime_type: 'application/pdf', size_bytes: 402000, kind: 'Acknowledgement of Debt', uploaded_by_name: 'Amanda Coertze', created_at: '2024-09-02T10:00:00Z' },
+    { id: 'd3', account_id: ACC, name: 'Proof of payment Aug 2026.pdf', storage_path: 'x/3.pdf', mime_type: 'application/pdf', size_bytes: 96000, kind: 'Proof of payment', uploaded_by_name: 'Stephan Bredell', created_at: '2026-08-05T10:00:00Z' },
+  ],
   account_notes: notes,
   promises_to_pay: promises,
   account_payments: payments,
@@ -155,10 +163,10 @@ const seed = ({ ref, user }) => {
 }
 await page.addInitScript(seed, { ref: REF, user: USER })
 
-for (const tab of ['Workspace', 'Statement']) {
+for (const tab of ['Overview', 'Transactions', 'Documents']) {
   await page.goto(`${ORIGIN}/accounts/${ACC}`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(1500)
-  if (tab !== 'Workspace') {
+  if (tab !== 'Overview') {
     const b = page.getByRole('button', { name: new RegExp('^' + tab) })
     if (await b.count()) { await b.first().click(); await page.waitForTimeout(700) }
     else console.log(`!! tab button not found: ${tab}`)

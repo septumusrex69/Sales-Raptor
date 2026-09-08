@@ -43,6 +43,11 @@ export interface DebtorAccount {
   diaryDate: string | null
   lastActionAt: string | null
   lastPaymentAt: string | null
+  mainComment: string | null
+  mainCommentAt: string | null
+  preferredLanguage: string | null
+  contactPreference: string | null
+  consentStatus: string | null
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON from PostgREST. */
@@ -78,6 +83,11 @@ const toAccount = (r: any): DebtorAccount => ({
   diaryDate: r.diary_date,
   lastActionAt: r.last_action_at,
   lastPaymentAt: r.last_payment_at,
+  mainComment: r.main_comment ?? null,
+  mainCommentAt: r.main_comment_at ?? null,
+  preferredLanguage: r.preferred_language ?? null,
+  contactPreference: r.contact_preference ?? null,
+  consentStatus: r.consent_status ?? null,
 })
 
 export interface AccountQuery {

@@ -251,3 +251,150 @@ export async function resolvePromise(
   if (error) throw new Error(error.message)
   return toPromise(data)
 }
+
+/* ---------- Documents ---------- */
+
+export interface AccountDocument {
+  id: string
+  accountId: string
+  name: string
+  storagePath: string
+  mimeType: string | null
+  sizeBytes: number | null
+  kind: string | null
+  uploadedByName: string | null
+  createdAt: string
+}
+
+const toDocument = (r: any): AccountDocument => ({
+  id: r.id,
+  accountId: r.account_id,
+  name: r.name,
+  storagePath: r.storage_path,
+  mimeType: r.mime_type,
+  sizeBytes: r.size_bytes === null ? null : Number(r.size_bytes),
+  kind: r.kind,
+  uploadedByName: r.uploaded_by_name,
+  createdAt: r.created_at,
+})
+
+/** What kind of paper it is. A short list, because a long one gets ignored. */
+export const DOCUMENT_KINDS = [
+  'Mandate', 'Acknowledgement of Debt', 'Letter of Demand', 'Statement',
+  'Proof of payment', 'Identity document', 'Court document', 'Correspondence', 'Other',
+] as const
+
+const BUCKET = 'account-documents'
+
+export async function fetchDocuments(accountId: string): Promise<AccountDocument[]> {
+  const { data, error } = await supabase
+    .from('account_documents')
+    .select('*')
+    .eq('account_id', accountId)
+    .order('created_at', { ascending: false })
+  if (error) throw new Error(error.message)
+  return (data ?? []).map(toDocument)
+}
+
+/**
+ * Upload, then record.
+ *
+ * In that order on purpose: a row pointing at a file that failed to upload is a broken link in
+ * the list, while a file with no row is invisible clutter in a bucket. The first is the one a
+ * person trips over.
+ *
+ * The stored path is prefixed with the account and a random id, so two people uploading
+ * "statement.pdf" on the same account do not collide and neither can overwrite the other.
+ */
+export async function uploadDocument(input: {
+  accountId: string
+  file: File
+  kind?: string | null
+  uploadedBy?: string | null
+  uploadedByName?: string | null
+}): Promise<AccountDocument> {
+  const safe = input.file.name.replace(/[^\w.\-() ]+/g, '_').slice(0, 120)
+  const path = `${input.accountId}/${crypto.randomUUID()}-${safe}`
+
+  const up = await supabase.storage.from(BUCKET).upload(path, input.file, {
+    contentType: input.file.type || 'application/octet-stream',
+    upsert: false,
+  })
+  if (up.error) throw new Error(up.error.message)
+
+  const { data, error } = await supabase
+    .from('account_documents')
+    .insert({
+      account_id: input.accountId,
+      name: input.file.name,
+      storage_path: path,
+      mime_type: input.file.type || null,
+      size_bytes: input.file.size,
+      kind: input.kind ?? null,
+      uploaded_by: input.uploadedBy ?? null,
+      uploaded_by_name: input.uploadedByName ?? null,
+    })
+    .select('*')
+    .single()
+  if (error) {
+    // The row failed, so the file is an orphan. Remove it rather than leave a private bucket
+    // quietly filling with files nothing points at.
+    await supabase.storage.from(BUCKET).remove([path])
+    throw new Error(error.message)
+  }
+  return toDocument(data)
+}
+
+/**
+ * A short-lived URL to open one.
+ *
+ * The bucket is private, so there is no permanent address to link to. Sixty seconds is enough to
+ * open a PDF and not enough for the URL to be worth passing on.
+ */
+export async function documentUrl(storagePath: string): Promise<string> {
+  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(storagePath, 60)
+  if (error || !data?.signedUrl) throw new Error(error?.message ?? 'Could not open that document.')
+  return data.signedUrl
+}
+
+/** Managers only, enforced by RLS as well as here. Removes the file and then the row. */
+export async function deleteDocument(doc: AccountDocument): Promise<void> {
+  const rm = await supabase.storage.from(BUCKET).remove([doc.storagePath])
+  if (rm.error) throw new Error(rm.error.message)
+  const { error } = await supabase.from('account_documents').delete().eq('id', doc.id)
+  if (error) throw new Error(error.message)
+}
+
+/* ---------- The account's own editable fields ---------- */
+
+/**
+ * The main comment: the current state of play, in a sentence or two.
+ *
+ * Rewritten rather than appended to, which is what separates it from a note. A note is dated
+ * evidence of what was said on a day; this is what someone picking the account up needs to know
+ * before they read any of it.
+ */
+export async function saveMainComment(accountId: string, text: string, byId: string | null): Promise<void> {
+  const { error } = await supabase
+    .from('debtor_accounts')
+    .update({
+      main_comment: text.trim() || null,
+      main_comment_at: new Date().toISOString(),
+      main_comment_by: byId,
+    })
+    .eq('id', accountId)
+  if (error) throw new Error(error.message)
+}
+
+export async function saveDebtorPreferences(accountId: string, patch: {
+  preferredLanguage?: string | null
+  contactPreference?: string | null
+  consentStatus?: string | null
+}): Promise<void> {
+  const row: Record<string, string | null> = {}
+  if ('preferredLanguage' in patch) row.preferred_language = patch.preferredLanguage?.trim() || null
+  if ('contactPreference' in patch) row.contact_preference = patch.contactPreference?.trim() || null
+  if ('consentStatus' in patch) row.consent_status = patch.consentStatus?.trim() || null
+  const { error } = await supabase.from('debtor_accounts').update(row).eq('id', accountId)
+  if (error) throw new Error(error.message)
+}

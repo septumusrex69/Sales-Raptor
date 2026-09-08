@@ -1182,3 +1182,75 @@ create policy "promises_select" on public.promises_to_pay for select using (auth
 drop policy if exists "promises_write" on public.promises_to_pay;
 create policy "promises_write" on public.promises_to_pay for all
   using (auth.uid() is not null) with check (auth.uid() is not null);
+
+-- ---------- The account page's own fields ----------
+-- The main comment: a short standing description of what is going on with this account, written
+-- and rewritten by whoever is working it. Distinct from a note, which is dated and never edited:
+-- this is the current state of play, and the current state of play is meant to be replaced.
+--
+-- The three preference fields are single-valued and belong to the debtor rather than to any one
+-- number, which is why they are columns and not account_contacts rows. Consent status matters
+-- under POPIA: it decides whether we may contact them electronically at all.
+alter table public.debtor_accounts
+  add column if not exists main_comment text,
+  add column if not exists main_comment_at timestamptz,
+  add column if not exists main_comment_by uuid references public.profiles (id) on delete set null,
+  add column if not exists preferred_language text,
+  add column if not exists contact_preference text,
+  add column if not exists consent_status text;
+
+-- ---------- Documents ----------
+-- The paperwork an account accumulates: the mandate, the AoD, letters, proof of payment, a
+-- traced ID copy. Files live in a PRIVATE storage bucket and are reached through short-lived
+-- signed URLs -- a debtor's ID document behind a guessable public URL is a POPIA breach waiting
+-- to be found.
+--
+-- Deletion is restricted to managers. Everyone can add; nobody working an account can quietly
+-- remove the letter of demand that proves it was sent.
+create table if not exists public.account_documents (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  name text not null,
+  storage_path text not null unique,
+  mime_type text,
+  size_bytes bigint,
+  -- What kind of paper it is, from the app's own list. Free text in the database so a new kind
+  -- does not need a migration.
+  kind text,
+  notes text,
+  uploaded_by uuid references public.profiles (id) on delete set null,
+  uploaded_by_name text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists account_documents_account_idx
+  on public.account_documents (account_id, created_at desc);
+
+alter table public.account_documents enable row level security;
+
+drop policy if exists "account_documents_select" on public.account_documents;
+create policy "account_documents_select" on public.account_documents for select using (auth.uid() is not null);
+drop policy if exists "account_documents_insert" on public.account_documents;
+create policy "account_documents_insert" on public.account_documents for insert with check (auth.uid() is not null);
+drop policy if exists "account_documents_delete" on public.account_documents;
+create policy "account_documents_delete" on public.account_documents for delete
+  using (public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager'));
+
+insert into storage.buckets (id, name, public)
+values ('account-documents', 'account-documents', false)
+on conflict (id) do nothing;
+
+drop policy if exists "account_documents_read" on storage.objects;
+create policy "account_documents_read" on storage.objects
+  for select using (bucket_id = 'account-documents' and auth.uid() is not null);
+
+drop policy if exists "account_documents_write" on storage.objects;
+create policy "account_documents_write" on storage.objects
+  for insert with check (bucket_id = 'account-documents' and auth.uid() is not null);
+
+drop policy if exists "account_documents_remove" on storage.objects;
+create policy "account_documents_remove" on storage.objects
+  for delete using (
+    bucket_id = 'account-documents'
+    and public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
+  );

@@ -1,40 +1,41 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  AlertTriangle, ArrowLeft, Building2, Check, CheckCircle2, FileText, Loader2, Mail, MapPin,
-  Phone, Plus, Printer, Send, ShieldCheck, Smartphone, X, XCircle,
+  AlertTriangle, ArrowLeft, Check, CheckCircle2, Loader2, Mail, MessageCircle, MessageSquare,
+  Phone, Plus, Printer, ShieldAlert, StickyNote, X, XCircle,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
+import { DashboardHero } from '../../components/dashboard/DashboardHero'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { StatusPill } from './AccountsList'
 import { fetchAccount, fetchLedgers, hasCommissionDrift, type AccountLedgers, type DebtorAccount } from '../../lib/accountBook'
 import { buildStatement, type BalanceInput, type BalanceBreakdown, type StatementLine } from '../../lib/accountBalance'
 import {
-  addContact, addNote, addPromise, fetchWorkspace, isOverdue, nextPromise, resolvePromise,
-  retireContact, verifyContact, CONTACT_KINDS,
-  type AccountContact, type ContactKind, type PromiseToPay, type Workspace,
+  addNote, addPromise, fetchDocuments, fetchWorkspace, isOverdue, nextPromise, resolvePromise,
+  saveMainComment, type AccountDocument, type PromiseToPay, type Workspace,
 } from '../../lib/accountWorkspace'
 import { buildTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
 import { styleFor, PROMISE_CHIP } from './timelineStyle'
+import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { feeCeiling, scheduleFor } from '../../lib/annexureB'
 import { formatCurrency, formatDate } from '../../data/mockData'
 
-type Tab = 'Workspace' | 'Statement'
+type Tab = 'Overview' | 'Transactions' | 'Documents'
 
 const TODAY = new Date().toISOString().slice(0, 10)
 
 /**
  * One debtor account: who to call, what the story is, and what is owed.
  *
- * Three columns, because that is the shape of the work. A collector picks up an account and needs
- * a number to dial, the history to know what has already been tried, and the figures to know what
- * to ask for -- and needs all three at once, not behind tabs.
+ * Three columns under the Overview tab, because that is the shape of the work. A collector picks
+ * up an account and needs a number to dial, the history to know what has already been tried, and
+ * the figures to know what to ask for — all at once, not behind tabs.
  *
- * The balance shown is **computed** from the three ledgers, not a stored figure. That is the point
- * of the whole model: a debtor, a client or the Council for Debt Collectors can ask how a number
- * was arrived at, and the Statement is the answer, line by line.
+ * The balance shown is **computed** from the three ledgers, never a stored figure. That is the
+ * point of the whole model: a debtor, a client or the Council for Debt Collectors can ask how a
+ * number was arrived at, and Transactions is the answer, line by line.
  */
 export function AccountDetail() {
   const { id } = useParams<{ id: string }>()
@@ -43,9 +44,17 @@ export function AccountDetail() {
   const [account, setAccount] = useState<DebtorAccount | null>(null)
   const [ledgers, setLedgers] = useState<AccountLedgers | null>(null)
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
-  const [tab, setTab] = useState<Tab>('Workspace')
+  const [documents, setDocuments] = useState<AccountDocument[]>([])
+  const [tab, setTab] = useState<Tab>('Overview')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [composeTo, setComposeTo] = useState<string | null>(null)
+
+  // The action bar drives the panels below it rather than opening modals of its own: "Add Note"
+  // puts the cursor in the note box that is already on the page, so there is one way to write a
+  // note and not two that can drift apart.
+  const noteRef = useRef<HTMLTextAreaElement>(null)
+  const [promiseOpen, setPromiseOpen] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -57,8 +66,8 @@ export function AccountDetail() {
         if (cancelled) return
         setAccount(a)
         if (a) {
-          const [l, w] = await Promise.all([fetchLedgers(a.id), fetchWorkspace(a.id)])
-          if (!cancelled) { setLedgers(l); setWorkspace(w) }
+          const [l, w, d] = await Promise.all([fetchLedgers(a.id), fetchWorkspace(a.id), fetchDocuments(a.id)])
+          if (!cancelled) { setLedgers(l); setWorkspace(w); setDocuments(d) }
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
@@ -69,12 +78,17 @@ export function AccountDetail() {
     return () => { cancelled = true }
   }, [id])
 
-  // Writes are few and small, so the whole workspace is refetched rather than patched in place.
-  // The alternative is three sets of local reducers that can drift from what the database holds.
-  const reloadWorkspace = useCallback(async () => {
+  // Writes are few and small, so everything is refetched rather than patched in place. The
+  // alternative is several sets of local reducers that can drift from what the database holds.
+  const reload = useCallback(async () => {
     if (!account) return
-    setWorkspace(await fetchWorkspace(account.id))
+    const [a, w, d] = await Promise.all([fetchAccount(account.id), fetchWorkspace(account.id), fetchDocuments(account.id)])
+    if (a) setAccount(a)
+    setWorkspace(w)
+    setDocuments(d)
   }, [account])
+
+  const { busy: savingComment, run: runComment } = useWriter(reload)
 
   const client = companies.find((c) => c.id === account?.companyId)
 
@@ -86,7 +100,7 @@ export function AccountDetail() {
       inDuplum: account.inDuplum,
       // An account written off stopped accruing then. Swordfish records the date inside the
       // comment ("Closed on 2026/09/07 ..."), which we do not have, so the last action stands in
-      // for it -- imprecise, and labelled as such rather than presented as the closing date.
+      // for it — imprecise, and labelled as such rather than presented as the closing date.
       writtenOffAt: /written.off/i.test(account.status) ? account.lastActionAt : null,
       ledgers: {
         payments: ledgers.payments
@@ -124,6 +138,8 @@ export function AccountDetail() {
   const drift = hasCommissionDrift(account)
   const name = [account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ') || 'Unnamed debtor'
   const due = workspace ? nextPromise(workspace.promises) : undefined
+  const emailContact = workspace?.contacts.find((c) => c.kind === 'email' && !c.retiredAt)
+  const canDelete = ['Administrator', 'Sales Manager', 'Liaison Manager'].includes(currentUser?.role ?? '')
 
   return (
     <div className="space-y-4">
@@ -131,59 +147,75 @@ export function AccountDetail() {
         <ArrowLeft size={14} /> All accounts
       </Link>
 
-      <Card padded={false}>
-        <div className="p-5">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h2 className="text-xl font-semibold text-navy-950">{name}</h2>
-            <StatusPill status={account.status} inDuplum={account.inDuplum} />
-            {account.prescribed && (
-              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-negative-50 text-negative-700"
-                title="Three years have run since the last payment or acknowledgement. It can no longer be enforced.">
-                prescribed
+      {/*
+        The debtor is the subject of this page — not the client. The client is who handed the
+        account over and who gets the money, which matters, but it is context for the person
+        whose debt this is. Hence "Debtor" on the band and the client named beneath.
+      */}
+      <DashboardHero
+        eyebrow="Debtor"
+        title={
+          <span className="inline-flex flex-wrap items-center gap-2">
+            {name}
+            {account.accountNumber && (
+              <span className="font-mono text-[11px] font-bold text-navy-950 bg-gold-400 px-2 py-0.5 rounded-md align-middle"
+                title="Our reference for this account">
+                {account.accountNumber}
               </span>
             )}
-            {due && isOverdue(due, TODAY) && (
-              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-negative-50 text-negative-700">
-                promise overdue
-              </span>
-            )}
-          </div>
-
-          {/*
-            One labelled row rather than a run-on line of tiny grey text. Which client an account
-            belongs to decides the commission, the mandate and who gets the money — it is not a
-            footnote to the debtor's name, so it is given a label and read at the same size as
-            everything else here.
-          */}
-          <dl className="grid gap-x-6 gap-y-3 mt-4 grid-cols-2 sm:grid-cols-3 xl:grid-cols-5">
-            <Titled label="Client">
-              {client
-                ? <Link to={`/companies/${client.id}`} className="text-brand-600 hover:underline">{client.name}</Link>
-                : <span className="text-slate-400">Unknown</span>}
-            </Titled>
-            <Titled label="Account">{account.accountNumber ?? '—'}</Titled>
-            <Titled label="Debtor ID">{account.debtorIdNumber ?? '—'}</Titled>
-            <Titled label="Their reference">{account.clientReference ?? '—'}</Titled>
-            <Titled label={account.swordfishAssignedTo ? 'Worked by' : 'Handed over'}>
-              {account.swordfishAssignedTo
-                ? <>{account.swordfishAssignedTo}<span className="block text-[11px] text-slate-400 font-normal">in Swordfish</span></>
-                : account.handoverDate ? formatDate(account.handoverDate) : '—'}
-            </Titled>
-          </dl>
+          </span>
+        }
+        subtitle={
+          <span className="inline-flex flex-wrap items-center gap-x-1.5">
+            <span className="text-white/50">Client</span>
+            {client
+              ? <Link to={`/companies/${client.id}`} className="text-gold-400 hover:underline">{client.name}</Link>
+              : <span>Unknown</span>}
+            {account.clientReference && <><span className="text-white/30">·</span><span>their ref {account.clientReference}</span></>}
+            {account.handoverDate && <><span className="text-white/30">·</span><span>handed over {formatDate(account.handoverDate)}</span></>}
+          </span>
+        }
+      >
+        <div className="flex items-center gap-2">
+          <StatusPill status={account.status} inDuplum={account.inDuplum} />
+          {account.prescribed && (
+            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-negative-50 text-negative-700"
+              title="Three years have run since the last payment or acknowledgement. It can no longer be enforced.">
+              prescribed
+            </span>
+          )}
         </div>
-
-        <div className="grid grid-cols-2 lg:grid-cols-4 border-t border-slate-100 divide-x divide-slate-100">
-          <HeaderFigure label="Outstanding" value={b ? formatCurrency(b.balance) : '—'} note="capital + interest + fees, less payments" strong />
-          <HeaderFigure label="To settle today" value={b ? formatCurrency(b.settlement) : '—'} note={b ? `includes ${formatCurrency(b.settlementFee)} receipt fee` : undefined} />
-          <HeaderFigure label="Paid to date" value={b ? formatCurrency(b.payments) : '—'} note={`${ledgers?.payments.length ?? 0} payments`} />
-          <HeaderFigure
-            label="Next promise"
-            value={due ? formatCurrency(due.amount) : '—'}
-            note={due ? `due ${formatDate(due.dueOn)}` : 'none outstanding'}
-            danger={!!due && isOverdue(due, TODAY)}
-          />
+        {/*
+          Whoever is working this debtor. "Pre-legal agent" rather than "Client Liaison": a
+          liaison looks after the client relationship, and this is the person chasing the debt.
+        */}
+        <div className="mt-2.5 text-right leading-tight ml-2">
+          <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-gold-500">Pre-legal agent</p>
+          <p className="text-sm font-semibold text-white">{account.swordfishAssignedTo ?? 'Unassigned'}</p>
+          {account.swordfishAssignedTo && <p className="text-[11px] text-white/50">from Swordfish</p>}
         </div>
-      </Card>
+      </DashboardHero>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Figure label="Balance" value={b ? formatCurrency(b.balance) : '—'} note="capital + interest + fees, less payments" strong />
+        <Figure label="To settle today" value={b ? formatCurrency(b.settlement) : '—'} note={b ? `includes ${formatCurrency(b.settlementFee)} receipt fee` : undefined} />
+        <Figure label="Collected" value={b ? formatCurrency(b.payments) : '—'} note={`${ledgers?.payments.length ?? 0} payments`} />
+        <Figure
+          label="Next promise"
+          value={due ? formatCurrency(due.amount) : '—'}
+          note={due ? `due ${formatDate(due.dueOn)}` : 'none outstanding'}
+          danger={!!due && isOverdue(due, TODAY)}
+        />
+      </div>
+
+      <MainComment account={account} busy={savingComment}
+        onSave={(text) => runComment(() => saveMainComment(account.id, text, currentUser?.id ?? null))} />
+
+      <ActionBar
+        onEmail={emailContact ? () => setComposeTo(emailContact.value) : undefined}
+        onNote={() => { setTab('Overview'); setTimeout(() => noteRef.current?.focus(), 0) }}
+        onPromise={() => { setTab('Overview'); setPromiseOpen(true) }}
+      />
 
       {statement?.note && <Banner>{statement.note}</Banner>}
 
@@ -195,26 +227,35 @@ export function AccountDetail() {
         </Banner>
       )}
 
-      <div className="flex gap-1">
-        {(['Workspace', 'Statement'] as Tab[]).map((t) => (
+      <div className="flex gap-1 border-b border-slate-200">
+        {(['Overview', 'Transactions', 'Documents'] as Tab[]).map((t) => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium ${tab === t ? 'bg-brand-50 text-brand-700' : 'text-slate-500 hover:bg-slate-100'}`}>
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+              tab === t ? 'border-gold-500 text-navy-950' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
             {t}
-            {t === 'Statement' && <span className="ml-1.5 text-[11px] text-slate-400 tabular-nums">{statement?.lines.length ?? 0}</span>}
+            {t === 'Transactions' && <span className="ml-1.5 text-[11px] text-slate-400 tabular-nums">{statement?.lines.length ?? 0}</span>}
+            {t === 'Documents' && <span className="ml-1.5 text-[11px] text-slate-400 tabular-nums">{documents.length}</span>}
           </button>
         ))}
       </div>
 
-      {tab === 'Statement' ? (
+      {tab === 'Transactions' && (
         <Card><StatementTable statement={statement?.lines ?? []} account={account} breakdown={b} /></Card>
-      ) : (
+      )}
+
+      {tab === 'Documents' && (
+        <DocumentsPanel accountId={account.id} documents={documents} onChange={reload}
+          userId={currentUser?.id ?? null} userName={currentUser?.name ?? null} canDelete={canDelete} />
+      )}
+
+      {tab === 'Overview' && (
         // Three columns only from xl. At iPad width the fixed side columns leave the timeline
-        // about 120px wide, which is not a narrow column -- it is unreadable. So lg drops to two
+        // about 120px wide, which is not a narrow column — it is unreadable. So lg drops to two
         // columns with the timeline full-width underneath, and anything narrower stacks.
-        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-[minmax(0,17rem)_minmax(0,1fr)_minmax(0,19rem)]">
+        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)_minmax(0,19rem)]">
           <div className="lg:order-1 xl:order-none">
-              <DebtorPanel account={account} name={name} workspace={workspace} onChange={reloadWorkspace}
-              userId={currentUser?.id ?? null} userName={currentUser?.name ?? null} />
+            <DebtorDetailsPanel account={account} name={name} workspace={workspace} onChange={reload}
+              userId={currentUser?.id ?? null} onEmail={setComposeTo} />
           </div>
           <div className="lg:order-3 lg:col-span-2 xl:order-none xl:col-span-1">
             <TimelinePanel
@@ -222,7 +263,8 @@ export function AccountDetail() {
               accountId={account.id}
               userName={currentUser?.name ?? null}
               userId={currentUser?.id ?? null}
-              onChange={reloadWorkspace}
+              onChange={reload}
+              noteRef={noteRef}
             />
           </div>
           <div className="space-y-4 lg:order-2 xl:order-none">
@@ -231,11 +273,38 @@ export function AccountDetail() {
               accountId={account.id}
               promises={workspace?.promises ?? []}
               userId={currentUser?.id ?? null}
-              onChange={reloadWorkspace}
+              onChange={reload}
+              open={promiseOpen}
+              setOpen={setPromiseOpen}
             />
             <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0} />
           </div>
         </div>
+      )}
+
+      {composeTo && (
+        <ComposeEmailModal
+          to={composeTo}
+          recipients={(workspace?.contacts ?? [])
+            .filter((c) => c.kind === 'email' && !c.retiredAt)
+            .map((c) => ({ email: c.value, label: c.label ?? undefined }))}
+          initialSubject={`Account ${account.accountNumber ?? ''} - ${name}`.trim()}
+          contextNote="Sent from this account. A note recording what was sent is added to the timeline."
+          onClose={() => setComposeTo(null)}
+          onSent={(subject, bodyText) => {
+            const to = composeTo
+            setComposeTo(null)
+            // The account's own record of the message. A note rather than a fee: an outgoing
+            // email IS a chargeable action under Annexure B item 4, but raising that charge is
+            // the collections engine's decision, not a side effect of a Send button.
+            void addNote({
+              accountId: account.id,
+              body: `Email sent to ${to}\nSubject: ${subject}\n\n${bodyText}`,
+              authorName: currentUser?.name ?? null,
+              createdBy: currentUser?.id ?? null,
+            }).then(reload)
+          }}
+        />
       )}
     </div>
   )
@@ -243,17 +312,71 @@ export function AccountDetail() {
 
 const pct = (r: number | null) => (r === null ? '—' : `${(r * 100).toFixed(r * 100 % 1 === 0 ? 0 : 1)}%`)
 
+/* ---------- the action bar ---------- */
+
+/**
+ * What you can do to this account, in one row.
+ *
+ * Three of these work. Four are placeholders, and they say so rather than looking live and doing
+ * nothing — a disabled button with a reason is honest; a button that swallows a click teaches
+ * people not to trust the row.
+ *
+ * Record Payment is deliberately absent. A payment is not something a collector asserts: it
+ * arrives in a bank account and is reconciled against the book, and a button that lets someone
+ * type one in is a hole in the ledger.
+ */
+function ActionBar({ onEmail, onNote, onPromise }: {
+  onEmail?: () => void
+  onNote: () => void
+  onPromise: () => void
+}) {
+  const soon = 'Not built yet — needs a provider connected and a decision on whether it charges the debtor.'
+  return (
+    <div className="flex flex-wrap gap-2">
+      <Action icon={Phone} label="Call" title={soon} />
+      <Action icon={MessageCircle} label="WhatsApp" title={soon} />
+      <Action icon={MessageSquare} label="SMS" title={soon} />
+      <Action icon={Mail} label="Email" onClick={onEmail}
+        title={onEmail ? 'Send from your connected mailbox' : 'No email address on this account yet'} />
+      <Action icon={StickyNote} label="Add Note" onClick={onNote} title="Write on the timeline" />
+      <Action icon={Check} label="Promise to Pay" onClick={onPromise} title="Record what they agreed to" primary />
+      <Action icon={ShieldAlert} label="Escalate" title="Not built yet — needs the legal handover flow." />
+    </div>
+  )
+}
+
+function Action({ icon: Icon, label, onClick, title, primary }: {
+  icon: typeof Phone; label: string; onClick?: () => void; title?: string; primary?: boolean
+}) {
+  const disabled = !onClick
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition-colors ${
+        disabled
+          ? 'border-dashed border-slate-200 text-slate-300 cursor-not-allowed'
+          : primary
+            ? 'border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500'
+            : 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50'}`}
+    >
+      <Icon size={14} /> {label}
+    </button>
+  )
+}
+
 /* ---------- small shared pieces ---------- */
 
-function HeaderFigure({ label, value, note, strong, danger }: {
+function Figure({ label, value, note, strong, danger }: {
   label: string; value: string; note?: string; strong?: boolean; danger?: boolean
 }) {
   return (
-    <div className="px-5 py-3.5">
+    <Card className={strong ? 'border-gold-100' : undefined}>
       <p className="text-[11px] uppercase tracking-wide text-slate-400">{label}</p>
       <p className={`text-xl font-semibold tabular-nums mt-0.5 ${danger ? 'text-negative' : strong ? 'text-navy-950' : 'text-slate-800'}`}>{value}</p>
       {note && <p className={`text-[11px] mt-0.5 ${danger ? 'text-negative-700' : 'text-slate-500'}`}>{note}</p>}
-    </div>
+    </Card>
   )
 }
 
@@ -276,16 +399,6 @@ function PanelTitle({ children, action }: { children: React.ReactNode; action?: 
     <div className="flex items-center justify-between gap-2 mb-3">
       <h3 className="text-[11px] uppercase tracking-wide text-slate-400">{children}</h3>
       {action}
-    </div>
-  )
-}
-
-/** A labelled cell in the header. Small grey label, the value at normal reading size. */
-function Titled({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-[11px] uppercase tracking-wide text-slate-400">{label}</dt>
-      <dd className="text-sm text-slate-800 font-medium mt-0.5 break-words">{children}</dd>
     </div>
   )
 }
@@ -316,228 +429,19 @@ function Money({ label, value, note, strong }: { label: string; value?: number; 
   )
 }
 
-/** Surfaces a failed write instead of leaving a button that silently did nothing. */
-function useWriter(onChange: () => Promise<void>) {
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-  const run = useCallback(async (fn: () => Promise<unknown>) => {
-    setBusy(true); setErr(null)
-    try {
-      await fn()
-      await onChange()
-      return true
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-      return false
-    } finally {
-      setBusy(false)
-    }
-  }, [onChange])
-  return { busy, err, run }
-}
-
-/* ---------- left: who you can reach ---------- */
-
-const CONTACT_ICON: Record<ContactKind, typeof Phone> = {
-  mobile: Smartphone, phone: Phone, work: Phone, email: Mail,
-  address: MapPin, employer: Building2, other: FileText,
-}
-
-function DebtorPanel({ account, name, workspace, onChange, userId, userName }: {
-  account: DebtorAccount
-  name: string
-  workspace: Workspace | null
-  onChange: () => Promise<void>
-  userId: string | null
-  userName: string | null
-}) {
-  const [adding, setAdding] = useState(false)
-  const [composeTo, setComposeTo] = useState<string | null>(null)
-  const { busy, err, run } = useWriter(onChange)
-
-  const live = (workspace?.contacts ?? []).filter((c) => !c.retiredAt)
-  const retired = (workspace?.contacts ?? []).filter((c) => c.retiredAt)
-  const emails = live.filter((c) => c.kind === 'email')
-
-  return (
-    <Card className="xl:sticky xl:top-4 self-start">
-      <PanelTitle action={
-        <button onClick={() => setAdding((v) => !v)} className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
-          {adding ? <><X size={12} /> Cancel</> : <><Plus size={12} /> Add</>}
-        </button>
-      }>Debtor details</PanelTitle>
-
-      <div className="space-y-1.5">
-        <Field label="Name" value={name} />
-        <Field label="ID number" value={account.debtorIdNumber} />
-        <Field label="Client reference" value={account.clientReference} />
-      </div>
-
-      {adding && <ContactForm accountId={account.id} busy={busy} onDone={() => setAdding(false)} run={run} />}
-      {err && <p className="text-xs text-negative-700 mt-2">{err}</p>}
-
-      <div className="mt-4 pt-3 border-t border-slate-100">
-        {live.length === 0 && !adding && (
-          // Said plainly rather than left as empty rows nobody can explain.
-          <p className="text-[11px] text-slate-400 leading-relaxed">
-            No contact details yet. None of the Swordfish exports carried a debtor phone number,
-            email or address &mdash; add what you get on a call.
-          </p>
-        )}
-        <div className="space-y-2.5">
-          {live.map((c) => (
-            <ContactRow key={c.id} contact={c} userId={userId} busy={busy} run={run}
-              onEmail={c.kind === 'email' ? () => setComposeTo(c.value) : undefined} />
-          ))}
-        </div>
-
-        {emails.length > 0 && (
-          <button onClick={() => setComposeTo(emails[0].value)}
-            className="mt-3 w-full text-sm font-medium py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 inline-flex items-center justify-center gap-1.5">
-            <Send size={13} /> Email {name.split(' ')[0]}
-          </button>
-        )}
-        {composeTo && (
-          <ComposeEmailModal
-            to={composeTo}
-            recipients={emails.map((c) => ({ email: c.value, label: c.label ?? undefined }))}
-            initialSubject={`Account ${account.accountNumber ?? ''} - ${name}`.trim()}
-            contextNote="Sent from this account. A note recording what was sent is added to the timeline."
-            onClose={() => setComposeTo(null)}
-            onSent={(subject, bodyText) => {
-              setComposeTo(null)
-              // The account's own record of the message. It is a note rather than a fee: an
-              // outgoing email IS a chargeable action under Annexure B item 4, but raising that
-              // charge is the collections engine's decision, not a side effect of a Send button.
-              void run(() => addNote({
-                accountId: account.id,
-                body: `Email sent to ${composeTo}\nSubject: ${subject}\n\n${bodyText}`,
-                authorName: userName,
-                createdBy: userId,
-              }))
-            }}
-          />
-        )}
-
-        {retired.length > 0 && (
-          <details className="mt-3">
-            <summary className="text-[11px] text-slate-400 cursor-pointer hover:text-slate-600">
-              {retired.length} retired
-            </summary>
-            <div className="space-y-1.5 mt-2">
-              {retired.map((c) => (
-                <p key={c.id} className="text-xs text-slate-400 line-through decoration-slate-300">
-                  {c.value}
-                  {c.retiredReason && <span className="no-underline ml-1.5">&mdash; {c.retiredReason}</span>}
-                </p>
-              ))}
-            </div>
-          </details>
-        )}
-      </div>
-    </Card>
-  )
-}
-
-function ContactRow({ contact, userId, busy, run, onEmail }: {
-  contact: AccountContact
-  userId: string | null
-  busy: boolean
-  run: (fn: () => Promise<unknown>) => Promise<boolean>
-  /** Present on email contacts: opens the composer rather than handing off to a mail client. */
-  onEmail?: () => void
-}) {
-  const Icon = CONTACT_ICON[contact.kind]
-  const dialable = contact.kind === 'mobile' || contact.kind === 'phone' || contact.kind === 'work'
-  // A phone still hands off to the device's dialler, which is what a tablet is good at. Email
-  // does NOT hand off to a mail client: sending it from here is what puts a copy on the account.
-  const href = dialable ? `tel:${contact.value.replace(/\s/g, '')}` : null
-  return (
-    <div className="flex items-start gap-2 text-sm group">
-      <Icon size={14} className="text-slate-400 mt-0.5 shrink-0" />
-      <div className="min-w-0 flex-1">
-        {href
-          ? <a href={href} className="text-brand-700 hover:underline break-words">{contact.value}</a>
-          : onEmail
-            ? <button onClick={onEmail} className="text-brand-700 hover:underline break-words text-left">{contact.value}</button>
-            : <span className="text-slate-700 break-words">{contact.value}</span>}
-        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-          {contact.label && <span className="text-[11px] text-slate-400">{contact.label}</span>}
-          {contact.isPrimary && <span className="text-[10px] px-1.5 rounded bg-slate-100 text-slate-500">primary</span>}
-          {contact.verifiedAt
-            ? <span className="text-[10px] px-1.5 rounded bg-positive-50 text-positive-700 inline-flex items-center gap-0.5">
-                <ShieldCheck size={9} /> verified
-              </span>
-            : <button
-                disabled={busy}
-                onClick={() => run(() => verifyContact(contact.id, userId))}
-                className="text-[10px] text-slate-400 hover:text-positive-700 disabled:opacity-50">
-                mark verified
-              </button>}
-          <button
-            disabled={busy}
-            onClick={() => {
-              const reason = window.prompt('Why is this being retired? (wrong number, disconnected, ...)')
-              if (reason !== null) run(() => retireContact(contact.id, reason))
-            }}
-            className="text-[10px] text-slate-300 hover:text-negative disabled:opacity-50 opacity-0 group-hover:opacity-100 focus:opacity-100">
-            retire
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function ContactForm({ accountId, busy, onDone, run }: {
-  accountId: string
-  busy: boolean
-  onDone: () => void
-  run: (fn: () => Promise<unknown>) => Promise<boolean>
-}) {
-  const [kind, setKind] = useState<ContactKind>('mobile')
-  const [value, setValue] = useState('')
-  const [label, setLabel] = useState('')
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!value.trim()) return
-    const ok = await run(() => addContact({ accountId, kind, value, label }))
-    if (ok) { setValue(''); setLabel(''); onDone() }
-  }
-
-  return (
-    <form onSubmit={submit} className="mt-3 space-y-2 p-3 rounded-lg bg-slate-50 border border-slate-100">
-      <select value={kind} onChange={(e) => setKind(e.target.value as ContactKind)}
-        className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 bg-white">
-        {CONTACT_KINDS.map((k) => <option key={k.kind} value={k.kind}>{k.label}</option>)}
-      </select>
-      <input value={value} onChange={(e) => setValue(e.target.value)} autoFocus
-        placeholder={kind === 'email' ? 'name@example.co.za' : kind === 'address' ? 'Street, suburb, city' : '+27 ...'}
-        className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
-      <input value={label} onChange={(e) => setLabel(e.target.value)}
-        placeholder="Whose is it? (optional)"
-        className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
-      <button type="submit" disabled={busy || !value.trim()}
-        className="w-full text-sm font-medium py-1.5 rounded-lg bg-brand-600 text-white disabled:opacity-50">
-        {busy ? 'Saving...' : 'Save contact'}
-      </button>
-    </form>
-  )
-}
-
 /* ---------- middle: the story ---------- */
 
-function TimelinePanel({ entries, accountId, userName, userId, onChange }: {
+const PAGE_SIZES = [5, 10, 20, 50] as const
+
+function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef }: {
   entries: TimelineEntry[]
   accountId: string
   userName: string | null
   userId: string | null
   onChange: () => Promise<void>
+  noteRef: React.RefObject<HTMLTextAreaElement | null>
 }) {
-  // A dozen is what a person reads before deciding whether to keep reading. An account can carry
-  // 800 actions; opening on forty of them is a wall, not a history.
-  const [limit, setLimit] = useState(12)
+  const [limit, setLimit] = useState<number>(10)
   const [body, setBody] = useState('')
   const { busy, err, run } = useWriter(onChange)
 
@@ -548,14 +452,32 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange }: {
     if (ok) setBody('')
   }
 
-  const days = groupByDay(entries.slice(0, limit))
+  const shown = limit >= entries.length ? entries : entries.slice(0, limit)
+  const days = groupByDay(shown)
 
   return (
     <Card>
-      <PanelTitle>Activity timeline</PanelTitle>
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <h3 className="text-[11px] uppercase tracking-wide text-slate-400">Activity timeline</h3>
+        {/*
+          How much to show, chosen at the top rather than discovered at the bottom. An account can
+          carry 800 actions; the question "how far back do I want to read" is asked before you
+          start reading, not after you have scrolled past everything.
+        */}
+        <label className="text-xs text-slate-500 inline-flex items-center gap-1.5">
+          Show
+          <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}
+            className="text-xs rounded-lg border border-slate-200 px-2 py-1 bg-white">
+            {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
+            <option value={entries.length || 1}>All {entries.length.toLocaleString('en-ZA')}</option>
+          </select>
+          <span className="text-slate-400">of {entries.length.toLocaleString('en-ZA')}</span>
+        </label>
+      </div>
 
       <form onSubmit={submit} className="mb-4">
         <textarea
+          ref={noteRef}
           value={body}
           onChange={(e) => setBody(e.target.value)}
           rows={body ? 3 : 1}
@@ -587,19 +509,11 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange }: {
         ))}
       </div>
 
-      {entries.length > limit && (
-        <div className="flex items-center gap-3 mt-4 pt-3 border-t border-slate-100">
-          <button onClick={() => setLimit((n) => n + 40)}
-            className="text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-            Show 40 more
-          </button>
-          <button onClick={() => setLimit(entries.length)} className="text-sm text-brand-600 hover:underline">
-            Show all {entries.length.toLocaleString('en-ZA')}
-          </button>
-          <span className="text-xs text-slate-400 ml-auto">
-            {limit.toLocaleString('en-ZA')} of {entries.length.toLocaleString('en-ZA')}
-          </span>
-        </div>
+      {entries.length > shown.length && (
+        <button onClick={() => setLimit((n) => n + 20)}
+          className="mt-4 pt-3 border-t border-slate-100 w-full text-sm text-brand-600 hover:underline">
+          Show 20 more &mdash; {(entries.length - shown.length).toLocaleString('en-ZA')} older
+        </button>
       )}
     </Card>
   )
@@ -652,13 +566,13 @@ function SummaryPanel({ account, breakdown }: { account: DebtorAccount; breakdow
     <Card>
       <PanelTitle>Account summary</PanelTitle>
       <div className="space-y-1.5">
-        <Money label="Capital handed over" value={b?.capital} />
+        <Money label="Original amount" value={b?.capital} />
         <Money label="Interest accrued" value={b?.interest} note={`${account.interestRateAnnual}% a year`} />
         <Money label="Fees, incl VAT" value={b?.fees} />
         <Money label="Receipt fees on payments" value={b?.receiptFees} note="10% of each, max R610" />
-        <Money label="Payments received" value={b ? -b.payments : undefined} />
+        <Money label="Collected" value={b ? -b.payments : undefined} />
         <div className="border-t border-slate-100 pt-2 mt-1 space-y-1.5">
-          <Money label="Outstanding" value={b?.balance} strong />
+          <Money label="Balance" value={b?.balance} strong />
           <Money label="Receipt fee if settled" value={b?.settlementFee} />
           <Money label="To settle today" value={b?.settlement} strong />
         </div>
@@ -671,22 +585,23 @@ function SummaryPanel({ account, breakdown }: { account: DebtorAccount; breakdow
  * Promises to pay.
  *
  * The one thing a collector actually produces on a call. It is a claim about the future, so it
- * never touches a balance -- it is kept or it is broken, and a person says which. Matching one
+ * never touches a balance — it is kept or it is broken, and a person says which. Matching one
  * against an incoming payment is the collections engine's job, and that does not exist yet.
  */
-function PromisePanel({ accountId, promises, userId, onChange }: {
+function PromisePanel({ accountId, promises, userId, onChange, open, setOpen }: {
   accountId: string
   promises: PromiseToPay[]
   userId: string | null
   onChange: () => Promise<void>
+  open: boolean
+  setOpen: (v: boolean) => void
 }) {
-  const [adding, setAdding] = useState(false)
   const [amount, setAmount] = useState('')
   const [dueOn, setDueOn] = useState('')
   const [method, setMethod] = useState('')
   const { busy, err, run } = useWriter(onChange)
 
-  const open = promises.filter((p) => p.status === 'open')
+  const outstanding = promises.filter((p) => p.status === 'open')
   const past = promises.filter((p) => p.status !== 'open')
 
   const submit = async (e: React.FormEvent) => {
@@ -694,18 +609,18 @@ function PromisePanel({ accountId, promises, userId, onChange }: {
     const value = Number(amount)
     if (!(value > 0) || !dueOn) return
     const ok = await run(() => addPromise({ accountId, amount: value, dueOn, method, createdBy: userId }))
-    if (ok) { setAmount(''); setDueOn(''); setMethod(''); setAdding(false) }
+    if (ok) { setAmount(''); setDueOn(''); setMethod(''); setOpen(false) }
   }
 
   return (
     <Card>
       <PanelTitle action={
-        <button onClick={() => setAdding((v) => !v)} className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
-          {adding ? <><X size={12} /> Cancel</> : <><Plus size={12} /> Take one</>}
+        <button onClick={() => setOpen(!open)} className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
+          {open ? <><X size={12} /> Cancel</> : <><Plus size={12} /> Take one</>}
         </button>
       }>Promise to pay</PanelTitle>
 
-      {adding && (
+      {open && (
         <form onSubmit={submit} className="space-y-2 p-3 rounded-lg bg-slate-50 border border-slate-100 mb-3">
           <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" autoFocus
             placeholder="Amount, e.g. 5000" className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
@@ -721,14 +636,14 @@ function PromisePanel({ accountId, promises, userId, onChange }: {
       )}
       {err && <p className="text-xs text-negative-700 mb-2">{err}</p>}
 
-      {open.length === 0 && past.length === 0 && !adding && (
+      {outstanding.length === 0 && past.length === 0 && !open && (
         <p className="text-[11px] text-slate-400 leading-relaxed">
           No promise outstanding. Take one on the next call &mdash; it is the thing this account is measured by.
         </p>
       )}
 
       <div className="space-y-2">
-        {open.map((p) => {
+        {outstanding.map((p) => {
           const late = isOverdue(p, TODAY)
           return (
             <div key={p.id} className={`p-3 rounded-lg border ${late ? 'border-negative-100 bg-negative-50' : 'border-gold-100 bg-gold-50'}`}>
@@ -819,11 +734,11 @@ function PositionPanel({ account, ceiling, chargedExclVat }: {
 }
 
 /**
- * The statement: every movement, in date order, with a running balance.
+ * Transactions: every movement, in date order, with a running balance.
  *
- * This is the document a debtor is entitled to ask for and a client asks for when they query a
- * figure. It is deliberately plain -- printable as it stands, no colour carrying meaning that
- * would be lost in black and white.
+ * This is the document a debtor is entitled to and a client asks for when they query a figure.
+ * Deliberately plain — printable as it stands, no colour carrying meaning that would be lost in
+ * black and white.
  */
 function StatementTable({ statement, account, breakdown }: {
   statement: StatementLine[]
@@ -867,10 +782,10 @@ function StatementTable({ statement, account, breakdown }: {
 
           {/*
             The settlement quotation, below the movements and ruled off from them.
-            It belongs on the statement because it is the number anybody reading this actually
-            wants -- what it takes to close the account today. It is NOT a movement: the receipt
-            fee on a settlement is only incurred if the settlement is paid, so putting it in the
-            running balance above would charge a fee for a payment nobody has made.
+            It belongs here because it is the number anybody reading this actually wants — what it
+            takes to close the account today. It is NOT a movement: the receipt fee on a settlement
+            is only incurred if the settlement is paid, so putting it in the running balance above
+            would charge a fee for a payment nobody has made.
           */}
           {breakdown && breakdown.balance > 0 && (
             <tfoot>
