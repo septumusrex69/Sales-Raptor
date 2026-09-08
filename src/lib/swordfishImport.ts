@@ -32,6 +32,12 @@ export interface SwordfishExports {
   payments: CsvRow[]
   actions: CsvRow[]
   interest: CsvRow[]
+  /**
+   * The client register — the business's own record of who its clients are, one row per
+   * Swordfish client record. Optional: without it the grouping falls back to the hand-written
+   * judgements in swordfishClients.ts, which is how this worked before the register existed.
+   */
+  clients?: CsvRow[]
 }
 
 export interface CompanyRow {
@@ -44,6 +50,23 @@ export interface CompanyRow {
   commission_bands: { upTo: number | null; rate: number }[] | null
   commission_bands_source: string | null
   commission_rate: number | null
+  registration_number: string | null
+  vat_number: string | null
+  banking_details: string | null
+  contact_person: string | null
+  bf_reference: string | null
+  register_status: string | null
+  liaison: string | null
+  marketing_agent: string | null
+  classification: string | null
+  mandate_signed_at: string | null
+  phone: string | null
+  email: string | null
+  address: string | null
+  city: string | null
+  account_count: number | null
+  handover_amount: number | null
+  payments_to_date: number | null
 }
 
 export interface HandoverRow {
@@ -247,16 +270,204 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
       // A single rate only where there is genuinely one. A client on a scale has no flat rate,
       // and writing the first band's rate here would read as a fact when it is a guess.
       commission_rate: uniqueRate(spec.commissionByPrefix),
+      registration_number: null,
+      vat_number: null,
+      banking_details: null,
+      contact_person: null,
+      bf_reference: null,
+      register_status: null,
+      liaison: null,
+      marketing_agent: null,
+      classification: null,
+      mandate_signed_at: null,
+      phone: null,
+      email: null,
+      address: null,
+      city: null,
+      account_count: null,
+      handover_amount: null,
+      payments_to_date: null,
     })
     for (const sw of spec.swordfish ?? []) companyBySwordfishName.set(sw, id)
     for (const child of spec.children ?? []) addCompany(child, id)
     return id
   }
 
+  /* ------------------------------------------------ clients, from the register */
+
+  /*
+   * Where the register is supplied it wins, because it is the business's own record rather than
+   * a judgement I made from naming conventions.
+   *
+   * The identity is the **company registration number**. That is what proves four rows named
+   * "ABSTO ... -1" through "-4" are one company. The BF reference cannot do that job: ABSTO's
+   * four rows share CLIENTS0591, but Agri Saad's three commission tiers carry three different
+   * references while sharing one registration number. A legal identity holds where a filing
+   * convention does not.
+   *
+   * Each row is one commission tier, keyed by Swordfish's prefix. Collected across a company's
+   * rows they are its scale — and the register knows about tiers no account has reached yet, so
+   * this is the only place the full scale is visible. Accelerate Fitness reads as a flat 30%
+   * from the accounts alone; the register shows 30 / 25 / 20 / 15.
+   */
+  function buildFromRegister(rows: CsvRow[]) {
+    const byRegistration = new Map<string, CsvRow[]>()
+    for (const r of rows) {
+      const name = text(r['Client'])
+      if (!name) continue
+      // Falling back to the name keeps a row with no registration number rather than dropping a
+      // client on a blank cell — it just cannot be grouped with its siblings.
+      const key = text(r['COMPANY REG/ID']) ?? text(r['VAT NO']) ?? name
+      if (!byRegistration.has(key)) byRegistration.set(key, [])
+      byRegistration.get(key)!.push(r)
+    }
+
+    for (const [key, group] of byRegistration) {
+      /*
+       * One registration number is one legal entity, but not always one book.
+       *
+       * Within the group, rows are sub-grouped by their base name — the Swordfish name with the
+       * commission-tier suffix and the handover year stripped off. Where that leaves one name,
+       * the rows are tiers of a single client. Where it leaves several, they are genuinely
+       * different sub-entities and become children of a parent.
+       *
+       * That distinction is the difference between Agri Saad and Adowa. "Agri Saad -1..-3" all
+       * reduce to "Agri Saad" — three commission tiers, one book, even though the register gives
+       * each its own BF reference. Adowa's two rows reduce to "Ellis Park" and "Frederick
+       * Street" — one company, two properties, each with its own book, which is how the business
+       * asked for them.
+       */
+      const subGroups = new Map<string, CsvRow[]>()
+      for (const r of group) {
+        const base = baseName(text(r['Client']) ?? '')
+        if (!subGroups.has(base)) subGroups.set(base, [])
+        subGroups.get(base)!.push(r)
+      }
+
+      if (subGroups.size > 1) {
+        // The parent carries the identity and the totals; the children carry the books. Named by
+        // what the sub-entities have in common, so "Adowa Property Managers (Pty) Ltd - Ellis
+        // Park" and "... -Frederick Street" give a parent called "Adowa Property Managers".
+        const parentId = addRegisterCompany(commonPrefix([...subGroups.keys()]) || key, group, null, false)
+        for (const [subName, rows] of subGroups) addRegisterCompany(subName, rows, parentId)
+      } else {
+        addRegisterCompany([...subGroups.keys()][0] || key, group, null)
+      }
+    }
+  }
+
+  /**
+   * A Swordfish client name with the bits that are filing conventions taken off: the trailing
+   * commission-tier suffix ("-1", " - 2") and then a handover year. What is left is the client.
+   */
+  function baseName(raw: string): string {
+    return raw
+      .replace(/\s*[-–]\s*\d+\s*$/, '')
+      .replace(/\s+(19|20)\d{2}\s*$/, '')
+      .trim()
+  }
+
+  /** The longest leading run of whole words every name shares. */
+  function commonPrefix(names: string[]): string {
+    if (names.length === 0) return ''
+    const split = names.map((n) => n.split(/\s+/))
+    const words: string[] = []
+    for (let i = 0; i < split[0].length; i++) {
+      const w = split[0][i]
+      if (!split.every((parts) => parts[i] === w)) break
+      words.push(w)
+    }
+    return words.join(' ').replace(/[-–,]\s*$/, '').trim()
+  }
+
+  function addRegisterCompany(
+    name: string,
+    group: CsvRow[],
+    parentId: string | null,
+    holdsAccounts = true,
+  ): string {
+    {
+      const first = group[0]
+
+      // Tiers, ordered as the register orders them: highest rate first, which is the smallest
+      // debt. Only rates that actually differ make a scale.
+      const tiers = group
+        .map((r) => ({ prefix: text(r['Prefix']), rate: num(r['PERCENTAGE']) }))
+        .filter((t): t is { prefix: string; rate: number } => !!t.prefix && t.rate !== undefined)
+      const rates = [...new Set(tiers.map((t) => t.rate))]
+
+      const id = newId()
+      companies.push({
+        id,
+        name,
+        industry: null,
+        parent_company_id: parentId,
+        account_owner_id: ownerId,
+        code: tiers[0]?.prefix.split('/')[0] ?? null,
+        // The register gives rates but not the capital boundaries between them — those are in
+        // the signed mandate. So the scale is recorded as a flat rate only where there is
+        // genuinely one, and the bands come from the mandate below.
+        commission_bands: null,
+        commission_bands_source: null,
+        commission_rate: rates.length === 1 ? rates[0] : null,
+        registration_number: text(first['COMPANY REG/ID']),
+        vat_number: text(first['VAT NO']),
+        banking_details: text(first['BANKING DETAILS']),
+        contact_person: text(first['CONTACT PERSON']),
+        bf_reference: text(first['BF Reference']),
+        register_status: text(first['Active / Dormant']),
+        // "Assigned To" is filled on a client's first row and "Assigned Dup" on the rest, so
+        // either can be the one that carries the name.
+        liaison: group.map((r) => text(r['Assigned To']) ?? text(r['Assigned Dup'])).find(Boolean) ?? null,
+        marketing_agent: text(first['Source']),
+        classification: ['A', 'B', 'C', 'D'].includes(text(first['Ranking']) ?? '') ? text(first['Ranking']) : null,
+        mandate_signed_at: group.map((r) => isoDate(r['Sign Date'])).find(Boolean) ?? null,
+        phone: text(first['CONTACT NO']),
+        email: text(first['EMAIL']),
+        address: [text(first['ADDRESS 1']), text(first['ADDRESS 2'])].filter(Boolean).join(', ') || null,
+        city: text(first['ADDRESS 3']),
+        // Summed across the tiers: they are one client's book however it is filed.
+        account_count: sumOf(group, 'Qty Handed Over Accounts'),
+        handover_amount: sumOf(group, 'Sum of Capital on Default'),
+        payments_to_date: sumOf(group, 'Sum of Payments To Date'),
+      })
+
+      // A parent holds no accounts of its own; its children do. Pointing Swordfish's names at
+      // the parent too would put every account on the parent and leave the children empty.
+      if (holdsAccounts) {
+        for (const r of group) {
+          const sw = text(r['Client'])
+          if (sw) companyBySwordfishName.set(sw, id)
+        }
+      }
+      for (const t of tiers) registerRateByPrefix.set(t.prefix, t.rate)
+
+      // The mandate's bands, matched to this client by name. The register cannot express them —
+      // it has rates but not the capital boundaries they apply at — so this is the one thing
+      // the hand-written configuration is still needed for.
+      const spec = [...walk(specs)].find((x) => x.commissionBands
+        && (x.swordfish ?? []).some((n) => group.some((r) => text(r['Client']) === n)))
+      if (spec?.commissionBands) {
+        const c = companies[companies.length - 1]
+        c.commission_bands = spec.commissionBands.bands
+        c.commission_bands_source = spec.commissionBands.source
+      }
+      return id
+    }
+  }
+
+  const sumOf = (rows: CsvRow[], column: string) => {
+    const values = rows.map((r) => num(r[column])).filter((v): v is number => v !== undefined)
+    return values.length ? values.reduce((t, v) => t + v, 0) : null
+  }
+
+  const registerRateByPrefix = new Map<string, number>()
+  if (exports.clients?.length) buildFromRegister(exports.clients)
+
   const present = new Set(accounts.map((r) => (r['Client'] ?? '').trim()))
   const inSlice = (spec: SwordfishClientSpec): boolean =>
     (spec.swordfish ?? []).some((n) => present.has(n)) || (spec.children ?? []).some(inSlice)
-  for (const spec of specs) if (!only || inSlice(spec)) addCompany(spec)
+  if (!exports.clients?.length) for (const spec of specs) if (!only || inSlice(spec)) addCompany(spec)
 
   // Anything Swordfish names that the configuration has not decided about. Imported under its own
   // name rather than dropped — losing accounts is worse than a client record somebody has to
@@ -273,6 +484,10 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
     return c?.commission_bands ? { source: c.commission_bands_source ?? '', bands: c.commission_bands } : undefined
   }
   const rateForPrefix = (prefix: string): number | undefined => {
+    // The register is the business's own record of what each tier charges, so it outranks the
+    // rates transcribed by hand.
+    const fromRegister = registerRateByPrefix.get(prefix)
+    if (fromRegister !== undefined) return fromRegister
     for (const spec of walk(specs)) {
       const r = spec.commissionByPrefix?.[prefix]
       if (r !== undefined) return r
@@ -577,6 +792,20 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
   }
   if (unbilledEvents) notes.push(`${unbilledEvents} actions were audit events with no charge. Imported as history at zero.`)
   if (quarantined) notes.push(`${quarantined} fees totalling R${quarantinedValue.toFixed(2)} excl VAT are held out of the recoverable total pending classification.`)
+
+  /*
+   * A client the register puts on a scale but whose mandate we do not hold.
+   *
+   * The register gives the rates; only the mandate gives the capital boundaries between them.
+   * Without those, an account's expected rate cannot be computed and the drift check is blind
+   * for that client — so this names exactly which mandates are worth digging out of the filing
+   * cabinet, rather than leaving the gap silent.
+   */
+  const scaledWithoutBands = companies.filter((c) => c.commission_rate === null && !c.commission_bands
+    && [...registerRateByPrefix.keys()].some((p) => p.startsWith(c.code ?? '\u0000')))
+  for (const c of scaledWithoutBands) {
+    notes.push(`${c.name} is on a commission scale in the register but has no signed mandate on file, so the capital boundaries between its rates are unknown. Its accounts import at the rate they were billed and cannot be checked against a mandate.`)
+  }
 
   const oddIds = debtorAccounts.filter((a) => a.debtor_id_number && !/^\d{13}$/.test(a.debtor_id_number)).length
   if (oddIds) notes.push(`${oddIds} accounts have something other than a 13-digit ID in the ID field. Imported as found — it is Swordfish's data, not a mapping fault.`)

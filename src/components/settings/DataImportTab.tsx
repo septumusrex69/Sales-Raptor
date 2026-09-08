@@ -36,10 +36,16 @@ const DATABASE_HOST = (() => {
 
 /** The four exports, in the order the migration needs them. Named as Swordfish names them. */
 const SOURCES = [
-  { key: 'accounts', label: 'Client Account Summary', hint: 'One row per debtor account. The spine of the import.' },
-  { key: 'payments', label: 'All Payments per Client', hint: 'Every payment received, including client-direct.' },
-  { key: 'actions', label: 'Actions performed per Client', hint: 'Every action and what it cost. The largest file by far.' },
-  { key: 'interest', label: 'Interest per Period', hint: 'Interest as accrued, one row per period.' },
+  { key: 'accounts', label: 'Client Account Summary', hint: 'One row per debtor account. The spine of the import.', required: true },
+  { key: 'payments', label: 'All Payments per Client', hint: 'Every payment received, including client-direct.', required: true },
+  { key: 'actions', label: 'Actions performed per Client', hint: 'Every action and what it cost. The largest file by far.', required: true },
+  { key: 'interest', label: 'Interest per Period', hint: 'Interest as accrued, one row per period.', required: true },
+  {
+    key: 'clients',
+    label: 'Client register',
+    hint: 'Who the clients are: registration numbers, commission tiers, banking and contacts. Save it as CSV first.',
+    required: false,
+  },
 ] as const
 
 type SourceKey = (typeof SOURCES)[number]['key']
@@ -62,23 +68,40 @@ export function DataImportTab() {
   const abort = useRef(false)
 
   const isAdmin = currentUser?.role === 'Administrator'
-  const ready = SOURCES.every((s) => files[s.key])
+  // The register is optional: without it the clients come from the configuration in the repo,
+  // which is how this worked before the register existed.
+  const ready = SOURCES.filter((s) => s.required).every((s) => files[s.key])
 
   const readPlan = useCallback(async () => {
     setError(null); setDone(null); setPlan(null); setReading(true)
     try {
       const parsed: Record<string, CsvRow[]> = {}
       for (const s of SOURCES) {
+        const file = files[s.key]
+        if (!file) continue
+        // A spreadsheet is a zip full of XML, and nothing here can read one. Say so plainly
+        // rather than handing the parser binary and reporting nonsense about the contents.
+        if (/\.xlsx?$/i.test(file.name)) {
+          throw new Error(
+            `${file.name} is a spreadsheet. Open it in Excel, choose File → Save As → CSV, and pick that instead.`,
+          )
+        }
         setPhase({ step: `Reading ${s.label}`, done: 0, total: 0 })
         // Yield to the browser between files: the actions export is tens of megabytes, and
         // parsing it without letting the page breathe looks exactly like a crash.
         await new Promise((r) => setTimeout(r, 0))
-        parsed[s.key] = parseCsv(await files[s.key]!.text())
+        parsed[s.key] = parseCsv(await file.text())
       }
       setPhase({ step: 'Working out what would change', done: 0, total: 0 })
       await new Promise((r) => setTimeout(r, 0))
       setPlan(buildImportPlan(
-        { accounts: parsed.accounts, payments: parsed.payments, actions: parsed.actions, interest: parsed.interest },
+        {
+          accounts: parsed.accounts,
+          payments: parsed.payments,
+          actions: parsed.actions,
+          interest: parsed.interest,
+          clients: parsed.clients,
+        },
         { ownerId, only: only.trim() || undefined },
       ))
     } catch (e) {
@@ -170,7 +193,7 @@ export function DataImportTab() {
           {SOURCES.map((s) => (
             <FilePicker
               key={s.key}
-              label={s.label}
+              label={s.label + (s.required ? '' : ' (optional)')}
               hint={s.hint}
               file={files[s.key]}
               onPick={(f) => { setFiles((prev) => ({ ...prev, [s.key]: f })); setPlan(null) }}
@@ -212,7 +235,7 @@ export function DataImportTab() {
           {reading ? <Loader2 size={15} className="animate-spin" /> : <FileUp size={15} />}
           {reading ? 'Reading…' : 'Read the exports'}
         </button>
-        {!ready && <p className="text-xs text-slate-400 mt-2">All four exports are needed. Balances cannot be checked without them.</p>}
+        {!ready && <p className="text-xs text-slate-400 mt-2">The first four exports are needed. Balances cannot be checked without them.</p>}
       </Card>
 
       {phase && (

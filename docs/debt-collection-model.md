@@ -896,6 +896,41 @@ would double-count: an account paid in full would open owing its whole capital a
 closing balance is kept in `swordfish_balance_at_import` purely so the replay can be checked
 against it.
 
+### The client register
+
+A fifth, optional export: the business's own record of who its clients are, one row per Swordfish
+client record. Supplied as CSV (spreadsheets are a zip of XML and nothing in the browser reads
+one; the screen says so rather than handing the parser binary).
+
+Where it is supplied it **wins**, because it is their record rather than a judgement made from
+naming conventions. It settled three things:
+
+**Identity is the company registration number.** That is what proves four rows named "ABSTO …
+-1" through "-4" are one company. The BF reference cannot do it: ABSTO's four rows share
+`CLIENTS0591`, but Agri Saad's three tiers carry `CLIENTS0609`, `0610` and `0611` while sharing
+one registration. Five registrations across 22 rows — hence the file being called *Clients x 5*.
+
+**One registration is not always one book.** Within a registration, rows are sub-grouped by their
+name with the tier suffix and handover year stripped. "Agri Saad -1..-3" all reduce to "Agri
+Saad" — three commission tiers, one book. Adowa's two reduce to "Ellis Park" and "Frederick
+Street" — one company, two properties, each with its own book, which becomes a parent and two
+children. Five clients, seven company records.
+
+**Two clients are on scales nobody had told us about.** Accelerate Fitness reads as a flat 30%
+from the accounts alone; the register shows **30 / 25 / 20 / 15**. ABSTO has a fourth tier at
+10%. Neither is visible in the account data because no account has reached those tiers yet — the
+register is the only place the full scale exists.
+
+That last point creates a gap worth naming: the register gives the *rates* but not the *capital
+boundaries* between them, which are only in the signed mandate. A client with several rates and
+no mandate on file — Accelerate Fitness today — has accounts that import at the rate they were
+billed and cannot be checked against anything. The importer says so by name, so it is clear which
+mandates are worth retrieving.
+
+What the register also carries, all of it new: registration and VAT numbers, banking details,
+contact person, ranking (which is the A/B/C/D classification), Active/Dormant status, sign date,
+the BF liaison, the referral source, and per-client totals.
+
 ### What the run produces
 
 | | |

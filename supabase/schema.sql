@@ -878,6 +878,33 @@ create table if not exists public.account_interest_accruals (
 
 create index if not exists account_interest_account_idx on public.account_interest_accruals (account_id, accrued_on desc);
 
+-- ---------- The client register ----------
+-- From the business's own record of who its clients are, one row per Swordfish client record.
+--
+-- registration_number is the one that matters: it is the client's legal identity, and it is what
+-- proves four "ABSTO ... -1..-4" rows are one company. The BF reference cannot do that job —
+-- Agri Saad's three commission tiers carry three different references while sharing one
+-- registration number. A legal identity holds where a filing convention does not.
+alter table public.companies
+  add column if not exists registration_number text,
+  add column if not exists vat_number text,
+  -- The client's own account, for paying over what we collect. Readable by anyone signed in,
+  -- like the rest of the company record — worth knowing, since that is wider than the people who
+  -- actually do remittances.
+  add column if not exists banking_details text,
+  add column if not exists contact_person text,
+  -- The business's own client reference (CLIENTS0591). Kept for looking things up in their
+  -- existing paperwork, never used as identity.
+  add column if not exists bf_reference text,
+  -- Active or Dormant on the register. A dormant client keeps its book and its history.
+  add column if not exists register_status text,
+  -- Who at Bredell Ferreira looks after the relationship. Free text rather than a profile
+  -- reference: these are names on a spreadsheet, and not all of them will have a login.
+  add column if not exists liaison text;
+
+create index if not exists companies_registration_number_idx
+  on public.companies (registration_number) where registration_number is not null;
+
 -- ---------- Migration provenance ----------
 -- Added when the Swordfish import was built. Separate from the definitions above because these
 -- columns exist to answer "where did this row come from and does it still agree with the system

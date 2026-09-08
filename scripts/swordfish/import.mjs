@@ -36,6 +36,8 @@ const count = (n) => n.toLocaleString('en-ZA')
 
 const paths = {
   summary: arg('summary'), payments: arg('payments'), actions: arg('actions'), interest: arg('interest'),
+  // Optional: the client register. Without it clients come from swordfishClients.ts instead.
+  clients: arg('clients'),
 }
 const ownerId = arg('owner')
 const outDir = arg('out') ?? path.join(HERE, 'out')
@@ -78,7 +80,11 @@ try {
 
 const read = (p) => parseCsv(fs.readFileSync(p, 'utf8'))
 const plan = buildImportPlan(
-  { accounts: read(paths.summary), payments: read(paths.payments), actions: read(paths.actions), interest: read(paths.interest) },
+  {
+    accounts: read(paths.summary), payments: read(paths.payments),
+    actions: read(paths.actions), interest: read(paths.interest),
+    clients: paths.clients ? read(paths.clients) : undefined,
+  },
   { ownerId, only },
 )
 const rows = planRows(plan)
