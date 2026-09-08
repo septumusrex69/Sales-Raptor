@@ -204,6 +204,43 @@ That is the argument for computing it: the mandate's bands belong on the client 
 follows from the account's capital, and a handover that departs from it has to be deliberate and
 visible rather than an accident nobody notices for two years.
 
+### The other two mandates are clean
+
+Two more signed mandates, checked the same way against the same account data:
+
+**ABSTO Industrial Supplies** — signed 12 September 2025.
+
+| No | Capital Handover Amount | Commission |
+|---|---|---|
+| 1 | R0 < R250,000 | 21% |
+| 2 | R250,001 < R500,000 | 15% |
+| 3 | R500,001 < R1,000,000 | 12% |
+| 4 | R1,000,000 + | 10% |
+
+19 accounts, **0 on the wrong rate.** AIS20001 at R370,232 is correctly in the 15% band; every
+other account is under R250,000 and correctly on 21%.
+
+**Agri Saad** — signed 2 September 2024, client Etienne Olivier.
+
+| No | Capital Handover Amount | Commission |
+|---|---|---|
+| 1 | R0 < R100,000 | 25% |
+| 2 | R100,001 < R500,000 | 20% |
+| 3 | R500,001 + | 15% |
+
+4 accounts, **0 on the wrong rate.** AID20001 (R423,823), AID20003 (R140,835) and AID20002
+(R137,884) are all correctly on 20%; AID10001 (R19,422) correctly on 25%.
+
+**0 of 23 wrong here against 60 of 285 at Growthpoint.** That is a scale effect, not a different
+standard: the same manual process holds up over twenty accounts and drifts over two hundred and
+eighty-five. It is the strongest argument yet for computing the rate — the failure appears
+exactly where a person cannot check every line, which is also exactly where the money is.
+
+Note the shape all three share: bands are **half-open on the capital handed over**, the first
+band starts at R0, and the boundary rand (R25,000 / R250,000 / R100,000) belongs to the *lower*
+band — "R0 < R25,000" then "R25,001 +". An account at exactly R25,000 is 25%, not 22.5%. The
+importer implements that literally rather than rounding to the nearest band.
+
 ### Two other things the mandate confirms
 
 **The 50/50 split.** Clause 3: payments received are allocated equally to "(a) capital handed
