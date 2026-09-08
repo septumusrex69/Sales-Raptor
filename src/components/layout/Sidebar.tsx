@@ -6,6 +6,7 @@ import {
   Handshake,
   Users,
   Building2,
+  BookOpen,
   CheckSquare,
   Calendar,
   Activity,
@@ -25,6 +26,9 @@ const NAV = [
   { to: '/deals', label: 'Deals', icon: Handshake },
   { to: '/contacts', label: 'Contacts', icon: Users },
   { to: '/companies', label: 'Clients', icon: Building2 },
+  // The collections book: the debtor accounts a client hands over, which is a different thing
+  // from the client record and much larger than it.
+  { to: '/accounts', label: 'Accounts', icon: BookOpen },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   { to: '/calendar', label: 'Calendar', icon: Calendar },
   { to: '/activities', label: 'Activities', icon: Activity },

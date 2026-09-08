@@ -1,6 +1,6 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock, Users2, Link2, Unlink, Trash2, Inbox, Plus } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock, Users2, Link2, Unlink, Trash2, Inbox, Plus } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
@@ -18,6 +18,7 @@ import { parseEmailActivity } from '../../lib/emailActivity'
 import { buildDrilldownUrl } from '../../lib/drilldown'
 import { RowLimitSelect, applyRowLimitKeeping, type RowLimit } from '../../components/ui/RowLimitSelect'
 import { useFocusedEmailId } from '../../lib/focusedEmail'
+import { fetchBookSummary, type BookSummary } from '../../lib/accountBook'
 import { HeroOwner } from '../../components/RecordOwner'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
@@ -256,6 +257,8 @@ export function CompanyDetail() {
           )}
         </div>
       </Card>
+
+      <ClientBookCard companyId={company.id} />
 
       <Card>
         <CardHeader
@@ -1007,3 +1010,61 @@ function AssignParentModal({
   )
 }
 
+
+/**
+ * The client's collections book, read live rather than from the sales-side totals above.
+ *
+ * companies.account_count and handover_amount are figures a person typed when the mandate was
+ * signed. These are the accounts that actually arrived. Both are worth showing, and they should
+ * not be conflated — a client who promised 300 accounts and sent 71 is a fact worth seeing.
+ */
+function ClientBookCard({ companyId }: { companyId: string }) {
+  const [summary, setSummary] = useState<BookSummary | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchBookSummary(companyId)
+      .then((s) => { if (!cancelled) setSummary(s) })
+      // A client with no book is the normal case before the migration runs, and a failed read
+      // here should not take the client page down with it.
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [companyId])
+
+  if (!summary || summary.accounts === 0) return null
+
+  return (
+    <Card>
+      <CardHeader
+        title="Collections book"
+        subtitle="The accounts actually handed over, as opposed to what the mandate estimated"
+        action={
+          <Link
+            to={`/accounts?client=${companyId}`}
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+          >
+            Open the book <ArrowRight size={12} />
+          </Link>
+        }
+      />
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        <div>
+          <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Accounts</p>
+          <p className="text-2xl font-bold text-slate-800 mt-0.5 tabular-nums">{summary.accounts.toLocaleString('en-ZA')}</p>
+        </div>
+        <div>
+          <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Capital handed over</p>
+          <p className="text-2xl font-bold text-slate-800 mt-0.5 tabular-nums">{formatCurrency(summary.capital)}</p>
+        </div>
+        {summary.commissionDrift > 0 && (
+          <div>
+            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Off their mandate rate</p>
+            <Link to={`/accounts?client=${companyId}&drift=1`} className="text-2xl font-bold text-amber-700 mt-0.5 tabular-nums block hover:underline">
+              {summary.commissionDrift.toLocaleString('en-ZA')}
+            </Link>
+          </div>
+        )}
+      </div>
+    </Card>
+  )
+}
