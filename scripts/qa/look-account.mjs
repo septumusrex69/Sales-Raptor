@@ -191,6 +191,17 @@ for (const tab of ['Overview', 'Transactions', 'Documents']) {
   console.log(`\n== ${tab} ==\n${text.slice(0, 900)}`)
 }
 
+// Settings -> Data Import, where the new "Update debtor details" card lives.
+const settings = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+await settings.route(`**://${REF}.supabase.co/**`, serve)
+await settings.addInitScript(seed, { ref: REF, user: USER })
+await settings.goto(`${ORIGIN}/settings`, { waitUntil: 'networkidle' })
+await settings.waitForTimeout(1200)
+const importTab = settings.getByRole('button', { name: /Data Import/ })
+if (await importTab.count()) { await importTab.first().click(); await settings.waitForTimeout(900) }
+else console.log('!! Data Import tab not found')
+await settings.screenshot({ path: `${OUT}/settings-import.png` })
+
 // The collectors work on iPads, so the narrow width is the real one, not the desk check.
 const ipad = await browser.newPage({ viewport: { width: 1024, height: 768 } })
 await ipad.route(`**://${REF}.supabase.co/**`, serve)

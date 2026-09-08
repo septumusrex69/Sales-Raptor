@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Database, FileUp, Info, Loader2, Upload } from 'lucide-react'
+import { AlertTriangle, Check, CheckCircle2, Database, FileUp, Info, Loader2, Upload } from 'lucide-react'
 import { Card, CardHeader } from '../ui/Card'
 import { inputClass } from '../ui/Modal'
 import { useAuth } from '../../store/AuthContext'
@@ -11,6 +11,9 @@ import { readXlsx } from '../../lib/xlsx'
 import {
   buildImportPlan, planRows, IMPORT_TABLES, WIPE_TABLES, type ImportPlan,
 } from '../../lib/swordfishImport'
+import {
+  applyEnrichment, fetchAccountRefs, planEnrichment, type EnrichPlan,
+} from '../../lib/accountEnrich'
 import { formatCurrency } from '../../data/mockData'
 
 /**
@@ -227,6 +230,8 @@ export function DataImportTab() {
 
   return (
     <div className="space-y-4">
+      <DebtorDetailsCard />
+
       <Card>
         <CardHeader
           title="Import from Swordfish"
@@ -384,6 +389,142 @@ export function DataImportTab() {
         </Card>
       )}
     </div>
+  )
+}
+
+/**
+ * Updating debtor details on their own.
+ *
+ * Separate from the import above, and deliberately so: that one clears the ledgers and rebuilds
+ * them, which needs every export and destroys what is there. This one adds phone numbers, email
+ * addresses, comments and promises to accounts already in the book. It deletes nothing except
+ * what a previous run of itself wrote, so it can be run whenever a fresh export arrives.
+ */
+function DebtorDetailsCard() {
+  const [file, setFile] = useState<File | undefined>()
+  const [plan, setPlan] = useState<EnrichPlan | null>(null)
+  const [phase, setPhase] = useState<Phase>(null)
+  const [reading, setReading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState<string | null>(null)
+
+  const read = useCallback(async () => {
+    if (!file) return
+    setError(null); setDone(null); setPlan(null); setReading(true)
+    try {
+      setPhase({ step: 'Reading the export', done: 0, total: 0 })
+      const rows = await readTable(file)
+      setPhase({ step: 'Matching against the book', done: 0, total: 0 })
+      const accounts = await fetchAccountRefs()
+      if (accounts.length === 0) {
+        throw new Error(
+          'There are no accounts in this database yet, so there is nothing to add details to. '
+          + 'Run the full import first.',
+        )
+      }
+      setPlan(planEnrichment(rows, accounts))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setReading(false); setPhase(null)
+    }
+  }, [file])
+
+  const apply = useCallback(async () => {
+    if (!plan) return
+    setError(null); setDone(null)
+    try {
+      const r = await applyEnrichment(plan, setPhase)
+      setDone(
+        `Updated ${r.accounts.toLocaleString('en-ZA')} accounts: `
+        + `${r.contacts.toLocaleString('en-ZA')} contact details, `
+        + `${r.promises.toLocaleString('en-ZA')} promises, `
+        + `${r.notes.toLocaleString('en-ZA')} comments.`,
+      )
+      setPlan(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPhase(null)
+    }
+  }, [plan])
+
+  return (
+    <Card>
+      <CardHeader
+        title="Update debtor details"
+        subtitle="Debtors Per Client on its own, applied to accounts already in the book. Nothing is cleared."
+      />
+
+      <FilePicker
+        label="Debtors Per Client"
+        hint="Phone numbers, email addresses, the main comment, promises to pay."
+        file={file}
+        onPick={(f) => { setFile(f); setPlan(null); setDone(null); setError(null) }}
+      />
+
+      <div className="flex flex-wrap items-center gap-3 mt-4">
+        <button
+          onClick={read}
+          disabled={!file || reading || !!phase}
+          className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg bg-brand-600 text-white disabled:opacity-40"
+        >
+          {reading ? <Loader2 size={15} className="animate-spin" /> : <FileUp size={15} />}
+          {reading ? 'Reading…' : 'Read the file'}
+        </button>
+        {plan && (
+          <button
+            onClick={apply}
+            disabled={!!phase || plan.matched === 0}
+            className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg bg-gold-400 text-navy-950 border border-gold-500 disabled:opacity-40"
+          >
+            <Check size={15} />
+            Apply to {plan.matched.toLocaleString('en-ZA')} accounts
+          </button>
+        )}
+      </div>
+
+      {phase && (
+        <p className="text-sm text-slate-500 mt-3">
+          {phase.step}
+          {phase.total > 0 && <> — {phase.done.toLocaleString('en-ZA')} of {phase.total.toLocaleString('en-ZA')}</>}
+        </p>
+      )}
+      {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
+      {done && <p className="text-sm text-positive-700 mt-3">{done}</p>}
+
+      {plan && (
+        <div className="mt-4 space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {[
+              { label: 'Accounts matched', value: plan.matched, note: plan.untouched ? `${plan.untouched} left alone` : 'the whole book' },
+              { label: 'Contact details', value: plan.contacts.length, note: `${plan.stats.mobiles} mobile · ${plan.stats.emails} email` },
+              { label: 'Promises to pay', value: plan.promises.length, note: 'open or broken' },
+              { label: 'Comments', value: plan.notes.length, note: 'last and sub-status' },
+            ].map((c) => (
+              <div key={c.label} className="rounded-lg bg-slate-50 px-3 py-2.5">
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">{c.label}</p>
+                <p className="text-lg font-semibold text-slate-800 tabular-nums">{c.value.toLocaleString('en-ZA')}</p>
+                <p className="text-[11px] text-slate-500">{c.note}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Said before the button is pressed, not discovered after. */}
+          <p className="text-xs text-slate-500">
+            Running this replaces the contact details, promises and comments a previous run of this
+            same file wrote. Anything typed in by hand on an account is left exactly as it is.
+          </p>
+
+          {plan.problems.map((p) => (
+            <p key={p} className="text-xs text-negative-700 flex gap-2">
+              <AlertTriangle size={13} className="shrink-0 mt-0.5" /> {p}
+            </p>
+          ))}
+          {plan.remarks.map((n) => <p key={n} className="text-xs text-slate-400">{n}</p>)}
+        </div>
+      )}
+    </Card>
   )
 }
 

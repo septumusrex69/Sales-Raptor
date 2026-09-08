@@ -286,3 +286,77 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
 
   return out
 }
+
+/* ================= Applying this export to a book that is already loaded ================= */
+
+export interface AccountRef {
+  id: string
+  swordfishReference: string | null
+  accountNumber: string | null
+}
+
+export interface EnrichPlan {
+  /** Only the columns this export supplies, plus the id to write them to. */
+  patches: (Record<string, unknown> & { id: string })[]
+  contacts: ContactRow[]
+  promises: PromiseRow[]
+  notes: NoteRow[]
+  matched: number
+  /** References in the file with no account in the book. */
+  unmatched: string[]
+  /** Accounts in the book the file says nothing about. */
+  untouched: number
+  problems: string[]
+  remarks: string[]
+  stats: ReturnType<typeof readDebtorsPerClient>['stats']
+}
+
+export function planEnrichment(rows: CsvRow[], accounts: AccountRef[]): EnrichPlan {
+  const d = readDebtorsPerClient(rows)
+
+  // Matched on the Swordfish reference, falling back to the account number — they are the same
+  // string on every migrated row, but an account created by hand may only have the latter.
+  const byRef = new Map<string, AccountRef>()
+  for (const a of accounts) {
+    if (a.swordfishReference) byRef.set(a.swordfishReference, a)
+    else if (a.accountNumber) byRef.set(a.accountNumber, a)
+  }
+
+  const plan: EnrichPlan = {
+    patches: [], contacts: [], promises: [], notes: [],
+    matched: 0, unmatched: [], untouched: 0,
+    problems: [...d.problems], remarks: [...d.notes], stats: d.stats,
+  }
+
+  const seen = new Set<string>()
+  for (const [ref, patch] of d.patches) {
+    const account = byRef.get(ref)
+    if (!account) { plan.unmatched.push(ref); continue }
+    plan.matched++
+    seen.add(account.id)
+
+    // Only what this export actually has. A blank column must not erase a name that is already
+    // on the account — the other exports supplied some of these fields first.
+    const row: Record<string, unknown> & { id: string } = { id: account.id }
+    for (const [k, v] of Object.entries(patch)) if (v !== null && v !== undefined) row[k] = v
+    if (Object.keys(row).length > 1) plan.patches.push(row)
+
+    for (const c of d.contactsByRef.get(ref) ?? []) plan.contacts.push({ ...c, account_id: account.id })
+    for (const p of d.promisesByRef.get(ref) ?? []) plan.promises.push({ ...p, account_id: account.id })
+    for (const n of d.notesByRef.get(ref) ?? []) plan.notes.push({ ...n, account_id: account.id })
+  }
+
+  plan.untouched = accounts.length - seen.size
+
+  if (plan.unmatched.length) {
+    plan.problems.push(
+      `${plan.unmatched.length} debtors in this file have no account in the book `
+      + `(${plan.unmatched.slice(0, 5).join(', ')}${plan.unmatched.length > 5 ? ', …' : ''}). `
+      + `They are skipped — this updates accounts, it does not create them.`,
+    )
+  }
+  if (plan.untouched > 0) {
+    plan.remarks.push(`${plan.untouched.toLocaleString('en-ZA')} accounts are not in this file and are left alone.`)
+  }
+  return plan
+}

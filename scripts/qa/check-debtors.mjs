@@ -10,6 +10,7 @@ import fs from 'node:fs'
 import { parseCsv } from '../../src/lib/csv.ts'
 import { readDebtorsPerClient } from '../../src/lib/swordfishDebtors.ts'
 import { buildImportPlan, planRows } from '../../src/lib/swordfishImport.ts'
+import { planEnrichment } from '../../src/lib/swordfishDebtors.ts'
 
 const file = process.argv[2]
 if (!file) {
@@ -102,6 +103,39 @@ check('main comments reached the account rows',
   `${tables.debtor_accounts.filter((a) => a.main_comment).length} accounts carry one, reader found ${s.mainComments}`)
 check('nothing was reported unmatched', !plan.problems.some((p) => /no matching account/.test(p)),
   plan.problems.filter((p) => /no matching account/.test(p)).join(' '))
+
+/*
+ * The enrich-only path: this same file applied to a book that is already loaded, without any of
+ * the other exports and without clearing anything.
+ */
+const refs = rows.map((r, i) => ({
+  id: `acct-${i}`, swordfishReference: String(r['Swordfish Reference']).trim(), accountNumber: null,
+}))
+const e = planEnrichment(rows, refs)
+
+console.log('\nEnrich-only against a loaded book:')
+console.log(`  ${String(e.matched).padStart(6)}  accounts matched`)
+console.log(`  ${String(e.patches.length).padStart(6)}  account patches`)
+console.log(`  ${String(e.contacts.length).padStart(6)}  contacts`)
+console.log(`  ${String(e.promises.length).padStart(6)}  promises`)
+console.log(`  ${String(e.notes.length).padStart(6)}  comments`)
+console.log(`  ${String(e.unmatched.length).padStart(6)}  unmatched`)
+
+check('enrich matches every row when the book holds them all', e.matched === rows.length && e.unmatched.length === 0)
+check('enrich produces the same contacts as the full import', e.contacts.length === s.contacts)
+check('every patch names an account and at least one field',
+  e.patches.every((p) => p.id && Object.keys(p).length > 1))
+check('a patch never carries a null', e.patches.every((p) => Object.values(p).every((v) => v !== null && v !== undefined)),
+  'a null would erase a value the other exports supplied')
+check('every written row is marked as ours',
+  [...e.contacts, ...e.promises, ...e.notes].every((r) => r.source === 'swordfish'),
+  'source is what makes a re-run replace instead of duplicate')
+
+/* Half a book: the other half must be reported, not silently skipped. */
+const half = planEnrichment(rows, refs.slice(0, 400))
+check('accounts missing from the book are reported', half.unmatched.length === rows.length - 400)
+check('a partial match still applies to what it found', half.matched === 400)
+check('untouched accounts are counted', planEnrichment(rows.slice(0, 100), refs).untouched === refs.length - 100)
 
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)
 process.exit(failed ? 1 : 0)
