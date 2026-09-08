@@ -62,14 +62,22 @@ from R50,000 up**, both excluding VAT.
 
 ---
 
-## 2a. FCC — Final Collection Commission
+## 2a. The settlement receipt fee (Swordfish: FCC)
 
-Resolved. FCC is **Final Collection Commission**: what the item 9 commission *would* be if the
-debtor settled the whole remaining balance in one payment. It appears on every statement so the
-settlement figure is one honest number instead of something the debtor has to work out.
+Resolved. Swordfish calls it **Final Collection Commission**; it is the **item 9 receipt fee**
+applied to a hypothetical final instalment — what the debtor would pay to settle the whole
+remaining balance in one payment. It appears on every statement so the settlement figure is one
+honest number instead of something the debtor has to work out.
+
+**On the name.** Three words are in circulation for one fee: Annexure B names it nothing,
+Swordfish says "collection commission", the export column says "FCC". We say **receipt fee**,
+because *commission* is the percentage charged to the **client** and using one word for both makes
+every conversation about money ambiguous. The receipt fee comes off the debtor's payment;
+commission comes off what is remitted to the client. Different payer, different base, different
+rate. In code it is `settlementReceiptFee()`, one line on top of `receiptFee()`.
 
 ```
-FCC = min( 10% x balance-before-FCC , R610 ) x 1.15
+settlement receipt fee = min( 10% x balance-before-fee , R610 ) x 1.15
 ```
 
 where balance-before-FCC is capital + interest + fees already raised + commission already
@@ -118,68 +126,105 @@ R2,075 x 10% x 1.15 is exactly R238.625 and the statement shows R238.63. As a do
 account. `roundToCents` in `annexureB.ts` rounds half up through the representation gap, and
 every rand figure the module returns goes through it.
 
-## 2b. The fee ceiling — a cap nobody had told us about
+## 2b. The fee ceiling — items 1 to 7
 
-Found by building the importer, and it is the single most important thing the migration turned up.
+**Correcting myself.** I wrote that a ceiling existed but that "the rule is not derivable from
+the exports". It is not derivable from the exports, but it did not need to be: it is printed at
+the top of Annexure B itself, and I had not read the gazette.
 
-**No account in the book has ever been charged more than R1,288.00 excl VAT in action fees.**
-Not one, in 735 accounts, across capitals from R1,899 to R423,823. 304 of them (41%) sit between
-R1,000 and R1,300, with 209 packed into the R1,000–R1,099 band alone.
+> **Note:** The total amount to be recovered from the debtor in respect of **items 1 to 7** of
+> the Annexure shall not exceed **the capital amount of the debt or R1023,00, whichever is the
+> lesser.**
+>
+> — GN R.580, GG 43343, 22 May 2020. The 2026 substitution raises the figure to **R1225,00**.
 
-That ceiling is flat, not proportional. Split the accounts by capital and the picture does not
-move:
+That is the whole rule. It is a ceiling on the *total recovered*, not on any one fee — so the fee
+that would cross the line is trimmed to land exactly on it, and every action after that is free.
+It excludes VAT, and it excludes items 8 (attending taxation) and 9 (the receipt fee).
 
-| Capital at handover | Accounts past the ceiling | Fees charged, excl VAT |
-|---|---|---|
-| under R10,000 | 18 | median R1,225 |
-| R10,000–R25,000 | 83 | median R1,029 |
-| R25,000–R50,000 | 80 | median R1,023 |
-| R50,000–R100,000 | 1 | R1,023 |
-| over R100,000 | 4 | median R1,225 |
+### It is enforced to the cent, and the data proves it twice over
 
-A R424,000 farm debt and a R1,900 gym membership stop at the same number.
-
-### What it explains
-
-**18,187 billable actions carry no charge.** 40% of phone calls, 46% of SMSes, 47% of outgoing
-emails, 31% of letters. At tariff that is roughly R300,000 of apparently unbilled work, and the
-obvious reading — that we have been giving away a third of our collections effort — is wrong.
-
-The giveaway is in the timing. Charge-free actions are rare in the month after a handover and
-almost universal two years later:
-
-| Month | Free share of billable actions |
+| Total fees on an account | Accounts |
 |---|---|
-| 2024/05 (Adowa + Growthpoint handover) | 3% |
-| 2024/08 | 8% |
-| 2024/11 | 43% |
-| 2025/05 | 70% |
-| 2025/09 | 89% |
-| 2025/10 (Growthpoint 2025 handover) | 46% |
-| 2026/07 (Accelerate Fitness handover) | 22% |
+| exactly R1,023.00 | **161** |
+| exactly R1,225.00 | **52** |
 
-Every dip is a fresh cohort arriving. The free rate is account age, not client policy or
-operator laziness — the same client shows 3% and 89% eighteen months apart. Consultations are
-the exception at 1% free, which fits: a consultation is a completed engagement, and they are
-rare enough that no account reaches the ceiling on them.
+Those two figures are the 2020 and 2026 ceilings, and the accounts date themselves by which one
+they stopped at: the last charge on an R1,023 account falls no later than **27 January 2026**, and
+the first on an R1,225 account no earlier than **16 April 2026**. The trimming is visible in the
+unit prices too — a phone call appears charged at R2.50 or R6.00, which looks like corrupt data
+until you see it is the last few rand of headroom before the cap.
 
-A separate and smaller effect: `Status = "Action Cancel without Charge"` is always free (142
-actions), against `"Action Cancel with Charge"` which is billed (1 action). This refines the
-earlier finding that a cancelled action keeps its fee — it usually does, and Swordfish records
-explicitly when it does not.
+This is what the 18,187 charge-free billable actions are. Not lost revenue: the cap, operating.
 
-### What we do not know
+### The half that is not being enforced
 
-The exact rule. Only that a ceiling exists, that it is flat, and that R1,288 is the highest
-figure it has ever permitted. The totals bunch at R1,023, R1,225 and R1,288 rather than at one
-number, so it is not a simple "stop before exceeding X" — and guessing the formula would be
-guessing about the one number that decides whether our billing is lawful.
+"or the capital amount of the debt, **whichever is the lesser**". Swordfish applies the flat
+figure and ignores the capital test, so small debts are over-recovered:
 
-**This blocks the fee engine.** Raptor must enforce the same ceiling before it raises a single
-fee of its own; without it, every account past this point would be over-billed, which is a
-compliance failure and not merely a bug. `account_fees.counts_toward_fee_cap` already exists for
-it. The rule needs to come from Annexure B or from the Swordfish configuration — it is not
-derivable from the exports.
+| | Accounts | Over the ceiling |
+|---|---|---|
+| Capital was the binding limit | 8 | **R1,647.01** |
+| A few rand over the flat ceiling (keying) | 31 | R598.50 |
+| | **39 of 735** | **R2,245.51 excl VAT** |
+
+APM20096 was charged R1,023.00 in fees on a debt of R580.00. ACF10046: R444.00 of fees on R230.00
+of capital. These are not rounding — the fees are nearly twice the debt, and the Act caps them at
+the debt.
+
+This is over-recovery from **debtors**, which is a different and more serious category than the
+Growthpoint commission drift (3a): that was billing a client the wrong agreed rate, this is
+exceeding a statutory limit. The amounts are small and the fix is forward-looking, but the two
+should not be discussed as if they were the same kind of error.
+
+`recoverableFee()` in `annexureB.ts` implements both halves, against the schedule in force on the
+action's own date. `reconcile.mjs` checks every account on every run.
+
+### What else the gazette settled
+
+- **Item 9 has three names and they are all one thing.** Annexure B does not name it; Swordfish
+  calls it "collection commission"; the export column calls the settlement quotation of it "FCC".
+  We call it the **receipt fee** — because "commission" is the percentage charged to the *client*,
+  and one word for both makes every conversation about money ambiguous. Different payer, different
+  base, different rate. FCC is now literally `receiptFee(balance)` with VAT (2a).
+- **The receipt fee applies to PTC.** "inclusive of instalments made directly to the client" — a
+  payment the client banks itself attracts the fee exactly like one reaching our trust account.
+  Gazetted, not a house reading (7a).
+- **No double-charging on a receipt.** "No additional fee shall be charged for any attendance in
+  connection with the receipt or payment of any instalment." A call chasing the instalment that
+  arrives is covered by the receipt fee.
+- **Per-month sub-limits**, which the engine must enforce and nothing currently checks: item 1(c)
+  electronic communications, maximum **ten per month**; item 4(c) credit bureau searches, maximum
+  **four per month**.
+- **Both quarantined fee names are released.** "Necessary Costs" — eight charges of exactly R21 on
+  2024-05-07 — is item 3, "other necessary expenses not specifically provided for", priced at
+  exactly R21 in the schedule then in force. "Team Leader Assistance" — one R25 charge commented
+  "WhatsApp Call - No Contact" — is item 2 at the 2026 rate; the name describes who helped, the
+  comment and the price describe what was done. R193 released.
+
+### The 2020 schedule, for the record
+
+| Item | | 2020 | 2026 |
+|---|---|---|---|
+| 1(a) | Letter, fax or e-mail | R21 | R25 |
+| 1(c) | Other electronic communication (max 10/month) | R3 | R3.50 |
+| 2 | Phone call, not a consultation | R21 | R25 |
+| 3 | Other necessary expenses (a total) | R21 | R25 |
+| 4(b) | Documents signed at the debtor's residence | R210 | R250 |
+| 4(c) | Credit bureau search (max 4/month) | R14 | R16 |
+| 5 | Settlement account at the debtor's request | R41 | R50 |
+| 6 | Correspondence received and attended to | R11 | R13 |
+| 7 | Consultation with debtor | R52 | R60 |
+| 8 | Attending taxation *(outside the cap)* | R82 | R98 |
+| 9 | Receipt fee, 10% of the instalment *(outside the cap)* | max R509 | max R610 |
+| | **Items 1–7 ceiling** | **min(capital, R1,023)** | **min(capital, R1,225)** |
+
+Items 1(b) and 4(a) point at the Magistrates' Courts Rules rather than naming an amount, and move
+independently of this schedule.
+
+Note item 6 is **inbound** correspondence at R11. The legacy name "Correspondence" in the export
+is *not* item 6 — all 25 charged instances are commented "Emailed debtor" and priced at R21, the
+outbound rate. The price is what distinguishes them.
 
 ---
 
@@ -322,6 +367,56 @@ Swordfish's workaround is why the client list shows Growthpoint four times and w
 parent-level view of the relationship does not exist there. In Raptor the client is one record
 and the rate lives on the account, so the sliding scale stops being a filing convention and
 starts being a rule the system can apply and audit.
+
+## 3b. Historical billing errors — what to do about them
+
+Two distinct errors are now on the record, and they are not the same kind of thing.
+
+| | Who was wrong-charged | Amount | Nature |
+|---|---|---|---|
+| Commission drift (3a) | **Clients** — Growthpoint | R4,698.72 foregone, R75 over-charged | A contract term applied inconsistently by hand |
+| Fee ceiling (2b) | **Debtors** — 39 accounts | R2,245.51 excl VAT over the ceiling | A statutory limit half-implemented |
+
+**The decision taken: do not restate history.** Take the position as it stands, and be correct
+from here. That is the right call and it is worth writing down why, because "we knew and did
+nothing" is a bad sentence to have to say later without a reason attached.
+
+The case for it:
+
+- The amounts are small against the cost of reopening. R4,698.72 of commission over two years on a
+  285-account book; R2,245.51 of fees across 735 accounts.
+- Payover reports have already been run and money has already moved on these figures. Restating
+  means reissuing statements, re-cutting remittances, and explaining to clients why a number they
+  reconciled two years ago has changed.
+- Many of the affected accounts are settled. Reopening a paid-up account to recover R70 is worse
+  for the relationship than the R70 is worth.
+- Both errors are already stopped by construction, not by discipline: bands are computed from the
+  mandate, and the ceiling is enforced as fees accrue.
+
+Where that reasoning does **not** hold, and where something should still be done:
+
+1. **The four over-charged Growthpoint accounts that have never paid.** All from the 2026/06/26
+   handover, zero payments received. Nothing has been invoiced or remitted, so correcting the rate
+   costs nothing and avoids over-charging a client going forward. Fix these.
+2. **Live accounts still accruing on a wrong rate.** 13 accounts, R286,876 outstanding, roughly
+   R7,172 of commission at stake on money not yet collected. Correct the rate forward — this is
+   not restating history, it is stopping the error continuing.
+3. **Any debtor still being charged past the ceiling.** Over-recovery from a debtor is a statutory
+   breach rather than a commercial one; the account should stop charging immediately even if
+   nothing is refunded.
+
+So: no restatement, no refunds, no reissued statements — but the rate and the ceiling are
+corrected on every account still running, and the four unbilled ones are simply fixed. The
+distinction that matters is between *money already settled* and *money still to be charged*.
+
+**What the system must do so this cannot recur.** Both errors survived for two years because
+nothing looked. `debtor_accounts.commission_rate_expected` sits beside `commission_rate` and
+disagreeing is visible; `recoverableFee()` applies the ceiling as fees accrue rather than
+discovering it at settlement; and `reconcile.mjs` reports both on every run. A number that
+disagrees with the contract or the Act should be a thing somebody sees that week, not something a
+migration turns up two years later.
+
+---
 
 ## 4. Interest
 
@@ -789,16 +884,18 @@ real data meets a real schema:
   fit the confirmed formula are almost all in duplum, so the two ceilings appear to interact.
 - ~~**What the sliding-scale commission bands are measured against**~~ — resolved (3a): capital
   at handover, per account, on bands the signed mandate sets out.
-- **Whether the electronic-communication cap is per account or per debtor**, and which action
-  types count toward it. Partly answered by 2b, which shows an absolute per-account fee
-  ceiling of at most R1,288 excl VAT exists and is being enforced — but not what the rule is.
+- ~~**Whether the electronic-communication cap is per account or per debtor**~~ — resolved (2b):
+  item 1(c) is capped at ten electronic communications per month, item 4(c) at four credit bureau
+  searches per month, and separately items 1–7 in total may not exceed min(capital, R1,225).
+  All per account.
 - **Item 1(b)**, the registered-letter fee, still to be confirmed.
 
 | # | Question | Blocks |
 |---|---|---|
 | 1 | The daily interest rate — 2% ÷ days in month, or 24% ÷ 365? | Interest |
 | 2 | Item 1(b), registered letter under s57 — the Magistrates' Courts figure. **Awaiting; BF to supply.** Rarely used, so it does not block the build. | Tariff |
-| 3 | **The fee ceiling rule** (2b). A cap of at most R1,288 excl VAT per account is demonstrably being enforced, and 18,187 actions are free because of it, but the formula is not derivable from the exports. Needed from Annexure B or the Swordfish configuration. | The fee engine — nothing may raise a fee until this is known |
+| 3 | ~~The fee ceiling rule~~ — **resolved** (2b). It is the Note at the head of Annexure B: items 1–7 may not exceed min(capital, R1,225), R1,023 before March 2026. Implemented in `recoverableFee()`. | — |
+| 4 | Whether the item 9 receipt-fee maximum (R610) is per instalment or in aggregate over the account. The 2020 wording "an instalment (one or more)" leans per-receipt, and per-receipt reproduces the business's own statements, which is what we do. Still not settled. | Statements on long-running accounts |
 
 ---
 

@@ -15,6 +15,7 @@
 import fs from 'node:fs'
 import { parseCsv, num, date } from './csv.mjs'
 import { codeForLegacyName, rateFor, ACTION_BY_CODE, isQuarantinedLegacyName } from '../../src/lib/actionTariff.ts'
+import { feeCeiling, scheduleFor } from '../../src/lib/annexureB.ts'
 
 const CENT = 0.011 // a cent, with room for float noise
 
@@ -260,6 +261,57 @@ if (actions.length) {
       `under-charged ${money(short)} excl VAT, over-charged ${money(over)} excl VAT`,
       ...[...staleByClient.entries()].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([c, v]) => `worst client: ${c} — ${money(v)}`),
     ])
+}
+
+/* ---------- 5b. Is the Annexure B fee ceiling being respected? ---------- */
+if (actions.length) {
+  console.log('\nFEE CEILING')
+  /*
+   * "The total amount to be recovered from the debtor in respect of items 1 to 7 of the Annexure
+   * shall not exceed the capital amount of the debt or R1225,00, whichever is the lesser."
+   *
+   * Two halves. The flat figure is enforced to the cent — accounts land on exactly R1,023.00 or
+   * exactly R1,225.00, with the fee that would have crossed the line trimmed to fit. The capital
+   * half is the one that gets missed, and it only bites on small debts, which is exactly where
+   * nobody is looking. This checks both, against the ceiling in force on the account's own
+   * last charged date rather than today's.
+   */
+  const charged = new Map()
+  const lastCharge = new Map()
+  for (const a of actions) {
+    const ref = a['Swordfish Reference']
+    const cost = num(a['Action Cost (excl VAT)']) ?? 0
+    if (!ref || cost <= 0) continue
+    charged.set(ref, (charged.get(ref) ?? 0) + cost)
+    const when = date(a['Action Date'])
+    if (when && (!lastCharge.has(ref) || when > lastCharge.get(ref))) lastCharge.set(ref, when)
+  }
+
+  const breaches = []
+  let overCapital = 0, overFlat = 0, worstDate = '1900-01-01'
+  for (const r of accounts) {
+    const ref = r['Swordfish Reference']
+    const cap = num(r['Capital on Default'])
+    const total = charged.get(ref)
+    if (cap === undefined || total === undefined) continue
+    const on = lastCharge.get(ref) ?? worstDate
+    const schedule = scheduleFor(on)
+    const limit = feeCeiling(cap, schedule)
+    if (total <= limit + CENT) continue
+    const over = total - limit
+    if (cap < schedule.itemsOneToSevenCeiling) overCapital += over
+    else overFlat += over
+    breaches.push({ ref, total, cap, limit, over, capitalBound: cap < schedule.itemsOneToSevenCeiling })
+  }
+  breaches.sort((a, b) => b.over - a.over)
+
+  check('no account is charged past its items 1-7 ceiling', breaches.length === 0 ? true : 'warn', [
+    `${breaches.length} of ${accounts.length} accounts exceed min(capital, ceiling); ${money(overCapital + overFlat)} excl VAT over in total`,
+    `${money(overCapital)} of that is on accounts where the CAPITAL was the binding limit — the half of the rule Swordfish does not apply`,
+    `${money(overFlat)} is a few rand over the flat ceiling on ${breaches.filter((b) => !b.capitalBound).length} accounts, which reads as keying`,
+    ...breaches.filter((b) => b.capitalBound).slice(0, 5).map(
+      (b) => `${b.ref}: ${money(b.total)} of fees on ${money(b.cap)} of capital — over by ${money(b.over)}`),
+  ])
 }
 
 /* ---------- 6. How many Swordfish "clients" are really one client? ---------- */
