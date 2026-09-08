@@ -1,14 +1,20 @@
 /**
  * Annexure B to the Regulations under the Debt Collectors Act 114 of 1998.
  *
- * Source: Government Notice R.7207, Government Gazette No. 54273, 6 March 2026, which
- * substituted Annexure B in full and amended regulation 11 from R1023,00 to R1225,00.
+ * Sources, newest first:
+ *   - GN R.7207, GG 54273, 6 March 2026 — substituted Annexure B in full and amended
+ *     regulation 11 from R1023,00 to R1225,00.
+ *   - GN R.580, GG 43343, 22 May 2020 — substituted Annexure B in full and amended
+ *     regulation 11 from R965,00 to R1023,00.
  *
  * This is gazetted fact, not house policy, and it is versioned by effective date rather than
  * edited in place. A tariff that is corrected in place silently rewrites history: an account
  * worked in 2025 must keep being calculated on the tariff that applied in 2025, or a statement
  * reissued years later will not match the one the debtor was originally sent. When the next
- * gazette lands, add a new schedule below it — never change these numbers.
+ * gazette lands, add a new schedule above the others — never change these numbers.
+ *
+ * The rules never change; only the amounts do. That is why the ceiling, the receipt-fee rate
+ * and the per-month limits all live on the schedule rather than in the code that applies them.
  */
 
 export type AnnexureBItemId =
@@ -63,17 +69,24 @@ export interface AnnexureBSchedule {
   /**
    * "The total amount to be recovered from the debtor in respect of items 1 to 7 of the
    * Annexure shall not exceed the capital amount of the debt or R1225,00, whichever is the
-   * lesser." Note this binds recovery, so it has to be enforced as fees accrue — work done
-   * beyond it was never recoverable, and discovering that at settlement is too late.
-   */
-  /**
+   * lesser."
+   *
+   * Two halves, and only one of them is commonly implemented. The flat figure is enforced in
+   * the migrated book to the cent — 161 accounts sit on exactly R1,023.00 and 52 on exactly
+   * R1,225.00, with the fee that would have crossed the line trimmed to land on it. The
+   * *capital* half is not: 8 accounts were charged more in fees than the debt was worth,
+   * R1,647.01 more than the Act allows. Both halves are enforced here.
+   *
+   * Note this binds recovery, so it has to be applied as fees accrue — work done beyond it was
+   * never recoverable, and discovering that at settlement is too late.
+   *
    * On the same VAT-exclusive basis as the amounts themselves — the consistent reading of a
    * single gazetted tariff, though the gazette does not spell it out.
    */
   itemsOneToSevenCeiling: number
   /** Item 9: a fee of 10% of the instalment received. */
   receiptFeeRate: number
-  /** Item 9: "subject to a maximum amount of R610.00". */
+  /** Item 9: "subject to a maximum amount of R610,00" (R509,00 under the 2020 schedule). */
   receiptFeeMaximum: number
   items: AnnexureBItem[]
 }
@@ -148,8 +161,85 @@ export const ANNEXURE_B_2026: AnnexureBSchedule = {
   ],
 }
 
+/**
+ * The schedule that ran for nearly six years before the 2026 substitution.
+ *
+ * It is here because 161 accounts in the migrated book stopped charging at exactly R1,023.00 —
+ * this schedule's ceiling — and 52 at exactly R1,225.00. Those two figures are how the cohorts
+ * date themselves: the last charge on an R1,023 account falls no later than January 2026, and
+ * the first on an R1,225 account no earlier than April 2026. Without this schedule the older
+ * accounts cannot be recomputed at all, and every reissued statement on them would be wrong.
+ */
+export const ANNEXURE_B_2020: AnnexureBSchedule = {
+  effectiveFrom: '2020-05-22',
+  citation: 'GN R.580, GG 43343, 22 May 2020',
+  vatBasis: 'exclusive',
+  itemsOneToSevenCeiling: 1023,
+  receiptFeeRate: 0.1,
+  receiptFeeMaximum: 509,
+  items: [
+    {
+      id: '1a',
+      description: 'Necessary ordinary letter, registered letter, facsimile or e-mail',
+      amount: 21,
+      countsTowardCap: true,
+    },
+    {
+      id: '1b',
+      description: "Registered letter (section 57 of the Magistrates' Courts Act, 1944)",
+      amount: null,
+      externalTariff: "Item 8 of Annexure 2, Table A, Part II of the Magistrates' Courts Rules",
+      countsTowardCap: true,
+    },
+    {
+      id: '1c',
+      description: 'Necessary electronic communication, other than facsimile or e-mail (each)',
+      amount: 3,
+      maxPerMonth: 10,
+      countsTowardCap: true,
+    },
+    { id: '2', description: 'Necessary phone call, which is not a consultation (per call)', amount: 21, countsTowardCap: true },
+    {
+      id: '3',
+      description: 'Other necessary expenses not specifically provided for',
+      amount: 21,
+      isTotal: true,
+      countsTowardCap: true,
+    },
+    {
+      id: '4a',
+      description: 'Acknowledgement of debt and undertaking to pay (section 57 or 58), including the necessary consultation',
+      amount: null,
+      externalTariff: "Items 9 and 10 of Annexure 2, Table A, Part II of the Magistrates' Courts Rules",
+      countsTowardCap: true,
+    },
+    {
+      id: '4b',
+      description: "Original documents signed by the debtor under item 4(a) at the debtor's residence or place of work",
+      amount: 210,
+      countsTowardCap: true,
+    },
+    { id: '4c', description: 'Necessary registered credit bureau search', amount: 14, maxPerMonth: 4, countsTowardCap: true },
+    {
+      id: '5',
+      description: 'Settlement account drawn up and furnished at the debtor’s request, other than the six-monthly one',
+      amount: 41,
+      countsTowardCap: true,
+    },
+    { id: '6', description: 'Correspondence received and attended to', amount: 11, countsTowardCap: true },
+    { id: '7', description: 'Necessary consultation with debtor', amount: 52, countsTowardCap: true },
+    { id: '8', description: 'Attending taxation', amount: 82, countsTowardCap: false },
+    {
+      id: '9',
+      description: 'On receipt of an instalment (one or more) in redemption of the debt, inclusive of instalments made directly to the client',
+      amount: null,
+      countsTowardCap: false,
+    },
+  ],
+}
+
 /** Newest first, so the schedule in force on a date is the first one that started on or before it. */
-export const ANNEXURE_B_SCHEDULES: AnnexureBSchedule[] = [ANNEXURE_B_2026]
+export const ANNEXURE_B_SCHEDULES: AnnexureBSchedule[] = [ANNEXURE_B_2026, ANNEXURE_B_2020]
 
 export function scheduleFor(date: string | Date): AnnexureBSchedule {
   const iso = typeof date === 'string' ? date : date.toISOString()
@@ -168,15 +258,58 @@ export function feeCeiling(capitalAmount: number, schedule: AnnexureBSchedule = 
 }
 
 /**
- * Item 9 on one instalment: 10%, capped at R610.
+ * Item 9 on one instalment: 10%, capped at R610 (R509 before March 2026).
  *
- * UNCONFIRMED: whether that R610 maximum applies per instalment or in aggregate across the
- * account. The wording carries both readings and the difference is large on a long-running
- * account, so this takes the literal per-instalment reading and the question stays open. Do
- * not treat this as settled.
+ * **This fee has three names and they all mean this function.** Annexure B calls it nothing in
+ * particular; Swordfish calls it "collection commission"; the export column calls the settlement
+ * quotation of it "FCC". We call it the **receipt fee**, deliberately — "commission" is the
+ * percentage we charge the *client*, and using one word for both makes every conversation about
+ * money ambiguous. The receipt fee comes off the debtor's payment; commission comes off what is
+ * remitted to the client. Different payer, different base, different rate.
+ *
+ * The gazette adds a rule worth keeping in view: "No additional fee shall be charged for any
+ * attendance in connection with the receipt or payment of any instalment." Taking the payment is
+ * covered by this fee, so a phone call logged for chasing that same instalment is not separately
+ * chargeable.
+ *
+ * It also says the fee applies "inclusive of instalments made directly to the client" — so a PTC
+ * payment attracts it exactly like one that reaches our trust account (§7a). That is gazetted,
+ * not a house reading.
+ *
+ * STILL UNCONFIRMED: whether the maximum applies per instalment or in aggregate across the
+ * account. The 2020 wording — "On receipt of an instalment (one or more) in redemption of the
+ * debt" — leans per-receipt, and the per-instalment reading reproduces the business's own
+ * statements, so that is what this does. Not settled.
  */
 export function receiptFee(instalment: number, schedule: AnnexureBSchedule = ANNEXURE_B_2026): number {
   return roundToCents(Math.min(instalment * schedule.receiptFeeRate, schedule.receiptFeeMaximum))
+}
+
+/**
+ * How much of a fee may actually be recovered, given what this account has already been charged.
+ *
+ * This is the whole cap, applied the way the Act words it: a limit on the *total recovered* for
+ * items 1 to 7, not a limit on any one fee. So the fee that would cross the line is trimmed to
+ * land exactly on it, and everything after it is free. That is not a rounding artefact — it is
+ * why 161 accounts in the migrated book sit on exactly R1,023.00 and 52 on exactly R1,225.00,
+ * and why a R25 phone call there appears charged at R2.50.
+ *
+ * `alreadyCharged` is the account's running total of items 1–7 only, excluding VAT. Items 8 and
+ * 9 are outside the cap and must not be counted into it.
+ *
+ * Returns the recoverable portion, which may be zero. The action still happened and the fee was
+ * still incurred — record it with `billed: false` rather than discarding it, because the work is
+ * part of the account's history whether or not the debtor can be charged for it.
+ */
+export function recoverableFee(
+  feeExclVat: number,
+  alreadyCharged: number,
+  capitalAmount: number,
+  schedule: AnnexureBSchedule = ANNEXURE_B_2026,
+): number {
+  const headroom = feeCeiling(capitalAmount, schedule) - alreadyCharged
+  if (headroom <= 0) return 0
+  return roundToCents(Math.min(feeExclVat, headroom))
 }
 
 /**
@@ -197,18 +330,19 @@ export function roundToCents(value: number): number {
 }
 
 /**
- * Final Collection Commission — what settling the whole balance today would cost.
+ * The receipt fee on a settlement — what paying the whole balance today would cost.
  *
- * FCC is the line that made "All Fees (inc VAT + FCC)" impossible to interpret. It is not a fee
- * that has been earned. It is a quotation: the item 9 commission that *would* be charged if the
- * debtor paid the remaining balance in one payment, shown on the statement so the settlement
- * figure is a single honest number rather than something the debtor has to work out.
+ * Swordfish calls this "Final Collection Commission" and the export column calls it FCC, which
+ * is the line that made "All Fees (inc VAT + FCC)" impossible to interpret. It is not a separate
+ * charge and not a fee that has been earned: it is item 9 applied to a hypothetical final
+ * instalment — hence the one-line body — shown on the statement so the settlement figure is a
+ * single honest number rather than something the debtor has to work out.
  *
  * Three consequences, and getting any of them wrong corrupts the ledger:
  *
  * 1. **It is never revenue.** Across the September 2026 export it was 47% of everything reported
  *    as fees — R168,563 of R360,811. Counting it as earned would overstate the book by nearly
- *    half.
+ *    half. In the full four-report export the same gap is R539,146 of R1,232,240.
  * 2. **It is recomputed, never accumulated.** Each statement replaces the previous figure; it is
  *    a derived display line, not a posted transaction. Store it as a fee row and it compounds
  *    against itself on every statement.
@@ -219,14 +353,13 @@ export function roundToCents(value: number): number {
  * worked statements from the business. The remainder are almost entirely in duplum accounts,
  * where the ceiling interacts with this and the behaviour is not yet confirmed.
  */
-export function finalCollectionCommission(
-  balanceBeforeFcc: number,
+export function settlementReceiptFee(
+  balanceBeforeFee: number,
   vatRate = 0.15,
   schedule: AnnexureBSchedule = ANNEXURE_B_2026,
 ): number {
-  if (balanceBeforeFcc <= 0) return 0
-  const excl = Math.min(balanceBeforeFcc * schedule.receiptFeeRate, schedule.receiptFeeMaximum)
-  return roundToCents(excl * (1 + vatRate))
+  if (balanceBeforeFee <= 0) return 0
+  return roundToCents(receiptFee(balanceBeforeFee, schedule) * (1 + vatRate))
 }
 
 /**

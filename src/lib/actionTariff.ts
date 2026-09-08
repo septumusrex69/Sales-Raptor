@@ -159,32 +159,44 @@ export const LEGACY_NAME_OVERRIDES: { legacy: string; code: ActionCode; evidence
     code: 'email_out',
     evidence:
       'All 25 charged instances carry the comment "Emailed debtor", and 24 of them are priced at ' +
-      'R21 — the outgoing-email rate in force at the time. The name is vague; what was done is not.',
+      'R21 — the outgoing-email rate in force at the time. The name is vague; what was done is not. ' +
+      'Note it is NOT Annexure B item 6 ("Correspondence received and attended to", R11 in 2020): ' +
+      'item 6 is inbound, these are outbound, and the price says so.',
+  },
+  {
+    legacy: 'necessarycosts',
+    code: 'perusal',
+    evidence:
+      'Eight charges of exactly R21, all on 2024-05-07. The 22 May 2020 gazette prices item 3, ' +
+      '"Other necessary expenses not specifically provided for", at exactly R21 — the name, the ' +
+      'amount and the schedule in force all agree. Previously quarantined only because we had not ' +
+      'read the 2020 Annexure B.',
+  },
+  {
+    legacy: 'teamleaderassistance',
+    code: 'phone_call',
+    evidence:
+      'A single charge of R25 in Aug 2026 commented "WhatsApp Call - No Contact". R25 is the ' +
+      'item 2 phone-call rate under the 2026 schedule, and the comment says a call was attempted. ' +
+      'The name describes who helped, not what was done; the comment and the price describe the act.',
   },
 ]
 
 /**
  * Names that must come across as history but must not bring a fee with them.
  *
- * The action happened and the audit trail should say so, but nobody at the business can identify
- * what was being charged for, and a fee filed under a guessed Annexure B item is a wrong
- * statement waiting to be reissued. These import with their money held back for classification
- * rather than being silently dropped or silently accepted.
+ * The action happened and the audit trail should say so, but nobody can identify what was being
+ * charged for, and a fee filed under a guessed Annexure B item is a wrong statement waiting to be
+ * reissued. These import with their money held back for classification rather than being silently
+ * dropped or silently accepted.
+ *
+ * Currently empty, and worth saying why. Both former entries — "Necessary Costs" and "Team Leader
+ * Assistance" — were released once we read the 22 May 2020 gazette: each turned out to sit exactly
+ * on a gazetted amount for the schedule in force on its own date. They are in
+ * LEGACY_NAME_OVERRIDES above with that evidence. The mechanism stays because the next export will
+ * bring names nobody recognises, and holding their money back is the right default.
  */
-export const QUARANTINED_LEGACY_NAMES: { legacy: string; reason: string }[] = [
-  {
-    legacy: 'necessarycosts',
-    reason:
-      'Eight charges of R21, all raised on 2024-05-07, commented only "Necessary Costs". Nobody at ' +
-      'the business recognises the item. Looks like a one-off bulk entry.',
-  },
-  {
-    legacy: 'teamleaderassistance',
-    reason:
-      'A single R25 charge in Aug 2026 commented "WhatsApp Call - No Contact". Confirmed as not a ' +
-      'standard item, and the name and the comment disagree about what happened.',
-  },
-]
+export const QUARANTINED_LEGACY_NAMES: { legacy: string; reason: string }[] = []
 
 /** Whether a legacy name is one whose fee is held back pending classification. */
 export function isQuarantinedLegacyName(name: string): boolean {
