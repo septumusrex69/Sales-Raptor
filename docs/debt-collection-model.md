@@ -166,23 +166,53 @@ Across the whole book the rates are: 30% (1,088 clients), 25% (859), 20% (180), 
 27.5% (111), 10% (80), 22.5% (25), and a long tail. Most clients are flat — one record, one
 rate. The tiered ones are the exception.
 
-### What can and cannot be derived
+### The bands are in the mandate
 
-**The historical rate is exact.** Every account belongs to a Swordfish client record, every
-record has a prefix, and every prefix has a percentage. So `debtor_accounts.commission_rate` can
-be populated per account with certainty, and no inference is involved.
+**Correcting an earlier conclusion of mine.** I said the boundaries could not be derived and had
+been assigned by a person at handover, because the capital ranges overlapped. The signed
+Growthpoint mandate of 30 April 2024 says otherwise:
 
-**The band boundaries cannot be derived, and must not be guessed.** The capital ranges overlap:
-Growthpoint's 25% tier runs R410–R31,120 while its 22.5% tier runs R5,005–R39,341, and GPS4 is
-the same — R1,605–R29,665 against R25,301–R49,680. An account at R28,000 sits in both. So the
-tier was assigned by a person at handover, not computed from a threshold.
+| No | Capital Handover Amount | Commission |
+|---|---|---|
+| 1 | R0 < R25,000 | 25% |
+| 2 | R25,001 + | 22.5% |
 
-That is the difference between importing history and calculating forward:
+A clean threshold on the individual account's capital at handover. The overlap I found was not
+evidence of judgement — it was evidence of the rule not being applied.
 
-- **Import:** carry the rate each account actually has. Exact, no judgement.
-- **Forward:** a new handover needs the agreement's real bands, because the data cannot supply
-  them. Still outstanding, and now precisely scoped — it is one question per tiered client, not
-  a general design problem.
+**So a rate is computed, not chosen.** Where a client's mandate defines bands, the band decides
+the rate and the system should say so when someone sets a different one.
+
+### What that turned up
+
+Against their own mandate, **60 of 285 Growthpoint accounts (21%) are on the wrong rate.**
+
+| | Accounts | Capital |
+|---|---|---|
+| Under-charged (22.5% applied, mandate says 25%) | 50 | R864,420 |
+| Over-charged (25% applied, mandate says 22.5%) | 10 | R279,086 |
+
+On payments actually received so far that is R4,698.72 of commission foregone against R75
+over-charged. Small today because most of the under-charged accounts have collected little yet;
+it grows with every rand they pay.
+
+It is not uniform incompetence — it is inconsistency. The 2025/10/08 handover of 98 accounts is
+**perfect**, split exactly at R25,000. The batches either side are 37%, 50% and in two cases 100%
+wrong. Somebody knows the rule; it is being applied by hand and by memory.
+
+That is the argument for computing it: the mandate's bands belong on the client record, the rate
+follows from the account's capital, and a handover that departs from it has to be deliberate and
+visible rather than an accident nobody notices for two years.
+
+### Two other things the mandate confirms
+
+**The 50/50 split.** Clause 3: payments received are allocated equally to "(a) capital handed
+over" and "(b) legal expenses and interest". Exactly as described, now evidenced.
+
+**The sales month.** Clause 4: money is transferred for debts "collected for the previous month,
+up until the 10th of every month ... on the 15th of the next month". The 11th-to-10th period is
+contractual, not a house convention — and remittance is due on the 15th, which is a date the
+system should be driving rather than a diary entry.
 
 ### Why this has to be modelled properly
 
