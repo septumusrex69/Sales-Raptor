@@ -978,8 +978,14 @@ alter table public.account_fees
   add column if not exists performed_by text,
   add column if not exists swordfish_action_id text;
 
+-- Scoped to the account, because Swordfish's Action ID is unique within an account and not
+-- across the book. Indexing it alone asserted a global key it does not have: 130 IDs in a
+-- 59,158-row export are reused, and the pairs are plainly different acts — an SMS on ACF10003 in
+-- August 2026 shares ID 3500044 with a Promise to Pay on GPS3/10006 in September 2024. 28 of
+-- them are reused within one client, so it is not a per-client sequence either. The pair has
+-- zero collisions across the whole export, and still stops a re-run double-importing an action.
 create unique index if not exists account_fees_swordfish_action_idx
-  on public.account_fees (swordfish_action_id) where swordfish_action_id is not null;
+  on public.account_fees (account_id, swordfish_action_id) where swordfish_action_id is not null;
 
 -- The accrual key was wrong, and the import is what proved it.
 --
