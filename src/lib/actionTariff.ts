@@ -75,22 +75,52 @@ export interface TariffSchedule {
 }
 
 /**
- * Rate history, newest first.
+ * Rate history, newest first — transcribed from the gazettes, not inferred from what was charged.
  *
- * Both schedules are evidenced from the export rather than transcribed from a gazette: every
- * one of these figures is the median charge actually raised in its period, and each changed on
- * the same date. That date — 1 April 2026 — sits just after Government Notice R.7207 of
- * 6 March 2026, which is consistent, but the mapping of each line to an Annexure B item is not
- * yet confirmed. Treat the amounts as reliable and the item numbering as provisional.
+ * An earlier version of this list was built from the export: each figure was the median charge
+ * actually raised in its period, and the schedules were dated from where those medians changed.
+ * That gave 1 April 2026, and it was wrong by three and a half weeks — GN R.7207 took effect on
+ * **6 March 2026**. The business simply did not reconfigure Swordfish until April.
  *
- * The Acknowledgement of Debt line is worth noting: it went DOWN, R210 to R161. R161 is the
- * gazetted item 4(a) figure for a debt under R50,000, so from April 2026 the charge matches the
- * gazette and R210 was the earlier rate — not, as first suspected, the other way round.
+ * The distinction matters and is not pedantic. What was charged is a fact about the past that a
+ * reissued statement must reproduce exactly; what the gazette says is the law, and the gap
+ * between them is a finding rather than a definition. Dating this table from behaviour made the
+ * gap invisible by construction — the tariff would always agree with itself. Dating it from the
+ * gazettes makes 156 actions between 6 and 31 March 2026 visibly under-charged, by R475.00 excl
+ * VAT. Under-charging is lawful, so nothing needs fixing; it just needs to be seeable.
+ *
+ * Two mappings worth stating, because a rate alone does not say which item it is:
+ *
+ *   perusal        item 3, "other necessary expenses not specifically provided for" — the same
+ *                  amount as a letter or a call in every schedule, which is why they move
+ *                  together and why "Necessary Costs" at exactly R21 was resolvable.
+ *   promise_to_pay item 5, the settlement account drawn at the debtor's request.
+ *
+ * acknowledgement_of_debt is the exception, and the one line here that is still evidenced rather
+ * than transcribed. Annexure B has two items an AoD can fall under and the export does not say
+ * which occurred:
+ *
+ *   4(a)  the acknowledgement itself, including the necessary consultation — banded by debt
+ *         size, prescribed by the Magistrates' Courts Rules rather than by this Annexure, and
+ *         held in annexureB.ts as ACKNOWLEDGEMENT_OF_DEBT_BANDS.
+ *   4(b)  the original documents signed at the debtor's residence or place of work — a flat
+ *         gazetted figure: R250 / R210 / R198 / R178 across the four schedules.
+ *
+ * These are different acts, both lawful, and the business changed which one it charges: R210
+ * (the 4(b) figure) before 2026, R161 (the 4(a) band for a debt under R50,000) after. So the
+ * line goes DOWN in 2026, which is a change of item and not a rate cut.
+ *
+ * What is recorded here is the charge as actually raised, because that is what a reissued
+ * statement has to reproduce. Writing the gazetted 4(b) figure into the 2026 row instead — which
+ * I tried — makes every real acknowledgement look R89 under-charged and invents R12,000 of
+ * shortfall that does not exist. The earlier schedules carry 4(b) because we hold that gazette
+ * and not the Magistrates' Courts tariff for those years; no action in the book is old enough
+ * for the difference to bite.
  */
 export const TARIFF_HISTORY: TariffSchedule[] = [
   {
-    effectiveFrom: '2026-04-01',
-    note: 'Following GN R.7207, GG 54273, 6 March 2026. Acknowledgement of Debt falls to the gazetted R161.',
+    effectiveFrom: '2026-03-06',
+    note: 'GN R.7207, GG 54273. Charging changed over in April, three and a half weeks late.',
     rates: {
       phone_call: 25,
       sms: 3.5,
@@ -98,13 +128,14 @@ export const TARIFF_HISTORY: TariffSchedule[] = [
       letter: 25,
       consultation: 60,
       perusal: 25,
+      // The 4(a) band for a debt under R50,000, which is what has been charged since April 2026.
       acknowledgement_of_debt: 161,
       promise_to_pay: 50,
     },
   },
   {
-    effectiveFrom: '1900-01-01',
-    note: 'The schedule in force before April 2026, as charged.',
+    effectiveFrom: '2020-05-22',
+    note: 'GN R.580, GG 43343. Covers all but the last six months of the migrated book.',
     rates: {
       phone_call: 21,
       sms: 3,
@@ -112,8 +143,37 @@ export const TARIFF_HISTORY: TariffSchedule[] = [
       letter: 21,
       consultation: 52,
       perusal: 21,
+      // The 4(b) figure, which is what was charged under this schedule.
       acknowledgement_of_debt: 210,
       promise_to_pay: 41,
+    },
+  },
+  {
+    effectiveFrom: '2017-10-27',
+    note: 'GN R.1141, GG 41205. Earlier than any action in the export; here so the ledger is complete.',
+    rates: {
+      phone_call: 20,
+      sms: 2.8,
+      email_out: 20,
+      letter: 20,
+      consultation: 49,
+      perusal: 20,
+      acknowledgement_of_debt: 198,
+      promise_to_pay: 39,
+    },
+  },
+  {
+    effectiveFrom: '2015-12-23',
+    note: 'GN R.1272, GG 39552. The oldest schedule we hold.',
+    rates: {
+      phone_call: 18,
+      sms: 2.5,
+      email_out: 18,
+      letter: 18,
+      consultation: 44,
+      perusal: 18,
+      acknowledgement_of_debt: 178,
+      promise_to_pay: 35,
     },
   },
 ]

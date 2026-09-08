@@ -187,6 +187,10 @@ action's own date. `reconcile.mjs` checks every account on every run.
   We call it the **receipt fee** — because "commission" is the percentage charged to the *client*,
   and one word for both makes every conversation about money ambiguous. Different payer, different
   base, different rate. FCC is now literally `receiptFee(balance)` with VAT (2a).
+- **The receipt-fee maximum is per instalment, not in aggregate.** Confirmed by the business. The
+  wording carries both readings — "on receipt of an instalment (one or more) in redemption of the
+  debt" — and this was the last number in the money model resting on inference. Settled.
+- **Every amount excludes VAT.** Also confirmed by the business. The gazettes do not say.
 - **The receipt fee applies to PTC.** "inclusive of instalments made directly to the client" — a
   payment the client banks itself attracts the fee exactly like one reaching our trust account.
   Gazetted, not a house reading (7a).
@@ -202,25 +206,80 @@ action's own date. `reconcile.mjs` checks every account on every run.
   "WhatsApp Call - No Contact" — is item 2 at the 2026 rate; the name describes who helped, the
   comment and the price describe what was done. R193 released.
 
-### The 2020 schedule, for the record
+### All four schedules
 
-| Item | | 2020 | 2026 |
-|---|---|---|---|
-| 1(a) | Letter, fax or e-mail | R21 | R25 |
-| 1(c) | Other electronic communication (max 10/month) | R3 | R3.50 |
-| 2 | Phone call, not a consultation | R21 | R25 |
-| 3 | Other necessary expenses (a total) | R21 | R25 |
-| 4(b) | Documents signed at the debtor's residence | R210 | R250 |
-| 4(c) | Credit bureau search (max 4/month) | R14 | R16 |
-| 5 | Settlement account at the debtor's request | R41 | R50 |
-| 6 | Correspondence received and attended to | R11 | R13 |
-| 7 | Consultation with debtor | R52 | R60 |
-| 8 | Attending taxation *(outside the cap)* | R82 | R98 |
-| 9 | Receipt fee, 10% of the instalment *(outside the cap)* | max R509 | max R610 |
-| | **Items 1–7 ceiling** | **min(capital, R1,023)** | **min(capital, R1,225)** |
+Every gazette we hold, oldest to newest. All amounts **exclude VAT** — the gazette does not say so
+itself, so this was an inference until the business confirmed it directly.
 
-Items 1(b) and 4(a) point at the Magistrates' Courts Rules rather than naming an amount, and move
-independently of this schedule.
+| Item | | 2015 | 2017 | 2020 | 2026 |
+|---|---|---|---|---|---|
+| 1(a) | Letter, fax or e-mail | R18 | R20 | R21 | R25 |
+| 1(c) | Other electronic communication (max 10/month) | R2.50 | R2.80 | R3 | R3.50 |
+| 2 | Phone call, not a consultation | R18 | R20 | R21 | R25 |
+| 3 | Other necessary expenses (a total) | R18 | R20 | R21 | R25 |
+| 4(b) | Documents signed at the debtor's residence | R178 | R198 | R210 | R250 |
+| 4(c) | Credit bureau search (max 4/month) | R12 | R13 | R14 | R16 |
+| 5 | Settlement account at the debtor's request | R35 | R39 | R41 | R50 |
+| 6 | Correspondence received and attended to | R9 | R10 | R11 | R13 |
+| 7 | Consultation with debtor | R44 | R49 | R52 | R60 |
+| 8 | Attending taxation *(outside the cap)* | R70 | R78 | R82 | R98 |
+| 9 | Receipt fee, 10% of the instalment *(outside the cap)* | max R435 | max R480 | max R509 | max R610 |
+| | **Items 1–7 ceiling** | **R870** | **R965** | **R1,023** | **R1,225** |
+
+- GN R.1272, GG 39552, 23 December 2015
+- GN R.1141, GG 41205, 27 October 2017
+- GN R.580, GG 43343, 22 May 2020
+- GN R.7207, GG 54273, 6 March 2026
+
+The ceiling is always **min(capital, that figure)**. Items 1(b) and 4(a) point at the Magistrates'
+Courts Rules rather than naming an amount, and move independently of these schedules.
+
+Note item 6 is **inbound** correspondence. The legacy name "Correspondence" in the export is *not*
+item 6 — all 25 charged instances are commented "Emailed debtor" and priced at R21, the outbound
+1(a) rate. The price is what distinguishes them.
+
+### The three-and-a-half-week gap, and why dating the tariff from behaviour hid it
+
+The action rates in `actionTariff.ts` were originally built from the export: each figure was the
+median charge actually raised, and the schedules were dated from where those medians changed. That
+gave **1 April 2026**. The gazette took effect on **6 March 2026**. Swordfish was simply not
+reconfigured for three and a half weeks.
+
+Dating the table from behaviour made that gap impossible to see — the tariff would always agree
+with itself by construction. Dated from the gazettes, 156 charged actions between 6 and 31 March
+2026 are visibly at the superseded rate:
+
+| | Actions | Under-charged |
+|---|---|---|
+| Phone Call | 71 | R284.00 |
+| Email (Outgoing) | 16 | R64.00 |
+| Letter | 12 | R48.00 |
+| SMS | 44 | R40.00 |
+| Consultation, Promise to Pay, Perusal, Trace | 8 | R39.00 |
+| | **153** | **R475.00 excl VAT** |
+
+Nothing needs fixing. **Under-charging is lawful; over-charging is not**, and that asymmetry is
+why this is a note rather than an incident. What it earns is the principle: the tariff table is
+transcribed from gazettes, and any disagreement with what was charged is a finding.
+
+### Acknowledgement of debt: two items, and the business changed which one it charges
+
+The one line still evidenced rather than transcribed, because Annexure B has two items an AoD can
+fall under and the export does not say which occurred:
+
+- **4(a)** the acknowledgement itself, including the necessary consultation — banded by debt size,
+  prescribed by the Magistrates' Courts Rules rather than by this Annexure. R161 under R50,000,
+  R209 above.
+- **4(b)** the original documents signed at the debtor's residence or place of work — a flat
+  gazetted figure, R250 in 2026.
+
+The business charged **R210 (4(b)) before 2026 and R161 (4(a)) after**. Both are lawful; the line
+goes *down* because the item changed, not the rate.
+
+`actionTariff.ts` records the charge as actually raised, because that is what a reissued statement
+must reproduce. Writing the gazetted 4(b) figure into the 2026 row instead — which I tried — makes
+every real acknowledgement look R89 under-charged and invents **R12,000 of shortfall that does not
+exist**. A tariff check that measures against the wrong item is worse than no check.
 
 Note item 6 is **inbound** correspondence at R11. The legacy name "Correspondence" in the export
 is *not* item 6 — all 25 charged instances are commented "Emailed debtor" and priced at R21, the
@@ -895,7 +954,7 @@ real data meets a real schema:
 | 1 | The daily interest rate — 2% ÷ days in month, or 24% ÷ 365? | Interest |
 | 2 | Item 1(b), registered letter under s57 — the Magistrates' Courts figure. **Awaiting; BF to supply.** Rarely used, so it does not block the build. | Tariff |
 | 3 | ~~The fee ceiling rule~~ — **resolved** (2b). It is the Note at the head of Annexure B: items 1–7 may not exceed min(capital, R1,225), R1,023 before March 2026. Implemented in `recoverableFee()`. | — |
-| 4 | Whether the item 9 receipt-fee maximum (R610) is per instalment or in aggregate over the account. The 2020 wording "an instalment (one or more)" leans per-receipt, and per-receipt reproduces the business's own statements, which is what we do. Still not settled. | Statements on long-running accounts |
+| 4 | ~~Whether the item 9 receipt-fee maximum is per instalment or in aggregate~~ — **resolved**: per instalment, confirmed by the business. So is the VAT-exclusive basis of every gazetted amount. | — |
 
 ---
 

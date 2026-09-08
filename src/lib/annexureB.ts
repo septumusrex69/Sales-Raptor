@@ -1,11 +1,12 @@
 /**
  * Annexure B to the Regulations under the Debt Collectors Act 114 of 1998.
  *
- * Sources, newest first:
- *   - GN R.7207, GG 54273, 6 March 2026 — substituted Annexure B in full and amended
- *     regulation 11 from R1023,00 to R1225,00.
- *   - GN R.580, GG 43343, 22 May 2020 — substituted Annexure B in full and amended
- *     regulation 11 from R965,00 to R1023,00.
+ * Sources, newest first. Each substituted Annexure B in full and moved the regulation 11
+ * ceiling; together they cover every action any account in the book can carry.
+ *   - GN R.7207, GG 54273, 6 March 2026     R1023,00 -> R1225,00
+ *   - GN R.580,  GG 43343, 22 May 2020      R965,00  -> R1023,00
+ *   - GN R.1141, GG 41205, 27 October 2017  R870,00  -> R965,00
+ *   - GN R.1272, GG 39552, 23 December 2015 R814,00  -> R870,00
  *
  * This is gazetted fact, not house policy, and it is versioned by effective date rather than
  * edited in place. A tariff that is corrected in place silently rewrites history: an account
@@ -61,9 +62,10 @@ export interface AnnexureBSchedule {
   effectiveFrom: string
   citation: string
   /**
-   * Every amount in this schedule excludes VAT; VAT is added on top when the fee is raised.
-   * Recorded explicitly because the gazette itself doesn't say, and reading these figures as
-   * VAT-inclusive would understate every fee on every account by the VAT rate.
+   * Every amount in these schedules excludes VAT; VAT is added on top when the fee is raised.
+   * The gazette does not say so itself, so this was an inference until the business confirmed
+   * it directly. Reading the figures as VAT-inclusive would understate every fee on every
+   * account by the VAT rate.
    */
   vatBasis: 'exclusive'
   /**
@@ -86,7 +88,15 @@ export interface AnnexureBSchedule {
   itemsOneToSevenCeiling: number
   /** Item 9: a fee of 10% of the instalment received. */
   receiptFeeRate: number
-  /** Item 9: "subject to a maximum amount of R610,00" (R509,00 under the 2020 schedule). */
+  /**
+   * Item 9: "subject to a maximum amount of R610,00", and R509 / R480 / R435 in the earlier
+   * schedules.
+   *
+   * **Per instalment, not in aggregate.** The wording carries both readings — "on receipt of an
+   * instalment (one or more) in redemption of the debt" — and this was an open question for some
+   * time. The business has confirmed the per-instalment reading, which is also the one that
+   * reproduces their own statements. Settled.
+   */
   receiptFeeMaximum: number
   items: AnnexureBItem[]
 }
@@ -238,8 +248,95 @@ export const ANNEXURE_B_2020: AnnexureBSchedule = {
   ],
 }
 
+/**
+ * 27 October 2017 to 21 May 2020.
+ *
+ * No account in the migrated book carries an action this old — the earliest is May 2023 — so
+ * this earns its place by making the ledger complete rather than by being used today. An account
+ * handed over in 2019 and revived is not a hypothetical in this business, and a schedule that
+ * stops at 2020 would price its history wrong without saying so.
+ */
+export const ANNEXURE_B_2017: AnnexureBSchedule = {
+  effectiveFrom: '2017-10-27',
+  citation: 'GN R.1141, GG 41205, 27 October 2017',
+  vatBasis: 'exclusive',
+  itemsOneToSevenCeiling: 965,
+  receiptFeeRate: 0.1,
+  receiptFeeMaximum: 480,
+  items: earlierItems({
+    letter: 20, electronic: 2.8, phoneCall: 20, otherExpenses: 20,
+    signedAtResidence: 198, creditBureau: 13, settlementAccount: 39,
+    correspondenceIn: 10, consultation: 49, taxation: 78,
+  }),
+}
+
+/** 23 December 2015 to 26 October 2017. Here for the same reason as the 2017 schedule. */
+export const ANNEXURE_B_2015: AnnexureBSchedule = {
+  effectiveFrom: '2015-12-23',
+  citation: 'GN R.1272, GG 39552, 23 December 2015',
+  vatBasis: 'exclusive',
+  itemsOneToSevenCeiling: 870,
+  receiptFeeRate: 0.1,
+  receiptFeeMaximum: 435,
+  items: earlierItems({
+    letter: 18, electronic: 2.5, phoneCall: 18, otherExpenses: 18,
+    signedAtResidence: 178, creditBureau: 12, settlementAccount: 35,
+    correspondenceIn: 9, consultation: 44, taxation: 70,
+  }),
+}
+
+/**
+ * The item list for a schedule, given its amounts.
+ *
+ * Every gazette since 2015 has the same thirteen items with the same wording and the same
+ * external references; only the figures move. Writing the descriptions out four times would
+ * invite them to drift apart, and a typo in one copy would be a fee described wrongly on a
+ * statement. The 2026 and 2020 schedules stay written out in full above because their wording
+ * differs in small ways worth being able to read against the gazette.
+ */
+function earlierItems(a: {
+  letter: number; electronic: number; phoneCall: number; otherExpenses: number
+  signedAtResidence: number; creditBureau: number; settlementAccount: number
+  correspondenceIn: number; consultation: number; taxation: number
+}): AnnexureBItem[] {
+  return [
+    { id: '1a', description: 'Necessary ordinary letter, registered letter, facsimile or e-mail', amount: a.letter, countsTowardCap: true },
+    {
+      id: '1b',
+      description: "Registered letter (section 57 of the Magistrates' Courts Act, 1944)",
+      amount: null,
+      externalTariff: "Item 8 of Annexure 2, Table A, Part II of the Magistrates' Courts Rules",
+      countsTowardCap: true,
+    },
+    { id: '1c', description: 'Necessary electronic communication, other than facsimile or e-mail (each)', amount: a.electronic, maxPerMonth: 10, countsTowardCap: true },
+    { id: '2', description: 'Necessary phone call, which is not a consultation (per call)', amount: a.phoneCall, countsTowardCap: true },
+    { id: '3', description: 'Other necessary expenses not specifically provided for', amount: a.otherExpenses, isTotal: true, countsTowardCap: true },
+    {
+      id: '4a',
+      description: 'Acknowledgement of debt and undertaking to pay (section 57 or 58), including the necessary consultation',
+      amount: null,
+      externalTariff: "Items 9 and 10 of Annexure 2, Table A, Part II of the Magistrates' Courts Rules",
+      countsTowardCap: true,
+    },
+    { id: '4b', description: "Original documents signed by the debtor under item 4(a) at the debtor's residence or place of work", amount: a.signedAtResidence, countsTowardCap: true },
+    { id: '4c', description: 'Necessary registered credit bureau search', amount: a.creditBureau, maxPerMonth: 4, countsTowardCap: true },
+    { id: '5', description: 'Settlement account drawn up and furnished at the debtor’s request, other than the six-monthly one', amount: a.settlementAccount, countsTowardCap: true },
+    { id: '6', description: 'Correspondence received and attended to', amount: a.correspondenceIn, countsTowardCap: true },
+    { id: '7', description: 'Necessary consultation with debtor', amount: a.consultation, countsTowardCap: true },
+    { id: '8', description: 'Attending taxation', amount: a.taxation, countsTowardCap: false },
+    {
+      id: '9',
+      description: 'On receipt of an instalment (one or more) in redemption of the debt, inclusive of instalments made directly to the client',
+      amount: null,
+      countsTowardCap: false,
+    },
+  ]
+}
+
 /** Newest first, so the schedule in force on a date is the first one that started on or before it. */
-export const ANNEXURE_B_SCHEDULES: AnnexureBSchedule[] = [ANNEXURE_B_2026, ANNEXURE_B_2020]
+export const ANNEXURE_B_SCHEDULES: AnnexureBSchedule[] = [
+  ANNEXURE_B_2026, ANNEXURE_B_2020, ANNEXURE_B_2017, ANNEXURE_B_2015,
+]
 
 export function scheduleFor(date: string | Date): AnnexureBSchedule {
   const iso = typeof date === 'string' ? date : date.toISOString()
