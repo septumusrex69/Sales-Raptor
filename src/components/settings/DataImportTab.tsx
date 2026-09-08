@@ -35,17 +35,26 @@ const DATABASE_HOST = (() => {
  */
 
 /** The four exports, in the order the migration needs them. Named as Swordfish names them. */
+/*
+ * In the order the import thinks about them: the clients first, then their accounts, then what
+ * happened on those accounts. The register is read first for the same reason it is listed first —
+ * it decides who every account belongs to, so everything after it depends on it.
+ *
+ * It is not strictly required, because there is a fallback, but the fallback is a set of
+ * judgements made by reading client names. Where the register exists it is the business's own
+ * record and it wins.
+ */
 const SOURCES = [
-  { key: 'accounts', label: 'Client Account Summary', hint: 'One row per debtor account. The spine of the import.', required: true },
-  { key: 'payments', label: 'All Payments per Client', hint: 'Every payment received, including client-direct.', required: true },
-  { key: 'actions', label: 'Actions performed per Client', hint: 'Every action and what it cost. The largest file by far.', required: true },
-  { key: 'interest', label: 'Interest per Period', hint: 'Interest as accrued, one row per period.', required: true },
   {
     key: 'clients',
     label: 'Client register',
     hint: 'Who the clients are: registration numbers, commission tiers, banking and contacts. Save it as CSV first.',
     required: false,
   },
+  { key: 'accounts', label: 'Client Account Summary', hint: 'One row per debtor account. The spine of the import.', required: true },
+  { key: 'payments', label: 'All Payments per Client', hint: 'Every payment received, including client-direct.', required: true },
+  { key: 'actions', label: 'Actions performed per Client', hint: 'Every action and what it cost. The largest file by far.', required: true },
+  { key: 'interest', label: 'Interest per Period', hint: 'Interest as accrued, one row per period.', required: true },
 ] as const
 
 type SourceKey = (typeof SOURCES)[number]['key']
@@ -193,7 +202,8 @@ export function DataImportTab() {
           {SOURCES.map((s) => (
             <FilePicker
               key={s.key}
-              label={s.label + (s.required ? '' : ' (optional)')}
+              label={s.label}
+              badge={s.required ? undefined : 'Recommended'}
               hint={s.hint}
               file={files[s.key]}
               onPick={(f) => { setFiles((prev) => ({ ...prev, [s.key]: f })); setPlan(null) }}
@@ -235,7 +245,13 @@ export function DataImportTab() {
           {reading ? <Loader2 size={15} className="animate-spin" /> : <FileUp size={15} />}
           {reading ? 'Reading…' : 'Read the exports'}
         </button>
-        {!ready && <p className="text-xs text-slate-400 mt-2">The first four exports are needed. Balances cannot be checked without them.</p>}
+        {!ready && (
+          <p className="text-xs text-slate-400 mt-2">
+            The four account exports are needed — balances cannot be checked without them. Without the
+            client register the clients are worked out from their names instead, which is a guess where
+            the register is a record.
+          </p>
+        )}
       </Card>
 
       {phase && (
@@ -328,7 +344,9 @@ export function DataImportTab() {
   )
 }
 
-function FilePicker({ label, hint, file, onPick }: { label: string; hint: string; file?: File; onPick: (f: File) => void }) {
+function FilePicker({ label, hint, badge, file, onPick }: {
+  label: string; hint: string; badge?: string; file?: File; onPick: (f: File) => void
+}) {
   return (
     <label className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-brand-300 cursor-pointer">
       <input
@@ -341,7 +359,14 @@ function FilePicker({ label, hint, file, onPick }: { label: string; hint: string
         {file ? <CheckCircle2 size={16} /> : <FileUp size={16} />}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium text-slate-700">{label}</span>
+        <span className="block text-sm font-medium text-slate-700">
+          {label}
+          {badge && (
+            <span className="ml-2 text-[10px] font-medium uppercase tracking-wide text-brand-600 bg-brand-50 rounded-full px-1.5 py-0.5">
+              {badge}
+            </span>
+          )}
+        </span>
         <span className="block text-xs text-slate-400 truncate">
           {file ? `${file.name} · ${(file.size / 1e6).toFixed(1)} MB` : hint}
         </span>
