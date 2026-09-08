@@ -26,6 +26,23 @@
 
   --color-positive: #406d58;
   --color-negative: #794234;
+
+  /*
+   * Tints of the two outcome colours and of gold, for the places a colour has to sit BEHIND
+   * something rather than be the something — a timeline icon, a promise that has fallen due.
+   * Derived from the colours above rather than picked, so they stay a family: generic emerald
+   * and amber next to this navy read as another app's palette pasted in.
+   */
+  --color-positive-50: #eef4f0;
+  --color-positive-100: #dbe8e1;
+  --color-positive-700: #35594a;
+
+  --color-negative-50: #f8f0ed;
+  --color-negative-100: #eeddd7;
+  --color-negative-700: #63362a;
+
+  --color-gold-50: #faf5ea;
+  --color-gold-100: #f4ead3;
 }
 
 /*

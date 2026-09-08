@@ -164,6 +164,18 @@ for (const tab of ['Workspace', 'Statement']) {
     else console.log(`!! tab button not found: ${tab}`)
   }
   await page.screenshot({ path: `${OUT}/account-${tab.toLowerCase()}.png`, fullPage: true })
+  // The app scrolls an inner container, not the document, so fullPage stops at the viewport.
+  // Anything below the fold -- the statement's settlement footer, for one -- needs this.
+  const scrolled = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('*')].find((n) => n.scrollHeight > n.clientHeight + 40 && getComputedStyle(n).overflowY !== 'visible')
+    if (!el) return false
+    el.scrollTop = el.scrollHeight
+    return true
+  })
+  if (scrolled) {
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: `${OUT}/account-${tab.toLowerCase()}-bottom.png` })
+  }
   const text = (await page.textContent('body')).replace(/\s+/g, ' ')
   console.log(`\n== ${tab} ==\n${text.slice(0, 900)}`)
 }

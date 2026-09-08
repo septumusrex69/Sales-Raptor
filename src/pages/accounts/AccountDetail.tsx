@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  AlertTriangle, ArrowLeft, Banknote, Building2, CalendarClock, Check, CheckCircle2, FileText,
-  Loader2, Mail, MapPin, MessageSquare, Phone, Plus, Printer, ShieldCheck, Smartphone, X, XCircle,
+  AlertTriangle, ArrowLeft, Building2, Check, CheckCircle2, FileText, Loader2, Mail, MapPin,
+  Phone, Plus, Printer, Send, ShieldCheck, Smartphone, X, XCircle,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { useAppStore } from '../../store/AppStore'
@@ -16,6 +16,8 @@ import {
   type AccountContact, type ContactKind, type PromiseToPay, type Workspace,
 } from '../../lib/accountWorkspace'
 import { buildTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
+import { styleFor, PROMISE_CHIP } from './timelineStyle'
+import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { feeCeiling, scheduleFor } from '../../lib/annexureB'
 import { formatCurrency, formatDate } from '../../data/mockData'
 
@@ -115,7 +117,7 @@ export function AccountDetail() {
   }, [account])
 
   if (loading) return <div className="p-10 grid place-items-center text-slate-400"><Loader2 size={20} className="animate-spin" /></div>
-  if (error) return <Card className="border-rose-200 bg-rose-50/50"><p className="text-sm text-rose-700">{error}</p></Card>
+  if (error) return <Card className="border-negative-100 bg-negative-50"><p className="text-sm text-negative-700">{error}</p></Card>
   if (!account) return <Card><p className="text-sm text-slate-600">That account is not in the book.</p></Card>
 
   const b = statement?.breakdown
@@ -130,40 +132,44 @@ export function AccountDetail() {
       </Link>
 
       <Card padded={false}>
-        <div className="p-5 flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <h2 className="text-lg font-semibold text-slate-800">{name}</h2>
-              <StatusPill status={account.status} inDuplum={account.inDuplum} />
-              {account.prescribed && (
-                <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-rose-50 text-rose-700"
-                  title="Three years have run since the last payment or acknowledgement. It can no longer be enforced.">
-                  prescribed
-                </span>
-              )}
-              {due && isOverdue(due, TODAY) && (
-                <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">
-                  promise overdue
-                </span>
-              )}
-            </div>
-            <p className="text-sm text-slate-600 mt-1 tabular-nums">
-              {account.accountNumber}
-              {account.debtorIdNumber && <> &middot; ID {account.debtorIdNumber}</>}
-            </p>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {client ? <Link to={`/companies/${client.id}`} className="text-brand-600 hover:underline">{client.name}</Link> : 'Unknown client'}
-              {account.clientReference && <> &middot; their ref {account.clientReference}</>}
-              {account.handoverDate && <> &middot; handed over {formatDate(account.handoverDate)}</>}
-            </p>
+        <div className="p-5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h2 className="text-xl font-semibold text-navy-950">{name}</h2>
+            <StatusPill status={account.status} inDuplum={account.inDuplum} />
+            {account.prescribed && (
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-negative-50 text-negative-700"
+                title="Three years have run since the last payment or acknowledgement. It can no longer be enforced.">
+                prescribed
+              </span>
+            )}
+            {due && isOverdue(due, TODAY) && (
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-negative-50 text-negative-700">
+                promise overdue
+              </span>
+            )}
           </div>
-          {account.swordfishAssignedTo && (
-            <div className="text-right shrink-0">
-              <p className="text-[11px] uppercase tracking-wide text-slate-400">Worked by</p>
-              <p className="text-sm text-slate-700">{account.swordfishAssignedTo}</p>
-              <p className="text-[11px] text-slate-400">in Swordfish</p>
-            </div>
-          )}
+
+          {/*
+            One labelled row rather than a run-on line of tiny grey text. Which client an account
+            belongs to decides the commission, the mandate and who gets the money — it is not a
+            footnote to the debtor's name, so it is given a label and read at the same size as
+            everything else here.
+          */}
+          <dl className="grid gap-x-6 gap-y-3 mt-4 grid-cols-2 sm:grid-cols-3 xl:grid-cols-5">
+            <Titled label="Client">
+              {client
+                ? <Link to={`/companies/${client.id}`} className="text-brand-600 hover:underline">{client.name}</Link>
+                : <span className="text-slate-400">Unknown</span>}
+            </Titled>
+            <Titled label="Account">{account.accountNumber ?? '—'}</Titled>
+            <Titled label="Debtor ID">{account.debtorIdNumber ?? '—'}</Titled>
+            <Titled label="Their reference">{account.clientReference ?? '—'}</Titled>
+            <Titled label={account.swordfishAssignedTo ? 'Worked by' : 'Handed over'}>
+              {account.swordfishAssignedTo
+                ? <>{account.swordfishAssignedTo}<span className="block text-[11px] text-slate-400 font-normal">in Swordfish</span></>
+                : account.handoverDate ? formatDate(account.handoverDate) : '—'}
+            </Titled>
+          </dl>
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 border-t border-slate-100 divide-x divide-slate-100">
@@ -200,14 +206,15 @@ export function AccountDetail() {
       </div>
 
       {tab === 'Statement' ? (
-        <Card><StatementTable statement={statement?.lines ?? []} account={account} /></Card>
+        <Card><StatementTable statement={statement?.lines ?? []} account={account} breakdown={b} /></Card>
       ) : (
         // Three columns only from xl. At iPad width the fixed side columns leave the timeline
         // about 120px wide, which is not a narrow column -- it is unreadable. So lg drops to two
         // columns with the timeline full-width underneath, and anything narrower stacks.
         <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-[minmax(0,17rem)_minmax(0,1fr)_minmax(0,19rem)]">
           <div className="lg:order-1 xl:order-none">
-            <DebtorPanel account={account} name={name} workspace={workspace} onChange={reloadWorkspace} userId={currentUser?.id ?? null} />
+              <DebtorPanel account={account} name={name} workspace={workspace} onChange={reloadWorkspace}
+              userId={currentUser?.id ?? null} userName={currentUser?.name ?? null} />
           </div>
           <div className="lg:order-3 lg:col-span-2 xl:order-none xl:col-span-1">
             <TimelinePanel
@@ -244,20 +251,20 @@ function HeaderFigure({ label, value, note, strong, danger }: {
   return (
     <div className="px-5 py-3.5">
       <p className="text-[11px] uppercase tracking-wide text-slate-400">{label}</p>
-      <p className={`text-xl font-semibold tabular-nums mt-0.5 ${danger ? 'text-rose-600' : strong ? 'text-brand-700' : 'text-slate-800'}`}>{value}</p>
-      {note && <p className={`text-[11px] mt-0.5 ${danger ? 'text-rose-500' : 'text-slate-500'}`}>{note}</p>}
+      <p className={`text-xl font-semibold tabular-nums mt-0.5 ${danger ? 'text-negative' : strong ? 'text-navy-950' : 'text-slate-800'}`}>{value}</p>
+      {note && <p className={`text-[11px] mt-0.5 ${danger ? 'text-negative-700' : 'text-slate-500'}`}>{note}</p>}
     </div>
   )
 }
 
 function Banner({ title, children }: { title?: string; children: React.ReactNode }) {
   return (
-    <Card className="border-amber-200 bg-amber-50/40">
+    <Card className="border-gold-100 bg-gold-50">
       <div className="flex gap-3 text-sm">
-        <AlertTriangle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+        <AlertTriangle size={16} className="text-gold-600 shrink-0 mt-0.5" />
         <div>
-          {title && <p className="font-medium text-amber-900">{title}</p>}
-          <p className={`text-amber-800 ${title ? 'mt-1' : ''}`}>{children}</p>
+          {title && <p className="font-medium text-navy-950">{title}</p>}
+          <p className={`text-navy-800 ${title ? 'mt-1' : ''}`}>{children}</p>
         </div>
       </div>
     </Card>
@@ -269,6 +276,16 @@ function PanelTitle({ children, action }: { children: React.ReactNode; action?: 
     <div className="flex items-center justify-between gap-2 mb-3">
       <h3 className="text-[11px] uppercase tracking-wide text-slate-400">{children}</h3>
       {action}
+    </div>
+  )
+}
+
+/** A labelled cell in the header. Small grey label, the value at normal reading size. */
+function Titled({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[11px] uppercase tracking-wide text-slate-400">{label}</dt>
+      <dd className="text-sm text-slate-800 font-medium mt-0.5 break-words">{children}</dd>
     </div>
   )
 }
@@ -326,18 +343,21 @@ const CONTACT_ICON: Record<ContactKind, typeof Phone> = {
   address: MapPin, employer: Building2, other: FileText,
 }
 
-function DebtorPanel({ account, name, workspace, onChange, userId }: {
+function DebtorPanel({ account, name, workspace, onChange, userId, userName }: {
   account: DebtorAccount
   name: string
   workspace: Workspace | null
   onChange: () => Promise<void>
   userId: string | null
+  userName: string | null
 }) {
   const [adding, setAdding] = useState(false)
+  const [composeTo, setComposeTo] = useState<string | null>(null)
   const { busy, err, run } = useWriter(onChange)
 
   const live = (workspace?.contacts ?? []).filter((c) => !c.retiredAt)
   const retired = (workspace?.contacts ?? []).filter((c) => c.retiredAt)
+  const emails = live.filter((c) => c.kind === 'email')
 
   return (
     <Card className="xl:sticky xl:top-4 self-start">
@@ -354,7 +374,7 @@ function DebtorPanel({ account, name, workspace, onChange, userId }: {
       </div>
 
       {adding && <ContactForm accountId={account.id} busy={busy} onDone={() => setAdding(false)} run={run} />}
-      {err && <p className="text-xs text-rose-600 mt-2">{err}</p>}
+      {err && <p className="text-xs text-negative-700 mt-2">{err}</p>}
 
       <div className="mt-4 pt-3 border-t border-slate-100">
         {live.length === 0 && !adding && (
@@ -366,9 +386,39 @@ function DebtorPanel({ account, name, workspace, onChange, userId }: {
         )}
         <div className="space-y-2.5">
           {live.map((c) => (
-            <ContactRow key={c.id} contact={c} userId={userId} busy={busy} run={run} />
+            <ContactRow key={c.id} contact={c} userId={userId} busy={busy} run={run}
+              onEmail={c.kind === 'email' ? () => setComposeTo(c.value) : undefined} />
           ))}
         </div>
+
+        {emails.length > 0 && (
+          <button onClick={() => setComposeTo(emails[0].value)}
+            className="mt-3 w-full text-sm font-medium py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 inline-flex items-center justify-center gap-1.5">
+            <Send size={13} /> Email {name.split(' ')[0]}
+          </button>
+        )}
+        {composeTo && (
+          <ComposeEmailModal
+            to={composeTo}
+            recipients={emails.map((c) => ({ email: c.value, label: c.label ?? undefined }))}
+            initialSubject={`Account ${account.accountNumber ?? ''} - ${name}`.trim()}
+            contextNote="Sent from this account. A note recording what was sent is added to the timeline."
+            onClose={() => setComposeTo(null)}
+            onSent={(subject, bodyText) => {
+              setComposeTo(null)
+              // The account's own record of the message. It is a note rather than a fee: an
+              // outgoing email IS a chargeable action under Annexure B item 4, but raising that
+              // charge is the collections engine's decision, not a side effect of a Send button.
+              void run(() => addNote({
+                accountId: account.id,
+                body: `Email sent to ${composeTo}\nSubject: ${subject}\n\n${bodyText}`,
+                authorName: userName,
+                createdBy: userId,
+              }))
+            }}
+          />
+        )}
+
         {retired.length > 0 && (
           <details className="mt-3">
             <summary className="text-[11px] text-slate-400 cursor-pointer hover:text-slate-600">
@@ -389,33 +439,39 @@ function DebtorPanel({ account, name, workspace, onChange, userId }: {
   )
 }
 
-function ContactRow({ contact, userId, busy, run }: {
+function ContactRow({ contact, userId, busy, run, onEmail }: {
   contact: AccountContact
   userId: string | null
   busy: boolean
   run: (fn: () => Promise<unknown>) => Promise<boolean>
+  /** Present on email contacts: opens the composer rather than handing off to a mail client. */
+  onEmail?: () => void
 }) {
   const Icon = CONTACT_ICON[contact.kind]
   const dialable = contact.kind === 'mobile' || contact.kind === 'phone' || contact.kind === 'work'
-  const href = dialable ? `tel:${contact.value.replace(/\s/g, '')}` : contact.kind === 'email' ? `mailto:${contact.value}` : null
+  // A phone still hands off to the device's dialler, which is what a tablet is good at. Email
+  // does NOT hand off to a mail client: sending it from here is what puts a copy on the account.
+  const href = dialable ? `tel:${contact.value.replace(/\s/g, '')}` : null
   return (
     <div className="flex items-start gap-2 text-sm group">
       <Icon size={14} className="text-slate-400 mt-0.5 shrink-0" />
       <div className="min-w-0 flex-1">
         {href
           ? <a href={href} className="text-brand-700 hover:underline break-words">{contact.value}</a>
-          : <span className="text-slate-700 break-words">{contact.value}</span>}
+          : onEmail
+            ? <button onClick={onEmail} className="text-brand-700 hover:underline break-words text-left">{contact.value}</button>
+            : <span className="text-slate-700 break-words">{contact.value}</span>}
         <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
           {contact.label && <span className="text-[11px] text-slate-400">{contact.label}</span>}
           {contact.isPrimary && <span className="text-[10px] px-1.5 rounded bg-slate-100 text-slate-500">primary</span>}
           {contact.verifiedAt
-            ? <span className="text-[10px] px-1.5 rounded bg-emerald-50 text-emerald-700 inline-flex items-center gap-0.5">
+            ? <span className="text-[10px] px-1.5 rounded bg-positive-50 text-positive-700 inline-flex items-center gap-0.5">
                 <ShieldCheck size={9} /> verified
               </span>
             : <button
                 disabled={busy}
                 onClick={() => run(() => verifyContact(contact.id, userId))}
-                className="text-[10px] text-slate-400 hover:text-emerald-700 disabled:opacity-50">
+                className="text-[10px] text-slate-400 hover:text-positive-700 disabled:opacity-50">
                 mark verified
               </button>}
           <button
@@ -424,7 +480,7 @@ function ContactRow({ contact, userId, busy, run }: {
               const reason = window.prompt('Why is this being retired? (wrong number, disconnected, ...)')
               if (reason !== null) run(() => retireContact(contact.id, reason))
             }}
-            className="text-[10px] text-slate-300 hover:text-rose-600 disabled:opacity-50 opacity-0 group-hover:opacity-100 focus:opacity-100">
+            className="text-[10px] text-slate-300 hover:text-negative disabled:opacity-50 opacity-0 group-hover:opacity-100 focus:opacity-100">
             retire
           </button>
         </div>
@@ -472,13 +528,6 @@ function ContactForm({ accountId, busy, onDone, run }: {
 
 /* ---------- middle: the story ---------- */
 
-const TIMELINE_STYLE: Record<TimelineEntry['kind'], { icon: typeof Phone; ring: string; fg: string }> = {
-  payment: { icon: Banknote, ring: 'bg-emerald-50', fg: 'text-emerald-600' },
-  promise: { icon: CalendarClock, ring: 'bg-amber-50', fg: 'text-amber-600' },
-  note: { icon: MessageSquare, ring: 'bg-slate-100', fg: 'text-slate-500' },
-  action: { icon: FileText, ring: 'bg-brand-50', fg: 'text-brand-600' },
-}
-
 function TimelinePanel({ entries, accountId, userName, userId, onChange }: {
   entries: TimelineEntry[]
   accountId: string
@@ -486,7 +535,9 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange }: {
   userId: string | null
   onChange: () => Promise<void>
 }) {
-  const [limit, setLimit] = useState(40)
+  // A dozen is what a person reads before deciding whether to keep reading. An account can carry
+  // 800 actions; opening on forty of them is a wall, not a history.
+  const [limit, setLimit] = useState(12)
   const [body, setBody] = useState('')
   const { busy, err, run } = useWriter(onChange)
 
@@ -520,7 +571,7 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange }: {
             <button type="button" onClick={() => setBody('')} className="text-sm text-slate-500 hover:text-slate-700">Cancel</button>
           </div>
         )}
-        {err && <p className="text-xs text-rose-600 mt-2">{err}</p>}
+        {err && <p className="text-xs text-negative-700 mt-2">{err}</p>}
       </form>
 
       {entries.length === 0 && <p className="text-sm text-slate-400 py-6 text-center">Nothing has happened on this account yet.</p>}
@@ -537,16 +588,25 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange }: {
       </div>
 
       {entries.length > limit && (
-        <button onClick={() => setLimit((n) => n + 100)} className="mt-4 text-sm text-brand-600 hover:underline">
-          Show more &mdash; {(entries.length - limit).toLocaleString('en-ZA')} older
-        </button>
+        <div className="flex items-center gap-3 mt-4 pt-3 border-t border-slate-100">
+          <button onClick={() => setLimit((n) => n + 40)}
+            className="text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+            Show 40 more
+          </button>
+          <button onClick={() => setLimit(entries.length)} className="text-sm text-brand-600 hover:underline">
+            Show all {entries.length.toLocaleString('en-ZA')}
+          </button>
+          <span className="text-xs text-slate-400 ml-auto">
+            {limit.toLocaleString('en-ZA')} of {entries.length.toLocaleString('en-ZA')}
+          </span>
+        </div>
       )}
     </Card>
   )
 }
 
 function TimelineRow({ entry }: { entry: TimelineEntry }) {
-  const style = TIMELINE_STYLE[entry.kind]
+  const style = styleFor(entry)
   const Icon = style.icon
   const reversed = entry.status === 'reversed'
   return (
@@ -562,7 +622,7 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
           </p>
           <span className="text-sm tabular-nums shrink-0">
             {entry.amount != null
-              ? <span className={entry.kind === 'payment' && !reversed ? 'text-emerald-700 font-medium' : 'text-slate-600'}>
+              ? <span className={entry.kind === 'payment' && !reversed ? 'text-positive-700 font-medium' : 'text-slate-600'}>
                   {formatCurrency(entry.amount)}
                 </span>
               : entry.free
@@ -578,13 +638,6 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
       </div>
     </div>
   )
-}
-
-const PROMISE_CHIP: Record<string, string> = {
-  open: 'bg-amber-50 text-amber-700',
-  kept: 'bg-emerald-50 text-emerald-700',
-  broken: 'bg-rose-50 text-rose-700',
-  cancelled: 'bg-slate-100 text-slate-500',
 }
 
 function PromiseChip({ status }: { status: string }) {
@@ -666,7 +719,7 @@ function PromisePanel({ accountId, promises, userId, onChange }: {
           </button>
         </form>
       )}
-      {err && <p className="text-xs text-rose-600 mb-2">{err}</p>}
+      {err && <p className="text-xs text-negative-700 mb-2">{err}</p>}
 
       {open.length === 0 && past.length === 0 && !adding && (
         <p className="text-[11px] text-slate-400 leading-relaxed">
@@ -678,21 +731,21 @@ function PromisePanel({ accountId, promises, userId, onChange }: {
         {open.map((p) => {
           const late = isOverdue(p, TODAY)
           return (
-            <div key={p.id} className={`p-3 rounded-lg border ${late ? 'border-rose-200 bg-rose-50/50' : 'border-amber-200 bg-amber-50/40'}`}>
+            <div key={p.id} className={`p-3 rounded-lg border ${late ? 'border-negative-100 bg-negative-50' : 'border-gold-100 bg-gold-50'}`}>
               <div className="flex items-baseline justify-between gap-2">
-                <span className={`font-semibold tabular-nums ${late ? 'text-rose-700' : 'text-amber-800'}`}>{formatCurrency(p.amount)}</span>
-                <span className={`text-[11px] ${late ? 'text-rose-600' : 'text-amber-700'}`}>
+                <span className={`font-semibold tabular-nums ${late ? 'text-negative-700' : 'text-navy-950'}`}>{formatCurrency(p.amount)}</span>
+                <span className={`text-[11px] ${late ? 'text-negative' : 'text-gold-600'}`}>
                   {late ? 'overdue ' : 'due '}{formatDate(p.dueOn)}
                 </span>
               </div>
               {p.method && <p className="text-[11px] text-slate-500 mt-0.5">{p.method}</p>}
               <div className="flex gap-1.5 mt-2">
                 <button disabled={busy} onClick={() => run(() => resolvePromise(p.id, 'kept', userId))}
-                  className="flex-1 text-[11px] font-medium py-1 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 inline-flex items-center justify-center gap-1">
+                  className="flex-1 text-[11px] font-medium py-1 rounded border border-positive-100 text-positive-700 hover:bg-positive-50 disabled:opacity-50 inline-flex items-center justify-center gap-1">
                   <Check size={11} /> Kept
                 </button>
                 <button disabled={busy} onClick={() => run(() => resolvePromise(p.id, 'broken', userId))}
-                  className="flex-1 text-[11px] font-medium py-1 rounded border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50 inline-flex items-center justify-center gap-1">
+                  className="flex-1 text-[11px] font-medium py-1 rounded border border-negative-100 text-negative-700 hover:bg-negative-50 disabled:opacity-50 inline-flex items-center justify-center gap-1">
                   <XCircle size={11} /> Broken
                 </button>
                 <button disabled={busy} onClick={() => run(() => resolvePromise(p.id, 'cancelled', userId))}
@@ -709,7 +762,7 @@ function PromisePanel({ accountId, promises, userId, onChange }: {
             {past.slice(0, 6).map((p) => (
               <div key={p.id} className="flex items-baseline justify-between gap-2 text-xs">
                 <span className="text-slate-500">
-                  {p.status === 'kept' ? <CheckCircle2 size={11} className="inline text-emerald-600 mr-1" /> : null}
+                  {p.status === 'kept' ? <CheckCircle2 size={11} className="inline text-positive mr-1" /> : null}
                   {formatDate(p.dueOn)}
                 </span>
                 <span className="tabular-nums text-slate-500">{formatCurrency(p.amount)}</span>
@@ -735,13 +788,13 @@ function PositionPanel({ account, ceiling, chargedExclVat }: {
         <div className="pb-3">
           <div className="flex items-baseline justify-between text-xs mb-1">
             <span className="text-slate-500">Annexure B fee ceiling</span>
-            <span className={`tabular-nums ${chargedExclVat > ceiling.limit ? 'text-rose-600 font-medium' : 'text-slate-400'}`}>
+            <span className={`tabular-nums ${chargedExclVat > ceiling.limit ? 'text-negative font-medium' : 'text-slate-400'}`}>
               {formatCurrency(chargedExclVat)} of {formatCurrency(ceiling.limit)}
             </span>
           </div>
           <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
             <div
-              className={`h-full rounded-full ${chargedExclVat > ceiling.limit ? 'bg-rose-500' : chargedExclVat / ceiling.limit > 0.9 ? 'bg-amber-500' : 'bg-brand-500'}`}
+              className={`h-full rounded-full ${chargedExclVat > ceiling.limit ? 'bg-negative' : chargedExclVat / ceiling.limit > 0.9 ? 'bg-gold-500' : 'bg-brand-500'}`}
               style={{ width: `${Math.min(100, ceiling.limit ? (100 * chargedExclVat) / ceiling.limit : 0)}%` }}
             />
           </div>
@@ -772,7 +825,11 @@ function PositionPanel({ account, ceiling, chargedExclVat }: {
  * figure. It is deliberately plain -- printable as it stands, no colour carrying meaning that
  * would be lost in black and white.
  */
-function StatementTable({ statement, account }: { statement: StatementLine[]; account: DebtorAccount }) {
+function StatementTable({ statement, account, breakdown }: {
+  statement: StatementLine[]
+  account: DebtorAccount
+  breakdown: BalanceBreakdown | undefined
+}) {
   if (statement.length === 0) return <p className="text-sm text-slate-400 py-6 text-center">Nothing has happened on this account.</p>
   return (
     <>
@@ -800,15 +857,53 @@ function StatementTable({ statement, account }: { statement: StatementLine[]; ac
             {statement.map((l, i) => (
               <tr key={i} className="border-b border-slate-50 last:border-0">
                 <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{formatDate(l.date)}</td>
-                <td className={`px-3 py-1.5 ${l.kind === 'payment' ? 'text-emerald-700' : 'text-slate-700'}`}>{l.description}</td>
+                <td className={`px-3 py-1.5 ${l.kind === 'payment' ? 'text-positive-700' : 'text-slate-700'}`}>{l.description}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">{l.debit ? formatCurrency(l.debit) : ''}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-emerald-700">{l.credit ? formatCurrency(l.credit) : ''}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-positive-700">{l.credit ? formatCurrency(l.credit) : ''}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums font-medium text-slate-900">{formatCurrency(l.balance)}</td>
               </tr>
             ))}
           </tbody>
+
+          {/*
+            The settlement quotation, below the movements and ruled off from them.
+            It belongs on the statement because it is the number anybody reading this actually
+            wants -- what it takes to close the account today. It is NOT a movement: the receipt
+            fee on a settlement is only incurred if the settlement is paid, so putting it in the
+            running balance above would charge a fee for a payment nobody has made.
+          */}
+          {breakdown && breakdown.balance > 0 && (
+            <tfoot>
+              <tr className="border-t-2 border-slate-200">
+                <td className="px-3 pt-3 text-slate-500 text-xs" colSpan={2}>Balance outstanding</td>
+                <td colSpan={2} />
+                <td className="px-3 pt-3 text-right tabular-nums font-medium text-slate-900">{formatCurrency(breakdown.balance)}</td>
+              </tr>
+              <tr>
+                <td className="px-3 py-1 text-slate-500 text-xs" colSpan={2}>
+                  Receipt fee on settlement
+                  <span className="block text-[11px] text-slate-400">
+                    10% of the balance, capped, plus VAT &mdash; charged only when the settlement is received
+                  </span>
+                </td>
+                <td colSpan={2} />
+                <td className="px-3 py-1 text-right tabular-nums text-slate-700">{formatCurrency(breakdown.settlementFee)}</td>
+              </tr>
+              <tr className="border-t border-slate-200">
+                <td className="px-3 pt-2 pb-3 font-semibold text-slate-900" colSpan={2}>To settle in full today</td>
+                <td colSpan={2} />
+                <td className="px-3 pt-2 pb-3 text-right tabular-nums font-semibold text-navy-950">{formatCurrency(breakdown.settlement)}</td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
+      {breakdown && breakdown.balance > 0 && (
+        <p className="text-[11px] text-slate-400 mt-3">
+          Quoted as at {formatDate(TODAY)}. Interest continues to run, so a settlement paid later
+          will differ.
+        </p>
+      )}
     </>
   )
 }

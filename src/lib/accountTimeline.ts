@@ -31,6 +31,9 @@ export interface TimelineEntry {
   free?: boolean
   /** Set on promises, so the timeline can show kept/broken/overdue without re-deriving it. */
   status?: string | null
+  /** Our closed action catalogue (src/lib/actionTariff.ts), so a call gets a phone and a letter
+   *  gets an envelope. Null on imported rows whose legacy name never mapped. */
+  actionCode?: string | null
 }
 
 const dayOf = (iso: string) => iso.slice(0, 10)
@@ -66,6 +69,7 @@ export function buildTimeline(
       by: f.performedBy,
       amount: f.billed ? f.amountExclVat + f.vatAmount : null,
       free: !f.billed,
+      actionCode: f.actionCode,
     })
   }
 
