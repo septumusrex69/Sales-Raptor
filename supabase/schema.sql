@@ -709,6 +709,300 @@ create policy "email_signatures_delete" on storage.objects
     and (auth.uid()::text = (storage.foldername(name))[1] or public.current_user_role() = 'Administrator')
   );
 
+-- ---------- The collections book ----------
+-- Everything above this line is the sales side: leads, deals, the mandate being signed.
+-- Everything below it is what happens after — the individual debtor accounts that arrive in a
+-- handover and get worked for years.
+--
+-- These five tables existed on the database before they existed in this file: they were applied
+-- live while the money model was being worked out and never written back here. That drift is
+-- why this section is now the authoritative copy. Re-running it against that database is a
+-- no-op.
+--
+-- The money is split across three independent ledgers rather than kept as running totals on the
+-- account, because a debtor, a client, or the Council for Debt Collectors can ask to see how a
+-- balance was arrived at. A stored balance cannot answer that; a ledger can. So an account's
+-- balance is *derived* — from its payments, its fees and its interest — and never stored as
+-- the truth.
+--
+-- All three ledgers are append-only by policy (select + insert, no update or delete). A
+-- reversal is a new negative row, not an edit, because the statement has to show the payment
+-- and the reversal rather than a silently smaller number.
+
+-- One debtor account. The unit the collections team actually works.
+create table if not exists public.debtor_accounts (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies (id) on delete restrict,
+  handover_id uuid references public.handovers (id) on delete set null,
+
+  account_number text,
+  client_reference text,
+  legacy_reference text,
+
+  debtor_first_name text,
+  debtor_surname text,
+  debtor_id_number text,
+
+  capital_handed_over numeric,
+  capital_outstanding numeric,
+  -- The in duplum ceiling: non-capital may never exceed capital outstanding at handover. Fixed
+  -- once, at handover, and never recalculated as the balance falls (§5).
+  in_duplum_ceiling numeric,
+
+  -- Stamped at handover and never recalculated (§3).
+  commission_rate numeric,
+
+  -- 2% per month is standard but negotiable, per client or per account, and a renegotiation
+  -- takes effect from a date rather than retroactively — so the rate carries its start date.
+  interest_rate_annual numeric,
+  interest_from date,
+
+  -- Prescription runs three years from the last interrupting act. A payment interrupts it, and
+  -- so does an acknowledgement of debt — which is why the AoD has its own Annexure B tariff.
+  prescription_date date,
+  prescribed boolean not null default false,
+  last_interrupted_at timestamptz,
+
+  -- The opening position: what the account was worth when Raptor took it over. Kept separate
+  -- from the ledgers so a migrated account can always be reconciled back to its old system.
+  opening_as_at date,
+  opening_capital numeric,
+  opening_fees numeric,
+  opening_interest numeric,
+
+  status text,
+  sub_status text,
+  bucket text,
+  assigned_to uuid references public.profiles (id) on delete set null,
+  diary_date date,
+
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists debtor_accounts_company_idx on public.debtor_accounts (company_id);
+create index if not exists debtor_accounts_assigned_idx on public.debtor_accounts (assigned_to, bucket, diary_date);
+create index if not exists debtor_accounts_diary_idx on public.debtor_accounts (diary_date) where prescribed = false;
+create index if not exists debtor_accounts_prescription_idx on public.debtor_accounts (prescription_date) where prescribed = false;
+create index if not exists debtor_accounts_legacy_idx on public.debtor_accounts (legacy_reference);
+create index if not exists debtor_accounts_surname_idx on public.debtor_accounts (debtor_surname);
+
+-- Every payment received, exactly as received.
+create table if not exists public.account_payments (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  received_at timestamptz not null,
+  amount numeric not null,
+  method text,
+  reference text,
+  source text not null default 'manual',
+  reversed_at timestamptz,
+  reversal_reason text,
+  created_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists account_payments_account_idx on public.account_payments (account_id, received_at desc);
+
+-- How a payment was split, and what it earned us. One row per payment, recomputed rather than
+-- edited: engine_version records which version of the waterfall produced it, so a corrected
+-- engine can be re-run over history and the difference explained rather than discovered.
+create table if not exists public.payment_allocations (
+  id uuid primary key default gen_random_uuid(),
+  payment_id uuid not null unique references public.account_payments (id) on delete cascade,
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  to_interest numeric not null default 0,
+  -- Annexure B item 9: 10% of the instalment, capped at R610 per payment.
+  to_receipt_fee numeric not null default 0,
+  to_fees numeric not null default 0,
+  to_capital numeric not null default 0,
+  commission numeric not null default 0,
+  commission_vat numeric not null default 0,
+  to_client numeric not null default 0,
+  capital_before numeric not null default 0,
+  capital_after numeric not null default 0,
+  -- The rates in force for this payment, stored rather than looked up: a rate change must not
+  -- silently restate what a client was already remitted.
+  commission_rate numeric not null default 0,
+  vat_rate numeric not null default 15,
+  engine_version text not null default 'v1',
+  computed_at timestamptz not null default now()
+);
+
+-- Every fee raised on an account, at the price it was raised at.
+--
+-- The fee is stored as charged, never recomputed from today's tariff: the Annexure B rates
+-- changed in April 2026, and a 2024 letter has to keep its 2024 price forever.
+-- tariff_effective_from records which schedule it was priced off.
+create table if not exists public.account_fees (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  annexure_item text,
+  tariff_effective_from date,
+  description text not null,
+  amount_excl_vat numeric not null default 0,
+  vat_rate numeric not null default 15,
+  vat_amount numeric not null default 0,
+  -- Annexure B caps recoverable fees. A fee outside the cap is still a real fee we raised; it
+  -- just cannot be recovered from the debtor, so it is flagged rather than omitted.
+  counts_toward_fee_cap boolean not null default true,
+  incurred_at timestamptz not null default now(),
+  source text not null default 'action',
+  -- Set for a fee that arises from a payment (the receipt fee), so the two can be reconciled.
+  payment_id uuid references public.account_payments (id) on delete set null,
+  created_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists account_fees_account_idx on public.account_fees (account_id, incurred_at desc);
+
+-- Interest as accrued. One row per accrual period.
+--
+-- amount_accrued is what the debt earned; amount_recoverable is what may actually be collected
+-- once in duplum is applied. They diverge on a capped account and must both be kept: the client
+-- is owed an honest account of what was written off, not a quietly smaller number.
+create table if not exists public.account_interest_accruals (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  accrued_on date not null,
+  days integer not null default 1,
+  opening_balance numeric not null default 0,
+  daily_rate numeric not null default 0,
+  amount_accrued numeric not null default 0,
+  amount_recoverable numeric not null default 0,
+  capitalised boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists account_interest_account_idx on public.account_interest_accruals (account_id, accrued_on desc);
+
+-- ---------- Migration provenance ----------
+-- Added when the Swordfish import was built. Separate from the definitions above because these
+-- columns exist to answer "where did this row come from and does it still agree with the system
+-- it came from" — a question that stops mattering once the migration is old, but which is
+-- unanswerable after the fact if the columns were never there.
+alter table public.debtor_accounts
+  add column if not exists swordfish_reference text,
+  add column if not exists in_duplum boolean not null default false,
+  add column if not exists write_off_reason text,
+  add column if not exists handover_date date,
+  add column if not exists handover_balance numeric,
+  add column if not exists handover_interest numeric,
+  add column if not exists handover_legal_fees numeric,
+  add column if not exists payments_to_date numeric,
+  -- What the client's mandate bands call for on the capital handed over, beside what the
+  -- account is actually billed at. They are allowed to differ: a difference may be a keying
+  -- error or a later negotiation, and the two cannot be told apart from the data — so the
+  -- system reports it and a person decides. 60 of 285 Growthpoint accounts arrived differing.
+  add column if not exists commission_rate_expected numeric,
+  add column if not exists commission_rate_source text,
+  -- Whoever works it in Swordfish. Free text, deliberately: not everyone who worked an account
+  -- has a Raptor login, and an account must not lose its history over that.
+  add column if not exists swordfish_assigned_to text,
+  add column if not exists current_legal_stage text,
+  add column if not exists legal_stage_date date,
+  add column if not exists last_action_at date,
+  add column if not exists last_payment_at date,
+  add column if not exists source text not null default 'manual',
+  add column if not exists imported_at timestamptz;
+
+create unique index if not exists debtor_accounts_swordfish_ref_idx
+  on public.debtor_accounts (swordfish_reference) where swordfish_reference is not null;
+
+alter table public.account_payments
+  add column if not exists depositor_name text,
+  add column if not exists details text,
+  -- Paid To Client: the client took the money directly and owes us our share. A full payment in
+  -- every respect except custody of the cash, so it counts on the account and settles in the
+  -- month-end reconciliation instead (§7a).
+  add column if not exists paid_to_client boolean not null default false;
+
+-- action_code is our closed catalogue (src/lib/actionTariff.ts); legacy_name is what Swordfish
+-- called it, kept beside it so a mapping decision can be re-examined against the original.
+--
+-- A cancelled action keeps its fee. The fee attaches to the action being issued, so a PTP the
+-- debtor later defaults on is still billed and reinstating it is billed again — cancelled_at
+-- records the cancellation without removing the charge. Excluding cancelled actions was tested
+-- against the export and made reconciliation worse (92% -> 76%).
+alter table public.account_fees
+  add column if not exists action_code text,
+  add column if not exists legacy_name text,
+  -- SMS is billed per 160-character segment: one message can be three segments and cost R10.50.
+  add column if not exists segments integer not null default 1,
+  -- False for an action taken but not chargeable, which is a different thing from one that
+  -- happened to cost zero.
+  add column if not exists billed boolean not null default true,
+  -- Annexure B distinguishes a fee (our tariff) from an expense (money paid out and recovered).
+  add column if not exists expense_or_fee text,
+  add column if not exists destination text,
+  add column if not exists cancelled_at date,
+  add column if not exists cancel_reason text,
+  add column if not exists performed_by text,
+  add column if not exists swordfish_action_id text;
+
+create unique index if not exists account_fees_swordfish_action_idx
+  on public.account_fees (swordfish_action_id) where swordfish_action_id is not null;
+
+-- The accrual key was wrong, and the import is what proved it.
+--
+-- It was unique (account_id, accrued_on): one accrual stream per account per day. The real book
+-- runs concurrent streams — 804 accounts in the export have two periods starting on the same
+-- date, and that constraint would have rejected every second one. No two periods are identical,
+-- though, so the period is the invariant, and that is what is enforced now.
+alter table public.account_interest_accruals
+  drop constraint if exists account_interest_accruals_account_id_accrued_on_key;
+
+create unique index if not exists account_interest_accruals_period_idx
+  on public.account_interest_accruals (account_id, accrued_on, days);
+
+alter table public.account_interest_accruals
+  add column if not exists source text not null default 'engine';
+
+-- The mandate's commission bands, as signed. Null for a client on a single flat rate, which is
+-- most of them. Shape: [{"upTo": 25000, "rate": 0.25}, {"upTo": null, "rate": 0.225}] — ordered
+-- ascending, upTo inclusive, final band null for "and above". See src/lib/commission.ts.
+alter table public.companies
+  add column if not exists commission_bands jsonb,
+  add column if not exists commission_bands_source text,
+  add column if not exists commission_rate numeric;
+
+-- ---------- Collections RLS ----------
+-- Everyone signed in can read the book: the collections floor, the rep who signed the mandate
+-- and the manager reporting on it all need the same view, and this is one company.
+--
+-- The three ledgers take inserts but no updates or deletes. That is the append-only rule above
+-- expressed as policy rather than as a convention someone is trusted to follow — there is no
+-- statement a client can be shown that a later edit could quietly contradict.
+alter table public.debtor_accounts enable row level security;
+alter table public.account_payments enable row level security;
+alter table public.payment_allocations enable row level security;
+alter table public.account_fees enable row level security;
+alter table public.account_interest_accruals enable row level security;
+
+drop policy if exists "debtor_accounts_select" on public.debtor_accounts;
+create policy "debtor_accounts_select" on public.debtor_accounts for select using (auth.uid() is not null);
+drop policy if exists "debtor_accounts_write" on public.debtor_accounts;
+create policy "debtor_accounts_write" on public.debtor_accounts for all
+  using (auth.uid() is not null) with check (auth.uid() is not null);
+
+drop policy if exists "account_payments_select" on public.account_payments;
+create policy "account_payments_select" on public.account_payments for select using (auth.uid() is not null);
+drop policy if exists "account_payments_insert" on public.account_payments;
+create policy "account_payments_insert" on public.account_payments for insert with check (auth.uid() is not null);
+
+drop policy if exists "payment_allocations_select" on public.payment_allocations;
+create policy "payment_allocations_select" on public.payment_allocations for select using (auth.uid() is not null);
+drop policy if exists "payment_allocations_insert" on public.payment_allocations;
+create policy "payment_allocations_insert" on public.payment_allocations for insert with check (auth.uid() is not null);
+
+drop policy if exists "account_fees_select" on public.account_fees;
+create policy "account_fees_select" on public.account_fees for select using (auth.uid() is not null);
+drop policy if exists "account_fees_insert" on public.account_fees;
+create policy "account_fees_insert" on public.account_fees for insert with check (auth.uid() is not null);
+
+drop policy if exists "account_interest_select" on public.account_interest_accruals;
+create policy "account_interest_select" on public.account_interest_accruals for select using (auth.uid() is not null);
+
 -- ---------- Function hardening ----------
 -- handle_new_user and protect_profile_privileged_fields only ever run as
 -- triggers (they reference NEW/OLD, which only exist in trigger context),
