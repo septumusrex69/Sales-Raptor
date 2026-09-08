@@ -4,6 +4,7 @@ import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { SignatureEditor } from '../../components/settings/SignatureEditor'
+import { DataImportTab } from '../../components/settings/DataImportTab'
 import { customFields as initialCustomFields, industries, leadSources as initialLeadSources } from '../../data/mockData'
 import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
@@ -20,7 +21,7 @@ import { TARGET_METRICS, resolveTarget } from '../../lib/targets'
 import { getCurrentSalesMonth } from '../../lib/salesMonth'
 import { formatCurrency, TODAY } from '../../data/mockData'
 
-const TABS = ['Profile', 'Appearance', 'Users', 'Teams', 'Targets', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations'] as const
+const TABS = ['Profile', 'Appearance', 'Users', 'Teams', 'Targets', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations', 'Data Import'] as const
 type Tab = (typeof TABS)[number]
 
 export function SettingsPage() {
@@ -51,6 +52,7 @@ export function SettingsPage() {
         {tab === 'Rejection Reasons' && <StringListTab title="Rejection Reasons" initial={REJECTION_REASONS} />}
         {tab === 'Notifications' && <NotificationsTab />}
         {tab === 'Integrations' && <IntegrationsTab />}
+        {tab === 'Data Import' && <DataImportTab />}
       </div>
     </div>
   )
