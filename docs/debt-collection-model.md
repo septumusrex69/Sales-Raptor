@@ -505,11 +505,17 @@ duplum (capped), 299 written off and 113 frozen (interest stopped), and any acco
 payments (the balance has moved). Tolerance scales with the number of periods, because each
 monthly accrual is rounded to a cent before storage and a long history accumulates that.
 
-**Cancelled actions are still billed.** 846 actions carry a cancellation, 190 of them with a
-charge — R7,699 excl VAT still sitting on debtor accounts, 137 of them cancelled as "Replaced by
-New PTP". Excluding cancelled actions makes the fee reconciliation *worse* (92% to 76%), so this
-is Swordfish's actual behaviour and not an export artefact. Whether a cancelled promise to pay
-should still carry its fee is a question for the business, not a bug to fix silently.
+**Cancelled actions are still billed, and that is correct.** 846 actions carry a cancellation,
+190 of them with a charge — R7,699 excl VAT, 137 cancelled as "Replaced by New PTP". Excluding
+them makes the fee reconciliation *worse* (92% to 76%), so it is Swordfish's real behaviour, and
+the business confirms it is deliberate: the fee attaches to the action being **issued**, not to
+its outcome. A debtor who arranges to pay, defaults, and then makes a fresh arrangement has had
+two arrangements set up, and is charged for both. The cancellation records that the first one
+failed; it does not undo the work.
+
+So an importer must carry cancelled actions across **with their fees intact**. Treating a
+cancellation as a reversal would quietly write off R7,699 on this sample alone, and rather more
+across a hundred thousand accounts.
 
 ### The dry-run harness
 
