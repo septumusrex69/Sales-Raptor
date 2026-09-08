@@ -6,6 +6,8 @@ import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { supabase } from '../../lib/supabase'
 import { parseCsv, type CsvRow } from '../../lib/csv'
+import { readSingleCsvFromZip } from '../../lib/zip'
+import { readXlsx } from '../../lib/xlsx'
 import {
   buildImportPlan, planRows, IMPORT_TABLES, WIPE_TABLES, type ImportPlan,
 } from '../../lib/swordfishImport'
@@ -18,6 +20,25 @@ import { formatCurrency } from '../../data/mockData'
  * which database they are deleting everything from, and because a deployment's environment
  * variables are not something you can check from inside the deployment without being told.
  */
+/**
+ * Whatever they actually have, read as rows.
+ *
+ * A CSV, a zipped CSV, or a spreadsheet. Swordfish's action report is forty-six megabytes, so it
+ * arrives zipped roughly every time, and the client register is a spreadsheet somebody maintains
+ * by hand. Insisting on plain CSV meant a conversion step before every import — one more thing to
+ * forget, and one that lets Excel's regional date formatting change what a sign date means.
+ */
+async function readTable(file: File): Promise<CsvRow[]> {
+  const name = file.name.toLowerCase()
+  if (name.endsWith('.zip')) return parseCsv(await readSingleCsvFromZip(await file.arrayBuffer()))
+  if (name.endsWith('.xlsx') || name.endsWith('.xlsm')) return readXlsx(await file.arrayBuffer())
+  if (name.endsWith('.xls')) {
+    // The pre-2007 binary format is a different thing entirely and not worth carrying.
+    throw new Error(`${file.name} is in the old Excel format. Open it and save it as .xlsx or .csv.`)
+  }
+  return parseCsv(await file.text())
+}
+
 const DATABASE_HOST = (() => {
   try { return new URL(import.meta.env.VITE_SUPABASE_URL as string).hostname } catch { return 'unknown' }
 })()
@@ -48,7 +69,7 @@ const SOURCES = [
   {
     key: 'clients',
     label: 'Client register',
-    hint: 'Who the clients are: registration numbers, commission tiers, banking and contacts. Save it as CSV first.',
+    hint: 'Who the clients are: registration numbers, commission tiers, banking and contacts.',
     required: false,
   },
   { key: 'accounts', label: 'Client Account Summary', hint: 'One row per debtor account. The spine of the import.', required: true },
@@ -88,18 +109,11 @@ export function DataImportTab() {
       for (const s of SOURCES) {
         const file = files[s.key]
         if (!file) continue
-        // A spreadsheet is a zip full of XML, and nothing here can read one. Say so plainly
-        // rather than handing the parser binary and reporting nonsense about the contents.
-        if (/\.xlsx?$/i.test(file.name)) {
-          throw new Error(
-            `${file.name} is a spreadsheet. Open it in Excel, choose File → Save As → CSV, and pick that instead.`,
-          )
-        }
         setPhase({ step: `Reading ${s.label}`, done: 0, total: 0 })
         // Yield to the browser between files: the actions export is tens of megabytes, and
         // parsing it without letting the page breathe looks exactly like a crash.
         await new Promise((r) => setTimeout(r, 0))
-        parsed[s.key] = parseCsv(await file.text())
+        parsed[s.key] = await readTable(file)
       }
       setPhase({ step: 'Working out what would change', done: 0, total: 0 })
       await new Promise((r) => setTimeout(r, 0))
@@ -351,7 +365,7 @@ function FilePicker({ label, hint, badge, file, onPick }: {
     <label className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-brand-300 cursor-pointer">
       <input
         type="file"
-        accept=".csv,text/csv"
+        accept=".csv,.zip,.xlsx,.xlsm,text/csv,application/zip"
         className="sr-only"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(f) }}
       />
