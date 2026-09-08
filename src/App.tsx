@@ -15,6 +15,8 @@ import { ContactsList } from './pages/contacts/ContactsList'
 import { ContactDetail } from './pages/contacts/ContactDetail'
 import { CompaniesList } from './pages/companies/CompaniesList'
 import { CompanyDetail } from './pages/companies/CompanyDetail'
+import { AccountsList } from './pages/accounts/AccountsList'
+import { AccountDetail } from './pages/accounts/AccountDetail'
 import { TasksPage } from './pages/tasks/TasksPage'
 import { CalendarPage } from './pages/calendar/CalendarPage'
 import { ActivitiesPage } from './pages/activities/ActivitiesPage'
@@ -46,6 +48,8 @@ function App() {
               <Route path="/contacts/:id" element={<ContactDetail />} handle={{ title: 'Contact Details' }} />
               <Route path="/companies" element={<CompaniesList />} handle={{ title: 'Clients' }} />
               <Route path="/companies/:id" element={<CompanyDetail />} handle={{ title: 'Client Details' }} />
+              <Route path="/accounts" element={<AccountsList />} handle={{ title: 'Accounts' }} />
+              <Route path="/accounts/:id" element={<AccountDetail />} handle={{ title: 'Account' }} />
               <Route path="/tasks" element={<TasksPage />} handle={{ title: 'Tasks' }} />
               <Route path="/calendar" element={<CalendarPage />} handle={{ title: 'Calendar' }} />
               <Route path="/activities" element={<ActivitiesPage />} handle={{ title: 'Activities' }} />
