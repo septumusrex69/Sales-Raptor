@@ -126,6 +126,16 @@ R2,075 x 10% x 1.15 is exactly R238.625 and the statement shows R238.63. As a do
 account. `roundToCents` in `annexureB.ts` rounds half up through the representation gap, and
 every rand figure the module returns goes through it.
 
+**Round once, not twice.** Rounding correctly is not enough if you do it in two places. The fee
+used to be reached as `receiptFee(x) * 1.15`, which rounds the VAT-exclusive figure to cents and
+then charges VAT on the rounded number rather than on the real one. ACF10043 is the case that
+caught it: a balance of R1,490.83 gives R149.083, which rounds to R149.08 and grosses up to
+R171.44, where the statement says R171.45. Swordfish evaluates the whole expression and rounds
+the answer. `receiptFeeInclVat` now does the same and every caller goes through it, including the
+fee posted when an ordinary payment arrives — that path had the same defect, hidden only because
+10% of a round payment is already exact to the cent. Nine statements dated 9 September 2026:
+one rounding matches all nine, two roundings match eight. Locked in `scripts/qa/check-fees.mjs`.
+
 ## 2b. The fee ceiling — items 1 to 7
 
 **Correcting myself.** I wrote that a ceiling existed but that "the rule is not derivable from
@@ -435,6 +445,20 @@ Two distinct errors are now on the record, and they are not the same kind of thi
 |---|---|---|---|
 | Commission drift (3a) | **Clients** — Growthpoint | R4,698.72 foregone, R75 over-charged | A contract term applied inconsistently by hand |
 | Fee ceiling (2b) | **Debtors** — 39 accounts | R2,245.51 excl VAT over the ceiling | A statutory limit half-implemented |
+| Receipt fee maximum | **Us** — revenue foregone | R8.05 per capped payment, unquantified across the book | A schedule figure that appears to be wrong in Swordfish |
+
+**The receipt fee maximum, unresolved.** Swordfish caps the item 9 receipt fee at R502 excluding
+VAT, charging R577.30, where the 2020 schedule in `annexureB.ts` carries R509 and would charge
+R585.35. AID20001 alone has sixteen capped payments on that figure, R128.80 of fee not raised.
+Swordfish also kept applying the old maximum until May 2026, two months after the R610 schedule
+took effect on 6 March, so a payment on 31 March 2026 was still capped at R502.
+
+The financial manager has independently seen the R502 problem and believes it was billed
+incorrectly, which points at R509 being right. **Nothing has been changed on the strength of
+that**, because it is a verbal report and the fix direction depends on which figure the 2020
+gazette actually carries. Confirm against the gazette, then either correct
+`ANNEXURE_B_2020.receiptFeeMaximum` or leave it and record why. The expectation in
+`scripts/qa/check-fees.mjs` moves with it.
 
 **The decision taken: do not restate history.** Take the position as it stands, and be correct
 from here. That is the right call and it is worth writing down why, because "we knew and did
@@ -493,6 +517,20 @@ This has a consequence worth stating plainly: **a balance is only meaningful wit
 attached.** Every quote, statement and settlement figure must record the date it was calculated
 for, because the same account gives a different answer tomorrow. A settlement figure sent to a
 debtor without a date on it is wrong the moment it is opened.
+
+**Neither reading reproduces Swordfish, and that is now measured.** The nine statements of
+9 September 2026 carry 107 posted interest rows across four clients and two rates. Replaying them
+both ways — 2% pro-rated by days in the calendar month, and 24% over 365 — reproduces the posted
+figure to the cent on **2 of 107**. The aggregate is close, R14.19 on R93,558.54 of interest
+charged, or 0.015%, and the sign is not consistent: four accounts come out under and five over.
+Individual rows are out by as much as R4.66.
+
+So the model is the right shape and roughly the right size, and it is **not** the arithmetic
+Swordfish performs. Close in aggregate is the wrong test. A reissued statement has to match the
+one the debtor was sent, row for row, which means this stays open until the actual convention is
+established rather than inferred. Reproduce it with `node scripts/qa/check-fees.mjs` for the fee
+side; the interest replay is not yet a checked-in script because there is nothing settled to
+assert against.
 
 **OPEN — the daily rate.** "2% per month, calculated daily" can mean either 2% divided by the
 number of days in that month (so exactly 2% accrues each month, and a day in February is worth

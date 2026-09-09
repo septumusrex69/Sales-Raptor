@@ -383,6 +383,31 @@ export function receiptFee(instalment: number, schedule: AnnexureBSchedule = ANN
 }
 
 /**
+ * The same fee with VAT on it, rounded **once**, at the end.
+ *
+ * Every caller wants the inclusive figure, because that is what is posted and what the debtor
+ * pays. Reaching it as `receiptFee(x) * 1.15` rounds twice: the exclusive amount is rounded to
+ * cents first, and VAT is then charged on that rounded number instead of on the real one. It
+ * costs a cent whenever 10% of the base lands on a fraction of a cent.
+ *
+ * ACF10043 is the worked case. A balance of R1,490.83 gives R149.083; round that to R149.08 and
+ * gross it up and you get R171.44, where the statement says R171.45. Swordfish evaluates
+ * 1490.83 x 10% x 1.15 in one go and rounds the answer. Across the nine statements of
+ * 9 September 2026, one rounding matches all nine and two roundings match eight.
+ *
+ * It bites on ordinary payments too, not only on settlements — it just stays hidden while
+ * debtors pay round amounts, because 10% of R500 is already exact to the cent.
+ */
+export function receiptFeeInclVat(
+  instalment: number,
+  vatRate = 0.15,
+  schedule: AnnexureBSchedule = ANNEXURE_B_2026,
+): number {
+  if (instalment <= 0) return 0
+  return roundToCents(Math.min(instalment * schedule.receiptFeeRate, schedule.receiptFeeMaximum) * (1 + vatRate))
+}
+
+/**
  * How much of a fee may actually be recovered, given what this account has already been charged.
  *
  * This is the whole cap, applied the way the Act words it: a limit on the *total recovered* for
@@ -455,8 +480,7 @@ export function settlementReceiptFee(
   vatRate = 0.15,
   schedule: AnnexureBSchedule = ANNEXURE_B_2026,
 ): number {
-  if (balanceBeforeFee <= 0) return 0
-  return roundToCents(receiptFee(balanceBeforeFee, schedule) * (1 + vatRate))
+  return receiptFeeInclVat(balanceBeforeFee, vatRate, schedule)
 }
 
 /**
