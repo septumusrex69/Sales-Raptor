@@ -282,7 +282,7 @@ function RaiseForm({ accountId, users, actor, busy, run, onDone }: {
             accountId, description, category, ownerId: ownerId || null, chaseOn: chaseOn || null,
             raisedBy: actor.id, raisedByName: actor.name,
           })
-          message = chargeMessage(charge, '3')
+          message = charge ? chargeMessage(charge, '3') : 'Not charged to the debtor.'
         })
         // Said after the fact rather than promised beforehand: whether item 3 has anything left
         // on this account depends on the ledger, and the ledger is read when the charge is made.

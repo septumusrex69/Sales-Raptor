@@ -92,7 +92,7 @@ for (let i = 0; i < 29; i++) {
 
 const companies = [{
   id: COMPANY, name: 'ABSA Technology Finance Solutions', industry: 'Financial Services',
-  status: 'Won', owner_id: USER, city: 'Johannesburg', province: 'Gauteng', country: 'South Africa',
+  status: 'Won', owner_id: USER, account_owner_id: USER, city: 'Johannesburg', province: 'Gauteng', country: 'South Africa',
   created_at: '2024-01-11', website: null, size: null, notes: null,
 }]
 const profiles = [{
@@ -235,6 +235,17 @@ for (const tab of ['Overview', 'Transactions', 'Documents']) {
   const text = (await page.textContent('body')).replace(/\s+/g, ' ')
   console.log(`\n== ${tab} ==\n${text.slice(0, 900)}`)
 }
+
+// The Escalate modal — the new front door to the query system.
+const esc = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+await esc.route(`**://${REF}.supabase.co/**`, serve)
+await esc.addInitScript(seed, { ref: REF, user: USER })
+await esc.goto(`${ORIGIN}/accounts/${ACC}`, { waitUntil: 'networkidle' })
+await esc.waitForTimeout(1400)
+const escalate = esc.getByRole('button', { name: /Escalate/ })
+if (await escalate.count()) { await escalate.first().click(); await esc.waitForTimeout(700) }
+else console.log('!! Escalate button not found')
+await esc.screenshot({ path: `${OUT}/account-escalate.png` })
 
 // The Communications queue.
 const queue = await browser.newPage({ viewport: { width: 1440, height: 1000 } })

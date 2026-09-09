@@ -149,7 +149,16 @@ export async function raiseQuery(input: {
   chaseOn?: string | null
   raisedBy?: string | null
   raisedByName?: string | null
-}): Promise<{ query: AccountQuery; charge: ChargeResult }> {
+  /**
+   * Whether to charge the debtor item 3.
+   *
+   * Defaults to true, because the ordinary case is a debtor query that Communications will take
+   * up with the client. It is false for an internal escalation — asking your own manager how to
+   * handle an account is supervision, not a "necessary expense" recoverable from the debtor, and
+   * charging for it would not survive being asked about.
+   */
+  charge?: boolean
+}): Promise<{ query: AccountQuery; charge: ChargeResult | null }> {
   const { data, error } = await supabase
     .from('account_queries')
     .insert({
@@ -166,7 +175,7 @@ export async function raiseQuery(input: {
   if (error) throw new Error(error.message)
   const q = toQuery(data)
 
-  const charge = await chargeItem({
+  const charge = input.charge === false ? null : await chargeItem({
     accountId: input.accountId,
     itemId: '3',
     actionCode: 'perusal',
@@ -178,7 +187,9 @@ export async function raiseQuery(input: {
   // where they read everything else, not only if they think to open a panel.
   await addNote({
     accountId: input.accountId,
-    body: `Query raised: ${q.description}\n${chargeMessage(charge, '3')}`,
+    body: charge
+      ? `Query raised: ${q.description}\n${chargeMessage(charge, '3')}`
+      : `Query raised: ${q.description}\nNot charged to the debtor.`,
     authorName: input.raisedByName ?? null,
     createdBy: input.raisedBy ?? null,
     queryId: q.id,

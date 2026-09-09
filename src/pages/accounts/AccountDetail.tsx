@@ -19,6 +19,7 @@ import { buildTimeline, groupByDay, type TimelineEntry } from '../../lib/account
 import { styleFor, PROMISE_CHIP } from './timelineStyle'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
+import { EscalateModal } from './EscalateModal'
 import { fetchQueries, type AccountQuery } from '../../lib/accountQueries'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { feeCeiling, scheduleFor } from '../../lib/annexureB'
@@ -59,6 +60,7 @@ export function AccountDetail() {
   const noteRef = useRef<HTMLTextAreaElement>(null)
   const [promiseOpen, setPromiseOpen] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)
+  const [escalating, setEscalating] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -149,6 +151,9 @@ export function AccountDetail() {
   const name = [account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ') || 'Unnamed debtor'
   const due = workspace ? nextPromise(workspace.promises) : undefined
   const emailContact = workspace?.contacts.find((c) => c.kind === 'email' && !c.retiredAt)
+  // Who looks after this debtor's CLIENT — a different person from the pre-legal agent working
+  // the debtor, and the one a query about the debt itself has to go to.
+  const clientLiaison = users.find((u) => u.id === client?.accountOwnerId)
   const canDelete = ['Administrator', 'Sales Manager', 'Liaison Manager'].includes(currentUser?.role ?? '')
 
   return (
@@ -199,10 +204,22 @@ export function AccountDetail() {
           Whoever is working this debtor. "Pre-legal agent" rather than "Client Liaison": a
           liaison looks after the client relationship, and this is the person chasing the debt.
         */}
+        {/*
+          Two different people, and confusing them wastes a phone call: the pre-legal agent works
+          the debtor, the client liaison looks after the client whose debt it is. A query about
+          the debt goes to the second one.
+        */}
         <div className="mt-2.5 text-right leading-tight ml-2">
           <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-gold-500">Pre-legal agent</p>
           <p className="text-sm font-semibold text-white">{account.swordfishAssignedTo ?? 'Unassigned'}</p>
           {account.swordfishAssignedTo && <p className="text-[11px] text-white/50">from Swordfish</p>}
+        </div>
+        <div className="mt-2.5 text-right leading-tight ml-2">
+          <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-gold-500">Client liaison</p>
+          <p className="text-sm font-semibold text-white">{clientLiaison?.name ?? 'Not set'}</p>
+          <p className="text-[11px] text-white/50">
+            {clientLiaison ? `for ${client?.name ?? 'this client'}` : 'set one on the client'}
+          </p>
         </div>
       </DashboardHero>
 
@@ -240,6 +257,7 @@ export function AccountDetail() {
         onEmail={emailContact ? () => setComposeTo(emailContact.value) : undefined}
         onNote={() => { setTab('Overview'); setNoteOpen(true); setTimeout(() => noteRef.current?.focus(), 0) }}
         onPromise={() => { setTab('Overview'); setPromiseOpen(true) }}
+        onEscalate={() => setEscalating(true)}
       />
 
       <OutcomeOutstanding queries={queries} accountId={account.id}
@@ -319,9 +337,21 @@ export function AccountDetail() {
               busy={queryBusy}
               run={runQuery}
             />
-            <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0} />
+            <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0}
+              clientLiaisonName={clientLiaison?.name ?? null} />
           </div>
         </div>
+      )}
+
+      {escalating && (
+        <EscalateModal
+          accountId={account.id}
+          users={users}
+          clientLiaison={clientLiaison}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setEscalating(false)}
+          onDone={reload}
+        />
       )}
 
       {composeTo && (
@@ -367,10 +397,11 @@ const pct = (r: number | null) => (r === null ? '—' : `${(r * 100).toFixed(r *
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ onEmail, onNote, onPromise }: {
+function ActionBar({ onEmail, onNote, onPromise, onEscalate }: {
   onEmail?: () => void
   onNote: () => void
   onPromise: () => void
+  onEscalate: () => void
 }) {
   const soon = 'Not built yet — needs a provider connected and a decision on whether it charges the debtor.'
   return (
@@ -382,7 +413,9 @@ function ActionBar({ onEmail, onNote, onPromise }: {
         title={onEmail ? 'Send from your connected mailbox' : 'No email address on this account yet'} />
       <Action icon={StickyNote} label="Add Note" onClick={onNote} title="Write on the timeline" />
       <Action icon={Check} label="Promise to Pay" onClick={onPromise} title="Record what they agreed to" primary />
-      <Action icon={ShieldAlert} label="Escalate" title="Not built yet — needs the legal handover flow." />
+      {/* The front door to the query system: raising a dispute is what escalating an account IS. */}
+      <Action icon={ShieldAlert} label="Escalate" onClick={onEscalate}
+        title="Raise a query or dispute and give it to someone" />
     </div>
   )
 }
@@ -768,10 +801,11 @@ function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, su
   )
 }
 
-function PositionPanel({ account, ceiling, chargedExclVat }: {
+function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName }: {
   account: DebtorAccount
   ceiling: { limit: number } | null
   chargedExclVat: number
+  clientLiaisonName: string | null
 }) {
   return (
     <Card>
@@ -805,6 +839,7 @@ function PositionPanel({ account, ceiling, chargedExclVat }: {
         <Field label="Diary date" value={account.diaryDate ? formatDate(account.diaryDate) : null} />
         <Field label="Last action" value={account.lastActionAt ? formatDate(account.lastActionAt) : null} />
         <Field label="Last contact by" value={account.lastContactMethod} />
+        <Field label="Client liaison" value={clientLiaisonName} />
         <Field label="Written off" value={account.writeOffReason} />
       </div>
     </Card>
