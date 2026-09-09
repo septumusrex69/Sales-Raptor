@@ -26,7 +26,7 @@
  * flagged rather than silently absorbed: in duplum, where accrual stops at the ceiling, and
  * write-off, where the account stopped and accrual stopped with it.
  */
-import { receiptFee, settlementReceiptFee, roundToCents, scheduleFor, type AnnexureBSchedule } from './annexureB.ts'
+import { receiptFeeInclVat, settlementReceiptFee, roundToCents, scheduleFor, type AnnexureBSchedule } from './annexureB.ts'
 import { accrueToDate, coveredTo as lastCoveredDay } from './interestAccrual.ts'
 
 export interface LedgerLines {
@@ -122,7 +122,7 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
   // taken in 2024 carries the R509 maximum, not today's R610.
   const receiptFees = roundToCents(
     ledgers.payments.reduce(
-      (t, p) => t + roundToCents(receiptFee(p.amount, scheduleFor(p.date)) * (1 + vatRate)),
+      (t, p) => t + receiptFeeInclVat(p.amount, vatRate, scheduleFor(p.date)),
       0,
     ),
   )
@@ -317,7 +317,7 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
       debit: 0,
       credit: p.amount,
     })
-    const fee = roundToCents(receiptFee(p.amount, schedule ?? scheduleFor(p.date)) * (1 + vatRate))
+    const fee = receiptFeeInclVat(p.amount, vatRate, schedule ?? scheduleFor(p.date))
     if (fee > 0) {
       pending.push({
         date: p.date,
