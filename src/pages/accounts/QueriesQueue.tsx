@@ -125,7 +125,7 @@ export function QueriesQueue() {
                         )}
                       </td>
                       <td className="px-4 py-2.5 align-top max-w-md">
-                        <span className="text-slate-700 line-clamp-2">{q.description}</span>
+                        <span className="text-slate-700 line-clamp-2 wrap-anywhere">{q.description}</span>
                         {q.category && <span className="block text-[11px] text-slate-400">{q.category}</span>}
                       </td>
                       <td className="px-4 py-2.5 align-top text-slate-600">

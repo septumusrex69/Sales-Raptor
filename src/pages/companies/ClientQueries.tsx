@@ -86,7 +86,7 @@ export function ClientQueries({ companyId }: { companyId: string }) {
             return (
               <div key={q.id} className="px-5 py-3 flex flex-wrap items-start gap-x-4 gap-y-1.5">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-slate-800">{q.description}</p>
+                  <p className="text-sm text-slate-800 line-clamp-3 wrap-anywhere">{q.description}</p>
                   <p className="text-[11px] text-slate-400 mt-0.5">
                     <Link to={`/accounts/${q.accountId}`} className="text-brand-600 hover:underline">
                       {q.debtorName}

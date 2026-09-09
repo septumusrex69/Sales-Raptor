@@ -151,7 +151,19 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
   }
 
   const balance = roundToCents(capital + recoverableNonCapital - payments)
-  const settlementFee = balance > 0 ? settlementReceiptFee(balance, vatRate) : 0
+
+  /*
+   * The receipt fee on a settlement is a FEE, so in duplum binds it like every other fee.
+   *
+   * It used to be worked out on the capped balance and then added to it, which quietly put the
+   * settlement figure above the ceiling the cap had just enforced — the rule applied to the
+   * balance and then abandoned one line later. Once non-capital has reached the capital there is
+   * no headroom left, so the fee for settling is nil: the debtor pays the ceiling and no more.
+   * Where the cap is close but not yet reached, only the part of the fee that still fits is
+   * charged.
+   */
+  const headroom = input.inDuplum ? Math.max(0, roundToCents(capital - recoverableNonCapital)) : Infinity
+  const settlementFee = balance > 0 ? Math.min(settlementReceiptFee(balance, vatRate), headroom) : 0
 
   // The VAT already inside `fees` and `receiptFees`. A receipt fee is charged VAT-inclusive, so
   // its tax is the inclusive amount less the amount it grossed up from — not the amount times
@@ -338,7 +350,8 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
     lines,
     breakdown,
     note: breakdown.cappedBy === 'in duplum'
-      ? `Interest and fees stopped at the in duplum ceiling. ${money(breakdown.withheld)} accrued beyond it and is not recoverable.`
+      ? `Interest and fees stopped at the in duplum ceiling. ${money(breakdown.withheld)} accrued beyond it and is not recoverable`
+        + `${breakdown.settlementFee === 0 ? ', and the receipt fee on a settlement falls away with it' : ''}.`
       : breakdown.cappedBy === 'written off'
         ? `The account was written off on ${stopAt}. ${money(breakdown.withheld)} of later interest and fees is excluded.`
         : undefined,

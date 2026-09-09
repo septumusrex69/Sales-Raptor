@@ -99,7 +99,7 @@ export function QueryPanel({ accountId, queries, users, actor, onChange, busy, r
                     </span>
                   )}
                 </div>
-                <p className="text-slate-600 mt-0.5">{q.description}</p>
+                <p className="text-slate-600 mt-0.5 wrap-anywhere">{q.description}</p>
                 {q.outcomeAction && <p className="text-slate-400 mt-0.5">{q.outcomeAction}</p>}
               </div>
             ))}
@@ -137,7 +137,7 @@ function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, cli
         </span>
       </div>
 
-      <p className="text-sm text-slate-800 mt-1.5">{q.description}</p>
+      <QueryDescription text={q.description} />
       <p className="text-[11px] text-slate-400 mt-0.5">
         {[q.category, q.raisedByName ? `raised by ${q.raisedByName}` : null].filter(Boolean).join(' · ')}
       </p>
@@ -400,5 +400,29 @@ function CloseForm({ onClose, onCancel, busy }: {
         <button onClick={onCancel} className="text-[11px] text-slate-500 hover:text-slate-700">Cancel</button>
       </div>
     </div>
+  )
+}
+
+/**
+ * A query's text, three lines at a time.
+ *
+ * Two things go wrong with a long description and both were visible on an iPad. It ran to a wall
+ * of text in a card meant to be scanned, and — where somebody had typed one unbroken run with no
+ * spaces in it — there was nowhere for the line to break, so the card widened until it pushed the
+ * whole right-hand column off the screen. `wrap-anywhere` lets the break happen mid-word, which
+ * is what keeps the column at the width the grid gave it.
+ */
+function QueryDescription({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  const long = text.length > 150
+  return (
+    <p
+      onClick={long ? () => setOpen((v) => !v) : undefined}
+      title={long ? (open ? 'Show less' : 'Show all') : undefined}
+      className={`text-sm text-slate-800 mt-1.5 wrap-anywhere ${long ? 'cursor-pointer' : ''} ${
+        long && !open ? 'line-clamp-3' : ''}`}
+    >
+      {text}
+    </p>
   )
 }

@@ -151,6 +151,9 @@ const TABLES = {
   account_queries: [
     { id: 'q1', account_id: ACC, description: 'Says she already paid R3,000 of this directly to the client in March and it was never credited.', category: 'Already paid', status: 'open', stage: 'client', sent_to_client_at: '2026-08-20T09:00:00Z', owner_id: USER, raised_by_name: 'Amanda Coertze', raised_at: '2026-08-18T09:00:00Z', chase_on: '2026-09-01', outcome: null, outcome_action: null, outcome_amount: null, outcome_done: false, closed_at: null, closed_by_name: null },
     { id: 'q2', account_id: ACC, description: 'Disputed the delivery of two of the items invoiced.', category: 'Goods or service', status: 'closed', stage: 'liaison', owner_id: USER, raised_by_name: 'Amanda Coertze', raised_at: '2026-05-02T09:00:00Z', chase_on: null, outcome: 'partly_valid', outcome_action: 'Reduce the capital by the two items', outcome_amount: 1840, outcome_done: false, closed_at: '2026-06-11T09:00:00Z', closed_by_name: 'Stephan Bredell' },
+    // The failure mode this reproduces: one unbroken run with nowhere to wrap. Typed by accident
+    // on an iPad, it widened the card until the whole right-hand column left the screen.
+    { id: 'q3', account_id: ACC, description: ',gffggnfngngmgmgmgmgmmgmgmgngngnnbgngngngngngnngnnmgngmgmhmmmhmhmmmmmhmhmmmhngmgmgmgmgmmmmmmmhbhbhbhbnmgngngmgm', category: 'Amount disputed', status: 'open', stage: 'agent', owner_id: USER, raised_by_name: 'Stephan Bredell', raised_at: '2026-09-09T09:00:00Z', chase_on: null, outcome: null, outcome_action: null, outcome_amount: null, outcome_done: false, closed_at: null, closed_by_name: null },
   ],
   account_documents: [
     { id: 'd1', account_id: ACC, name: 'Letter of demand - 20 Aug 2024.pdf', storage_path: 'x/1.pdf', mime_type: 'application/pdf', size_bytes: 184320, kind: 'Letter of Demand', uploaded_by_name: 'Amanda Coertze', created_at: '2024-08-20T10:00:00Z' },
@@ -269,6 +272,38 @@ for (const tab of ['Overview', 'Transactions', 'Documents']) {
   console.log(`\n== ${tab} ==\n${text.slice(0, 900)}`)
   // The header alone fills the excerpt above, so the things worth asserting are asserted rather
   // than eyeballed: the running interest has to reach the statement, not only the tile.
+  /*
+   * Overflow, measured against the CARD rather than the page.
+   *
+   * The page-level check was useless: at a desktop width the grid simply absorbs an over-wide
+   * card and documentElement.scrollWidth never moves, so a card whose text visibly runs past its
+   * own border reports clean. What matters is whether any text box is wider than the card it
+   * sits in — that is the thing you actually see on an iPad.
+   */
+  const over = await page.evaluate(() => {
+    const bad = []
+    for (const card of document.querySelectorAll('.card')) {
+      const edge = card.getBoundingClientRect().right
+      for (const n of card.querySelectorAll('p, span')) {
+        const r = n.getBoundingClientRect()
+        if (r.width > 0 && r.right > edge + 2) {
+          bad.push(`${Math.round(r.right - edge)}px past the card: "${(n.textContent ?? '').slice(0, 28)}"`)
+        }
+      }
+    }
+    return bad.slice(0, 3)
+  })
+  console.log(over.length ? `!! text overflows its card — ${over.join(' | ')}` : '   nothing overflows its card')
+  // Measured rather than asserted: this harness's Chromium wraps the fixture string even without
+  // the fix, so it cannot prove the iPad bug is gone — it can only show the text now sits inside
+  // its card at the width the grid gave it.
+  const wrapped = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('p, span')].find((n) => (n.textContent ?? '').includes('gffggnfngngm'))
+    if (!el) return null
+    const r = el.getBoundingClientRect(), c = el.closest('.card').getBoundingClientRect()
+    return `unbroken query text: ${Math.round(r.width)}px inside a ${Math.round(c.width)}px card`
+  })
+  if (wrapped) console.log('   ' + wrapped)
   if (tab === 'Transactions') {
     const line = text.match(/Interest, \d+ days? — accruing to today/)
     console.log(line ? `   statement carries the open period: "${line[0]}"` : '!! no accruing-interest line on the statement')

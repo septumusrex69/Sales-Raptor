@@ -659,7 +659,7 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
         <div className="flex items-baseline justify-between gap-3">
           <p
             onClick={long ? () => setOpen((v) => !v) : undefined}
-            className={`text-sm min-w-0 ${wraps ? 'whitespace-pre-wrap' : ''} ${
+            className={`text-sm min-w-0 wrap-anywhere ${wraps ? 'whitespace-pre-wrap' : ''} ${
               long ? 'cursor-pointer' : ''} ${long && !open ? 'line-clamp-3' : ''} ${
               reversed ? 'line-through text-slate-400' : 'text-slate-700'}`}
           >
@@ -1009,7 +1009,9 @@ function StatementTable({ statement, account, breakdown }: {
                 <td className="px-3 py-1 text-slate-500 text-xs" colSpan={2}>
                   Receipt fee on settlement
                   <span className="block text-[11px] text-slate-400">
-                    10% of the balance, capped, plus VAT &mdash; charged only when the settlement is received
+                    {breakdown.cappedBy === 'in duplum' && breakdown.settlementFee === 0
+                      ? 'Nil \u2014 in duplum leaves no room for it. The ceiling is the whole of what is owed.'
+                      : '10% of the balance, capped, plus VAT \u2014 charged only when the settlement is received'}
                   </span>
                 </td>
                 <td colSpan={2} />

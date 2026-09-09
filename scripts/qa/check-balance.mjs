@@ -222,5 +222,42 @@ const empty = { payments: [], fees: [], interest: [] }
   check('the statement still ends at the balance', s.lines[s.lines.length - 1].balance, s.breakdown.balance)
 }
 
+/*
+ * In duplum binds the settlement fee too.
+ *
+ * The cap used to be applied to the balance and then abandoned one line later: the receipt fee
+ * for settling was worked out on the capped balance and added on top, putting the figure the
+ * debtor was actually quoted back above the ceiling. Non-capital may not exceed the capital, and
+ * a receipt fee is non-capital.
+ */
+{
+  const capped = {
+    capitalHandedOver: 1000, handoverDate: '2024-01-01', inDuplum: true,
+    ledgers: { payments: [], fees: [], interest: [{ from: '2024-02-01', days: 30, amount: 5000 }] },
+  }
+  const b = computeBalance(capped)
+  check('in duplum: the balance stops at twice the capital', b.balance, 2000)
+  check('in duplum: no room is left for a settlement fee', b.settlementFee, 0)
+  check('in duplum: so settling costs the ceiling and no more', b.settlement, 2000)
+
+  /* Part-way to the ceiling, only the part of the fee that still fits is charged. */
+  const nearly = computeBalance({
+    ...capped,
+    ledgers: { payments: [], fees: [], interest: [{ from: '2024-02-01', days: 30, amount: 950 }] },
+  })
+  // R50 of headroom left under the R1,000 ceiling; the fee on R1,950 would be R224.25.
+  check('near the ceiling: the fee is trimmed to the headroom', nearly.settlementFee, 50)
+  check('near the ceiling: settlement lands exactly on the ceiling', nearly.settlement, 2000)
+
+  /* An account not subject to in duplum is untouched by any of this. */
+  const free = computeBalance({
+    capitalHandedOver: 1000, handoverDate: '2024-01-01',
+    ledgers: { payments: [], fees: [], interest: [{ from: '2024-02-01', days: 30, amount: 5000 }] },
+  })
+  // 10% of R6,000 is R600, still under the R610 maximum, so it is not the cap that applies here.
+  check('without in duplum the fee is charged in full', free.settlementFee, 690)
+  check('and the balance is not capped', free.balance, 6000)
+}
+
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)
 process.exit(failed ? 1 : 0)
