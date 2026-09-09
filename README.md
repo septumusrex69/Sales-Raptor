@@ -38,3 +38,8 @@ npm run lint     # oxlint
 - **Global search & Quick Add** — available from every page
 
 All data is seeded mock data held in memory for the session (see `src/data/mockData.ts`); there is no persistence layer yet.
+
+## Integrations
+
+- **Email (SMTP / IMAP)** — send from a connected mailbox and log replies as Activities (`api/email/*`).
+- **BuzzBox Cloud PABX** — click-to-dial from any phone number, logged as a Call Activity. See `docs/buzzbox-integration.md` for setup, routes and the schema additions.

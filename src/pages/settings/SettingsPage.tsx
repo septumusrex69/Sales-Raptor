@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
@@ -10,6 +10,7 @@ import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { useTheme } from '../../store/ThemeContext'
+import { useBuzzBox } from '../../store/BuzzBoxContext'
 import { THEMES } from '../../lib/themes'
 import { DEAL_MILESTONE_EVERY, MANDATE_MILESTONE_EVERY } from '../../lib/celebration'
 import { celebrationSoundEnabled, setCelebrationSoundEnabled } from '../../lib/chime'
@@ -1409,6 +1410,7 @@ function IntegrationsTab() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <EmailIntegrationCard />
+      <BuzzBoxIntegrationCard />
       {INTEGRATIONS.map((i) => (
         <Card key={i.name} className="p-4">
           <div className="flex items-start justify-between gap-3">
@@ -1426,6 +1428,283 @@ function IntegrationsTab() {
         </Card>
       ))}
     </div>
+  )
+}
+
+type BuzzBoxExtension = { extension: string; name: string; email: string }
+
+/**
+ * BuzzBox Cloud PABX — click to dial.
+ *
+ * Two halves. An Administrator connects the firm's BuzzBox login once (the password is stored
+ * encrypted server-side and never comes back to the browser). Then each person picks which
+ * extension is theirs, and every phone number in the app becomes a button that rings that
+ * extension and bridges the call, logging it on the record it was dialled from.
+ */
+function BuzzBoxIntegrationCard() {
+  const { session, currentUser, reloadProfile } = useAuth()
+  const { users, updateUser } = useAppStore()
+  const { status, loading, refresh } = useBuzzBox()
+  const accessToken = session?.access_token
+  const isAdmin = currentUser?.role === 'Administrator'
+
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ identity: '', password: '', organisationId: '' })
+  const [orgChoices, setOrgChoices] = useState<{ organisationId: number; name: string }[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  const [extensions, setExtensions] = useState<BuzzBoxExtension[] | null>(null)
+  const [extensionsError, setExtensionsError] = useState<string | null>(null)
+  const [savingFor, setSavingFor] = useState<string | null>(null)
+
+  const connected = !!status?.connected
+
+  useEffect(() => {
+    if (!accessToken || !connected) {
+      setExtensions(null)
+      return
+    }
+    let active = true
+    fetch('/api/buzzbox/extensions', { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}))
+        if (!active) return
+        if (!res.ok) {
+          setExtensionsError(body.error ?? 'Could not load extensions from BuzzBox.')
+          setExtensions([])
+        } else {
+          setExtensionsError(null)
+          setExtensions(body.extensions ?? [])
+        }
+      })
+      .catch(() => {
+        if (!active) return
+        setExtensionsError('Could not reach the server.')
+        setExtensions([])
+      })
+    return () => {
+      active = false
+    }
+  }, [accessToken, connected])
+
+  async function handleConnect(e: FormEvent) {
+    e.preventDefault()
+    if (!accessToken) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/buzzbox/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          identity: form.identity.trim(),
+          password: form.password,
+          organisationId: form.organisationId.trim() || undefined,
+        }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (res.status === 409 && Array.isArray(body.organisations)) {
+        // More than one PABX organisation behind this login — ask which, then resubmit.
+        setOrgChoices(body.organisations)
+        setForm((f) => ({ ...f, organisationId: String(body.organisations[0]?.organisationId ?? '') }))
+        setError(body.error ?? null)
+        return
+      }
+      if (!res.ok) {
+        setError(body.error ?? 'Could not connect BuzzBox.')
+        return
+      }
+      setShowForm(false)
+      setOrgChoices(null)
+      setForm({ identity: '', password: '', organisationId: '' })
+      await refresh()
+    } catch {
+      setError('Could not reach the server. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleDisconnect() {
+    if (!accessToken) return
+    if (!confirm('Disconnect BuzzBox? Click-to-dial will stop for everyone; phone numbers go back to opening the device dialler.')) return
+    await fetch('/api/buzzbox/disconnect', { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } })
+    await refresh()
+  }
+
+  async function setExtensionFor(userId: string, extension: string) {
+    setSavingFor(userId)
+    updateUser(userId, { buzzboxExtension: extension || undefined })
+    // updateUser is optimistic and fire-and-forget; give the write a moment to land before
+    // re-reading, so the status (and therefore every PhoneLink) reflects the new extension.
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    if (userId === currentUser?.id) {
+      reloadProfile()
+      await refresh()
+    }
+    setSavingFor(null)
+  }
+
+  const extensionOptions = extensions ?? []
+
+  const activeUsers = users.filter((u) => u.status === 'Active')
+
+  return (
+    <Card className="p-4 md:col-span-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <div className="w-9 h-9 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center shrink-0">
+            <PhoneCall size={16} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-slate-800">BuzzBox Cloud (PABX click-to-dial)</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {loading
+                ? 'Checking connection…'
+                : connected
+                ? `Connected as ${status?.identity}${status?.organisationName ? ` · ${status.organisationName}` : ''} (organisation ${status?.organisationId})`
+                : 'Click any phone number to ring your extension and bridge the call, logged as a Call on the record'}
+            </p>
+          </div>
+        </div>
+        {!loading && !connected && !showForm && isAdmin && (
+          <button
+            onClick={() => setShowForm(true)}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg shrink-0 bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center gap-1.5"
+          >
+            <Link2 size={13} /> Connect
+          </button>
+        )}
+        {connected && isAdmin && (
+          <button
+            onClick={handleDisconnect}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 flex items-center gap-1.5 shrink-0"
+          >
+            <Unlink size={13} /> Disconnect
+          </button>
+        )}
+      </div>
+
+      {!loading && !connected && !isAdmin && (
+        <p className="text-xs text-slate-400 mt-3">Ask an administrator to connect the firm's BuzzBox account here.</p>
+      )}
+
+      {showForm && !connected && isAdmin && (
+        <form onSubmit={handleConnect} className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <FormField label="BuzzBox login (identity)" required>
+            <input className={inputClass} autoComplete="off" placeholder="admin@yourfirm.co.za" value={form.identity} onChange={(e) => setForm({ ...form, identity: e.target.value })} required />
+          </FormField>
+          <FormField label="Password" required>
+            <input className={inputClass} type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
+          </FormField>
+          {orgChoices ? (
+            <FormField label="Organisation" required>
+              <select className={inputClass} value={form.organisationId} onChange={(e) => setForm({ ...form, organisationId: e.target.value })}>
+                {orgChoices.map((o) => (
+                  <option key={o.organisationId} value={o.organisationId}>
+                    {o.name} ({o.organisationId})
+                  </option>
+                ))}
+              </select>
+            </FormField>
+          ) : (
+            <FormField label="Organisation ID (optional)">
+              <input className={inputClass} placeholder="Found automatically when the login has one organisation" value={form.organisationId} onChange={(e) => setForm({ ...form, organisationId: e.target.value })} />
+            </FormField>
+          )}
+          <p className="text-xs text-slate-400 md:col-span-2 -mt-1">
+            The same login you use for the BuzzBox portal. It is stored encrypted on the server and is never sent to anyone's browser.
+          </p>
+          {error && <p className="text-xs text-red-600 md:col-span-2">{error}</p>}
+          <div className="md:col-span-2 flex items-center gap-2">
+            <button type="submit" disabled={submitting} className="text-xs font-medium px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+              {submitting ? 'Connecting…' : 'Connect BuzzBox'}
+            </button>
+            <button type="button" onClick={() => { setShowForm(false); setError(null); setOrgChoices(null) }} className="text-xs font-medium px-3 py-1.5 rounded-lg text-slate-500 hover:bg-slate-100">
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {connected && currentUser && (
+        <div className="mt-4 pt-4 border-t border-slate-100 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+            <FormField label="Your extension">
+              <ExtensionPicker value={currentUser.buzzboxExtension} options={extensionOptions} saving={savingFor === currentUser.id} onChange={(ext) => void setExtensionFor(currentUser.id, ext)} />
+            </FormField>
+            <p className="text-xs text-slate-400">
+              {status?.extension
+                ? `Clicking a number rings extension ${status.extension} first; pick up and BuzzBox dials the number.`
+                : 'Until you pick an extension, phone numbers open your device’s own dialler.'}
+            </p>
+          </div>
+          {extensionsError && <p className="text-xs text-amber-600">{extensionsError} You can still type an extension number.</p>}
+
+          {isAdmin && (
+            <div>
+              <p className="text-xs font-semibold text-slate-500 mb-2">Everyone’s extensions</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
+                      <th className="font-medium px-2 py-1.5">Person</th>
+                      <th className="font-medium px-2 py-1.5 w-72">Extension</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeUsers.map((u) => (
+                      <tr key={u.id} className="border-b border-slate-50">
+                        <td className="px-2 py-1.5">
+                          <div className="flex items-center gap-2">
+                            <UserAvatar userId={u.id} size={22} />
+                            <span className="text-slate-700">{u.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <ExtensionPicker value={u.buzzboxExtension} options={extensionOptions} saving={savingFor === u.id} onChange={(ext) => void setExtensionFor(u.id, ext)} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+/** Pick an extension from BuzzBox's list, or type one when the list could not be loaded. */
+function ExtensionPicker({ value, options, saving, onChange }: { value?: string; options: BuzzBoxExtension[]; saving: boolean; onChange: (extension: string) => void }) {
+  if (options.length === 0) {
+    return (
+      <input
+        className={inputClass}
+        placeholder="e.g. 201"
+        defaultValue={value ?? ''}
+        disabled={saving}
+        onBlur={(e) => {
+          const next = e.target.value.trim()
+          if (next !== (value ?? '')) onChange(next)
+        }}
+      />
+    )
+  }
+  const known = options.some((x) => x.extension === value)
+  return (
+    <select className={inputClass} value={value ?? ''} disabled={saving} onChange={(e) => onChange(e.target.value)}>
+      <option value="">— No extension (use device dialler) —</option>
+      {value && !known && <option value={value}>{value} (not in BuzzBox list)</option>}
+      {options.map((x) => (
+        <option key={x.extension} value={x.extension}>
+          {x.name ? `${x.extension} — ${x.name}` : x.extension}
+        </option>
+      ))}
+    </select>
   )
 }
 

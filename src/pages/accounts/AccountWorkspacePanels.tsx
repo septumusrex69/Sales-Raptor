@@ -4,6 +4,7 @@ import {
   Phone, Plus, ShieldCheck, Smartphone, Trash2, Upload, User, X,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
+import { PhoneLink } from '../../components/PhoneLink'
 import { formatDate } from '../../data/mockData'
 import type { DebtorAccount } from '../../lib/accountBook'
 import {
@@ -338,8 +339,9 @@ function ContactValue({ contact, userId, busy, run, onOpen }: {
     <div>
       <div className="flex items-start gap-2">
         {dialable
-          // A phone hands off to the device's dialler, which is what a tablet is good at.
-          ? <a href={`tel:${contact.value.replace(/\s/g, '')}`} className="text-brand-700 hover:underline break-words">{contact.value}</a>
+          // A phone hands off to the device's dialler, which is what a tablet is good at —
+          // unless BuzzBox is connected, in which case the PABX rings the agent's desk phone instead.
+          ? <PhoneLink number={contact.value} className="text-brand-700 hover:underline break-words">{contact.value}</PhoneLink>
           : onOpen
             ? <button onClick={onOpen} className="text-brand-700 hover:underline break-words text-left">{contact.value}</button>
             : <span className="break-words">{contact.value}</span>}

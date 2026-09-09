@@ -18,6 +18,7 @@ import { AddDealModal, QuickLogModal, ScheduleFollowUpModal, ScheduleMeetingModa
 import { RejectLeadModal } from '../../components/leads/RejectLeadModal'
 import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
 import { InlineSelect } from '../../components/ui/InlineSelect'
+import { PhoneLink } from '../../components/PhoneLink'
 import { LEAD_STATUSES, isActiveLead } from '../../lib/leadStatus'
 import { RowLimitSelect, applyRowLimitKeeping, type RowLimit } from '../../components/ui/RowLimitSelect'
 import { useFocusedEmailId } from '../../lib/focusedEmail'
@@ -254,9 +255,12 @@ export function LeadDetail() {
             <div>
               <p className="text-xs text-slate-400 mb-0.5">Office Number</p>
               {lead.phone ? (
-                <a href={`tel:${lead.phone}`} className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600">
-                  <Phone size={13} /> {lead.phone}
-                </a>
+                <PhoneLink
+                  number={lead.phone}
+                  className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600"
+                  log={{ label: `${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId }}
+                  onDialled={() => updateLead(lead.id, { lastContactAt: new Date().toISOString() })}
+                />
               ) : (
                 <span className="text-slate-300">—</span>
               )}
@@ -264,9 +268,12 @@ export function LeadDetail() {
             <div>
               <p className="text-xs text-slate-400 mb-0.5">Mobile</p>
               {lead.mobile ? (
-                <a href={`tel:${lead.mobile}`} className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600">
-                  <Phone size={13} /> {lead.mobile}
-                </a>
+                <PhoneLink
+                  number={lead.mobile}
+                  className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600"
+                  log={{ label: `${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId }}
+                  onDialled={() => updateLead(lead.id, { lastContactAt: new Date().toISOString() })}
+                />
               ) : (
                 <span className="text-slate-300">—</span>
               )}
@@ -311,14 +318,12 @@ export function LeadDetail() {
                   </Link>
                   <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
                     {c.phone && (
-                      <a href={`tel:${c.phone}`} className="inline-flex items-center gap-1 hover:text-brand-600">
-                        <Phone size={11} /> {c.phone}
-                      </a>
+                      <PhoneLink number={c.phone} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, leadId: lead.id, contactId: c.id, companyId: lead.companyId }} />
                     )}
                     {c.mobile && (
-                      <a href={`tel:${c.mobile}`} className="inline-flex items-center gap-1 hover:text-brand-600">
+                      <PhoneLink number={c.mobile} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, leadId: lead.id, contactId: c.id, companyId: lead.companyId }}>
                         <Phone size={11} /> {c.mobile} <span className="text-slate-300">mobile</span>
-                      </a>
+                      </PhoneLink>
                     )}
                     {c.email && (
                       <span className="inline-flex items-center gap-1">
