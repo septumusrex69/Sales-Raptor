@@ -472,3 +472,26 @@ export function acknowledgementOfDebtFee(debtAmount: number): number {
 export function annexureBItem(id: AnnexureBItemId, schedule: AnnexureBSchedule = ANNEXURE_B_2026): AnnexureBItem | undefined {
   return schedule.items.find((i) => i.id === id)
 }
+
+/**
+ * What is left of an item the gazette prices as a total rather than per occurrence.
+ *
+ * Item 3 — "Other necessary expenses not specifically provided for, **a total amount of**:
+ * R25,00" — is the one that matters in practice. The words "a total amount of" appear in every
+ * gazette from 2015 on, and they mean R25 for the whole account, not R25 each time. An account
+ * with four sundry expenses on it recovers R25, not R100.
+ *
+ * Returns what may still be charged under that item, given what has been charged under it
+ * already. For an ordinary per-occurrence item there is no such limit and the full amount comes
+ * back.
+ */
+export function itemTotalRemaining(
+  itemId: string,
+  alreadyChargedUnderItem: number,
+  schedule: AnnexureBSchedule = ANNEXURE_B_2026,
+): number {
+  const item = schedule.items.find((i) => i.id === itemId)
+  if (!item || item.amount === null) return 0
+  if (!item.isTotal) return item.amount
+  return roundToCents(Math.max(0, item.amount - alreadyChargedUnderItem))
+}

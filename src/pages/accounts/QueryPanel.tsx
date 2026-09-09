@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Check, MessageCircleQuestion, Plus, X } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { formatCurrency, formatDate } from '../../data/mockData'
+import { chargeMessage } from '../../lib/accountCharges'
 import {
   ageInDays, closeQuery, isStale, markOutcomeDone, raiseQuery, updateQuery,
   QUERY_CATEGORIES, QUERY_OUTCOME_LABEL, QUERY_STATUS_LABEL,
@@ -267,6 +268,7 @@ function RaiseForm({ accountId, users, actor, busy, run, onDone }: {
   const [category, setCategory] = useState('')
   const [ownerId, setOwnerId] = useState('')
   const [chaseOn, setChaseOn] = useState('')
+  const [charged, setCharged] = useState<string | null>(null)
 
   return (
     <form
@@ -274,11 +276,17 @@ function RaiseForm({ accountId, users, actor, busy, run, onDone }: {
       onSubmit={async (e) => {
         e.preventDefault()
         if (!description.trim()) return
-        const ok = await run(() => raiseQuery({
-          accountId, description, category, ownerId: ownerId || null, chaseOn: chaseOn || null,
-          raisedBy: actor.id, raisedByName: actor.name,
-        }))
-        if (ok) onDone()
+        let message: string | null = null
+        const ok = await run(async () => {
+          const { charge } = await raiseQuery({
+            accountId, description, category, ownerId: ownerId || null, chaseOn: chaseOn || null,
+            raisedBy: actor.id, raisedByName: actor.name,
+          })
+          message = chargeMessage(charge)
+        })
+        // Said after the fact rather than promised beforehand: whether item 3 has anything left
+        // on this account depends on the ledger, and the ledger is read when the charge is made.
+        if (ok) { setCharged(message); onDone() }
       }}
     >
       <textarea value={description} onChange={(e) => setDescription(e.target.value)} autoFocus rows={3}
@@ -300,6 +308,12 @@ function RaiseForm({ accountId, users, actor, busy, run, onDone }: {
         <input type="date" value={chaseOn} onChange={(e) => setChaseOn(e.target.value)} min={TODAY}
           className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 mt-0.5" />
       </label>
+      <p className="text-[10px] text-slate-500 leading-snug">
+        Raising a query charges the debtor under Annexure B item 3, &ldquo;other necessary expenses
+        not specifically provided for&rdquo; &mdash; R25 excluding VAT. The gazette makes that a
+        total for the account, so a second query on the same account charges nothing.
+      </p>
+      {charged && <p className="text-[11px] text-gold-600">{charged}</p>}
       <button type="submit" disabled={busy || !description.trim()}
         className="w-full text-sm font-medium py-1.5 rounded-lg bg-brand-600 text-white disabled:opacity-50">
         {busy ? 'Saving...' : 'Raise query'}

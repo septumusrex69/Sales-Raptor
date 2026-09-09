@@ -13,6 +13,7 @@
  */
 import { supabase } from './supabase'
 import { addNote, type AccountNote } from './accountWorkspace'
+import { chargeItem, chargeMessage, type ChargeResult } from './accountCharges'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON from PostgREST. */
 
@@ -129,6 +130,17 @@ export async function fetchOpenQueries(): Promise<QueueRow[]> {
   })
 }
 
+/**
+ * Raising a query charges the debtor under Annexure B item 3.
+ *
+ * Item 3 is "other necessary expenses not specifically provided for" — R25 excluding VAT on the
+ * current schedule, and the gazette prices it as A TOTAL AMOUNT for the account rather than per
+ * occurrence. So the first query on an account charges R25 and the second charges nothing, which
+ * is what the words say and not what a naive per-query fee would do.
+ *
+ * The charge is raised even when it comes out at zero, as an unbilled row, so the work is on the
+ * record either way. Whoever raised the query is told which happened.
+ */
 export async function raiseQuery(input: {
   accountId: string
   description: string
@@ -137,7 +149,7 @@ export async function raiseQuery(input: {
   chaseOn?: string | null
   raisedBy?: string | null
   raisedByName?: string | null
-}): Promise<AccountQuery> {
+}): Promise<{ query: AccountQuery; charge: ChargeResult }> {
   const { data, error } = await supabase
     .from('account_queries')
     .insert({
@@ -154,17 +166,25 @@ export async function raiseQuery(input: {
   if (error) throw new Error(error.message)
   const q = toQuery(data)
 
+  const charge = await chargeItem({
+    accountId: input.accountId,
+    itemId: '3',
+    actionCode: 'perusal',
+    description: 'Query raised — other necessary expenses',
+    createdBy: input.raisedBy ?? null,
+  })
+
   // The account's own timeline gets it too, so a collector reading the history sees the dispute
   // where they read everything else, not only if they think to open a panel.
   await addNote({
     accountId: input.accountId,
-    body: `Query raised: ${q.description}`,
+    body: `Query raised: ${q.description}\n${chargeMessage(charge)}`,
     authorName: input.raisedByName ?? null,
     createdBy: input.raisedBy ?? null,
     queryId: q.id,
     kind: 'query',
   })
-  return q
+  return { query: q, charge }
 }
 
 /**

@@ -7,7 +7,9 @@
  * So these are direct, paged queries against Supabase, called by the screens that need them.
  *
  * Everything here is read-only. Writing to the ledgers is the collections engine's job, and it
- * does not exist yet.
+ * does not exist yet — with one deliberate exception: accountCharges.ts raises an Annexure B fee
+ * when the app takes an action that the tariff prices, and it is the only place that does. The
+ * boundary moved on purpose rather than eroding one call site at a time.
  */
 import { supabase } from './supabase'
 
