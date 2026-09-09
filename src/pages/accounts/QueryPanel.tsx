@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Check, MessageCircleQuestion, Plus, X } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
-import { formatCurrency, formatDate } from '../../data/mockData'
+import { formatMoney, formatDate } from '../../data/mockData'
 import { chargeMessage } from '../../lib/accountCharges'
 import {
   ageInDays, closeQuery, isStale, markOutcomeDone, raiseQuery, updateQuery,
@@ -226,7 +226,7 @@ export function OutcomeOutstanding({ queries, accountId, actor, busy, run }: {
               </p>
               <p className="text-navy-800 mt-1">
                 {q.outcomeAction}
-                {q.outcomeAmount !== null && <> &mdash; {formatCurrency(q.outcomeAmount)}</>}
+                {q.outcomeAmount !== null && <> &mdash; {formatMoney(q.outcomeAmount)}</>}
               </p>
               <p className="text-[11px] text-slate-500 mt-1">
                 Closed {q.closedAt ? formatDate(q.closedAt) : ''} by {q.closedByName ?? 'someone'}.
@@ -282,7 +282,7 @@ function RaiseForm({ accountId, users, actor, busy, run, onDone }: {
             accountId, description, category, ownerId: ownerId || null, chaseOn: chaseOn || null,
             raisedBy: actor.id, raisedByName: actor.name,
           })
-          message = chargeMessage(charge)
+          message = chargeMessage(charge, '3')
         })
         // Said after the fact rather than promised beforehand: whether item 3 has anything left
         // on this account depends on the ledger, and the ledger is read when the charge is made.
@@ -309,9 +309,10 @@ function RaiseForm({ accountId, users, actor, busy, run, onDone }: {
           className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 mt-0.5" />
       </label>
       <p className="text-[10px] text-slate-500 leading-snug">
-        Raising a query charges the debtor under Annexure B item 3, &ldquo;other necessary expenses
-        not specifically provided for&rdquo; &mdash; R25 excluding VAT. The gazette makes that a
-        total for the account, so a second query on the same account charges nothing.
+        Raising a query charges item 3, &ldquo;other necessary expenses not specifically provided
+        for&rdquo; &mdash; R25 excluding VAT, and a total for the account, so a second query
+        charges nothing under it. Sending it to the client then charges item 1a (R25) and the
+        client&rsquo;s reply charges item 6 (R13), both per occurrence.
       </p>
       {charged && <p className="text-[11px] text-gold-600">{charged}</p>}
       <button type="submit" disabled={busy || !description.trim()}

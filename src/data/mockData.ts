@@ -97,6 +97,20 @@ export function formatCurrency(value: number) {
   return new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR', maximumFractionDigits: 0 }).format(value)
 }
 
+/**
+ * Money to the cent.
+ *
+ * formatCurrency rounds to whole rands, which is right for a dashboard tile summarising a
+ * hundred deals and wrong for anything a person reconciles or reads out on a call. A statement
+ * showing R27,531 against a real figure of R27,530.62 is a statement that will be argued with,
+ * and the debtor will be right.
+ */
+export function formatMoney(value: number) {
+  return new Intl.NumberFormat('en-ZA', {
+    style: 'currency', currency: 'ZAR', minimumFractionDigits: 2, maximumFractionDigits: 2,
+  }).format(value)
+}
+
 export function formatDate(iso?: string) {
   if (!iso) return '—'
   return new Intl.DateTimeFormat('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(iso))

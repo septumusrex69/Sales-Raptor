@@ -104,12 +104,12 @@ export async function chargeItem(input: {
 }
 
 /** What the person who did the work should be told about what it earned. */
-export function chargeMessage(r: ChargeResult): string {
+export function chargeMessage(r: ChargeResult, itemId: string): string {
   if (r.reason === 'charged') {
-    return `Charged R${r.exclVat.toFixed(2)} plus VAT under Annexure B item 3.`
+    return `Charged R${r.exclVat.toFixed(2)} plus VAT under Annexure B item ${itemId}.`
   }
   if (r.reason === 'item-total-spent') {
-    return 'No charge: item 3 is a total for the account and it has already been used.'
+    return `No charge: item ${itemId} is a total for the account and it has already been used.`
   }
   return 'No charge: the account is at the Annexure B fee ceiling.'
 }

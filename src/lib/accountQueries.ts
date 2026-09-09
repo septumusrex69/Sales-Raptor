@@ -178,13 +178,33 @@ export async function raiseQuery(input: {
   // where they read everything else, not only if they think to open a panel.
   await addNote({
     accountId: input.accountId,
-    body: `Query raised: ${q.description}\n${chargeMessage(charge)}`,
+    body: `Query raised: ${q.description}\n${chargeMessage(charge, '3')}`,
     authorName: input.raisedByName ?? null,
     createdBy: input.raisedBy ?? null,
     queryId: q.id,
     kind: 'query',
   })
   return { query: q, charge }
+}
+
+/**
+ * What a status change costs the debtor.
+ *
+ * Two of the three transitions are chargeable work, and neither can be item 3 — that one is a
+ * total for the account and raising the query already used it. They are charged as what they
+ * actually are:
+ *
+ *   with_client  we write to the client about the dispute. Item 1a, "necessary ordinary letter,
+ *                registered letter, facsimile or e-mail", R25. Per occurrence, so a query that
+ *                has to be chased more than once charges each time.
+ *   answered     the client's reply comes in and someone deals with it. Item 6, "correspondence
+ *                received and attended to", R13.
+ *
+ * Closing a query costs nothing: deciding is not a further piece of correspondence.
+ */
+const CHARGE_ON_STATUS: Partial<Record<QueryStatus, { itemId: string; actionCode: string; description: string }>> = {
+  with_client: { itemId: '1a', actionCode: 'email_out', description: 'Query sent to client' },
+  answered: { itemId: '6', actionCode: 'email_in', description: 'Client response to query received and attended to' },
 }
 
 /**
@@ -215,11 +235,24 @@ export async function updateQuery(
   const { data, error } = await supabase.from('account_queries').update(row).eq('id', id).select('*').single()
   if (error) throw new Error(error.message)
 
+  let charge: ChargeResult | null = null
+  const chargeable = patch.status ? CHARGE_ON_STATUS[patch.status] : undefined
+  if (chargeable) {
+    charge = await chargeItem({
+      accountId: context.accountId,
+      itemId: chargeable.itemId,
+      actionCode: chargeable.actionCode,
+      description: chargeable.description,
+      createdBy: context.actorId,
+    })
+  }
+
   if (patch.status || context.note) {
+    const body = context.note?.trim()
+      || `Query moved to ${QUERY_STATUS_LABEL[patch.status as QueryStatus] ?? patch.status}.`
     await addNote({
       accountId: context.accountId,
-      body: context.note?.trim()
-        || `Query moved to ${QUERY_STATUS_LABEL[patch.status as QueryStatus] ?? patch.status}.`,
+      body: charge ? `${body}\n${chargeMessage(charge, chargeable!.itemId)}` : body,
       authorName: context.actorName,
       createdBy: context.actorId,
       queryId: id,

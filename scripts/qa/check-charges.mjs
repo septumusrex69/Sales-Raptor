@@ -85,5 +85,35 @@ function check(name, ok, detail) {
     near(itemTotalRemaining('3', 0, scheduleFor('2026-03-05')), 21))
 }
 
+/*
+ * The three items a query's lifecycle charges, and why they are three different items.
+ *
+ * Item 3 is a total, so it can only pay once. The other two are per-occurrence, which is what
+ * makes them the right home for work that genuinely repeats — a query chased three times is
+ * three letters.
+ */
+{
+  const s = ANNEXURE_B_2026
+  check('raising a query: item 3 at R25', near(itemTotalRemaining('3', 0, s), 25))
+  check('sending it to the client: item 1a at R25', near(itemTotalRemaining('1a', 0, s), 25))
+  check('the client answering: item 6 at R13', near(itemTotalRemaining('6', 0, s), 13))
+
+  check('a second query charges nothing under item 3', near(itemTotalRemaining('3', 25, s), 0))
+  check('a second letter to the client still charges item 1a',
+    near(itemTotalRemaining('1a', 25, s), 25),
+    'item 1a is per occurrence — a chased query is another letter')
+  check('a second reply still charges item 6', near(itemTotalRemaining('6', 13, s), 13))
+
+  // All three count towards the R1,225 ceiling, so a busy account eventually stops earning.
+  for (const id of ['3', '1a', '6']) {
+    const item = s.items.find((i) => i.id === id)
+    check(`item ${id} counts towards the items 1-7 ceiling`, item?.countsTowardCap === true)
+  }
+
+  const lifecycle = itemTotalRemaining('3', 0, s) + itemTotalRemaining('1a', 0, s) + itemTotalRemaining('6', 0, s)
+  check('a full query lifecycle is R63 excluding VAT', near(lifecycle, 63), `got ${lifecycle}`)
+  check('and R72.45 including VAT', near(lifecycle * 1.15, 72.45))
+}
+
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)
 process.exit(failed ? 1 : 0)

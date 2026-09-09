@@ -22,7 +22,7 @@ import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
 import { fetchQueries, type AccountQuery } from '../../lib/accountQueries'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { feeCeiling, scheduleFor } from '../../lib/annexureB'
-import { formatCurrency, formatDate } from '../../data/mockData'
+import { formatMoney, formatDate } from '../../data/mockData'
 
 type Tab = 'Overview' | 'Transactions' | 'Documents'
 
@@ -215,12 +215,12 @@ export function AccountDetail() {
         Status and flags earn their place beside the money: they decide what the call is about.
       */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5">
-        <Figure label="To settle today" value={b ? formatCurrency(b.settlement) : '—'}
-          note={b ? `incl. ${formatCurrency(b.settlementFee)} receipt fee` : undefined} strong />
-        <Figure label="Collected" value={b ? formatCurrency(b.payments) : '—'} note={`${ledgers?.payments.length ?? 0} payments`} />
+        <Figure label="To settle today" value={b ? formatMoney(b.settlement) : '—'}
+          note={b ? `incl. ${formatMoney(b.settlementFee)} receipt fee` : undefined} strong />
+        <Figure label="Collected" value={b ? formatMoney(b.payments) : '—'} note={`${ledgers?.payments.length ?? 0} payments`} />
         <Figure
           label="Next promise"
-          value={due ? formatCurrency(due.amount) : '—'}
+          value={due ? formatMoney(due.amount) : '—'}
           note={due ? `due ${formatDate(due.dueOn)}` : 'none outstanding'}
           danger={!!due && isOverdue(due, TODAY)}
         />
@@ -250,7 +250,7 @@ export function AccountDetail() {
 
       {drift && (
         <Banner title={`Billed at ${pct(account.commissionRate)}, but the mandate says ${pct(account.commissionRateExpected)}`}>
-          On capital of {formatCurrency(account.capitalHandedOver)}
+          On capital of {formatMoney(account.capitalHandedOver)}
           {account.commissionRateSource && <> under the {account.commissionRateSource.toLowerCase()}</>}.
           The billed rate is the record of what was actually charged &mdash; this is a flag, not a correction.
         </Banner>
@@ -470,7 +470,7 @@ function Money({ label, value, note, strong }: { label: string; value?: number; 
         {note && <span className="block text-[11px] text-slate-400">{note}</span>}
       </span>
       <span className={`tabular-nums shrink-0 ${strong ? 'font-semibold text-slate-900' : 'text-slate-700'}`}>
-        {value === undefined ? '—' : formatCurrency(value)}
+        {value === undefined ? '—' : formatMoney(value)}
       </span>
     </div>
   )
@@ -588,7 +588,7 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
           <span className="text-sm tabular-nums shrink-0">
             {entry.amount != null
               ? <span className={entry.kind === 'payment' && !reversed ? 'text-positive-700 font-medium' : 'text-slate-600'}>
-                  {formatCurrency(entry.amount)}
+                  {formatMoney(entry.amount)}
                 </span>
               : entry.free
                 ? <span className="text-slate-300 text-xs" title="Work done past the Annexure B ceiling. Real history, no money.">not charged</span>
@@ -622,6 +622,10 @@ function SummaryPanel({ account, breakdown }: { account: DebtorAccount; breakdow
         <Money label="Fees, incl VAT" value={b?.fees} />
         <Money label="Receipt fees on payments" value={b?.receiptFees} note="10% of each, max R610" />
         <Money label="Collected" value={b ? -b.payments : undefined} />
+        <p className="text-[11px] text-slate-400 pt-0.5">
+          Fees and receipt fees are shown including VAT
+          {b ? <> &mdash; {formatMoney(b.vat)} of the above is VAT</> : null}. Capital and interest carry none.
+        </p>
         <div className="border-t border-slate-100 pt-2 mt-1 space-y-1.5">
           <Money label="Balance" value={b?.balance} strong />
           <Money label="Receipt fee if settled" value={b?.settlementFee} />
@@ -695,7 +699,7 @@ function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, su
             placeholder="Amount, e.g. 5000" className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
           {over && (
             <p className="text-[11px] text-gold-600 leading-snug">
-              That is more than the {formatCurrency(settlement!)} it takes to settle the account
+              That is more than the {formatMoney(settlement!)} it takes to settle the account
               today. Fine if they meant it &mdash; worth a second look if they did not.
             </p>
           )}
@@ -721,7 +725,7 @@ function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, su
           return (
             <div key={p.id} className={`p-3 rounded-lg border ${late ? 'border-negative-100 bg-negative-50' : 'border-gold-100 bg-gold-50'}`}>
               <div className="flex items-baseline justify-between gap-2">
-                <span className={`font-semibold tabular-nums ${late ? 'text-negative-700' : 'text-navy-950'}`}>{formatCurrency(p.amount)}</span>
+                <span className={`font-semibold tabular-nums ${late ? 'text-negative-700' : 'text-navy-950'}`}>{formatMoney(p.amount)}</span>
                 <span className={`text-[11px] ${late ? 'text-negative' : 'text-gold-600'}`}>
                   {late ? 'overdue ' : 'due '}{formatDate(p.dueOn)}
                 </span>
@@ -753,7 +757,7 @@ function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, su
                   {p.status === 'kept' ? <CheckCircle2 size={11} className="inline text-positive mr-1" /> : null}
                   {formatDate(p.dueOn)}
                 </span>
-                <span className="tabular-nums text-slate-500">{formatCurrency(p.amount)}</span>
+                <span className="tabular-nums text-slate-500">{formatMoney(p.amount)}</span>
                 <PromiseChip status={p.status} />
               </div>
             ))}
@@ -777,7 +781,7 @@ function PositionPanel({ account, ceiling, chargedExclVat }: {
           <div className="flex items-baseline justify-between text-xs mb-1">
             <span className="text-slate-500">Annexure B fee ceiling</span>
             <span className={`tabular-nums ${chargedExclVat > ceiling.limit ? 'text-negative font-medium' : 'text-slate-400'}`}>
-              {formatCurrency(chargedExclVat)} of {formatCurrency(ceiling.limit)}
+              {formatMoney(chargedExclVat)} of {formatMoney(ceiling.limit)}
             </span>
           </div>
           <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
@@ -789,7 +793,7 @@ function PositionPanel({ account, ceiling, chargedExclVat }: {
           <p className="text-[11px] text-slate-400 mt-1">
             {chargedExclVat >= ceiling.limit - 0.01
               ? 'At the ceiling. Further work on this account cannot be charged to the debtor.'
-              : `${formatCurrency(ceiling.limit - chargedExclVat)} of chargeable work left.`}
+              : `${formatMoney(ceiling.limit - chargedExclVat)} of chargeable work left.`}
           </p>
         </div>
       )}
@@ -847,9 +851,9 @@ function StatementTable({ statement, account, breakdown }: {
               <tr key={i} className="border-b border-slate-50 last:border-0">
                 <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{formatDate(l.date)}</td>
                 <td className={`px-3 py-1.5 ${l.kind === 'payment' ? 'text-positive-700' : 'text-slate-700'}`}>{l.description}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">{l.debit ? formatCurrency(l.debit) : ''}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-positive-700">{l.credit ? formatCurrency(l.credit) : ''}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums font-medium text-slate-900">{formatCurrency(l.balance)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">{l.debit ? formatMoney(l.debit) : ''}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-positive-700">{l.credit ? formatMoney(l.credit) : ''}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums font-medium text-slate-900">{formatMoney(l.balance)}</td>
               </tr>
             ))}
           </tbody>
@@ -866,7 +870,7 @@ function StatementTable({ statement, account, breakdown }: {
               <tr className="border-t-2 border-slate-200">
                 <td className="px-3 pt-3 text-slate-500 text-xs" colSpan={2}>Balance outstanding</td>
                 <td colSpan={2} />
-                <td className="px-3 pt-3 text-right tabular-nums font-medium text-slate-900">{formatCurrency(breakdown.balance)}</td>
+                <td className="px-3 pt-3 text-right tabular-nums font-medium text-slate-900">{formatMoney(breakdown.balance)}</td>
               </tr>
               <tr>
                 <td className="px-3 py-1 text-slate-500 text-xs" colSpan={2}>
@@ -876,12 +880,27 @@ function StatementTable({ statement, account, breakdown }: {
                   </span>
                 </td>
                 <td colSpan={2} />
-                <td className="px-3 py-1 text-right tabular-nums text-slate-700">{formatCurrency(breakdown.settlementFee)}</td>
+                <td className="px-3 py-1 text-right tabular-nums text-slate-700">{formatMoney(breakdown.settlementFee)}</td>
               </tr>
               <tr className="border-t border-slate-200">
-                <td className="px-3 pt-2 pb-3 font-semibold text-slate-900" colSpan={2}>To settle in full today</td>
+                <td className="px-3 pt-2 font-semibold text-slate-900" colSpan={2}>To settle in full today</td>
                 <td colSpan={2} />
-                <td className="px-3 pt-2 pb-3 text-right tabular-nums font-semibold text-navy-950">{formatCurrency(breakdown.settlement)}</td>
+                <td className="px-3 pt-2 text-right tabular-nums font-semibold text-navy-950">{formatMoney(breakdown.settlement)}</td>
+              </tr>
+              {/*
+                VAT is a component of the figures above, not an addition to them, so it sits under
+                the total rather than in the running balance. Capital carries none — we did not
+                sell the debtor anything — and neither does interest; the tax is on our fees and
+                on the receipt fee, both of which are charged VAT-inclusive.
+              */}
+              <tr>
+                <td className="px-3 pb-3 text-[11px] text-slate-400" colSpan={2}>
+                  Included in the above: VAT at 15% on fees and receipt fees
+                </td>
+                <td colSpan={2} />
+                <td className="px-3 pb-3 text-right tabular-nums text-[11px] text-slate-500">
+                  {formatMoney(breakdown.vat + (breakdown.settlementFee - breakdown.settlementFee / 1.15))}
+                </td>
               </tr>
             </tfoot>
           )}

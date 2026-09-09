@@ -58,6 +58,12 @@ export interface BalanceBreakdown {
   fees: number
   /** Item 9 charged as each instalment arrived. */
   receiptFees: number
+  /**
+   * VAT contained in the fees and receipt fees above, so a statement can say how much of what it
+   * shows is tax. Capital and interest carry none: we did not sell the debtor anything and
+   * interest is not a supply. It is a component OF the figures above, never added to them.
+   */
+  vat: number
   payments: number
   /** What is owed today, before any settlement quotation. */
   balance: number
@@ -86,9 +92,9 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
   const interest = roundToCents(
     ledgers.interest.filter((i) => within(i.from)).reduce((t, i) => t + i.amount, 0),
   )
-  const fees = roundToCents(
-    ledgers.fees.filter((f) => within(f.date)).reduce((t, f) => t + f.exclVat + f.vat, 0),
-  )
+  const chargedFees = ledgers.fees.filter((f) => within(f.date))
+  const fees = roundToCents(chargedFees.reduce((t, f) => t + f.exclVat + f.vat, 0))
+  const feeVat = roundToCents(chargedFees.reduce((t, f) => t + f.vat, 0))
   const payments = roundToCents(ledgers.payments.reduce((t, p) => t + p.amount, 0))
 
   // Item 9 on each instalment, priced on the schedule in force the day it arrived — a payment
@@ -122,11 +128,17 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
   const balance = roundToCents(capital + recoverableNonCapital - payments)
   const settlementFee = balance > 0 ? settlementReceiptFee(balance, vatRate) : 0
 
+  // The VAT already inside `fees` and `receiptFees`. A receipt fee is charged VAT-inclusive, so
+  // its tax is the inclusive amount less the amount it grossed up from — not the amount times
+  // the rate, which would overstate it by the rate squared.
+  const receiptFeeVat = roundToCents(receiptFees - receiptFees / (1 + vatRate))
+
   return {
     capital,
     interest,
     fees,
     receiptFees,
+    vat: roundToCents(feeVat + receiptFeeVat),
     payments,
     balance,
     settlementFee,
