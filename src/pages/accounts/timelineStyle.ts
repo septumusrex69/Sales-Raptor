@@ -1,6 +1,6 @@
 import {
   Banknote, CalendarClock, FileSignature, FileSearch, HandCoins, Mail, MailOpen,
-  MapPinned, MessageSquare, MessagesSquare, Phone, RotateCcw, ScrollText, StickyNote,
+  MapPinned, MessageSquare, MessagesSquare, Phone, ScrollText, StickyNote,
   Undo2, type LucideIcon,
 } from 'lucide-react'
 import type { TimelineEntry } from '../../lib/accountTimeline'
@@ -30,50 +30,65 @@ const REVERSAL: TimelineStyle = { icon: Undo2, ring: 'bg-negative-50', fg: 'text
 const PROMISE: TimelineStyle = { icon: HandCoins, ring: 'bg-gold-50', fg: 'text-gold-600' }
 const NOTE: TimelineStyle = { icon: StickyNote, ring: 'bg-slate-100', fg: 'text-slate-500' }
 
-/** Everything we do to an account, by our own catalogue rather than by Swordfish's wording. */
-const BY_ACTION_CODE: Record<string, LucideIcon> = {
-  phone_call: Phone,
-  sms: MessageSquare,
-  whatsapp: MessagesSquare,
-  email_out: Mail,
-  email_in: MailOpen,
-  letter: ScrollText,
-  trace: MapPinned,
-  perusal: FileSearch,
-  consultation: MessagesSquare,
-  acknowledgement_of_debt: FileSignature,
-  promise_to_pay: CalendarClock,
+/**
+ * Everything we do to an account, by our own catalogue rather than by Swordfish's wording.
+ *
+ * Each channel gets its own colour as well as its own icon, because a collector scanning two
+ * years of history is looking for a shape — "we phoned, phoned, phoned, then wrote" — and a
+ * column of identical grey discs hides exactly that. The palette stays inside Raptor's own:
+ * navy for the things we say, gold for the things that carry weight, green and brick reserved
+ * for money in and money back out.
+ */
+const CHANNEL: Record<string, { icon: LucideIcon; ring: string; fg: string }> = {
+  // Spoken to: the navy end of the palette, because a call is the ordinary work.
+  phone_call: { icon: Phone, ring: 'bg-brand-100', fg: 'text-brand-600' },
+  consultation: { icon: MessagesSquare, ring: 'bg-brand-100', fg: 'text-brand-600' },
+  // Written to, electronically. Lighter navy: cheaper, and there are far more of them.
+  sms: { icon: MessageSquare, ring: 'bg-brand-50', fg: 'text-brand-500' },
+  whatsapp: { icon: MessagesSquare, ring: 'bg-brand-50', fg: 'text-brand-500' },
+  email_out: { icon: Mail, ring: 'bg-brand-50', fg: 'text-brand-500' },
+  // From them, not from us. Green, like a payment: the debtor made contact.
+  email_in: { icon: MailOpen, ring: 'bg-positive-50', fg: 'text-positive' },
+  // Paper that carries legal weight, and the paper they signed. Gold.
+  letter: { icon: ScrollText, ring: 'bg-gold-50', fg: 'text-gold-600' },
+  acknowledgement_of_debt: { icon: FileSignature, ring: 'bg-gold-100', fg: 'text-gold-600' },
+  promise_to_pay: { icon: CalendarClock, ring: 'bg-gold-50', fg: 'text-gold-600' },
+  // Looking for someone who does not want to be found.
+  trace: { icon: MapPinned, ring: 'bg-navy-700/10', fg: 'text-navy-700' },
+  perusal: { icon: FileSearch, ring: 'bg-navy-700/10', fg: 'text-navy-700' },
 }
 
 /**
- * Imported rows whose legacy name never mapped to a code still deserve the right icon, so the
- * description is read as a fallback. Ordered: the first pattern that matches wins.
+ * Imported rows whose legacy name never mapped to a code still deserve the right icon and
+ * colour, so the description is read as a fallback. Ordered: first pattern to match wins.
  */
-const BY_DESCRIPTION: [RegExp, LucideIcon][] = [
-  [/\b(call|phone|tel)\b/i, Phone],
-  [/\bwhats ?app\b/i, MessagesSquare],
-  [/\bsms\b/i, MessageSquare],
-  [/\be-?mail\b/i, Mail],
-  [/\b(letter|demand|lod|notice)\b/i, ScrollText],
-  [/\btrace\b/i, MapPinned],
-  [/\b(perusal|document|file)\b/i, FileSearch],
-  [/\b(aod|acknowledge)/i, FileSignature],
-  [/\b(promise|ptp|arrangement)\b/i, CalendarClock],
-  [/\b(reversal|returned|unpaid|rd)\b/i, RotateCcw],
+const BY_DESCRIPTION: [RegExp, string][] = [
+  [/\b(call|phone|tel)\b/i, 'phone_call'],
+  [/\bwhats ?app\b/i, 'whatsapp'],
+  [/\bsms\b/i, 'sms'],
+  [/\be-?mail\b.*\b(in|incoming|received)\b/i, 'email_in'],
+  [/\be-?mail\b/i, 'email_out'],
+  [/\b(letter|demand|lod|notice)\b/i, 'letter'],
+  [/\btrace\b/i, 'trace'],
+  [/\b(perusal|document|file)\b/i, 'perusal'],
+  [/\b(aod|acknowledge)/i, 'acknowledgement_of_debt'],
+  [/\b(promise|ptp|arrangement)\b/i, 'promise_to_pay'],
 ]
+
+const FALLBACK: TimelineStyle = { icon: ScrollText, ring: 'bg-slate-100', fg: 'text-slate-500' }
 
 export function styleFor(entry: TimelineEntry): TimelineStyle {
   if (entry.kind === 'payment') return entry.status === 'reversed' ? REVERSAL : PAYMENT
   if (entry.kind === 'promise') return PROMISE
   if (entry.kind === 'note') return NOTE
 
-  const byCode = entry.actionCode ? BY_ACTION_CODE[entry.actionCode] : undefined
-  const icon = byCode ?? BY_DESCRIPTION.find(([re]) => re.test(entry.title))?.[1] ?? ScrollText
-  // An action that could not be charged is history, not money, so it sits back: grey disc rather
-  // than navy, which lets the charged work and the payments carry the eye down the column.
-  return entry.free
-    ? { icon, ring: 'bg-slate-50', fg: 'text-slate-400' }
-    : { icon, ring: 'bg-brand-50', fg: 'text-brand-500' }
+  const code = entry.actionCode ?? BY_DESCRIPTION.find(([re]) => re.test(entry.title))?.[1]
+  const style: TimelineStyle = (code ? CHANNEL[code] : undefined) ?? FALLBACK
+
+  // An action that could not be charged keeps its icon but loses its colour. The work happened
+  // and belongs in the history; it just did not earn anything, and the eye should travel past it
+  // to the rows that did.
+  return entry.free ? { icon: style.icon, ring: 'bg-slate-50', fg: 'text-slate-300' } : style
 }
 
 /** Chip colours for a promise's outcome, in the same family. */

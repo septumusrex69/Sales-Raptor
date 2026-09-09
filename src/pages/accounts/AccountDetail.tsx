@@ -55,6 +55,7 @@ export function AccountDetail() {
   // note and not two that can drift apart.
   const noteRef = useRef<HTMLTextAreaElement>(null)
   const [promiseOpen, setPromiseOpen] = useState(false)
+  const [noteOpen, setNoteOpen] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -196,9 +197,17 @@ export function AccountDetail() {
         </div>
       </DashboardHero>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Figure label="Balance" value={b ? formatCurrency(b.balance) : '—'} note="capital + interest + fees, less payments" strong />
-        <Figure label="To settle today" value={b ? formatCurrency(b.settlement) : '—'} note={b ? `includes ${formatCurrency(b.settlementFee)} receipt fee` : undefined} />
+      {/*
+        One number, not two. "Balance" and "To settle today" differ by the receipt fee, and a
+        collector reading two figures a few hundred rand apart has to work out which one to quote
+        — so only the one they quote is here. The other is on the Transactions tab, in the
+        statement, where the working is shown.
+
+        Status and flags earn their place beside the money: they decide what the call is about.
+      */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5">
+        <Figure label="To settle today" value={b ? formatCurrency(b.settlement) : '—'}
+          note={b ? `incl. ${formatCurrency(b.settlementFee)} receipt fee` : undefined} strong />
         <Figure label="Collected" value={b ? formatCurrency(b.payments) : '—'} note={`${ledgers?.payments.length ?? 0} payments`} />
         <Figure
           label="Next promise"
@@ -206,28 +215,21 @@ export function AccountDetail() {
           note={due ? `due ${formatDate(due.dueOn)}` : 'none outstanding'}
           danger={!!due && isOverdue(due, TODAY)}
         />
+        <Figure label="Status" value={account.status || '—'} note={account.subStatus ?? undefined} small />
+        <Figure
+          label="Flag"
+          value={accountFlagList(account)[0] ?? '—'}
+          note={accountFlagList(account).slice(1).join(' · ') || undefined}
+          small
+        />
       </div>
-
-      {accountFlagList(account).length > 0 && (
-        // Swordfish's own flags. They change how the account is worked — "Debtor avoiding
-        // contact" and "Section 129 in process" are not the same conversation — so they sit
-        // above the fold rather than among the fields at the bottom of a panel.
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] uppercase tracking-wide text-slate-400">Flags</span>
-          {accountFlagList(account).map((f) => (
-            <span key={f} className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-              {f}
-            </span>
-          ))}
-        </div>
-      )}
 
       <MainComment account={account} busy={savingComment}
         onSave={(text) => runComment(() => saveMainComment(account.id, text, currentUser?.id ?? null))} />
 
       <ActionBar
         onEmail={emailContact ? () => setComposeTo(emailContact.value) : undefined}
-        onNote={() => { setTab('Overview'); setTimeout(() => noteRef.current?.focus(), 0) }}
+        onNote={() => { setTab('Overview'); setNoteOpen(true); setTimeout(() => noteRef.current?.focus(), 0) }}
         onPromise={() => { setTab('Overview'); setPromiseOpen(true) }}
       />
 
@@ -279,6 +281,8 @@ export function AccountDetail() {
               userId={currentUser?.id ?? null}
               onChange={reload}
               noteRef={noteRef}
+              noteOpen={noteOpen}
+              setNoteOpen={setNoteOpen}
             />
           </div>
           <div className="space-y-4 lg:order-2 xl:order-none">
@@ -291,6 +295,7 @@ export function AccountDetail() {
               open={promiseOpen}
               setOpen={setPromiseOpen}
               successRatio={account.ptpSuccessRatio}
+              settlement={b?.settlement}
             />
             <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0} />
           </div>
@@ -383,15 +388,20 @@ function Action({ icon: Icon, label, onClick, title, primary }: {
 
 /* ---------- small shared pieces ---------- */
 
-function Figure({ label, value, note, strong, danger }: {
-  label: string; value: string; note?: string; strong?: boolean; danger?: boolean
+/**
+ * One figure. `small` is for the two that hold words rather than money — a status set at the
+ * size of a rand amount reads as the most important thing on the page, and it is not.
+ */
+function Figure({ label, value, note, strong, danger, small }: {
+  label: string; value: string; note?: string; strong?: boolean; danger?: boolean; small?: boolean
 }) {
   return (
-    <Card className={strong ? 'border-gold-100' : undefined}>
-      <p className="text-[11px] uppercase tracking-wide text-slate-400">{label}</p>
-      <p className={`text-xl font-semibold tabular-nums mt-0.5 ${danger ? 'text-negative' : strong ? 'text-navy-950' : 'text-slate-800'}`}>{value}</p>
-      {note && <p className={`text-[11px] mt-0.5 ${danger ? 'text-negative-700' : 'text-slate-500'}`}>{note}</p>}
-    </Card>
+    <div className={`card px-3.5 py-2.5 ${strong ? 'border-gold-100' : ''}`}>
+      <p className="text-[10px] uppercase tracking-wide text-slate-400">{label}</p>
+      <p className={`font-semibold mt-0.5 ${small ? 'text-sm leading-snug' : 'text-lg tabular-nums'} ${
+        danger ? 'text-negative' : strong ? 'text-navy-950' : 'text-slate-800'}`}>{value}</p>
+      {note && <p className={`text-[11px] mt-0.5 leading-snug ${danger ? 'text-negative-700' : 'text-slate-500'}`}>{note}</p>}
+    </div>
   )
 }
 
@@ -448,13 +458,16 @@ function Money({ label, value, note, strong }: { label: string; value?: number; 
 
 const PAGE_SIZES = [5, 10, 20, 50] as const
 
-function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef }: {
+function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef, noteOpen, setNoteOpen }: {
   entries: TimelineEntry[]
   accountId: string
   userName: string | null
   userId: string | null
   onChange: () => Promise<void>
   noteRef: React.RefObject<HTMLTextAreaElement | null>
+  /** Driven by "Add Note" in the action bar. There is one way to write a note, not two. */
+  noteOpen: boolean
+  setNoteOpen: (v: boolean) => void
 }) {
   const [limit, setLimit] = useState<number>(10)
   const [body, setBody] = useState('')
@@ -464,7 +477,7 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef
     e.preventDefault()
     if (!body.trim()) return
     const ok = await run(() => addNote({ accountId, body, authorName: userName, createdBy: userId }))
-    if (ok) setBody('')
+    if (ok) { setBody(''); setNoteOpen(false) }
   }
 
   const shown = limit >= entries.length ? entries : entries.slice(0, limit)
@@ -490,26 +503,27 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef
         </label>
       </div>
 
-      <form onSubmit={submit} className="mb-4">
-        <textarea
-          ref={noteRef}
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          rows={body ? 3 : 1}
-          placeholder="Add a note - what was said, what was agreed..."
-          className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-brand-100"
-        />
-        {body.trim() && (
+      {noteOpen && (
+        <form onSubmit={submit} className="mb-4">
+          <textarea
+            ref={noteRef}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            rows={3}
+            placeholder="What was said, what was agreed..."
+            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-brand-100"
+          />
           <div className="flex items-center gap-2 mt-2">
-            <button type="submit" disabled={busy}
+            <button type="submit" disabled={busy || !body.trim()}
               className="text-sm font-medium px-3 py-1.5 rounded-lg bg-brand-600 text-white disabled:opacity-50">
               {busy ? 'Saving...' : 'Post note'}
             </button>
-            <button type="button" onClick={() => setBody('')} className="text-sm text-slate-500 hover:text-slate-700">Cancel</button>
+            <button type="button" onClick={() => { setBody(''); setNoteOpen(false) }}
+              className="text-sm text-slate-500 hover:text-slate-700">Cancel</button>
           </div>
-        )}
-        {err && <p className="text-xs text-negative-700 mt-2">{err}</p>}
-      </form>
+          {err && <p className="text-xs text-negative-700 mt-2">{err}</p>}
+        </form>
+      )}
 
       {entries.length === 0 && <p className="text-sm text-slate-400 py-6 text-center">Nothing has happened on this account yet.</p>}
 
@@ -603,7 +617,7 @@ function SummaryPanel({ account, breakdown }: { account: DebtorAccount; breakdow
  * never touches a balance — it is kept or it is broken, and a person says which. Matching one
  * against an incoming payment is the collections engine's job, and that does not exist yet.
  */
-function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, successRatio }: {
+function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, successRatio, settlement }: {
   accountId: string
   promises: PromiseToPay[]
   userId: string | null
@@ -612,10 +626,11 @@ function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, su
   setOpen: (v: boolean) => void
   /** Swordfish's score for how reliably this debtor keeps one, out of ten. */
   successRatio: number | null
+  /** What it takes to close the account today, so a promise above it can be questioned. */
+  settlement: number | undefined
 }) {
   const [amount, setAmount] = useState('')
   const [dueOn, setDueOn] = useState('')
-  const [method, setMethod] = useState('')
   const { busy, err, run } = useWriter(onChange)
 
   const outstanding = promises.filter((p) => p.status === 'open')
@@ -625,9 +640,15 @@ function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, su
     e.preventDefault()
     const value = Number(amount)
     if (!(value > 0) || !dueOn) return
-    const ok = await run(() => addPromise({ accountId, amount: value, dueOn, method, createdBy: userId }))
-    if (ok) { setAmount(''); setDueOn(''); setMethod(''); setOpen(false) }
+    const ok = await run(() => addPromise({ accountId, amount: value, dueOn, createdBy: userId }))
+    if (ok) { setAmount(''); setDueOn(''); setOpen(false) }
   }
+
+  // Warned, not blocked. A promise above the settlement figure is usually a typo — a keystroke
+  // turning 5,000 into 50,000 — but it is legitimately possible, since interest runs until the
+  // money arrives and someone may be promising a round number that covers it. The person taking
+  // the promise knows which; the form does not, so it says what it sees and lets them decide.
+  const over = settlement !== undefined && Number(amount) > settlement
 
   return (
     <Card>
@@ -650,10 +671,14 @@ function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, su
         <form onSubmit={submit} className="space-y-2 p-3 rounded-lg bg-slate-50 border border-slate-100 mb-3">
           <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" autoFocus
             placeholder="Amount, e.g. 5000" className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
+          {over && (
+            <p className="text-[11px] text-gold-600 leading-snug">
+              That is more than the {formatCurrency(settlement!)} it takes to settle the account
+              today. Fine if they meant it &mdash; worth a second look if they did not.
+            </p>
+          )}
           <input type="date" value={dueOn} onChange={(e) => setDueOn(e.target.value)} min={TODAY}
             className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
-          <input value={method} onChange={(e) => setMethod(e.target.value)}
-            placeholder="How? (EFT, debit order ...)" className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
           <button type="submit" disabled={busy || !(Number(amount) > 0) || !dueOn}
             className="w-full text-sm font-medium py-1.5 rounded-lg bg-brand-600 text-white disabled:opacity-50">
             {busy ? 'Saving...' : 'Record promise'}

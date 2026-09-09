@@ -9,6 +9,7 @@
  *   node --experimental-strip-types scripts/qa/check-timeline.mjs
  */
 import { buildTimeline, groupByDay } from '../../src/lib/accountTimeline.ts'
+import { styleFor } from '../../src/pages/accounts/timelineStyle.ts'
 
 let failed = 0
 function check(name, ok, detail) {
@@ -77,6 +78,36 @@ check('reversed payment is kept and flagged',
   check('grouping preserves order', flat.join() === t.map((e) => e.id).join())
   const days = groupByDay(t).map((d) => d.date)
   check('each day appears once', new Set(days).size === days.length)
+}
+
+/*
+ * Icons and colour.
+ *
+ * A timeline whose rows all look the same is the thing this styling exists to prevent, and it is
+ * exactly what a careless edit reverts it to. These pin the two properties that matter: a
+ * channel is distinguishable from the other channels, and unbilled work recedes.
+ */
+{
+  const at = '2026-08-05'
+  const row = (title, actionCode, free = false) =>
+    ({ id: title, kind: 'action', date: at, at, title, actionCode, free })
+
+  const channels = ['phone_call', 'sms', 'whatsapp', 'email_out', 'email_in', 'letter', 'trace']
+  const styles = channels.map((c) => styleFor(row(c, c)))
+  check('every channel has an icon', styles.every((s) => typeof s.icon === 'function' || typeof s.icon === 'object'))
+  check('a call, a letter and a payment do not share a colour',
+    new Set([styleFor(row('c', 'phone_call')).ring, styleFor(row('l', 'letter')).ring,
+      styleFor({ id: 'p', kind: 'payment', date: at, at, title: 'Payment received', amount: 1 }).ring]).size === 3)
+  check('at least four distinct colours across the channels',
+    new Set(styles.map((s) => s.ring)).size >= 4,
+    `got ${new Set(styles.map((s) => s.ring)).size}`)
+  check('no channel falls back to a stock Tailwind hue',
+    styles.every((s) => !/emerald|amber|rose|indigo|violet|sky/.test(`${s.ring} ${s.fg}`)),
+    'the palette is navy, gold, positive and negative')
+  check('unbilled work recedes', styleFor(row('SMS', 'sms', true)).fg !== styleFor(row('SMS', 'sms')).fg)
+  check('unbilled work keeps its own icon', styleFor(row('SMS', 'sms', true)).icon === styleFor(row('SMS', 'sms')).icon)
+  check('an unmapped legacy name still gets a channel by its wording',
+    styleFor(row('Outbound Telephone Call', null)).ring === styleFor(row('x', 'phone_call')).ring)
 }
 
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)

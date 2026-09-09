@@ -398,3 +398,55 @@ export async function saveDebtorPreferences(accountId: string, patch: {
   const { error } = await supabase.from('debtor_accounts').update(row).eq('id', accountId)
   if (error) throw new Error(error.message)
 }
+
+/**
+ * Correcting the debtor's own details.
+ *
+ * Separate from saveDebtorPreferences because these are claims about a person's identity rather
+ * than about how they like to be contacted: a name on a letter of demand and an ID number on a
+ * summons. A blank clears the field — if someone deletes a wrong ID number, leaving the wrong
+ * one there because the input was empty would be the opposite of the intent.
+ */
+export async function saveDebtorIdentity(accountId: string, patch: {
+  firstName?: string | null
+  surname?: string | null
+  idNumber?: string | null
+  title?: string | null
+  initials?: string | null
+}): Promise<void> {
+  const row: Record<string, string | null> = {}
+  if ('firstName' in patch) row.debtor_first_name = patch.firstName?.trim() || null
+  if ('surname' in patch) row.debtor_surname = patch.surname?.trim() || null
+  if ('idNumber' in patch) row.debtor_id_number = patch.idNumber?.replace(/\s/g, '') || null
+  if ('title' in patch) row.debtor_title = patch.title?.trim() || null
+  if ('initials' in patch) row.debtor_initials = patch.initials?.trim() || null
+  const { error } = await supabase.from('debtor_accounts').update(row).eq('id', accountId)
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * Correcting a contact.
+ *
+ * A number typed down wrong on a call is the commonest error on this page, and the alternative —
+ * retire it and add another — leaves a retired row that looks like a dead number rather than a
+ * typo. Editing keeps the record honest about what actually happened.
+ *
+ * Changing the value clears any verification: what was confirmed was the old number.
+ */
+export async function updateContact(id: string, patch: {
+  value?: string
+  label?: string | null
+  isPrimary?: boolean
+}): Promise<AccountContact> {
+  const row: Record<string, unknown> = {}
+  if (patch.value !== undefined) {
+    row.value = patch.value.trim()
+    row.verified_at = null
+    row.verified_by = null
+  }
+  if (patch.label !== undefined) row.label = patch.label?.trim() || null
+  if (patch.isPrimary !== undefined) row.is_primary = patch.isPrimary
+  const { data, error } = await supabase.from('account_contacts').update(row).eq('id', id).select('*').single()
+  if (error) throw new Error(error.message)
+  return toContact(data)
+}
