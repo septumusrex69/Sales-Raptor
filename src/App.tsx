@@ -1,3 +1,4 @@
+import { Suspense, lazy } from 'react'
 import { Route, Routes } from 'react-router-dom'
 import { AppStoreProvider } from './store/AppStore'
 import { AuthProvider } from './store/AuthContext'
@@ -21,8 +22,16 @@ import { QueriesQueue } from './pages/accounts/QueriesQueue'
 import { TasksPage } from './pages/tasks/TasksPage'
 import { CalendarPage } from './pages/calendar/CalendarPage'
 import { ActivitiesPage } from './pages/activities/ActivitiesPage'
-import { ReportsPage } from './pages/reports/ReportsPage'
-import { SettingsPage } from './pages/settings/SettingsPage'
+/*
+ * Loaded on demand.
+ *
+ * Reports and Settings are the two heaviest screens and the two least often opened — Reports
+ * pulls in the whole charting library for the sake of one page, and a collector who lives on
+ * Accounts was downloading it on every first load. Splitting them takes roughly a third off what
+ * the app fetches before it can show anything.
+ */
+const ReportsPage = lazy(() => import('./pages/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })))
+const SettingsPage = lazy(() => import('./pages/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 import { RepDetailPage } from './pages/reps/RepDetailPage'
 
 function App() {
@@ -31,6 +40,9 @@ function App() {
       <AuthProvider>
         <AppStoreProvider>
           <NewVersionWatcher />
+          {/* A lazily-loaded route needs a boundary; the fallback is deliberately nothing, so a
+              fast chunk does not flash a spinner on its way in. */}
+          <Suspense fallback={null}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route
@@ -60,6 +72,7 @@ function App() {
               <Route path="/reps/:id" element={<RepDetailPage />} handle={{ title: 'Rep Performance' }} />
             </Route>
           </Routes>
+          </Suspense>
         </AppStoreProvider>
       </AuthProvider>
     </ThemeProvider>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode, Suspense, lazy } from 'react'
 import { Link } from 'react-router-dom'
 import { Download, CheckCircle2, Circle } from 'lucide-react'
 import { useAppStore } from '../store/AppStore'
@@ -13,7 +13,13 @@ import { CompareSelector, type CompareMode } from '../components/ui/CompareSelec
 import { SalesFunnelChart } from '../components/dashboard/SalesFunnelChart'
 import { WinRateCard } from '../components/dashboard/WinRateCard'
 import { DashboardHero } from '../components/dashboard/DashboardHero'
-import { SalesTrendCard } from '../components/dashboard/SalesTrendCard'
+/*
+ * The only thing on this page that needs the charting library, and it sits below the fold.
+ * Loading it separately lets the figures — which are what someone opens the dashboard for —
+ * paint without waiting for a chart they have not scrolled to yet.
+ */
+const SalesTrendCard = lazy(() => import('../components/dashboard/SalesTrendCard')
+  .then((m) => ({ default: m.SalesTrendCard })))
 import { ActivityBreakdownChart } from '../components/dashboard/ActivityBreakdownChart'
 import { WinRateByKind } from '../components/dashboard/WinRateByKind'
 import { LossReasonsCard } from '../components/dashboard/LossReasonsCard'
@@ -622,7 +628,9 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
         <LossReasonsCard leads={rejectedLeads} deals={rejectedDeals} periodLabel={period.label} />
       </div>
 
-      <SalesTrendCard deals={scopedDeals} leads={scopedLeads} referenceDate={TODAY} />
+      <Suspense fallback={<div className="card h-72" aria-hidden />}>
+        <SalesTrendCard deals={scopedDeals} leads={scopedLeads} referenceDate={TODAY} />
+      </Suspense>
 
       <RepLeaderboard rows={leaderboardRows} />
 

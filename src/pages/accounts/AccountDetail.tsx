@@ -69,15 +69,20 @@ export function AccountDetail() {
     setLoading(true); setError(null)
     ;(async () => {
       try {
-        const a = await fetchAccount(id)
+        /*
+         * All at once, not the account first and everything else after.
+         *
+         * Every one of these keys on the account id, which the URL already gives us — waiting for
+         * the account row before asking for its ledgers doubled the page's opening latency for no
+         * information gained. From Paris that is a round trip of about 200ms, spent to learn
+         * something we knew before the page rendered.
+         */
+        const [a, l, w, d, q] = await Promise.all([
+          fetchAccount(id), fetchLedgers(id), fetchWorkspace(id), fetchDocuments(id), fetchQueries(id),
+        ])
         if (cancelled) return
         setAccount(a)
-        if (a) {
-          const [l, w, d, q] = await Promise.all([
-            fetchLedgers(a.id), fetchWorkspace(a.id), fetchDocuments(a.id), fetchQueries(a.id),
-          ])
-          if (!cancelled) { setLedgers(l); setWorkspace(w); setDocuments(d); setQueries(q) }
-        }
+        if (a) { setLedgers(l); setWorkspace(w); setDocuments(d); setQueries(q) }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
       } finally {

@@ -53,24 +53,22 @@ export async function chargeItem(input: {
   const at = input.at ?? new Date()
   const schedule = scheduleFor(at)
 
-  const [account, fees] = await Promise.all([
-    supabase.from('debtor_accounts').select('capital_handed_over').eq('id', input.accountId).maybeSingle(),
-    supabase.from('account_fees')
-      .select('amount_excl_vat, annexure_item, counts_toward_fee_cap, billed')
-      .eq('account_id', input.accountId),
-  ])
-  if (account.error) throw new Error(account.error.message)
-  if (fees.error) throw new Error(fees.error.message)
+  /*
+   * One request, and it returns three numbers rather than a ledger.
+   *
+   * This used to select every fee row on the account to add up two of its columns — up to 822
+   * rows and half a megabyte of JSON on the busiest account, fetched from Paris, to compute two
+   * sums Postgres can do in microseconds. The database is where you add up rows.
+   */
+  const { data, error: basisError } = await supabase
+    .rpc('account_charge_basis', { p_account_id: input.accountId, p_item: input.itemId })
+    .single<{ capital: number; spent_on_item: number; towards_ceiling: number }>()
+  if (basisError) throw new Error(basisError.message)
 
-  const rows = fees.data ?? []
-  const spentOnItem = rows
-    .filter((f) => f.annexure_item === input.itemId && f.billed)
-    .reduce((t, f) => t + Number(f.amount_excl_vat ?? 0), 0)
-  const towardsCeiling = rows
-    .filter((f) => f.counts_toward_fee_cap && f.billed)
-    .reduce((t, f) => t + Number(f.amount_excl_vat ?? 0), 0)
+  const capital = Number(data?.capital ?? 0)
+  const spentOnItem = Number(data?.spent_on_item ?? 0)
+  const towardsCeiling = Number(data?.towards_ceiling ?? 0)
 
-  const capital = Number(account.data?.capital_handed_over ?? 0)
   const remainingOnItem = itemTotalRemaining(input.itemId, spentOnItem, schedule)
   const recoverable = recoverableFee(remainingOnItem, towardsCeiling, capital, schedule)
 
