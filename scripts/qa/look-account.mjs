@@ -124,8 +124,8 @@ const TABLES = {
   debtor_accounts: [account],
   account_contacts: contacts,
   account_queries: [
-    { id: 'q1', account_id: ACC, description: 'Says she already paid R3,000 of this directly to the client in March and it was never credited.', category: 'Already paid', status: 'with_client', owner_id: USER, raised_by_name: 'Amanda Coertze', raised_at: '2026-08-18T09:00:00Z', chase_on: '2026-09-01', outcome: null, outcome_action: null, outcome_amount: null, outcome_done: false, closed_at: null, closed_by_name: null },
-    { id: 'q2', account_id: ACC, description: 'Disputed the delivery of two of the items invoiced.', category: 'Goods or service', status: 'closed', owner_id: USER, raised_by_name: 'Amanda Coertze', raised_at: '2026-05-02T09:00:00Z', chase_on: null, outcome: 'partly_valid', outcome_action: 'Reduce the capital by the two items', outcome_amount: 1840, outcome_done: false, closed_at: '2026-06-11T09:00:00Z', closed_by_name: 'Stephan Bredell' },
+    { id: 'q1', account_id: ACC, description: 'Says she already paid R3,000 of this directly to the client in March and it was never credited.', category: 'Already paid', status: 'open', stage: 'client', sent_to_client_at: '2026-08-20T09:00:00Z', owner_id: USER, raised_by_name: 'Amanda Coertze', raised_at: '2026-08-18T09:00:00Z', chase_on: '2026-09-01', outcome: null, outcome_action: null, outcome_amount: null, outcome_done: false, closed_at: null, closed_by_name: null },
+    { id: 'q2', account_id: ACC, description: 'Disputed the delivery of two of the items invoiced.', category: 'Goods or service', status: 'closed', stage: 'liaison', owner_id: USER, raised_by_name: 'Amanda Coertze', raised_at: '2026-05-02T09:00:00Z', chase_on: null, outcome: 'partly_valid', outcome_action: 'Reduce the capital by the two items', outcome_amount: 1840, outcome_done: false, closed_at: '2026-06-11T09:00:00Z', closed_by_name: 'Stephan Bredell' },
   ],
   account_documents: [
     { id: 'd1', account_id: ACC, name: 'Letter of demand - 20 Aug 2024.pdf', storage_path: 'x/1.pdf', mime_type: 'application/pdf', size_bytes: 184320, kind: 'Letter of Demand', uploaded_by_name: 'Amanda Coertze', created_at: '2024-08-20T10:00:00Z' },
@@ -170,18 +170,12 @@ const serve = (route) => {
   const table = url.pathname.replace('/rest/v1/', '')
   let rows = TABLES[table] ?? []
 
-  for (const [key, raw] of url.searchParams) {
-    if (['select', 'order', 'limit', 'offset'].includes(key)) continue
-    const [op, ...rest] = raw.split('.')
-    const fn = OPS[op]
-    if (!fn) continue
-    const value = rest.join('.')
-    rows = rows.filter((r) => fn(r[key], value))
-  }
-
-  // One level of embedded select, e.g. select=*,debtor_accounts(account_number,...)
+  // Embeds are resolved BEFORE filtering, because PostgREST allows a filter on an embedded
+  // table (`debtor_accounts.company_id=eq.…`) and the row has to carry the child to be filtered
+  // on it. Getting this order wrong silently returned nothing, which looked exactly like an
+  // empty section rather than a broken stub.
   const select = url.searchParams.get('select') ?? '*'
-  const embed = /([a-z_]+)\(([^)]*)\)/.exec(select)
+  const embed = /([a-z_]+)!?[a-z]*\(([^)]*)\)/.exec(select)
   if (embed) {
     const [, child, cols] = embed
     const wanted = cols.split(',').map((c) => c.trim()).filter(Boolean)
@@ -190,6 +184,19 @@ const serve = (route) => {
       if (!parent) return r
       return { ...r, [child]: Object.fromEntries(wanted.map((c) => [c, parent[c]])) }
     })
+    // !inner drops rows with no match, exactly as the join would.
+    if (/!inner/.test(select)) rows = rows.filter((r) => r[child])
+  }
+
+  for (const [key, raw] of url.searchParams) {
+    if (['select', 'order', 'limit', 'offset'].includes(key)) continue
+    const [op, ...rest] = raw.split('.')
+    const fn = OPS[op]
+    if (!fn) continue
+    const value = rest.join('.')
+    // A dotted key names a column on an embedded table.
+    const [head, nested] = key.split('.')
+    rows = rows.filter((r) => fn(nested ? r[head]?.[nested] : r[key], value))
   }
   // maybeSingle() asks for a single object back via the Accept header.
   const single = /vnd.pgrst.object/.test(route.request().headers()['accept'] ?? '')
@@ -247,6 +254,20 @@ const escalate = esc.getByRole('button', { name: /Escalate/ })
 if (await escalate.count()) { await escalate.first().click(); await esc.waitForTimeout(700) }
 else console.log('!! Escalate button not found')
 await esc.screenshot({ path: `${OUT}/account-escalate.png` })
+
+// The client's own queries section.
+const cq = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+await cq.route(`**://${REF}.supabase.co/**`, serve)
+await cq.addInitScript(seed, { ref: REF, user: USER })
+await cq.goto(`${ORIGIN}/companies/${COMPANY}`, { waitUntil: 'networkidle' })
+await cq.waitForTimeout(1500)
+await cq.evaluate(() => {
+  const el = [...document.querySelectorAll('*')].find((n) => n.scrollHeight > n.clientHeight + 40 && getComputedStyle(n).overflowY !== 'visible')
+  const target = [...document.querySelectorAll('h3')].find((h) => /Queries/.test(h.textContent ?? ''))
+  if (el && target) el.scrollTop = target.getBoundingClientRect().top + el.scrollTop - 90
+})
+await cq.waitForTimeout(500)
+await cq.screenshot({ path: `${OUT}/client-queries.png` })
 
 // The Communications queue.
 const queue = await browser.newPage({ viewport: { width: 1440, height: 1000 } })

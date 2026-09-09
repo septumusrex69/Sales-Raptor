@@ -1,22 +1,22 @@
 import { useState } from 'react'
-import { Check, MessageCircleQuestion, Plus, X } from 'lucide-react'
+import { ArrowUpRight, Check, MessageCircleQuestion, Plus, X } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { Card } from '../../components/ui/Card'
 import { formatMoney, formatDate } from '../../data/mockData'
 import { chargeMessage } from '../../lib/accountCharges'
 import {
-  ageInDays, closeQuery, isStale, markOutcomeDone, raiseQuery, updateQuery,
-  QUERY_CATEGORIES, QUERY_OUTCOME_LABEL, QUERY_STATUS_LABEL,
-  type AccountQuery, type QueryOutcome, type QueryStatus,
+  ageInDays, canSendToClient, closeQuery, isStale, markOutcomeDone, raiseQuery, updateQuery,
+  NEXT_STAGE, QUERY_CATEGORIES, QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
+  type AccountQuery, type QueryOutcome, type QueryStage,
 } from '../../lib/accountQueries'
 import type { User } from '../../types'
 
 const TODAY = new Date().toISOString().slice(0, 10)
 
-const STATUS_CHIP: Record<QueryStatus, string> = {
-  open: 'bg-gold-100 text-gold-600',
-  with_client: 'bg-brand-100 text-brand-600',
-  answered: 'bg-positive-100 text-positive-700',
-  closed: 'bg-slate-100 text-slate-500',
+const STAGE_CHIP: Record<QueryStage, string> = {
+  agent: 'bg-slate-100 text-slate-600',
+  liaison: 'bg-brand-100 text-brand-600',
+  client: 'bg-gold-100 text-gold-600',
 }
 
 const OUTCOME_CHIP: Record<QueryOutcome, string> = {
@@ -34,15 +34,17 @@ const OUTCOME_CHIP: Record<QueryOutcome, string> = {
  * the business's decision, and a system that quietly halted work on an account would be taking
  * that decision away.
  */
-export function QueryPanel({ accountId, queries, users, actor, onChange, busy, run }: {
+export function QueryPanel({ accountId, queries, users, actor, onChange, busy, run, clientId, clientName }: {
   accountId: string
   queries: AccountQuery[]
   /** Who a query can be given to. */
   users: User[]
-  actor: { id: string | null; name: string | null }
+  actor: { id: string | null; name: string | null; role: string | undefined }
   onChange: () => Promise<void>
   busy: boolean
   run: (fn: () => Promise<unknown>) => Promise<boolean>
+  clientId: string | undefined
+  clientName: string | undefined
 }) {
   const [adding, setAdding] = useState(false)
   const open = queries.filter((q) => q.status !== 'closed')
@@ -77,7 +79,7 @@ export function QueryPanel({ accountId, queries, users, actor, onChange, busy, r
       <div className="space-y-2.5">
         {open.map((q) => (
           <QueryCard key={q.id} query={q} accountId={accountId} users={users} actor={actor}
-            busy={busy} run={run} onChange={onChange} />
+            busy={busy} run={run} onChange={onChange} clientId={clientId} clientName={clientName} />
         ))}
       </div>
 
@@ -108,14 +110,16 @@ export function QueryPanel({ accountId, queries, users, actor, onChange, busy, r
   )
 }
 
-function QueryCard({ query: q, accountId, users, actor, busy, run, onChange }: {
+function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, clientId, clientName }: {
   query: AccountQuery
   accountId: string
   users: User[]
-  actor: { id: string | null; name: string | null }
+  actor: { id: string | null; name: string | null; role: string | undefined }
   busy: boolean
   run: (fn: () => Promise<unknown>) => Promise<boolean>
   onChange: () => Promise<void>
+  clientId: string | undefined
+  clientName: string | undefined
 }) {
   const [closing, setClosing] = useState(false)
   const stale = isStale(q, TODAY)
@@ -125,8 +129,8 @@ function QueryCard({ query: q, accountId, users, actor, busy, run, onChange }: {
   return (
     <div className={`p-3 rounded-lg border ${stale ? 'border-negative-100 bg-negative-50' : 'border-slate-200'}`}>
       <div className="flex items-start justify-between gap-2">
-        <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${STATUS_CHIP[q.status]}`}>
-          {QUERY_STATUS_LABEL[q.status]}
+        <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${STAGE_CHIP[q.stage]}`}>
+          {QUERY_STAGE_LABEL[q.stage]}
         </span>
         <span className={`text-[11px] shrink-0 ${stale ? 'text-negative' : 'text-slate-400'}`}>
           {stale ? `chase — ${formatDate(q.chaseOn!)}` : `${ageInDays(q)} days old`}
@@ -163,17 +167,47 @@ function QueryCard({ query: q, accountId, users, actor, busy, run, onChange }: {
         </p>
       )}
 
+      {/*
+        Where to go from here. The account is where the story is; the client is who the query is
+        ultimately about, and the liaison needs both — one to understand it, one to answer it.
+      */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px]">
+        <Link to={`/accounts/${accountId}`} className="text-brand-600 hover:underline inline-flex items-center gap-0.5">
+          Open the account <ArrowUpRight size={11} />
+        </Link>
+        {clientId && (
+          <Link to={`/companies/${clientId}`} className="text-brand-600 hover:underline inline-flex items-center gap-0.5">
+            Open {clientName ?? 'the client'} <ArrowUpRight size={11} />
+          </Link>
+        )}
+      </div>
+
       {!closing && (
         <div className="flex flex-wrap gap-1.5 mt-2.5">
-          {q.status === 'open' && (
-            <Step label="Sent to client" disabled={busy}
-              onClick={() => run(() => updateQuery(q.id, { status: 'with_client' }, { ...ctx, note: 'Query sent to the client.' }))} />
-          )}
-          {q.status === 'with_client' && (
-            <Step label="Client answered" disabled={busy}
-              onClick={() => run(() => updateQuery(q.id, { status: 'answered' }, { ...ctx, note: 'The client has answered.' }))} />
-          )}
-          <Step label="Close" disabled={busy} onClick={() => setClosing(true)} />
+          {/*
+            One rung at a time, and only the rung this query is actually on. Sending to the client
+            is gated: a collections agent should not be writing to a client about a disputed
+            account on their own initiative — that is the liaison's relationship to manage.
+          */}
+          {(() => {
+            const next = NEXT_STAGE[q.stage]
+            if (!next) return null
+            const gated = next.to === 'client' && !canSendToClient(actor.role)
+            if (gated) {
+              return (
+                <span className="text-[11px] text-slate-400 px-2 py-1 border border-dashed border-slate-200 rounded"
+                  title="Only a client liaison or a manager can put a query in front of a client.">
+                  {next.label} &mdash; liaison only
+                </span>
+              )
+            }
+            return (
+              <Step label={next.label} disabled={busy}
+                onClick={() => run(() => updateQuery(q.id, { stage: next.to }, { ...ctx, note: next.note }))} />
+            )
+          })()}
+          {/* Every tier can close what it has answered. Most queries never reach the client. */}
+          <Step label="Resolve" disabled={busy} onClick={() => setClosing(true)} />
           <label className="text-[11px] text-slate-400 inline-flex items-center gap-1 ml-auto">
             chase
             <input type="date" value={q.chaseOn ?? ''} disabled={busy}

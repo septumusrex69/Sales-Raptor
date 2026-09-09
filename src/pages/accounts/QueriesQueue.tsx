@@ -6,16 +6,15 @@ import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { formatDate } from '../../data/mockData'
 import {
-  ageInDays, fetchOpenQueries, isStale, QUERY_STATUS_LABEL, type QueueRow, type QueryStatus,
+  ageInDays, fetchOpenQueries, isStale, QUERY_STAGE_LABEL, type QueueRow, type QueryStage,
 } from '../../lib/accountQueries'
 
 const TODAY = new Date().toISOString().slice(0, 10)
 
-const STATUS_CHIP: Record<QueryStatus, string> = {
-  open: 'bg-gold-100 text-gold-600',
-  with_client: 'bg-brand-100 text-brand-600',
-  answered: 'bg-positive-100 text-positive-700',
-  closed: 'bg-slate-100 text-slate-500',
+const STAGE_CHIP: Record<QueryStage, string> = {
+  agent: 'bg-slate-100 text-slate-600',
+  liaison: 'bg-brand-100 text-brand-600',
+  client: 'bg-gold-100 text-gold-600',
 }
 
 type Scope = 'Mine' | 'Everyone' | 'Nobody'
@@ -103,7 +102,7 @@ export function QueriesQueue() {
                   <th className="text-left px-4 py-2.5 font-medium">Debtor</th>
                   <th className="text-left px-4 py-2.5 font-medium">Query</th>
                   <th className="text-left px-4 py-2.5 font-medium">Owner</th>
-                  <th className="text-left px-4 py-2.5 font-medium">Status</th>
+                  <th className="text-left px-4 py-2.5 font-medium">Sitting with</th>
                   <th className="text-right px-4 py-2.5 font-medium">Chase</th>
                   <th className="text-right px-4 py-2.5 font-medium">Age</th>
                 </tr>
@@ -119,6 +118,11 @@ export function QueriesQueue() {
                           {q.debtorName}
                         </Link>
                         <span className="block text-[11px] text-slate-400 tabular-nums">{q.accountNumber}</span>
+                        {q.companyId && (
+                          <Link to={`/companies/${q.companyId}`} className="block text-[11px] text-brand-600 hover:underline">
+                            Open the client
+                          </Link>
+                        )}
                       </td>
                       <td className="px-4 py-2.5 align-top max-w-md">
                         <span className="text-slate-700 line-clamp-2">{q.description}</span>
@@ -128,8 +132,8 @@ export function QueriesQueue() {
                         {owner?.name ?? <span className="text-gold-600">Unassigned</span>}
                       </td>
                       <td className="px-4 py-2.5 align-top">
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${STATUS_CHIP[q.status]}`}>
-                          {QUERY_STATUS_LABEL[q.status]}
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${STAGE_CHIP[q.stage]}`}>
+                          {QUERY_STAGE_LABEL[q.stage]}
                         </span>
                       </td>
                       <td className={`px-4 py-2.5 align-top text-right whitespace-nowrap ${stale ? 'text-negative font-medium' : 'text-slate-500'}`}>

@@ -20,6 +20,7 @@ import { RowLimitSelect, applyRowLimitKeeping, type RowLimit } from '../../compo
 import { useFocusedEmailId } from '../../lib/focusedEmail'
 import { fetchBookSummary, type BookSummary } from '../../lib/accountBook'
 import { HeroOwner } from '../../components/RecordOwner'
+import { ClientQueries } from './ClientQueries'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
 import { LogHandoverModal } from '../../components/companies/LogHandoverModal'
@@ -449,6 +450,10 @@ export function CompanyDetail() {
           </div>
         )}
       </Card>
+
+      {/* Beside the handover book, because these are the two things a liaison opens this page
+          for: what came in, and what is stuck. */}
+      <ClientQueries companyId={company.id} />
 
       {/* Above the deals: for a debt collection client this is the relationship. What they
           signed is one line on a deal; what they actually send is the work. */}

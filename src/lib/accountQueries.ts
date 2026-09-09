@@ -17,14 +17,50 @@ import { chargeItem, type ChargeResult } from './accountCharges'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON from PostgREST. */
 
-export type QueryStatus = 'open' | 'with_client' | 'answered' | 'closed'
+export type QueryStatus = 'open' | 'closed'
 export type QueryOutcome = 'valid' | 'partly_valid' | 'not_valid' | 'withdrawn'
 
-export const QUERY_STATUS_LABEL: Record<QueryStatus, string> = {
-  open: 'Open',
-  with_client: 'With client',
-  answered: 'Client answered',
-  closed: 'Closed',
+/**
+ * Where a query sits on the ladder.
+ *
+ * The ladder is the point. A query starts with whoever took the call, goes to the client liaison
+ * if they cannot answer it, and only reaches the client if the liaison cannot either. Most never
+ * get past the second rung.
+ *
+ * The previous model had one forward move — "send to client" — which made the client the only
+ * exit from a query and quietly turned every dispute into correspondence with a client who did
+ * not need to hear about it. Any tier can close a query it has answered.
+ */
+export type QueryStage = 'agent' | 'liaison' | 'client'
+
+export const QUERY_STAGE_LABEL: Record<QueryStage, string> = {
+  agent: 'With the agent',
+  liaison: 'With the client liaison',
+  client: 'With the client',
+}
+
+/** What happens when this query moves up, and what it is called on the button. */
+export const NEXT_STAGE: Record<QueryStage, { to: QueryStage; label: string; note: string } | null> = {
+  agent: { to: 'liaison', label: 'Send to liaison', note: 'Passed to the client liaison.' },
+  liaison: { to: 'client', label: 'Send to client', note: 'Sent to the client.' },
+  client: { to: 'liaison', label: 'Client answered', note: 'The client has answered.' },
+}
+
+/**
+ * Who may put a query in front of a client.
+ *
+ * A collections agent should not be writing to a client about a disputed account on their own
+ * initiative — that is the liaison's relationship to manage. Everything else on a query is open
+ * to anyone signed in.
+ *
+ * Worth saying plainly: these are the roles this app HAS, which are a sales CRM's roles. There
+ * is no "collections agent" or "pre-legal agent" in the list, so Sales Representative is standing
+ * in for one. That is a mapping, not a model, and it should be fixed properly.
+ */
+export const CAN_SEND_TO_CLIENT = ['Administrator', 'Sales Manager', 'Liaison Manager', 'Liaison']
+
+export function canSendToClient(role: string | undefined): boolean {
+  return CAN_SEND_TO_CLIENT.includes(role ?? '')
 }
 
 export const QUERY_OUTCOME_LABEL: Record<QueryOutcome, string> = {
@@ -49,6 +85,8 @@ export interface AccountQuery {
   description: string
   category: string | null
   status: QueryStatus
+  stage: QueryStage
+  sentToClientAt: string | null
   ownerId: string | null
   raisedByName: string | null
   raisedAt: string
@@ -67,6 +105,8 @@ const toQuery = (r: any): AccountQuery => ({
   description: r.description,
   category: r.category,
   status: r.status,
+  stage: (r.stage ?? 'agent') as QueryStage,
+  sentToClientAt: r.sent_to_client_at ?? null,
   ownerId: r.owner_id,
   raisedByName: r.raised_by_name,
   raisedAt: r.raised_at,
@@ -116,7 +156,7 @@ export async function fetchOpenQueries(): Promise<QueueRow[]> {
   const { data, error } = await supabase
     .from('account_queries')
     .select('*, debtor_accounts(account_number, debtor_first_name, debtor_surname, company_id)')
-    .neq('status', 'closed')
+    .eq('status', 'open')
     .order('raised_at', { ascending: true })
   if (error) throw new Error(error.message)
   return (data ?? []).map((r: any) => {
@@ -141,6 +181,33 @@ export async function fetchOpenQueries(): Promise<QueueRow[]> {
  * The charge is raised even when it comes out at zero, as an unbilled row, so the work is on the
  * record either way. Whoever raised the query is told which happened.
  */
+/**
+ * Every query on a client's book, open and closed.
+ *
+ * A query is about a debt, but it is answered by the client, so the client's page is where a
+ * liaison asks "what is outstanding with Accelerate Fitness". Filtered by the client's accounts
+ * rather than stored against the client, because the query belongs to the account — one place it
+ * lives, two places it is read from.
+ */
+export async function fetchQueriesForClient(companyId: string): Promise<QueueRow[]> {
+  const { data, error } = await supabase
+    .from('account_queries')
+    .select('*, debtor_accounts!inner(account_number, debtor_first_name, debtor_surname, company_id)')
+    .eq('debtor_accounts.company_id', companyId)
+    .order('raised_at', { ascending: false })
+  if (error) throw new Error(error.message)
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  return (data ?? []).map((r: any) => {
+    const a = r.debtor_accounts ?? {}
+    return {
+      ...toQuery(r),
+      accountNumber: a.account_number ?? null,
+      debtorName: [a.debtor_first_name, a.debtor_surname].filter(Boolean).join(' ') || 'Unnamed debtor',
+      companyId: a.company_id ?? null,
+    }
+  })
+}
+
 export async function raiseQuery(input: {
   accountId: string
   description: string
@@ -213,9 +280,11 @@ export async function raiseQuery(input: {
  *
  * Closing a query costs nothing: deciding is not a further piece of correspondence.
  */
-const CHARGE_ON_STATUS: Partial<Record<QueryStatus, { itemId: string; actionCode: string; description: string }>> = {
-  with_client: { itemId: '1a', actionCode: 'email_out', description: 'Query sent to client' },
-  answered: { itemId: '6', actionCode: 'email_in', description: 'Client response to query received and attended to' },
+const CHARGE_ON_STAGE: Partial<Record<QueryStage, { itemId: string; actionCode: string; description: string }>> = {
+  // Reaching the client is correspondence out; the client answering is correspondence in.
+  // Moving from the agent to the liaison is internal and costs the debtor nothing.
+  client: { itemId: '1a', actionCode: 'email_out', description: 'Query sent to client' },
+  liaison: { itemId: '6', actionCode: 'email_in', description: 'Client response to query received and attended to' },
 }
 
 /**
@@ -228,7 +297,7 @@ const CHARGE_ON_STATUS: Partial<Record<QueryStatus, { itemId: string; actionCode
 export async function updateQuery(
   id: string,
   patch: {
-    status?: QueryStatus
+    stage?: QueryStage
     ownerId?: string | null
     chaseOn?: string | null
     category?: string | null
@@ -237,7 +306,15 @@ export async function updateQuery(
   context: { accountId: string; actorId: string | null; actorName: string | null; note?: string },
 ): Promise<AccountQuery> {
   const row: Record<string, unknown> = { updated_at: new Date().toISOString() }
-  if (patch.status !== undefined) row.status = patch.status
+  if (patch.stage !== undefined) {
+    row.stage = patch.stage
+    // Recorded once, the first time it goes out: how long a client has actually had it is the
+    // question that matters when a query goes quiet.
+    if (patch.stage === 'client') {
+      row.sent_to_client_at = new Date().toISOString()
+      row.sent_to_client_by = context.actorId
+    }
+  }
   if (patch.ownerId !== undefined) row.owner_id = patch.ownerId
   if (patch.chaseOn !== undefined) row.chase_on = patch.chaseOn || null
   if (patch.category !== undefined) row.category = patch.category?.trim() || null
@@ -246,7 +323,7 @@ export async function updateQuery(
   const { data, error } = await supabase.from('account_queries').update(row).eq('id', id).select('*').single()
   if (error) throw new Error(error.message)
 
-  const chargeable = patch.status ? CHARGE_ON_STATUS[patch.status] : undefined
+  const chargeable = patch.stage ? CHARGE_ON_STAGE[patch.stage] : undefined
   if (chargeable) {
     await chargeItem({
       accountId: context.accountId,
@@ -257,9 +334,9 @@ export async function updateQuery(
     })
   }
 
-  if (patch.status || context.note) {
+  if (patch.stage || context.note) {
     const body = context.note?.trim()
-      || `Query moved to ${QUERY_STATUS_LABEL[patch.status as QueryStatus] ?? patch.status}.`
+      || `Query moved: ${QUERY_STAGE_LABEL[patch.stage as QueryStage] ?? patch.stage}.`
     await addNote({
       accountId: context.accountId,
       body,
