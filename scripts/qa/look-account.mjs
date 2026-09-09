@@ -83,11 +83,36 @@ for (let i = 0; i < 64; i++) {
   })
 }
 
+/*
+ * Interest as the migrated book records it: a monthly row on the 1st, plus a part-month stub
+ * where the export was taken. The stub deliberately stops a few days short of today, because
+ * that gap is what the running "accruing to today" figure is computed across — a fixture whose
+ * accruals ran up to this morning would render the one thing this screen now has to show as
+ * blank, and pass.
+ */
 const accruals = []
-for (let i = 0; i < 29; i++) {
-  const d = new Date(Date.UTC(2024, 4 + i, 18))
+{
   const amt = Math.round(18500 * 0.24 / 12 * 100) / 100
-  accruals.push({ id: `i${i}`, account_id: ACC, accrued_on: d.toISOString().slice(0, 10), days: 30, amount_accrued: amt, amount_recoverable: amt })
+  const now = new Date()
+  const stubStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+  for (let i = 29; i >= 1; i--) {
+    const d = new Date(Date.UTC(stubStart.getUTCFullYear(), stubStart.getUTCMonth() - i, 1))
+    const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate()
+    accruals.push({
+      id: `i${i}`, account_id: ACC, accrued_on: d.toISOString().slice(0, 10),
+      // Swordfish stores days as an exclusive count, so a full month is one less than its length.
+      days: last - 1, amount_accrued: amt, amount_recoverable: amt,
+    })
+  }
+  // Four days short of today, so the page has a real open period to show.
+  const stubDays = Math.max(0, now.getUTCDate() - 1 - 4)
+  const stub = Math.round(amt * (stubDays + 1) / 30 * 100) / 100
+  if (stubDays >= 0) {
+    accruals.push({
+      id: 'istub', account_id: ACC, accrued_on: stubStart.toISOString().slice(0, 10),
+      days: stubDays, amount_accrued: stub, amount_recoverable: stub,
+    })
+  }
 }
 
 const companies = [{
@@ -242,6 +267,12 @@ for (const tab of ['Overview', 'Transactions', 'Documents']) {
   }
   const text = (await page.textContent('body')).replace(/\s+/g, ' ')
   console.log(`\n== ${tab} ==\n${text.slice(0, 900)}`)
+  // The header alone fills the excerpt above, so the things worth asserting are asserted rather
+  // than eyeballed: the running interest has to reach the statement, not only the tile.
+  if (tab === 'Transactions') {
+    const line = text.match(/Interest, \d+ days? — accruing to today/)
+    console.log(line ? `   statement carries the open period: "${line[0]}"` : '!! no accruing-interest line on the statement')
+  }
 }
 
 // The Escalate modal — the new front door to the query system.

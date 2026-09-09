@@ -120,6 +120,10 @@ export function AccountDetail() {
       // comment ("Closed on 2026/09/07 ..."), which we do not have, so the last action stands in
       // for it — imprecise, and labelled as such rather than presented as the closing date.
       writtenOffAt: /written.off/i.test(account.status) ? account.lastActionAt : null,
+      // Interest runs to today, not to the last monthly posting. Without this the balance stands
+      // still between postings and a collector quotes a settlement that is days out of date.
+      interestRateAnnual: account.interestRateAnnual,
+      accrueTo: new Date().toISOString().slice(0, 10),
       ledgers: {
         payments: ledgers.payments
           .filter((p) => !p.reversedAt)
@@ -231,8 +235,17 @@ export function AccountDetail() {
         Status and flags earn their place beside the money: they decide what the call is about.
       */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5">
+        {/*
+          The figure moves every day, so the tile says so. A collector who quotes a settlement and
+          is asked "why is it more than yesterday" needs the answer on the same screen.
+        */}
         <Figure label="To settle today" value={b ? formatMoney(b.settlement) : '—'}
-          note={b ? `incl. ${formatMoney(b.settlementFee)} receipt fee` : undefined} strong />
+          note={b
+            ? `incl. ${formatMoney(b.settlementFee)} receipt fee`
+              + (b.interestAccruing > 0
+                ? ` · ${formatMoney(b.interestAccruing)} interest over ${b.interestAccruingDays} ${b.interestAccruingDays === 1 ? 'day' : 'days'}`
+                : '')
+            : undefined} strong />
         <Figure label="Collected" value={b ? formatMoney(b.payments) : '—'} note={`${ledgers?.payments.length ?? 0} payments`} />
         <Figure
           label="Next promise"
@@ -963,7 +976,14 @@ function StatementTable({ statement, account, breakdown }: {
             {statement.map((l, i) => (
               <tr key={i} className="border-b border-slate-50 last:border-0">
                 <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{formatDate(l.date)}</td>
-                <td className={`px-3 py-1.5 ${l.kind === 'payment' ? 'text-positive-700' : 'text-slate-700'}`}>{l.description}</td>
+                <td className={`px-3 py-1.5 ${l.kind === 'payment' ? 'text-positive-700' : 'text-slate-700'}`}>
+                  {l.description}
+                  {l.kind === 'interest-accruing' && (
+                    <span className="block text-[11px] text-slate-400">
+                      Running since the last monthly posting. It will be charged as part of this month.
+                    </span>
+                  )}
+                </td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">{l.debit ? formatMoney(l.debit) : ''}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-positive-700">{l.credit ? formatMoney(l.credit) : ''}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums font-medium text-slate-900">{formatMoney(l.balance)}</td>

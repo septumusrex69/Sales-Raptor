@@ -23,7 +23,7 @@ create table if not exists public.profiles (
   name text not null default '',
   email text not null,
   role text not null default 'Sales Representative'
-    check (role in ('Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Read Only')),
+    check (role in ('Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Agent', 'Read Only')),
   team_id uuid references public.teams (id) on delete set null,
   status text not null default 'Active' check (status in ('Active', 'Inactive')),
   phone text,
@@ -1384,3 +1384,16 @@ alter table public.promises_to_pay
   add column if not exists instalments_kept integer not null default 0,
   -- Where the debtor committed to a total as well as a monthly figure.
   add column if not exists total_promised numeric;
+
+
+-- ---------- Pre-legal Agent ----------
+-- The collections side of the house: the person working a debtor account before it goes to
+-- attorneys. A separate role from Liaison, which is a CLIENT-facing job — a pre-legal agent
+-- escalates a query to a liaison and may not put one in front of a client themselves.
+--
+-- Written as a constraint swap rather than an ALTER TYPE because role is a text column with a
+-- check: adding a value means replacing the check, and the old one has to go first or the new
+-- one is never reached.
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check
+  check (role in ('Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Agent', 'Read Only'));

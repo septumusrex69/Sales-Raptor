@@ -363,7 +363,23 @@ export interface Proposal {
   createdAt: string
 }
 
-export type UserRole = 'Administrator' | 'Sales Manager' | 'Sales Representative' | 'Liaison Manager' | 'Liaison' | 'Read Only'
+/**
+ * Who somebody is in the business.
+ *
+ * "Pre-legal Agent" is the collections side of the house: the person working a debtor account
+ * before it goes to attorneys. They are not a liaison — a liaison looks after the CLIENT
+ * relationship — and the distinction matters, because only a liaison may put a query in front of
+ * a client (see CAN_SEND_TO_CLIENT in accountQueries.ts). A pre-legal agent who can answer a
+ * debtor's question answers it and writes a note; they escalate only what they cannot resolve.
+ */
+export type UserRole =
+  | 'Administrator'
+  | 'Sales Manager'
+  | 'Sales Representative'
+  | 'Liaison Manager'
+  | 'Liaison'
+  | 'Pre-legal Agent'
+  | 'Read Only'
 
 export interface User {
   id: ID

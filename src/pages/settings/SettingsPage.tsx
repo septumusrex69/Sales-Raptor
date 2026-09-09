@@ -233,7 +233,7 @@ function UsersTab() {
                       value={u.role}
                       onChange={(e) => updateUser(u.id, { role: e.target.value as UserRole })}
                     >
-                      {(['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Read Only'] as UserRole[]).map((r) => (
+                      {(['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Agent', 'Read Only'] as UserRole[]).map((r) => (
                         <option key={r}>{r}</option>
                       ))}
                     </select>
@@ -651,7 +651,7 @@ function RemoveUserModal({
   )
 }
 
-const INVITE_ROLES: UserRole[] = ['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Read Only']
+const INVITE_ROLES: UserRole[] = ['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Agent', 'Read Only']
 
 function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string; teams: Team[]; onClose: () => void }) {
   const [name, setName] = useState('')

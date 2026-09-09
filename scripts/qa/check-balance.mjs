@@ -9,6 +9,7 @@
  *   node scripts/qa/check-balance.mjs
  */
 import { computeBalance, buildStatement } from '../../src/lib/accountBalance.ts'
+import { accrueToDate, coveredTo } from '../../src/lib/interestAccrual.ts'
 
 let failed = 0
 const near = (a, b) => Math.abs(a - b) < 0.005
@@ -131,6 +132,94 @@ const empty = { payments: [], fees: [], interest: [] }
 
   const dates = s.lines.map((l) => l.date)
   check('lines are in date order', [...dates].sort().join() === dates.join() ? 1 : 0, 1)
+}
+
+/*
+ * Daily interest.
+ *
+ * The migrated book charges a flat 2% of the running balance a month — 24% a year over twelve
+ * months, not 365 days — so a full month accrued day by day has to land on exactly that 2%, or
+ * the running figure and the posted figure would disagree the moment the month closed. Every
+ * expectation below was worked out by hand from that rule.
+ */
+{
+  /* A full 30-day month is exactly 2%. */
+  const full = accrueToDate({ openingBalance: 10000, annualRate: 24, coveredTo: '2026-08-31', asAt: '2026-09-30' })
+  check('a full month accrues the flat monthly rate', full.amount, 200)
+  check('a full month is 30 days in September', full.days, 30)
+
+  /* February is shorter, and still exactly 2%: the rate is monthly, not daily. */
+  const feb = accrueToDate({ openingBalance: 10000, annualRate: 24, coveredTo: '2026-01-31', asAt: '2026-02-28' })
+  check('a short month accrues the same flat monthly rate', feb.amount, 200)
+  check('February is 28 days', feb.days, 28)
+
+  /* Part of a month is pro-rated: 7 of September's 30 days on R28,167.53. */
+  const part = accrueToDate({ openingBalance: 28167.53, annualRate: 24, coveredTo: '2026-08-31', asAt: '2026-09-07' })
+  check('a part month is pro-rated by days elapsed', part.amount, 131.45)
+  check('1 to 7 September is 7 days', part.days, 7)
+
+  /* One day moves the number. This is the whole point of the exercise. */
+  const d1 = accrueToDate({ openingBalance: 10000, annualRate: 24, coveredTo: '2026-08-31', asAt: '2026-09-01' })
+  const d2 = accrueToDate({ openingBalance: 10000, annualRate: 24, coveredTo: '2026-08-31', asAt: '2026-09-02' })
+  check('one day of interest on R10,000', d1.amount, 6.67)
+  check('the balance moves every day', d2.amount, 13.33)
+
+  /* Crossing a month boundary capitalises, as the posted history does. */
+  const across = accrueToDate({ openingBalance: 10000, annualRate: 24, coveredTo: '2026-08-31', asAt: '2026-10-31' })
+  check('two months compound rather than add', across.amount, 404)
+
+  /* Nothing to accrue is nothing, not zero-dressed-as-something. */
+  check('a book already current accrues nothing',
+    accrueToDate({ openingBalance: 10000, annualRate: 24, coveredTo: '2026-09-09', asAt: '2026-09-09' }) === null ? 1 : 0, 1)
+  check('no rate accrues nothing',
+    accrueToDate({ openingBalance: 10000, annualRate: 0, coveredTo: '2026-08-31', asAt: '2026-09-09' }) === null ? 1 : 0, 1)
+  check('a settled account accrues nothing',
+    accrueToDate({ openingBalance: 0, annualRate: 24, coveredTo: '2026-08-31', asAt: '2026-09-09' }) === null ? 1 : 0, 1)
+
+  /* Swordfish stores `days` as an exclusive count: 1 August for 30 days covers to the 31st. */
+  check('the covered day is the last day of the posted period',
+    coveredTo([{ from: '2026-08-01', days: 30 }, { from: '2026-02-01', days: 27 }]) === '2026-08-31' ? 1 : 0, 1)
+  check('a stub covers to its own end',
+    coveredTo([{ from: '2026-09-01', days: 6 }]) === '2026-09-07' ? 1 : 0, 1)
+}
+
+/* The balance engine has to carry the accrual through to the settlement figure and the statement. */
+{
+  const base = {
+    capitalHandedOver: 10000, handoverDate: '2026-08-01',
+    interestRateAnnual: 24,
+    ledgers: { payments: [], fees: [], interest: [{ from: '2026-08-01', days: 30, amount: 200 }] },
+  }
+
+  const posted = computeBalance(base)
+  check('without accrueTo the book shows only what is posted', posted.interest, 200)
+  check('and nothing is running', posted.interestAccruing, 0)
+
+  /* 7 days of September on the closed balance of R10,200. */
+  const live = computeBalance({ ...base, accrueTo: '2026-09-07' })
+  check('with accrueTo the interest runs to today', live.interestAccruing, 47.6)
+  check('the running figure is inside the interest total', live.interest, 247.6)
+  check('and inside the balance', live.balance, 10247.6)
+  // The receipt fee on a balance this size is at the R610 maximum, plus VAT.
+  check('so the settlement moves with it', live.settlement, 10247.6 + 701.5)
+
+  /* An account written off stopped accruing when it stopped. */
+  const dead = computeBalance({ ...base, accrueTo: '2026-09-07', writtenOffAt: '2026-08-15' })
+  check('a written-off account accrues nothing further', dead.interestAccruing, 0)
+
+  /* In duplum caps the running figure with everything else, rather than sneaking past it. */
+  const capped = computeBalance({
+    capitalHandedOver: 100, handoverDate: '2024-01-01', inDuplum: true, interestRateAnnual: 24,
+    accrueTo: '2026-09-30',
+    ledgers: { payments: [], fees: [], interest: [{ from: '2026-08-01', days: 30, amount: 500 }] },
+  })
+  check('in duplum caps the running interest too', capped.balance, 200)
+
+  const s = buildStatement({ ...base, accrueTo: '2026-09-07' })
+  const running = s.lines.filter((l) => l.kind === 'interest-accruing')
+  check('the statement shows the open period as one line', running.length, 1)
+  check('dated today', running[0].date === '2026-09-07' ? 1 : 0, 1)
+  check('the statement still ends at the balance', s.lines[s.lines.length - 1].balance, s.breakdown.balance)
 }
 
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)

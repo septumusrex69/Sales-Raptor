@@ -27,6 +27,7 @@
  * write-off, where the account stopped and accrual stopped with it.
  */
 import { receiptFee, settlementReceiptFee, roundToCents, scheduleFor, type AnnexureBSchedule } from './annexureB.ts'
+import { accrueToDate, coveredTo as lastCoveredDay } from './interestAccrual.ts'
 
 export interface LedgerLines {
   /** Every payment received, oldest first. Reversed payments are excluded by the caller. */
@@ -50,6 +51,16 @@ export interface BalanceInput {
   /** An account written off stops accruing on this date. */
   writtenOffAt?: string | null
   vatRate?: number
+  /**
+   * Annual interest rate as a percentage (24 = 24% a year). With `accrueTo` below, the balance
+   * grows every day instead of standing still between monthly postings.
+   */
+  interestRateAnnual?: number
+  /**
+   * Accrue interest up to and including this day — today, on a screen. Absent means show the
+   * book exactly as posted, which is what a historical statement wants.
+   */
+  accrueTo?: string | null
 }
 
 export interface BalanceBreakdown {
@@ -75,6 +86,16 @@ export interface BalanceBreakdown {
   cappedBy?: 'in duplum' | 'written off'
   /** How much interest and fees the cap withheld. Nonzero only when `cappedBy` is set. */
   withheld: number
+  /**
+   * Interest since the last posted accrual, computed to `accrueTo` and already included in
+   * `interest` above. Kept separate so a statement can label the line as still running rather
+   * than present it as charged.
+   */
+  interestAccruing: number
+  /** Calendar days the accruing figure covers. Zero when nothing is accruing. */
+  interestAccruingDays: number
+  /** First day of the open period, for the statement line. */
+  interestAccruingFrom: string | null
 }
 
 /**
@@ -106,7 +127,11 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
     ),
   )
 
-  const nonCapital = interest + fees + receiptFees
+  // Interest between the last posted accrual and today. Computed, never written: see
+  // interestAccrual.ts for why a daily figure does not need a daily row.
+  const open = openAccrual(input, roundToCents(capital + interest + fees + receiptFees - payments))
+
+  const nonCapital = interest + open.amount + fees + receiptFees
   let cappedBy: BalanceBreakdown['cappedBy']
   let withheld = 0
 
@@ -135,7 +160,7 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
 
   return {
     capital,
-    interest,
+    interest: roundToCents(interest + open.amount),
     fees,
     receiptFees,
     vat: roundToCents(feeVat + receiptFeeVat),
@@ -145,10 +170,45 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
     settlement: roundToCents(balance + settlementFee),
     cappedBy,
     withheld,
+    interestAccruing: open.amount,
+    interestAccruingDays: open.days,
+    interestAccruingFrom: open.from,
   }
 }
 
-export type StatementKind = 'handover' | 'interest' | 'fee' | 'receipt-fee' | 'payment'
+/**
+ * The open interest period, or nothing.
+ *
+ * Nothing is the answer more often than not: an account with no rate, an account already written
+ * off (accrual stopped when it did), a caller reprinting a historical statement, or a book that
+ * is already current. Each of those has to produce a real zero rather than an accidental one, so
+ * they are all decided here in one place.
+ */
+function openAccrual(
+  input: BalanceInput,
+  balanceAtLastPosting: number,
+): { amount: number; days: number; from: string | null } {
+  const none = { amount: 0, days: 0, from: null }
+  if (!input.accrueTo || input.writtenOffAt) return none
+  const covered = lastCoveredDay(input.ledgers.interest)
+  if (!covered) return none
+  const open = accrueToDate({
+    openingBalance: balanceAtLastPosting,
+    annualRate: input.interestRateAnnual ?? 0,
+    coveredTo: covered,
+    asAt: input.accrueTo,
+  })
+  return open ? { amount: open.amount, days: open.days, from: open.from } : none
+}
+
+export type StatementKind =
+  | 'handover'
+  | 'interest'
+  /** Interest since the last posting, computed to today and not yet charged. */
+  | 'interest-accruing'
+  | 'fee'
+  | 'receipt-fee'
+  | 'payment'
 
 export interface StatementLine {
   date: string
@@ -210,6 +270,19 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
     })
   }
 
+  // The open period, dated today and marked as still running. It is the last debit on the
+  // statement by construction: nothing can be dated after the day it is accrued to.
+  if (breakdown.interestAccruing > 0 && input.accrueTo) {
+    const d = breakdown.interestAccruingDays
+    pending.push({
+      date: input.accrueTo,
+      kind: 'interest-accruing',
+      description: `Interest, ${d} ${d === 1 ? 'day' : 'days'} — accruing to today`,
+      debit: breakdown.interestAccruing,
+      credit: 0,
+    })
+  }
+
   for (const f of ledgers.fees) {
     if (stopAt && f.date > stopAt) continue
     // An action taken past the Annexure B ceiling is real history and no charge. It belongs in
@@ -251,7 +324,7 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
    * statement, reissued, showing different intermediate figures.
    */
   const rank: Record<StatementKind, number> = {
-    handover: 0, interest: 1, fee: 2, payment: 3, 'receipt-fee': 4,
+    handover: 0, interest: 1, 'interest-accruing': 1, fee: 2, payment: 3, 'receipt-fee': 4,
   }
   pending.sort((a, b) => a.date.localeCompare(b.date) || rank[a.kind] - rank[b.kind])
 
