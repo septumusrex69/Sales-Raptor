@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { adminClient, callerIsAdmin, requireCaller } from '../_lib/auth.js'
-import { encrypt } from '../_lib/crypto.js'
-import { BuzzBoxError, getOrganisation, listOrganisations, login } from '../_lib/buzzbox.js'
+import { adminClient, callerIsAdmin, requireCaller } from '../auth.js'
+import { encrypt } from '../crypto.js'
+import { BuzzBoxError, getOrganisation, listOrganisations, login } from '../buzzbox.js'
 
 /**
  * Connect the firm's BuzzBox account. One set of credentials for the whole organisation

@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { adminClient, requireCaller } from '../_lib/auth.js'
+import { adminClient, requireCaller } from '../auth.js'
 
 /**
  * Is BuzzBox connected for the firm, and does the caller have an extension to dial from?

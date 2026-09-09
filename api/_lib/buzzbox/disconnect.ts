@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { adminClient, callerIsAdmin, requireCaller } from '../_lib/auth.js'
-import { forgetToken } from '../_lib/buzzbox.js'
+import { adminClient, callerIsAdmin, requireCaller } from '../auth.js'
+import { forgetToken } from '../buzzbox.js'
 
 /** Remove the firm's BuzzBox credentials (Administrator only). Extensions on profiles are left as they are. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {

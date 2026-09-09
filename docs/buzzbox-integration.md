@@ -66,7 +66,10 @@ Anyone without an extension, or a firm without BuzzBox connected, gets the `tel:
 
 ## 3. Server routes
 
-All under `api/buzzbox/`, all require a Supabase session bearer token, same as `api/email/*`.
+All require a Supabase session bearer token, same as `api/email/*`. They are served by **one**
+serverless function, `api/buzzbox/[action].ts`, which dispatches to the handlers under
+`api/_lib/buzzbox/` — Vercel's Hobby plan caps a deployment at 12 functions and the existing
+email and user routes already use 10. The URLs below are unchanged by this.
 
 | Route | Who | Does |
 |---|---|---|

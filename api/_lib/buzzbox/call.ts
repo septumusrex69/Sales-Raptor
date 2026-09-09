@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { adminClient, requireCaller } from '../_lib/auth.js'
-import { BuzzBoxError, initiateCall, normaliseDialNumber } from '../_lib/buzzbox.js'
-import { connectedSession } from './extensions.js'
+import { adminClient, requireCaller } from '../auth.js'
+import { BuzzBoxError, initiateCall, normaliseDialNumber } from '../buzzbox.js'
+import { connectedSession } from './session.js'
 
 /**
  * Click to dial. BuzzBox rings the caller's own extension first; when they pick up it
