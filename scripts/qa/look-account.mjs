@@ -110,6 +110,7 @@ const contacts = [
 
 const notes = [
   { id: 'n1', account_id: ACC, body: 'Spoke to Thandiwe. She confirmed payment will be made today and asked for the bank details again -- sent via WhatsApp.', pinned: false, author_name: 'Amanda Coertze', created_by: null, created_at: '2026-08-05T09:12:00Z' },
+  { id: 'n3', account_id: ACC, body: 'Query raised: Debtor says she paid R3,000 directly to the client in March, at their branch, in cash, and was given a handwritten receipt which she has since lost. She wants the account corrected before she pays anything further and says she has told them twice already.', pinned: false, kind: 'query', query_id: 'q1', author_name: 'Amanda Coertze', created_by: null, created_at: '2026-08-18T09:00:00Z' },
   { id: 'n2', account_id: ACC, body: 'Requested a 7-day extension. Advised of the collection process and the fee position.', pinned: false, author_name: 'Amanda Coertze', created_by: null, created_at: '2026-06-04T11:18:00Z' },
 ]
 

@@ -13,7 +13,7 @@
  */
 import { supabase } from './supabase'
 import { addNote, type AccountNote } from './accountWorkspace'
-import { chargeItem, chargeMessage, type ChargeResult } from './accountCharges'
+import { chargeItem, type ChargeResult } from './accountCharges'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON from PostgREST. */
 
@@ -179,7 +179,7 @@ export async function raiseQuery(input: {
     accountId: input.accountId,
     itemId: '3',
     actionCode: 'perusal',
-    description: 'Query raised — other necessary expenses',
+    description: 'Other necessary expenses',
     createdBy: input.raisedBy ?? null,
   })
 
@@ -187,9 +187,9 @@ export async function raiseQuery(input: {
   // where they read everything else, not only if they think to open a panel.
   await addNote({
     accountId: input.accountId,
-    body: charge
-      ? `Query raised: ${q.description}\n${chargeMessage(charge, '3')}`
-      : `Query raised: ${q.description}\nNot charged to the debtor.`,
+    // Just what happened. The fee is already its own line on the timeline with its own amount,
+    // and repeating it here made a two-line event into a five-line one.
+    body: `Query raised: ${q.description}`,
     authorName: input.raisedByName ?? null,
     createdBy: input.raisedBy ?? null,
     queryId: q.id,
@@ -246,10 +246,9 @@ export async function updateQuery(
   const { data, error } = await supabase.from('account_queries').update(row).eq('id', id).select('*').single()
   if (error) throw new Error(error.message)
 
-  let charge: ChargeResult | null = null
   const chargeable = patch.status ? CHARGE_ON_STATUS[patch.status] : undefined
   if (chargeable) {
-    charge = await chargeItem({
+    await chargeItem({
       accountId: context.accountId,
       itemId: chargeable.itemId,
       actionCode: chargeable.actionCode,
@@ -263,7 +262,7 @@ export async function updateQuery(
       || `Query moved to ${QUERY_STATUS_LABEL[patch.status as QueryStatus] ?? patch.status}.`
     await addNote({
       accountId: context.accountId,
-      body: charge ? `${body}\n${chargeMessage(charge, chargeable!.itemId)}` : body,
+      body,
       authorName: context.actorName,
       createdBy: context.actorId,
       queryId: id,

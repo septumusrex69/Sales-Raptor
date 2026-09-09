@@ -205,21 +205,14 @@ export function AccountDetail() {
           liaison looks after the client relationship, and this is the person chasing the debt.
         */}
         {/*
-          Two different people, and confusing them wastes a phone call: the pre-legal agent works
-          the debtor, the client liaison looks after the client whose debt it is. A query about
-          the debt goes to the second one.
+          The band carries the person working the DEBTOR. The client liaison is a different job on
+          a different relationship, and it sits in the strip below with the other facts you check
+          before picking up the phone — the band was starting to hold two of everything.
         */}
         <div className="mt-2.5 text-right leading-tight ml-2">
           <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-gold-500">Pre-legal agent</p>
           <p className="text-sm font-semibold text-white">{account.swordfishAssignedTo ?? 'Unassigned'}</p>
           {account.swordfishAssignedTo && <p className="text-[11px] text-white/50">from Swordfish</p>}
-        </div>
-        <div className="mt-2.5 text-right leading-tight ml-2">
-          <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-gold-500">Client liaison</p>
-          <p className="text-sm font-semibold text-white">{clientLiaison?.name ?? 'Not set'}</p>
-          <p className="text-[11px] text-white/50">
-            {clientLiaison ? `for ${client?.name ?? 'this client'}` : 'set one on the client'}
-          </p>
         </div>
       </DashboardHero>
 
@@ -241,11 +234,21 @@ export function AccountDetail() {
           note={due ? `due ${formatDate(due.dueOn)}` : 'none outstanding'}
           danger={!!due && isOverdue(due, TODAY)}
         />
-        <Figure label="Status" value={account.status || '—'} note={account.subStatus ?? undefined} small />
+        {/*
+          One block, because the band above already carries the top-level status and repeating it
+          here spent a whole tile saying "Active" twice. What is left is the part that differs
+          account to account: the sub-status and the flags.
+        */}
         <Figure
-          label="Flag"
-          value={accountFlagList(account)[0] ?? '—'}
-          note={accountFlagList(account).slice(1).join(' · ') || undefined}
+          label="Status & flag"
+          value={account.subStatus || account.status || '—'}
+          note={accountFlagList(account).join(' · ') || 'no flags'}
+          small
+        />
+        <Figure
+          label="Client liaison"
+          value={clientLiaison?.name ?? 'Not set'}
+          note={clientLiaison ? `for ${client?.name ?? 'this client'}` : 'set one on the client record'}
           small
         />
       </div>
@@ -603,10 +606,23 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef
   )
 }
 
+/**
+ * How much of an entry fits before it needs asking for.
+ *
+ * A note someone typed during a call can run to a paragraph, and three of those turn the timeline
+ * into a wall — which is the thing the timeline exists to avoid. Long entries clamp to three
+ * lines and open on a click. The threshold is on character count rather than measured height:
+ * a measurement would be exact and would also mean laying out every row twice on every render.
+ */
+const CLAMP_AT = 150
+
 function TimelineRow({ entry }: { entry: TimelineEntry }) {
   const style = styleFor(entry)
   const Icon = style.icon
   const reversed = entry.status === 'reversed'
+  const [open, setOpen] = useState(false)
+  const long = entry.title.length > CLAMP_AT
+  const wraps = entry.kind === 'note' || entry.kind === 'query'
   return (
     <div className="flex gap-3">
       <div className={`w-7 h-7 rounded-full grid place-items-center shrink-0 ${style.ring}`}>
@@ -614,7 +630,12 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-3">
-          <p className={`text-sm min-w-0 ${entry.kind === 'note' ? 'whitespace-pre-wrap' : ''} ${reversed ? 'line-through text-slate-400' : 'text-slate-700'}`}>
+          <p
+            onClick={long ? () => setOpen((v) => !v) : undefined}
+            className={`text-sm min-w-0 ${wraps ? 'whitespace-pre-wrap' : ''} ${
+              long ? 'cursor-pointer' : ''} ${long && !open ? 'line-clamp-3' : ''} ${
+              reversed ? 'line-through text-slate-400' : 'text-slate-700'}`}
+          >
             {entry.title}
             {entry.status && entry.kind === 'promise' && <PromiseChip status={entry.status} />}
           </p>
@@ -628,6 +649,11 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
                 : null}
           </span>
         </div>
+        {long && (
+          <button onClick={() => setOpen((v) => !v)} className="text-[11px] text-brand-600 hover:underline">
+            {open ? 'Show less' : 'Show more'}
+          </button>
+        )}
         {(entry.detail || entry.by) && (
           <p className="text-[11px] text-slate-400 mt-0.5">
             {[entry.detail, entry.by].filter(Boolean).join(' · ')}
