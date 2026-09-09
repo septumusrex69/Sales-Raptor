@@ -27,7 +27,7 @@
  * write-off, where the account stopped and accrual stopped with it.
  */
 import { receiptFeeInclVat, settlementReceiptFee, roundToCents, scheduleFor, type AnnexureBSchedule } from './annexureB.ts'
-import { accrueToDate, coveredTo as lastCoveredDay } from './interestAccrual.ts'
+import { accrueToDate, accrualEnd, coveredTo as lastCoveredDay } from './interestAccrual.ts'
 
 export interface LedgerLines {
   /** Every payment received, oldest first. Reversed payments are excluded by the caller. */
@@ -270,13 +270,27 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
     })
   }
 
+  /*
+   * Dated at the END of the period it covers, and labelled with that period.
+   *
+   * Interest is earned across a stretch of days and posted once at the close of it, which is
+   * where Swordfish puts it: ACF10044's R36.88 for August sits on 31 August on the statement the
+   * debtor was sent. Dating it at the start put the same money a month earlier and sorted it
+   * above the fees it had actually accrued on, so a reissued statement did not match the
+   * original — and the day count on its own said nothing about which days were meant.
+   *
+   * The count is Swordfish's exclusive offset, not a number of days: 1 September for 6 covers to
+   * the 7th, seven days. Printing it as "6 days" was reading that field as if it meant what it
+   * says. `accrualEnd` holds the convention.
+   */
   for (const i of ledgers.interest) {
     if (stopAt && i.from > stopAt) continue
     if (i.amount === 0) continue
+    const to = accrualEnd(i.from, i.days)
     pending.push({
-      date: i.from,
+      date: to,
       kind: 'interest',
-      description: i.days > 1 ? `Interest, ${i.days} days` : 'Interest',
+      description: `Interest, ${periodLabel(i.from, to)}`,
       debit: i.amount,
       credit: 0,
     })
@@ -285,11 +299,15 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
   // The open period, dated today and marked as still running. It is the last debit on the
   // statement by construction: nothing can be dated after the day it is accrued to.
   if (breakdown.interestAccruing > 0 && input.accrueTo) {
-    const d = breakdown.interestAccruingDays
+    const from = breakdown.interestAccruingFrom
     pending.push({
       date: input.accrueTo,
       kind: 'interest-accruing',
-      description: `Interest, ${d} ${d === 1 ? 'day' : 'days'} — accruing to today`,
+      // Pull the statement on the 7th and this reads "1 to 7 September": the days since the last
+      // posting are on the page, named, rather than left for the reader to work out from a count.
+      description: from
+        ? `Interest, ${periodLabel(from, input.accrueTo)} — still accruing`
+        : 'Interest — still accruing',
       debit: breakdown.interestAccruing,
       credit: 0,
     })
@@ -356,6 +374,26 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
         ? `The account was written off on ${stopAt}. ${money(breakdown.withheld)} of later interest and fees is excluded.`
         : undefined,
   }
+}
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
+
+/**
+ * The period an interest line covers, as "1 to 7 September", or "20 July to 2 August" where it
+ * crosses a month, or just "7 September" for a single day.
+ *
+ * No year: the date column beside it carries one, and a period long enough to span a new year
+ * still reads unambiguously against it.
+ */
+function periodLabel(from: string, to: string): string {
+  const day = (iso: string) => Number(iso.slice(8, 10))
+  const month = (iso: string) => MONTH_NAMES[Number(iso.slice(5, 7)) - 1]
+  if (from >= to) return `${day(to)} ${month(to)}`
+  if (from.slice(0, 7) === to.slice(0, 7)) return `${day(from)} to ${day(to)} ${month(to)}`
+  return `${day(from)} ${month(from)} to ${day(to)} ${month(to)}`
 }
 
 const money = (n: number) => `R${n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
