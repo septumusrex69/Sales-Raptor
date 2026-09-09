@@ -10,6 +10,11 @@
  * about a phone number without being wrong about a balance.
  */
 import { supabase } from './supabase'
+import { nextDueDate, type Arrangement } from './arrangements'
+
+export {
+  nextDueDate, describeArrangement, ARRANGEMENT_LABEL, WEEKDAYS, type Arrangement,
+} from './arrangements'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON from PostgREST. */
 
@@ -84,6 +89,7 @@ export type PromiseStatus = 'open' | 'kept' | 'broken' | 'cancelled'
 export interface PromiseToPay {
   id: string
   accountId: string
+  /** Per instalment where this recurs, not the total. */
   amount: number
   dueOn: string
   method: string | null
@@ -92,6 +98,13 @@ export interface PromiseToPay {
   notes: string | null
   createdBy: string | null
   createdAt: string
+  arrangement: Arrangement
+  dayOfMonth: number | null
+  onLastDay: boolean
+  /** 1 = Monday .. 7 = Sunday. */
+  dayOfWeek: number | null
+  instalmentsKept: number
+  totalPromised: number | null
 }
 
 const toPromise = (r: any): PromiseToPay => ({
@@ -105,6 +118,12 @@ const toPromise = (r: any): PromiseToPay => ({
   notes: r.notes,
   createdBy: r.created_by,
   createdAt: r.created_at,
+  arrangement: (r.arrangement ?? 'once_off') as Arrangement,
+  dayOfMonth: r.day_of_month === null || r.day_of_month === undefined ? null : Number(r.day_of_month),
+  onLastDay: !!r.on_last_day,
+  dayOfWeek: r.day_of_week === null || r.day_of_week === undefined ? null : Number(r.day_of_week),
+  instalmentsKept: Number(r.instalments_kept ?? 0),
+  totalPromised: r.total_promised === null || r.total_promised === undefined ? null : Number(r.total_promised),
 })
 
 /**
@@ -223,7 +242,13 @@ export async function addPromise(input: {
   method?: string | null
   notes?: string | null
   createdBy?: string | null
+  arrangement?: Arrangement
+  dayOfMonth?: number | null
+  onLastDay?: boolean
+  dayOfWeek?: number | null
+  totalPromised?: number | null
 }): Promise<PromiseToPay> {
+  const arrangement = input.arrangement ?? 'once_off'
   const { data, error } = await supabase
     .from('promises_to_pay')
     .insert({
@@ -233,7 +258,37 @@ export async function addPromise(input: {
       method: input.method?.trim() || null,
       notes: input.notes?.trim() || null,
       created_by: input.createdBy ?? null,
+      arrangement,
+      // Only the field the chosen pattern uses is stored. A day-of-week left behind on a monthly
+      // arrangement is a field that will eventually be read by mistake.
+      day_of_month: arrangement === 'monthly' && !input.onLastDay
+        ? input.dayOfMonth ?? Number(input.dueOn.slice(8, 10))
+        : null,
+      on_last_day: arrangement === 'monthly' ? !!input.onLastDay : false,
+      day_of_week: arrangement === 'weekly' ? input.dayOfWeek ?? null : null,
+      total_promised: input.totalPromised ?? null,
     })
+    .select('*')
+    .single()
+  if (error) throw new Error(error.message)
+  return toPromise(data)
+}
+
+/**
+ * An instalment arrived.
+ *
+ * A recurring arrangement does not close when one instalment is kept — the next one is now due.
+ * So the count goes up, the due date moves on, and the promise stays open. Only a once-off
+ * finishes on being kept.
+ */
+export async function keepInstalment(p: PromiseToPay, byId: string | null): Promise<PromiseToPay> {
+  const next = nextDueDate(p)
+  if (p.arrangement === 'once_off' || !next) return resolvePromise(p.id, 'kept', byId)
+
+  const { data, error } = await supabase
+    .from('promises_to_pay')
+    .update({ due_on: next, instalments_kept: p.instalmentsKept + 1 })
+    .eq('id', p.id)
     .select('*')
     .single()
   if (error) throw new Error(error.message)

@@ -1364,3 +1364,23 @@ create policy "account_queries_select" on public.account_queries for select usin
 drop policy if exists "account_queries_write" on public.account_queries;
 create policy "account_queries_write" on public.account_queries for all
   using (auth.uid() is not null) with check (auth.uid() is not null);
+
+-- ---------- Arrangements ----------
+-- A promise is either a single settlement or an instalment arrangement, and the difference
+-- decides what happens when the money arrives. A once-off is kept and finished; an instalment
+-- kept means the next one is now due, which is why `due_on` moves rather than the row closing.
+--
+-- The day is stored as a rule, not a date. "The last day of the month" is not the 30th — it is
+-- the 28th in February and the 31st in March — and a debtor paid on payday means the 25th every
+-- month, not 30 days after the last one. Storing a computed date would drift.
+alter table public.promises_to_pay
+  add column if not exists arrangement text not null default 'once_off'
+    check (arrangement in ('once_off', 'weekly', 'monthly')),
+  add column if not exists day_of_month integer check (day_of_month between 1 and 31),
+  add column if not exists on_last_day boolean not null default false,
+  -- 1 = Monday through 7 = Sunday, matching ISO rather than JavaScript's Sunday-is-zero.
+  add column if not exists day_of_week integer check (day_of_week between 1 and 7),
+  -- How many instalments have actually landed. The measure of whether an arrangement is holding.
+  add column if not exists instalments_kept integer not null default 0,
+  -- Where the debtor committed to a total as well as a monthly figure.
+  add column if not exists total_promised numeric;

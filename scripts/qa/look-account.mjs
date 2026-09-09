@@ -115,7 +115,7 @@ const notes = [
 ]
 
 const promises = [
-  { id: 'pr1', account_id: ACC, amount: 5000, due_on: '2026-09-07', method: 'EFT', status: 'open', resolved_at: null, notes: 'Client confirmed payment today.', created_by: null, created_at: '2026-08-05T09:12:00Z' },
+  { id: 'pr1', account_id: ACC, amount: 1500, due_on: '2026-09-30', method: 'Debit order', status: 'open', resolved_at: null, notes: null, created_by: null, created_at: '2026-08-05T09:12:00Z', arrangement: 'monthly', day_of_month: null, on_last_day: true, day_of_week: null, instalments_kept: 3, total_promised: null },
   { id: 'pr2', account_id: ACC, amount: 1500, due_on: '2026-06-05', method: 'Debit order', status: 'kept', resolved_at: '2026-06-05T10:00:00Z', notes: null, created_by: null, created_at: '2026-05-20T09:00:00Z' },
   { id: 'pr3', account_id: ACC, amount: 1500, due_on: '2026-04-05', method: 'EFT', status: 'broken', resolved_at: '2026-04-12T10:00:00Z', notes: null, created_by: null, created_at: '2026-03-18T09:00:00Z' },
 ]

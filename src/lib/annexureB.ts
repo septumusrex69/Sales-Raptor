@@ -474,16 +474,29 @@ export function annexureBItem(id: AnnexureBItemId, schedule: AnnexureBSchedule =
 }
 
 /**
- * What is left of an item the gazette prices as a total rather than per occurrence.
+ * Whether an item marked `isTotal` is enforced as a per-account total.
  *
- * Item 3 — "Other necessary expenses not specifically provided for, **a total amount of**:
- * R25,00" — is the one that matters in practice. The words "a total amount of" appear in every
- * gazette from 2015 on, and they mean R25 for the whole account, not R25 each time. An account
- * with four sundry expenses on it recovers R25, not R100.
+ * The gazette wording is "Other necessary expenses not specifically provided for, **a total
+ * amount of**: R25,00", and the same phrase appears in every schedule since 2015. Read strictly
+ * that is R25 for the whole account however many sundry expenses it accumulates, and this code
+ * enforced it that way until Bredell Ferreira instructed otherwise on 9 September 2026: item 3
+ * is charged per occurrence, as Swordfish charged it before the migration.
  *
- * Returns what may still be charged under that item, given what has been charged under it
- * already. For an ordinary per-occurrence item there is no such limit and the full amount comes
- * back.
+ * Left as a flag rather than deleted, because the reading is the thing worth keeping. Flip it
+ * back and the per-account total returns, with no other change.
+ *
+ * The items 1–7 CEILING is untouched by this and still binds. Its wording admits no argument —
+ * "the total amount to be recovered from the debtor in respect of items 1 to 7 shall not exceed
+ * the capital amount of the debt or R1225,00, whichever is the lesser" — so an account still
+ * stops earning at R1,225 no matter how many times item 3 is raised.
+ */
+export const ENFORCE_ITEM_TOTALS = false
+
+/**
+ * What may still be charged under an item, given what it has already earned on this account.
+ *
+ * With ENFORCE_ITEM_TOTALS off this is simply the item's rate; with it on, an item the gazette
+ * prices as a total returns only its remainder.
  */
 export function itemTotalRemaining(
   itemId: string,
@@ -492,6 +505,6 @@ export function itemTotalRemaining(
 ): number {
   const item = schedule.items.find((i) => i.id === itemId)
   if (!item || item.amount === null) return 0
-  if (!item.isTotal) return item.amount
+  if (!item.isTotal || !ENFORCE_ITEM_TOTALS) return item.amount
   return roundToCents(Math.max(0, item.amount - alreadyChargedUnderItem))
 }

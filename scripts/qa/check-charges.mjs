@@ -9,7 +9,7 @@
  */
 import {
   ANNEXURE_B_2015, ANNEXURE_B_2017, ANNEXURE_B_2020, ANNEXURE_B_2026,
-  feeCeiling, itemTotalRemaining, recoverableFee, scheduleFor,
+  ENFORCE_ITEM_TOTALS, feeCeiling, itemTotalRemaining, recoverableFee, scheduleFor,
 } from '../../src/lib/annexureB.ts'
 
 let failed = 0
@@ -31,12 +31,25 @@ function check(name, ok, detail) {
       `got ${itemTotalRemaining('3', 0, schedule)}`)
   }
 
-  check('a second charge under item 3 gets nothing',
-    near(itemTotalRemaining('3', 25, ANNEXURE_B_2026), 0))
-  check('a part-used item 3 gets only the remainder',
-    near(itemTotalRemaining('3', 10, ANNEXURE_B_2026), 15))
-  check('over-spending item 3 does not produce a negative',
-    near(itemTotalRemaining('3', 400, ANNEXURE_B_2026), 0))
+  /*
+   * Item 3 is charged per occurrence by business decision (see ENFORCE_ITEM_TOTALS). The gazette
+   * facts above still hold and are still tested; what changed is whether the total is enforced.
+   * Both behaviours are pinned so flipping the flag cannot pass silently.
+   */
+  if (ENFORCE_ITEM_TOTALS) {
+    check('a second charge under item 3 gets nothing',
+      near(itemTotalRemaining('3', 25, ANNEXURE_B_2026), 0))
+    check('a part-used item 3 gets only the remainder',
+      near(itemTotalRemaining('3', 10, ANNEXURE_B_2026), 15))
+    check('over-spending item 3 does not produce a negative',
+      near(itemTotalRemaining('3', 400, ANNEXURE_B_2026), 0))
+  } else {
+    check('item 3 charges again on a second query',
+      near(itemTotalRemaining('3', 25, ANNEXURE_B_2026), 25))
+    check('and again on a tenth', near(itemTotalRemaining('3', 250, ANNEXURE_B_2026), 25))
+    check('the gazette still records it as a total', ANNEXURE_B_2026.items.find((i) => i.id === '3')?.isTotal === true,
+      'the wording is kept even where the business charges differently')
+  }
 }
 
 /* A per-occurrence item has no such limit: a phone call is R25 every time it is made. */
@@ -68,10 +81,10 @@ function check(name, ok, detail) {
     recoverableFee(itemTotalRemaining('3', spentOnItem, ANNEXURE_B_2026), towardsCeiling, capital, ANNEXURE_B_2026)
 
   check('fresh account, plenty of room: full R25', near(both(0, 0, 50000), 25))
-  check('item 3 spent, ceiling free: nothing', near(both(25, 100, 50000), 0))
-  check('item 3 free, ceiling spent: nothing', near(both(0, 1225, 50000), 0))
-  check('both partly used: the tighter one wins', near(both(15, 1220, 50000), 5),
-    'R10 left on item 3, R5 left under the ceiling')
+  check('ceiling spent: nothing, however free the item is', near(both(0, 1225, 50000), 0))
+  check('near the ceiling: trimmed to what is left', near(both(0, 1220, 50000), 5))
+  check('a tenth query on a roomy account still charges',
+    near(both(250, 100, 50000), ENFORCE_ITEM_TOTALS ? 0 : 25))
 }
 
 /* A charge is priced on the schedule in force the day it is raised, never today's. */
@@ -98,7 +111,8 @@ function check(name, ok, detail) {
   check('sending it to the client: item 1a at R25', near(itemTotalRemaining('1a', 0, s), 25))
   check('the client answering: item 6 at R13', near(itemTotalRemaining('6', 0, s), 13))
 
-  check('a second query charges nothing under item 3', near(itemTotalRemaining('3', 25, s), 0))
+  check('a second query charges item 3 again',
+    near(itemTotalRemaining('3', 25, s), ENFORCE_ITEM_TOTALS ? 0 : 25))
   check('a second letter to the client still charges item 1a',
     near(itemTotalRemaining('1a', 25, s), 25),
     'item 1a is per occurrence — a chased query is another letter')

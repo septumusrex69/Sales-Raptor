@@ -12,8 +12,9 @@ import { StatusPill } from './AccountsList'
 import { accountFlagList, fetchAccount, fetchLedgers, hasCommissionDrift, type AccountLedgers, type DebtorAccount } from '../../lib/accountBook'
 import { buildStatement, type BalanceInput, type BalanceBreakdown, type StatementLine } from '../../lib/accountBalance'
 import {
-  addNote, addPromise, fetchDocuments, fetchWorkspace, isOverdue, nextPromise, resolvePromise,
-  saveMainComment, type AccountDocument, type PromiseToPay, type Workspace,
+  addNote, addPromise, describeArrangement, fetchDocuments, fetchWorkspace, isOverdue,
+  keepInstalment, nextPromise, resolvePromise, saveMainComment, ARRANGEMENT_LABEL, WEEKDAYS,
+  type AccountDocument, type Arrangement, type PromiseToPay, type Workspace,
 } from '../../lib/accountWorkspace'
 import { buildTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
 import { styleFor, PROMISE_CHIP } from './timelineStyle'
@@ -387,6 +388,12 @@ export function AccountDetail() {
 
 const pct = (r: number | null) => (r === null ? '—' : `${(r * 100).toFixed(r * 100 % 1 === 0 ? 0 : 1)}%`)
 
+/** 1 = Monday .. 7 = Sunday, from a yyyy-mm-dd string, read as UTC so a timezone cannot shift it. */
+function isoWeekday(iso: string): number {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay() || 7
+}
+
 /* ---------- the action bar ---------- */
 
 /**
@@ -716,6 +723,8 @@ function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, su
 }) {
   const [amount, setAmount] = useState('')
   const [dueOn, setDueOn] = useState('')
+  const [arrangement, setArrangement] = useState<Arrangement>('once_off')
+  const [onLastDay, setOnLastDay] = useState(false)
   const { busy, err, run } = useWriter(onChange)
 
   const outstanding = promises.filter((p) => p.status === 'open')
@@ -725,8 +734,15 @@ function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, su
     e.preventDefault()
     const value = Number(amount)
     if (!(value > 0) || !dueOn) return
-    const ok = await run(() => addPromise({ accountId, amount: value, dueOn, createdBy: userId }))
-    if (ok) { setAmount(''); setDueOn(''); setOpen(false) }
+    const ok = await run(() => addPromise({
+      accountId, amount: value, dueOn, createdBy: userId,
+      arrangement,
+      onLastDay: arrangement === 'monthly' && onLastDay,
+      // Taken from the first instalment's date, which is what the debtor actually agreed to.
+      dayOfMonth: arrangement === 'monthly' && !onLastDay ? Number(dueOn.slice(8, 10)) : null,
+      dayOfWeek: arrangement === 'weekly' ? isoWeekday(dueOn) : null,
+    }))
+    if (ok) { setAmount(''); setDueOn(''); setArrangement('once_off'); setOnLastDay(false); setOpen(false) }
   }
 
   // Warned, not blocked. A promise above the settlement figure is usually a typo — a keystroke
@@ -755,15 +771,40 @@ function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, su
       {open && (
         <form onSubmit={submit} className="space-y-2 p-3 rounded-lg bg-slate-50 border border-slate-100 mb-3">
           <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" autoFocus
-            placeholder="Amount, e.g. 5000" className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
+            placeholder={arrangement === 'once_off' ? 'Amount, e.g. 5000' : 'Amount per instalment'}
+            className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
+          <select value={arrangement} onChange={(e) => setArrangement(e.target.value as Arrangement)}
+            className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 bg-white">
+            {(Object.keys(ARRANGEMENT_LABEL) as Arrangement[]).map((a) => (
+              <option key={a} value={a}>{ARRANGEMENT_LABEL[a]}</option>
+            ))}
+          </select>
+          {arrangement === 'monthly' && (
+            <label className="flex items-center gap-2 text-[11px] text-slate-600">
+              <input type="checkbox" checked={onLastDay} onChange={(e) => setOnLastDay(e.target.checked)} />
+              On the last day of the month
+            </label>
+          )}
           {over && (
             <p className="text-[11px] text-gold-600 leading-snug">
               That is more than the {formatMoney(settlement!)} it takes to settle the account
               today. Fine if they meant it &mdash; worth a second look if they did not.
             </p>
           )}
-          <input type="date" value={dueOn} onChange={(e) => setDueOn(e.target.value)} min={TODAY}
-            className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
+          <label className="block text-[11px] text-slate-500">
+            {arrangement === 'once_off' ? 'Due on' : 'First instalment due on'}
+            <input type="date" value={dueOn} onChange={(e) => setDueOn(e.target.value)} min={TODAY}
+              className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 mt-0.5" />
+          </label>
+          {arrangement !== 'once_off' && dueOn && (
+            // Said back before it is saved: "monthly on the 31st" behaves differently in February,
+            // and a person should see which rule they have picked rather than discover it later.
+            <p className="text-[11px] text-slate-500">
+              Then {arrangement === 'weekly'
+                ? `every ${WEEKDAYS[isoWeekday(dueOn) - 1]}`
+                : onLastDay ? 'on the last day of each month' : `on the ${dueOn.slice(8, 10)}th of each month`}.
+            </p>
+          )}
           <button type="submit" disabled={busy || !(Number(amount) > 0) || !dueOn}
             className="w-full text-sm font-medium py-1.5 rounded-lg bg-brand-600 text-white disabled:opacity-50">
             {busy ? 'Saving...' : 'Record promise'}
@@ -789,11 +830,15 @@ function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, su
                   {late ? 'overdue ' : 'due '}{formatDate(p.dueOn)}
                 </span>
               </div>
-              {p.method && <p className="text-[11px] text-slate-500 mt-0.5">{p.method}</p>}
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                {[describeArrangement(p), p.method,
+                  p.instalmentsKept > 0 ? `${p.instalmentsKept} paid so far` : null]
+                  .filter(Boolean).join(' · ')}
+              </p>
               <div className="flex gap-1.5 mt-2">
-                <button disabled={busy} onClick={() => run(() => resolvePromise(p.id, 'kept', userId))}
+                <button disabled={busy} onClick={() => run(() => keepInstalment(p, userId))}
                   className="flex-1 text-[11px] font-medium py-1 rounded border border-positive-100 text-positive-700 hover:bg-positive-50 disabled:opacity-50 inline-flex items-center justify-center gap-1">
-                  <Check size={11} /> Kept
+                  <Check size={11} /> {p.arrangement === 'once_off' ? 'Kept' : 'Instalment paid'}
                 </button>
                 <button disabled={busy} onClick={() => run(() => resolvePromise(p.id, 'broken', userId))}
                   className="flex-1 text-[11px] font-medium py-1 rounded border border-negative-100 text-negative-700 hover:bg-negative-50 disabled:opacity-50 inline-flex items-center justify-center gap-1">
