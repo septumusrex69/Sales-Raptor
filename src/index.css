@@ -213,11 +213,21 @@ select:autofill {
   box-shadow: 0 0 0 100px var(--color-card) inset;
 }
 
-.card {
-  background-color: var(--color-card);
-  border-radius: var(--skin-card-radius);
-  border: 1px solid var(--skin-card-border);
-  box-shadow: var(--skin-card-shadow);
+/*
+ * In the components layer so a Tailwind utility on the same element wins.
+ *
+ * Unlayered, this rule sits after Tailwind's utilities in source order and beats them on equal
+ * specificity — which meant every `<Card className="bg-gold-50">` on the app silently rendered
+ * white. The card kept its own background and the caller's intent went nowhere, with no error
+ * anywhere to say so. Utilities beat components by layer, so the override works again.
+ */
+@layer components {
+  .card {
+    background-color: var(--color-card);
+    border-radius: var(--skin-card-radius);
+    border: 1px solid var(--skin-card-border);
+    box-shadow: var(--skin-card-shadow);
+  }
 }
 
 /*

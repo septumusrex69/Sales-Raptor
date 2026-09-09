@@ -18,6 +18,8 @@ import {
 import { buildTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
 import { styleFor, PROMISE_CHIP } from './timelineStyle'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
+import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
+import { fetchQueries, type AccountQuery } from '../../lib/accountQueries'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { feeCeiling, scheduleFor } from '../../lib/annexureB'
 import { formatCurrency, formatDate } from '../../data/mockData'
@@ -39,12 +41,13 @@ const TODAY = new Date().toISOString().slice(0, 10)
  */
 export function AccountDetail() {
   const { id } = useParams<{ id: string }>()
-  const { companies } = useAppStore()
+  const { companies, users } = useAppStore()
   const { currentUser } = useAuth()
   const [account, setAccount] = useState<DebtorAccount | null>(null)
   const [ledgers, setLedgers] = useState<AccountLedgers | null>(null)
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const [documents, setDocuments] = useState<AccountDocument[]>([])
+  const [queries, setQueries] = useState<AccountQuery[]>([])
   const [tab, setTab] = useState<Tab>('Overview')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -67,8 +70,10 @@ export function AccountDetail() {
         if (cancelled) return
         setAccount(a)
         if (a) {
-          const [l, w, d] = await Promise.all([fetchLedgers(a.id), fetchWorkspace(a.id), fetchDocuments(a.id)])
-          if (!cancelled) { setLedgers(l); setWorkspace(w); setDocuments(d) }
+          const [l, w, d, q] = await Promise.all([
+            fetchLedgers(a.id), fetchWorkspace(a.id), fetchDocuments(a.id), fetchQueries(a.id),
+          ])
+          if (!cancelled) { setLedgers(l); setWorkspace(w); setDocuments(d); setQueries(q) }
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
@@ -83,13 +88,17 @@ export function AccountDetail() {
   // alternative is several sets of local reducers that can drift from what the database holds.
   const reload = useCallback(async () => {
     if (!account) return
-    const [a, w, d] = await Promise.all([fetchAccount(account.id), fetchWorkspace(account.id), fetchDocuments(account.id)])
+    const [a, w, d, q] = await Promise.all([
+      fetchAccount(account.id), fetchWorkspace(account.id), fetchDocuments(account.id), fetchQueries(account.id),
+    ])
     if (a) setAccount(a)
     setWorkspace(w)
     setDocuments(d)
+    setQueries(q)
   }, [account])
 
   const { busy: savingComment, run: runComment } = useWriter(reload)
+  const { busy: queryBusy, run: runQuery } = useWriter(reload)
 
   const client = companies.find((c) => c.id === account?.companyId)
 
@@ -233,6 +242,10 @@ export function AccountDetail() {
         onPromise={() => { setTab('Overview'); setPromiseOpen(true) }}
       />
 
+      <OutcomeOutstanding queries={queries} accountId={account.id}
+        actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+        busy={queryBusy} run={runQuery} />
+
       {statement?.note && <Banner>{statement.note}</Banner>}
 
       {drift && (
@@ -296,6 +309,15 @@ export function AccountDetail() {
               setOpen={setPromiseOpen}
               successRatio={account.ptpSuccessRatio}
               settlement={b?.settlement}
+            />
+            <QueryPanel
+              accountId={account.id}
+              queries={queries}
+              users={users}
+              actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+              onChange={reload}
+              busy={queryBusy}
+              run={runQuery}
             />
             <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0} />
           </div>

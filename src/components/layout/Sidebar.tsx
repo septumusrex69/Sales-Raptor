@@ -7,6 +7,7 @@ import {
   Users,
   Building2,
   BookOpen,
+  MessageCircleQuestion,
   CheckSquare,
   Calendar,
   Activity,
@@ -29,6 +30,7 @@ const NAV = [
   // The collections book: the debtor accounts a client hands over, which is a different thing
   // from the client record and much larger than it.
   { to: '/accounts', label: 'Accounts', icon: BookOpen },
+  { to: '/queries', label: 'Queries', icon: MessageCircleQuestion },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   { to: '/calendar', label: 'Calendar', icon: Calendar },
   { to: '/activities', label: 'Activities', icon: Activity },

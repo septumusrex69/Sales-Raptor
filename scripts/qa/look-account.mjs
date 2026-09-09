@@ -122,6 +122,10 @@ const promises = [
 const TABLES = {
   debtor_accounts: [account],
   account_contacts: contacts,
+  account_queries: [
+    { id: 'q1', account_id: ACC, description: 'Says she already paid R3,000 of this directly to the client in March and it was never credited.', category: 'Already paid', status: 'with_client', owner_id: USER, raised_by_name: 'Amanda Coertze', raised_at: '2026-08-18T09:00:00Z', chase_on: '2026-09-01', outcome: null, outcome_action: null, outcome_amount: null, outcome_done: false, closed_at: null, closed_by_name: null },
+    { id: 'q2', account_id: ACC, description: 'Disputed the delivery of two of the items invoiced.', category: 'Goods or service', status: 'closed', owner_id: USER, raised_by_name: 'Amanda Coertze', raised_at: '2026-05-02T09:00:00Z', chase_on: null, outcome: 'partly_valid', outcome_action: 'Reduce the capital by the two items', outcome_amount: 1840, outcome_done: false, closed_at: '2026-06-11T09:00:00Z', closed_by_name: 'Stephan Bredell' },
+  ],
   account_documents: [
     { id: 'd1', account_id: ACC, name: 'Letter of demand - 20 Aug 2024.pdf', storage_path: 'x/1.pdf', mime_type: 'application/pdf', size_bytes: 184320, kind: 'Letter of Demand', uploaded_by_name: 'Amanda Coertze', created_at: '2024-08-20T10:00:00Z' },
     { id: 'd2', account_id: ACC, name: 'Acknowledgement of debt (signed).pdf', storage_path: 'x/2.pdf', mime_type: 'application/pdf', size_bytes: 402000, kind: 'Acknowledgement of Debt', uploaded_by_name: 'Amanda Coertze', created_at: '2024-09-02T10:00:00Z' },
@@ -141,10 +145,51 @@ const errors = []
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text().slice(0, 200)) })
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message.slice(0, 200)))
 
+/*
+ * A stub that ignores the query is a stub that lies.
+ *
+ * It reported a closed query in the open-queries queue and an unnamed debtor on every row,
+ * neither of which the real database would have done -- which is worse than no screenshot,
+ * because it looks like a finding. So it honours the two things the app actually relies on:
+ * PostgREST filter params, and a one-level embedded select.
+ */
+const OPS = {
+  eq: (a, b) => String(a) === b,
+  neq: (a, b) => String(a) !== b,
+  gt: (a, b) => Number(a) > Number(b),
+  gte: (a, b) => Number(a) >= Number(b),
+  lt: (a, b) => Number(a) < Number(b),
+  lte: (a, b) => Number(a) <= Number(b),
+  is: (a, b) => (b === 'null' ? a === null || a === undefined : String(a) === b),
+  in: (a, b) => b.replace(/^\(|\)$/g, '').split(',').map((v) => v.replace(/^"|"$/g, '')).includes(String(a)),
+}
+
 const serve = (route) => {
   const url = new URL(route.request().url())
   const table = url.pathname.replace('/rest/v1/', '')
   let rows = TABLES[table] ?? []
+
+  for (const [key, raw] of url.searchParams) {
+    if (['select', 'order', 'limit', 'offset'].includes(key)) continue
+    const [op, ...rest] = raw.split('.')
+    const fn = OPS[op]
+    if (!fn) continue
+    const value = rest.join('.')
+    rows = rows.filter((r) => fn(r[key], value))
+  }
+
+  // One level of embedded select, e.g. select=*,debtor_accounts(account_number,...)
+  const select = url.searchParams.get('select') ?? '*'
+  const embed = /([a-z_]+)\(([^)]*)\)/.exec(select)
+  if (embed) {
+    const [, child, cols] = embed
+    const wanted = cols.split(',').map((c) => c.trim()).filter(Boolean)
+    rows = rows.map((r) => {
+      const parent = (TABLES[child] ?? []).find((p) => p.id === r[`${child.replace(/s$/, '')}_id`] || p.id === r.account_id)
+      if (!parent) return r
+      return { ...r, [child]: Object.fromEntries(wanted.map((c) => [c, parent[c]])) }
+    })
+  }
   // maybeSingle() asks for a single object back via the Accept header.
   const single = /vnd.pgrst.object/.test(route.request().headers()['accept'] ?? '')
   const body = single ? JSON.stringify(rows[0] ?? null) : JSON.stringify(rows)
@@ -190,6 +235,14 @@ for (const tab of ['Overview', 'Transactions', 'Documents']) {
   const text = (await page.textContent('body')).replace(/\s+/g, ' ')
   console.log(`\n== ${tab} ==\n${text.slice(0, 900)}`)
 }
+
+// The Communications queue.
+const queue = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+await queue.route(`**://${REF}.supabase.co/**`, serve)
+await queue.addInitScript(seed, { ref: REF, user: USER })
+await queue.goto(`${ORIGIN}/queries`, { waitUntil: 'networkidle' })
+await queue.waitForTimeout(1200)
+await queue.screenshot({ path: `${OUT}/queries-queue.png` })
 
 // Settings -> Data Import, where the new "Update debtor details" card lives.
 const settings = await browser.newPage({ viewport: { width: 1440, height: 1000 } })

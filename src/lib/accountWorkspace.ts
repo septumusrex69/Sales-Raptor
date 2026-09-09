@@ -61,6 +61,10 @@ export interface AccountNote {
   authorName: string | null
   createdBy: string | null
   createdAt: string
+  /** Set where the note belongs to a query's thread rather than to the account at large. */
+  queryId: string | null
+  /** 'note' for something a person wrote, 'query' for a query's own history. */
+  kind: string
 }
 
 const toNote = (r: any): AccountNote => ({
@@ -71,6 +75,8 @@ const toNote = (r: any): AccountNote => ({
   authorName: r.author_name,
   createdBy: r.created_by,
   createdAt: r.created_at,
+  queryId: r.query_id ?? null,
+  kind: r.kind ?? 'note',
 })
 
 export type PromiseStatus = 'open' | 'kept' | 'broken' | 'cancelled'
@@ -191,6 +197,8 @@ export async function addNote(input: {
   body: string
   authorName?: string | null
   createdBy?: string | null
+  queryId?: string | null
+  kind?: string
 }): Promise<AccountNote> {
   const { data, error } = await supabase
     .from('account_notes')
@@ -199,6 +207,8 @@ export async function addNote(input: {
       body: input.body.trim(),
       author_name: input.authorName ?? null,
       created_by: input.createdBy ?? null,
+      query_id: input.queryId ?? null,
+      kind: input.kind ?? 'note',
     })
     .select('*')
     .single()

@@ -1284,3 +1284,83 @@ alter table public.promises_to_pay
 
 create index if not exists debtor_accounts_flags_idx
   on public.debtor_accounts (account_flags) where account_flags is not null;
+
+-- ---------- Queries and disputes ----------
+-- A debtor says something the collector cannot answer: "I already paid this", "the goods were
+-- never delivered", "that is not my account". It goes to a specific person in Communications,
+-- who asks the client and comes back with an answer.
+--
+-- This is a STATE THE ACCOUNT IS IN, which is why it lives here and not in a ticket system of
+-- its own. A ticket saying "see account APM10432" beside an account saying nothing is two records
+-- that drift apart, and the collector who phones next week reads the one without the dispute on it.
+--
+-- Three things this deliberately does NOT do:
+--
+--   It does not hold collection. An open dispute is a fact to know, not a brake -- the business
+--   decides what to do about it through its own workflows, and a system that silently stopped
+--   work on 25 accounts would be making that decision for them.
+--
+--   It does not enumerate the kinds. "It could be anything": already paid, goods not delivered,
+--   wrong person, wrong amount. A required taxonomy would be a guess dressed as a field, so the
+--   description is free text and `category` is optional.
+--
+--   It does not act on its own outcome. A valid dispute usually means an amount comes down or the
+--   account is withdrawn -- both of which move money or end a mandate. This records the decision
+--   and that it is outstanding; a person or the collections engine carries it out.
+create table if not exists public.account_queries (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  description text not null,
+  category text,
+  -- open: raised, nobody has taken it to the client yet.
+  -- with_client: asked, waiting. answered: the client replied, needs a decision.
+  -- closed: decided, with an outcome.
+  status text not null default 'open'
+    check (status in ('open', 'with_client', 'answered', 'closed')),
+  -- Whose query it is. The team covers for each other -- anyone may act on it, and every action
+  -- records who really did it -- but one person carries it.
+  owner_id uuid references public.profiles (id) on delete set null,
+  raised_by uuid references public.profiles (id) on delete set null,
+  raised_by_name text,
+  raised_at timestamptz not null default now(),
+  -- When to chase the client again. The thing that kills a query is nobody noticing it went quiet.
+  chase_on date,
+  outcome text check (outcome in ('valid', 'partly_valid', 'not_valid', 'withdrawn')),
+  -- What must now happen: "reduce to R4,200", "withdraw the account", "no change". Free text for
+  -- the same reason the description is.
+  outcome_action text,
+  outcome_amount numeric,
+  -- Whether the action has actually been carried out. A decision recorded is not a decision done.
+  outcome_done boolean not null default false,
+  closed_at timestamptz,
+  closed_by uuid references public.profiles (id) on delete set null,
+  closed_by_name text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists account_queries_account_idx on public.account_queries (account_id, raised_at desc);
+create index if not exists account_queries_open_idx on public.account_queries (status, chase_on)
+  where status <> 'closed';
+create index if not exists account_queries_owner_idx on public.account_queries (owner_id)
+  where status <> 'closed';
+
+-- A query's thread is account notes carrying its id, rather than a second thread table. One
+-- consequence is worth the choice on its own: everything said about a dispute appears on the
+-- account timeline automatically, where the next person to phone will actually read it.
+alter table public.account_notes
+  add column if not exists query_id uuid references public.account_queries (id) on delete cascade,
+  add column if not exists kind text not null default 'note';
+
+create index if not exists account_notes_query_idx on public.account_notes (query_id, created_at)
+  where query_id is not null;
+
+alter table public.account_queries enable row level security;
+
+-- As wide as the account's own policies. Communications cover for each other by design, so a
+-- policy scoped to the owner would break the way the team actually works.
+drop policy if exists "account_queries_select" on public.account_queries;
+create policy "account_queries_select" on public.account_queries for select using (auth.uid() is not null);
+drop policy if exists "account_queries_write" on public.account_queries;
+create policy "account_queries_write" on public.account_queries for all
+  using (auth.uid() is not null) with check (auth.uid() is not null);

@@ -1,7 +1,7 @@
 import {
   Banknote, CalendarClock, FileSignature, FileSearch, HandCoins, Mail, MailOpen,
-  MapPinned, MessageSquare, MessagesSquare, Phone, ScrollText, StickyNote,
-  Undo2, type LucideIcon,
+  MapPinned, MessageCircleQuestion, MessageSquare, MessagesSquare, Phone, ScrollText,
+  StickyNote, Undo2, type LucideIcon,
 } from 'lucide-react'
 import type { TimelineEntry } from '../../lib/accountTimeline'
 
@@ -29,6 +29,8 @@ const PAYMENT: TimelineStyle = { icon: Banknote, ring: 'bg-positive-50', fg: 'te
 const REVERSAL: TimelineStyle = { icon: Undo2, ring: 'bg-negative-50', fg: 'text-negative' }
 const PROMISE: TimelineStyle = { icon: HandCoins, ring: 'bg-gold-50', fg: 'text-gold-600' }
 const NOTE: TimelineStyle = { icon: StickyNote, ring: 'bg-slate-100', fg: 'text-slate-500' }
+/* A dispute takes the negative colour: it is the debtor pushing back, and it changes the call. */
+const QUERY: TimelineStyle = { icon: MessageCircleQuestion, ring: 'bg-negative-50', fg: 'text-negative' }
 
 /**
  * Everything we do to an account, by our own catalogue rather than by Swordfish's wording.
@@ -81,6 +83,7 @@ export function styleFor(entry: TimelineEntry): TimelineStyle {
   if (entry.kind === 'payment') return entry.status === 'reversed' ? REVERSAL : PAYMENT
   if (entry.kind === 'promise') return PROMISE
   if (entry.kind === 'note') return NOTE
+  if (entry.kind === 'query') return QUERY
 
   const code = entry.actionCode ?? BY_DESCRIPTION.find(([re]) => re.test(entry.title))?.[1]
   const style: TimelineStyle = (code ? CHANNEL[code] : undefined) ?? FALLBACK

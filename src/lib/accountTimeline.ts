@@ -13,7 +13,7 @@
 import type { AccountLedgers } from './accountBook'
 import type { AccountNote, PromiseToPay } from './accountWorkspace'
 
-export type TimelineKind = 'action' | 'payment' | 'note' | 'promise'
+export type TimelineKind = 'action' | 'payment' | 'note' | 'promise' | 'query'
 
 export interface TimelineEntry {
   id: string
@@ -49,7 +49,7 @@ const dayOf = (iso: string) => iso.slice(0, 10)
  * The fixed rank matters beyond that: a timeline that reshuffles itself between two loads is a
  * timeline nobody trusts.
  */
-const RANK: Record<TimelineKind, number> = { payment: 0, promise: 1, action: 2, note: 3 }
+const RANK: Record<TimelineKind, number> = { payment: 0, promise: 1, query: 2, action: 3, note: 4 }
 
 export function buildTimeline(
   ledgers: AccountLedgers | null,
@@ -91,7 +91,9 @@ export function buildTimeline(
   for (const n of notes) {
     entries.push({
       id: `note:${n.id}`,
-      kind: 'note',
+      // A query's own history is not an ordinary note: it belongs to a dispute, and a collector
+      // scanning the timeline needs to see that at a glance rather than read for it.
+      kind: n.kind === 'query' ? 'query' : 'note',
       date: dayOf(n.createdAt),
       at: n.createdAt,
       title: n.body,
