@@ -522,6 +522,29 @@ export const ENFORCE_ITEM_TOTALS = false
  * With ENFORCE_ITEM_TOTALS off this is simply the item's rate; with it on, an item the gazette
  * prices as a total returns only its remainder.
  */
+/**
+ * How many times an item may be charged in a calendar month, or null where it is uncapped.
+ *
+ * Two items carry one: a credit bureau search (four) and a non-email electronic communication
+ * (ten). The gazette words them per month rather than as a total, so unlike item 3 the allowance
+ * comes back every month and cannot be spent for good.
+ */
+export function monthlyLimit(itemId: string, schedule: AnnexureBSchedule = ANNEXURE_B_2026): number | null {
+  return schedule.items.find((i) => i.id === itemId)?.maxPerMonth ?? null
+}
+
+/**
+ * How many more times an item may be charged this month.
+ *
+ * Only charges that actually earned money count against the allowance. A search recorded at zero
+ * because the account was at the ceiling took nothing from the debtor, so it cannot be what stops
+ * the next one from being recovered.
+ */
+export function monthlyRoom(limit: number | null, billedThisMonth: number): number {
+  if (limit === null) return Infinity
+  return Math.max(0, limit - billedThisMonth)
+}
+
 export function itemTotalRemaining(
   itemId: string,
   alreadyChargedUnderItem: number,

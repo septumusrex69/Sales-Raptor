@@ -65,7 +65,7 @@ function App() {
               <Route path="/companies/:id" element={<CompanyDetail />} handle={{ title: 'Client Details' }} />
               <Route path="/accounts" element={<AccountsList />} handle={{ title: 'Accounts' }} />
               <Route path="/accounts/:id" element={<AccountDetail />} handle={{ title: 'Account' }} />
-              <Route path="/queries" element={<QueriesQueue />} handle={{ title: 'Queries' }} />
+              <Route path="/queries" element={<QueriesQueue />} handle={{ title: 'Disputes' }} />
               <Route path="/tasks" element={<TasksPage />} handle={{ title: 'Tasks' }} />
               <Route path="/calendar" element={<CalendarPage />} handle={{ title: 'Calendar' }} />
               <Route path="/activities" element={<ActivitiesPage />} handle={{ title: 'Activities' }} />

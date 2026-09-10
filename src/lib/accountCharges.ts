@@ -15,19 +15,23 @@
  *   The items 1–7 ceiling: the capital, or R1,225, whichever is less. Past it the work continues
  *   and the money stops.
  *
+ *   The item's monthly allowance. A credit bureau search is "R16,00" with a maximum of four a
+ *   month; the fifth in a month earns nothing. Unlike item 3 this comes back next month, so it
+ *   is counted per calendar month rather than for the life of the account.
+ *
  * A charge that comes out at zero is still recorded, as an unbilled row. What was done is history
  * whether or not it earned anything, and an account that shows no trace of the work is an account
  * nobody can prove was worked.
  */
 import { supabase } from './supabase'
-import { itemTotalRemaining, recoverableFee, roundToCents, scheduleFor } from './annexureB'
+import { itemTotalRemaining, monthlyLimit, monthlyRoom, recoverableFee, roundToCents, scheduleFor } from './annexureB'
 
 export interface ChargeResult {
   /** Excluding VAT. Zero where a cap left no room. */
   exclVat: number
   vat: number
   /** Why nothing was charged, for showing to the person who did the work. */
-  reason: 'charged' | 'item-total-spent' | 'at-ceiling'
+  reason: 'charged' | 'item-total-spent' | 'monthly-limit' | 'at-ceiling'
 }
 
 const VAT_RATE = 0.15
@@ -70,14 +74,40 @@ export async function chargeItem(input: {
   const towardsCeiling = Number(data?.towards_ceiling ?? 0)
 
   const remainingOnItem = itemTotalRemaining(input.itemId, spentOnItem, schedule)
-  const recoverable = recoverableFee(remainingOnItem, towardsCeiling, capital, schedule)
+
+  /*
+   * The monthly allowance, for the two items that have one.
+   *
+   * Only charges that EARNED something count against it: a search recorded at zero took nothing
+   * from the debtor, so it cannot be the reason the next one goes unrecovered. Costs an extra
+   * count request, and only on the items where the gazette actually imposes a limit.
+   */
+  const limit = monthlyLimit(input.itemId, schedule)
+  let room = Infinity
+  if (limit !== null) {
+    const monthStart = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), 1))
+    const nextMonth = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 1))
+    const { count, error: countError } = await supabase
+      .from('account_fees')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', input.accountId)
+      .eq('annexure_item', input.itemId)
+      .eq('billed', true)
+      .gte('incurred_at', monthStart.toISOString())
+      .lt('incurred_at', nextMonth.toISOString())
+    if (countError) throw new Error(countError.message)
+    room = monthlyRoom(limit, count ?? 0)
+  }
+
+  const recoverable = room > 0 ? recoverableFee(remainingOnItem, towardsCeiling, capital, schedule) : 0
 
   const exclVat = roundToCents(recoverable)
   const vat = roundToCents(exclVat * VAT_RATE)
   const reason: ChargeResult['reason'] =
     exclVat > 0 ? 'charged'
-      : remainingOnItem <= 0 ? 'item-total-spent'
-        : 'at-ceiling'
+      : room <= 0 ? 'monthly-limit'
+        : remainingOnItem <= 0 ? 'item-total-spent'
+          : 'at-ceiling'
 
   const { error } = await supabase.from('account_fees').insert({
     account_id: input.accountId,
@@ -108,6 +138,9 @@ export function chargeMessage(r: ChargeResult, itemId: string): string {
   }
   if (r.reason === 'item-total-spent') {
     return `No charge: item ${itemId} is a total for the account and it has already been used.`
+  }
+  if (r.reason === 'monthly-limit') {
+    return `No charge: item ${itemId} has already been charged its maximum for this month. It is recorded, and the allowance resets next month.`
   }
   return 'No charge: the account is at the Annexure B fee ceiling.'
 }

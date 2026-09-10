@@ -59,7 +59,7 @@ export function ClientQueries({ companyId }: { companyId: string }) {
     <Card padded={false}>
       <div className="p-5 pb-0">
         <CardHeader
-          title="Queries &amp; disputes"
+          title="Disputes on this client's book"
           subtitle={
             open.length === 0
               ? 'Nothing outstanding on this client.'

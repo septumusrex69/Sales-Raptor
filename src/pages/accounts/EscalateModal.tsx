@@ -11,15 +11,20 @@ const TODAY = new Date().toISOString().slice(0, 10)
 const MANAGER_ROLES = ['Administrator', 'Sales Manager', 'Liaison Manager']
 
 /**
- * Escalating an account.
+ * Raising a dispute.
  *
- * The front door to the query system. Raising a dispute used to mean finding a panel three cards
- * down the right-hand column, which is a fine place to WORK a query and a poor place to discover
- * that you can start one — the action bar is where a collector looks for something to do.
+ * The front door to the dispute system. Raising one used to mean finding a panel three cards down
+ * the right-hand column, which is a fine place to WORK a dispute and a poor place to discover that
+ * you can start one — the action bar is where a collector looks for something to do.
  *
- * An escalation and a debtor's query are the same object deliberately. Both are "this account
- * needs somebody else's attention", both need an owner, a chase date and an answer, and building
- * two of them would mean two queues and two places to look.
+ * On the words: when a DEBTOR says something is wrong it is a dispute, and when a CLIENT asks us
+ * something it is a query. The firm made that distinction so that "there's a query on this
+ * account" stops being ambiguous about who is unhappy. This modal is the debtor's side, which is
+ * why every word in it says dispute.
+ *
+ * An internal escalation and a debtor's dispute are the same object deliberately. Both are "this
+ * account needs somebody else's attention", both need an owner, a chase date and an answer, and
+ * building two of them would mean two queues and two places to look.
  */
 export function EscalateModal({ accountId, users, clientLiaison, actor, onClose, onDone }: {
   accountId: string
@@ -76,10 +81,10 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
   }
 
   return (
-    <Modal title="Escalate this account" onClose={onClose} width={520}>
+    <Modal title="Raise a dispute" onClose={onClose} width={520}>
       <div className="space-y-3">
         <label className="block">
-          <span className="text-sm font-medium text-slate-700">Escalate to</span>
+          <span className="text-sm font-medium text-slate-700">Give it to</span>
           <select
             value={toId}
             onChange={(e) => setToId(e.target.value)}
@@ -165,7 +170,7 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
             className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg bg-brand-600 text-white disabled:opacity-40"
           >
             <ShieldAlert size={15} />
-            {busy ? 'Escalating...' : 'Escalate'}
+            {busy ? 'Raising...' : 'Raise dispute'}
           </button>
           <button onClick={onClose} className="text-sm text-slate-600 hover:text-slate-800 px-2">Cancel</button>
         </div>

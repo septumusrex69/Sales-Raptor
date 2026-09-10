@@ -196,7 +196,9 @@ const OPS = {
   in: (a, b) => b.replace(/^\(|\)$/g, '').split(',').map((v) => v.replace(/^"|"$/g, '')).includes(String(a)),
 }
 
+const posted = []
 const serve = (route) => {
+  if (route.request().method() === 'POST') posted.push(route.request().url())
   const url = new URL(route.request().url())
   const table = url.pathname.replace('/rest/v1/', '')
   let rows = TABLES[table] ?? []
@@ -319,9 +321,9 @@ await esc.route(`**://${REF}.supabase.co/**`, serve)
 await esc.addInitScript(seed, { ref: REF, user: USER })
 await esc.goto(`${ORIGIN}/accounts/${ACC}`, { waitUntil: 'networkidle' })
 await esc.waitForTimeout(1400)
-const escalate = esc.getByRole('button', { name: /Escalate/ })
+const escalate = esc.getByRole('button', { name: /^Dispute$/ })
 if (await escalate.count()) { await escalate.first().click(); await esc.waitForTimeout(700) }
-else console.log('!! Escalate button not found')
+else console.log('!! Dispute button not found')
 await esc.screenshot({ path: `${OUT}/account-escalate.png` })
 
 // The client's own queries section.
@@ -458,6 +460,56 @@ else {
 // Retired numbers are never what the action bar rings.
 if (await dial.getByRole('button', { name: /^Call$/ }).count() && dialled === '+27 71 000 1111') {
   console.log('!! the action bar rang a RETIRED number')
+}
+
+/*
+ * The two new action-bar buttons: Dispute (which used to say Escalate) and Trace.
+ *
+ * Trace charges the debtor, so what is checked here is that it ASKS first -- the modal has to
+ * appear, and the fee it is about to raise has to be named in it.
+ */
+const act = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+await act.route(`**://${REF}.supabase.co/**`, serve)
+await act.addInitScript(seed, { ref: REF, user: USER })
+await act.goto(`${ORIGIN}/accounts/${ACC}`, { waitUntil: 'networkidle' })
+await act.waitForTimeout(1500)
+
+const bar = (await act.textContent('body')).replace(/\s+/g, ' ')
+console.log(`   action bar says "Dispute": ${/Dispute/.test(bar)}`)
+if (/Escalate/.test(bar)) console.log('!! the old "Escalate" wording is still on the page')
+if (!/Trace/.test(bar)) console.log('!! no Trace button in the action bar')
+
+const trace = act.getByRole('button', { name: /^Trace$/ })
+if (await trace.count() === 0) console.log('!! Trace button not found')
+else {
+  await trace.first().click()
+  await act.waitForTimeout(600)
+  const modal = (await act.textContent('body')).replace(/\s+/g, ' ')
+  const named = /item 4\(c\)/.test(modal)
+  const priced = /R16\.00 plus VAT/.test(modal)
+  const capped = /four a month/.test(modal)
+  console.log(`   trace modal names the item: ${named}, the fee: ${priced}, the monthly cap: ${capped}`)
+  if (!named || !priced || !capped) console.log('!! the trace modal does not say what it will charge')
+  await act.screenshot({ path: `${OUT}/account-trace.png` })
+  const cancel = act.locator('[data-modal-open="true"]').getByRole('button', { name: /^Cancel$/ })
+  if (await cancel.count()) await cancel.first().click()
+  else console.log('!! no Cancel in the trace modal')
+  await act.waitForTimeout(400)
+}
+// Nothing may be charged by opening the modal alone.
+const chargedOnOpen = posted.some((p) => /account_fees/.test(p))
+if (chargedOnOpen) console.log('!! a fee was raised just by opening the trace modal')
+else console.log('   opening the modal charged nothing')
+
+const disputeBtn = act.getByRole('button', { name: /^Dispute$/ })
+if (await disputeBtn.count() === 0) console.log('!! Dispute button not found')
+else {
+  await disputeBtn.first().click()
+  await act.waitForTimeout(600)
+  const m = (await act.textContent('body')).replace(/\s+/g, ' ')
+  if (!/Raise a dispute/.test(m)) console.log('!! the dispute modal is not titled "Raise a dispute"')
+  else console.log('   dispute modal opens with the right title')
+  await act.screenshot({ path: `${OUT}/account-dispute.png` })
 }
 
 console.log('\nerrors:', errors.length ? JSON.stringify([...new Set(errors)].slice(0, 8), null, 2) : 'none')

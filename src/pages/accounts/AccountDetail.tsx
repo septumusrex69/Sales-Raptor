@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   AlertTriangle, ArrowLeft, Check, CheckCircle2, Loader2, Mail, MessageCircle, MessageSquare,
-  Phone, Plus, Printer, ShieldAlert, StickyNote, X, XCircle,
+  Phone, Plus, Printer, Search, ShieldAlert, StickyNote, X, XCircle,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
@@ -21,6 +21,7 @@ import { styleFor, PROMISE_CHIP } from './timelineStyle'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
 import { EscalateModal } from './EscalateModal'
+import { TraceModal } from './TraceModal'
 import { fetchQueries, type AccountQuery } from '../../lib/accountQueries'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { PhoneLink } from '../../components/PhoneLink'
@@ -62,7 +63,8 @@ export function AccountDetail() {
   const noteRef = useRef<HTMLTextAreaElement>(null)
   const [promiseOpen, setPromiseOpen] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)
-  const [escalating, setEscalating] = useState(false)
+  const [disputing, setDisputing] = useState(false)
+  const [tracing, setTracing] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -287,7 +289,8 @@ export function AccountDetail() {
         onEmail={emailContact ? () => setComposeTo(emailContact.value) : undefined}
         onNote={() => { setTab('Overview'); setNoteOpen(true); setTimeout(() => noteRef.current?.focus(), 0) }}
         onPromise={() => { setTab('Overview'); setPromiseOpen(true) }}
-        onEscalate={() => setEscalating(true)}
+        onDispute={() => setDisputing(true)}
+        onTrace={() => setTracing(true)}
       />
 
       <OutcomeOutstanding queries={queries} accountId={account.id}
@@ -375,13 +378,22 @@ export function AccountDetail() {
         </div>
       )}
 
-      {escalating && (
+      {disputing && (
         <EscalateModal
           accountId={account.id}
           users={users}
           clientLiaison={clientLiaison}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
-          onClose={() => setEscalating(false)}
+          onClose={() => setDisputing(false)}
+          onDone={reload}
+        />
+      )}
+
+      {tracing && (
+        <TraceModal
+          accountId={account.id}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setTracing(false)}
           onDone={reload}
         />
       )}
@@ -435,13 +447,14 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, onEmail, onNote, onPromise, onEscalate }: {
+function ActionBar({ callNumber, onEmail, onNote, onPromise, onDispute, onTrace }: {
   /** The account's own number. Absent only when there is no phone number on file. */
   callNumber?: string
   onEmail?: () => void
   onNote: () => void
   onPromise: () => void
-  onEscalate: () => void
+  onDispute: () => void
+  onTrace: () => void
 }) {
   const soon = 'Not built yet — needs a provider connected and a decision on whether it charges the debtor.'
   return (
@@ -465,9 +478,15 @@ function ActionBar({ callNumber, onEmail, onNote, onPromise, onEscalate }: {
         title={onEmail ? 'Send from your connected mailbox' : 'No email address on this account yet'} />
       <Action icon={StickyNote} label="Add Note" onClick={onNote} title="Write on the timeline" />
       <Action icon={Check} label="Promise to Pay" onClick={onPromise} title="Record what they agreed to" primary />
-      {/* The front door to the query system: raising a dispute is what escalating an account IS. */}
-      <Action icon={ShieldAlert} label="Escalate" onClick={onEscalate}
-        title="Raise a query or dispute and give it to someone" />
+      {/*
+        The front door to the dispute system. It said "Escalate", which described what happens to
+        the record rather than what happened on the phone -- a collector who has just been told
+        "I don't owe this" is looking for the word the debtor used, not for a workflow verb.
+      */}
+      <Action icon={ShieldAlert} label="Dispute" onClick={onDispute}
+        title="The debtor disputes this account — raise it and give it to someone" />
+      <Action icon={Search} label="Trace" onClick={onTrace}
+        title="Search for the debtor at XDS and record the trace on the account" />
     </div>
   )
 }

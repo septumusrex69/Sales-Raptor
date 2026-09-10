@@ -27,7 +27,11 @@ const OUTCOME_CHIP: Record<QueryOutcome, string> = {
 }
 
 /**
- * Queries and disputes on this account.
+ * Disputes on this account.
+ *
+ * A DEBTOR who says something is wrong has a dispute; a CLIENT who asks us something has a query.
+ * The firm draws that line so "there's a query on this account" stops being ambiguous about who
+ * is unhappy, and everything this panel shows is the debtor's side.
  *
  * Shown, never enforced: an open dispute does not stop the collector doing anything, it just
  * means they should know about it before they phone. What the business does about a dispute is
@@ -53,7 +57,7 @@ export function QueryPanel({ accountId, queries, users, actor, onChange, busy, r
   return (
     <Card>
       <div className="flex items-center justify-between gap-2 mb-3">
-        <h3 className="text-[11px] uppercase tracking-wide text-slate-400">Queries &amp; disputes</h3>
+        <h3 className="text-[11px] uppercase tracking-wide text-slate-400">Disputes</h3>
         <button onClick={() => setAdding((v) => !v)} className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
           {adding ? <><X size={12} /> Cancel</> : <><Plus size={12} /> Raise one</>}
         </button>
@@ -153,7 +157,7 @@ function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, cli
           disabled={busy}
           onChange={(e) => run(() => updateQuery(q.id, { ownerId: e.target.value || null }, {
             ...ctx,
-            note: `Query given to ${users.find((u) => u.id === e.target.value)?.name ?? 'nobody'}.`,
+            note: `Dispute given to ${users.find((u) => u.id === e.target.value)?.name ?? 'nobody'}.`,
           }))}
           className="flex-1 min-w-0 text-[11px] rounded border border-slate-200 px-1.5 py-1 bg-white"
         >

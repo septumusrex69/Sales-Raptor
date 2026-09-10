@@ -1,0 +1,67 @@
+/**
+ * Tracing a debtor through XDS.
+ *
+ * XDS is a registered credit bureau, so a search there is Annexure B item 4(c) — "necessary
+ * registered credit bureau search", R16 excluding VAT, four a month. It is not a fee we invented:
+ * the gazette names the work.
+ *
+ * The portal has no way to be handed a debtor, so this cannot search on anyone's behalf. What it
+ * does is the paperwork either side of the search: it opens the portal, records that a search was
+ * done, and charges for it — so a collector stops having to remember to write up a trace they
+ * performed twenty minutes ago on another screen.
+ *
+ * Worth being plain about the trade: the charge is raised when the portal is OPENED, not when a
+ * result comes back, because nothing tells us what happened inside XDS. That is why the button
+ * asks first. A trace that earns nothing is still recorded, same as every other capped item.
+ */
+import { addNote } from './accountWorkspace'
+import { chargeItem, type ChargeResult } from './accountCharges'
+
+/** Item 4(c). Named once so the reason for the charge is greppable from the button. */
+export const TRACE_ITEM = '4c'
+export const TRACE_ACTION_CODE = 'TRC'
+
+/**
+ * The bureau's own portal.
+ *
+ * A constant rather than a setting because the firm uses one bureau. When a second one arrives
+ * this becomes a row in settings and the button grows a menu; until then a setting nobody ever
+ * changes is just somewhere else to look.
+ */
+export const XDS_PORTAL_URL = 'https://www.online.xds.co.za/Portal/Account/Login?ReturnUrl=%2FPortal%2F'
+
+/**
+ * Record a trace against an account: the fee, then the note.
+ *
+ * In that order deliberately. The note quotes what the charge came to, so a timeline entry can
+ * never claim a fee the ledger does not carry.
+ */
+export async function recordTrace(input: {
+  accountId: string
+  actor: { id: string | null; name: string | null }
+}): Promise<ChargeResult> {
+  const charge = await chargeItem({
+    accountId: input.accountId,
+    itemId: TRACE_ITEM,
+    actionCode: TRACE_ACTION_CODE,
+    description: 'Credit bureau search (XDS)',
+    createdBy: input.actor.id,
+  })
+  await addNote({
+    accountId: input.accountId,
+    body: traceNote(charge),
+    authorName: input.actor.name,
+    createdBy: input.actor.id,
+  })
+  return charge
+}
+
+/** What the timeline says happened. */
+export function traceNote(charge: ChargeResult): string {
+  const earned = charge.reason === 'charged'
+    ? `Charged R${charge.exclVat.toFixed(2)} plus VAT under item 4(c).`
+    : charge.reason === 'monthly-limit'
+      ? 'Not charged — four bureau searches have already been charged this month.'
+      : 'Not charged — the account is at the Annexure B fee ceiling.'
+  return `Trace done — credit bureau search through XDS. ${earned}`
+}

@@ -92,7 +92,7 @@ export function QueriesQueue() {
       <Card padded={false}>
         {shown.length === 0 ? (
           <p className="text-sm text-slate-400 py-12 text-center">
-            {scope === 'Mine' ? 'Nothing is with you.' : 'No open queries.'}
+            {scope === 'Mine' ? 'Nothing is with you.' : 'No open disputes.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -100,7 +100,7 @@ export function QueriesQueue() {
               <thead>
                 <tr className="text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-200">
                   <th className="text-left px-4 py-2.5 font-medium">Debtor</th>
-                  <th className="text-left px-4 py-2.5 font-medium">Query</th>
+                  <th className="text-left px-4 py-2.5 font-medium">Dispute</th>
                   <th className="text-left px-4 py-2.5 font-medium">Owner</th>
                   <th className="text-left px-4 py-2.5 font-medium">Sitting with</th>
                   <th className="text-right px-4 py-2.5 font-medium">Chase</th>
