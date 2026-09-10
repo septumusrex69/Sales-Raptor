@@ -171,6 +171,38 @@ export async function fetchOpenQueries(): Promise<QueueRow[]> {
 }
 
 /**
+ * Every dispute in the book, resolved ones included.
+ *
+ * The queue asks for open work; the board is a picture of the whole thing, and a Resolved column
+ * with nothing in it is a column that teaches people the board is broken. Closed disputes are
+ * capped at the recent ones — the board is for working, not for archaeology, and a year of
+ * resolved rows would push the live columns off the screen.
+ */
+export async function fetchAllQueries(closedLimit = 40): Promise<QueueRow[]> {
+  const [open, closed] = await Promise.all([
+    supabase.from('account_queries')
+      .select('*, debtor_accounts(account_number, debtor_first_name, debtor_surname, company_id)')
+      .eq('status', 'open').order('raised_at', { ascending: true }),
+    supabase.from('account_queries')
+      .select('*, debtor_accounts(account_number, debtor_first_name, debtor_surname, company_id)')
+      .eq('status', 'closed').order('closed_at', { ascending: false }).limit(closedLimit),
+  ])
+  for (const r of [open, closed]) if (r.error) throw new Error(r.error.message)
+  return [...(open.data ?? []), ...(closed.data ?? [])].map(toQueueRow)
+}
+
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+function toQueueRow(r: any): QueueRow {
+  const a = r.debtor_accounts ?? {}
+  return {
+    ...toQuery(r),
+    accountNumber: a.account_number ?? null,
+    debtorName: [a.debtor_first_name, a.debtor_surname].filter(Boolean).join(' ') || 'Unnamed debtor',
+    companyId: a.company_id ?? null,
+  }
+}
+
+/**
  * Raising a query charges the debtor under Annexure B item 3.
  *
  * Item 3 is "other necessary expenses not specifically provided for" — R25 excluding VAT on the

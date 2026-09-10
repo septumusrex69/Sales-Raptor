@@ -403,13 +403,40 @@ await cq.screenshot({ path: `${OUT}/client-queries.png` })
   }
 }
 
-// The Communications queue.
+// The disputes board -- same shape as the Deals board, which is what the firm asked for.
 const queue = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
 await queue.route(`**://${REF}.supabase.co/**`, serve)
 await queue.addInitScript(seed, { ref: REF, user: USER })
 await queue.goto(`${ORIGIN}/queries`, { waitUntil: 'networkidle' })
-await queue.waitForTimeout(1200)
-await queue.screenshot({ path: `${OUT}/queries-queue.png` })
+await queue.waitForTimeout(1400)
+const boardText = (await queue.textContent('body')).replace(/\s+/g, ' ')
+for (const col of ['With the agent', 'With the client liaison', 'With the client', 'Resolved']) {
+  if (!boardText.includes(col)) console.log(`!! disputes board is missing the "${col}" column`)
+}
+for (const kpi of ['Total Disputes', 'Open', 'Chase overdue', 'Oldest open']) {
+  if (!boardText.includes(kpi)) console.log(`!! disputes board is missing the "${kpi}" figure`)
+}
+// A placeholder is not in textContent, so ask the input itself.
+if (await queue.locator('input[placeholder^="Search disputes"]').count() === 0) {
+  console.log('!! no search box on the disputes board')
+}
+if (!/Disputes/.test(await queue.textContent('h1, header') ?? '')) console.log('!! the page is not headed "Disputes"')
+await queue.screenshot({ path: `${OUT}/disputes-board.png` })
+// And the list view the firm asked for beside the board.
+const listBtn = queue.getByTitle('List')
+if (await listBtn.count() === 0) console.log('!! no list/board switch on the disputes board')
+else {
+  await listBtn.first().click()
+  await queue.waitForTimeout(600)
+  const listText = (await queue.textContent('body')).replace(/\s+/g, ' ')
+  const headers = await queue.locator('table thead th').allTextContents()
+  const wanted = ['Debtor', 'Dispute', 'Owner', 'Sitting with', 'Chase', 'Age']
+  const missing = wanted.filter((w) => !headers.some((h) => h.trim() === w))
+  if (missing.length) console.log(`!! the list view is missing columns: ${missing.join(', ')}`)
+  else if (!/With the (agent|client)/.test(listText)) console.log('!! the list view shows no stage chips')
+  else console.log('   disputes board and list both render')
+  await queue.screenshot({ path: `${OUT}/disputes-list.png` })
+}
 
 // Settings -> Data Import, where the new "Update debtor details" card lives.
 const settings = await browser.newPage({ viewport: { width: 1440, height: 1000 } })

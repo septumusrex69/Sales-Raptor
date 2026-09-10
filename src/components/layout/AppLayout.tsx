@@ -21,7 +21,7 @@ const TITLES: { test: RegExp; title: string }[] = [
   { test: /^\/reps\/[^/]+$/, title: 'Rep Performance' },
   { test: /^\/accounts\/[^/]+$/, title: 'Account' },
   { test: /^\/accounts/, title: 'Accounts' },
-  { test: /^\/queries/, title: 'Queries & disputes' },
+  { test: /^\/queries/, title: 'Disputes' },
 ]
 
 export function AppLayout() {
