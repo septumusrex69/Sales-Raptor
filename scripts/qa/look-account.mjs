@@ -487,9 +487,11 @@ else {
   const modal = (await act.textContent('body')).replace(/\s+/g, ' ')
   const named = /item 4\(c\)/.test(modal)
   const priced = /R16\.00 plus VAT/.test(modal)
+  // The four-a-month allowance is switched off, so the modal must not promise one.
   const capped = /four a month/.test(modal)
-  console.log(`   trace modal names the item: ${named}, the fee: ${priced}, the monthly cap: ${capped}`)
-  if (!named || !priced || !capped) console.log('!! the trace modal does not say what it will charge')
+  console.log(`   trace modal names the item: ${named}, the fee: ${priced}`)
+  if (!named || !priced) console.log('!! the trace modal does not say what it will charge')
+  if (capped) console.log('!! the trace modal still promises a monthly cap that is not enforced')
   await act.screenshot({ path: `${OUT}/account-trace.png` })
   const cancel = act.locator('[data-modal-open="true"]').getByRole('button', { name: /^Cancel$/ })
   if (await cancel.count()) await cancel.first().click()

@@ -2,8 +2,10 @@
  * Tracing a debtor through XDS.
  *
  * XDS is a registered credit bureau, so a search there is Annexure B item 4(c) — "necessary
- * registered credit bureau search", R16 excluding VAT, four a month. It is not a fee we invented:
- * the gazette names the work.
+ * registered credit bureau search", R16 excluding VAT. It is not a fee we invented: the gazette
+ * names the work. The gazette's four-a-month allowance is not enforced (see
+ * ENFORCE_MONTHLY_LIMITS): one account can carry a company and several sureties, and each of them
+ * is a separate person to find.
  *
  * The portal has no way to be handed a debtor, so this cannot search on anyone's behalf. What it
  * does is the paperwork either side of the search: it opens the portal, records that a search was

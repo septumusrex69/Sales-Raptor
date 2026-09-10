@@ -71,8 +71,8 @@ export function TraceModal({ accountId, actor, onClose, onDone }: {
             This opens the XDS portal in a new tab and records a credit bureau search on this account.
           </p>
           <p className="text-sm text-slate-500 mt-2">
-            A search is Annexure B item 4(c){fee !== null && <> — <span className="font-medium text-slate-700">R{fee.toFixed(2)} plus VAT</span></>}, up to four a month.
-            Past that, or past the fee ceiling, the trace is still recorded but earns nothing.
+            A search is Annexure B item 4(c){fee !== null && <> — <span className="font-medium text-slate-700">R{fee.toFixed(2)} plus VAT</span></>}.
+            Past the fee ceiling the trace is still recorded but earns nothing.
           </p>
           <p className="text-xs text-slate-400 mt-3">
             XDS cannot be handed a debtor, so you will need to search for them once it opens.

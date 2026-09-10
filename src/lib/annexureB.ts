@@ -523,13 +523,37 @@ export const ENFORCE_ITEM_TOTALS = false
  * prices as a total returns only its remainder.
  */
 /**
+ * Whether the per-month allowances bind.
+ *
+ * Two items carry one: a credit bureau search (four a month) and a non-email electronic
+ * communication (ten). Enforced from the day the Trace button was built until Bredell Ferreira
+ * instructed otherwise on 10 September 2026.
+ *
+ * The reason is worth recording, because it is not "the firm wants more fees". The gazette counts
+ * per ACCOUNT and the work happens per PERSON: one account can carry a company plus several
+ * sureties, and tracing four of them exhausts a month's allowance on a single afternoon's work
+ * that was entirely necessary. The limit as written does not contemplate a multi-debtor account.
+ *
+ * What this costs, said plainly: Raptor no longer refuses to charge a fifth search in a month, so
+ * whether a charge was necessary is now a question for the people doing the work and for the fee
+ * ledger that records every one of them, not for this function. The items 1–7 CEILING is
+ * untouched and still binds — an account stops earning at R1,225 however many searches it takes.
+ *
+ * A flag rather than a deletion, same as ENFORCE_ITEM_TOTALS: the limits stay in the schedules
+ * where the gazette put them, and flipping this back restores them with no other change. The
+ * better answer, when there is a debtor-level record to hang it on, is to count per person rather
+ * than per account — which is what the gazette's four probably meant.
+ */
+export const ENFORCE_MONTHLY_LIMITS = false
+
+/**
  * How many times an item may be charged in a calendar month, or null where it is uncapped.
  *
- * Two items carry one: a credit bureau search (four) and a non-email electronic communication
- * (ten). The gazette words them per month rather than as a total, so unlike item 3 the allowance
- * comes back every month and cannot be spent for good.
+ * The gazette words these per month rather than as a total, so unlike item 3 the allowance comes
+ * back every month and cannot be spent for good.
  */
 export function monthlyLimit(itemId: string, schedule: AnnexureBSchedule = ANNEXURE_B_2026): number | null {
+  if (!ENFORCE_MONTHLY_LIMITS) return null
   return schedule.items.find((i) => i.id === itemId)?.maxPerMonth ?? null
 }
 
