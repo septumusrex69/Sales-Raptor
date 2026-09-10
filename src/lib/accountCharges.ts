@@ -24,7 +24,7 @@
  * nobody can prove was worked.
  */
 import { supabase } from './supabase'
-import { itemTotalRemaining, monthlyLimit, monthlyRoom, recoverableFee, roundToCents, scheduleFor } from './annexureB'
+import { itemAmountFor, itemTotalRemaining, monthlyLimit, monthlyRoom, recoverableFee, roundToCents, scheduleFor } from './annexureB'
 
 export interface ChargeResult {
   /** Excluding VAT. Zero where a cap left no room. */
@@ -51,6 +51,12 @@ export async function chargeItem(input: {
   actionCode: string
   description: string
   createdBy?: string | null
+  /**
+   * How many units of the item this one charge covers — four bureau searches on an account with
+   * a company and three sureties. One row at four times the rate, not four rows: a statement is
+   * read by a debtor, and four identical lines is arithmetic homework.
+   */
+  quantity?: number
   /** Defaults to now. Passed in by tests. */
   at?: Date
 }): Promise<ChargeResult> {
@@ -73,7 +79,9 @@ export async function chargeItem(input: {
   const spentOnItem = Number(data?.spent_on_item ?? 0)
   const towardsCeiling = Number(data?.towards_ceiling ?? 0)
 
+  const quantity = Math.max(1, Math.floor(input.quantity ?? 1))
   const remainingOnItem = itemTotalRemaining(input.itemId, spentOnItem, schedule)
+  const asked = itemAmountFor(input.itemId, quantity, spentOnItem, schedule)
 
   /*
    * The monthly allowance, for the two items that have one.
@@ -99,7 +107,7 @@ export async function chargeItem(input: {
     room = monthlyRoom(limit, count ?? 0)
   }
 
-  const recoverable = room > 0 ? recoverableFee(remainingOnItem, towardsCeiling, capital, schedule) : 0
+  const recoverable = room > 0 ? recoverableFee(asked, towardsCeiling, capital, schedule) : 0
 
   const exclVat = roundToCents(recoverable)
   const vat = roundToCents(exclVat * VAT_RATE)
@@ -118,6 +126,9 @@ export async function chargeItem(input: {
     amount_excl_vat: exclVat,
     vat_rate: VAT_RATE * 100,
     vat_amount: vat,
+    // The unit count this row stands for. Named for SMS, which needed it first; it means the
+    // same thing here — how many of the item one line covers.
+    segments: quantity,
     counts_toward_fee_cap: true,
     // False where a cap left nothing: the action happened, it just earned nothing. The balance
     // engine already excludes unbilled rows, and the timeline already draws them as "not charged".

@@ -41,29 +41,45 @@ export const XDS_PORTAL_URL = 'https://www.online.xds.co.za/Portal/Account/Login
 export async function recordTrace(input: {
   accountId: string
   actor: { id: string | null; name: string | null }
+  /** How many searches were actually run. One account can carry a company and its sureties. */
+  count?: number
 }): Promise<ChargeResult> {
+  const count = Math.max(1, Math.floor(input.count ?? 1))
   const charge = await chargeItem({
     accountId: input.accountId,
     itemId: TRACE_ITEM,
     actionCode: TRACE_ACTION_CODE,
-    description: 'Credit bureau search (XDS)',
+    description: traceDescription(count),
+    quantity: count,
     createdBy: input.actor.id,
   })
   await addNote({
     accountId: input.accountId,
-    body: traceNote(charge),
+    body: traceNote(charge, count),
     authorName: input.actor.name,
     createdBy: input.actor.id,
   })
   return charge
 }
 
+/**
+ * How the charge reads on the statement.
+ *
+ * One line for the whole sitting. Four sureties traced in one afternoon is "Credit bureau search
+ * (XDS) x 4" at four times the rate, not four identical rows the debtor has to add up to work out
+ * what they were charged for.
+ */
+export function traceDescription(count: number): string {
+  return count > 1 ? `Credit bureau search (XDS) x ${count}` : 'Credit bureau search (XDS)'
+}
+
 /** What the timeline says happened. */
-export function traceNote(charge: ChargeResult): string {
+export function traceNote(charge: ChargeResult, count = 1): string {
+  const searches = count > 1 ? `${count} credit bureau searches` : 'credit bureau search'
   const earned = charge.reason === 'charged'
     ? `Charged R${charge.exclVat.toFixed(2)} plus VAT under item 4(c).`
     : charge.reason === 'monthly-limit'
-      ? 'Not charged — four bureau searches have already been charged this month.'
+      ? 'Not charged — the monthly allowance for item 4(c) is spent.'
       : 'Not charged — the account is at the Annexure B fee ceiling.'
-  return `Trace done — credit bureau search through XDS. ${earned}`
+  return `Trace done — ${searches} through XDS. ${earned}`
 }

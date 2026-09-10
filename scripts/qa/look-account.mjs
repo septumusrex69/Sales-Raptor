@@ -510,30 +510,45 @@ act.on('popup', async (p) => { await p.waitForLoadState().catch(() => {}); opene
 const trace = act.getByRole('button', { name: /^Trace$/ })
 if (await trace.count() === 0) console.log('!! Trace button not found')
 else {
-  if (await act.locator('[data-modal-open="true"]').count()) console.log('!! something is already modal before Trace is clicked')
   await trace.first().click()
-  await act.waitForTimeout(1200)
-  if (await act.locator('[data-modal-open="true"]').count()) console.log('!! Trace still opens a confirmation dialog')
-  else console.log('   Trace charged straight away, no dialog')
+  await act.waitForTimeout(1000)
 
   console.log(`   opened: ${opened ?? '(no new tab)'}`)
   if (!opened || !/xds\.co\.za/.test(opened)) console.log('!! Trace did not open the XDS portal')
 
+  // The count is asked AFTER the portal opens, and nothing may be charged until it is answered.
+  const ask = act.locator('[data-modal-open="true"]')
+  if (await ask.count() === 0) console.log('!! Trace did not ask how many searches were run')
+  else console.log('   asked how many traces, with XDS already open')
+  if (posted.some((p) => p.table === 'account_fees')) console.log('!! a fee was raised before the count was given')
+  else console.log('   nothing charged before answering')
+
+  await act.screenshot({ path: `${OUT}/account-trace-count.png` })
+  const four = ask.getByRole('button', { name: /^4$/ })
+  if (await four.count() === 0) console.log('!! no count buttons in the trace prompt')
+  else await four.first().click()
+  await act.waitForTimeout(1000)
+
   const fee = posted.find((p) => p.table === 'account_fees')
   const note = posted.find((p) => p.table === 'account_notes')
+  // Four searches are ONE row at four times the rate, not four rows.
+  const feeRows = posted.filter((p) => p.table === 'account_fees')
+  if (feeRows.length !== 1) console.log(`!! ${feeRows.length} fee rows written for one trace sitting, expected 1`)
   if (!fee) console.log('!! no fee was raised')
   else {
     const body = JSON.parse(fee.body)
-    const ok = body.annexure_item === '4c' && Number(body.amount_excl_vat) === 16 && body.action_code === 'TRC'
-    console.log(`   fee: item ${body.annexure_item}, R${body.amount_excl_vat} excl VAT, code ${body.action_code}`)
-    if (!ok) console.log('!! the trace fee is not item 4(c) at R16 under TRC')
+    console.log(`   fee: "${body.description}" — item ${body.annexure_item}, R${body.amount_excl_vat} excl VAT, ${body.segments} units, code ${body.action_code}`)
+    if (body.annexure_item !== '4c' || body.action_code !== 'TRC') console.log('!! the trace fee is not item 4(c) under TRC')
+    if (Number(body.amount_excl_vat) !== 64) console.log('!! four searches did not come to 4 x R16')
+    if (Number(body.segments) !== 4) console.log('!! the row does not record how many searches it covers')
+    if (!/x 4/.test(body.description)) console.log('!! the statement line does not say how many searches it covers')
   }
   if (!note) console.log('!! nothing was written to the timeline')
-  else if (!/Trace done/.test(JSON.parse(note.body).body)) console.log('!! the timeline note does not say a trace was done')
+  else if (!/Trace done — 4 credit bureau searches/.test(JSON.parse(note.body).body)) console.log('!! the timeline note does not say how many searches were done')
   else console.log(`   note: ${JSON.parse(note.body).body}`)
 
   const after = (await act.textContent('body')).replace(/\s+/g, ' ')
-  if (!/XDS opened . charged R16\.00/.test(after)) console.log('!! the button does not report what it charged')
+  if (!/4 searches . charged R64\.00/.test(after)) console.log('!! the button does not report what it charged')
   else console.log('   the button reports the charge next to itself')
   await act.screenshot({ path: `${OUT}/account-trace.png` })
 }

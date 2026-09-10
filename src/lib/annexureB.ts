@@ -569,6 +569,30 @@ export function monthlyRoom(limit: number | null, billedThisMonth: number): numb
   return Math.max(0, limit - billedThisMonth)
 }
 
+/**
+ * What `quantity` units of an item come to, before the items 1–7 ceiling is applied.
+ *
+ * Most items are charged per occurrence, so this is the rate times the count: four bureau
+ * searches on one account are four times R16, and they belong on ONE statement line rather than
+ * four identical rows a debtor has to add up themselves.
+ *
+ * An item the gazette words as a TOTAL for the account cannot exceed what is left of that total
+ * however many units are claimed — which only bites while ENFORCE_ITEM_TOTALS is on.
+ */
+export function itemAmountFor(
+  itemId: string,
+  quantity: number,
+  alreadyChargedUnderItem: number,
+  schedule: AnnexureBSchedule = ANNEXURE_B_2026,
+): number {
+  const item = schedule.items.find((i) => i.id === itemId)
+  if (!item || item.amount === null) return 0
+  const units = Math.max(1, Math.floor(quantity))
+  const asked = roundToCents(item.amount * units)
+  if (!item.isTotal || !ENFORCE_ITEM_TOTALS) return asked
+  return roundToCents(Math.max(0, Math.min(asked, item.amount - alreadyChargedUnderItem)))
+}
+
 export function itemTotalRemaining(
   itemId: string,
   alreadyChargedUnderItem: number,

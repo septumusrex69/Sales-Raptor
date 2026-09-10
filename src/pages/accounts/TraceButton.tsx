@@ -1,19 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, Search } from 'lucide-react'
+import { Modal } from '../../components/ui/Modal'
 import { recordTrace, XDS_PORTAL_URL } from '../../lib/accountTrace'
+import { scheduleFor } from '../../lib/annexureB'
 import type { ChargeResult } from '../../lib/accountCharges'
 
+/** Enough for a company and everyone who signed surety for it. */
+const COUNTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
 /**
- * Trace a debtor: one click here, then the login on the XDS side.
+ * Trace a debtor: XDS opens on the click, and Raptor asks afterwards how many searches were run.
  *
- * This asked "are you sure?" first, because the charge is raised when the portal OPENS rather
- * than when a result comes back — XDS never tells us what happened inside it. The firm's answer
- * was that a collector tracing all day does not need to confirm a R16 fee they meant to raise,
- * and they are right that a dialog on every trace is a tax on the common case.
+ * Afterwards is the only moment the answer exists. An account can carry a company and three
+ * sureties, and nobody knows before opening the portal how many of them they will end up looking
+ * for — asking first would be asking someone to predict their own next ten minutes.
  *
- * So the safeguard moved rather than disappearing: the outcome is shown, in words, next to the
- * button that caused it. A mis-tap is a fee you can see and a note on the timeline you can read,
- * which is a better safety net than a dialog people learn to dismiss without reading.
+ * So the click does the fast thing (open XDS) and nothing else; the charge waits for the count.
+ * Closing without answering charges nothing, which is the right outcome for a portal opened by
+ * mistake and for a search that turned out not to be needed.
  */
 export function TraceButton({ accountId, actor, className, onDone }: {
   accountId: string
@@ -22,54 +26,93 @@ export function TraceButton({ accountId, actor, className, onDone }: {
   className: string
   onDone: () => Promise<void>
 }) {
-  const [state, setState] = useState<
-    { kind: 'idle' } | { kind: 'working' } | { kind: 'done'; charge: ChargeResult } | { kind: 'error'; message: string }
-  >({ kind: 'idle' })
+  const [asking, setAsking] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<{ charge: ChargeResult; count: number } | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => () => {
     if (resetTimer.current) clearTimeout(resetTimer.current)
   }, [])
 
-  async function go() {
-    if (state.kind === 'working') return
+  const rate = scheduleFor(new Date()).items.find((i) => i.id === '4c')?.amount ?? 0
+
+  function open() {
     /*
-     * Opened FIRST, inside the click, and never after the await. Safari only allows a new tab
-     * while it can still see the tap that asked for one; open it after a round trip to Postgres
-     * and the tab is silently blocked, which looks exactly like a broken button.
+     * Opened inside the click and before anything else. Safari only allows a new tab while it can
+     * still see the tap that asked for one; open it after any await and the tab is silently
+     * blocked, which looks exactly like a broken button.
      */
     window.open(XDS_PORTAL_URL, '_blank', 'noopener,noreferrer')
-    setState({ kind: 'working' })
+    setResult(null)
+    setError(null)
+    setAsking(true)
+  }
+
+  async function charge(count: number) {
+    setBusy(true)
+    setError(null)
     try {
-      const charge = await recordTrace({ accountId, actor })
-      setState({ kind: 'done', charge })
+      const c = await recordTrace({ accountId, actor, count })
+      setResult({ charge: c, count })
+      setAsking(false)
       await onDone()
+      if (resetTimer.current) clearTimeout(resetTimer.current)
+      resetTimer.current = setTimeout(() => setResult(null), 10000)
     } catch (e) {
-      setState({ kind: 'error', message: e instanceof Error ? e.message : String(e) })
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
     }
-    if (resetTimer.current) clearTimeout(resetTimer.current)
-    resetTimer.current = setTimeout(() => setState({ kind: 'idle' }), 8000)
   }
 
   return (
     <span className="inline-flex flex-col items-start">
-      <button
-        type="button"
-        onClick={() => void go()}
-        disabled={state.kind === 'working'}
-        title="Open XDS and record a credit bureau search on this account — Annexure B item 4(c)"
-        className={`${className} disabled:opacity-60`}
-      >
-        {state.kind === 'working' ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} Trace
+      <button type="button" onClick={open} title="Open XDS and record a credit bureau search — Annexure B item 4(c)" className={className}>
+        <Search size={14} /> Trace
       </button>
-      {state.kind === 'done' && (
+
+      {result && (
         <span className="text-[11px] text-[var(--c-green)]">
-          {state.charge.reason === 'charged'
-            ? `XDS opened · charged R${state.charge.exclVat.toFixed(2)} + VAT`
-            : 'XDS opened · recorded, no charge (fee ceiling)'}
+          {result.charge.reason === 'charged'
+            ? `XDS opened · ${result.count > 1 ? `${result.count} searches · ` : ''}charged R${result.charge.exclVat.toFixed(2)} + VAT`
+            : 'Recorded · no charge (fee ceiling)'}
         </span>
       )}
-      {state.kind === 'error' && <span className="text-[11px] text-red-600">{state.message}</span>}
+
+      {asking && (
+        <Modal title="How many traces did you do?" onClose={() => setAsking(false)} width={460}>
+          <p className="text-sm text-slate-500">
+            XDS is open in a new tab. One account can carry a company and its sureties, so tell us how many
+            searches you ran and they go on the statement as a single line.
+          </p>
+          <div className="flex flex-wrap gap-2 mt-4">
+            {COUNTS.map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => void charge(n)}
+                disabled={busy}
+                className="w-11 h-11 rounded-lg border border-slate-200 text-sm font-semibold text-slate-700 bg-white hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50"
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-slate-400 mt-3">
+            {rate > 0 && <>R{rate.toFixed(2)} plus VAT each, under Annexure B item 4(c). </>}
+            Nothing is charged until you choose.
+          </p>
+          {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
+          <div className="flex items-center justify-end gap-2 mt-5">
+            {busy && <Loader2 size={15} className="animate-spin text-slate-400" />}
+            <button onClick={() => setAsking(false)} disabled={busy} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50">
+              Didn&apos;t trace
+            </button>
+          </div>
+        </Modal>
+      )}
     </span>
   )
 }
