@@ -73,7 +73,7 @@ email and user routes already use 10. The URLs below are unchanged by this.
 
 | Route | Who | Does |
 |---|---|---|
-| `POST /api/buzzbox/connect` | Administrator | Verifies the login, resolves the organisation (auto when the login sees exactly one; `409` with a list to pick from otherwise), stores credentials. |
+| `POST /api/buzzbox/connect` | Administrator | Verifies the login, resolves the organisation (auto when the login sees exactly one; `409` with a list to pick from otherwise), stores credentials. See §7 for the DomainAdmin case. |
 | `GET /api/buzzbox/status` | anyone signed in | `{ connected, identity, organisationId, organisationName, extension }` — never the password. |
 | `GET /api/buzzbox/extensions` | anyone signed in | The organisation's extensions for the picker. |
 | `POST /api/buzzbox/call` | anyone signed in | `{ to, reference? }` → rings the caller's extension, then `to`. `400` if they have no extension. |
@@ -119,7 +119,30 @@ The spec does not say what format `CallSetup.to` expects. The API addresses PSTN
 send the national form (`0821234567`) instead — no code change needed. Short numbers (six
 digits or fewer) are passed through untouched as internal extensions.
 
-## 7. Follow-ups worth doing
+## 7. What a live account taught us
+
+Confirmed against the firm's own BuzzBox on 2026-09-10.
+
+**A DomainAdmin login cannot list organisations.** `GET /pabx-organisations` checks read access
+on each organisation in the domain and fails the whole call at the first one the login does not
+hold, rather than returning a filtered list:
+
+```
+User at IP ... with identity ...@... and user Id 9269 is not allowed READ access to
+PabxOrganisation with id 2583. Users roles are [DomainAdmin]
+Users positions are [Administrator in org 2741]
+```
+
+The refusal names the organisations the login *does* hold, so `listReadableOrganisations()`
+reads them back out of the message and fetches each one directly - one position connects
+automatically, several become the `409` picker, and an id that turns out to be unreadable is
+dropped. Nothing is trusted on the error string's say-so: every id it yields is fetched
+normally, and only an organisation BuzzBox actually serves is stored. An admin can still skip
+all of it by typing the Organisation ID into the connect form.
+
+`scripts/qa/check-buzzbox.mjs` covers this (run with `node --experimental-strip-types`).
+
+## 8. Follow-ups worth doing
 
 - **Call outcome and duration.** `CallSetup.webhookUrl` lets BuzzBox call us back about the
   call; its payload is undocumented, so it is not wired. Capturing a sample payload from a real

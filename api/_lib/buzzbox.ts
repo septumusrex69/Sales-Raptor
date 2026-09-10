@@ -175,3 +175,58 @@ export function normaliseDialNumber(raw: string, format: 'e164' | 'local' = (pro
   if (national) return '27' + national.slice(1)
   return digits
 }
+
+/**
+ * Pull the organisation ids BuzzBox names as this login's own positions out of a refusal.
+ *
+ * A DomainAdmin can *see* every organisation in the domain but may only read the ones it
+ * holds a position in, so `GET /pabx-organisations` fails outright instead of returning a
+ * filtered list. The refusal names both the organisation it stopped on and the caller's real
+ * positions:
+ *
+ *     User at IP 35.181.5.208 with identity camille@example.co.za and user Id 9269 is not
+ *     allowed READ access to PabxOrganisation with id 2583. Users roles are [DomainAdmin]
+ *     Users positions are [Administrator in org 2741]
+ *
+ * Those positions are the answer to the question the failed call was asking. This is parsing
+ * an error string, so nothing is trusted on its say-so: every id it returns is fetched
+ * normally afterwards, and only an organisation BuzzBox actually serves is ever used. Only
+ * the text inside `positions are [...]` is read, so the id that was *refused* can't be
+ * mistaken for one that was granted.
+ */
+export function organisationsFromPermissionError(message: string): number[] {
+  const positions = /positions are \[([^\]]*)\]/i.exec(message)
+  if (!positions) return []
+  const ids = [...positions[1].matchAll(/\bin org (\d+)/gi)].map((m) => Number(m[1]))
+  return [...new Set(ids)].filter((n) => Number.isInteger(n) && n > 0)
+}
+
+/**
+ * The organisations this login can actually work with.
+ *
+ * Normally that is just what `/pabx-organisations` returns. When BuzzBox refuses to list at
+ * all because the login outranks its own positions (see above), fall back to fetching the
+ * organisations it named — which turns a dead end into the ordinary "here are your
+ * organisations" answer the caller was after.
+ */
+export async function listReadableOrganisations(jwt: BuzzBoxJwt): Promise<PabxOrganisation[]> {
+  try {
+    return await listOrganisations(jwt)
+  } catch (err) {
+    if (!(err instanceof BuzzBoxError)) throw err
+    const own = organisationsFromPermissionError(err.message)
+    if (own.length === 0) throw err
+    const fetched = await Promise.all(
+      own.map((id) =>
+        getOrganisation(jwt, id)
+          .then((org) => ({ ...org, organisationId: org.organisationId ?? id }))
+          .catch(() => null),
+      ),
+    )
+    const readable = fetched.filter((o): o is PabxOrganisation => o !== null)
+    // Nothing readable means the positions were a red herring; the original refusal is the
+    // more honest thing to show.
+    if (readable.length === 0) throw err
+    return readable
+  }
+}

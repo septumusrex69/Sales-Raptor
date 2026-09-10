@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { adminClient, callerIsAdmin, requireCaller } from '../auth.js'
 import { credentialsKeyProblem, encrypt } from '../crypto.js'
-import { BuzzBoxError, getOrganisation, listOrganisations, login } from '../buzzbox.js'
+import { BuzzBoxError, getOrganisation, listReadableOrganisations, login } from '../buzzbox.js'
 
 /**
  * Connect the firm's BuzzBox account. One set of credentials for the whole organisation
@@ -57,7 +57,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const org = await getOrganisation(jwt, orgId)
       orgName = org.name ?? null
     } else {
-      const orgs = await listOrganisations(jwt)
+      const orgs = await listReadableOrganisations(jwt)
       if (orgs.length === 0) {
         res.status(400).json({ error: 'That BuzzBox login has no PABX organisation attached to it.' })
         return
@@ -89,7 +89,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json({ ok: true, identity: identity.trim(), organisationId: orgId, organisationName: orgName })
   } catch (err) {
     if (err instanceof BuzzBoxError) {
-      res.status(err.status === 401 ? 400 : 502).json({ error: err.message })
+      // 401/403 are things the admin can act on -- wrong password, or a login BuzzBox will not
+      // let read the organisation it was pointed at. Reporting those as 502 blames the network
+      // for a problem sitting in the form.
+      const actionable = err.status === 401 || err.status === 403
+      const hint = err.status === 403 && !organisationId
+        ? ' If you know it, enter the Organisation ID above to connect that organisation directly.'
+        : ''
+      res.status(actionable ? 400 : 502).json({ error: err.message + hint })
       return
     }
     res.status(502).json({ error: 'Could not reach BuzzBox. Please try again.' })
