@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock, Users2, Link2, Unlink, Trash2, Inbox, Plus } from 'lucide-react'
+import { UserPlus, ArrowLeft, ArrowRight, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock, Users2, Link2, Unlink, Trash2, Inbox, Plus } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
@@ -25,6 +25,9 @@ import { ClientQueries } from './ClientQueries'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
 import { LogHandoverModal } from '../../components/companies/LogHandoverModal'
+import { AddDebtorModal } from '../../components/companies/AddDebtorModal'
+import { createDebtorAccount, fetchAccountReferences } from '../../lib/accountBook'
+import { toAccountRow, type NewDebtorInput } from '../../lib/newDebtor'
 import { HandoverBook } from '../../components/companies/HandoverBook'
 import type { Company, Contact } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
@@ -59,6 +62,12 @@ export function CompanyDetail() {
   const [noteOpen, setNoteOpen] = useState(false)
   const [courtesyCallOpen, setCourtesyCallOpen] = useState(false)
   const [handoverOpen, setHandoverOpen] = useState(false)
+  // Adding a debtor by hand. The references are fetched when the modal opens rather than on every
+  // page load: they are only ever used to propose the next number in the client's series.
+  const [debtorOpen, setDebtorOpen] = useState(false)
+  const [debtorRefs, setDebtorRefs] = useState<string[]>([])
+  const [debtorBusy, setDebtorBusy] = useState(false)
+  const [debtorError, setDebtorError] = useState<string | null>(null)
   const [ownerOpen, setOwnerOpen] = useState(false)
   const [dealOpen, setDealOpen] = useState(false)
   const [followUpOpen, setFollowUpOpen] = useState(false)
@@ -241,7 +250,27 @@ export function CompanyDetail() {
           )}
           {isClient && (
             <button onClick={() => setHandoverOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              <Inbox size={13} /> Log Handover Received
+              <Inbox size={13} /> Import Handover
+            </button>
+          )}
+          {/*
+            Beside the import, because they are the two ways an account gets into the book and a
+            person looking for one will look for the other. The import takes a batch; this takes
+            the single account a client phones in, which until now had no way in at all.
+          */}
+          {isClient && (
+            <button
+              onClick={async () => {
+                setDebtorError(null)
+                // Fetched BEFORE the modal opens, not alongside it. The reference it proposes is
+                // worked out once when the form mounts, so references arriving a moment later
+                // would leave the field blank — which is exactly what it did.
+                setDebtorRefs(await fetchAccountReferences(company.id).catch(() => []))
+                setDebtorOpen(true)
+              }}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              <UserPlus size={13} /> Add Debtor
             </button>
           )}
           <button onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
@@ -621,6 +650,28 @@ export function CompanyDetail() {
           onSave={(text) => addActivity({ type: 'Courtesy Call', subject: `Courtesy call — ${company.name}`, notes: text || undefined, companyId: company.id })}
         />
       )}
+      {debtorOpen && (
+        <AddDebtorModal
+          companyName={company.name}
+          existingReferences={debtorRefs}
+          busy={debtorBusy}
+          error={debtorError}
+          onClose={() => setDebtorOpen(false)}
+          onSave={async (input: NewDebtorInput) => {
+            setDebtorBusy(true); setDebtorError(null)
+            try {
+              const account = await createDebtorAccount(toAccountRow(input, company.id, null))
+              setDebtorOpen(false)
+              navigate(`/accounts/${account.id}`)
+            } catch (e) {
+              setDebtorError(e instanceof Error ? e.message : String(e))
+            } finally {
+              setDebtorBusy(false)
+            }
+          }}
+        />
+      )}
+
       {handoverOpen && (
         <LogHandoverModal
           companyName={company.name}

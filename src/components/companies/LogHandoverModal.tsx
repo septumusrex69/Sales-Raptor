@@ -40,11 +40,11 @@ export function LogHandoverModal({
   }
 
   return (
-    <Modal title="Log Handover Received" onClose={onClose} width={480}>
+    <Modal title="Import Handover" onClose={onClose} width={480}>
       <form onSubmit={submit}>
         <p className="text-sm text-slate-500 mb-4">
           One batch from {companyName}. Capital only — Annex B fees and interest are added as the accounts are worked,
-          not here.
+          not here. The accounts themselves arrive with the client's handover sheet; this records the batch they came in.
         </p>
 
         <div className="grid grid-cols-2 gap-3">

@@ -118,6 +118,9 @@ const accruals = []
 const companies = [{
   id: COMPANY, name: 'ABSA Technology Finance Solutions', industry: 'Financial Services',
   status: 'Won', owner_id: USER, account_owner_id: USER, city: 'Johannesburg', province: 'Gauteng', country: 'South Africa',
+  // A client code is what makes a company a CLIENT rather than a prospect, and the client-only
+  // actions are hidden without it.
+  code: 'ABS',
   created_at: '2024-01-11', website: null, size: null, notes: null,
 }]
 const profiles = [{
@@ -305,7 +308,7 @@ for (const tab of ['Overview', 'Transactions', 'Documents']) {
   })
   if (wrapped) console.log('   ' + wrapped)
   if (tab === 'Transactions') {
-    const line = text.match(/Interest, \d+ days? — accruing to today/)
+    const line = text.match(/Interest, \d+ to \d+ \w+ — still accruing/)
     console.log(line ? `   statement carries the open period: "${line[0]}"` : '!! no accruing-interest line on the statement')
   }
 }
@@ -334,6 +337,49 @@ await cq.evaluate(() => {
 })
 await cq.waitForTimeout(500)
 await cq.screenshot({ path: `${OUT}/client-queries.png` })
+
+/*
+ * The two doors into the book, on the client page.
+ *
+ * "Import Handover" takes a batch; "Add Debtor" takes the single account a client phones in. The
+ * second is the one worth exercising here — it is the only place in the app that opens a ledger
+ * without a Swordfish file behind it, and the modal has to propose the next reference in this
+ * client's own series rather than leave it to whoever is typing.
+ */
+{
+  const labels = await cq.evaluate(() =>
+    [...document.querySelectorAll('button')].map((b) => (b.textContent ?? '').trim()).filter(Boolean))
+  console.log(`   client actions: ${labels.includes('Import Handover') ? 'Import Handover ✓' : '!! no Import Handover'} · ${labels.includes('Add Debtor') ? 'Add Debtor ✓' : '!! no Add Debtor'}`)
+
+  const add = cq.getByRole('button', { name: 'Add Debtor' })
+  if (await add.count()) {
+    await add.first().click()
+    await cq.waitForTimeout(900)
+    await cq.screenshot({ path: `${OUT}/add-debtor.png` })
+    const ref = await cq.evaluate(() => {
+      const labelled = [...document.querySelectorAll('label')].find((l) => /Our reference/i.test(l.textContent ?? ''))
+      return labelled?.querySelector('input')?.value ?? null
+    })
+    console.log(`   reference proposed: ${ref === null ? '!! field not found' : JSON.stringify(ref)}`)
+
+    // Saving an empty form must report every problem at once, not one per attempt.
+    const submit = cq.getByRole('button', { name: /Add debtor$/ })
+    await cq.evaluate(() => {
+      for (const i of document.querySelectorAll('input')) {
+        if (i.type !== 'date') { i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })) }
+      }
+    })
+    await submit.first().click()
+    await cq.waitForTimeout(400)
+    const errs = await cq.evaluate(() =>
+      [...document.querySelectorAll('p')].map((p) => (p.textContent ?? '').trim())
+        .filter((t) => /required|surname|more than nothing/i.test(t)))
+    // The date input is left alone (a date field cannot hold an empty string here), so two of
+    // the three required fields are being tested.
+    console.log(`   cleared form reports ${errs.length} problem(s) at once`)
+    await cq.screenshot({ path: `${OUT}/add-debtor-errors.png` })
+  }
+}
 
 // The Communications queue.
 const queue = await browser.newPage({ viewport: { width: 1440, height: 1000 } })

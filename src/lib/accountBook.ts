@@ -315,3 +315,30 @@ export async function fetchBookSummary(companyId?: string): Promise<BookSummary>
       && Math.round(Number(r.commission_rate) * 10000) !== Math.round(Number(r.commission_rate_expected) * 10000)).length,
   }
 }
+
+/**
+ * Open an account by hand.
+ *
+ * The one write in this file. Everything else here reads: the ledgers are the collections
+ * engine's to fill, and the import writes the book. But an account phoned in by a client has no
+ * file behind it and no import to wait for, so it is created here — and only ever created. Once
+ * it exists it is worked like any other, and its ledgers fill the same way.
+ */
+export async function createDebtorAccount(row: Record<string, unknown>): Promise<DebtorAccount> {
+  const { data, error } = await supabase.from('debtor_accounts').insert(row).select('*').single()
+  if (error) {
+    // The reference is unique per client, and colliding with one is the mistake a person is most
+    // likely to make here — so it is named rather than handed back as a constraint string.
+    if (error.code === '23505') throw new Error('That reference is already used on another account.')
+    throw new Error(error.message)
+  }
+  return toAccount(data)
+}
+
+/** Every account number already on a client, so the next in their series can be proposed. */
+export async function fetchAccountReferences(companyId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('debtor_accounts').select('account_number').eq('company_id', companyId).limit(2000)
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r: { account_number: string | null }) => r.account_number).filter((r): r is string => !!r)
+}

@@ -48,7 +48,7 @@ export function HandoverBook({ company, onLog }: { company: Company; onLog: () =
         subtitle={rows.length === 1 ? '1 batch received' : `${rows.length} batches received`}
         action={
           <button onClick={onLog} className="text-xs font-medium text-brand-600 hover:underline">
-            Log Handover
+            Import Handover
           </button>
         }
       />
