@@ -16,6 +16,7 @@ interface ProfileRow {
   email_signature_image_url: string | null
   email_signature_image_width: number | null
   email_signature_image_align: 'left' | 'center' | 'right' | null
+  buzzbox_extension: string | null
 }
 
 function mapProfileRow(row: ProfileRow): User {
@@ -32,6 +33,7 @@ function mapProfileRow(row: ProfileRow): User {
     emailSignatureImageUrl: row.email_signature_image_url ?? undefined,
     emailSignatureImageWidth: row.email_signature_image_width ?? undefined,
     emailSignatureImageAlign: row.email_signature_image_align ?? undefined,
+    buzzboxExtension: row.buzzbox_extension ?? undefined,
   }
 }
 

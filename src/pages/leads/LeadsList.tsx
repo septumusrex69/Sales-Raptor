@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
+import { useBuzzBox } from '../../store/BuzzBoxContext'
 import { canEditOwned, canReassign as canReassignRole, useDefaultOwnerFilter, isAssignableOwner} from '../../lib/permissions'
 import { Card } from '../../components/ui/Card'
 import { StatusBadge, ServiceBadge, ClassificationBadge } from '../../components/ui/Badge'
@@ -75,6 +76,7 @@ export function LeadsList() {
   const store = useAppStore()
   const { leads, deals, activities, users, userById, updateLead, rejectLead, deleteLead, convertLeadToClient, addActivity } = store
   const { currentUser } = useAuth()
+  const buzzbox = useBuzzBox()
   const canReassign = canReassignRole(currentUser)
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const navigate = useNavigate()
@@ -249,7 +251,12 @@ export function LeadsList() {
   function logQuickAction(lead: Lead, type: 'Call' | 'Email' | 'WhatsApp') {
     addActivity({ type, subject: `${type} with ${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId })
     updateLead(lead.id, { lastContactAt: new Date().toISOString() })
-    if (type === 'Call' && lead.phone) window.open(`tel:${lead.phone}`)
+    if (type === 'Call' && lead.phone) {
+      // With BuzzBox connected the PABX rings the rep's extension and bridges the call; the
+      // Activity above is already the log of it. Otherwise hand off to the device's dialler.
+      if (buzzbox.canDial) void buzzbox.dial(lead.phone, `${lead.firstName} ${lead.lastName} (lead)`).then((r) => { if (!r.ok) alert(r.error) })
+      else window.open(`tel:${lead.phone}`)
+    }
     if (type === 'Email' && lead.email) window.open(`mailto:${lead.email}`)
     if (type === 'WhatsApp' && lead.mobile) window.open(`https://wa.me/${lead.mobile.replace(/\D/g, '')}`)
   }

@@ -396,6 +396,8 @@ export interface User {
   emailSignatureImageUrl?: string
   emailSignatureImageWidth?: number
   emailSignatureImageAlign?: 'left' | 'center' | 'right'
+  /** This person's BuzzBox PABX extension; set, click-to-dial rings it before bridging the call. */
+  buzzboxExtension?: string
 }
 
 export type TeamKind = 'Sales' | 'Communications'

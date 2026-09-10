@@ -7,6 +7,7 @@ import { DashboardHero } from '../../components/dashboard/DashboardHero'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { StatusBadge, StageBadge, ClassificationBadge } from '../../components/ui/Badge'
 import { InlineSelect } from '../../components/ui/InlineSelect'
+import { PhoneLink } from '../../components/PhoneLink'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { AddDealModal, QuickLogModal, ScheduleFollowUpModal, ScheduleMeetingModal } from '../../components/QuickModals'
@@ -274,9 +275,7 @@ export function CompanyDetail() {
           <div>
             <p className="text-xs text-slate-400 mb-0.5">Phone</p>
             {company.phone ? (
-              <a href={`tel:${company.phone}`} className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600">
-                <Phone size={13} /> {company.phone}
-              </a>
+              <PhoneLink number={company.phone} className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600" log={{ label: company.name, companyId: company.id }} />
             ) : (
               <span className="text-slate-300">—</span>
             )}
@@ -327,14 +326,12 @@ export function CompanyDetail() {
                 </Link>
                 <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
                   {c.phone && (
-                    <a href={`tel:${c.phone}`} className="inline-flex items-center gap-1 hover:text-brand-600">
-                      <Phone size={11} /> {c.phone}
-                    </a>
+                    <PhoneLink number={c.phone} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, contactId: c.id, companyId: company.id }} />
                   )}
                   {c.mobile && (
-                    <a href={`tel:${c.mobile}`} className="inline-flex items-center gap-1 hover:text-brand-600">
+                    <PhoneLink number={c.mobile} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, contactId: c.id, companyId: company.id }}>
                       <Phone size={11} /> {c.mobile} <span className="text-slate-300">mobile</span>
-                    </a>
+                    </PhoneLink>
                   )}
                   {c.email && (
                     <span className="inline-flex items-center gap-1">

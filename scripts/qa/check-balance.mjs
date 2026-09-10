@@ -223,6 +223,53 @@ const empty = { payments: [], fees: [], interest: [] }
 }
 
 /*
+ * Where an interest line is dated, and what it says.
+ *
+ * Interest is earned across a period and posted at the close of it, which is where Swordfish puts
+ * it and where a debtor looks for it. It used to be dated at the START of the period, which put
+ * August's interest on 1 August, sorted it above the fees it had accrued on, and left a reissued
+ * statement not matching the original.
+ *
+ * The count is Swordfish's exclusive offset rather than a number of days: 1 September for 6
+ * covers to the 7th. It used to print as "6 days", which is the field read as if it meant what
+ * it says, and is what made a debtor ask why September only had six days in it.
+ */
+{
+  const line = (st, kind) => st.lines.find((l) => l.kind === kind)
+  const acc = (from, days, amount) => ({ from, days, amount })
+  const at = (asAt, interest) => buildStatement({
+    capitalHandedOver: 5000, handoverDate: '2026-01-10', interestRateAnnual: 24, accrueTo: asAt,
+    ledgers: { payments: [], fees: [], interest },
+  })
+
+  const posted = line(at('2026-09-09', [acc('2026-08-01', 30, 100)]), 'interest')
+  check('a posted accrual is dated at the end of its period', posted.date === '2026-08-31' ? 1 : 0, 1)
+  check('and names the period, not a day count', posted.description === 'Interest, 1 to 31 August' ? 1 : 0, 1)
+
+  const stub = line(at('2026-09-09', [acc('2026-09-01', 6, 3.71)]), 'interest')
+  check('the six-day September stub really covers seven days, to the 7th', stub.date === '2026-09-07' ? 1 : 0, 1)
+  check('and says so', stub.description === 'Interest, 1 to 7 September' ? 1 : 0, 1)
+
+  const crossing = line(at('2026-09-09', [acc('2026-07-20', 13, 9)]), 'interest')
+  check('a period crossing a month names both', crossing.description === 'Interest, 20 July to 2 August' ? 1 : 0, 1)
+
+  const oneDay = line(at('2026-09-09', [acc('2026-08-31', 0, 1)]), 'interest')
+  check('a single day is not written as a range', oneDay.description === 'Interest, 31 August' ? 1 : 0, 1)
+
+  /* Pull the statement mid-month and the days since the last posting are on the page, named. */
+  const mid = at('2026-09-07', [acc('2026-08-01', 30, 100)])
+  const open = line(mid, 'interest-accruing')
+  check('a statement pulled on the 7th shows the days since the last posting', open.date === '2026-09-07' ? 1 : 0, 1)
+  check('labelled with the period it covers', open.description === 'Interest, 1 to 7 September — still accruing' ? 1 : 0, 1)
+  check('and the two lines meet without a gap or an overlap', mid.lines.filter((l) => l.kind.startsWith('interest')).length, 2)
+
+  /* Where the posted stub already reaches the pull date there is nothing left running. */
+  const covered = at('2026-09-07', [acc('2026-09-01', 6, 3.71)])
+  check('nothing is still accruing when the posting already reaches the pull date',
+    covered.lines.filter((l) => l.kind === 'interest-accruing').length, 0)
+}
+
+/*
  * In duplum binds the settlement fee too.
  *
  * The cap used to be applied to the balance and then abandoned one line later: the receipt fee

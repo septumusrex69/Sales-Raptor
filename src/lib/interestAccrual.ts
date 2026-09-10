@@ -70,10 +70,21 @@ const round = (n: number) => Math.round(n * 100) / 100
 export function coveredTo(accruals: { from: string; days: number }[]): string | null {
   let latest: string | null = null
   for (const a of accruals) {
-    const end = addDays(a.from, Math.max(0, a.days))
+    const end = accrualEnd(a.from, a.days)
     if (!latest || end > latest) latest = end
   }
   return latest
+}
+
+/**
+ * The last day a single accrual covers.
+ *
+ * Split out of `coveredTo` so the statement can date a row at the end of the period it covers —
+ * which is where Swordfish posts it, and where a debtor expects to find it — without restating
+ * the exclusive-count convention somewhere else and letting the two drift apart.
+ */
+export function accrualEnd(from: string, days: number): string {
+  return addDays(from, Math.max(0, days))
 }
 
 /**

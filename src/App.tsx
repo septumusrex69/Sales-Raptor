@@ -3,6 +3,7 @@ import { Route, Routes } from 'react-router-dom'
 import { AppStoreProvider } from './store/AppStore'
 import { AuthProvider } from './store/AuthContext'
 import { ThemeProvider } from './store/ThemeContext'
+import { BuzzBoxProvider } from './store/BuzzBoxContext'
 import { RequireAuth } from './components/auth/RequireAuth'
 import { NewVersionWatcher } from './components/NewVersionWatcher'
 import { LoginPage } from './pages/auth/LoginPage'
@@ -39,6 +40,7 @@ function App() {
     <ThemeProvider>
       <AuthProvider>
         <AppStoreProvider>
+         <BuzzBoxProvider>
           <NewVersionWatcher />
           {/* A lazily-loaded route needs a boundary; the fallback is deliberately nothing, so a
               fast chunk does not flash a spinner on its way in. */}
@@ -73,6 +75,7 @@ function App() {
             </Route>
           </Routes>
           </Suspense>
+         </BuzzBoxProvider>
         </AppStoreProvider>
       </AuthProvider>
     </ThemeProvider>

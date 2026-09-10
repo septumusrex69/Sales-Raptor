@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Mail, Phone, StickyNote, Building2, Pencil } from 'lucide-react'
+import { ArrowLeft, Mail, StickyNote, Building2, Pencil } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { Avatar } from '../../components/ui/Avatar'
@@ -8,6 +8,7 @@ import { StageBadge } from '../../components/ui/Badge'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { EditContactModal } from '../../components/contacts/EditContactModal'
+import { PhoneLink } from '../../components/PhoneLink'
 import { companyById, formatCurrency, formatDate, formatDateTime, userById } from '../../data/mockData'
 
 export function ContactDetail() {
@@ -59,9 +60,12 @@ export function ContactDetail() {
                   </span>
                 )}
                 {(contact.phone || contact.mobile) && (
-                  <a href={`tel:${contact.phone ?? contact.mobile}`} className="inline-flex items-center gap-1 hover:text-brand-600">
-                    <Phone size={12} /> {contact.phone ?? contact.mobile}
-                  </a>
+                  <PhoneLink
+                    number={(contact.phone ?? contact.mobile)!}
+                    iconSize={12}
+                    className="inline-flex items-center gap-1 hover:text-brand-600"
+                    log={{ label: `${contact.firstName} ${contact.lastName}`, contactId: contact.id, companyId: contact.companyId }}
+                  />
                 )}
               </div>
             </div>

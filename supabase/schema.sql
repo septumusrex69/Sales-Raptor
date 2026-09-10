@@ -35,8 +35,13 @@ create table if not exists public.profiles (
   -- 'email-signatures' Storage bucket, laid out under the text signature at send time.
   email_signature_image_url text,
   email_signature_image_width integer,
-  email_signature_image_align text not null default 'left' check (email_signature_image_align in ('left', 'center', 'right'))
+  email_signature_image_align text not null default 'left' check (email_signature_image_align in ('left', 'center', 'right')),
+  -- This person's BuzzBox PABX extension (e.g. '201'). Click-to-dial rings this extension
+  -- first, then bridges it to the number clicked. Null means "use the device's own dialler".
+  buzzbox_extension text
 );
+-- Older databases were created before the column existed.
+alter table public.profiles add column if not exists buzzbox_extension text;
 
 -- Auto-create a profile the moment someone accepts a Supabase invite /
 -- signs in for the first time. The very first person ever to sign up
@@ -678,6 +683,26 @@ create table if not exists public.email_connections (
   updated_at timestamptz not null default now()
 );
 alter table public.email_connections enable row level security;
+
+-- ---------- BuzzBox (PABX click-to-dial) ----------
+-- One row for the whole firm: the BuzzBox login the CRM dials through. Same posture as
+-- email_connections -- RLS on, NO policies, so only the service key (api/buzzbox/*) can read
+-- it, and the password is AES-GCM encrypted on top with EMAIL_CREDENTIALS_KEY. Reps never
+-- see these credentials; each rep is tied to an extension via profiles.buzzbox_extension.
+--
+-- The security advisor's "RLS enabled, no policy" report on this table is expected. Do not
+-- resolve it by adding a policy.
+create table if not exists public.buzzbox_settings (
+  id smallint primary key default 1 check (id = 1),
+  identity text not null,
+  encrypted_password text not null,
+  organisation_id bigint not null,
+  organisation_name text,
+  connected_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.buzzbox_settings enable row level security;
 
 -- ---------- Email signature image storage ----------
 -- Public bucket (an outgoing email's <img> tag needs a URL any mail client
