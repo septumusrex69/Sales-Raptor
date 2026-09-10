@@ -1397,3 +1397,22 @@ alter table public.promises_to_pay
 alter table public.profiles drop constraint if exists profiles_role_check;
 alter table public.profiles add constraint profiles_role_check
   check (role in ('Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Agent', 'Read Only'));
+
+-- ---------- The collection commission, as charged ----------
+-- "All Payments Incl Balances" replaced "All Payments per Client" as the payments export. It is
+-- the only Swordfish report that carries the receipt fee actually charged on a payment, and the
+-- only one with a stable key per payment.
+--
+-- The commission matters because the gazetted maximum and the charged maximum are not the same
+-- number: Swordfish billed a maximum of R502 from December 2023 to March 2026 where Annexure B
+-- item 9 says R509. Recomputing history from the gazette would show a balance no debtor was ever
+-- billed, so the charged figure is stored and preferred where it exists.
+alter table public.account_payments
+  add column if not exists swordfish_payment_id text,
+  add column if not exists collection_commission numeric;
+
+-- Partial, so the many payments Raptor takes in itself — which have no Swordfish id — do not
+-- collide with each other on null.
+create unique index if not exists account_payments_swordfish_id_idx
+  on public.account_payments (swordfish_payment_id)
+  where swordfish_payment_id is not null;

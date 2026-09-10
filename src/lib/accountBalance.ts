@@ -30,8 +30,13 @@ import { receiptFee, settlementReceiptFee, roundToCents, scheduleFor, type Annex
 import { accrueToDate, coveredTo as lastCoveredDay } from './interestAccrual.ts'
 
 export interface LedgerLines {
-  /** Every payment received, oldest first. Reversed payments are excluded by the caller. */
-  payments: { date: string; amount: number; paidToClient?: boolean }[]
+  /**
+   * Every payment received, oldest first. Reversed payments are excluded by the caller.
+   *
+   * `commissionExclVat` is the receipt fee as Swordfish actually charged it. Where it is given it
+   * wins over the computed figure — see receiptFeeOn below for why that is the honest choice.
+   */
+  payments: { date: string; amount: number; paidToClient?: boolean; commissionExclVat?: number | null }[]
   /** Every fee raised. `inclVat` is what was actually charged. */
   fees: { date: string; description: string; exclVat: number; vat: number; billed: boolean }[]
   /** Every interest accrual period. */
@@ -118,13 +123,8 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
   const feeVat = roundToCents(chargedFees.reduce((t, f) => t + f.vat, 0))
   const payments = roundToCents(ledgers.payments.reduce((t, p) => t + p.amount, 0))
 
-  // Item 9 on each instalment, priced on the schedule in force the day it arrived — a payment
-  // taken in 2024 carries the R509 maximum, not today's R610.
   const receiptFees = roundToCents(
-    ledgers.payments.reduce(
-      (t, p) => t + roundToCents(receiptFee(p.amount, scheduleFor(p.date)) * (1 + vatRate)),
-      0,
-    ),
+    ledgers.payments.reduce((t, p) => t + receiptFeeOn(p, vatRate), 0),
   )
 
   // Interest between the last posted accrual and today. Computed, never written: see
@@ -211,6 +211,28 @@ function openAccrual(
     asAt: input.accrueTo,
   })
   return open ? { amount: open.amount, days: open.days, from: open.from } : none
+}
+
+/**
+ * The receipt fee on one payment, VAT included.
+ *
+ * Two sources, and the recorded one wins. Item 9 is 10% of the instalment capped by the schedule
+ * in force the day it arrived — a payment taken in 2024 carries the R509 maximum, not today's
+ * R610 — and that is what Raptor charges on anything it takes in itself.
+ *
+ * But the migrated book was not charged by Raptor. Swordfish billed those debtors at a maximum of
+ * R502 from December 2023 until the end of March 2026, seven rand under the gazetted figure,
+ * because the number was entered wrong. Recomputing history from the gazette would produce a
+ * balance the debtor was never billed and the client has never seen. So where the export tells us
+ * what was actually charged, that figure stands; the computed one is for payments taken from here
+ * on, and for the older export, which did not carry a commission at all.
+ */
+function receiptFeeOn(
+  p: { date: string; amount: number; commissionExclVat?: number | null },
+  vatRate: number,
+): number {
+  const excl = p.commissionExclVat ?? receiptFee(p.amount, scheduleFor(p.date))
+  return roundToCents(excl * (1 + vatRate))
 }
 
 export type StatementKind =
@@ -317,7 +339,9 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
       debit: 0,
       credit: p.amount,
     })
-    const fee = roundToCents(receiptFee(p.amount, schedule ?? scheduleFor(p.date)) * (1 + vatRate))
+    const fee = p.commissionExclVat != null
+      ? roundToCents(p.commissionExclVat * (1 + vatRate))
+      : roundToCents(receiptFee(p.amount, schedule ?? scheduleFor(p.date)) * (1 + vatRate))
     if (fee > 0) {
       pending.push({
         date: p.date,

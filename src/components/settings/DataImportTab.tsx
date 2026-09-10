@@ -103,7 +103,16 @@ const SOURCES = [
     required: false,
   },
   { key: 'accounts', label: 'Client Account Summary', hint: 'One row per debtor account. The spine of the import.', required: true },
-  { key: 'payments', label: 'All Payments per Client', hint: 'Every payment received, including client-direct.', required: true },
+  {
+    key: 'payments',
+    label: 'All Payments Incl Balances',
+    // Replaced "All Payments per Client", which is a strict subset of this one. The difference
+    // that matters is the collection commission: the receipt fee as actually charged appears in
+    // no other export, so without this file it can only be recomputed, and a recomputation from
+    // the gazette does not match what these debtors were billed.
+    hint: 'Every payment, the commission charged on it, and Swordfish\u2019s own balance.',
+    required: true,
+  },
   { key: 'actions', label: 'Actions performed per Client', hint: 'Every action and what it cost. The largest file by far.', required: true },
   { key: 'interest', label: 'Interest per Period', hint: 'Interest as accrued, one row per period.', required: true },
 ] as const

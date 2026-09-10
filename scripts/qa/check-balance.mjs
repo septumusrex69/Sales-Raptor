@@ -259,5 +259,52 @@ const empty = { payments: [], fees: [], interest: [] }
   check('and the balance is not capped', free.balance, 6000)
 }
 
+/*
+ * The receipt fee as charged, not as recomputed.
+ *
+ * Swordfish capped the commission at R502 from December 2023 to March 2026 — seven rand under the
+ * gazetted R509, because the figure was entered wrong. Those debtors were billed R502 and the
+ * client's records say R502, so an imported payment carrying a recorded commission has to use it.
+ * Figures below are real rows from the "All Payments Incl Balances" export.
+ */
+{
+  /* R803 paid, R80.30 charged: exactly 10%, under any cap. Computed and charged agree. */
+  const under = computeBalance({
+    capitalHandedOver: 0, handoverDate: '2024-01-01',
+    ledgers: { ...empty, payments: [{ date: '2024-05-30', amount: 803, commissionExclVat: 80.30 }] },
+  })
+  check('a commission under the cap matches the computed figure', under.receiptFees, 92.35)
+
+  /* R15,000 paid. Swordfish charged R502; the 2020 gazette says R509. The charged figure wins. */
+  const charged = computeBalance({
+    capitalHandedOver: 0, handoverDate: '2025-01-01',
+    ledgers: { ...empty, payments: [{ date: '2025-03-01', amount: 15000, commissionExclVat: 502 }] },
+  })
+  check('a capped commission uses what was actually charged', charged.receiptFees, 577.30)
+
+  /* The same payment with nothing recorded falls back to the gazette. */
+  const computed = computeBalance({
+    capitalHandedOver: 0, handoverDate: '2025-01-01',
+    ledgers: { ...empty, payments: [{ date: '2025-03-01', amount: 15000 }] },
+  })
+  check('with no recorded commission the gazette applies', computed.receiptFees, 585.35)
+  check('and the two differ by the seven rand plus VAT', computed.receiptFees - charged.receiptFees, 8.05)
+
+  /* An explicit zero is a real instruction — a waived fee — not a missing value. */
+  const waived = computeBalance({
+    capitalHandedOver: 1000, handoverDate: '2025-01-01',
+    ledgers: { ...empty, payments: [{ date: '2025-03-01', amount: 500, commissionExclVat: 0 }] },
+  })
+  check('a recorded zero commission charges nothing', waived.receiptFees, 0)
+
+  /* And it has to reach the statement, not just the totals. */
+  const s = buildStatement({
+    capitalHandedOver: 20000, handoverDate: '2025-01-01',
+    ledgers: { ...empty, payments: [{ date: '2025-03-01', amount: 15000, commissionExclVat: 502 }] },
+  })
+  const line = s.lines.find((l) => l.kind === 'receipt-fee')
+  check('the statement shows the charged fee', line.debit, 577.30)
+}
+
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)
 process.exit(failed ? 1 : 0)

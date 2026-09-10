@@ -175,6 +175,14 @@ export interface LedgerPayment {
   details: string | null
   paidToClient: boolean
   reversedAt: string | null
+  /**
+   * The receipt fee Swordfish actually charged on this payment, excluding VAT.
+   *
+   * Null on anything Raptor took in itself, and on payments migrated from the older export, which
+   * did not carry it. Where it is present it is preferred over the computed figure: it is what
+   * the debtor was billed and what the client's own records show.
+   */
+  collectionCommission: number | null
 }
 
 export interface LedgerFee {
@@ -228,7 +236,7 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
    */
   const [payments, fees, accruals] = await Promise.all([
     supabase.from('account_payments')
-      .select('id,received_at,amount,method,reference,details,paid_to_client,reversed_at')
+      .select('id,received_at,amount,method,reference,details,paid_to_client,reversed_at,collection_commission')
       .eq('account_id', accountId).order('received_at', { ascending: false }),
     supabase.from('account_fees')
       .select('id,incurred_at,description,amount_excl_vat,vat_amount,billed,action_code,segments,cancelled_at,performed_by')
@@ -251,6 +259,8 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
       details: r.details,
       paidToClient: !!r.paid_to_client,
       reversedAt: r.reversed_at,
+      collectionCommission: r.collection_commission === null || r.collection_commission === undefined
+        ? null : Number(r.collection_commission),
     })),
     fees: (fees.data ?? []).map((r: any) => ({
       id: r.id,

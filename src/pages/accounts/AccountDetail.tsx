@@ -127,7 +127,12 @@ export function AccountDetail() {
       ledgers: {
         payments: ledgers.payments
           .filter((p) => !p.reversedAt)
-          .map((p) => ({ date: p.receivedAt.slice(0, 10), amount: p.amount, paidToClient: p.paidToClient })),
+          .map((p) => ({
+            date: p.receivedAt.slice(0, 10),
+            amount: p.amount,
+            paidToClient: p.paidToClient,
+            commissionExclVat: p.collectionCommission,
+          })),
         fees: ledgers.fees.map((f) => ({
           date: f.incurredAt.slice(0, 10),
           description: f.description,
