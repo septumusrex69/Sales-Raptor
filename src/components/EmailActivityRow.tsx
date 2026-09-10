@@ -190,7 +190,13 @@ export function EmailActivityRow({
               </Link>
             </p>
           )}
-          {body && <p className="text-[13.5px] leading-relaxed text-slate-600 whitespace-pre-wrap max-w-[70ch]">{body}</p>}
+          {/*
+            The body is the part somebody actually reads, so it is sized to be read rather than
+            to match the metadata around it. 13.5px in a muted grey is fine for a subject line
+            and thin going for a paragraph on a tablet held at arm's length. The 70ch measure
+            stays: a line much longer than that is harder to read, not easier.
+          */}
+          {body && <p className="text-[15px] leading-relaxed text-slate-700 whitespace-pre-wrap max-w-[70ch]">{body}</p>}
           <div className="flex flex-wrap items-center gap-2 mt-3">
             {attachments.map((name, i) => (
               <button

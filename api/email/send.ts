@@ -4,6 +4,7 @@ import MailComposer from 'nodemailer/lib/mail-composer'
 import { adminClient, requireCaller } from '../_lib/auth.js'
 import { decrypt, credentialsKeyProblem } from '../_lib/crypto.js'
 import { appendToSent } from '../_lib/emailSync.js'
+import { SIGNATURE_CID, composeBody, fetchSignatureImage, signatureHtml } from '../_lib/signature.js'
 
 /** Sends an email through the caller's own connected mailbox via SMTP, with their saved signature appended. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -51,13 +52,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const signatureImageWidth = (profile?.email_signature_image_width as number | null | undefined) ?? 160
   const signatureImageAlign = (profile?.email_signature_image_align as 'left' | 'center' | 'right' | null | undefined) ?? 'left'
 
-  let signatureHtml = ''
-  if (signatureText) signatureHtml += signatureText.replace(/\n/g, '<br>')
-  if (signatureImageUrl) {
-    const margin = signatureImageAlign === 'right' ? 'margin:8px 0 0 auto' : signatureImageAlign === 'center' ? 'margin:8px auto 0' : 'margin:8px 0 0 0'
-    signatureHtml += `<img src="${signatureImageUrl}" width="${signatureImageWidth}" style="display:block;max-width:100%;${margin}" alt="" />`
-  }
-  const fullHtml = signatureHtml ? `${bodyHtml}<br><br>${signatureHtml}` : bodyHtml
+  /*
+   * The signature image travels INSIDE the message.
+   *
+   * Linked from a URL it is a remote image, which Outlook and Gmail refuse to load until the
+   * reader asks — so the block carrying the sender's face, numbers and branding shows up as a
+   * grey box on every first email to somebody new. Fetched here and attached, the client already
+   * has the bytes and just draws them.
+   *
+   * If the fetch fails the message still goes, with the image linked as before. A picture is not
+   * worth failing a send over.
+   */
+  const image = signatureImageUrl ? { width: signatureImageWidth, align: signatureImageAlign } : null
+  const embedded = signatureImageUrl ? await fetchSignatureImage(signatureImageUrl) : null
+  const imageSrc = signatureImageUrl ? (embedded ? `cid:${SIGNATURE_CID}` : signatureImageUrl) : null
+  const attachments = embedded
+    ? [{ filename: 'signature', content: embedded.content, contentType: embedded.contentType, cid: SIGNATURE_CID }]
+    : undefined
+
+  const fullHtml = composeBody(bodyHtml, signatureHtml(signatureText, image, imageSrc))
 
   let sentMessageId: string | null = null
   try {
@@ -67,7 +80,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       secure: (conn.smtp_port as number) === 465,
       auth: { user: conn.email as string, pass: decrypt(conn.encrypted_password as string) },
     })
-    const info = await transporter.sendMail({ from: conn.email as string, to, subject, html: fullHtml })
+    const info = await transporter.sendMail({ from: conn.email as string, to, subject, html: fullHtml, attachments })
     // Kept so an inbound reply carrying this value in In-Reply-To can be threaded back to the
     // exact deal the message was sent from. Without it a reply can only be matched on the
     // sender's address, which finds the client but not which of its deals is being discussed.
@@ -81,7 +94,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // person's own mail client too, not just the CRM timeline. A failure here doesn't undo the
   // send above -- the message already went out -- so it's never surfaced as a send error.
   try {
-    const raw = await new MailComposer({ from: conn.email as string, to, subject, html: fullHtml }).compile().build()
+    // The Sent copy carries the same attachment, so the person's own mail client shows the
+    // message exactly as the recipient got it rather than with a broken image in it.
+    const raw = await new MailComposer({ from: conn.email as string, to, subject, html: fullHtml, attachments }).compile().build()
     await appendToSent(
       { email: conn.email as string, imap_host: conn.imap_host as string, imap_port: conn.imap_port as number, encrypted_password: conn.encrypted_password as string },
       raw,
