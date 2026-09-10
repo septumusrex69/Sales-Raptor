@@ -9,7 +9,6 @@
  * Run: node --experimental-strip-types scripts/qa/check-buzzbox.mjs
  */
 import {
-  BuzzBoxError,
   listReadableOrganisations,
   organisationsFromPermissionError,
   normaliseDialNumber,

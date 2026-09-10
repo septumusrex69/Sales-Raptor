@@ -198,9 +198,26 @@ const OPS = {
 
 const posted = []
 const serve = (route) => {
-  if (route.request().method() === 'POST') posted.push(route.request().url())
   const url = new URL(route.request().url())
   const table = url.pathname.replace('/rest/v1/', '')
+  const wantsObject = /vnd.pgrst.object/.test(route.request().headers()['accept'] ?? '')
+  const json = (body, status = 200) => route.fulfill({
+    status, contentType: 'application/json',
+    headers: { 'content-range': '0-0/1', 'access-control-allow-origin': '*' },
+    body: JSON.stringify(body),
+  })
+
+  // The fee engine asks Postgres for three numbers rather than pulling the ledger.
+  if (table === 'rpc/account_charge_basis') {
+    return json({ capital: 18500, spent_on_item: 0, towards_ceiling: 0 })
+  }
+  if (route.request().method() === 'POST') {
+    posted.push({ table, body: route.request().postData() ?? '' })
+    // Echo the insert back as the stored row: addNote reads what it wrote.
+    const sent = JSON.parse(route.request().postData() || '{}')
+    const row = { id: `qa-${posted.length}`, created_at: new Date().toISOString(), ...(Array.isArray(sent) ? sent[0] : sent) }
+    return json(wantsObject ? row : [row], 201)
+  }
   let rows = TABLES[table] ?? []
 
   // Embeds are resolved BEFORE filtering, because PostgREST allows a filter on an embedded
@@ -479,29 +496,47 @@ console.log(`   action bar says "Dispute": ${/Dispute/.test(bar)}`)
 if (/Escalate/.test(bar)) console.log('!! the old "Escalate" wording is still on the page')
 if (!/Trace/.test(bar)) console.log('!! no Trace button in the action bar')
 
+/*
+ * Trace is one click and no confirmation, so what matters is that the click actually does all
+ * three things -- opens XDS, raises the fee, writes the note -- and says which.
+ */
+let opened = null
+// The container cannot reach xds.co.za, and a popup that fails to load reports its URL as
+// chrome-error -- which would hide whether the right address was ever asked for. Stubbing the
+// portal makes the popup's own URL the thing under test.
+await act.context().route('**xds.co.za/**', (r) =>
+  r.fulfill({ status: 200, contentType: 'text/html', body: '<title>XDS (stub)</title>' }))
+act.on('popup', async (p) => { await p.waitForLoadState().catch(() => {}); opened = p.url(); void p.close() })
 const trace = act.getByRole('button', { name: /^Trace$/ })
 if (await trace.count() === 0) console.log('!! Trace button not found')
 else {
+  if (await act.locator('[data-modal-open="true"]').count()) console.log('!! something is already modal before Trace is clicked')
   await trace.first().click()
-  await act.waitForTimeout(600)
-  const modal = (await act.textContent('body')).replace(/\s+/g, ' ')
-  const named = /item 4\(c\)/.test(modal)
-  const priced = /R16\.00 plus VAT/.test(modal)
-  // The four-a-month allowance is switched off, so the modal must not promise one.
-  const capped = /four a month/.test(modal)
-  console.log(`   trace modal names the item: ${named}, the fee: ${priced}`)
-  if (!named || !priced) console.log('!! the trace modal does not say what it will charge')
-  if (capped) console.log('!! the trace modal still promises a monthly cap that is not enforced')
+  await act.waitForTimeout(1200)
+  if (await act.locator('[data-modal-open="true"]').count()) console.log('!! Trace still opens a confirmation dialog')
+  else console.log('   Trace charged straight away, no dialog')
+
+  console.log(`   opened: ${opened ?? '(no new tab)'}`)
+  if (!opened || !/xds\.co\.za/.test(opened)) console.log('!! Trace did not open the XDS portal')
+
+  const fee = posted.find((p) => p.table === 'account_fees')
+  const note = posted.find((p) => p.table === 'account_notes')
+  if (!fee) console.log('!! no fee was raised')
+  else {
+    const body = JSON.parse(fee.body)
+    const ok = body.annexure_item === '4c' && Number(body.amount_excl_vat) === 16 && body.action_code === 'TRC'
+    console.log(`   fee: item ${body.annexure_item}, R${body.amount_excl_vat} excl VAT, code ${body.action_code}`)
+    if (!ok) console.log('!! the trace fee is not item 4(c) at R16 under TRC')
+  }
+  if (!note) console.log('!! nothing was written to the timeline')
+  else if (!/Trace done/.test(JSON.parse(note.body).body)) console.log('!! the timeline note does not say a trace was done')
+  else console.log(`   note: ${JSON.parse(note.body).body}`)
+
+  const after = (await act.textContent('body')).replace(/\s+/g, ' ')
+  if (!/XDS opened . charged R16\.00/.test(after)) console.log('!! the button does not report what it charged')
+  else console.log('   the button reports the charge next to itself')
   await act.screenshot({ path: `${OUT}/account-trace.png` })
-  const cancel = act.locator('[data-modal-open="true"]').getByRole('button', { name: /^Cancel$/ })
-  if (await cancel.count()) await cancel.first().click()
-  else console.log('!! no Cancel in the trace modal')
-  await act.waitForTimeout(400)
 }
-// Nothing may be charged by opening the modal alone.
-const chargedOnOpen = posted.some((p) => /account_fees/.test(p))
-if (chargedOnOpen) console.log('!! a fee was raised just by opening the trace modal')
-else console.log('   opening the modal charged nothing')
 
 const disputeBtn = act.getByRole('button', { name: /^Dispute$/ })
 if (await disputeBtn.count() === 0) console.log('!! Dispute button not found')

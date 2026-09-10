@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   AlertTriangle, ArrowLeft, Check, CheckCircle2, Loader2, Mail, MessageCircle, MessageSquare,
-  Phone, Plus, Printer, Search, ShieldAlert, StickyNote, X, XCircle,
+  Phone, Plus, Printer, ShieldAlert, StickyNote, X, XCircle,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
@@ -21,7 +21,7 @@ import { styleFor, PROMISE_CHIP } from './timelineStyle'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
 import { EscalateModal } from './EscalateModal'
-import { TraceModal } from './TraceModal'
+import { TraceButton } from './TraceButton'
 import { fetchQueries, type AccountQuery } from '../../lib/accountQueries'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { PhoneLink } from '../../components/PhoneLink'
@@ -64,7 +64,6 @@ export function AccountDetail() {
   const [promiseOpen, setPromiseOpen] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)
   const [disputing, setDisputing] = useState(false)
-  const [tracing, setTracing] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -290,7 +289,9 @@ export function AccountDetail() {
         onNote={() => { setTab('Overview'); setNoteOpen(true); setTimeout(() => noteRef.current?.focus(), 0) }}
         onPromise={() => { setTab('Overview'); setPromiseOpen(true) }}
         onDispute={() => setDisputing(true)}
-        onTrace={() => setTracing(true)}
+        accountId={account.id}
+        actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+        onTraced={reload}
       />
 
       <OutcomeOutstanding queries={queries} accountId={account.id}
@@ -389,15 +390,6 @@ export function AccountDetail() {
         />
       )}
 
-      {tracing && (
-        <TraceModal
-          accountId={account.id}
-          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
-          onClose={() => setTracing(false)}
-          onDone={reload}
-        />
-      )}
-
       {composeTo && (
         <ComposeEmailModal
           to={composeTo}
@@ -447,14 +439,17 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, onEmail, onNote, onPromise, onDispute, onTrace }: {
+function ActionBar({ callNumber, onEmail, onNote, onPromise, onDispute, accountId, actor, onTraced }: {
   /** The account's own number. Absent only when there is no phone number on file. */
   callNumber?: string
   onEmail?: () => void
   onNote: () => void
   onPromise: () => void
   onDispute: () => void
-  onTrace: () => void
+  /** The account being worked, and who is working it — the Trace button charges a fee. */
+  accountId: string
+  actor: { id: string | null; name: string | null }
+  onTraced: () => Promise<void>
 }) {
   const soon = 'Not built yet — needs a provider connected and a decision on whether it charges the debtor.'
   return (
@@ -485,8 +480,7 @@ function ActionBar({ callNumber, onEmail, onNote, onPromise, onDispute, onTrace 
       */}
       <Action icon={ShieldAlert} label="Dispute" onClick={onDispute}
         title="The debtor disputes this account — raise it and give it to someone" />
-      <Action icon={Search} label="Trace" onClick={onTrace}
-        title="Search for the debtor at XDS and record the trace on the account" />
+      <TraceButton accountId={accountId} actor={actor} className={`${ACTION_BASE} ${ACTION_ENABLED}`} onDone={onTraced} />
     </div>
   )
 }
