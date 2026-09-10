@@ -49,7 +49,7 @@ export async function recordTrace(input: {
     accountId: input.accountId,
     itemId: TRACE_ITEM,
     actionCode: TRACE_ACTION_CODE,
-    description: traceDescription(count),
+    description: TRACE_DESCRIPTION,
     quantity: count,
     createdBy: input.actor.id,
   })
@@ -63,15 +63,13 @@ export async function recordTrace(input: {
 }
 
 /**
- * How the charge reads on the statement.
+ * What the charge is for.
  *
- * One line for the whole sitting. Four sureties traced in one afternoon is "Credit bureau search
- * (XDS) x 4" at four times the rate, not four identical rows the debtor has to add up to work out
- * what they were charged for.
+ * Only what was done — how MANY is `segments` on the row, and the statement and the timeline both
+ * render it from there. Spelling the count out here as well is what produced "Credit bureau
+ * search (XDS) x 4 ×4".
  */
-export function traceDescription(count: number): string {
-  return count > 1 ? `Credit bureau search (XDS) x ${count}` : 'Credit bureau search (XDS)'
-}
+export const TRACE_DESCRIPTION = 'Credit bureau search (XDS)'
 
 /** What the timeline says happened. */
 export function traceNote(charge: ChargeResult, count = 1): string {

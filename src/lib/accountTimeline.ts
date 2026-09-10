@@ -12,6 +12,7 @@
  */
 import type { AccountLedgers } from './accountBook'
 import type { AccountNote, PromiseToPay } from './accountWorkspace'
+import { feeLabel } from './feeLabel.ts'
 
 export type TimelineKind = 'action' | 'payment' | 'note' | 'promise' | 'query'
 
@@ -64,7 +65,7 @@ export function buildTimeline(
       kind: 'action',
       date: dayOf(f.incurredAt),
       at: f.incurredAt,
-      title: f.segments > 1 ? `${f.description} ×${f.segments}` : f.description,
+      title: feeLabel(f.description, f.segments),
       detail: f.cancelledAt ? 'Cancelled. The fee stands — it attaches to the action being issued.' : null,
       by: f.performedBy,
       amount: f.billed ? f.amountExclVat + f.vatAmount : null,

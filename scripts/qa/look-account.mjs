@@ -544,7 +544,8 @@ else {
     if (body.annexure_item !== '4c' || body.action_code !== 'TRC') console.log('!! the trace fee is not item 4(c) under TRC')
     if (Number(body.amount_excl_vat) !== 64) console.log('!! four searches did not come to 4 x R16')
     if (Number(body.segments) !== 4) console.log('!! the row does not record how many searches it covers')
-    if (!/x 4/.test(body.description)) console.log('!! the statement line does not say how many searches it covers')
+    // The count lives in `segments`, not in the description -- the renderers add it, once.
+    if (/x ?4|×4/.test(body.description)) console.log('!! the count is written into the description as well as segments')
   }
   if (!note) console.log('!! nothing was written to the timeline')
   else if (!/Trace done — 4 credit bureau searches/.test(JSON.parse(note.body).body)) console.log('!! the timeline note does not say how many searches were done')
@@ -565,9 +566,10 @@ else {
   await act.getByRole('button', { name: /^Transactions/ }).first().click()
   await act.waitForTimeout(900)
   const txns = (await act.textContent('body')).replace(/\s+/g, ' ')
-  if (!/Credit bureau search \(XDS\) x 4/.test(txns)) {
+  if (!/Credit bureau search \(XDS\) ×4/.test(txns)) {
     console.log('!! the trace is not on the transaction list without a page reload')
-  } else console.log('   the trace is on the transaction list without a reload')
+  } else console.log('   the trace is on the transaction list without a reload, labelled ×4')
+  if (/×4 ?×4|x 4 ×4/.test(txns)) console.log('!! the count is rendered twice')
   await act.screenshot({ path: `${OUT}/account-trace.png` })
 }
 

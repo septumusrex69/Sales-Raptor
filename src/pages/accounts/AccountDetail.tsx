@@ -153,6 +153,7 @@ export function AccountDetail() {
           exclVat: f.amountExclVat,
           vat: f.vatAmount,
           billed: f.billed,
+          segments: f.segments,
         })),
         interest: ledgers.accruals.map((i) => ({ from: i.accruedOn, days: i.days, amount: i.amountAccrued })),
       },

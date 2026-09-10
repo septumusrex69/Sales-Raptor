@@ -28,6 +28,7 @@
  */
 import { receiptFeeInclVat, settlementReceiptFee, roundToCents, scheduleFor, type AnnexureBSchedule } from './annexureB.ts'
 import { accrueToDate, accrualEnd, coveredTo as lastCoveredDay } from './interestAccrual.ts'
+import { feeLabel } from './feeLabel.ts'
 
 export interface LedgerLines {
   /**
@@ -38,7 +39,7 @@ export interface LedgerLines {
    */
   payments: { date: string; amount: number; paidToClient?: boolean; commissionExclVat?: number | null }[]
   /** Every fee raised. `inclVat` is what was actually charged. */
-  fees: { date: string; description: string; exclVat: number; vat: number; billed: boolean }[]
+  fees: { date: string; description: string; exclVat: number; vat: number; billed: boolean; segments?: number }[]
   /** Every interest accrual period. */
   interest: { from: string; days: number; amount: number }[]
 }
@@ -348,7 +349,7 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
     pending.push({
       date: f.date,
       kind: 'fee',
-      description: f.description,
+      description: feeLabel(f.description, f.segments),
       debit: roundToCents(f.exclVat + f.vat),
       credit: 0,
     })
