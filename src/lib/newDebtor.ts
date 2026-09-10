@@ -24,8 +24,23 @@ export interface NewDebtorInput {
   handoverDate: string
   /** Percent a year. 24 is standard but negotiable per client and per account. */
   interestRateAnnual: string
-  /** Percent of collections. Blank means "not resolved", which is not the same as zero. */
-  commissionRate: string
+
+  /*
+   * How to reach them. Everything here is optional — an account phoned in often arrives with a
+   * name and a number and nothing else — but it is asked for now because this is the one moment
+   * somebody has the client on the phone with the file open in front of them.
+   */
+  mobile: string
+  workPhone: string
+  altNumber: string
+  email: string
+  address: string
+  employer: string
+  /** Next of kin. Two, because one number that rings out is the usual reason a trace starts. */
+  kin1Name: string
+  kin1Phone: string
+  kin2Name: string
+  kin2Phone: string
 }
 
 export interface Problem {
@@ -131,24 +146,34 @@ export function validateNewDebtor(input: NewDebtorInput, today: string): Problem
     problems.push({ field: 'handoverDate', message: 'A handover cannot be dated in the future.' })
   }
 
+  if (input.email.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(input.email.trim())) {
+    problems.push({ field: 'email', message: 'That does not look like an email address.' })
+  }
+
   const rate = num(input.interestRateAnnual)
   if (rate === null) problems.push({ field: 'interestRateAnnual', message: 'An interest rate is required. Enter 0 if none is charged.' })
   else if (rate < 0) problems.push({ field: 'interestRateAnnual', message: 'An interest rate cannot be negative.' })
   else if (rate > 100) problems.push({ field: 'interestRateAnnual', message: 'That reads as a rate over 100% a year. Check it.' })
 
-  // Blank is allowed and means "not resolved". Zero means "we charge nothing", which is a
-  // different fact, and the schema keeps them apart deliberately.
-  const commission = num(input.commissionRate)
-  if (input.commissionRate.trim() !== '') {
-    if (commission === null) problems.push({ field: 'commissionRate', message: 'Commission has to be a number, or blank.' })
-    else if (commission < 0 || commission > 100) problems.push({ field: 'commissionRate', message: 'Commission is a percentage between 0 and 100.' })
-  }
-
   return problems
 }
 
-/** The row to write, once it validates. Kept here so the shape is tested with the rules. */
-export function toAccountRow(input: NewDebtorInput, companyId: string, handoverId: string | null) {
+/**
+ * The row to write, once it validates.
+ *
+ * `clientCommissionRate` is the client's own rate and arrives as a FRACTION — 0.3 is thirty
+ * percent — because that is how the whole system stores it and how every screen renders it. An
+ * account taking a percentage instead read as 2300% on the accounts list, which is what a
+ * commission of 23 means when the renderer multiplies by a hundred. Commission belongs to the
+ * client anyway, so it is inherited rather than typed: null where the client has none resolved,
+ * which is a different fact from zero and the schema keeps them apart.
+ */
+export function toAccountRow(
+  input: NewDebtorInput,
+  companyId: string,
+  handoverId: string | null,
+  clientCommissionRate: number | null = null,
+) {
   const capital = num(input.capital) ?? 0
   return {
     company_id: companyId,
@@ -172,8 +197,35 @@ export function toAccountRow(input: NewDebtorInput, companyId: string, handoverI
     // Interest runs from the handover, which is what the date is for.
     interest_rate_annual: num(input.interestRateAnnual) ?? 0,
     interest_from: input.handoverDate,
-    commission_rate: input.commissionRate.trim() === '' ? null : num(input.commissionRate),
+    commission_rate: clientCommissionRate,
     status: 'Active: Activated',
     source: 'manual',
   }
+}
+
+/**
+ * The ways to reach this debtor, as contact rows.
+ *
+ * Next of kin is not a separate table: a contact already carries a `label` for whose number it
+ * is, which is what "Mother" or "Neighbour" was always for. A kin entry is therefore a phone
+ * with a name on it, and it lands in the same list a collector already works from rather than in
+ * a panel nobody opens.
+ */
+export function toContactRows(input: NewDebtorInput, accountId: string) {
+  const rows: { account_id: string; kind: string; value: string; label: string | null; is_primary: boolean; source: string }[] = []
+  const add = (kind: string, value: string, label: string | null, isPrimary = false) => {
+    const v = value.trim()
+    if (v) rows.push({ account_id: accountId, kind, value: v, label, is_primary: isPrimary, source: 'manual' })
+  }
+  add('mobile', input.mobile, null, true)
+  add('work', input.workPhone, null)
+  add('phone', input.altNumber, 'Alternative')
+  add('email', input.email, null, true)
+  add('address', input.address, null)
+  add('employer', input.employer, null)
+  // A kin number with no name is still a number worth having; a name with no number is not a way
+  // to reach anybody, so it is dropped rather than stored as a contact that cannot be called.
+  add('phone', input.kin1Phone, input.kin1Name.trim() || 'Next of kin')
+  add('phone', input.kin2Phone, input.kin2Name.trim() || 'Next of kin')
+  return rows
 }

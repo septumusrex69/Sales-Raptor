@@ -26,8 +26,8 @@ import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
 import { LogHandoverModal } from '../../components/companies/LogHandoverModal'
 import { AddDebtorModal } from '../../components/companies/AddDebtorModal'
-import { createDebtorAccount, fetchAccountReferences } from '../../lib/accountBook'
-import { toAccountRow, type NewDebtorInput } from '../../lib/newDebtor'
+import { createDebtorAccount, fetchAccountReferences, fetchClientCommissionRate } from '../../lib/accountBook'
+import { toAccountRow, toContactRows, type NewDebtorInput } from '../../lib/newDebtor'
 import { HandoverBook } from '../../components/companies/HandoverBook'
 import type { Company, Contact } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
@@ -660,7 +660,14 @@ export function CompanyDetail() {
           onSave={async (input: NewDebtorInput) => {
             setDebtorBusy(true); setDebtorError(null)
             try {
-              const account = await createDebtorAccount(toAccountRow(input, company.id, null))
+              // Commission is the client's, not the account's, so it is inherited rather than
+              // typed. It is stored as a fraction everywhere in the system — 0.3 is thirty
+              // percent — and passing a percentage through here is what made one account read
+              // as 2300% on the accounts list.
+              const account = await createDebtorAccount(
+                toAccountRow(input, company.id, null, await fetchClientCommissionRate(company.id).catch(() => null)),
+                (id) => toContactRows(input, id),
+              )
               setDebtorOpen(false)
               navigate(`/accounts/${account.id}`)
             } catch (e) {

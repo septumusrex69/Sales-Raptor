@@ -7,7 +7,7 @@
  *
  *   node --experimental-strip-types scripts/qa/check-new-debtor.mjs
  */
-import { isValidSaId, suggestReference, validateNewDebtor, toAccountRow } from '../../src/lib/newDebtor.ts'
+import { isValidSaId, suggestReference, validateNewDebtor, toAccountRow, toContactRows } from '../../src/lib/newDebtor.ts'
 
 let failed = 0
 function check(name, actual, expected) {
@@ -19,7 +19,9 @@ function check(name, actual, expected) {
 
 const ok = {
   accountNumber: 'ACF10131', clientReference: '99231', firstName: 'Thandiwe', surname: 'Mokoena',
-  idNumber: '', capital: '18500', handoverDate: '2026-09-01', interestRateAnnual: '24', commissionRate: '30',
+  idNumber: '', capital: '18500', handoverDate: '2026-09-01', interestRateAnnual: '24',
+  mobile: '', workPhone: '', altNumber: '', email: '', address: '', employer: '',
+  kin1Name: '', kin1Phone: '', kin2Name: '', kin2Phone: '',
 }
 const TODAY = '2026-09-10'
 
@@ -64,10 +66,9 @@ const TODAY = '2026-09-10'
   check('zero interest is a real answer', validateNewDebtor({ ...ok, interestRateAnnual: '0' }, TODAY), [])
   check('a negative rate is not', validateNewDebtor({ ...ok, interestRateAnnual: '-1' }, TODAY).map((p) => p.field), ['interestRateAnnual'])
 
-  /* Blank commission means "not resolved"; zero means "we charge nothing". Different facts. */
-  check('commission may be left blank', validateNewDebtor({ ...ok, commissionRate: '' }, TODAY), [])
-  check('commission of zero is allowed', validateNewDebtor({ ...ok, commissionRate: '0' }, TODAY), [])
-  check('commission over 100 is not', validateNewDebtor({ ...ok, commissionRate: '150' }, TODAY).map((p) => p.field), ['commissionRate'])
+  check('a malformed email is caught', validateNewDebtor({ ...ok, email: 'not-an-address' }, TODAY).map((p) => p.field), ['email'])
+  check('a real one is not', validateNewDebtor({ ...ok, email: 'thandiwe@example.co.za' }, TODAY), [])
+  check('no email at all is fine', validateNewDebtor({ ...ok, email: '' }, TODAY), [])
 
   check('a bad ID is caught', validateNewDebtor({ ...ok, idNumber: '1234567890123' }, TODAY).map((p) => p.field), ['idNumber'])
   check('no ID at all is allowed', validateNewDebtor({ ...ok, idNumber: '' }, TODAY), [])
@@ -85,10 +86,36 @@ const TODAY = '2026-09-10'
   check('interest runs from the handover', row.interest_from, '2026-09-01')
   check('the account opens active', row.status, 'Active: Activated')
   check('and is marked as taken by hand', row.source, 'manual')
-  check('blank commission stays null, not zero',
-    toAccountRow({ ...ok, commissionRate: '' }, 'c', null).commission_rate, null)
-  check('but a zero commission is kept as zero',
-    toAccountRow({ ...ok, commissionRate: '0' }, 'c', null).commission_rate, 0)
+  /*
+   * Commission is the CLIENT's and is stored as a fraction. Typing 23 into an account and storing
+   * it raw is what put "2300%" on the accounts list, because every renderer multiplies by a
+   * hundred. It is now inherited and never typed.
+   */
+  check('the client’s rate is inherited as given', toAccountRow(ok, 'c', null, 0.3).commission_rate, 0.3)
+  check('a client with no resolved rate leaves it null', toAccountRow(ok, 'c', null, null).commission_rate, null)
+  check('and it is a fraction, so it renders as a percentage',
+    Math.round((toAccountRow(ok, 'c', null, 0.3).commission_rate ?? 0) * 100), 30)
+}
+
+/* Contact details, including next of kin, which is a labelled phone rather than its own table. */
+{
+  const full = {
+    ...ok, mobile: '082 555 0101', workPhone: '011 555 0000', altNumber: '083 555 0202',
+    email: 'thandiwe@example.co.za', address: '14 Main Rd, Pretoria', employer: 'Shoprite',
+    kin1Name: 'Mother', kin1Phone: '082 555 0303', kin2Name: '', kin2Phone: '082 555 0404',
+  }
+  const rows = toContactRows(full, 'acct-1')
+  check('every filled contact becomes a row', rows.length, 8)
+  check('the mobile is primary', rows.find((r) => r.kind === 'mobile').is_primary, true)
+  check('the alternative number is labelled', rows.find((r) => r.label === 'Alternative').kind, 'phone')
+  check('a named kin keeps the name as the label',
+    rows.filter((r) => r.label === 'Mother').map((r) => r.value), ['082 555 0303'])
+  check('an unnamed kin still says what it is',
+    rows.filter((r) => r.label === 'Next of kin').map((r) => r.value), ['082 555 0404'])
+  check('an empty form writes no contacts at all', toContactRows(ok, 'acct-1').length, 0)
+  // A name with nobody to ring is not a way to reach anyone.
+  check('a kin name with no number is dropped',
+    toContactRows({ ...ok, kin1Name: 'Brother' }, 'acct-1').length, 0)
 }
 
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)

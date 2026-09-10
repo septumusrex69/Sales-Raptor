@@ -324,7 +324,10 @@ export async function fetchBookSummary(companyId?: string): Promise<BookSummary>
  * file behind it and no import to wait for, so it is created here — and only ever created. Once
  * it exists it is worked like any other, and its ledgers fill the same way.
  */
-export async function createDebtorAccount(row: Record<string, unknown>): Promise<DebtorAccount> {
+export async function createDebtorAccount(
+  row: Record<string, unknown>,
+  contacts: (accountId: string) => Record<string, unknown>[] = () => [],
+): Promise<DebtorAccount> {
   const { data, error } = await supabase.from('debtor_accounts').insert(row).select('*').single()
   if (error) {
     // The reference is unique per client, and colliding with one is the mistake a person is most
@@ -332,7 +335,18 @@ export async function createDebtorAccount(row: Record<string, unknown>): Promise
     if (error.code === '23505') throw new Error('That reference is already used on another account.')
     throw new Error(error.message)
   }
-  return toAccount(data)
+  const account = toAccount(data)
+
+  // Contacts are written after the account exists, because they hang off its id. A failure here
+  // is reported but does not undo the account: an account with no numbers on it is a working
+  // account somebody can add a number to, and throwing it away would lose the capital and the
+  // handover date the person just typed.
+  const rows = contacts(account.id)
+  if (rows.length > 0) {
+    const { error: contactError } = await supabase.from('account_contacts').insert(rows)
+    if (contactError) throw new Error(`The account was created, but its contact details were not saved: ${contactError.message}`)
+  }
+  return account
 }
 
 /** Every account number already on a client, so the next in their series can be proposed. */
@@ -341,4 +355,21 @@ export async function fetchAccountReferences(companyId: string): Promise<string[
     .from('debtor_accounts').select('account_number').eq('company_id', companyId).limit(2000)
   if (error) throw new Error(error.message)
   return (data ?? []).map((r: { account_number: string | null }) => r.account_number).filter((r): r is string => !!r)
+}
+
+/**
+ * The client's own commission rate, as a fraction.
+ *
+ * Read at the moment an account is opened rather than carried on the Company the app already
+ * holds, because that object does not carry it and widening it for one form would mean touching
+ * every screen that loads a client. Null where the client has bands instead of a flat rate: a
+ * banded rate depends on the capital and resolving it belongs with the import that knows the
+ * bands, not with a person typing one account.
+ */
+export async function fetchClientCommissionRate(companyId: string): Promise<number | null> {
+  const { data, error } = await supabase
+    .from('companies').select('commission_rate').eq('id', companyId).maybeSingle()
+  if (error) throw new Error(error.message)
+  const rate = data?.commission_rate
+  return rate === null || rate === undefined ? null : Number(rate)
 }
