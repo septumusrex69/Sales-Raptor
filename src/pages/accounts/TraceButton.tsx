@@ -74,10 +74,12 @@ export function TraceButton({ accountId, actor, className, onDone }: {
       </button>
 
       {result && (
-        <span className="text-[11px] text-[var(--c-green)]">
+        <span className={`text-[11px] ${result.charge.reason === 'charged' ? 'text-[var(--c-green)]' : 'text-slate-500'}`}>
           {result.charge.reason === 'charged'
             ? `XDS opened · ${result.count > 1 ? `${result.count} searches · ` : ''}charged R${result.charge.exclVat.toFixed(2)} + VAT`
-            : 'Recorded · no charge (fee ceiling)'}
+            : result.charge.reason === 'written-off'
+              ? 'Recorded · no charge (account written off)'
+              : 'Recorded · no charge (fee ceiling)'}
         </span>
       )}
 

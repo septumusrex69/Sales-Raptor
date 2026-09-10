@@ -582,6 +582,44 @@ else {
   await act.screenshot({ path: `${OUT}/account-dispute.png` })
 }
 
+/*
+ * A written-off account earns nothing more.
+ *
+ * This is the case that reached the firm: a trace on a "Written-off / Paid in Full" account
+ * charged R48, said so, and then never appeared on the statement -- which drops fees dated after
+ * the write-off. The work must still be recorded; the money must not.
+ */
+TABLES.debtor_accounts = TABLES.debtor_accounts.map((a) => ({ ...a, status: 'Written-off', write_off_reason: 'Paid in Full' }))
+const before = posted.length
+const closed = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+await closed.route(`**://${REF}.supabase.co/**`, serve)
+await closed.addInitScript(seed, { ref: REF, user: USER })
+await closed.context().route('**xds.co.za/**', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<title>XDS</title>' }))
+closed.on('popup', (p) => void p.close())
+await closed.goto(`${ORIGIN}/accounts/${ACC}`, { waitUntil: 'networkidle' })
+await closed.waitForTimeout(1500)
+const closedTrace = closed.getByRole('button', { name: /^Trace$/ })
+if (await closedTrace.count() === 0) console.log('!! no Trace button on the written-off account')
+else {
+  await closedTrace.first().click()
+  await closed.waitForTimeout(700)
+  const two = closed.locator('[data-modal-open="true"]').getByRole('button', { name: /^2$/ })
+  if (await two.count()) await two.first().click()
+  await closed.waitForTimeout(1000)
+  const wroteFee = posted.slice(before).find((p) => p.table === 'account_fees')
+  if (!wroteFee) console.log('!! the trace was not recorded at all on a written-off account')
+  else {
+    const body = JSON.parse(wroteFee.body)
+    console.log(`   written-off: recorded at R${body.amount_excl_vat}, billed=${body.billed}`)
+    if (Number(body.amount_excl_vat) !== 0 || body.billed !== false) {
+      console.log('!! a written-off account was charged for a trace')
+    }
+  }
+  const said = (await closed.textContent('body')).replace(/\s+/g, ' ')
+  if (!/no charge \(account written off\)/.test(said)) console.log('!! the button did not say why nothing was charged')
+  else console.log('   the button said the account is written off')
+}
+
 console.log('\nerrors:', errors.length ? JSON.stringify([...new Set(errors)].slice(0, 8), null, 2) : 'none')
 await browser.close()
 stop()

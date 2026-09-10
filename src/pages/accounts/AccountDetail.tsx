@@ -17,6 +17,7 @@ import {
   type AccountDocument, type Arrangement, type PromiseToPay, type Workspace,
 } from '../../lib/accountWorkspace'
 import { buildTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
+import { isWrittenOff } from '../../lib/accountStatus'
 import { styleFor, PROMISE_CHIP } from './timelineStyle'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
@@ -132,7 +133,7 @@ export function AccountDetail() {
       // An account written off stopped accruing then. Swordfish records the date inside the
       // comment ("Closed on 2026/09/07 ..."), which we do not have, so the last action stands in
       // for it — imprecise, and labelled as such rather than presented as the closing date.
-      writtenOffAt: /written.off/i.test(account.status) ? account.lastActionAt : null,
+      writtenOffAt: isWrittenOff(account.status) ? account.lastActionAt : null,
       // Interest runs to today, not to the last monthly posting. Without this the balance stands
       // still between postings and a collector quotes a settlement that is days out of date.
       interestRateAnnual: account.interestRateAnnual,

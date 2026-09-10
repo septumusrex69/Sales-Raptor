@@ -78,8 +78,10 @@ export function traceNote(charge: ChargeResult, count = 1): string {
   const searches = count > 1 ? `${count} credit bureau searches` : 'credit bureau search'
   const earned = charge.reason === 'charged'
     ? `Charged R${charge.exclVat.toFixed(2)} plus VAT under item 4(c).`
-    : charge.reason === 'monthly-limit'
-      ? 'Not charged — the monthly allowance for item 4(c) is spent.'
-      : 'Not charged — the account is at the Annexure B fee ceiling.'
+    : charge.reason === 'written-off'
+      ? 'Not charged — the account is written off.'
+      : charge.reason === 'monthly-limit'
+        ? 'Not charged — the monthly allowance for item 4(c) is spent.'
+        : 'Not charged — the account is at the Annexure B fee ceiling.'
   return `Trace done — ${searches} through XDS. ${earned}`
 }

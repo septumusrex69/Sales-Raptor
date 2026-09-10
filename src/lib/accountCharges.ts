@@ -24,6 +24,7 @@
  * nobody can prove was worked.
  */
 import { supabase } from './supabase'
+import { isWrittenOff } from './accountStatus'
 import { itemAmountFor, itemTotalRemaining, monthlyLimit, monthlyRoom, recoverableFee, roundToCents, scheduleFor } from './annexureB'
 
 export interface ChargeResult {
@@ -31,7 +32,7 @@ export interface ChargeResult {
   exclVat: number
   vat: number
   /** Why nothing was charged, for showing to the person who did the work. */
-  reason: 'charged' | 'item-total-spent' | 'monthly-limit' | 'at-ceiling'
+  reason: 'charged' | 'written-off' | 'item-total-spent' | 'monthly-limit' | 'at-ceiling'
 }
 
 const VAT_RATE = 0.15
@@ -79,6 +80,18 @@ export async function chargeItem(input: {
   const spentOnItem = Number(data?.spent_on_item ?? 0)
   const towardsCeiling = Number(data?.towards_ceiling ?? 0)
 
+  /*
+   * A written-off account earns nothing more.
+   *
+   * The statement drops fees dated after the write-off, so charging one produced money that was
+   * recorded, announced to the collector, and then invisible everywhere it mattered. The work is
+   * still written down — it happened — it simply cannot be recovered.
+   */
+  const { data: acct, error: statusError } = await supabase
+    .from('debtor_accounts').select('status').eq('id', input.accountId).maybeSingle<{ status: string | null }>()
+  if (statusError) throw new Error(statusError.message)
+  const closed = isWrittenOff(acct?.status)
+
   const quantity = Math.max(1, Math.floor(input.quantity ?? 1))
   const remainingOnItem = itemTotalRemaining(input.itemId, spentOnItem, schedule)
   const asked = itemAmountFor(input.itemId, quantity, spentOnItem, schedule)
@@ -107,15 +120,16 @@ export async function chargeItem(input: {
     room = monthlyRoom(limit, count ?? 0)
   }
 
-  const recoverable = room > 0 ? recoverableFee(asked, towardsCeiling, capital, schedule) : 0
+  const recoverable = !closed && room > 0 ? recoverableFee(asked, towardsCeiling, capital, schedule) : 0
 
   const exclVat = roundToCents(recoverable)
   const vat = roundToCents(exclVat * VAT_RATE)
   const reason: ChargeResult['reason'] =
     exclVat > 0 ? 'charged'
-      : room <= 0 ? 'monthly-limit'
-        : remainingOnItem <= 0 ? 'item-total-spent'
-          : 'at-ceiling'
+      : closed ? 'written-off'
+        : room <= 0 ? 'monthly-limit'
+          : remainingOnItem <= 0 ? 'item-total-spent'
+            : 'at-ceiling'
 
   const { error } = await supabase.from('account_fees').insert({
     account_id: input.accountId,
@@ -149,6 +163,9 @@ export function chargeMessage(r: ChargeResult, itemId: string): string {
   }
   if (r.reason === 'item-total-spent') {
     return `No charge: item ${itemId} is a total for the account and it has already been used.`
+  }
+  if (r.reason === 'written-off') {
+    return 'No charge: the account is written off, so nothing further can be recovered. The action is recorded.'
   }
   if (r.reason === 'monthly-limit') {
     return `No charge: item ${itemId} has already been charged its maximum for this month. It is recorded, and the allowance resets next month.`
