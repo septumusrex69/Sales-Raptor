@@ -213,9 +213,12 @@ const serve = (route) => {
   }
   if (route.request().method() === 'POST') {
     posted.push({ table, body: route.request().postData() ?? '' })
-    // Echo the insert back as the stored row: addNote reads what it wrote.
     const sent = JSON.parse(route.request().postData() || '{}')
     const row = { id: `qa-${posted.length}`, created_at: new Date().toISOString(), ...(Array.isArray(sent) ? sent[0] : sent) }
+    // Kept, not just echoed. A stub that forgets what was inserted cannot tell the difference
+    // between a page that refetched after a write and one that did not -- which is the whole
+    // question when a fee is raised and a statement is sent a minute later.
+    if (TABLES[table]) TABLES[table] = [...TABLES[table], row]
     return json(wantsObject ? row : [row], 201)
   }
   let rows = TABLES[table] ?? []
@@ -550,6 +553,21 @@ else {
   const after = (await act.textContent('body')).replace(/\s+/g, ' ')
   if (!/4 searches . charged R64\.00/.test(after)) console.log('!! the button does not report what it charged')
   else console.log('   the button reports the charge next to itself')
+
+  /*
+   * And the money must be ON the page, without a reload.
+   *
+   * A collector traces a debtor and then emails them a statement. If the fee is only in Postgres
+   * until somebody presses refresh, the statement that goes out is missing a charge that was
+   * raised a minute earlier. So this navigates to Transactions the way a person would -- by
+   * clicking the tab, never by reloading.
+   */
+  await act.getByRole('button', { name: /^Transactions/ }).first().click()
+  await act.waitForTimeout(900)
+  const txns = (await act.textContent('body')).replace(/\s+/g, ' ')
+  if (!/Credit bureau search \(XDS\) x 4/.test(txns)) {
+    console.log('!! the trace is not on the transaction list without a page reload')
+  } else console.log('   the trace is on the transaction list without a reload')
   await act.screenshot({ path: `${OUT}/account-trace.png` })
 }
 

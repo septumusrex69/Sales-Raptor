@@ -94,14 +94,25 @@ export function AccountDetail() {
     return () => { cancelled = true }
   }, [id])
 
-  // Writes are few and small, so everything is refetched rather than patched in place. The
-  // alternative is several sets of local reducers that can drift from what the database holds.
+  /*
+   * Writes are few and small, so everything is refetched rather than patched in place. The
+   * alternative is several sets of local reducers that can drift from what the database holds.
+   *
+   * The LEDGERS are part of "everything", and were not. Nothing on this page raised a fee when
+   * this was written; two things do now — a trace and a dispute — and both left the money they
+   * had just charged invisible until somebody reloaded the browser. That is not a cosmetic lag:
+   * the statement, the Transactions tab and the account summary are all built from these rows,
+   * so a collector could trace a debtor and email them a statement that did not have the trace
+   * on it.
+   */
   const reload = useCallback(async () => {
     if (!account) return
-    const [a, w, d, q] = await Promise.all([
-      fetchAccount(account.id), fetchWorkspace(account.id), fetchDocuments(account.id), fetchQueries(account.id),
+    const [a, l, w, d, q] = await Promise.all([
+      fetchAccount(account.id), fetchLedgers(account.id), fetchWorkspace(account.id),
+      fetchDocuments(account.id), fetchQueries(account.id),
     ])
     if (a) setAccount(a)
+    setLedgers(l)
     setWorkspace(w)
     setDocuments(d)
     setQueries(q)
