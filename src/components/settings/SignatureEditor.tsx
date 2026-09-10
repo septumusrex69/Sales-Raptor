@@ -7,7 +7,15 @@ import type { ID } from '../../types'
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/gif']
 const MAX_FILE_BYTES = 2 * 1024 * 1024
 const MIN_WIDTH = 60
-const MAX_WIDTH = 400
+/*
+ * 600px, because that is how wide an email is.
+ *
+ * Most clients lay the body out at roughly 600 to 700 pixels, so a signature at 600 runs the full
+ * width of the message and anything past it only gets scaled back down. The old ceiling of 400
+ * was arbitrary and Felicia had already reached it — a signature block holding a name, four
+ * contact lines, a photograph and a service list has a lot to fit, and at 400 it was cramped.
+ */
+const MAX_WIDTH = 600
 const DEFAULT_WIDTH = 160
 
 export interface SignatureValue {
@@ -25,6 +33,8 @@ export interface SignatureValue {
  * the caller's own "<user_id>/..." folder or, for an Administrator, any folder.
  */
 export function SignatureEditor({ userId, value, onChange }: { userId: ID; value: SignatureValue; onChange: (patch: Partial<SignatureValue>) => void }) {
+  // What the uploaded file actually measures, read off the rendered image.
+  const [naturalWidth, setNaturalWidth] = useState<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -80,7 +90,15 @@ export function SignatureEditor({ userId, value, onChange }: { userId: ID; value
       {value.imageUrl ? (
         <div className="border border-slate-200 rounded-lg p-3 space-y-3">
           <div className={`flex ${value.imageAlign === 'right' ? 'justify-end' : value.imageAlign === 'center' ? 'justify-center' : 'justify-start'}`}>
-            <img src={value.imageUrl} alt="Signature" style={{ width: value.imageWidth ?? DEFAULT_WIDTH, maxWidth: '100%' }} />
+            <img
+              src={value.imageUrl}
+              alt="Signature"
+              // The browser knows how many pixels the file actually has; nothing else here does.
+              // Worth capturing, because stretching a small image past its own size is the one
+              // way to make a signature look worse by making it bigger.
+              onLoad={(e) => setNaturalWidth(e.currentTarget.naturalWidth || null)}
+              style={{ width: value.imageWidth ?? DEFAULT_WIDTH, maxWidth: '100%' }}
+            />
           </div>
           <div className="flex items-center gap-3">
             <span className="text-xs text-slate-400 shrink-0">Size</span>
@@ -95,6 +113,12 @@ export function SignatureEditor({ userId, value, onChange }: { userId: ID; value
             />
             <span className="text-xs text-slate-400 w-10 text-right shrink-0">{value.imageWidth ?? DEFAULT_WIDTH}px</span>
           </div>
+          {naturalWidth !== null && (value.imageWidth ?? DEFAULT_WIDTH) > naturalWidth && (
+            <p className="text-[11px] text-amber-700">
+              This image is only {naturalWidth}px wide, so it will look soft at{' '}
+              {value.imageWidth ?? DEFAULT_WIDTH}px. Upload a larger one to fill the space sharply.
+            </p>
+          )}
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-400">Position</span>
             <div className="flex rounded-lg border border-slate-200 overflow-hidden">
