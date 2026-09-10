@@ -31,7 +31,18 @@ function getKey(): Buffer {
   const key = process.env.EMAIL_CREDENTIALS_KEY
   if (!key) throw new Error('Server is missing EMAIL_CREDENTIALS_KEY configuration.')
   const buf = Buffer.from(key, 'base64')
-  if (buf.length !== 32) throw new Error('EMAIL_CREDENTIALS_KEY must decode to exactly 32 bytes.')
+  if (buf.length !== 32) {
+    // The length is worth naming. Buffer.from(..., 'base64') ignores anything that is not a
+    // base64 character rather than refusing, so a key generated the wrong way decodes to
+    // something plausible-looking and fails here with no hint as to which mistake was made.
+    // 48 bytes almost always means `openssl rand -hex 32` — 64 hex characters read as base64.
+    // A short count means a passphrase was pasted in instead of a generated key. Reporting the
+    // count gives that away; it gives nothing else away, being a length and not the key.
+    throw new Error(
+      `EMAIL_CREDENTIALS_KEY decodes to ${buf.length} bytes, not 32. `
+      + 'Generate one with: openssl rand -base64 32',
+    )
+  }
   return buf
 }
 
