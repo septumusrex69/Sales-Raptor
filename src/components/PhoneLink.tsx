@@ -50,6 +50,17 @@ export function PhoneLink({ number, className = '', iconSize = 13, children, log
       <Phone size={iconSize} /> {number}
     </>
   )
+  // While a call is being placed the default rendering swaps its icon and keeps showing the
+  // number. A caller that supplied its own content (the account page's "Call" button) keeps it:
+  // a button whose label turns into a phone number mid-click reads as a different button, and
+  // the row it sits in changes width. That one pulses instead, and the line underneath says
+  // what is happening.
+  const dialling = state.kind === 'dialling' || state.kind === 'ringing'
+  const busyContent = children ?? (
+    <>
+      <PhoneCall size={iconSize} className="animate-pulse" /> {number}
+    </>
+  )
 
   if (!canDial) {
     return (
@@ -88,14 +99,14 @@ export function PhoneLink({ number, className = '', iconSize = 13, children, log
   const title = `Call via BuzzBox — rings your extension ${status?.extension} first, then dials ${number}`
   return (
     <span className="inline-flex flex-col items-start min-w-0">
-      <button type="button" onClick={handleClick} disabled={state.kind === 'dialling'} title={title} className={`${className} disabled:opacity-60 text-left`}>
-        {state.kind === 'dialling' || state.kind === 'ringing' ? (
-          <>
-            <PhoneCall size={iconSize} className="animate-pulse" /> {number}
-          </>
-        ) : (
-          content
-        )}
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={state.kind === 'dialling'}
+        title={title}
+        className={`${className} disabled:opacity-60 text-left ${dialling && children ? 'animate-pulse' : ''}`}
+      >
+        {dialling ? busyContent : content}
       </button>
       {state.kind === 'dialling' && <span className="text-[11px] text-slate-400">Asking BuzzBox…</span>}
       {state.kind === 'ringing' && <span className="text-[11px] text-[var(--c-green)]">Ringing extension {status?.extension} — pick up to connect</span>}

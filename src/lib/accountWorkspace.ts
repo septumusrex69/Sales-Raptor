@@ -44,6 +44,23 @@ export interface AccountContact {
   createdAt: string
 }
 
+/**
+ * The number to ring for this account: the phone marked primary, else the first one on file.
+ *
+ * Debtor details and the action bar have to agree about this. A Call button at the top of the
+ * page that dials a different number from the one shown under "Mobile (Primary)" is worse than
+ * no button at all, because nothing on screen says which one it rang.
+ *
+ * Retired numbers are never offered -- a number is retired precisely because calling it is a
+ * mistake.
+ */
+export function dialableNumber(contacts: AccountContact[]): AccountContact | undefined {
+  const phones = contacts.filter(
+    (c) => !c.retiredAt && (c.kind === 'mobile' || c.kind === 'phone' || c.kind === 'work'),
+  )
+  return phones.find((c) => c.isPrimary) ?? phones[0]
+}
+
 const toContact = (r: any): AccountContact => ({
   id: r.id,
   accountId: r.account_id,

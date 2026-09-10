@@ -13,7 +13,7 @@ import { accountFlagList, fetchAccount, fetchLedgers, hasCommissionDrift, type A
 import { buildStatement, type BalanceInput, type BalanceBreakdown, type StatementLine } from '../../lib/accountBalance'
 import {
   addNote, addPromise, describeArrangement, fetchDocuments, fetchWorkspace, isOverdue,
-  keepInstalment, nextPromise, resolvePromise, saveMainComment, ARRANGEMENT_LABEL, WEEKDAYS,
+  keepInstalment, nextPromise, resolvePromise, saveMainComment, dialableNumber, ARRANGEMENT_LABEL, WEEKDAYS,
   type AccountDocument, type Arrangement, type PromiseToPay, type Workspace,
 } from '../../lib/accountWorkspace'
 import { buildTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
@@ -23,6 +23,7 @@ import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
 import { EscalateModal } from './EscalateModal'
 import { fetchQueries, type AccountQuery } from '../../lib/accountQueries'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
+import { PhoneLink } from '../../components/PhoneLink'
 import { feeCeiling, scheduleFor } from '../../lib/annexureB'
 import { formatMoney, formatDate } from '../../data/mockData'
 
@@ -166,6 +167,7 @@ export function AccountDetail() {
   const name = [account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ') || 'Unnamed debtor'
   const due = workspace ? nextPromise(workspace.promises) : undefined
   const emailContact = workspace?.contacts.find((c) => c.kind === 'email' && !c.retiredAt)
+  const callContact = dialableNumber(workspace?.contacts ?? [])
   // Who looks after this debtor's CLIENT — a different person from the pre-legal agent working
   // the debtor, and the one a query about the debt itself has to go to.
   const clientLiaison = users.find((u) => u.id === client?.accountOwnerId)
@@ -281,6 +283,7 @@ export function AccountDetail() {
         onSave={(text) => runComment(() => saveMainComment(account.id, text, currentUser?.id ?? null))} />
 
       <ActionBar
+        callNumber={callContact?.value}
         onEmail={emailContact ? () => setComposeTo(emailContact.value) : undefined}
         onNote={() => { setTab('Overview'); setNoteOpen(true); setTimeout(() => noteRef.current?.focus(), 0) }}
         onPromise={() => { setTab('Overview'); setPromiseOpen(true) }}
@@ -424,7 +427,7 @@ function isoWeekday(iso: string): number {
 /**
  * What you can do to this account, in one row.
  *
- * Three of these work. Four are placeholders, and they say so rather than looking live and doing
+ * Four of these work. Three are placeholders, and they say so rather than looking live and doing
  * nothing — a disabled button with a reason is honest; a button that swallows a click teaches
  * people not to trust the row.
  *
@@ -432,7 +435,9 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ onEmail, onNote, onPromise, onEscalate }: {
+function ActionBar({ callNumber, onEmail, onNote, onPromise, onEscalate }: {
+  /** The account's own number. Absent only when there is no phone number on file. */
+  callNumber?: string
   onEmail?: () => void
   onNote: () => void
   onPromise: () => void
@@ -441,7 +446,19 @@ function ActionBar({ onEmail, onNote, onPromise, onEscalate }: {
   const soon = 'Not built yet — needs a provider connected and a decision on whether it charges the debtor.'
   return (
     <div className="flex flex-wrap gap-2">
-      <Action icon={Phone} label="Call" title={soon} />
+      {/*
+        The same PhoneLink the number in Debtor details uses, wearing the action row's clothes —
+        so this button and that number cannot disagree about what dialling does. Without BuzzBox
+        it falls back to a tel: link, which on the tablet the collectors actually use is the
+        device dialler; with BuzzBox it rings the rep's extension and bridges the call.
+      */}
+      {callNumber
+        ? (
+          <PhoneLink number={callNumber} className={`${ACTION_BASE} ${ACTION_ENABLED}`} iconSize={14}>
+            <Phone size={14} /> Call
+          </PhoneLink>
+        )
+        : <Action icon={Phone} label="Call" title="No phone number on this account yet" />}
       <Action icon={MessageCircle} label="WhatsApp" title={soon} />
       <Action icon={MessageSquare} label="SMS" title={soon} />
       <Action icon={Mail} label="Email" onClick={onEmail}
@@ -455,6 +472,10 @@ function ActionBar({ onEmail, onNote, onPromise, onEscalate }: {
   )
 }
 
+/** Shared with the Call button above, which is a PhoneLink rather than an Action. */
+const ACTION_BASE = 'inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition-colors'
+const ACTION_ENABLED = 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50'
+
 function Action({ icon: Icon, label, onClick, title, primary }: {
   icon: typeof Phone; label: string; onClick?: () => void; title?: string; primary?: boolean
 }) {
@@ -464,12 +485,12 @@ function Action({ icon: Icon, label, onClick, title, primary }: {
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition-colors ${
+      className={`${ACTION_BASE} ${
         disabled
           ? 'border-dashed border-slate-200 text-slate-300 cursor-not-allowed'
           : primary
             ? 'border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500'
-            : 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50'}`}
+            : ACTION_ENABLED}`}
     >
       <Icon size={14} /> {label}
     </button>

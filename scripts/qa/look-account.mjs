@@ -408,6 +408,58 @@ await ipad.goto(`${ORIGIN}/accounts/${ACC}`, { waitUntil: 'networkidle' })
 await ipad.waitForTimeout(1500)
 await ipad.screenshot({ path: `${OUT}/account-ipad.png`, fullPage: true })
 
+/*
+ * Click to dial, with BuzzBox stubbed as connected.
+ *
+ * The collector's report was that the number in Debtor details dialled but the Call button at the
+ * top of the page did nothing -- it was written as a placeholder before BuzzBox existed. Both are
+ * now the same PhoneLink, so this checks that they ring the SAME number, and that it is not the
+ * retired one.
+ */
+const dial = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+await dial.route(`**://${REF}.supabase.co/**`, serve)
+await dial.addInitScript(seed, { ref: REF, user: USER })
+let dialled = null
+await dial.route('**/api/buzzbox/status', (r) =>
+  r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+    connected: true, identity: 'qa@bredellferreira.co.za', organisationId: 2741,
+    organisationName: 'QA', connectedAt: '2026-09-10T10:00:00Z', extension: '141',
+  }) }))
+await dial.route('**/api/buzzbox/call', (r) => {
+  dialled = JSON.parse(r.request().postData() ?? '{}').to
+  return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, from: '141', to: dialled }) })
+})
+await dial.goto(`${ORIGIN}/accounts/${ACC}`, { waitUntil: 'networkidle' })
+await dial.waitForTimeout(1500)
+
+const callBtn = dial.getByRole('button', { name: /^Call$/ })
+if (await callBtn.count() === 0) console.log('!! no Call button in the action bar')
+else if (await callBtn.first().isDisabled()) console.log('!! the Call button is still disabled with BuzzBox connected')
+else {
+  await callBtn.first().click()
+  await dial.waitForTimeout(600)
+  console.log(`   Call button dialled: ${dialled ?? '(nothing)'}`)
+  if (dialled !== '+27 82 123 4567') console.log(`!! expected the primary mobile, got ${dialled}`)
+  if (!(await dial.getByText(/Ringing extension 141/).count())) console.log('!! no "pick up to connect" feedback after dialling')
+}
+await dial.screenshot({ path: `${OUT}/account-dialling.png` })
+
+// The same number in Debtor details must reach the same place.
+dialled = null
+const numberBtn = dial.getByRole('button', { name: /\+27 82 123 4567/ })
+if (await numberBtn.count() === 0) console.log('!! the primary number is not a dial button')
+else {
+  await numberBtn.first().click()
+  await dial.waitForTimeout(600)
+  if (dialled !== '+27 82 123 4567') console.log(`!! Debtor details dialled ${dialled}, not the primary mobile`)
+  else console.log('   Debtor details dialled the same number')
+}
+
+// Retired numbers are never what the action bar rings.
+if (await dial.getByRole('button', { name: /^Call$/ }).count() && dialled === '+27 71 000 1111') {
+  console.log('!! the action bar rang a RETIRED number')
+}
+
 console.log('\nerrors:', errors.length ? JSON.stringify([...new Set(errors)].slice(0, 8), null, 2) : 'none')
 await browser.close()
 stop()

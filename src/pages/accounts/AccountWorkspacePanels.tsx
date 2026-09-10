@@ -10,6 +10,7 @@ import type { DebtorAccount } from '../../lib/accountBook'
 import {
   addContact, deleteDocument, documentUrl, retireContact, saveDebtorIdentity, saveDebtorPreferences,
   updateContact, uploadDocument, verifyContact, CONTACT_KINDS, DOCUMENT_KINDS,
+  dialableNumber,
   type AccountContact, type AccountDocument, type ContactKind, type Workspace,
 } from '../../lib/accountWorkspace'
 
@@ -68,7 +69,8 @@ export function DebtorDetailsPanel({ account, name, workspace, onChange, userId,
   const retired = (workspace?.contacts ?? []).filter((c) => c.retiredAt)
 
   const phones = live.filter((c) => c.kind === 'mobile' || c.kind === 'phone' || c.kind === 'work')
-  const primaryPhone = phones.find((c) => c.isPrimary) ?? phones[0]
+  // Shared with the action bar's Call button, so both ring the same number.
+  const primaryPhone = dialableNumber(live)
   const altPhone = phones.find((c) => c.id !== primaryPhone?.id)
   const email = live.find((c) => c.kind === 'email')
   const address = live.find((c) => c.kind === 'address')
