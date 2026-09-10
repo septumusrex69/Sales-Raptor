@@ -149,6 +149,7 @@ export function AccountDetail() {
           })),
         fees: ledgers.fees.map((f) => ({
           date: f.incurredAt.slice(0, 10),
+          at: f.incurredAt,
           description: f.description,
           exclVat: f.amountExclVat,
           vat: f.vatAmount,

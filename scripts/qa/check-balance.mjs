@@ -353,5 +353,57 @@ const empty = { payments: [], fees: [], interest: [] }
   check('the statement shows the charged fee', line.debit, 577.30)
 }
 
+/*
+ * Two fees on the same day come out in the order they happened.
+ *
+ * The fee ledger is fetched newest-first, and the statement used to sort on the DATE alone — so
+ * a stable sort kept that reversal and the second trace of the morning sat above the first. A
+ * statement that runs oldest to newest down the page has to do that within a day as well.
+ */
+{
+  const day = '2026-09-10'
+  const fee = (at, description, exclVat, segments) => ({ date: day, at, description, exclVat, vat: 0, billed: true, segments })
+  const s = buildStatement({
+    capitalHandedOver: 1000,
+    handoverDate: '2026-07-20',
+    accrueTo: day,
+    ledgers: {
+      payments: [],
+      interest: [],
+      // Handed over newest-first, exactly as PostgREST returns them.
+      fees: [
+        fee(`${day}T13:20:23Z`, 'Credit bureau search (XDS)', 48, 3),
+        fee(`${day}T13:20:02Z`, 'Credit bureau search (XDS)', 32, 2),
+      ],
+    },
+  })
+  // The suite's `check` compares numbers; these are strings.
+  const checkText = (name, actual, expected) => {
+    const ok = actual === expected
+    console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`)
+    if (!ok) { console.log(`        expected "${expected}", got "${actual}"`); failed++ }
+  }
+  const traces = s.lines.filter((l) => l.kind === 'fee').map((l) => l.description)
+  checkText('the first trace of the day is listed first', traces[0], 'Credit bureau search (XDS) ×2')
+  checkText('...and the second below it', traces[1], 'Credit bureau search (XDS) ×3')
+
+  // Without a timestamp there is nothing to order by, and the order given must be kept.
+  const untimed = buildStatement({
+    capitalHandedOver: 1000,
+    handoverDate: '2026-07-20',
+    accrueTo: day,
+    ledgers: {
+      payments: [],
+      interest: [],
+      fees: [
+        { date: day, description: 'Letter', exclVat: 25, vat: 0, billed: true },
+        { date: day, description: 'Phone Call', exclVat: 25, vat: 0, billed: true },
+      ],
+    },
+  })
+  const order = untimed.lines.filter((l) => l.kind === 'fee').map((l) => l.description)
+  checkText('untimed fees keep the order they arrived in', order.join(' then '), 'Letter then Phone Call')
+}
+
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)
 process.exit(failed ? 1 : 0)

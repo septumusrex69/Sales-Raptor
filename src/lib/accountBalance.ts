@@ -39,7 +39,20 @@ export interface LedgerLines {
    */
   payments: { date: string; amount: number; paidToClient?: boolean; commissionExclVat?: number | null }[]
   /** Every fee raised. `inclVat` is what was actually charged. */
-  fees: { date: string; description: string; exclVat: number; vat: number; billed: boolean; segments?: number }[]
+  fees: {
+    date: string
+    /**
+     * The full timestamp, where there is one. Two fees raised on the same day are ordered by it —
+     * without it they fall back on the order the database handed them over, which is newest
+     * first, so a statement showed the second trace of the morning above the first.
+     */
+    at?: string
+    description: string
+    exclVat: number
+    vat: number
+    billed: boolean
+    segments?: number
+  }[]
   /** Every interest accrual period. */
   interest: { from: string; days: number; amount: number }[]
 }
@@ -285,7 +298,7 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
   const breakdown = computeBalance(input)
   const stopAt = input.writtenOffAt ?? null
 
-  type Pending = Omit<StatementLine, 'balance'>
+  type Pending = Omit<StatementLine, 'balance'> & { at?: string }
   const pending: Pending[] = []
 
   if (input.handoverDate) {
@@ -349,6 +362,7 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
     pending.push({
       date: f.date,
       kind: 'fee',
+      at: f.at,
       description: feeLabel(f.description, f.segments),
       debit: roundToCents(f.exclVat + f.vat),
       credit: 0,
@@ -384,10 +398,22 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
   const rank: Record<StatementKind, number> = {
     handover: 0, interest: 1, 'interest-accruing': 1, fee: 2, payment: 3, 'receipt-fee': 4,
   }
-  pending.sort((a, b) => a.date.localeCompare(b.date) || rank[a.kind] - rank[b.kind])
+  /*
+   * Day, then kind, then the clock.
+   *
+   * Kind stays ahead of the clock deliberately: a payment and the receipt fee it produces share a
+   * date and the fee has no time of its own, so ranking keeps them in the order that reads
+   * correctly. The timestamp only breaks ties BETWEEN the same kind on the same day — which is
+   * where two traces taken ten minutes apart were coming out backwards, because the fee ledger is
+   * fetched newest-first and a stable sort kept it that way.
+   */
+  pending.sort((a, b) =>
+    a.date.localeCompare(b.date)
+    || rank[a.kind] - rank[b.kind]
+    || (a.at ?? a.date).localeCompare(b.at ?? b.date))
 
   let running = 0
-  const lines: StatementLine[] = pending.map((l) => {
+  const lines: StatementLine[] = pending.map(({ at: _at, ...l }) => {
     running = roundToCents(running + l.debit - l.credit)
     return { ...l, balance: running }
   })
