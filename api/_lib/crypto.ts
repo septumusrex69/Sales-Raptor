@@ -6,6 +6,27 @@ import crypto from 'node:crypto'
  * anon) -- a raw DB dump or a misconfigured policy still wouldn't expose a
  * usable password. EMAIL_CREDENTIALS_KEY must be a 32-byte key, base64-encoded.
  */
+/**
+ * Why the key cannot be used, or null when it can.
+ *
+ * getKey throws, which is right at the point of use and wrong at the edge of a request: an
+ * uncaught throw inside a handler returns a 500 with no body, and a client that reads
+ * `body.error` off an empty body falls back to whatever generic sentence it holds. Connecting
+ * Felicia's mailbox on production did exactly that — both the IMAP and the SMTP checks passed,
+ * the key was missing, and the screen said only "Could not connect that mailbox."
+ *
+ * So routes ask this first and answer plainly. Configuration missing on the server is not the
+ * operator's mistake and should never be reported as if it were their password.
+ */
+export function credentialsKeyProblem(): string | null {
+  try {
+    getKey()
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : 'EMAIL_CREDENTIALS_KEY is not usable.'
+  }
+}
+
 function getKey(): Buffer {
   const key = process.env.EMAIL_CREDENTIALS_KEY
   if (!key) throw new Error('Server is missing EMAIL_CREDENTIALS_KEY configuration.')

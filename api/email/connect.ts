@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { ImapFlow } from 'imapflow'
 import nodemailer from 'nodemailer'
 import { adminClient, callerIsAdmin, requireCaller } from '../_lib/auth.js'
-import { encrypt } from '../_lib/crypto.js'
+import { credentialsKeyProblem, encrypt } from '../_lib/crypto.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -13,6 +13,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = adminClient()
   if (!admin) {
     res.status(500).json({ error: 'Server is missing Supabase configuration.' })
+    return
+  }
+  // Asked before the IMAP and SMTP checks, not after. Without the key the password cannot be
+  // stored however good it is, so verifying it first only wastes two network round trips and
+  // then reports a server problem as though the mailbox were at fault.
+  const keyProblem = credentialsKeyProblem()
+  if (keyProblem) {
+    res.status(500).json({ error: `${keyProblem} Mailboxes cannot be connected until it is set.` })
     return
   }
   const caller = await requireCaller(req, admin)

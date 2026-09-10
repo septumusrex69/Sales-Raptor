@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { adminClient, callerIsAdmin, requireCaller } from '../auth.js'
-import { encrypt } from '../crypto.js'
+import { credentialsKeyProblem, encrypt } from '../crypto.js'
 import { BuzzBoxError, getOrganisation, listOrganisations, login } from '../buzzbox.js'
 
 /**
@@ -20,6 +20,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = adminClient()
   if (!admin) {
     res.status(500).json({ error: 'Server is missing Supabase configuration.' })
+    return
+  }
+  // BuzzBox stores its password with the same key the mailboxes use, so it falls into the same
+  // hole: without the key set, a correct login would be verified against BuzzBox and then fail
+  // silently on the way to the database. Asked before the login, so nothing is attempted that
+  // cannot be saved.
+  const keyProblem = credentialsKeyProblem()
+  if (keyProblem) {
+    res.status(500).json({ error: `${keyProblem} BuzzBox cannot be connected until it is set.` })
     return
   }
   const caller = await requireCaller(req, admin)

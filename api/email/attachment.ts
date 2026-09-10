@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { credentialsKeyProblem } from '../_lib/crypto.js'
 import { adminClient, requireCaller } from '../_lib/auth.js'
 import { fetchAttachment } from '../_lib/emailSync.js'
 
@@ -19,6 +20,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = adminClient()
   if (!admin) {
     res.status(500).json({ error: 'Server is missing Supabase configuration.' })
+    return
+  }
+  // Same guard as connect: a missing key is a server problem and has to say so, not surface as
+  // an empty 500 the client renders as a generic failure.
+  const keyProblem = credentialsKeyProblem()
+  if (keyProblem) {
+    res.status(500).json({ error: keyProblem })
     return
   }
   const caller = await requireCaller(req, admin)
