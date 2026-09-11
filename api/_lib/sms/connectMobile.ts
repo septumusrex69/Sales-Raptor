@@ -71,7 +71,14 @@ export async function sendSms(input: {
   reference: string
   token?: string
 }): Promise<SendResult> {
-  const token = input.token ?? process.env.CONNECT_MOBILE_API_TOKEN
+  /*
+   * Trimmed, because a pasted secret almost never arrives clean.
+   *
+   * Copying a token out of a vault or an email brings a trailing newline or a leading space with
+   * it more often than not, and neither is visible in the box you paste into. The provider then
+   * rejects a token that looks perfectly correct to the person who set it.
+   */
+  const token = (input.token ?? process.env.CONNECT_MOBILE_API_TOKEN ?? '').trim()
   if (!token) {
     /*
      * Says what to DO, not just what is missing.
