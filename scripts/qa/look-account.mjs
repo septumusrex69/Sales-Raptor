@@ -419,7 +419,7 @@ await queue.addInitScript(seed, { ref: REF, user: USER })
 await queue.goto(`${ORIGIN}/queries`, { waitUntil: 'networkidle' })
 await queue.waitForTimeout(1400)
 const boardText = (await queue.textContent('body')).replace(/\s+/g, ' ')
-for (const col of ['With the agent', 'With the client liaison', 'With the client', 'Resolved']) {
+for (const col of ['With the agent', 'Awaiting team leader', 'Awaiting liaison', 'Awaiting client', 'Resolved']) {
   if (!boardText.includes(col)) console.log(`!! disputes board is missing the "${col}" column`)
 }
 for (const kpi of ['Total Disputes', 'Open', 'Chase overdue', 'Oldest open']) {

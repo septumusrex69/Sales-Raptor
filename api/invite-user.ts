@@ -46,7 +46,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: 'Email is required.' })
     return
   }
-  const ALLOWED_ROLES = ['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Agent', 'Read Only']
+  const ALLOWED_ROLES = ['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Team Leader', 'Pre-legal Agent', 'Read Only']
   if (role !== undefined && !ALLOWED_ROLES.includes(role)) {
     res.status(400).json({ error: 'Invalid role.' })
     return

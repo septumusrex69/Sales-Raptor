@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
-import { raiseQuery } from '../../lib/accountQueries'
+import { raiseQuery, stageForAssignee } from '../../lib/accountQueries'
 import {
   categoryExamples, explanationMissing,
   CATEGORY_NEEDING_EXPLANATION, EXPLANATION_MIN_LENGTH, QUERY_CATEGORIES,
@@ -10,9 +10,6 @@ import { chargeMessage } from '../../lib/accountCharges'
 import type { User } from '../../types'
 
 const TODAY = new Date().toISOString().slice(0, 10)
-
-/** Who a manager is, in the absence of a team-leader field: it is a role, not a relationship. */
-const MANAGER_ROLES = ['Administrator', 'Sales Manager', 'Liaison Manager']
 
 /**
  * Raising a dispute.
@@ -46,9 +43,16 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const managers = useMemo(() => users.filter((u) => MANAGER_ROLES.includes(u.role)), [users])
-  const others = useMemo(
-    () => users.filter((u) => u.id !== clientLiaison?.id && !MANAGER_ROLES.includes(u.role)),
+  /*
+   * Two rungs, and nothing else.
+   *
+   * An agent who cannot answer a dispute has exactly two people to give it to: the liaison who
+   * owns the client relationship, or a pre-legal team leader. The list used to be the whole staff,
+   * which invited a dispute to be handed to whoever came to mind first -- and that is how one ends
+   * up parked with somebody who has no standing to answer it.
+   */
+  const teamLeaders = useMemo(
+    () => users.filter((u) => u.id !== clientLiaison?.id && u.role === 'Pre-legal Team Leader'),
     [users, clientLiaison?.id],
   )
 
@@ -70,10 +74,21 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
    */
   const needsExplanation = explanationMissing(category, description)
 
-  const givenAway = !!toId && toId !== actor.id
+  /*
+   * The debtor pays when the dispute is given to somebody.
+   *
+   * Unassigned means nobody has been put to work on it yet, so there is nothing to recover. The
+   * moment it has a name on it -- anyone's, including your own -- somebody's time is being spent
+   * on this account because of this dispute, and that is what item 3 is for. This was keyed to
+   * "somebody other than you", which quietly let the commonest case of all go unbilled.
+   *
+   * Still a checkbox: the rule is right almost always, and the person doing it knows when it is
+   * not.
+   */
+  const assigned = !!toId
   const [chargeTouched, setChargeTouched] = useState(false)
-  const [charge, setCharge] = useState(givenAway)
-  const chargeDebtor = chargeTouched ? charge : givenAway
+  const [charge, setCharge] = useState(assigned)
+  const chargeDebtor = chargeTouched ? charge : assigned
 
   async function submit() {
     if (!description.trim()) return
@@ -84,6 +99,7 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
         description,
         category,
         ownerId: toId || null,
+        stage: stageForAssignee(users.find((u) => u.id === toId)?.role, !!toId && toId === clientLiaison?.id),
         chaseOn: chaseOn || null,
         raisedBy: actor.id,
         raisedByName: actor.name,
@@ -115,14 +131,9 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
                 <option value={clientLiaison.id}>{clientLiaison.name} — looks after this client</option>
               </optgroup>
             )}
-            {managers.length > 0 && (
-              <optgroup label="Managers">
-                {managers.map((u) => <option key={u.id} value={u.id}>{u.name} — {u.role}</option>)}
-              </optgroup>
-            )}
-            {others.length > 0 && (
-              <optgroup label="Everyone else">
-                {others.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            {teamLeaders.length > 0 && (
+              <optgroup label="Pre-legal team leaders">
+                {teamLeaders.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
               </optgroup>
             )}
           </select>
@@ -178,9 +189,9 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
             <span className="block text-[11px] text-slate-500 mt-0.5">
               Annexure B item 3, &ldquo;other necessary expenses not specifically provided for&rdquo;. It is a
               total for the account, so it charges nothing if this account has already had it.
-              {givenAway
-                ? ' Ticked because you are giving this dispute to someone else to deal with.'
-                : ' Unticked because you are keeping this one — answering your own dispute is the job, not an expense.'}
+              {assigned
+                ? ' Ticked because somebody is being put to work on this dispute.'
+                : ' Unticked because it is unassigned — nobody is spending time on it yet.'}
             </span>
           </span>
         </label>

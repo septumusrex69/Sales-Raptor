@@ -20,7 +20,7 @@ const TODAY = new Date().toISOString().slice(0, 10)
  * {@link columnOf}.
  */
 type Column = QueryStage | 'resolved'
-const COLUMNS: Column[] = ['agent', 'liaison', 'client', 'resolved']
+const COLUMNS: Column[] = ['agent', 'team_leader', 'liaison', 'client', 'resolved']
 
 const COLUMN_LABEL: Record<Column, string> = { ...QUERY_STAGE_LABEL, resolved: 'Resolved' }
 /*
@@ -35,6 +35,7 @@ const COLUMN_LABEL: Record<Column, string> = { ...QUERY_STAGE_LABEL, resolved: '
  */
 const COLUMN_DOT: Record<Column, string> = {
   agent: 'var(--c-grey-light)',
+  team_leader: 'var(--c-steel)',
   liaison: 'var(--c-navy)',
   client: 'var(--c-gold)',
   resolved: 'var(--c-green)',
@@ -273,6 +274,7 @@ function Total({ label, value, tone }: { label: string; value: number | string; 
 function StageChip({ column }: { column: Column }) {
   const chip: Record<Column, string> = {
     agent: 'bg-slate-100 text-slate-600',
+    team_leader: 'bg-navy-700/[0.07] text-[var(--c-steel-deep)]',
     liaison: 'bg-navy-700/10 text-navy-700',
     client: 'bg-gold-100 text-[var(--c-gold-deep)]',
     resolved: 'bg-positive-100 text-positive-700',

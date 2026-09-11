@@ -389,6 +389,7 @@ export function AccountDetail() {
               run={runQuery}
               clientId={client?.id}
               clientName={client?.name}
+              clientLiaisonId={clientLiaison?.id}
             />
             <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0}
               clientLiaisonName={clientLiaison?.name ?? null} />

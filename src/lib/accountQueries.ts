@@ -18,7 +18,7 @@ import { chargeItem, type ChargeResult } from './accountCharges'
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON from PostgREST. */
 
 export type QueryStatus = 'open' | 'closed'
-export type QueryOutcome = 'valid' | 'partly_valid' | 'not_valid' | 'withdrawn'
+
 
 /**
  * Where a query sits on the ladder.
@@ -31,44 +31,59 @@ export type QueryOutcome = 'valid' | 'partly_valid' | 'not_valid' | 'withdrawn'
  * exit from a query and quietly turned every dispute into correspondence with a client who did
  * not need to hear about it. Any tier can close a query it has answered.
  */
-export type QueryStage = 'agent' | 'liaison' | 'client'
+/*
+ * The dispute vocabulary lives in disputeCategories.ts — it is pure, and this module talks to
+ * Postgres, which would otherwise mean none of it could be exercised outside a browser. Re-exported
+ * here so the twelve call sites that already say `from './accountQueries'` keep working: one
+ * import for everything about a dispute is the right shape for a caller, whatever the files do.
+ */
+import {
+  canSendToClient, stageForAssignee,
+  CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL,
+  type DisputeStage as QueryStage, type QueryOutcome,
+} from './disputeCategories'
 
+export {
+  canSendToClient, stageForAssignee,
+  CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL,
+}
+export type { QueryStage, QueryOutcome }
+
+/**
+ * Who is being waited on.
+ *
+ * These read as "awaiting X" rather than "with X" for a reason the firm put plainly: once you have
+ * escalated a dispute, being told it is *with* the liaison tells you nothing you did not do
+ * yourself a second ago. What you actually want to know is that the ball is not in your court and
+ * whose court it is in.
+ *
+ * `agent` is the exception and stays "with", because nobody is being waited on — it is sitting
+ * with the collections desk, which is where it started.
+ */
 export const QUERY_STAGE_LABEL: Record<QueryStage, string> = {
   agent: 'With the agent',
-  liaison: 'With the client liaison',
-  client: 'With the client',
+  team_leader: 'Awaiting team leader',
+  liaison: 'Awaiting liaison',
+  client: 'Awaiting client',
 }
 
 /** What happens when this query moves up, and what it is called on the button. */
 export const NEXT_STAGE: Record<QueryStage, { to: QueryStage; label: string; note: string } | null> = {
   agent: { to: 'liaison', label: 'Send to liaison', note: 'Passed to the client liaison.' },
+  team_leader: { to: 'liaison', label: 'Send to liaison', note: 'Passed to the client liaison.' },
   liaison: { to: 'client', label: 'Send to client', note: 'Sent to the client.' },
   client: { to: 'liaison', label: 'Client answered', note: 'The client has answered.' },
 }
 
 /**
- * Who may put a query in front of a client.
+ * The rungs a dispute can be handed to, and nothing else.
  *
- * A collections agent should not be writing to a client about a disputed account on their own
- * initiative — that is the liaison's relationship to manage. Everything else on a query is open
- * to anyone signed in.
- *
- * Worth saying plainly: these are the roles this app HAS, which are a sales CRM's roles. There
- * is no "collections agent" or "pre-legal agent" in the list, so Sales Representative is standing
- * in for one. That is a mapping, not a model, and it should be fixed properly.
+ * An agent who cannot answer a dispute has exactly two people to give it to: the liaison who owns
+ * the client relationship, or a pre-legal team leader. Offering the whole staff list invited a
+ * dispute to be handed to whoever was remembered first, which is how one ends up parked with
+ * somebody who has no standing to answer it.
  */
-export const CAN_SEND_TO_CLIENT = ['Administrator', 'Sales Manager', 'Liaison Manager', 'Liaison']
-
-export function canSendToClient(role: string | undefined): boolean {
-  return CAN_SEND_TO_CLIENT.includes(role ?? '')
-}
-
-export const QUERY_OUTCOME_LABEL: Record<QueryOutcome, string> = {
-  valid: 'Valid',
-  partly_valid: 'Partly valid',
-  not_valid: 'Not valid',
-  withdrawn: 'Withdrawn by debtor',
-}
+export const DISPUTE_ESCALATION_ROLES = ['Pre-legal Team Leader', 'Liaison Manager', 'Liaison']
 
 export interface AccountQuery {
   id: string
@@ -236,6 +251,8 @@ export async function raiseQuery(input: {
   description: string
   category?: string | null
   ownerId?: string | null
+  /** Where it lands, which follows who it was given to. See {@link stageForAssignee}. */
+  stage?: QueryStage
   chaseOn?: string | null
   raisedBy?: string | null
   raisedByName?: string | null
@@ -256,6 +273,7 @@ export async function raiseQuery(input: {
       description: input.description.trim(),
       category: input.category?.trim() || null,
       owner_id: input.ownerId ?? null,
+      stage: input.stage ?? 'agent',
       chase_on: input.chaseOn || null,
       raised_by: input.raisedBy ?? null,
       raised_by_name: input.raisedByName ?? null,

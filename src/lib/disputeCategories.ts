@@ -61,3 +61,51 @@ export function explanationMissing(category: string | null | undefined, descript
 export function categoryExamples(value: string | null | undefined): string | null {
   return QUERY_CATEGORIES.find((c) => c.value === value)?.examples ?? null
 }
+
+/** Where a dispute sits. Mirrors the account_queries.stage check constraint. */
+export type DisputeStage = 'agent' | 'team_leader' | 'liaison' | 'client'
+
+/**
+ * Where a dispute sits, given who is holding it.
+ *
+ * The stage follows the assignee rather than being set separately, because they cannot disagree
+ * without one of them being a lie. Handing a dispute to the liaison IS escalating it to the
+ * liaison; making somebody then press a button to say so is a second chance to forget.
+ */
+export function stageForAssignee(
+  assigneeRole: string | undefined,
+  isClientLiaison: boolean,
+): DisputeStage {
+  if (!assigneeRole) return 'agent'
+  if (isClientLiaison) return 'liaison'
+  if (assigneeRole === 'Pre-legal Team Leader') return 'team_leader'
+  if (assigneeRole === 'Liaison' || assigneeRole === 'Liaison Manager') return 'liaison'
+  return 'agent'
+}
+
+/**
+ * Who may put a query in front of a client.
+ *
+ * A collections agent should not be writing to a client about a disputed account on their own
+ * initiative — that is the liaison's relationship to manage. Everything else on a query is open
+ * to anyone signed in.
+ *
+ * Neither pre-legal role is on this list, and that is the point rather than an omission: an agent
+ * works the debtor and a team leader supervises that work, but the conversation with a client
+ * belongs to whoever holds the relationship.
+ */
+export const CAN_SEND_TO_CLIENT = ['Administrator', 'Sales Manager', 'Liaison Manager', 'Liaison']
+
+export function canSendToClient(role: string | undefined): boolean {
+  return CAN_SEND_TO_CLIENT.includes(role ?? '')
+}
+
+/** How a dispute ended. */
+export type QueryOutcome = 'valid' | 'partly_valid' | 'not_valid' | 'withdrawn'
+
+export const QUERY_OUTCOME_LABEL: Record<QueryOutcome, string> = {
+  valid: 'Valid',
+  partly_valid: 'Partly valid',
+  not_valid: 'Not valid',
+  withdrawn: 'Withdrawn by debtor',
+}

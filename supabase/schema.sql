@@ -23,7 +23,7 @@ create table if not exists public.profiles (
   name text not null default '',
   email text not null,
   role text not null default 'Sales Representative'
-    check (role in ('Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Agent', 'Read Only')),
+    check (role in ('Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Team Leader', 'Pre-legal Agent', 'Read Only')),
   team_id uuid references public.teams (id) on delete set null,
   status text not null default 'Active' check (status in ('Active', 'Inactive')),
   phone text,
@@ -1421,7 +1421,7 @@ alter table public.promises_to_pay
 -- one is never reached.
 alter table public.profiles drop constraint if exists profiles_role_check;
 alter table public.profiles add constraint profiles_role_check
-  check (role in ('Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Agent', 'Read Only'));
+  check (role in ('Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Team Leader', 'Pre-legal Agent', 'Read Only'));
 
 -- ---------- The collection commission, as charged ----------
 -- "All Payments Incl Balances" replaced "All Payments per Client" as the payments export. It is

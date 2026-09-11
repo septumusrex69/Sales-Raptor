@@ -6,7 +6,7 @@ import { formatMoney, formatDate } from '../../data/mockData'
 import { chargeMessage } from '../../lib/accountCharges'
 import {
   ageInDays, canSendToClient, closeQuery, isStale, markOutcomeDone, raiseQuery, updateQuery,
-  NEXT_STAGE, QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
+  NEXT_STAGE, stageForAssignee, QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
   type AccountQuery, type QueryOutcome, type QueryStage,
 } from '../../lib/accountQueries'
 import type { User } from '../../types'
@@ -25,6 +25,7 @@ const TODAY = new Date().toISOString().slice(0, 10)
  */
 const STAGE_DOT: Record<QueryStage, string> = {
   agent: 'var(--c-grey-light)',
+  team_leader: 'var(--c-steel)',
   liaison: 'var(--c-navy)',
   client: 'var(--c-gold)',
 }
@@ -48,7 +49,7 @@ const OUTCOME_CHIP: Record<QueryOutcome, string> = {
  * the business's decision, and a system that quietly halted work on an account would be taking
  * that decision away.
  */
-export function QueryPanel({ accountId, queries, users, actor, onChange, busy, run, clientId, clientName }: {
+export function QueryPanel({ accountId, queries, users, actor, onChange, busy, run, clientId, clientName, clientLiaisonId }: {
   accountId: string
   queries: AccountQuery[]
   /** Who a query can be given to. */
@@ -59,6 +60,8 @@ export function QueryPanel({ accountId, queries, users, actor, onChange, busy, r
   run: (fn: () => Promise<unknown>) => Promise<boolean>
   clientId: string | undefined
   clientName: string | undefined
+  /** Who looks after this debtor's client — giving a dispute to them is what "with the liaison" means. */
+  clientLiaisonId: string | undefined
 }) {
   const [adding, setAdding] = useState(false)
   const open = queries.filter((q) => q.status !== 'closed')
@@ -92,7 +95,7 @@ export function QueryPanel({ accountId, queries, users, actor, onChange, busy, r
 
       <div className="space-y-2.5">
         {open.map((q) => (
-          <QueryCard key={q.id} query={q} accountId={accountId} users={users} actor={actor}
+          <QueryCard key={q.id} query={q} accountId={accountId} users={users} actor={actor} clientLiaisonId={clientLiaisonId}
             busy={busy} run={run} onChange={onChange} clientId={clientId} clientName={clientName} />
         ))}
       </div>
@@ -124,7 +127,7 @@ export function QueryPanel({ accountId, queries, users, actor, onChange, busy, r
   )
 }
 
-function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, clientId, clientName }: {
+function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, clientId, clientName, clientLiaisonId }: {
   query: AccountQuery
   accountId: string
   users: User[]
@@ -134,6 +137,7 @@ function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, cli
   onChange: () => Promise<void>
   clientId: string | undefined
   clientName: string | undefined
+  clientLiaisonId: string | undefined
 }) {
   const [closing, setClosing] = useState(false)
   const stale = isStale(q, TODAY)
@@ -179,10 +183,18 @@ function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, cli
         <select
           value={q.ownerId ?? ''}
           disabled={busy}
-          onChange={(e) => run(() => updateQuery(q.id, { ownerId: e.target.value || null }, {
-            ...ctx,
-            note: `Dispute given to ${users.find((u) => u.id === e.target.value)?.name ?? 'nobody'}.`,
-          }))}
+          onChange={(e) => {
+            /*
+             * Handing a dispute over IS escalating it, so the stage moves with the name. Keeping
+             * them separate meant a dispute could sit "with the agent" while a liaison held it,
+             * and the only way to correct that was to remember a second button.
+             */
+            const to = users.find((u) => u.id === e.target.value)
+            return run(() => updateQuery(q.id, {
+              ownerId: e.target.value || null,
+              stage: stageForAssignee(to?.role, !!to && to.id === clientLiaisonId),
+            }, { ...ctx, note: `Dispute given to ${to?.name ?? 'nobody'}.` }))
+          }}
           className="max-w-[9rem] text-[11px] text-slate-600 bg-transparent outline-none cursor-pointer hover:text-[var(--c-gold-deep)]"
         >
           <option value="">nobody yet</option>

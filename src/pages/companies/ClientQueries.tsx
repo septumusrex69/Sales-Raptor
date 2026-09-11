@@ -10,10 +10,12 @@ import {
 
 const TODAY = new Date().toISOString().slice(0, 10)
 
+/** The app's own palette, same as the board and the card on the account. */
 const STAGE_CHIP: Record<QueryStage, string> = {
   agent: 'bg-slate-100 text-slate-600',
-  liaison: 'bg-brand-100 text-brand-600',
-  client: 'bg-gold-100 text-gold-600',
+  team_leader: 'bg-navy-700/[0.07] text-[var(--c-steel-deep)]',
+  liaison: 'bg-navy-700/10 text-navy-700',
+  client: 'bg-gold-100 text-[var(--c-gold-deep)]',
 }
 
 /**
@@ -58,10 +60,13 @@ export function ClientQueries({ companyId }: { companyId: string }) {
    * the moment it is escalated to the liaison, which is the point at which somebody outside the
    * collections desk has to do something about it.
    *
-   * Stage carries over when a dispute closes, so one that was resolved by the agent stays hidden
-   * and one that reached the liaison stays visible — no extra column needed to remember it.
+   * A dispute with a pre-legal TEAM LEADER is still inside the collections department, so it is
+   * hidden here too — the client hears about it when the liaison does, and not before.
+   *
+   * Stage carries over when a dispute closes, so one that was resolved inside the firm stays
+   * hidden and one that reached the liaison stays visible — no extra column needed to remember it.
    */
-  const escalated = rows.filter((q) => q.stage !== 'agent')
+  const escalated = rows.filter((q) => q.stage === 'liaison' || q.stage === 'client')
   const open = escalated.filter((q) => q.status === 'open')
   const closed = escalated.filter((q) => q.status === 'closed')
   const withClient = open.filter((q) => q.stage === 'client')

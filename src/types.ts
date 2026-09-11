@@ -378,6 +378,9 @@ export type UserRole =
   | 'Sales Representative'
   | 'Liaison Manager'
   | 'Liaison'
+  // The rung between the collector and the client liaison: a dispute an agent cannot answer
+  // goes to one of those two and to nobody else.
+  | 'Pre-legal Team Leader'
   | 'Pre-legal Agent'
   | 'Read Only'
 

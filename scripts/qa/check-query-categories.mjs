@@ -4,7 +4,7 @@
  * Run: node --experimental-strip-types scripts/qa/check-query-categories.mjs
  */
 import {
-  categoryExamples, explanationMissing,
+  categoryExamples, explanationMissing, stageForAssignee,
   CATEGORY_NEEDING_EXPLANATION, EXPLANATION_MIN_LENGTH, QUERY_CATEGORIES,
 } from '../../src/lib/disputeCategories.ts'
 
@@ -59,6 +59,24 @@ for (const c of QUERY_CATEGORIES.filter((c) => c.value !== 'Other')) {
 }
 check('no classification at all needs no minimum', explanationMissing('', 'paid'), false)
 check('null category needs no minimum', explanationMissing(null, 'paid'), false)
+
+/* ---- where a dispute lands, which follows who it was given to ---- */
+// Unassigned is the only state that is not an escalation: nobody has been put to work on it.
+check('nobody yet keeps it with the agent', stageForAssignee(undefined, false), 'agent')
+// No assignee cannot be the liaison, whatever the second argument claims. The guard says so
+// rather than leaving the two arguments free to contradict each other.
+check('no assignee is never an escalation', stageForAssignee(undefined, true), 'agent')
+check('an empty role is not an escalation either', stageForAssignee('', true), 'agent')
+check('the client liaison means awaiting liaison', stageForAssignee('Liaison', true), 'liaison')
+check('a liaison who is not this client\'s is still the liaison rung', stageForAssignee('Liaison', false), 'liaison')
+check('a liaison manager counts as the liaison rung', stageForAssignee('Liaison Manager', false), 'liaison')
+check('a pre-legal team leader is its own rung', stageForAssignee('Pre-legal Team Leader', false), 'team_leader')
+// Being the client's liaison beats the role: that is what the relationship means here.
+check('the client liaison wins over the role', stageForAssignee('Pre-legal Team Leader', true), 'liaison')
+// Anyone else on the collections desk has not escalated it anywhere.
+check('another agent is not an escalation', stageForAssignee('Pre-legal Agent', false), 'agent')
+check('a sales rep is not an escalation', stageForAssignee('Sales Representative', false), 'agent')
+check('an administrator alone is not an escalation', stageForAssignee('Administrator', false), 'agent')
 
 console.log(`${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  !! ${f}`)
