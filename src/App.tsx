@@ -15,6 +15,7 @@ import { DealsBoard } from './pages/deals/DealsBoard'
 import { DealDetail } from './pages/deals/DealDetail'
 import { ContactsList } from './pages/contacts/ContactsList'
 import { ContactDetail } from './pages/contacts/ContactDetail'
+import { RequireClientAccess } from './components/auth/RequireClientAccess'
 import { CompaniesList } from './pages/companies/CompaniesList'
 import { CompanyDetail } from './pages/companies/CompanyDetail'
 import { AccountsList } from './pages/accounts/AccountsList'
@@ -61,8 +62,10 @@ function App() {
               <Route path="/deals/:id" element={<DealDetail />} handle={{ title: 'Deal Details' }} />
               <Route path="/contacts" element={<ContactsList />} handle={{ title: 'Contacts' }} />
               <Route path="/contacts/:id" element={<ContactDetail />} handle={{ title: 'Contact Details' }} />
-              <Route path="/companies" element={<CompaniesList />} handle={{ title: 'Clients' }} />
-              <Route path="/companies/:id" element={<CompanyDetail />} handle={{ title: 'Client Details' }} />
+              {/* A hidden link is not a permission: a pre-legal agent who types the URL lands back
+                  on the book they are meant to be working. */}
+              <Route path="/companies" element={<RequireClientAccess><CompaniesList /></RequireClientAccess>} handle={{ title: 'Clients' }} />
+              <Route path="/companies/:id" element={<RequireClientAccess><CompanyDetail /></RequireClientAccess>} handle={{ title: 'Client Details' }} />
               <Route path="/accounts" element={<AccountsList />} handle={{ title: 'Accounts' }} />
               <Route path="/accounts/:id" element={<AccountDetail />} handle={{ title: 'Account' }} />
               <Route path="/queries" element={<DisputesBoard />} handle={{ title: 'Disputes' }} />

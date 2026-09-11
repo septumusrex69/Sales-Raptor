@@ -50,8 +50,20 @@ export function ClientQueries({ companyId }: { companyId: string }) {
     return <Card><div className="py-6 grid place-items-center text-slate-400"><Loader2 size={18} className="animate-spin" /></div></Card>
   }
 
-  const open = rows.filter((q) => q.status === 'open')
-  const closed = rows.filter((q) => q.status === 'closed')
+  /*
+   * Only disputes that have left the agent.
+   *
+   * A debtor arguing with a collector is not the client's business, and a client page that listed
+   * every one of them would bury the handful that actually need answering. A dispute appears here
+   * the moment it is escalated to the liaison, which is the point at which somebody outside the
+   * collections desk has to do something about it.
+   *
+   * Stage carries over when a dispute closes, so one that was resolved by the agent stays hidden
+   * and one that reached the liaison stays visible — no extra column needed to remember it.
+   */
+  const escalated = rows.filter((q) => q.stage !== 'agent')
+  const open = escalated.filter((q) => q.status === 'open')
+  const closed = escalated.filter((q) => q.status === 'closed')
   const withClient = open.filter((q) => q.stage === 'client')
   const shown = showClosed ? closed : open
 
@@ -62,7 +74,7 @@ export function ClientQueries({ companyId }: { companyId: string }) {
           title="Disputes on this client's book"
           subtitle={
             open.length === 0
-              ? 'Nothing outstanding on this client.'
+              ? 'Nothing has been escalated to the liaison on this client.'
               : `${open.length} open${withClient.length ? `, ${withClient.length} waiting on this client` : ''}.`
           }
           action={
@@ -77,7 +89,7 @@ export function ClientQueries({ companyId }: { companyId: string }) {
 
       {shown.length === 0 ? (
         <p className="text-sm text-slate-400 py-8 text-center">
-          {showClosed ? 'Nothing closed yet.' : 'No open queries on this client.'}
+          {showClosed ? 'Nothing closed yet.' : 'Nothing escalated to the liaison on this client.'}
         </p>
       ) : (
         <div className="divide-y divide-slate-50">

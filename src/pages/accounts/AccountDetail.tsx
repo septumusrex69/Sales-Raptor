@@ -18,6 +18,7 @@ import {
 } from '../../lib/accountWorkspace'
 import { buildTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
 import { isWrittenOff } from '../../lib/accountStatus'
+import { canViewClients } from '../../lib/permissions'
 import { styleFor, PROMISE_CHIP } from './timelineStyle'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
@@ -216,7 +217,9 @@ export function AccountDetail() {
           <span className="inline-flex flex-wrap items-center gap-x-1.5">
             <span className="text-white/50">Client</span>
             {client
-              ? <Link to={`/companies/${client.id}`} className="text-gold-400 hover:underline">{client.name}</Link>
+              ? canViewClients(currentUser?.role)
+                ? <Link to={`/companies/${client.id}`} className="text-gold-400 hover:underline">{client.name}</Link>
+                : <span className="text-gold-400">{client.name}</span>
               : <span>Unknown</span>}
             {account.clientReference && <><span className="text-white/30">·</span><span>their ref {account.clientReference}</span></>}
             {account.handoverDate && <><span className="text-white/30">·</span><span>handed over {formatDate(account.handoverDate)}</span></>}

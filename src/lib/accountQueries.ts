@@ -252,9 +252,9 @@ export async function raiseQuery(input: {
    * Whether to charge the debtor item 3.
    *
    * Defaults to true, because the ordinary case is a debtor query that Communications will take
-   * up with the client. It is false for an internal escalation — asking your own manager how to
-   * handle an account is supervision, not a "necessary expense" recoverable from the debtor, and
-   * charging for it would not survive being asked about.
+   * up with someone else. It is false when you keep it yourself — writing down a dispute you are
+   * going to answer at your own desk is the job, not a "necessary expense" recoverable from the
+   * debtor, and charging for it would not survive being asked about.
    */
   charge?: boolean
 }): Promise<{ query: AccountQuery; charge: ChargeResult | null }> {
@@ -288,7 +288,7 @@ export async function raiseQuery(input: {
     accountId: input.accountId,
     // Just what happened. The fee is already its own line on the timeline with its own amount,
     // and repeating it here made a two-line event into a five-line one.
-    body: `Query raised: ${q.description}`,
+    body: `Dispute raised: ${q.description}`,
     authorName: input.raisedByName ?? null,
     createdBy: input.raisedBy ?? null,
     queryId: q.id,

@@ -20,6 +20,7 @@ import clsx from 'clsx'
 import { useAuth } from '../../store/AuthContext'
 import { UserAvatar } from '../ui/Avatar'
 import { useTheme } from '../../store/ThemeContext'
+import { canViewClients } from '../../lib/permissions'
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -59,7 +60,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
-        {NAV.map(({ to, label, icon: Icon, end }) => (
+        {NAV.filter((n) => n.to !== '/companies' || canViewClients(currentUser?.role)).map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
             to={to}

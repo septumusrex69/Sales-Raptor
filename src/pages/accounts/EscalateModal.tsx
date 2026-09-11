@@ -48,13 +48,20 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
     [users, clientLiaison?.id],
   )
 
-  // Internal supervision is not a "necessary expense" recoverable from a debtor, so escalating to
-  // a manager starts unticked and escalating to the client's liaison starts ticked. Shown as a
-  // checkbox rather than decided silently: the person doing it knows which this really is.
-  const goesToClient = !!toId && toId === clientLiaison?.id
+  /*
+   * Whether the debtor pays for this follows one question: did the dispute go to somebody else?
+   *
+   * Keeping it yourself is you writing down what you are about to deal with — that is the job,
+   * and billing a debtor for it would not survive being asked about. Handing it to another person
+   * is work the account caused someone else to do, which is what item 3 is for.
+   *
+   * Still a checkbox rather than decided silently. The rule is right almost always; the person
+   * doing it is the one who knows when it is not.
+   */
+  const givenAway = !!toId && toId !== actor.id
   const [chargeTouched, setChargeTouched] = useState(false)
-  const [charge, setCharge] = useState(goesToClient)
-  const chargeDebtor = chargeTouched ? charge : goesToClient
+  const [charge, setCharge] = useState(givenAway)
+  const chargeDebtor = chargeTouched ? charge : givenAway
 
   async function submit() {
     if (!description.trim()) return
@@ -154,9 +161,9 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
             <span className="block text-[11px] text-slate-500 mt-0.5">
               Annexure B item 3, &ldquo;other necessary expenses not specifically provided for&rdquo;. It is a
               total for the account, so it charges nothing if this account has already had it.
-              {goesToClient
-                ? ' Ticked because this is going to the client liaison and will be taken up with the client.'
-                : ' Unticked because an internal escalation is supervision, not an expense of collecting.'}
+              {givenAway
+                ? ' Ticked because you are giving this dispute to someone else to deal with.'
+                : ' Unticked because you are keeping this one — answering your own dispute is the job, not an expense.'}
             </span>
           </span>
         </label>

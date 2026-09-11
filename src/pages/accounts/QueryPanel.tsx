@@ -10,8 +10,16 @@ import {
   type AccountQuery, type QueryOutcome, type QueryStage,
 } from '../../lib/accountQueries'
 import type { User } from '../../types'
+import { canViewClients } from '../../lib/permissions'
 
 const TODAY = new Date().toISOString().slice(0, 10)
+
+/** The card's left edge. Same colours as the disputes board, so a stage reads the same anywhere. */
+const STAGE_SPINE: Record<QueryStage, string> = {
+  agent: '#c9a052',
+  liaison: '#3b82f6',
+  client: '#0f2b46',
+}
 
 const STAGE_CHIP: Record<QueryStage, string> = {
   agent: 'bg-slate-100 text-slate-600',
@@ -131,60 +139,79 @@ function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, cli
   const ctx = { accountId, actorId: actor.id, actorName: actor.name }
 
   return (
-    <div className={`p-3 rounded-lg border ${stale ? 'border-negative-100 bg-negative-50' : 'border-slate-200'}`}>
-      <div className="flex items-start justify-between gap-2">
-        <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${STAGE_CHIP[q.stage]}`}>
-          {QUERY_STAGE_LABEL[q.stage]}
-        </span>
-        <span className={`text-[11px] shrink-0 ${stale ? 'text-negative' : 'text-slate-400'}`}>
-          {stale ? `chase — ${formatDate(q.chaseOn!)}` : `${ageInDays(q)} days old`}
-        </span>
-      </div>
+    /*
+      A card with a stage-coloured spine, which the firm asked for and which earns its keep: a
+      collector scanning a stack of these is asking "whose is this now?" before they read a word,
+      and the colour answers it from across the desk.
+    */
+    <div className={`rounded-lg border overflow-hidden ${stale ? 'border-negative-100 bg-negative-50' : 'border-slate-200 bg-white'}`}>
+      <div className="flex">
+        <span className="w-1 shrink-0" style={{ backgroundColor: STAGE_SPINE[q.stage] }} aria-hidden="true" />
+        <div className="flex-1 min-w-0 p-3">
+          <div className="flex items-start justify-between gap-2">
+            <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${STAGE_CHIP[q.stage]}`}>
+              {QUERY_STAGE_LABEL[q.stage]}
+            </span>
+            <span className={`text-[11px] shrink-0 ${stale ? 'text-negative' : 'text-slate-400'}`}>
+              {stale ? `chase — ${formatDate(q.chaseOn!)}` : `${ageInDays(q)} days old`}
+            </span>
+          </div>
 
-      <QueryDescription text={q.description} />
-      <p className="text-[11px] text-slate-400 mt-0.5">
-        {[q.category, q.raisedByName ? `raised by ${q.raisedByName}` : null].filter(Boolean).join(' · ')}
-      </p>
+          <QueryDescription text={q.description} />
+          {q.category && <p className="text-[11px] text-slate-400 mt-0.5">{q.category}</p>}
 
-      {/*
-        Whose query it is, chosen inline. The team covers for each other — anyone may act on this
-        and every action records who really did — but one person carries it.
-      */}
-      <label className="flex items-center gap-2 mt-2 text-[11px] text-slate-500">
-        Owner
-        <select
-          value={q.ownerId ?? ''}
-          disabled={busy}
-          onChange={(e) => run(() => updateQuery(q.id, { ownerId: e.target.value || null }, {
-            ...ctx,
-            note: `Dispute given to ${users.find((u) => u.id === e.target.value)?.name ?? 'nobody'}.`,
-          }))}
-          className="flex-1 min-w-0 text-[11px] rounded border border-slate-200 px-1.5 py-1 bg-white"
-        >
-          <option value="">Nobody yet</option>
-          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-        </select>
-      </label>
-      {owner && actor.id && owner.id !== actor.id && (
-        <p className="text-[10px] text-slate-400 mt-1">
-          You are covering for {owner.name.split(' ')[0]} — anything you do here is recorded under your name.
-        </p>
-      )}
+          {/*
+            Raised by, assigned to, follow-up — the three things asked about a dispute that is not
+            in front of you. Two of them are still controls rather than text: who carries it and
+            when to chase are changed far more often than they are read, and making somebody open
+            something else to change them is how chase dates go stale.
+          */}
+          <div className="flex flex-wrap gap-x-4 gap-y-2 mt-2.5 pt-2.5 border-t border-slate-100">
+            <div className="min-w-[6.5rem] flex-1">
+              <p className="text-[10px] uppercase tracking-wide text-slate-400">Raised by</p>
+              <p className="text-[12px] text-slate-700 truncate">{q.raisedByName ?? '—'}</p>
+            </div>
+            <div className="min-w-[6.5rem] flex-1">
+              <p className="text-[10px] uppercase tracking-wide text-slate-400">Assigned to</p>
+              <select
+                value={q.ownerId ?? ''}
+                disabled={busy}
+                onChange={(e) => run(() => updateQuery(q.id, { ownerId: e.target.value || null }, {
+                  ...ctx,
+                  note: `Dispute given to ${users.find((u) => u.id === e.target.value)?.name ?? 'nobody'}.`,
+                }))}
+                className="w-full text-[12px] text-slate-700 bg-transparent -ml-0.5 outline-none cursor-pointer hover:text-brand-600"
+              >
+                <option value="">Nobody yet</option>
+                {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </div>
+            <div className="min-w-[7.5rem] flex-1">
+              <p className="text-[10px] uppercase tracking-wide text-slate-400">Follow-up</p>
+              <input
+                type="date"
+                value={q.chaseOn ?? ''}
+                disabled={busy}
+                onChange={(e) => run(() => updateQuery(q.id, { chaseOn: e.target.value }, ctx))}
+                className={`w-full text-[12px] bg-transparent -ml-0.5 outline-none cursor-pointer ${stale ? 'text-negative font-medium' : 'text-slate-700'}`}
+              />
+            </div>
+          </div>
+          {owner && actor.id && owner.id !== actor.id && (
+            <p className="text-[10px] text-slate-400 mt-1.5">
+              You are covering for {owner.name.split(' ')[0]} — anything you do here is recorded under your name.
+            </p>
+          )}
 
-      {/*
-        Where to go from here. The account is where the story is; the client is who the query is
-        ultimately about, and the liaison needs both — one to understand it, one to answer it.
-      */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px]">
-        <Link to={`/accounts/${accountId}`} className="text-brand-600 hover:underline inline-flex items-center gap-0.5">
-          Open the account <ArrowUpRight size={11} />
-        </Link>
-        {clientId && (
-          <Link to={`/companies/${clientId}`} className="text-brand-600 hover:underline inline-flex items-center gap-0.5">
-            Open {clientName ?? 'the client'} <ArrowUpRight size={11} />
-          </Link>
-        )}
-      </div>
+          {/*
+            The client link is not for everyone. A pre-legal agent works the debtor; the client
+            behind the account — its rates, its mandate, its deals — is the liaison's business.
+          */}
+          {clientId && canViewClients(actor.role as User['role'] | undefined) && (
+            <Link to={`/companies/${clientId}`} className="inline-flex items-center gap-0.5 mt-2 text-[11px] text-brand-600 hover:underline">
+              View client: {clientName ?? 'the client'} <ArrowUpRight size={11} />
+            </Link>
+          )}
 
       {!closing && (
         <div className="flex flex-wrap gap-1.5 mt-2.5">
@@ -211,13 +238,9 @@ function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, cli
             )
           })()}
           {/* Every tier can close what it has answered. Most queries never reach the client. */}
+          {/* The chase date is set in Follow-up above; a second control for it was two places to
+              change one thing, and the one you did not use looked wrong afterwards. */}
           <Step label="Resolve" disabled={busy} onClick={() => setClosing(true)} />
-          <label className="text-[11px] text-slate-400 inline-flex items-center gap-1 ml-auto">
-            chase
-            <input type="date" value={q.chaseOn ?? ''} disabled={busy}
-              onChange={(e) => run(() => updateQuery(q.id, { chaseOn: e.target.value }, ctx))}
-              className="text-[11px] rounded border border-slate-200 px-1 py-0.5" />
-          </label>
         </div>
       )}
 
@@ -232,6 +255,8 @@ function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, cli
           }}
         />
       )}
+        </div>
+      </div>
     </div>
   )
 }

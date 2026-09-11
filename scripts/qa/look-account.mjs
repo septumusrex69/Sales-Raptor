@@ -281,6 +281,15 @@ for (const tab of ['Overview', 'Transactions', 'Documents']) {
     else console.log(`!! tab button not found: ${tab}`)
   }
   await page.screenshot({ path: `${OUT}/account-${tab.toLowerCase()}.png`, fullPage: true })
+  if (tab === 'Overview') {
+    // The disputes panel sits low in the right-hand column; scroll it into frame on its own.
+    await page.evaluate(() => {
+      const h = [...document.querySelectorAll('h3')].find((n) => /^Disputes$/.test(n.textContent ?? ''))
+      h?.scrollIntoView({ block: 'center' })
+    })
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: `${OUT}/account-disputes-panel.png` })
+  }
   // The app scrolls an inner container, not the document, so fullPage stops at the viewport.
   // Anything below the fold -- the statement's settlement footer, for one -- needs this.
   const scrolled = await page.evaluate(() => {
@@ -648,6 +657,39 @@ else {
   if (!/no charge \(account written off\)/.test(said)) console.log('!! the button did not say why nothing was charged')
   else console.log('   the button said the account is written off')
 }
+
+/*
+ * A pre-legal agent may not look at a client.
+ *
+ * Three surfaces, because hiding a link is not a permission: the sidebar entry, the client name
+ * in the account hero, and the /companies URL typed directly.
+ */
+TABLES.profiles = TABLES.profiles.map((p) => (p.id === USER ? { ...p, role: 'Pre-legal Agent' } : p))
+const prelegal = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+await prelegal.route(`**://${REF}.supabase.co/**`, serve)
+await prelegal.addInitScript(seed, { ref: REF, user: USER })
+await prelegal.goto(`${ORIGIN}/accounts/${ACC}`, { waitUntil: 'networkidle' })
+await prelegal.waitForTimeout(1500)
+if (await prelegal.getByRole('link', { name: /^Clients$/ }).count()) console.log('!! a pre-legal agent still has Clients in the sidebar')
+if (await prelegal.locator(`a[href="/companies/${COMPANY}"]`).count()) console.log('!! the account still links a pre-legal agent to the client')
+await prelegal.goto(`${ORIGIN}/companies/${COMPANY}`, { waitUntil: 'networkidle' })
+await prelegal.waitForTimeout(1200)
+if (/\/companies/.test(new URL(prelegal.url()).pathname)) console.log('!! a pre-legal agent reached the client page by URL')
+else console.log(`   pre-legal agent is kept out of clients (sent to ${new URL(prelegal.url()).pathname})`)
+await prelegal.screenshot({ path: `${OUT}/account-prelegal.png` })
+
+// And an ordinary role still gets there.
+TABLES.profiles = TABLES.profiles.map((p) => (p.id === USER ? { ...p, role: 'Administrator' } : p))
+const admin = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+await admin.route(`**://${REF}.supabase.co/**`, serve)
+await admin.addInitScript(seed, { ref: REF, user: USER })
+await admin.goto(`${ORIGIN}/companies/${COMPANY}`, { waitUntil: 'networkidle' })
+await admin.waitForTimeout(1200)
+if (!/\/companies/.test(new URL(admin.url()).pathname)) console.log('!! an administrator was locked out of the client page')
+else console.log('   an administrator still opens the client')
+const clientText = (await admin.textContent('body')).replace(/\s+/g, ' ')
+if (/Disputes on this client/.test(clientText)) console.log('   client page shows its disputes section')
+await admin.screenshot({ path: `${OUT}/client-disputes.png` })
 
 console.log('\nerrors:', errors.length ? JSON.stringify([...new Set(errors)].slice(0, 8), null, 2) : 'none')
 await browser.close()

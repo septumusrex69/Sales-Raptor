@@ -20,6 +20,23 @@ export function canReassign(user: Pick<User, 'role'> | null | undefined): boolea
   return user?.role === 'Administrator' || user?.role === 'Sales Manager' || user?.role === 'Liaison Manager'
 }
 
+/**
+ * Whether this person may look at a client.
+ *
+ * A pre-legal agent works debtors, not the firm's relationships. They see the account, the
+ * debtor, the ledger and the dispute — everything needed to collect — and not the client behind
+ * it, whose commission rates, mandate and open deals are the liaison's business and commercially
+ * sensitive besides.
+ *
+ * Enforced in three places because hiding a link is not a permission: the client links on the
+ * account and on a dispute, the Clients entry in the sidebar, and the /companies routes
+ * themselves. RLS remains the real boundary — this stops the app offering what the database
+ * should refuse.
+ */
+export function canViewClients(role: Pick<User, 'role'>['role'] | undefined): boolean {
+  return role !== undefined && role !== 'Pre-legal Agent'
+}
+
 /** Roles eligible to own a Lead/Deal/Task/Contact/Company — i.e. show up in "assign to" / "Client Liaison" pickers. */
 export function isAssignableOwner(role: Pick<User, 'role'>['role']): boolean {
   return role === 'Administrator' || role.includes('Sales') || role === 'Liaison' || role === 'Liaison Manager'
