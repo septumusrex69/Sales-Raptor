@@ -1140,6 +1140,12 @@ create table if not exists public.account_notes (
   body text not null,
   -- Pinned notes lead the timeline: "speaks Zulu", "do not call at work".
   pinned boolean not null default false,
+  -- Who put the words there, which is what the timeline's "just what people wrote" reads:
+  --   manual     a person typed it into Raptor
+  --   swordfish  a person typed it into the old system -- still their writing
+  --   system     Raptor composed it ("Trace done — 4 credit bureau searches")
+  -- Recorded at the source rather than pattern-matched off the body, so a collector who writes
+  -- "Trace done, nothing came back" in their own words is not mistaken for the machine.
   source text not null default 'manual',
   -- Free text as well as a reference, for the same reason swordfish_assigned_to is free text:
   -- an imported comment was written by someone who may never have a Raptor login.

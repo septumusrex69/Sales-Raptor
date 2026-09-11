@@ -19,7 +19,7 @@ import {
   ARRANGEMENT_LABEL, WEEKDAYS,
   type AccountDocument, type Arrangement, type PromiseToPay, type Workspace,
 } from '../../lib/accountWorkspace'
-import { buildTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
+import { buildTimeline, filterTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
 import { isWrittenOff } from '../../lib/accountStatus'
 import { canViewClients } from '../../lib/permissions'
 import { styleFor, PROMISE_CHIP } from './timelineStyle'
@@ -433,9 +433,14 @@ export function AccountDetail() {
           onSent={(subject, bodyText) => {
             const to = composeTo
             setComposeTo(null)
-            // The account's own record of the message. A note rather than a fee: an outgoing
-            // email IS a chargeable action under Annexure B item 4, but raising that charge is
-            // the collections engine's decision, not a side effect of a Send button.
+            // The account's own record of the message, and a person's note rather than an
+            // automatic one: the words in it are theirs, so it survives "just what people wrote".
+            //
+            // A note rather than a fee. An outgoing email IS chargeable -- item 1(a), "necessary
+            // ordinary letter, registered letter, facsimile or e-mail", R25; the comment here
+            // used to say item 4, which is the acknowledgement of debt. Raising it is still the
+            // collections engine's decision rather than a side effect of a Send button, which
+            // does leave Email as the one channel that does not bill itself while SMS does.
             void addNote({
               accountId: account.id,
               body: `Email sent to ${to}\nSubject: ${subject}\n\n${bodyText}`,
@@ -620,6 +625,9 @@ function Money({ label, value, note, strong }: { label: string; value?: number; 
 
 const PAGE_SIZES = [5, 10, 20, 50] as const
 
+/** Remembered per browser, not per account: it is a way of reading, not a fact about a debtor. */
+const AUTOMATED_KEY = 'raptor.timeline.automated'
+
 function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef, noteOpen, setNoteOpen }: {
   entries: TimelineEntry[]
   accountId: string
@@ -632,8 +640,24 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef
   setNoteOpen: (v: boolean) => void
 }) {
   const [limit, setLimit] = useState<number>(10)
+  /*
+   * Everything by default.
+   *
+   * A timeline that quietly hides rows the first time you open it is a timeline you cannot trust
+   * to be complete, and "why is the trace not showing" is a worse afternoon than a long list.
+   * The choice is remembered per browser, because whoever turns it off means it.
+   */
+  const [showAutomated, setShowAutomated] = useState(() => {
+    try { return window.localStorage.getItem(AUTOMATED_KEY) !== 'hide' } catch { return true }
+  })
   const [body, setBody] = useState('')
   const { busy, err, run } = useWriter(onChange)
+
+  function setAutomated(next: boolean) {
+    setShowAutomated(next)
+    // Wrapped: Safari in private mode throws on write, and a filter toggle is not worth a crash.
+    try { window.localStorage.setItem(AUTOMATED_KEY, next ? 'show' : 'hide') } catch { /* fine */ }
+  }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -642,12 +666,18 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef
     if (ok) { setBody(''); setNoteOpen(false) }
   }
 
-  const shown = limit >= entries.length ? entries : entries.slice(0, limit)
+  /*
+   * Filter, then count, then slice. In the other order "10 of 431" would count rows you cannot
+   * see and hand you a page of four with no explanation of where the rest went.
+   */
+  const visible = filterTimeline(entries, showAutomated)
+  const hidden = entries.length - visible.length
+  const shown = limit >= visible.length ? visible : visible.slice(0, limit)
   const days = groupByDay(shown)
 
   return (
     <Card>
-      <div className="flex items-center justify-between gap-2 mb-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <h3 className="text-[11px] uppercase tracking-wide text-slate-400">Activity timeline</h3>
         {/*
           How much to show, chosen at the top rather than discovered at the bottom. An account can
@@ -659,11 +689,32 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef
           <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}
             className="text-xs rounded-lg border border-slate-200 px-2 py-1 bg-white">
             {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
-            <option value={entries.length || 1}>All {entries.length.toLocaleString('en-ZA')}</option>
+            <option value={visible.length || 1}>All {visible.length.toLocaleString('en-ZA')}</option>
           </select>
-          <span className="text-slate-400">of {entries.length.toLocaleString('en-ZA')}</span>
+          <span className="text-slate-400">of {visible.length.toLocaleString('en-ZA')}</span>
         </label>
       </div>
+
+      {/*
+        One switch, and it says what it costs. A filter that hides rows without saying how many is
+        how somebody concludes a trace never happened.
+      */}
+      {/* Label and hint are one text flow, not two flex children: as two, the hint started on the
+          first line beside the label and finished under it, which reads as a broken line. */}
+      <label className="flex items-start gap-2 text-[11px] text-slate-500 mb-3 cursor-pointer select-none">
+        <input type="checkbox" className="mt-0.5 shrink-0"
+          checked={!showAutomated} onChange={(e) => setAutomated(!e.target.checked)} />
+        <span>
+          Just what people wrote{' '}
+          <span className="text-slate-400">
+            {showAutomated
+              ? '— hides fee lines and the notes Raptor writes itself'
+              : hidden > 0
+                ? `— ${hidden.toLocaleString('en-ZA')} automatic ${hidden === 1 ? 'entry' : 'entries'} hidden`
+                : '— nothing automatic on this account'}
+          </span>
+        </span>
+      </label>
 
       {noteOpen && (
         <form onSubmit={submit} className="mb-4">
@@ -688,6 +739,11 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef
       )}
 
       {entries.length === 0 && <p className="text-sm text-slate-400 py-6 text-center">Nothing has happened on this account yet.</p>}
+      {entries.length > 0 && visible.length === 0 && (
+        <p className="text-sm text-slate-400 py-6 text-center">
+          Everything on this account so far was done by Raptor. Untick to see it.
+        </p>
+      )}
 
       <div className="space-y-4">
         {days.map((day) => (
@@ -700,10 +756,12 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef
         ))}
       </div>
 
-      {entries.length > shown.length && (
+      {/* Counted against what is visible, not against everything: with the filter on, offering
+          "20 more" out of rows the filter is hiding is a button that runs out early. */}
+      {visible.length > shown.length && (
         <button onClick={() => setLimit((n) => n + 20)}
           className="mt-4 pt-3 border-t border-slate-100 w-full text-sm text-brand-600 hover:underline">
-          Show 20 more &mdash; {(entries.length - shown.length).toLocaleString('en-ZA')} older
+          Show 20 more &mdash; {(visible.length - shown.length).toLocaleString('en-ZA')} older
         </button>
       )}
     </Card>

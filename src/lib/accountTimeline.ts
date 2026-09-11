@@ -35,20 +35,36 @@ export interface TimelineEntry {
   /** Our closed action catalogue (src/lib/actionTariff.ts), so a call gets a phone and a letter
    *  gets an envelope. Null on imported rows whose legacy name never mapped. */
   actionCode?: string | null
+  /**
+   * Raptor wrote this, not a person.
+   *
+   * The split the firm asked for: "all of the actions, and then you can just hide the automated
+   * actions ... so it only shows the writings, the comments, that type of important stuff."
+   *
+   * It is a fact recorded at the source, never guessed from the text. A fee line is automatic
+   * because raising it is the machine's half of an action somebody else took; a note is automatic
+   * when Raptor composed it ("Trace done — 4 credit bureau searches"), and is not when a person
+   * typed the words. Payments, promises and a dispute's own history stay: money arriving and
+   * decisions being taken are the story, not bookkeeping about it.
+   */
+  automated: boolean
 }
 
 const dayOf = (iso: string) => iso.slice(0, 10)
 
 /**
- * Build the stream, newest first.
+ * Build the stream, newest first — and newest first WITHIN a day as well.
  *
- * Sorting is by DAY first, then by a fixed rank per kind, and only then by timestamp. Sorting on
- * the raw timestamp instead looks right and is not: fees and payments come from date columns and
- * carry no time, so '2026-08-05' sorts against '2026-08-05T09:12:00Z' as a shorter string and a
- * payment sinks below every note made that day. Money leads the day it arrived on.
+ * This used to sort by day, then by a fixed rank per kind, and only then by time. The rank won
+ * over the clock, so a dispute closed at 15:12 sat underneath a promise taken at 09:30 the same
+ * morning: the days ran newest-first while the events inside each day ran oldest-first. The firm
+ * put it plainly — "newest on top and then go down".
  *
- * The fixed rank matters beyond that: a timeline that reshuffles itself between two loads is a
- * timeline nobody trusts.
+ * The rank stays, demoted to a tiebreak, because most of the book genuinely has no time of day.
+ * Every one of the 1,070 imported payments is stamped midnight, and so are 59,158 of the 59,215
+ * fees: the export carried dates, not timestamps. Those rows are all exactly equal within their
+ * day and something has to order them, or the timeline reshuffles itself between two loads. Money
+ * still leads a day nobody recorded a time on. It no longer overrules a day where they did.
  */
 const RANK: Record<TimelineKind, number> = { payment: 0, promise: 1, query: 2, action: 3, note: 4 }
 
@@ -71,6 +87,9 @@ export function buildTimeline(
       amount: f.billed ? f.amountExclVat + f.vatAmount : null,
       free: !f.billed,
       actionCode: f.actionCode,
+      // Always. A fee line is Raptor charging for something a person did; the doing is already
+      // on the timeline as its own entry, written in words.
+      automated: true,
     })
   }
 
@@ -86,6 +105,8 @@ export function buildTimeline(
         .join(' · ') || null,
       amount: p.amount,
       status: p.reversedAt ? 'reversed' : null,
+      // Money arriving is the story, not bookkeeping about it.
+      automated: false,
     })
   }
 
@@ -99,6 +120,19 @@ export function buildTimeline(
       at: n.createdAt,
       title: n.body,
       by: n.authorName,
+      /*
+       * Read off the row, not guessed from the words.
+       *
+       *   system      Raptor composed it: "Trace done — 4 credit bureau searches."
+       *   manual      somebody typed it into Raptor.
+       *   swordfish   somebody typed it into the old system. Still a person's writing, and on
+       *               this book it is most of it — 1,449 of the 1,523 notes we hold.
+       *
+       * An earlier sketch matched on the body's prefix instead. That works until a collector
+       * writes "Trace done, nothing came back" in their own words and the app decides they are
+       * a machine.
+       */
+      automated: n.source === 'system',
     })
   }
 
@@ -112,14 +146,29 @@ export function buildTimeline(
       detail: [`due ${p.dueOn}`, p.method, p.notes].filter(Boolean).join(' · '),
       amount: p.amount,
       status: p.status,
+      // A promise is the single most important thing a collector produces. It never hides.
+      automated: false,
     })
   }
 
   return entries.sort((a, b) => {
     if (a.date !== b.date) return a.date < b.date ? 1 : -1
+    if (a.at !== b.at) return a.at < b.at ? 1 : -1
     if (a.kind !== b.kind) return RANK[a.kind] - RANK[b.kind]
-    return a.at < b.at ? 1 : a.at > b.at ? -1 : 0
+    // Last resort, so two midnight fees of the same kind cannot swap places between loads.
+    return a.id < b.id ? 1 : a.id > b.id ? -1 : 0
   })
+}
+
+/**
+ * What to show: everything, or only what a person put there.
+ *
+ * Filtering here rather than in the component so the count in "showing 10 of 431" is the count of
+ * what you are actually looking at. A filter applied after the slice would page through hidden
+ * rows and hand you a short page with no explanation.
+ */
+export function filterTimeline(entries: TimelineEntry[], showAutomated: boolean): TimelineEntry[] {
+  return showAutomated ? entries : entries.filter((e) => !e.automated)
 }
 
 /** Group into date headings, preserving the stream's order. */

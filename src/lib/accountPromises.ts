@@ -53,6 +53,9 @@ export async function recordPromise(input: {
   await addNote({
     accountId: input.accountId,
     body: promiseNote(promise, charge),
+    // Raptor's words, not a person's: hidden when the timeline is set to show only
+    // what people wrote. See TimelineEntry.automated.
+    source: 'system',
     authorName: input.actor.name,
     createdBy: input.actor.id,
   })

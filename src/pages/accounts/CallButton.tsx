@@ -28,6 +28,7 @@ export function CallButton({ accountId, number, actor, className, onDone }: {
   onDone: () => Promise<void>
 }) {
   const [asking, setAsking] = useState<string | null>(null)
+  const [comment, setComment] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ChargeResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -45,6 +46,7 @@ export function CallButton({ accountId, number, actor, className, onDone }: {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
+    setComment('')
     setAsking(call.to)
   }
 
@@ -53,9 +55,10 @@ export function CallButton({ accountId, number, actor, className, onDone }: {
     setBusy(true)
     setError(null)
     try {
-      if (yes) setResult(await recordConsultation({ accountId, number: asking, actor }))
-      else await recordNoAnswer({ accountId, number: asking, actor })
+      if (yes) setResult(await recordConsultation({ accountId, number: asking, comment, actor }))
+      else await recordNoAnswer({ accountId, number: asking, comment, actor })
       setAsking(null)
+      setComment('')
       await onDone()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -87,6 +90,18 @@ export function CallButton({ accountId, number, actor, className, onDone }: {
             timeline either way. A call the debtor answers is a consultation and goes on their
             statement; a phone that rings out does not.
           </p>
+          {/*
+            The one moment the answer exists, so it is also the moment to ask what was said.
+            A call Raptor recorded by itself is bookkeeping and hides under "just what people
+            wrote"; a call with a collector's words on it is the story, and stays.
+          */}
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            rows={3}
+            placeholder="What was said? Optional — leave it blank and only the call is recorded."
+            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-3 resize-none focus:outline-none focus:ring-2 focus:ring-brand-100"
+          />
           {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
           <p className="text-xs text-slate-400 mt-3">
             {rate > 0 && <>R{rate.toFixed(2)} plus VAT, under Annexure B item 7. </>}

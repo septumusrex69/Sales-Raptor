@@ -115,6 +115,13 @@ export interface AccountNote {
   queryId: string | null
   /** 'note' for something a person wrote, 'query' for a query's own history. */
   kind: string
+  /**
+   * Who put the words there: 'manual' a person in Raptor, 'swordfish' a person in the old
+   * system, 'system' Raptor itself. The timeline's "hide automatic entries" reads this rather
+   * than pattern-matching the body, so a collector who happens to write like the app still
+   * counts as a person.
+   */
+  source: string
 }
 
 const toNote = (r: any): AccountNote => ({
@@ -127,6 +134,7 @@ const toNote = (r: any): AccountNote => ({
   createdAt: r.created_at,
   queryId: r.query_id ?? null,
   kind: r.kind ?? 'note',
+  source: r.source ?? 'manual',
 })
 
 export type PromiseStatus = 'open' | 'kept' | 'broken' | 'cancelled'
@@ -263,6 +271,8 @@ export async function addNote(input: {
   createdBy?: string | null
   queryId?: string | null
   kind?: string
+  /** 'system' where Raptor composed the words. Defaults to 'manual' — a person typed them. */
+  source?: string
 }): Promise<AccountNote> {
   const { data, error } = await supabase
     .from('account_notes')
@@ -273,6 +283,7 @@ export async function addNote(input: {
       created_by: input.createdBy ?? null,
       query_id: input.queryId ?? null,
       kind: input.kind ?? 'note',
+      source: input.source ?? 'manual',
     })
     .select('*')
     .single()
