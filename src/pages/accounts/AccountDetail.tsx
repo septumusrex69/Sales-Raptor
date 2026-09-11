@@ -11,8 +11,10 @@ import { useAuth } from '../../store/AuthContext'
 import { StatusPill } from './AccountsList'
 import { accountFlagList, fetchAccount, fetchLedgers, hasCommissionDrift, type AccountLedgers, type DebtorAccount } from '../../lib/accountBook'
 import { buildStatement, type BalanceInput, type BalanceBreakdown, type StatementLine } from '../../lib/accountBalance'
+import { chargeMessage } from '../../lib/accountCharges'
+import { promiseProblem, recordPromise, PROMISE_ITEM_ID } from '../../lib/accountPromises'
 import {
-  addNote, addPromise, describeArrangement, fetchDocuments, fetchWorkspace, isOverdue,
+  addNote, describeArrangement, fetchDocuments, fetchWorkspace, isOverdue,
   keepInstalment, nextPromise, resolvePromise, saveMainComment, dialableNumber, smsableNumbers,
   ARRANGEMENT_LABEL, WEEKDAYS,
   type AccountDocument, type Arrangement, type PromiseToPay, type Workspace,
@@ -378,10 +380,12 @@ export function AccountDetail() {
               accountId={account.id}
               promises={workspace?.promises ?? []}
               userId={currentUser?.id ?? null}
+              userName={currentUser?.name ?? null}
               onChange={reload}
               open={promiseOpen}
               setOpen={setPromiseOpen}
               successRatio={account.ptpSuccessRatio}
+              balance={b?.balance}
               settlement={b?.settlement}
             />
             <QueryPanel
@@ -799,22 +803,33 @@ function SummaryPanel({ account, breakdown }: { account: DebtorAccount; breakdow
  * never touches a balance — it is kept or it is broken, and a person says which. Matching one
  * against an incoming payment is the collections engine's job, and that does not exist yet.
  */
-function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, successRatio, settlement }: {
+function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement }: {
   accountId: string
   promises: PromiseToPay[]
+  userName: string | null
   userId: string | null
   onChange: () => Promise<void>
   open: boolean
   setOpen: (v: boolean) => void
   /** Swordfish's score for how reliably this debtor keeps one, out of ten. */
   successRatio: number | null
-  /** What it takes to close the account today, so a promise above it can be questioned. */
+  /** What is owed today. An instalment may not exceed it. */
+  balance: number | undefined
+  /** What it takes to close the account today, including the item 9 receipt fee on settling. */
   settlement: number | undefined
 }) {
+  /*
+   * The arrangement is chosen first, and the amount follows from it.
+   *
+   * Asked in the other order, the form could not help: it did not know whether "5000" was the
+   * whole debt or a monthly instalment, so it could neither fill it in nor object to it. Asked
+   * this way round a once-off can quote itself, and an instalment can be held to the balance.
+   */
+  const [arrangement, setArrangement] = useState<Arrangement | ''>('')
   const [amount, setAmount] = useState('')
   const [dueOn, setDueOn] = useState('')
-  const [arrangement, setArrangement] = useState<Arrangement>('once_off')
   const [onLastDay, setOnLastDay] = useState(false)
+  const [charged, setCharged] = useState<string | null>(null)
   const { busy, err, run } = useWriter(onChange)
 
   const outstanding = promises.filter((p) => p.status === 'open')
@@ -823,23 +838,39 @@ function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, su
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     const value = Number(amount)
-    if (!(value > 0) || !dueOn) return
-    const ok = await run(() => addPromise({
-      accountId, amount: value, dueOn, createdBy: userId,
-      arrangement,
-      onLastDay: arrangement === 'monthly' && onLastDay,
-      // Taken from the first instalment's date, which is what the debtor actually agreed to.
-      dayOfMonth: arrangement === 'monthly' && !onLastDay ? Number(dueOn.slice(8, 10)) : null,
-      dayOfWeek: arrangement === 'weekly' ? isoWeekday(dueOn) : null,
-    }))
-    if (ok) { setAmount(''); setDueOn(''); setArrangement('once_off'); setOnLastDay(false); setOpen(false) }
+    if (!arrangement || !(value > 0) || !dueOn || problem) return
+    let message: string | null = null
+    const ok = await run(async () => {
+      const { charge } = await recordPromise({
+        accountId, amount: value, dueOn, arrangement,
+        onLastDay: arrangement === 'monthly' && onLastDay,
+        // Taken from the first instalment's date, which is what the debtor actually agreed to.
+        dayOfMonth: arrangement === 'monthly' && !onLastDay ? Number(dueOn.slice(8, 10)) : null,
+        dayOfWeek: arrangement === 'weekly' ? isoWeekday(dueOn) : null,
+        actor: { id: userId, name: userName },
+      })
+      message = chargeMessage(charge, PROMISE_ITEM_ID)
+    })
+    // Said after the fact rather than promised beforehand: whether item 5 has room on this
+    // account depends on the ledger, and the ledger is read when the charge is made.
+    if (ok) {
+      setCharged(message)
+      setAmount(''); setDueOn(''); setArrangement(''); setOnLastDay(false); setOpen(false)
+    }
   }
 
-  // Warned, not blocked. A promise above the settlement figure is usually a typo — a keystroke
-  // turning 5,000 into 50,000 — but it is legitimately possible, since interest runs until the
-  // money arrives and someone may be promising a round number that covers it. The person taking
-  // the promise knows which; the form does not, so it says what it sees and lets them decide.
-  const over = settlement !== undefined && Number(amount) > settlement
+  /*
+   * Two different answers to an amount that is too big, because they are different mistakes.
+   *
+   * An instalment above the balance is refused: no instalment can be larger than the whole debt,
+   * so it is always a slip. A once-off above the settlement figure is only questioned -- interest
+   * runs until the money actually arrives, and someone may be promising a round number that
+   * covers it. The person on the phone knows which; the form does not.
+   */
+  const problem = arrangement && balance !== undefined && settlement !== undefined
+    ? promiseProblem(arrangement, Number(amount), balance, settlement)
+    : null
+  const over = arrangement === 'once_off' && settlement !== undefined && Number(amount) > settlement
 
   return (
     <Card>
@@ -860,47 +891,85 @@ function PromisePanel({ accountId, promises, userId, onChange, open, setOpen, su
 
       {open && (
         <form onSubmit={submit} className="space-y-2 p-3 rounded-lg bg-slate-50 border border-slate-100 mb-3">
-          <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" autoFocus
-            placeholder={arrangement === 'once_off' ? 'Amount, e.g. 5000' : 'Amount per instalment'}
-            className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
-          <select value={arrangement} onChange={(e) => setArrangement(e.target.value as Arrangement)}
-            className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 bg-white">
+          {/*
+            What kind of arrangement, before anything else. Choosing "once-off settlement" fills
+            the amount in with what it actually takes to close the account today -- the balance
+            plus the item 9 receipt fee that settling attracts -- because a settlement quoted at
+            the bare balance leaves the debtor still owing that fee, and an account everyone
+            believes is closed turns up open. It stays editable: it is a quote, not a lock.
+          */}
+          <select
+            value={arrangement}
+            autoFocus
+            onChange={(e) => {
+              const next = e.target.value as Arrangement | ''
+              setArrangement(next)
+              if (next === 'once_off' && settlement !== undefined) setAmount(String(settlement))
+              else setAmount('')
+            }}
+            className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 bg-white"
+          >
+            <option value="">What did they agree to?</option>
             {(Object.keys(ARRANGEMENT_LABEL) as Arrangement[]).map((a) => (
               <option key={a} value={a}>{ARRANGEMENT_LABEL[a]}</option>
             ))}
           </select>
-          {arrangement === 'monthly' && (
-            <label className="flex items-center gap-2 text-[11px] text-slate-600">
-              <input type="checkbox" checked={onLastDay} onChange={(e) => setOnLastDay(e.target.checked)} />
-              On the last day of the month
-            </label>
+
+          {arrangement && (
+            <>
+              <label className="block text-[11px] text-slate-500">
+                {arrangement === 'once_off' ? 'Settles the account in full' : 'Amount per instalment'}
+                <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal"
+                  placeholder={arrangement === 'once_off' ? 'Amount' : 'e.g. 500'}
+                  className={`w-full text-sm rounded-lg border px-2 py-1.5 mt-0.5 ${
+                    problem ? 'border-negative-100 bg-negative-50' : 'border-slate-200'}`} />
+              </label>
+              {arrangement !== 'once_off' && balance !== undefined && (
+                <p className="text-[11px] text-slate-500">
+                  {formatMoney(balance)} outstanding.
+                </p>
+              )}
+              {problem && <p className="text-[11px] text-negative-700 leading-snug">{problem}</p>}
+              {over && (
+                <p className="text-[11px] text-gold-600 leading-snug">
+                  That is more than the {formatMoney(settlement!)} it takes to settle the account
+                  today. Fine if they meant it &mdash; worth a second look if they did not.
+                </p>
+              )}
+              {arrangement === 'monthly' && (
+                <label className="flex items-center gap-2 text-[11px] text-slate-600">
+                  <input type="checkbox" checked={onLastDay} onChange={(e) => setOnLastDay(e.target.checked)} />
+                  On the last day of the month
+                </label>
+              )}
+              <label className="block text-[11px] text-slate-500">
+                {arrangement === 'once_off' ? 'Due on' : 'First instalment due on'}
+                <input type="date" value={dueOn} onChange={(e) => setDueOn(e.target.value)} min={TODAY}
+                  className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 mt-0.5" />
+              </label>
+              {arrangement !== 'once_off' && dueOn && (
+                // Said back before it is saved: "monthly on the 31st" behaves differently in
+                // February, and a person should see which rule they have picked rather than
+                // discover it later.
+                <p className="text-[11px] text-slate-500">
+                  Then {arrangement === 'weekly'
+                    ? `every ${WEEKDAYS[isoWeekday(dueOn) - 1]}`
+                    : onLastDay ? 'on the last day of each month' : `on the ${dueOn.slice(8, 10)}th of each month`}.
+                </p>
+              )}
+              <p className="text-[10px] text-slate-500 leading-snug">
+                Taking an arrangement charges item 5, the settlement account drawn up at the
+                debtor&rsquo;s request &mdash; R50 excluding VAT, per occurrence.
+              </p>
+            </>
           )}
-          {over && (
-            <p className="text-[11px] text-gold-600 leading-snug">
-              That is more than the {formatMoney(settlement!)} it takes to settle the account
-              today. Fine if they meant it &mdash; worth a second look if they did not.
-            </p>
-          )}
-          <label className="block text-[11px] text-slate-500">
-            {arrangement === 'once_off' ? 'Due on' : 'First instalment due on'}
-            <input type="date" value={dueOn} onChange={(e) => setDueOn(e.target.value)} min={TODAY}
-              className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 mt-0.5" />
-          </label>
-          {arrangement !== 'once_off' && dueOn && (
-            // Said back before it is saved: "monthly on the 31st" behaves differently in February,
-            // and a person should see which rule they have picked rather than discover it later.
-            <p className="text-[11px] text-slate-500">
-              Then {arrangement === 'weekly'
-                ? `every ${WEEKDAYS[isoWeekday(dueOn) - 1]}`
-                : onLastDay ? 'on the last day of each month' : `on the ${dueOn.slice(8, 10)}th of each month`}.
-            </p>
-          )}
-          <button type="submit" disabled={busy || !(Number(amount) > 0) || !dueOn}
+          <button type="submit" disabled={busy || !arrangement || !(Number(amount) > 0) || !dueOn || !!problem}
             className="w-full text-sm font-medium py-1.5 rounded-lg bg-brand-600 text-white disabled:opacity-50">
             {busy ? 'Saving...' : 'Record promise'}
           </button>
         </form>
       )}
+      {charged && <p className="text-[11px] text-gold-600 mb-2">{charged}</p>}
       {err && <p className="text-xs text-negative-700 mb-2">{err}</p>}
 
       {outstanding.length === 0 && past.length === 0 && !open && (

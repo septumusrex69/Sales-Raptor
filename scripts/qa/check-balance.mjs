@@ -372,8 +372,8 @@ const empty = { payments: [], fees: [], interest: [] }
       interest: [],
       // Handed over newest-first, exactly as PostgREST returns them.
       fees: [
-        fee(`${day}T13:20:23Z`, 'Credit bureau search (XDS)', 48, 3),
-        fee(`${day}T13:20:02Z`, 'Credit bureau search (XDS)', 32, 2),
+        fee(`${day}T13:20:23Z`, 'Credit bureau search', 48, 3),
+        fee(`${day}T13:20:02Z`, 'Credit bureau search', 32, 2),
       ],
     },
   })
@@ -384,8 +384,8 @@ const empty = { payments: [], fees: [], interest: [] }
     if (!ok) { console.log(`        expected "${expected}", got "${actual}"`); failed++ }
   }
   const traces = s.lines.filter((l) => l.kind === 'fee').map((l) => l.description)
-  checkText('the first trace of the day is listed first', traces[0], 'Credit bureau search (XDS) ×2')
-  checkText('...and the second below it', traces[1], 'Credit bureau search (XDS) ×3')
+  checkText('the first trace of the day is listed first', traces[0], 'Credit bureau search 2')
+  checkText('...and the second below it', traces[1], 'Credit bureau search 3')
 
   // Without a timestamp there is nothing to order by, and the order given must be kept.
   const untimed = buildStatement({

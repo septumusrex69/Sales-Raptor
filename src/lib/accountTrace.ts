@@ -68,8 +68,11 @@ export async function recordTrace(input: {
  * Only what was done — how MANY is `segments` on the row, and the statement and the timeline both
  * render it from there. Spelling the count out here as well is what produced "Credit bureau
  * search (XDS) x 4 ×4".
+ *
+ * The bureau's name came off at the firm's request. It told the debtor nothing they needed and
+ * named a supplier on a document that goes outside the building.
  */
-export const TRACE_DESCRIPTION = 'Credit bureau search (XDS)'
+export const TRACE_DESCRIPTION = 'Credit bureau search'
 
 /** What the timeline says happened. */
 export function traceNote(charge: ChargeResult, count = 1): string {
@@ -81,5 +84,5 @@ export function traceNote(charge: ChargeResult, count = 1): string {
       : charge.reason === 'monthly-limit'
         ? 'Not charged — the monthly allowance for item 4(c) is spent.'
         : 'Not charged — the account is at the Annexure B fee ceiling.'
-  return `Trace done — ${searches} through XDS. ${earned}`
+  return `Trace done — ${searches}. ${earned}`
 }

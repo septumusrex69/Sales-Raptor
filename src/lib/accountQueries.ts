@@ -287,7 +287,9 @@ export async function raiseQuery(input: {
     accountId: input.accountId,
     itemId: '3',
     actionCode: 'perusal',
-    description: 'Other necessary expenses',
+    // "ONE" is what the firm calls item 3 -- Other Necessary Expenses. Their own shorthand,
+    // on their own statements.
+    description: 'ONE',
     createdBy: input.raisedBy ?? null,
   })
 
@@ -325,7 +327,9 @@ const CHARGE_ON_STAGE: Partial<Record<QueryStage, { itemId: string; actionCode: 
   // Reaching the client is correspondence out; the client answering is correspondence in.
   // Moving from the agent to the liaison is internal and costs the debtor nothing.
   client: { itemId: '1a', actionCode: 'email_out', description: 'Query sent to client' },
-  liaison: { itemId: '6', actionCode: 'email_in', description: 'Client response to query received and attended to' },
+  // Item 6 IS "correspondence received and attended to"; the longer sentence was this code
+  // explaining to itself which correspondence it meant. On a statement it only added words.
+  liaison: { itemId: '6', actionCode: 'email_in', description: 'Correspondence' },
 }
 
 /**

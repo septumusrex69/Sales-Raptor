@@ -602,10 +602,10 @@ else {
   await act.getByRole('button', { name: /^Transactions/ }).first().click()
   await act.waitForTimeout(900)
   const txns = (await act.textContent('body')).replace(/\s+/g, ' ')
-  if (!/Credit bureau search \(XDS\) ×4/.test(txns)) {
+  if (!/Credit bureau search 4/.test(txns)) {
     console.log('!! the trace is not on the transaction list without a page reload')
-  } else console.log('   the trace is on the transaction list without a reload, labelled ×4')
-  if (/×4 ?×4|x 4 ×4/.test(txns)) console.log('!! the count is rendered twice')
+  } else console.log('   the trace is on the transaction list without a reload, labelled 4')
+  if (/×4|x ?4 4|search 4 4/.test(txns)) console.log('!! the count is rendered twice')
   await act.screenshot({ path: `${OUT}/account-trace.png` })
 }
 

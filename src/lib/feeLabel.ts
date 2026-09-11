@@ -7,7 +7,11 @@
  *
  * So: descriptions say WHAT was done, `segments` says HOW MANY, and this is the only place the
  * two are put together. The statement and the timeline both call it.
+ *
+ * The count is written plainly -- "Credit bureau search 4", not "×4". The firm's own reading:
+ * a statement goes to a debtor, and a multiplication sign in the middle of a description invites
+ * them to check the arithmetic instead of reading what was done.
  */
 export function feeLabel(description: string, segments: number | undefined): string {
-  return (segments ?? 1) > 1 ? `${description} ×${segments}` : description
+  return (segments ?? 1) > 1 ? `${description} ${segments}` : description
 }
