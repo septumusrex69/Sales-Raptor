@@ -23,11 +23,21 @@ type Column = QueryStage | 'resolved'
 const COLUMNS: Column[] = ['agent', 'liaison', 'client', 'resolved']
 
 const COLUMN_LABEL: Record<Column, string> = { ...QUERY_STAGE_LABEL, resolved: 'Resolved' }
+/*
+ * The app's own palette, not a generic one.
+ *
+ * Read as a scale: grey while the dispute is ours to answer, navy once it has gone up the firm,
+ * gold when it is outside the building and somebody else is holding it, green when it is done.
+ * Gold is the one meant to catch an eye from across a desk, which is right — a dispute sitting
+ * with a client is the one nobody here can move.
+ *
+ * Same three colours the card on the account uses, so a stage means the same thing everywhere.
+ */
 const COLUMN_DOT: Record<Column, string> = {
-  agent: '#64748b',
-  liaison: '#3b82f6',
-  client: '#c9a052',
-  resolved: '#16a34a',
+  agent: 'var(--c-grey-light)',
+  liaison: 'var(--c-navy)',
+  client: 'var(--c-gold)',
+  resolved: 'var(--c-green)',
 }
 
 const columnOf = (q: QueueRow): Column => (q.status === 'closed' ? 'resolved' : q.stage)
@@ -263,8 +273,8 @@ function Total({ label, value, tone }: { label: string; value: number | string; 
 function StageChip({ column }: { column: Column }) {
   const chip: Record<Column, string> = {
     agent: 'bg-slate-100 text-slate-600',
-    liaison: 'bg-brand-100 text-brand-600',
-    client: 'bg-gold-100 text-gold-600',
+    liaison: 'bg-navy-700/10 text-navy-700',
+    client: 'bg-gold-100 text-[var(--c-gold-deep)]',
     resolved: 'bg-positive-100 text-positive-700',
   }
   return <span className={`inline-block text-xs px-2 py-0.5 rounded-full ${chip[column]}`}>{COLUMN_LABEL[column]}</span>
@@ -286,11 +296,11 @@ function DisputeCard({ dispute: q, ownerName, busy, onDragStart, onOpen }: {
       className={`bg-white rounded-lg border border-slate-200 p-3 cursor-pointer hover:border-slate-300 hover:shadow-sm transition ${busy ? 'opacity-60' : ''}`}
     >
       <div className="flex items-start justify-between gap-2">
-        <span className="text-sm font-semibold text-slate-800 truncate">{q.debtorName}</span>
+        <span className="text-[12px] text-slate-500 truncate">{q.debtorName}</span>
         <span className="text-xs text-slate-400 shrink-0 tabular-nums">{ageInDays(q)}d</span>
       </div>
-      <p className="text-xs text-slate-400">{q.accountNumber}</p>
-      <p className="text-[13px] text-slate-600 mt-1.5 line-clamp-2 wrap-anywhere">{q.description}</p>
+      <p className="text-[11px] text-slate-300">{q.accountNumber}</p>
+      <p className="text-[13px] font-semibold leading-snug text-navy-950 mt-1.5 line-clamp-2 wrap-anywhere">{q.description}</p>
       {q.category && <p className="text-xs text-slate-400 mt-1">{q.category}</p>}
       <div className="flex items-center justify-between gap-2 mt-2.5 text-xs">
         <span className="text-slate-500 truncate">{ownerName ?? 'Unassigned'}</span>

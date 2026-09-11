@@ -15,17 +15,18 @@ import { QUERY_CATEGORIES } from '../../lib/disputeCategories'
 
 const TODAY = new Date().toISOString().slice(0, 10)
 
-/** The card's left edge. Same colours as the disputes board, so a stage reads the same anywhere. */
-const STAGE_SPINE: Record<QueryStage, string> = {
-  agent: '#c9a052',
-  liaison: '#3b82f6',
-  client: '#0f2b46',
-}
-
-const STAGE_CHIP: Record<QueryStage, string> = {
-  agent: 'bg-slate-100 text-slate-600',
-  liaison: 'bg-brand-100 text-brand-600',
-  client: 'bg-gold-100 text-gold-600',
+/**
+ * Where a dispute sits, as a dot, in the app's own palette.
+ *
+ * The first attempt reached for a generic blue, which is nobody's brand and this app's least of
+ * all — Raptor is navy and gold. Read as a scale rather than three labels: grey while it is ours
+ * to answer, navy once it has gone up the firm, gold when it is outside the building and somebody
+ * else is holding it. Gold is the one that should catch an eye across a desk.
+ */
+const STAGE_DOT: Record<QueryStage, string> = {
+  agent: 'var(--c-grey-light)',
+  liaison: 'var(--c-navy)',
+  client: 'var(--c-gold)',
 }
 
 const OUTCOME_CHIP: Record<QueryOutcome, string> = {
@@ -141,75 +142,75 @@ function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, cli
 
   return (
     /*
-      A card with a stage-coloured spine, which the firm asked for and which earns its keep: a
-      collector scanning a stack of these is asking "whose is this now?" before they read a word,
-      and the colour answers it from across the desk.
+      Quiet card, loud sentence.
+      
+      The first version put a stage-coloured spine down the edge and three labelled columns under
+      the text, and the result was uniform: every card the same weight, so nothing on any of them
+      stood out. What a collector needs from a stack of these is the debtor's complaint — that is
+      the only line worth reading at a glance, so it is the only line with any weight. Everything
+      else drops to the smallest type that stays legible, and the stage becomes a dot rather than
+      a filled chip.
+      
+      An overdue chase used to tint the whole card red, which is a lot of colour for one late date.
+      The date itself goes red instead.
     */
-    <div className={`rounded-lg border overflow-hidden ${stale ? 'border-negative-100 bg-negative-50' : 'border-slate-200 bg-white'}`}>
-      <div className="flex">
-        <span className="w-1 shrink-0" style={{ backgroundColor: STAGE_SPINE[q.stage] }} aria-hidden="true" />
-        <div className="flex-1 min-w-0 p-3">
-          <div className="flex items-start justify-between gap-2">
-            <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${STAGE_CHIP[q.stage]}`}>
-              {QUERY_STAGE_LABEL[q.stage]}
-            </span>
-            <span className={`text-[11px] shrink-0 ${stale ? 'text-negative' : 'text-slate-400'}`}>
-              {stale ? `chase — ${formatDate(q.chaseOn!)}` : `${ageInDays(q)} days old`}
-            </span>
-          </div>
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-slate-400">
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: STAGE_DOT[q.stage] }} />
+          {QUERY_STAGE_LABEL[q.stage]}
+        </span>
+        <span className="text-[10px] text-slate-300 shrink-0">{ageInDays(q)}d</span>
+      </div>
 
-          <QueryDescription text={q.description} />
-          {q.category && <p className="text-[11px] text-slate-400 mt-0.5">{q.category}</p>}
+      {/* The complaint, in the debtor's words. The reason this card exists. */}
+      <QueryDescription text={q.description} />
+      {q.category && <p className="text-[11px] text-slate-400 mt-1">{q.category}</p>}
 
-          {/*
-            Raised by, assigned to, follow-up — the three things asked about a dispute that is not
-            in front of you. Two of them are still controls rather than text: who carries it and
-            when to chase are changed far more often than they are read, and making somebody open
-            something else to change them is how chase dates go stale.
-          */}
-          <div className="flex flex-wrap gap-x-4 gap-y-2 mt-2.5 pt-2.5 border-t border-slate-100">
-            <div className="min-w-[6.5rem] flex-1">
-              <p className="text-[10px] uppercase tracking-wide text-slate-400">Raised by</p>
-              <p className="text-[12px] text-slate-700 truncate">{q.raisedByName ?? '—'}</p>
-            </div>
-            <div className="min-w-[6.5rem] flex-1">
-              <p className="text-[10px] uppercase tracking-wide text-slate-400">Assigned to</p>
-              <select
-                value={q.ownerId ?? ''}
-                disabled={busy}
-                onChange={(e) => run(() => updateQuery(q.id, { ownerId: e.target.value || null }, {
-                  ...ctx,
-                  note: `Dispute given to ${users.find((u) => u.id === e.target.value)?.name ?? 'nobody'}.`,
-                }))}
-                className="w-full text-[12px] text-slate-700 bg-transparent -ml-0.5 outline-none cursor-pointer hover:text-brand-600"
-              >
-                <option value="">Nobody yet</option>
-                {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
-            </div>
-            <div className="min-w-[7.5rem] flex-1">
-              <p className="text-[10px] uppercase tracking-wide text-slate-400">Follow-up</p>
-              <input
-                type="date"
-                value={q.chaseOn ?? ''}
-                disabled={busy}
-                onChange={(e) => run(() => updateQuery(q.id, { chaseOn: e.target.value }, ctx))}
-                className={`w-full text-[12px] bg-transparent -ml-0.5 outline-none cursor-pointer ${stale ? 'text-negative font-medium' : 'text-slate-700'}`}
-              />
-            </div>
-          </div>
-          {owner && actor.id && owner.id !== actor.id && (
-            <p className="text-[10px] text-slate-400 mt-1.5">
-              You are covering for {owner.name.split(' ')[0]} — anything you do here is recorded under your name.
-            </p>
-          )}
+      {/*
+        One line, not three labelled blocks. Who has it and when to chase are still controls --
+        they change far more often than they are read, and sending somebody elsewhere to move a
+        chase date is how chase dates go stale -- but they sit inline and look like the text they
+        are until you touch them.
+      */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-2 text-[11px] text-slate-400">
+        <span className="shrink-0">{q.raisedByName ?? 'Unknown'}</span>
+        <span className="text-slate-200">&rarr;</span>
+        <select
+          value={q.ownerId ?? ''}
+          disabled={busy}
+          onChange={(e) => run(() => updateQuery(q.id, { ownerId: e.target.value || null }, {
+            ...ctx,
+            note: `Dispute given to ${users.find((u) => u.id === e.target.value)?.name ?? 'nobody'}.`,
+          }))}
+          className="max-w-[9rem] text-[11px] text-slate-600 bg-transparent outline-none cursor-pointer hover:text-[var(--c-gold-deep)]"
+        >
+          <option value="">nobody yet</option>
+          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
+        <span className="text-slate-200">&middot;</span>
+        <input
+          type="date"
+          value={q.chaseOn ?? ''}
+          disabled={busy}
+          onChange={(e) => run(() => updateQuery(q.id, { chaseOn: e.target.value }, ctx))}
+          title="Follow up on"
+          className={`text-[11px] bg-transparent outline-none cursor-pointer ${stale ? 'text-[var(--c-rust-deep)] font-medium' : 'text-slate-600 hover:text-[var(--c-gold-deep)]'}`}
+        />
+        {stale && <span className="text-[10px] text-[var(--c-rust-deep)]">overdue</span>}
+      </div>
+      {owner && actor.id && owner.id !== actor.id && (
+        <p className="text-[10px] text-slate-400 mt-1">
+          You are covering for {owner.name.split(' ')[0]} — anything you do here is recorded under your name.
+        </p>
+      )}
 
-          {/*
-            The client link is not for everyone. A pre-legal agent works the debtor; the client
-            behind the account — its rates, its mandate, its deals — is the liaison's business.
-          */}
+      {/*
+        The client link is not for everyone. A pre-legal agent works the debtor; the client
+        behind the account — its rates, its mandate, its deals — is the liaison's business.
+      */}
           {clientId && canViewClients(actor.role as User['role'] | undefined) && (
-            <Link to={`/companies/${clientId}`} className="inline-flex items-center gap-0.5 mt-2 text-[11px] text-brand-600 hover:underline">
+            <Link to={`/companies/${clientId}`} className="inline-flex items-center gap-0.5 mt-2 text-[11px] text-[var(--c-gold-deep)] hover:underline">
               View client: {clientName ?? 'the client'} <ArrowUpRight size={11} />
             </Link>
           )}
@@ -256,8 +257,6 @@ function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, cli
           }}
         />
       )}
-        </div>
-      </div>
     </div>
   )
 }
@@ -311,10 +310,17 @@ export function OutcomeOutstanding({ queries, accountId, actor, busy, run }: {
   )
 }
 
+/**
+ * A move a dispute can make.
+ *
+ * Text until you go near it. Two boxed buttons under every card made a column of disputes read as
+ * a column of buttons, which is the opposite of what it should be — the complaint is the content
+ * and these are what you do about it.
+ */
 function Step({ label, onClick, disabled }: { label: string; onClick: () => void; disabled: boolean }) {
   return (
     <button onClick={onClick} disabled={disabled}
-      className="text-[11px] font-medium px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+      className="text-[11px] font-medium px-1.5 py-1 -mx-1.5 rounded text-slate-500 hover:text-[var(--c-gold-deep)] hover:bg-gold-50 disabled:opacity-50">
       {label}
     </button>
   )
@@ -449,7 +455,7 @@ function QueryDescription({ text }: { text: string }) {
     <p
       onClick={long ? () => setOpen((v) => !v) : undefined}
       title={long ? (open ? 'Show less' : 'Show all') : undefined}
-      className={`text-sm text-slate-800 mt-1.5 wrap-anywhere ${long ? 'cursor-pointer' : ''} ${
+      className={`text-[13.5px] font-semibold leading-snug text-navy-950 mt-1.5 wrap-anywhere ${long ? 'cursor-pointer' : ''} ${
         long && !open ? 'line-clamp-3' : ''}`}
     >
       {text}
