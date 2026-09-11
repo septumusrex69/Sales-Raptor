@@ -24,6 +24,7 @@ import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './Ac
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
 import { EscalateModal } from './EscalateModal'
 import { TraceButton } from './TraceButton'
+import { SmsModal } from './SmsModal'
 import { fetchQueries, type AccountQuery } from '../../lib/accountQueries'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { PhoneLink } from '../../components/PhoneLink'
@@ -66,6 +67,7 @@ export function AccountDetail() {
   const [promiseOpen, setPromiseOpen] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)
   const [disputing, setDisputing] = useState(false)
+  const [smsTo, setSmsTo] = useState<string | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -306,6 +308,7 @@ export function AccountDetail() {
         onNote={() => { setTab('Overview'); setNoteOpen(true); setTimeout(() => noteRef.current?.focus(), 0) }}
         onPromise={() => { setTab('Overview'); setPromiseOpen(true) }}
         onDispute={() => setDisputing(true)}
+        onSms={() => setSmsTo(callContact?.value ?? null)}
         accountId={account.id}
         actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
         onTraced={reload}
@@ -408,6 +411,10 @@ export function AccountDetail() {
         />
       )}
 
+      {smsTo && (
+        <SmsModal accountId={account.id} to={smsTo} onClose={() => setSmsTo(null)} onDone={reload} />
+      )}
+
       {composeTo && (
         <ComposeEmailModal
           to={composeTo}
@@ -457,13 +464,14 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, onEmail, onNote, onPromise, onDispute, accountId, actor, onTraced }: {
+function ActionBar({ callNumber, onEmail, onNote, onPromise, onDispute, onSms, accountId, actor, onTraced }: {
   /** The account's own number. Absent only when there is no phone number on file. */
   callNumber?: string
   onEmail?: () => void
   onNote: () => void
   onPromise: () => void
   onDispute: () => void
+  onSms: () => void
   /** The account being worked, and who is working it — the Trace button charges a fee. */
   accountId: string
   actor: { id: string | null; name: string | null }
@@ -486,7 +494,10 @@ function ActionBar({ callNumber, onEmail, onNote, onPromise, onDispute, accountI
         )
         : <Action icon={Phone} label="Call" title="No phone number on this account yet" />}
       <Action icon={MessageCircle} label="WhatsApp" title={soon} />
-      <Action icon={MessageSquare} label="SMS" title={soon} />
+      {/* The number the SMS goes to is the same one Call rings: one number on file, one thing
+          that happens when you reach for it. */}
+      <Action icon={MessageSquare} label="SMS" onClick={callNumber ? onSms : undefined}
+        title={callNumber ? 'Send this debtor an SMS — Annexure B item 1(c)' : 'No phone number on this account yet'} />
       <Action icon={Mail} label="Email" onClick={onEmail}
         title={onEmail ? 'Send from your connected mailbox' : 'No email address on this account yet'} />
       <Action icon={StickyNote} label="Add Note" onClick={onNote} title="Write on the timeline" />

@@ -717,6 +717,77 @@ const clientText = (await admin.textContent('body')).replace(/\s+/g, ' ')
 if (/Disputes on this client/.test(clientText)) console.log('   client page shows its disputes section')
 await admin.screenshot({ path: `${OUT}/client-disputes.png` })
 
+/*
+ * The SMS compose box.
+ *
+ * What matters here is that the price is right BEFORE the message goes: 161 characters costs twice
+ * what 160 does, and one curly apostrophe costs more again. A collector who can see that will
+ * shorten the message; one who finds out on the statement will not.
+ */
+// Earlier sections leave the fixture written off and the user pre-legal; put both back, or the
+// SMS is correctly charged nothing and the check fails for the wrong reason.
+TABLES.debtor_accounts = TABLES.debtor_accounts.map((a) => ({ ...a, status: 'Active', write_off_reason: null }))
+TABLES.profiles = TABLES.profiles.map((p) => (p.id === USER ? { ...p, role: 'Administrator' } : p))
+const sms = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+await sms.route(`**://${REF}.supabase.co/**`, serve)
+await sms.addInitScript(seed, { ref: REF, user: USER })
+let smsSent = null
+await sms.route('**/api/sms/send', (r) => {
+  smsSent = JSON.parse(r.request().postData() ?? '{}')
+  return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+    ok: true, id: 'qa-sms', reference: 'bfqa', segments: 2, encoding: 'GSM-7', to: '27821234567',
+  }) })
+})
+await sms.goto(`${ORIGIN}/accounts/${ACC}`, { waitUntil: 'networkidle' })
+await sms.waitForTimeout(1500)
+
+const smsBtn = sms.getByRole('button', { name: /^SMS$/ })
+if (await smsBtn.count() === 0) console.log('!! no SMS button in the action bar')
+else if (await smsBtn.first().isDisabled()) console.log('!! the SMS button is disabled on an account with a number')
+else {
+  await smsBtn.first().click()
+  await sms.waitForTimeout(600)
+  const box = sms.locator('[data-modal-open="true"] textarea')
+  if (await box.count() === 0) console.log('!! the SMS compose box did not open')
+  else {
+    const priced = async () => (await sms.textContent('[data-modal-open="true"]')).replace(/\s+/g, ' ')
+    await box.fill('a'.repeat(160))
+    await sms.waitForTimeout(250)
+    const one = await priced()
+    if (!/1 message/.test(one) || !/R3\.50 plus VAT/.test(one)) console.log(`!! 160 characters is not priced as one message: ${one.slice(0, 160)}`)
+    else console.log('   160 characters priced as one message at R3.50')
+
+    await box.fill('a'.repeat(161))
+    await sms.waitForTimeout(250)
+    const two = await priced()
+    if (!/2 messages/.test(two) || !/R7\.00 plus VAT/.test(two)) console.log(`!! 161 characters is not priced as two: ${two.slice(0, 160)}`)
+    else console.log('   161 characters priced as two at R7.00')
+
+    // The expensive surprise.
+    await box.fill('a'.repeat(100) + '\u2019')
+    await sms.waitForTimeout(250)
+    const curly = await priced()
+    if (!/cuts each message to 70/.test(curly)) console.log('!! a curly quote is not flagged as halving the message')
+    else console.log('   a curly quote is flagged before sending')
+
+    await box.fill('Bredell Ferreira: your account is in arrears. Please call 010 444 0044.')
+    await sms.waitForTimeout(250)
+    await sms.locator('[data-modal-open="true"]').getByRole('button', { name: /^Send SMS$/ }).click()
+    await sms.waitForTimeout(1200)
+    console.log(`   sent to the server: ${smsSent ? `${smsSent.to} — "${String(smsSent.text).slice(0, 40)}…"` : '(nothing)'}`)
+    if (!smsSent) console.log('!! the SMS was never handed to the server')
+
+    const fee = posted.filter((p) => p.table === 'account_fees').map((p) => JSON.parse(p.body)).at(-1)
+    if (!fee || fee.action_code !== 'SMS') console.log('!! no SMS fee was raised')
+    else {
+      console.log(`   fee: item ${fee.annexure_item}, R${fee.amount_excl_vat} excl VAT, ${fee.segments} segment(s)`)
+      if (fee.annexure_item !== '1c') console.log('!! the SMS fee is not item 1(c)')
+      if (Number(fee.amount_excl_vat) !== 7) console.log('!! two segments did not charge 2 x R3.50')
+    }
+    await sms.screenshot({ path: `${OUT}/account-sms.png` })
+  }
+}
+
 console.log('\nerrors:', errors.length ? JSON.stringify([...new Set(errors)].slice(0, 8), null, 2) : 'none')
 await browser.close()
 stop()

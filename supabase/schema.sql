@@ -1441,3 +1441,47 @@ alter table public.account_payments
 create unique index if not exists account_payments_swordfish_id_idx
   on public.account_payments (swordfish_payment_id)
   where swordfish_payment_id is not null;
+
+-- ---------- SMS ----------
+--
+-- Every SMS the firm sends, and every reply that comes back.
+--
+-- Its own table rather than a note, because an SMS has a life after it is written: it is accepted,
+-- then delivered or not, and a debtor may answer it. A timeline entry cannot change its mind.
+create table if not exists public.sms_messages (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid references public.debtor_accounts (id) on delete cascade,
+  direction text not null default 'outbound' check (direction in ('outbound', 'inbound')),
+  -- International format, digits only, as the network addresses it.
+  msisdn text not null,
+  body text not null,
+  -- What the network will actually send, which is what Annexure B item 1(c) is charged per.
+  segments integer not null default 1,
+  encoding text,
+  status text not null default 'queued'
+    check (status in ('queued', 'sent', 'delivered', 'failed', 'received')),
+  status_detail text,
+  -- Ours, sent as `id` and echoed back on the delivery report. How a DLR finds its row.
+  reference text unique,
+  provider_id text,
+  -- The provider's own words, verbatim. The API documentation is not reachable from the build
+  -- environment, so the first real sends are what teach us the shape of a response.
+  provider_raw text,
+  fee_id uuid references public.account_fees (id) on delete set null,
+  sent_at timestamptz,
+  delivered_at timestamptz,
+  created_by uuid references public.profiles (id) on delete set null,
+  created_by_name text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists sms_messages_account_idx on public.sms_messages (account_id, created_at desc);
+create index if not exists sms_messages_reference_idx on public.sms_messages (reference);
+create index if not exists sms_messages_provider_idx on public.sms_messages (provider_id) where provider_id is not null;
+
+alter table public.sms_messages enable row level security;
+
+-- Readable by anyone signed in: what was already said to a debtor is part of the account.
+drop policy if exists sms_messages_read on public.sms_messages;
+create policy sms_messages_read on public.sms_messages for select to authenticated using (true);
+-- Writes are server-side only. Nothing in the browser holds the provider token.
