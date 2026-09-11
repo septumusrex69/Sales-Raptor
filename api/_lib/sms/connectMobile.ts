@@ -22,6 +22,33 @@
 export const CONNECT_MOBILE_URL =
   (process.env.CONNECT_MOBILE_URL ?? 'https://sms.connect-mobile.co.za/submit/single/').replace(/\/*$/, '/')
 
+/**
+ * The token, out of whatever was pasted into the environment variable.
+ *
+ * A secret almost never arrives clean. A vault hands over a labelled block —
+ *
+ *     Username: someone
+ *     API_Token: abc123…
+ *
+ * — and the whole thing goes into the box, because that is what was copied. The provider then
+ * rejects a credential that looks perfectly correct to the person who set it, and the error says
+ * nothing about why. It has happened twice on this project with two different secrets.
+ *
+ * So: if the value names the token, take what it names; otherwise take the value, trimmed. This is
+ * not an invitation to paste blocks — the variable should hold the token and nothing else — it is
+ * a refusal to fail over a stray newline that nobody can see.
+ */
+export function readToken(raw: string | undefined | null): string {
+  const value = (raw ?? '').trim()
+  if (!value) return ''
+  const labelled = /(?:^|\n)\s*(?:api[_\s-]?token|token|api[_\s-]?key)\s*[:=]\s*(\S+)/i.exec(value)
+  if (labelled) return labelled[1]
+  // A bare multi-line value: the last non-empty line is the likelier secret, since labels and
+  // usernames come first.
+  const lines = value.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  return lines.length > 1 ? lines[lines.length - 1] : value
+}
+
 export class SmsError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -71,14 +98,7 @@ export async function sendSms(input: {
   reference: string
   token?: string
 }): Promise<SendResult> {
-  /*
-   * Trimmed, because a pasted secret almost never arrives clean.
-   *
-   * Copying a token out of a vault or an email brings a trailing newline or a leading space with
-   * it more often than not, and neither is visible in the box you paste into. The provider then
-   * rejects a token that looks perfectly correct to the person who set it.
-   */
-  const token = (input.token ?? process.env.CONNECT_MOBILE_API_TOKEN ?? '').trim()
+  const token = readToken(input.token ?? process.env.CONNECT_MOBILE_API_TOKEN)
   if (!token) {
     /*
      * Says what to DO, not just what is missing.
