@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { LayoutGrid, List, Loader2, Search } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { useAppStore } from '../../store/AppStore'
@@ -60,11 +60,17 @@ export function DisputesBoard() {
   const { users, userById } = useAppStore()
   const { currentUser } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   const [rows, setRows] = useState<QueueRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<'kanban' | 'table'>('kanban')
-  const [search, setSearch] = useState('')
+  /*
+   * "View dispute" on an account arrives with ?q=<account number>, so the board opens already
+   * narrowed to that debtor. Read once into the ordinary search box rather than held as its own
+   * filter: the first thing anyone does is clear it to see what else is queued.
+   */
+  const [search, setSearch] = useState(() => searchParams.get('q') ?? '')
   const [owner, setOwner] = useState('All')
   const [stage, setStage] = useState<'' | Column>('')
   const [dragging, setDragging] = useState<string | null>(null)

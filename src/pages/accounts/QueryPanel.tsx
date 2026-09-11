@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import { ArrowUpRight, Check, MessageCircleQuestion, Plus, X } from 'lucide-react'
+import { Check, MessageCircleQuestion, Plus, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Card } from '../../components/ui/Card'
 import { formatMoney, formatDate } from '../../data/mockData'
 import { chargeMessage } from '../../lib/accountCharges'
 import {
-  ageInDays, canSendToClient, closeQuery, isStale, markOutcomeDone, raiseQuery, updateQuery,
-  NEXT_STAGE, stageForAssignee, QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
+  closeQuery, isStale, markOutcomeDone, raiseQuery, updateQuery,
+  stageForAssignee, QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
   type AccountQuery, type QueryOutcome, type QueryStage,
 } from '../../lib/accountQueries'
 import type { User } from '../../types'
@@ -49,8 +49,10 @@ const OUTCOME_CHIP: Record<QueryOutcome, string> = {
  * the business's decision, and a system that quietly halted work on an account would be taking
  * that decision away.
  */
-export function QueryPanel({ accountId, queries, users, actor, onChange, busy, run, clientId, clientName, clientLiaisonId }: {
+export function QueryPanel({ accountId, accountLabel, queries, users, actor, onChange, busy, run, clientId, clientLiaisonId }: {
   accountId: string
+  /** The account number, used to find this debtor again on the dispute board. */
+  accountLabel: string | null
   queries: AccountQuery[]
   /** Who a query can be given to. */
   users: User[]
@@ -59,7 +61,6 @@ export function QueryPanel({ accountId, queries, users, actor, onChange, busy, r
   busy: boolean
   run: (fn: () => Promise<unknown>) => Promise<boolean>
   clientId: string | undefined
-  clientName: string | undefined
   /** Who looks after this debtor's client — giving a dispute to them is what "with the liaison" means. */
   clientLiaisonId: string | undefined
 }) {
@@ -95,8 +96,8 @@ export function QueryPanel({ accountId, queries, users, actor, onChange, busy, r
 
       <div className="space-y-2.5">
         {open.map((q) => (
-          <QueryCard key={q.id} query={q} accountId={accountId} users={users} actor={actor} clientLiaisonId={clientLiaisonId}
-            busy={busy} run={run} onChange={onChange} clientId={clientId} clientName={clientName} />
+          <QueryCard key={q.id} query={q} accountId={accountId} accountLabel={accountLabel} users={users} actor={actor}
+            clientLiaisonId={clientLiaisonId} busy={busy} run={run} onChange={onChange} clientId={clientId} />
         ))}
       </div>
 
@@ -127,16 +128,16 @@ export function QueryPanel({ accountId, queries, users, actor, onChange, busy, r
   )
 }
 
-function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, clientId, clientName, clientLiaisonId }: {
+function QueryCard({ query: q, accountId, accountLabel, users, actor, busy, run, onChange, clientId, clientLiaisonId }: {
   query: AccountQuery
   accountId: string
+  accountLabel: string | null
   users: User[]
   actor: { id: string | null; name: string | null; role: string | undefined }
   busy: boolean
   run: (fn: () => Promise<unknown>) => Promise<boolean>
   onChange: () => Promise<void>
   clientId: string | undefined
-  clientName: string | undefined
   clientLiaisonId: string | undefined
 }) {
   const [closing, setClosing] = useState(false)
@@ -146,48 +147,73 @@ function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, cli
 
   return (
     /*
-      Quiet card, loud sentence.
-      
-      The first version put a stage-coloured spine down the edge and three labelled columns under
-      the text, and the result was uniform: every card the same weight, so nothing on any of them
-      stood out. What a collector needs from a stack of these is the debtor's complaint — that is
-      the only line worth reading at a glance, so it is the only line with any weight. Everything
-      else drops to the smallest type that stays legible, and the stage becomes a dot rather than
-      a filled chip.
-      
-      An overdue chase used to tint the whole card red, which is a lot of colour for one late date.
-      The date itself goes red instead.
-    */
-    <div className="rounded-lg border border-slate-200 bg-white p-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-slate-400">
-          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: STAGE_DOT[q.stage] }} />
-          {QUERY_STAGE_LABEL[q.stage]}
-        </span>
-        <span className="text-[10px] text-slate-300 shrink-0">{ageInDays(q)}d</span>
-      </div>
+      Built on the Promise to Pay card, at the firm's request and for a good reason: the two are
+      the same kind of object. Something is outstanding, somebody owes an answer, and there are
+      two or three things you can do about it. PTP had already found the shape — a tinted panel,
+      the important line in bold, one line of facts under it, and a row of equal buttons — so a
+      second invented layout beside it was noise pretending to be design.
 
-      {/* The complaint, in the debtor's words. The reason this card exists. */}
+      The tint carries the state, the way PTP goes red when a promise is late: quiet while the
+      dispute is ours, gold once it is with the client and nobody here can move it, red when the
+      follow-up date has gone by.
+
+      The quiet tint is `brand`, not Tailwind's `slate`. Both are grey at a glance, but brand-50 is
+      mixed off this app's navy, so a resting dispute sits in the same family as the gold promise
+      beside it instead of looking like a panel borrowed from somewhere else.
+    */
+    <div className={`p-3 rounded-lg border ${
+      stale ? 'border-negative-100 bg-negative-50'
+        : q.stage === 'client' ? 'border-gold-100 bg-gold-50'
+          : 'border-brand-100 bg-brand-50'}`}
+    >
+      {/*
+        The complaint gets the full width.
+
+        PTP can put its meta on the same row because the bold thing there is "R1 250.00". A
+        complaint is a sentence, and a stage chip beside it at this column's real width (19rem)
+        squeezed it into a four-line ribbon down the left of the card.
+      */}
       <QueryDescription text={q.description} />
-      {q.category && <p className="text-[11px] text-slate-400 mt-1">{q.category}</p>}
 
       {/*
-        One line, not three labelled blocks. Who has it and when to chase are still controls --
-        they change far more often than they are read, and sending somebody elsewhere to move a
-        chase date is how chase dates go stale -- but they sit inline and look like the text they
-        are until you touch them.
+        Facts in two short rows instead of one that wraps.
+
+        One long line looked tidier written down and was not: at 19rem it broke wherever it ran
+        out of room, which left a middle dot alone at the start or the end of a line. Two rows
+        that each fit are honest about the width the panel actually has.
+
+        Who raised it is deliberately not here. It was the piece that would not fit, it is the
+        least useful of them at a glance, and the timeline records it on the "Dispute raised" note.
       */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-2 text-[11px] text-slate-400">
-        <span className="shrink-0">{q.raisedByName ?? 'Unknown'}</span>
-        <span className="text-slate-200">&rarr;</span>
+      <p className="text-[11px] text-slate-500 mt-1 flex flex-wrap items-center gap-x-1.5">
+        <span className="inline-flex items-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: STAGE_DOT[q.stage] }} />
+          {QUERY_STAGE_LABEL[q.stage]}
+        </span>
+        {q.category && (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="text-slate-300">&middot;</span>{q.category}
+          </span>
+        )}
+      </p>
+
+      {/*
+        Who has it and when to chase stay controls rather than text: they change far more often
+        than they are read, and sending somebody to another screen to move a chase date is how
+        chase dates go stale.
+      */}
+      <p className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-x-1.5">
+        {/* "With", not "Given to": four characters of label is the difference between reading
+            somebody's name and reading "Thab...". */}
+        <span className="shrink-0">With</span>
         <select
           value={q.ownerId ?? ''}
           disabled={busy}
           onChange={(e) => {
             /*
-             * Handing a dispute over IS escalating it, so the stage moves with the name. Keeping
-             * them separate meant a dispute could sit "with the agent" while a liaison held it,
-             * and the only way to correct that was to remember a second button.
+             * Handing a dispute over IS escalating it, so the stage moves with the name. This is
+             * also the only way to escalate from here now: the step buttons are gone, because a
+             * dispute is worked on its own board and not in the corner of an account page.
              */
             const to = users.find((u) => u.id === e.target.value)
             return run(() => updateQuery(q.id, {
@@ -195,66 +221,67 @@ function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, cli
               stage: stageForAssignee(to?.role, !!to && to.id === clientLiaisonId),
             }, { ...ctx, note: `Dispute given to ${to?.name ?? 'nobody'}.` }))
           }}
-          className="max-w-[9rem] text-[11px] text-slate-600 bg-transparent outline-none cursor-pointer hover:text-[var(--c-gold-deep)]"
+          className="min-w-0 flex-1 truncate text-[11px] text-slate-600 bg-transparent outline-none cursor-pointer hover:text-[var(--c-gold-deep)]"
         >
           <option value="">nobody yet</option>
           {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
-        <span className="text-slate-200">&middot;</span>
-        <input
-          type="date"
-          value={q.chaseOn ?? ''}
-          disabled={busy}
-          onChange={(e) => run(() => updateQuery(q.id, { chaseOn: e.target.value }, ctx))}
-          title="Follow up on"
-          className={`text-[11px] bg-transparent outline-none cursor-pointer ${stale ? 'text-[var(--c-rust-deep)] font-medium' : 'text-slate-600 hover:text-[var(--c-gold-deep)]'}`}
-        />
-        {stale && <span className="text-[10px] text-[var(--c-rust-deep)]">overdue</span>}
-      </div>
+        {/*
+          The row does not wrap; the name gives way instead.
+
+          A name and a date wrapping past each other left a middle dot alone at the start of a
+          line. The select shrinks and ellipsizes so one readable line survives -- and the date
+          next to it is a written date, not a date input, which is what makes the name fit at all.
+          A native date field costs about 170px of a 272px row once its picker icon is counted;
+          "19 Sep 2026" costs 75. PTP writes its date out for the same reason, so the two cards
+          now read alike.
+
+          An overdue chase date said so three times over -- the card turns red, the date turns red,
+          and it used to add the word "overdue" as well. Two signals are plenty.
+        */}
+        <span className="inline-flex items-center gap-1.5 shrink-0">
+          <span className="text-slate-300">&middot;</span>
+          <ChaseDate
+            value={q.chaseOn}
+            stale={stale}
+            busy={busy}
+            onChange={(v) => run(() => updateQuery(q.id, { chaseOn: v || null }, ctx))}
+          />
+        </span>
+      </p>
       {owner && actor.id && owner.id !== actor.id && (
-        <p className="text-[10px] text-slate-400 mt-1">
-          You are covering for {owner.name.split(' ')[0]} — anything you do here is recorded under your name.
+        <p className="text-[10px] text-slate-400 mt-0.5">
+          Covering for {owner.name.split(' ')[0]} — recorded under your name.
         </p>
       )}
 
       {/*
-        The client link is not for everyone. A pre-legal agent works the debtor; the client
-        behind the account — its rates, its mandate, its deals — is the liaison's business.
+        Three buttons, equal width, exactly as PTP does it.
+
+        Two of the three only navigate, so both are quiet and navy; green is kept for the one that
+        changes something. Three different colours in a row of three read as three equal choices.
+
+        No "send to liaison" or "send to client" here. A dispute is moved on the dispute board,
+        where you can see the others it is queued behind; from an account you look at it, or you
+        answer it. Giving it to somebody in the line above still escalates it, which is the one
+        move that genuinely belongs on this page.
       */}
+      {!closing && (
+        <div className="flex gap-1.5 mt-2">
           {clientId && canViewClients(actor.role as User['role'] | undefined) && (
-            <Link to={`/companies/${clientId}`} className="inline-flex items-center gap-0.5 mt-2 text-[11px] text-[var(--c-gold-deep)] hover:underline">
-              View client: {clientName ?? 'the client'} <ArrowUpRight size={11} />
+            <Link to={`/companies/${clientId}`}
+              className="flex-1 text-[11px] font-medium py-1 rounded border border-brand-100 text-brand-500 hover:bg-white inline-flex items-center justify-center gap-1">
+              View client
             </Link>
           )}
-
-      {!closing && (
-        <div className="flex flex-wrap gap-1.5 mt-2.5">
-          {/*
-            One rung at a time, and only the rung this query is actually on. Sending to the client
-            is gated: a collections agent should not be writing to a client about a disputed
-            account on their own initiative — that is the liaison's relationship to manage.
-          */}
-          {(() => {
-            const next = NEXT_STAGE[q.stage]
-            if (!next) return null
-            const gated = next.to === 'client' && !canSendToClient(actor.role)
-            if (gated) {
-              return (
-                <span className="text-[11px] text-slate-400 px-2 py-1 border border-dashed border-slate-200 rounded"
-                  title="Only a client liaison or a manager can put a query in front of a client.">
-                  {next.label} &mdash; liaison only
-                </span>
-              )
-            }
-            return (
-              <Step label={next.label} disabled={busy}
-                onClick={() => run(() => updateQuery(q.id, { stage: next.to }, { ...ctx, note: next.note }))} />
-            )
-          })()}
-          {/* Every tier can close what it has answered. Most queries never reach the client. */}
-          {/* The chase date is set in Follow-up above; a second control for it was two places to
-              change one thing, and the one you did not use looked wrong afterwards. */}
-          <Step label="Resolve" disabled={busy} onClick={() => setClosing(true)} />
+          <Link to={accountLabel ? `/queries?q=${encodeURIComponent(accountLabel)}` : '/queries'}
+            className="flex-1 text-[11px] font-medium py-1 rounded border border-brand-100 text-brand-500 hover:bg-white inline-flex items-center justify-center gap-1">
+            View dispute
+          </Link>
+          <button disabled={busy} onClick={() => setClosing(true)}
+            className="flex-1 text-[11px] font-medium py-1 rounded border border-positive-100 text-positive-700 hover:bg-positive-50 disabled:opacity-50 inline-flex items-center justify-center gap-1">
+            <Check size={11} /> Resolve
+          </button>
         </div>
       )}
 
@@ -323,17 +350,45 @@ export function OutcomeOutstanding({ queries, accountId, actor, busy, run }: {
 }
 
 /**
- * A move a dispute can make.
+ * The follow-up date: written out, editable on a click.
  *
- * Text until you go near it. Two boxed buttons under every card made a column of disputes read as
- * a column of buttons, which is the opposite of what it should be — the complaint is the content
- * and these are what you do about it.
+ * A bare `<input type="date">` is the honest control and the wrong one here. It is a third of
+ * this panel's width before anything is typed in it, it shows the browser's locale rather than
+ * the firm's, and it put "19 Sep 2026" on the card as "09/19/2026" next to a name truncated to
+ * "Thab...". Written text costs a third of that and matches the promise card beside it; the
+ * input is one click away for the rare occasion somebody moves the date.
  */
-function Step({ label, onClick, disabled }: { label: string; onClick: () => void; disabled: boolean }) {
+function ChaseDate({ value, stale, busy, onChange }: {
+  value: string | null
+  stale: boolean
+  busy: boolean
+  onChange: (value: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+
+  if (editing) {
+    return (
+      <input
+        type="date"
+        autoFocus
+        defaultValue={value ?? ''}
+        disabled={busy}
+        onBlur={() => setEditing(false)}
+        onChange={(e) => onChange(e.target.value)}
+        className="text-[11px] bg-transparent outline-none"
+      />
+    )
+  }
   return (
-    <button onClick={onClick} disabled={disabled}
-      className="text-[11px] font-medium px-1.5 py-1 -mx-1.5 rounded text-slate-500 hover:text-[var(--c-gold-deep)] hover:bg-gold-50 disabled:opacity-50">
-      {label}
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => setEditing(true)}
+      title={value ? `Following up on ${formatDate(value)} — click to change` : 'Set a follow-up date'}
+      className={`text-[11px] disabled:opacity-50 ${
+        stale ? 'text-negative-700 font-medium' : 'text-slate-600 hover:text-[var(--c-gold-deep)]'}`}
+    >
+      {value ? formatDate(value) : 'no date'}
     </button>
   )
 }
@@ -467,7 +522,7 @@ function QueryDescription({ text }: { text: string }) {
     <p
       onClick={long ? () => setOpen((v) => !v) : undefined}
       title={long ? (open ? 'Show less' : 'Show all') : undefined}
-      className={`text-[13.5px] font-semibold leading-snug text-navy-950 mt-1.5 wrap-anywhere ${long ? 'cursor-pointer' : ''} ${
+      className={`text-[13.5px] font-semibold leading-snug text-navy-950 wrap-anywhere ${long ? 'cursor-pointer' : ''} ${
         long && !open ? 'line-clamp-3' : ''}`}
     >
       {text}

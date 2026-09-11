@@ -93,6 +93,12 @@ console.log(`dev server on ${ORIGIN}`)
 /*
  * Two things the browser needs that the shell already has.
  *
+ * NOTE. The egress policy can refuse the Supabase host on the browser's path even when the
+ * Supabase MCP tools work, in which case sign-in fails with ERR_TUNNEL_CONNECTION_FAILED and
+ * `curl $HTTPS_PROXY/__agentproxy/status` records a 403 CONNECT against it. That is an
+ * organisation policy denial, not a bug here -- report the blocked host rather than routing
+ * around it.
+ *
  * Outbound HTTPS in this container goes through a local agent proxy, and Chromium does not read
  * the shell's proxy variables — without this every Supabase call dies as ERR_TUNNEL_CONNECTION
  * _FAILED and the sign-in silently never completes. The proxy re-signs TLS with its own CA, so
@@ -105,7 +111,19 @@ console.log(`dev server on ${ORIGIN}`)
 const proxy = process.env.HTTPS_PROXY ?? process.env.https_proxy
 const browser = await chromium.launch({
   executablePath: '/opt/pw-browsers/chromium',
-  ...(proxy ? { proxy: { server: proxy, bypass: 'localhost,127.0.0.1' } } : {}),
+  /*
+   * Set the proxy as a raw Chromium flag, not through Playwright's `proxy` option.
+   *
+   * Playwright's option adds --proxy-bypass-list=<-loopback>, which is Chromium for "proxy the
+   * loopback address too", and its `bypass` field did not override it in this build: every load
+   * of the dev server went to the relay, which answers plain HTTP with 405, so the sign-in form
+   * never rendered. Measured, not guessed -- 'localhost,127.0.0.1', the port-qualified host and
+   * '<-loopback>' all behaved identically, and dropping the flag fixed it.
+   *
+   * Passing --proxy-server alone leaves Chromium's implicit loopback bypass in place, which is
+   * exactly what this wants: the dev server direct, everything else through the relay.
+   */
+  ...(proxy ? { args: [`--proxy-server=${proxy}`], ignoreDefaultArgs: ['--proxy-server'] } : {}),
 })
 const page = await browser.newPage({ viewport: { width: 1440, height: 1050 }, ignoreHTTPSErrors: true })
 const errors = []
@@ -134,6 +152,16 @@ try {
 } catch (e) {
   failed = true
   console.error(`\nFAILED: ${e instanceof Error ? e.message : e}`)
+  // A timed-out selector says which element never arrived and nothing about why. The page
+  // itself does — an error boundary, a blank white screen, a login form that changed shape.
+  // Cheap to capture, and the alternative is guessing at a page nobody looked at.
+  try {
+    const shot = path.join(OUT, 'failure.png')
+    await page.screenshot({ path: shot, fullPage: true })
+    const text = (await page.textContent('body')) ?? ''
+    console.error(`   page was ${page.url()} -> ${shot}`)
+    console.error(`   ${text.trim().slice(0, 400).replace(/\s+/g, ' ') || '(empty body)'}`)
+  } catch { /* the browser may already be gone; the original failure is what matters */ }
 } finally {
   await browser.close()
   stop()

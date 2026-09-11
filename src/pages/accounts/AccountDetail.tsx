@@ -386,6 +386,7 @@ export function AccountDetail() {
             />
             <QueryPanel
               accountId={account.id}
+              accountLabel={account.accountNumber}
               queries={queries}
               users={users}
               actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null, role: currentUser?.role }}
@@ -393,7 +394,6 @@ export function AccountDetail() {
               busy={queryBusy}
               run={runQuery}
               clientId={client?.id}
-              clientName={client?.name}
               clientLiaisonId={clientLiaison?.id}
             />
             <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0}
