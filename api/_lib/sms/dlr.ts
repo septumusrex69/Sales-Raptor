@@ -17,7 +17,7 @@ import { deliveryStatus, params, pick, REFERENCE_KEYS, STATUS_KEYS } from './inb
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const secret = process.env.SMS_WEBHOOK_KEY
   if (!secret) {
-    res.status(500).json({ error: 'SMS_WEBHOOK_KEY is not set, so delivery reports cannot be accepted.' })
+    res.status(500).json({ error: 'SMS_WEBHOOK_KEY is not set on this deployment. Add it in Vercel (Production and Preview) and redeploy, then delivery reports can be accepted.' })
     return
   }
   const p = params(req)

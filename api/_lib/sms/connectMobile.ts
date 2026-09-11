@@ -73,7 +73,18 @@ export async function sendSms(input: {
 }): Promise<SendResult> {
   const token = input.token ?? process.env.CONNECT_MOBILE_API_TOKEN
   if (!token) {
-    throw new SmsError(500, 'CONNECT_MOBILE_API_TOKEN is not set, so no SMS can be sent.')
+    /*
+     * Says what to DO, not just what is missing.
+     *
+     * The first time this fired, the variable had in fact been set — a few minutes after the
+     * deployment was built. A Vercel deployment carries the environment it was built with, so a
+     * variable added afterwards reaches the next build and not this one. That is the answer
+     * almost every time this message appears, and the message is where somebody will look.
+     */
+    throw new SmsError(500,
+      'Connect Mobile is not configured on this deployment. Add CONNECT_MOBILE_API_TOKEN in '
+      + 'Vercel — tick Production AND Preview — and then redeploy, because a deployment keeps the '
+      + 'settings it was built with.')
   }
   const msisdn = toMsisdn(input.to)
   if (!msisdn) throw new SmsError(400, `"${input.to}" is not a number an SMS can be sent to.`)

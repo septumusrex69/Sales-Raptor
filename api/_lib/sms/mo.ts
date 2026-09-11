@@ -18,7 +18,7 @@ import { MSISDN_KEYS, TEXT_KEYS, params, pick } from './inbound.js'
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const secret = process.env.SMS_WEBHOOK_KEY
   if (!secret) {
-    res.status(500).json({ error: 'SMS_WEBHOOK_KEY is not set, so replies cannot be accepted.' })
+    res.status(500).json({ error: 'SMS_WEBHOOK_KEY is not set on this deployment. Add it in Vercel (Production and Preview) and redeploy, then replies can be accepted.' })
     return
   }
   const p = params(req)
