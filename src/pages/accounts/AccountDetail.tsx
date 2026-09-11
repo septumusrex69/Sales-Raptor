@@ -13,7 +13,8 @@ import { accountFlagList, fetchAccount, fetchLedgers, hasCommissionDrift, type A
 import { buildStatement, type BalanceInput, type BalanceBreakdown, type StatementLine } from '../../lib/accountBalance'
 import {
   addNote, addPromise, describeArrangement, fetchDocuments, fetchWorkspace, isOverdue,
-  keepInstalment, nextPromise, resolvePromise, saveMainComment, dialableNumber, ARRANGEMENT_LABEL, WEEKDAYS,
+  keepInstalment, nextPromise, resolvePromise, saveMainComment, dialableNumber, smsableNumbers,
+  ARRANGEMENT_LABEL, WEEKDAYS,
   type AccountDocument, type Arrangement, type PromiseToPay, type Workspace,
 } from '../../lib/accountWorkspace'
 import { buildTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
@@ -67,7 +68,7 @@ export function AccountDetail() {
   const [promiseOpen, setPromiseOpen] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)
   const [disputing, setDisputing] = useState(false)
-  const [smsTo, setSmsTo] = useState<string | null>(null)
+  const [smsOpen, setSmsOpen] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -186,6 +187,7 @@ export function AccountDetail() {
   const due = workspace ? nextPromise(workspace.promises) : undefined
   const emailContact = workspace?.contacts.find((c) => c.kind === 'email' && !c.retiredAt)
   const callContact = dialableNumber(workspace?.contacts ?? [])
+  const smsNumbers = smsableNumbers(workspace?.contacts ?? [])
   // Who looks after this debtor's CLIENT — a different person from the pre-legal agent working
   // the debtor, and the one a query about the debt itself has to go to.
   const clientLiaison = users.find((u) => u.id === client?.accountOwnerId)
@@ -308,7 +310,7 @@ export function AccountDetail() {
         onNote={() => { setTab('Overview'); setNoteOpen(true); setTimeout(() => noteRef.current?.focus(), 0) }}
         onPromise={() => { setTab('Overview'); setPromiseOpen(true) }}
         onDispute={() => setDisputing(true)}
-        onSms={() => setSmsTo(callContact?.value ?? null)}
+        onSms={() => setSmsOpen(true)}
         accountId={account.id}
         actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
         onTraced={reload}
@@ -411,8 +413,8 @@ export function AccountDetail() {
         />
       )}
 
-      {smsTo && (
-        <SmsModal accountId={account.id} to={smsTo} onClose={() => setSmsTo(null)} onDone={reload} />
+      {smsOpen && (
+        <SmsModal accountId={account.id} numbers={smsNumbers} onClose={() => setSmsOpen(false)} onDone={reload} />
       )}
 
       {composeTo && (

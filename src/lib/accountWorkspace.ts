@@ -45,6 +45,34 @@ export interface AccountContact {
 }
 
 /**
+ * Every number on this account that an SMS could go to.
+ *
+ * Not one number, because a debtor is rarely one number: a mobile that stopped answering, a work
+ * line, a daughter's phone somebody wrote down in March. The collector knows which of them the
+ * person actually reads, and the app does not, so it offers the list rather than deciding.
+ *
+ * A landline is included and left to the collector's judgement. Some of them are cellular numbers
+ * recorded under the wrong kind, and refusing to show them would hide a working number to enforce
+ * a distinction the data does not reliably carry.
+ *
+ * Retired numbers are never offered: a number is retired precisely because using it is a mistake.
+ * The primary comes first, since it is the one most messages should go to.
+ */
+export function smsableNumbers(contacts: AccountContact[]): { label: string; value: string }[] {
+  const phones = contacts.filter(
+    (c) => !c.retiredAt && (c.kind === 'mobile' || c.kind === 'phone' || c.kind === 'work'),
+  )
+  const ordered = [...phones].sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+  return ordered.map((c) => ({
+    value: c.value,
+    label: [
+      c.label ?? CONTACT_KINDS.find((k) => k.kind === c.kind)?.label ?? 'Number',
+      c.isPrimary ? '(primary)' : null,
+    ].filter(Boolean).join(' '),
+  }))
+}
+
+/**
  * The number to ring for this account: the phone marked primary, else the first one on file.
  *
  * Debtor details and the action bar have to agree about this. A Call button at the top of the

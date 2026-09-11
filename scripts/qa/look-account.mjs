@@ -747,6 +747,17 @@ else if (await smsBtn.first().isDisabled()) console.log('!! the SMS button is di
 else {
   await smsBtn.first().click()
   await sms.waitForTimeout(600)
+  // The account carries a mobile and a work number; the collector chooses which one.
+  const picker = sms.locator('[data-modal-open="true"] select')
+  if (await picker.count() === 0) console.log('!! no number picker, so only one number can ever be texted')
+  else {
+    const opts = await picker.first().locator('option').allTextContents()
+    console.log(`   numbers offered: ${opts.map((o) => o.split(' — ')[0]).join(', ')}`)
+    if (opts.length < 2) console.log('!! the picker offers fewer numbers than the account has')
+    if (!/primary/.test(opts[0] ?? '')) console.log('!! the primary number is not offered first')
+    // A retired number must never be on the list.
+    if (opts.some((o) => o.includes('71 000 1111'))) console.log('!! a retired number is offered for SMS')
+  }
   const box = sms.locator('[data-modal-open="true"] textarea')
   if (await box.count() === 0) console.log('!! the SMS compose box did not open')
   else {

@@ -14,13 +14,15 @@ import { scheduleFor } from '../../lib/annexureB'
  * Word costs more than that again. A collector who can see "2 messages, R6.90" before they press
  * send will shorten it; one who finds out on the statement will not.
  */
-export function SmsModal({ accountId, to, onClose, onDone }: {
+export function SmsModal({ accountId, numbers, onClose, onDone }: {
   accountId: string
-  to: string
+  /** Every number on the account, primary first. The collector picks; the app does not guess. */
+  numbers: { label: string; value: string }[]
   onClose: () => void
   onDone: () => Promise<void>
 }) {
   const { session, currentUser } = useAuth()
+  const [to, setTo] = useState(numbers[0]?.value ?? '')
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -31,7 +33,7 @@ export function SmsModal({ accountId, to, onClose, onDone }: {
   const price = rate * Math.max(1, cost.segments)
 
   async function send() {
-    if (!session?.access_token || !text.trim()) return
+    if (!session?.access_token || !text.trim() || !to) return
     setBusy(true)
     setError(null)
     try {
@@ -74,7 +76,26 @@ export function SmsModal({ accountId, to, onClose, onDone }: {
         </div>
       ) : (
         <div className="space-y-3">
-          <p className="text-sm text-slate-500">To <span className="font-medium text-slate-700">{to}</span></p>
+          {/*
+            One number is a sentence; several is a choice. Rendering a one-option dropdown would
+            make the common case look like a decision somebody has to make.
+          */}
+          {numbers.length <= 1 ? (
+            <p className="text-sm text-slate-500">To <span className="font-medium text-slate-700">{to || 'no number on file'}</span></p>
+          ) : (
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700">Send to</span>
+              <select
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+                className="w-full mt-1 text-sm rounded-lg border border-slate-200 px-2.5 py-2 bg-white"
+              >
+                {numbers.map((n) => (
+                  <option key={n.value} value={n.value}>{n.value} — {n.label}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <textarea
             rows={5}
             autoFocus
@@ -105,7 +126,7 @@ export function SmsModal({ accountId, to, onClose, onDone }: {
           <div className="flex items-center gap-2 pt-1">
             <button
               onClick={() => void send()}
-              disabled={busy || !text.trim()}
+              disabled={busy || !text.trim() || !to}
               className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg bg-navy-950 text-white hover:bg-navy-900 disabled:opacity-40"
             >
               {busy ? <Loader2 size={14} className="animate-spin" /> : <MessageSquare size={14} />}
