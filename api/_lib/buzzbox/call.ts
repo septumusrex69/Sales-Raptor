@@ -12,6 +12,23 @@ import { connectedSession } from './session.js'
  * Body: { to: string, reference?: string }. `reference` is passed through to BuzzBox so the
  * call shows up in its own records tagged with the CRM record it was placed from.
  */
+/**
+ * Where BuzzBox should post what happened to the call.
+ *
+ * VERCEL_PROJECT_PRODUCTION_URL is the stable production hostname; VERCEL_URL is the per-
+ * deployment one, which is right on a preview and wrong to hand a provider on production, since
+ * it dies with the deployment. BUZZBOX_WEBHOOK_BASE overrides both for a custom domain.
+ */
+function callbackUrl(): string | undefined {
+  const key = process.env.SMS_WEBHOOK_KEY
+  const host = process.env.BUZZBOX_WEBHOOK_BASE
+    ?? process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ?? process.env.VERCEL_URL
+  if (!key || !host) return undefined
+  const base = host.startsWith('http') ? host.replace(/\/+$/, '') : `https://${host}`
+  return `${base}/api/buzzbox/webhook?key=${encodeURIComponent(key)}`
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' })
@@ -56,6 +73,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       from,
       to: dialTo,
       reference: reference?.slice(0, 120) || undefined,
+      /*
+       * Ask BuzzBox to tell us how the call went.
+       *
+       * Nothing reads the answer yet -- the payload is undocumented, so /api/buzzbox/webhook only
+       * logs what arrives. Sending the URL now is what makes a real call teach us the shape; the
+       * alternative is asking every collector after every call forever.
+       *
+       * Omitted rather than guessed when the deployment does not know its own public URL or has
+       * no webhook key: a webhookUrl pointing at the wrong host is worse than none.
+       */
+      webhookUrl: callbackUrl(),
     })
     res.status(200).json({ ok: true, from, to: dialTo })
   } catch (err) {

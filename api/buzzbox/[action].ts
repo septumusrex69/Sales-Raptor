@@ -4,6 +4,7 @@ import connect from '../_lib/buzzbox/connect.js'
 import disconnect from '../_lib/buzzbox/disconnect.js'
 import extensions from '../_lib/buzzbox/extensions.js'
 import status from '../_lib/buzzbox/status.js'
+import webhook from '../_lib/buzzbox/webhook.js'
 
 /**
  * One serverless function for every /api/buzzbox/* route.
@@ -20,6 +21,7 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   disconnect,
   extensions,
   status,
+  webhook,
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

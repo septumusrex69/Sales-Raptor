@@ -22,8 +22,12 @@ interface PhoneLinkProps {
   children?: ReactNode
   /** When set, a successful BuzzBox dial logs a Call Activity against this record. Omit to dial without logging. */
   log?: CallLogTarget
-  /** Runs after a successful BuzzBox dial — e.g. to stamp a lead's last-contact time. */
-  onDialled?: () => void
+  /**
+   * Runs after a successful BuzzBox dial — e.g. to stamp a lead's last-contact time, or to write
+   * the call onto a debtor account's own timeline. Carries what was dialled and from where,
+   * since a caller that wants to record the call needs both and only this component knows them.
+   */
+  onDialled?: (call: { from: string; to: string }) => void
 }
 
 /**
@@ -90,7 +94,7 @@ export function PhoneLink({ number, className = '', iconSize = 13, children, log
           dealId: log.dealId,
         })
       }
-      onDialled?.()
+      onDialled?.({ from: result.from, to: result.to })
     }
     if (resetTimer.current) clearTimeout(resetTimer.current)
     resetTimer.current = setTimeout(() => setState({ kind: 'idle' }), result.ok ? 5000 : 8000)

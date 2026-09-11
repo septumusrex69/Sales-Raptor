@@ -145,11 +145,25 @@ all of it by typing the Organisation ID into the connect form.
 ## 8. Follow-ups worth doing
 
 - **Call outcome and duration.** `CallSetup.webhookUrl` lets BuzzBox call us back about the
-  call; its payload is undocumented, so it is not wired. Capturing a sample payload from a real
-  call is the first step; the Activity can then be updated with answered/duration.
+  call; its payload is undocumented. Every dial now sends the URL and
+  `api/_lib/buzzbox/webhook.ts` logs whatever arrives, gated on `SMS_WEBHOOK_KEY` in the query
+  string. **So one real call through Raptor should show the payload in the Vercel runtime logs
+  under `[buzzbox-webhook]`.** Read it there, then teach the handler which field means answered.
+
+  Until then nothing reads it, deliberately. The debtor account page asks the collector "did
+  they answer?" instead and charges Annexure B item 7 on a yes -- guessing which field means
+  "picked up" and billing on the strength of the guess is how a firm charges for calls that rang
+  out. When the shape is known the charge moves into the webhook and the question goes away.
+
+  The callback URL is built in `api/_lib/buzzbox/call.ts` from `BUZZBOX_WEBHOOK_BASE`, else
+  `VERCEL_PROJECT_PRODUCTION_URL`, else `VERCEL_URL`. It is omitted rather than guessed when the
+  deployment has no webhook key or does not know its own hostname.
 - **Call recordings.** `GET /rest/v1/pabx-organisations/{id}/call-recordings/{uuid}` exists;
   linking a recording to the Activity needs the webhook above to learn the recording id.
 - **Inbound screen-pop.** `GET .../calls` lists active calls (with `cidNumber`), and there is a
   Pusher channel auth route, so "who is calling" against leads/contacts is feasible.
-- **Debtor accounts.** Log dialled calls on the account timeline once the fee/tariff decision
-  in `docs/debt-collection-model.md` is made.
+- ~~**Debtor accounts.** Log dialled calls on the account timeline once the fee/tariff decision
+  is made.~~ Done. The firm decided: a dialled call goes on the timeline and costs nothing, and
+  a call the debtor answers is a consultation (item 7, R60). `src/pages/accounts/CallButton.tsx`
+  places the call and asks; `src/lib/callRules.ts` holds the fee decision, including why item 2
+  ("necessary phone call, which is not a consultation", R25) stays switched off.

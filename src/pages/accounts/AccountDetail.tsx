@@ -30,7 +30,7 @@ import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
 import { fetchQueries, type AccountQuery } from '../../lib/accountQueries'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
-import { PhoneLink } from '../../components/PhoneLink'
+import { CallButton } from './CallButton'
 import { feeCeiling, scheduleFor } from '../../lib/annexureB'
 import { formatMoney, formatDate } from '../../data/mockData'
 
@@ -478,9 +478,10 @@ function ActionBar({ callNumber, onEmail, onNote, onPromise, onDispute, onSms, a
   onPromise: () => void
   onDispute: () => void
   onSms: () => void
-  /** The account being worked, and who is working it — the Trace button charges a fee. */
+  /** The account being worked, and who is working it — Call and Trace both charge fees. */
   accountId: string
   actor: { id: string | null; name: string | null }
+  /** Reload after anything that writes a note or a fee — a trace, a call. */
   onTraced: () => Promise<void>
 }) {
   const soon = 'Not built yet — needs a provider connected and a decision on whether it charges the debtor.'
@@ -491,12 +492,14 @@ function ActionBar({ callNumber, onEmail, onNote, onPromise, onDispute, onSms, a
         so this button and that number cannot disagree about what dialling does. Without BuzzBox
         it falls back to a tel: link, which on the tablet the collectors actually use is the
         device dialler; with BuzzBox it rings the rep's extension and bridges the call.
+
+        CallButton is that, plus the two things the firm found missing: the dial goes on the
+        account's timeline, and a call the debtor answers raises the item 7 consultation.
       */}
       {callNumber
         ? (
-          <PhoneLink number={callNumber} className={`${ACTION_BASE} ${ACTION_ENABLED}`} iconSize={14}>
-            <Phone size={14} /> Call
-          </PhoneLink>
+          <CallButton accountId={accountId} number={callNumber} actor={actor}
+            className={`${ACTION_BASE} ${ACTION_ENABLED}`} onDone={onTraced} />
         )
         : <Action icon={Phone} label="Call" title="No phone number on this account yet" />}
       <Action icon={MessageCircle} label="WhatsApp" title={soon} />
