@@ -70,15 +70,6 @@ export const QUERY_OUTCOME_LABEL: Record<QueryOutcome, string> = {
   withdrawn: 'Withdrawn by debtor',
 }
 
-/**
- * Optional, and short on purpose. The kinds are genuinely various — "it could be anything" — so
- * this groups the handful worth counting and stops. Anything else is just the description.
- */
-export const QUERY_CATEGORIES = [
-  'Already paid', 'Amount disputed', 'Goods or service', 'Not my account',
-  'Prescribed', 'Under debt review', 'Other',
-] as const
-
 export interface AccountQuery {
   id: string
   accountId: string

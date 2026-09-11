@@ -617,6 +617,32 @@ else {
   const m = (await act.textContent('body')).replace(/\s+/g, ' ')
   if (!/Raise a dispute/.test(m)) console.log('!! the dispute modal is not titled "Raise a dispute"')
   else console.log('   dispute modal opens with the right title')
+
+  // The firm's classification, with its examples under the choice.
+  const opts = await act.locator('[data-modal-open="true"] select').last().locator('option').allTextContents()
+  const wanted = ['Amount dispute', 'Liability dispute', 'Third-party payment', 'Other']
+  const missing = wanted.filter((w) => !opts.includes(w))
+  if (missing.length) console.log(`!! classifications missing from the form: ${missing.join(', ')}`)
+  else console.log(`   ${opts.length - 1} classifications offered`)
+
+  const selects = act.locator('[data-modal-open="true"] select')
+  await selects.last().selectOption('Amount dispute')
+  await act.waitForTimeout(300)
+  if (!/Incorrect balance, fees, interest, missing payment/.test((await act.textContent('body')))) {
+    console.log('!! the examples for the chosen classification are not shown')
+  } else console.log('   examples shown under the classification')
+
+  // "Other" is refused without the words.
+  await selects.last().selectOption('Other')
+  await act.locator('[data-modal-open="true"] textarea').fill('n/a')
+  await act.waitForTimeout(300)
+  const raise = act.locator('[data-modal-open="true"]').getByRole('button', { name: /^Raise dispute$/ })
+  if (!(await raise.isDisabled())) console.log('!! "Other" was accepted with no real explanation')
+  else console.log('   "Other" refused without an explanation')
+  await act.locator('[data-modal-open="true"] textarea').fill('Debtor says the account belongs to their late father')
+  await act.waitForTimeout(300)
+  if (await raise.isDisabled()) console.log('!! a real explanation was still refused')
+  else console.log('   ...and accepted once explained')
   await act.screenshot({ path: `${OUT}/account-dispute.png` })
 }
 

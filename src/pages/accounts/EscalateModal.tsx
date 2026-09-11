@@ -1,7 +1,11 @@
 import { useMemo, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
-import { raiseQuery, QUERY_CATEGORIES } from '../../lib/accountQueries'
+import { raiseQuery } from '../../lib/accountQueries'
+import {
+  categoryExamples, explanationMissing,
+  CATEGORY_NEEDING_EXPLANATION, EXPLANATION_MIN_LENGTH, QUERY_CATEGORIES,
+} from '../../lib/disputeCategories'
 import { chargeMessage } from '../../lib/accountCharges'
 import type { User } from '../../types'
 
@@ -58,6 +62,14 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
    * Still a checkbox rather than decided silently. The rule is right almost always; the person
    * doing it is the one who knows when it is not.
    */
+  const examples = categoryExamples(category)
+  /*
+   * "Other" means "not one of the nine", which tells a reader nothing on its own. So it is the one
+   * classification that will not be accepted without the words — long enough that "n/a" and a
+   * stray keystroke do not pass, short enough that a real sentence always does.
+   */
+  const needsExplanation = explanationMissing(category, description)
+
   const givenAway = !!toId && toId !== actor.id
   const [chargeTouched, setChargeTouched] = useState(false)
   const [charge, setCharge] = useState(givenAway)
@@ -128,19 +140,24 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
             onChange={(e) => setDescription(e.target.value)}
             rows={4}
             autoFocus
-            placeholder="What did the debtor say, or what do you need decided? In their words if you can."
+            placeholder={category === CATEGORY_NEEDING_EXPLANATION
+              ? 'Required for "Other" — say what the debtor is actually disputing.'
+              : 'What did the debtor say, or what do you need decided? In their words if you can.'}
             className="w-full mt-1 text-sm rounded-lg border border-slate-200 px-2.5 py-2 resize-none"
           />
         </label>
 
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
-            <span className="text-sm font-medium text-slate-700">Category</span>
+            <span className="text-sm font-medium text-slate-700">Classification</span>
             <select value={category} onChange={(e) => setCategory(e.target.value)}
               className="w-full mt-1 text-sm rounded-lg border border-slate-200 px-2.5 py-2 bg-white">
               <option value="">None</option>
-              {QUERY_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              {QUERY_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.value}</option>)}
             </select>
+            {/* The examples sit under the choice, where somebody on a call can actually read them.
+                A taxonomy nobody can apply in five seconds gets applied wrongly. */}
+            {examples && <span className="block text-[11px] text-slate-500 mt-1">{examples}</span>}
           </label>
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Chase on</span>
@@ -168,12 +185,18 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
           </span>
         </label>
 
+        {needsExplanation && (
+          <p className="text-sm text-slate-500">
+            &ldquo;Other&rdquo; needs an explanation — at least {EXPLANATION_MIN_LENGTH} characters saying what this
+            actually is, so whoever picks it up later does not have to guess.
+          </p>
+        )}
         {error && <p className="text-sm text-negative-700">{error}</p>}
 
         <div className="flex items-center gap-2 pt-1">
           <button
             onClick={submit}
-            disabled={busy || !description.trim()}
+            disabled={busy || !description.trim() || needsExplanation}
             className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg bg-brand-600 text-white disabled:opacity-40"
           >
             <ShieldAlert size={15} />

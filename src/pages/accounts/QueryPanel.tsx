@@ -6,11 +6,12 @@ import { formatMoney, formatDate } from '../../data/mockData'
 import { chargeMessage } from '../../lib/accountCharges'
 import {
   ageInDays, canSendToClient, closeQuery, isStale, markOutcomeDone, raiseQuery, updateQuery,
-  NEXT_STAGE, QUERY_CATEGORIES, QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
+  NEXT_STAGE, QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
   type AccountQuery, type QueryOutcome, type QueryStage,
 } from '../../lib/accountQueries'
 import type { User } from '../../types'
 import { canViewClients } from '../../lib/permissions'
+import { QUERY_CATEGORIES } from '../../lib/disputeCategories'
 
 const TODAY = new Date().toISOString().slice(0, 10)
 
@@ -359,7 +360,7 @@ function RaiseForm({ accountId, users, actor, busy, run, onDone }: {
       <select value={category} onChange={(e) => setCategory(e.target.value)}
         className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 bg-white">
         <option value="">No category</option>
-        {QUERY_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+        {QUERY_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.value}</option>)}
       </select>
       <select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}
         className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 bg-white">
