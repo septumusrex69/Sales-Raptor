@@ -494,12 +494,28 @@ export function AccountDetail() {
         // Capped to a readable measure — a full-width timeline on a 27" screen is a worse read
         // than a narrow one, not a better one.
         <div className="mx-auto w-full max-w-5xl space-y-4">
-          {detailsPanel}
-          {summaryPanel}
+          {/*
+            Details beside the money rather than above it. Reading order is preserved — left to
+            right is still details then summary — and it saves most of a screen of scrolling now
+            that the details panel lays its fields out across the width.
+          */}
+          <div className="grid gap-4 items-start lg:grid-cols-3">
+            <div className="lg:col-span-2">{detailsPanel}</div>
+            {summaryPanel}
+          </div>
           {timelinePanel}
-          {promisePanel}
-          {disputesPanel}
-          {positionPanel}
+          {/*
+            The three short cards share a row rather than each taking a full one.
+
+            `items-start` matters: without it the grid stretches all three to the height of the
+            tallest, so an account with four open disputes would leave the position card a mostly
+            empty box the same height. They keep the order they are read in, left to right.
+          */}
+          <div className="grid gap-4 items-start md:grid-cols-2 lg:grid-cols-3">
+            {promisePanel}
+            {disputesPanel}
+            {positionPanel}
+          </div>
         </div>
       )}
 
@@ -953,6 +969,14 @@ function SummaryPanel({ account, breakdown }: { account: DebtorAccount; breakdow
   return (
     <Card>
       <PanelTitle>Account summary</PanelTitle>
+      {/*
+        One column, deliberately, however wide the card gets.
+
+        This is a small financial statement, and the figures being in a single right-hand column
+        is what makes it scannable — you read down the money, not across it. Splitting it two up
+        was tried and it broke that alignment, so the width is used by putting the whole card
+        beside the details panel instead. See the Overview layouts.
+      */}
       <div className="space-y-1.5">
         <Money label="Original amount" value={b?.capital} />
         <Money label="Interest accrued" value={b?.interest} note={`${account.interestRateAnnual}% a year`} />
