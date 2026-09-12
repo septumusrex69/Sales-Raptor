@@ -9,6 +9,9 @@ import { useAuth } from '../../store/AuthContext'
 import { relativeDayLabel } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
+import { useEmailView } from '../../lib/emailView'
+import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
+import { ReadingPane } from '../../components/email/ReadingPane'
 import {
   blockSender, deleteMail, domainBlockProblem, domainOf, fetchBlockedSenders, fetchMail,
   fetchMailBody, linkMailToAccount, markMailRead, unblockSender,
@@ -74,6 +77,7 @@ export function MailPage() {
   const [bodies, setBodies] = useState<Record<string, string>>({})
   const [reading, setReading] = useState<string | null>(null)
   const [readError, setReadError] = useState<Record<string, string>>({})
+  const [view, setView] = useEmailView()
 
   const load = useCallback(async (at = 0) => {
     if (!currentUser) return
@@ -143,6 +147,16 @@ export function MailPage() {
    */
   async function toggle(mail: MailItem) {
     if (open === mail.id) { setOpen(null); return }
+    await toggleTo(mail)
+  }
+
+  /**
+   * Select and read a message, without the close-on-second-click of the list.
+   *
+   * In a reading pane, clicking the message you are already reading should keep reading it —
+   * emptying the pane would be a click that undoes itself.
+   */
+  async function toggleTo(mail: MailItem) {
     setOpen(mail.id)
 
     if (!mail.readAt) {
@@ -219,6 +233,8 @@ export function MailPage() {
             {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             {syncing ? 'Checking…' : 'Check now'}
           </button>
+          {/* Not on the blocklist, which is a list of senders rather than of mail. */}
+          {filter !== 'blocked' && <EmailViewSwitcher view={view} onChange={setView} />}
         </div>
 
         <div className="border-b border-slate-200">
@@ -235,7 +251,7 @@ export function MailPage() {
 
         {/* The bulk bar only exists once something is selected — an always-visible row of
             disabled buttons is furniture. */}
-        {chosen.size > 0 && (
+        {view === 'list' && chosen.size > 0 && (
           <div className="px-5 py-2.5 bg-gold-50 border-b border-gold-100 flex flex-wrap items-center gap-2 text-sm">
             <span className="text-navy-950 font-medium mr-auto">{chosen.size} selected</span>
             <button onClick={() => void readChosen()}
@@ -264,6 +280,46 @@ export function MailPage() {
           }} />
         ) : items.length === 0 ? (
           <Empty filter={filter} searching={!!search.trim()} />
+        ) : view === 'reading' ? (
+          /*
+           * Outlook's shape. The left column is summaries only: ReadingPane makes each row a
+           * button, so a checkbox or a Link button nested inside it would be a control inside a
+           * control. The actions move to the pane's own header instead, which is where Outlook
+           * puts them too — and is why bulk select stays a list-view affair.
+           */
+          <ReadingPane
+            items={items}
+            selectedId={open}
+            onSelect={(m) => void toggleTo(m)}
+            emptyDetail="Pick a message on the left to read it."
+            renderRow={(m) => (
+              <span className={`block px-4 py-3 ${!m.readAt ? 'bg-positive-50/40' : ''}`}>
+                <MailSummary mail={m} tight />
+              </span>
+            )}
+            renderDetail={(m) => (
+              <div className="px-5 py-4">
+                <div className="flex flex-wrap items-start gap-3 pb-3 mb-3 border-b border-slate-100">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm font-semibold text-navy-950">{m.subject || '(no subject)'}</h3>
+                    <p className="text-xs text-slate-400 mt-0.5 truncate">
+                      {m.fromName || m.fromAddress}
+                      {m.fromName && <span className="text-slate-300"> &middot; {m.fromAddress}</span>}
+                      {' · '}{relativeDayLabel(m.occurredAt)}
+                    </p>
+                  </div>
+                  {!m.linkedAccountId && (
+                    <button onClick={() => setLinking(m)}
+                      className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950">
+                      <Link2 size={13} /> Link to account
+                    </button>
+                  )}
+                </div>
+                <MailBody mail={m} body={bodies[m.id]} loadingBody={reading === m.id}
+                  bodyError={readError[m.id]} onBlock={() => setBlocking(m)} />
+              </div>
+            )}
+          />
         ) : (
           <>
             <div className="px-5 py-2 border-b border-slate-100">
@@ -343,6 +399,113 @@ function Empty({ filter, searching }: { filter: Exclude<Pane, 'blocked'>; search
   )
 }
 
+/**
+ * The summary of a message: what both views show in the list.
+ *
+ * Split out of the row so the reading pane can use the same block down its left-hand side. Two
+ * identical-looking lists maintained separately is how they end up disagreeing.
+ */
+function MailSummary({ mail, tight }: { mail: MailItem; tight?: boolean }) {
+  const unread = !mail.readAt
+  return (
+    <span className="block min-w-0">
+      <span className="flex items-baseline gap-2">
+        {unread && <span className="w-1.5 h-1.5 rounded-full bg-positive shrink-0 self-center" />}
+        <span className={`text-sm truncate ${unread ? 'font-semibold text-navy-950' : 'font-medium text-slate-800'}`}>
+          {mail.subject || '(no subject)'}
+        </span>
+        {mail.attachmentNames.length > 0 && <Paperclip size={12} className="shrink-0 text-slate-400" />}
+        {mail.isJunk && (
+          <span className="shrink-0 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
+            <ShieldAlert size={10} /> Junk
+          </span>
+        )}
+      </span>
+      <span className="block text-xs text-slate-400 mt-0.5 truncate">
+        {mail.fromName || mail.fromAddress}
+        {/* The address as well as the name, but not in the reading pane's narrow column, where
+            it would push the date and the name out of sight. */}
+        {mail.fromName && !tight && <span className="text-slate-300"> &middot; {mail.fromAddress}</span>}
+        {' · '}{relativeDayLabel(mail.occurredAt)}
+      </span>
+      {mail.snippet && (
+        <span className="block text-[13px] text-slate-500 mt-1 line-clamp-2">{mail.snippet}</span>
+      )}
+      {mail.linkedAccount && (
+        <span className="text-xs text-[var(--c-green)] mt-1.5 inline-flex items-center gap-1">
+          <Link2 size={11} />
+          On {mail.linkedAccount.debtorName ?? 'an account'}
+          {mail.linkedAccount.accountNumber && <> &middot; {mail.linkedAccount.accountNumber}</>}
+        </span>
+      )}
+    </span>
+  )
+}
+
+/** The message itself, shared by the expanded row and the reading pane. */
+function MailBody({ mail, body, loadingBody, bodyError, onBlock }: {
+  mail: MailItem
+  body?: string
+  loadingBody: boolean
+  bodyError?: string
+  onBlock: () => void
+}) {
+  return (
+    <>
+      {loadingBody && (
+        <p className="text-[13px] text-slate-400 inline-flex items-center gap-1.5">
+          <Loader2 size={13} className="animate-spin" /> Fetching the message from your mailbox&hellip;
+        </p>
+      )}
+
+      {!loadingBody && body !== undefined && (
+        /*
+         * The message as it was written. `whitespace-pre-wrap` because an email's own line breaks
+         * carry meaning — collapsing them turns a numbered arrangement into a paragraph.
+         * `break-words` because a pasted URL would otherwise push the page wide.
+         *
+         * Rendered as TEXT, never as HTML: this is mail from outside the building, and putting a
+         * stranger's markup into the page is not worth faithful formatting.
+         */
+        <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
+          {body.trim() || <span className="text-slate-400">This message has no text in it.</span>}
+        </p>
+      )}
+
+      {!loadingBody && bodyError && (
+        <>
+          {/* Fall back to what Raptor holds rather than showing nothing. */}
+          {mail.snippet && (
+            <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">{mail.snippet}</p>
+          )}
+          <p className="text-xs text-gold-600 mt-2">
+            {bodyError} Showing the first {mail.snippet?.length ?? 0} characters Raptor saved.
+          </p>
+        </>
+      )}
+
+      {mail.attachmentNames.length > 0 && (
+        <p className="text-xs text-slate-400 mt-3">
+          {/* Names only. The files stay in the mailbox — see fetchAttachment. */}
+          <Paperclip size={11} className="inline mr-1" />
+          {mail.attachmentNames.join(', ')}
+        </p>
+      )}
+
+      {/*
+        Blocking lives on the open message rather than as another button on every row. It is the
+        one action you should have read something before taking — and it is offered even on mail
+        already linked to an account, because blocking a sender is about future noise, not about
+        the message in front of you.
+      */}
+      <button onClick={onBlock}
+        className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-negative-100 hover:bg-negative-50 hover:text-negative-700">
+        <Ban size={13} /> Never import from this sender
+      </button>
+    </>
+  )
+}
+
 function MailRow({
   mail, chosen, expanded, body, loadingBody, bodyError, onToggle, onChoose, onLink, onBlock,
 }: {
@@ -370,36 +533,11 @@ function MailRow({
         <input type="checkbox" checked={chosen} onChange={(e) => onChoose(e.target.checked)}
           aria-label={`Select the email from ${mail.fromAddress}`} className="mt-1.5 shrink-0" />
 
-        <button onClick={onToggle} aria-expanded={expanded}
-          className="min-w-0 flex-1 text-left">
-          <span className="flex items-baseline gap-2">
-            {unread && <span className="w-1.5 h-1.5 rounded-full bg-positive shrink-0 self-center" />}
-            <span className={`text-sm truncate ${unread ? 'font-semibold text-navy-950' : 'font-medium text-slate-800'}`}>
-              {mail.subject || '(no subject)'}
-            </span>
-            {mail.attachmentNames.length > 0 && <Paperclip size={12} className="shrink-0 text-slate-400" />}
-            {mail.isJunk && (
-              <span className="shrink-0 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
-                <ShieldAlert size={10} /> Junk
-              </span>
-            )}
-          </span>
-          <span className="block text-xs text-slate-400 mt-0.5 truncate">
-            {mail.fromName || mail.fromAddress}
-            {mail.fromName && <span className="text-slate-300"> &middot; {mail.fromAddress}</span>}
-            {' · '}{relativeDayLabel(mail.occurredAt)}
-          </span>
+        <button onClick={onToggle} aria-expanded={expanded} className="min-w-0 flex-1 text-left">
           {/* Collapsed, the snippet is the preview. Open, the whole message replaces it below. */}
-          {!expanded && mail.snippet && (
-            <span className="block text-[13px] text-slate-500 mt-1 line-clamp-2">{mail.snippet}</span>
-          )}
-          {mail.linkedAccount && (
-            <span className="text-xs text-[var(--c-green)] mt-1.5 inline-flex items-center gap-1">
-              <Link2 size={11} />
-              On {mail.linkedAccount.debtorName ?? 'an account'}
-              {mail.linkedAccount.accountNumber && <> &middot; {mail.linkedAccount.accountNumber}</>}
-            </span>
-          )}
+          {expanded
+            ? <MailSummary mail={{ ...mail, snippet: null }} />
+            : <MailSummary mail={mail} />}
         </button>
 
         <div className="shrink-0 flex items-center gap-2 pt-0.5">
@@ -420,56 +558,8 @@ function MailRow({
 
       {expanded && (
         <div className="px-5 pb-4 pl-[2.9rem]">
-          {loadingBody && (
-            <p className="text-[13px] text-slate-400 inline-flex items-center gap-1.5">
-              <Loader2 size={13} className="animate-spin" /> Fetching the message from your mailbox&hellip;
-            </p>
-          )}
-
-          {!loadingBody && body !== undefined && (
-            /*
-             * The message as it was written. `whitespace-pre-wrap` because an email's own line
-             * breaks carry meaning — collapsing them turns a numbered arrangement into a
-             * paragraph. `break-words` because a pasted URL would otherwise push the page wide.
-             *
-             * Rendered as TEXT, never as HTML: this is mail from outside the building, and
-             * putting a stranger's markup into the page is not worth faithful formatting.
-             */
-            <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
-              {body.trim() || <span className="text-slate-400">This message has no text in it.</span>}
-            </p>
-          )}
-
-          {!loadingBody && bodyError && (
-            <>
-              {/* Fall back to what Raptor holds rather than showing nothing. */}
-              {mail.snippet && (
-                <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">{mail.snippet}</p>
-              )}
-              <p className="text-xs text-gold-600 mt-2">
-                {bodyError} Showing the first {mail.snippet?.length ?? 0} characters Raptor saved.
-              </p>
-            </>
-          )}
-
-          {mail.attachmentNames.length > 0 && (
-            <p className="text-xs text-slate-400 mt-3">
-              {/* Names only. The files stay in the mailbox — see fetchAttachment. */}
-              <Paperclip size={11} className="inline mr-1" />
-              {mail.attachmentNames.join(', ')}
-            </p>
-          )}
-
-          {/*
-            Blocking lives here, on the open message, rather than as another button on every row.
-            It is the one action you should have read something before taking — and it is offered
-            even on mail already linked to an account, because blocking the sender is about
-            future noise, not about the message in front of you.
-          */}
-          <button onClick={onBlock}
-            className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-negative-100 hover:bg-negative-50 hover:text-negative-700">
-            <Ban size={13} /> Never import from this sender
-          </button>
+          <MailBody mail={mail} body={body} loadingBody={loadingBody}
+            bodyError={bodyError} onBlock={onBlock} />
         </div>
       )}
     </li>

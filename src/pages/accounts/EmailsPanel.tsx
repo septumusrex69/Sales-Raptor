@@ -4,6 +4,9 @@ import { Card } from '../../components/ui/Card'
 import { formatMoney } from '../../data/mockData'
 import { relativeDayLabel } from '../../lib/dateLabels'
 import type { AccountEmail } from '../../lib/accountEmails'
+import { useEmailView } from '../../lib/emailView'
+import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
+import { ReadingPane } from '../../components/email/ReadingPane'
 
 /**
  * Every email either way on this account.
@@ -35,14 +38,27 @@ export function EmailsPanel({ emails, userId, canSend, onCompose, onReply, onRea
    * somebody destroys the only signal that says which mail still needs attention.
    */
   const [open, setOpen] = useState<string | null>(null)
+  const [view, setView] = useEmailView()
+
+  /*
+   * Reading it is what marks it read — and only for the agent it arrived for, because that is
+   * all the RLS policy permits. For anyone else it stays unread, which is correct: it is not
+   * their message to have dealt with.
+   */
+  function markRead(email: AccountEmail) {
+    if (!email.readAt && email.receivedBy && email.receivedBy === userId) onRead(email)
+  }
+
+  /** Select and read, without the list's close-on-second-click. */
+  function select(email: AccountEmail) {
+    if (open !== email.id) markRead(email)
+    setOpen(email.id)
+  }
 
   function toggle(email: AccountEmail) {
     const opening = open !== email.id
     setOpen(opening ? email.id : null)
-    // Reading it is what marks it read — and only for the agent it arrived for, because that is
-    // all the RLS policy permits. For anyone else it stays unread, which is correct: it is not
-    // their message to have dealt with.
-    if (opening && !email.readAt && email.receivedBy && email.receivedBy === userId) onRead(email)
+    if (opening) markRead(email)
   }
 
   if (emails.length === 0) {
@@ -72,17 +88,129 @@ export function EmailsPanel({ emails, userId, canSend, onCompose, onReply, onRea
             {count(emails.filter((e) => e.direction === 'in').length, 'received')}
           </p>
         </div>
-        <SendButton canSend={canSend} onClick={onCompose} />
+        <div className="flex items-center gap-2">
+          <EmailViewSwitcher view={view} onChange={setView} />
+          <SendButton canSend={canSend} onClick={onCompose} />
+        </div>
       </div>
 
-      <ul className="divide-y divide-slate-100">
-        {emails.map((e) => (
-          <EmailRow key={e.id} email={e} expanded={open === e.id}
-            onToggle={() => toggle(e)}
-            canSend={canSend} onReply={() => onReply(e)} />
-        ))}
-      </ul>
+      {view === 'reading' ? (
+        /*
+         * The same list, Outlook's way round. Rows are summaries only: ReadingPane makes each
+         * one a button, so the Reply button moves into the pane beside the message — which is
+         * where Outlook has it too.
+         */
+        <ReadingPane
+          items={emails}
+          selectedId={open}
+          onSelect={(e) => select(e)}
+          emptyDetail="Pick a message on the left to read it."
+          renderRow={(e) => (
+            <span className={`block px-4 py-3 ${e.direction === 'in' && !e.readAt ? 'bg-positive-50/40' : ''}`}>
+              <EmailSummary email={e} tight />
+            </span>
+          )}
+          renderDetail={(e) => (
+            <div className="px-5 py-4">
+              <div className="pb-3 mb-3 border-b border-slate-100">
+                <h3 className="text-sm font-semibold text-navy-950">{e.subject || '(no subject)'}</h3>
+                <p className="text-xs text-slate-400 mt-0.5 truncate">
+                  {e.direction === 'in' ? 'From' : 'To'} {e.debtorAddress}
+                  {' · '}{relativeDayLabel(e.occurredAt)}
+                  {e.sentByName && e.direction === 'out' && <> &middot; {e.sentByName}</>}
+                </p>
+              </div>
+              <EmailBody email={e} canSend={canSend} onReply={() => onReply(e)} />
+            </div>
+          )}
+        />
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {emails.map((e) => (
+            <EmailRow key={e.id} email={e} expanded={open === e.id}
+              onToggle={() => toggle(e)}
+              canSend={canSend} onReply={() => onReply(e)} />
+          ))}
+        </ul>
+      )}
     </Card>
+  )
+}
+
+/**
+ * The summary of a message: what both views show in the list.
+ *
+ * Split out of the row so the reading pane can use the same block down its left. Two
+ * identical-looking lists maintained separately is how they end up disagreeing.
+ */
+function EmailSummary({ email, tight }: { email: AccountEmail; tight?: boolean }) {
+  const inbound = email.direction === 'in'
+  const unread = inbound && !email.readAt
+  const Icon = inbound && email.readAt ? MailOpen : Mail
+  return (
+    <span className="flex items-start gap-3">
+      {/* Inbound takes the positive colour, like a payment does: the debtor made contact, which
+          is the outcome the whole account is trying to produce. */}
+      <span className={`mt-0.5 shrink-0 grid place-items-center w-7 h-7 rounded-full ${
+        inbound ? 'bg-positive-50 text-positive' : 'bg-brand-50 text-brand-500'}`}>
+        <Icon size={14} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-2">
+          {unread && <span className="w-1.5 h-1.5 rounded-full bg-positive shrink-0 self-center" />}
+          <span className={`text-sm truncate ${unread ? 'font-semibold text-navy-950' : 'font-medium text-slate-800'}`}>
+            {email.subject || '(no subject)'}
+          </span>
+          {email.attachmentNames.length > 0 && <Paperclip size={12} className="shrink-0 text-slate-400" />}
+        </span>
+        <span className="block text-xs text-slate-400 mt-0.5 truncate">
+          {unread && <span className="font-semibold text-positive">Unread · </span>}
+          {inbound ? 'From' : 'To'} {email.debtorAddress}
+          {' · '}{relativeDayLabel(email.occurredAt)}
+          {email.sentByName && !inbound && !tight && <> · {email.sentByName}</>}
+        </span>
+      </span>
+      {/* The fee sits with the row in the list; in the reading pane's narrow column it would
+          crowd the subject, and the pane's own header carries the detail instead. */}
+      {!tight && email.chargedExclVat !== null && (
+        <span className={`shrink-0 text-[11px] tabular-nums pt-0.5 ${
+          email.chargedExclVat > 0 ? 'text-slate-500' : 'text-slate-300'}`}>
+          {email.chargedExclVat > 0 ? formatMoney(email.chargedExclVat) : 'no charge'}
+        </span>
+      )}
+    </span>
+  )
+}
+
+/** The message itself, shared by the expanded row and the reading pane. */
+function EmailBody({ email, canSend, onReply }: {
+  email: AccountEmail
+  canSend: boolean
+  onReply: () => void
+}) {
+  return (
+    <>
+      {/* `whitespace-pre-wrap` because an email's own line breaks are part of what it said —
+          collapsing them turns a numbered arrangement into a paragraph. */}
+      <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
+        {email.body?.trim() || <span className="text-slate-400">No text in this message.</span>}
+      </p>
+      {email.attachmentNames.length > 0 && (
+        <p className="text-xs text-slate-400 mt-3">
+          {/* Names only. The files stay in the mailbox they arrived in — see fetchAttachment
+              in api/_lib/emailSync.ts for why they are not copied into Raptor. */}
+          <Paperclip size={11} className="inline mr-1" />
+          {email.attachmentNames.join(', ')}
+        </p>
+      )}
+      {email.direction === 'in' && (
+        <button onClick={onReply} disabled={!canSend}
+          title={canSend ? undefined : 'Connect your mailbox in Settings → Integrations first'}
+          className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-transparent">
+          <Reply size={13} /> Reply · R25
+        </button>
+      )}
+    </>
   )
 }
 
@@ -93,81 +221,20 @@ function EmailRow({ email, expanded, onToggle, canSend, onReply }: {
   canSend: boolean
   onReply: () => void
 }) {
-  const inbound = email.direction === 'in'
-  // Unread is only a thing for what arrived. Nothing we sent is waiting to be read.
-  const unread = inbound && !email.readAt
-  const Icon = inbound && email.readAt ? MailOpen : Mail
+  const unread = email.direction === 'in' && !email.readAt
   return (
     <li className={unread ? 'bg-positive-50/40' : undefined}>
-      <button onClick={onToggle}
+      <button onClick={onToggle} aria-expanded={expanded}
         className="w-full text-left px-5 py-3 flex items-start gap-3 hover:bg-slate-50">
-        {/* Inbound takes the positive colour, like a payment does: the debtor made contact, which
-            is the outcome the whole account is trying to produce. */}
-        <span className={`mt-0.5 shrink-0 grid place-items-center w-7 h-7 rounded-full ${
-          inbound ? 'bg-positive-50 text-positive' : 'bg-brand-50 text-brand-500'}`}>
-          <Icon size={14} />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-2">
-            {/* A dot as well as the weight, because "slightly bolder" is not a signal anyone
-                reliably notices in a list of six. */}
-            {unread && <span className="w-1.5 h-1.5 rounded-full bg-positive shrink-0 self-center" />}
-            <span className={`text-sm truncate ${unread ? 'font-semibold text-navy-950' : 'font-medium text-slate-800'}`}>
-              {email.subject || '(no subject)'}
-            </span>
-            {email.attachmentNames.length > 0 && (
-              <Paperclip size={12} className="shrink-0 text-slate-400" />
-            )}
-          </span>
-          <span className="block text-xs text-slate-400 mt-0.5 truncate">
-            {unread && <span className="font-semibold text-positive">Unread · </span>}
-            {inbound ? 'From' : 'To'} {email.debtorAddress}
-            {' · '}{relativeDayLabel(email.occurredAt)}
-            {email.sentByName && !inbound && <> · {email.sentByName}</>}
-          </span>
-        </span>
-        <span className="shrink-0 flex items-center gap-2 pt-0.5">
-          {/*
-            Both directions carry a fee — R25 out under item 1(a), R13 in under item 6 — so a
-            figure here is the ordinary case. Zero is a message that earned nothing because a cap
-            left no room; it is greyed rather than hidden, because the message still happened and
-            the statement still shows it as unbilled. Null means no fee was ever recorded at all,
-            which on an inbound row means the charge failed and a R13 is owing by hand.
-          */}
-          {email.chargedExclVat !== null && (
-            <span className={`text-[11px] tabular-nums ${
-              email.chargedExclVat > 0 ? 'text-slate-500' : 'text-slate-300'}`}>
-              {email.chargedExclVat > 0 ? formatMoney(email.chargedExclVat) : 'no charge'}
-            </span>
-          )}
-          {expanded ? <ChevronDown size={15} className="text-slate-400" />
-            : <ChevronRight size={15} className="text-slate-400" />}
+        <span className="min-w-0 flex-1"><EmailSummary email={email} /></span>
+        <span className="shrink-0 pt-0.5 text-slate-400">
+          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
         </span>
       </button>
 
       {expanded && (
         <div className="px-5 pb-4 pl-[3.75rem]">
-          {/* The message as it was written. `whitespace-pre-wrap` because an email's own line
-              breaks are part of what it said — collapsing them turns a numbered arrangement
-              into a paragraph. */}
-          <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
-            {email.body?.trim() || <span className="text-slate-400">No text in this message.</span>}
-          </p>
-          {email.attachmentNames.length > 0 && (
-            <p className="text-xs text-slate-400 mt-3">
-              {/* Names only. The files stay in the mailbox they arrived in — see fetchAttachment
-                  in api/_lib/emailSync.ts for why they are not copied into Raptor. */}
-              <Paperclip size={11} className="inline mr-1" />
-              {email.attachmentNames.join(', ')}
-            </p>
-          )}
-          {inbound && (
-            <button onClick={onReply} disabled={!canSend}
-              title={canSend ? undefined : 'Connect your mailbox in Settings → Integrations first'}
-              className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-transparent">
-              <Reply size={13} /> Reply · R25
-            </button>
-          )}
+          <EmailBody email={email} canSend={canSend} onReply={onReply} />
         </div>
       )}
     </li>
