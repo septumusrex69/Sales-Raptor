@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
+import { useNavCounts, type NavCounts } from '../../lib/navCounts'
 import {
   LayoutDashboard,
   Target,
@@ -16,6 +17,7 @@ import {
   ChevronDown,
   LogOut,
   Inbox,
+  type LucideIcon,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../store/AuthContext'
@@ -23,12 +25,20 @@ import { UserAvatar } from '../ui/Avatar'
 import { useTheme } from '../../store/ThemeContext'
 import { canViewClients } from '../../lib/permissions'
 
-const NAV = [
+/**
+ * The navigation, and the three items that carry a count.
+ *
+ * Only three, and the rule is strict: a badge earns its place if it counts something ONE PERSON
+ * CAN CLEAR TODAY. Accounts, Leads, Deals and Clients are catalogues rather than inboxes — a
+ * number on Accounts would read "100 000" forever and teach everybody to ignore the others.
+ * See src/lib/navCounts.ts.
+ */
+const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean; badge?: keyof NavCounts }[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   // Second, under Dashboard, at the firm's request. It is the first thing an agent checks:
   // debtor mail that could not be matched to an account is waiting here to be filed, and
   // nothing else in Raptor will tell them it arrived.
-  { to: '/mail', label: 'Mail', icon: Inbox },
+  { to: '/mail', label: 'Mail', icon: Inbox, badge: 'mail' },
   { to: '/leads', label: 'Leads', icon: Target },
   { to: '/deals', label: 'Deals', icon: Handshake },
   { to: '/contacts', label: 'Contacts', icon: Users },
@@ -36,8 +46,8 @@ const NAV = [
   // The collections book: the debtor accounts a client hands over, which is a different thing
   // from the client record and much larger than it.
   { to: '/accounts', label: 'Accounts', icon: BookOpen },
-  { to: '/queries', label: 'Disputes', icon: MessageCircleQuestion },
-  { to: '/tasks', label: 'Tasks', icon: CheckSquare },
+  { to: '/queries', label: 'Disputes', icon: MessageCircleQuestion, badge: 'disputes' },
+  { to: '/tasks', label: 'Tasks', icon: CheckSquare, badge: 'tasks' },
   { to: '/calendar', label: 'Calendar', icon: Calendar },
   { to: '/activities', label: 'Activities', icon: Activity },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
@@ -48,6 +58,7 @@ export function Sidebar() {
   const { currentUser, signOut } = useAuth()
   const { theme } = useTheme()
   const [menuOpen, setMenuOpen] = useState(false)
+  const counts = useNavCounts()
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -65,7 +76,9 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
-        {NAV.filter((n) => n.to !== '/companies' || canViewClients(currentUser?.role)).map(({ to, label, icon: Icon, end }) => (
+        {NAV.filter((n) => n.to !== '/companies' || canViewClients(currentUser?.role)).map(({ to, label, icon: Icon, end, badge }) => {
+          const count = badge ? counts[badge] : 0
+          return (
           <NavLink
             key={to}
             to={to}
@@ -77,10 +90,34 @@ export function Sidebar() {
               )
             }
           >
-            <Icon size={17} strokeWidth={2} />
-            {label}
+            {({ isActive }) => (
+              <>
+                <Icon size={17} strokeWidth={2} />
+                {label}
+                {/*
+                  A count, never a dot. "3" tells you whether to look now; a dot only says
+                  something exists, which you could have assumed.
+
+                  Nothing at zero: a badge that is always there showing 0 is furniture, and it
+                  is the thing that teaches people to stop reading the others.
+
+                  On the active item the gold background is already carrying the emphasis, so
+                  the badge goes dark-on-gold rather than competing with it.
+                */}
+                {count > 0 && (
+                  <span className={clsx(
+                    'ml-auto min-w-5 h-5 px-1.5 rounded-full text-[11px] font-semibold',
+                    'inline-flex items-center justify-center tabular-nums',
+                    isActive ? 'bg-navy-950/15 text-navy-950' : 'bg-gold-500 text-navy-950',
+                  )}>
+                    {count > 99 ? '99+' : count}
+                  </span>
+                )}
+              </>
+            )}
           </NavLink>
-        ))}
+          )
+        })}
       </nav>
 
       <div ref={menuRef} className="relative border-t border-white/10 p-3">
