@@ -450,15 +450,24 @@ function MailSummary({ mail, tight, showLinked }: {
         {' · '}{relativeDayLabel(mail.occurredAt)}
       </span>
       {/*
-        One line in the pane, two in the list. A four-line row is a row you scroll past rather
-        than scan.
+        One line in the pane, two in the list. A four-line row is one you scroll past rather than
+        scan.
+        
+        `truncate` for the single line rather than `line-clamp-1`, deliberately. line-clamp needs
+        display:-webkit-box, and two things go wrong with that here: Tailwind emits `.block` later
+        in the stylesheet, so pairing them silently kills the clamp; and Safari can reserve the
+        UNCLAMPED height while painting only the visible line, which is what left ~120px of blank
+        space under every row with a preview on the firm's iPad. Chromium renders the same markup
+        at 81px, which is why it took a screenshot to find.
 
-        No `block` class on the span, deliberately: line-clamp sets display:-webkit-box itself,
-        and Tailwind emits `.block` LATER in the stylesheet, so `block line-clamp-1` silently
-        loses the clamp and the row grows to three lines. Measured at 120px, 81px once fixed.
+        truncate is overflow+ellipsis+nowrap — no display trickery, identical everywhere.
+
+        The two-line case still needs line-clamp, so it gets an explicit max height as well:
+        whatever the browser thinks the box measures, the row cannot grow past two lines.
       */}
       {mail.snippet && (
-        <span className={`text-[13px] text-slate-500 mt-0.5 ${tight ? 'line-clamp-1' : 'line-clamp-2'}`}>
+        <span className={`block text-[13px] text-slate-500 mt-0.5 ${
+          tight ? 'truncate' : 'line-clamp-2 max-h-[2.7em] overflow-hidden'}`}>
           {mail.snippet}
         </span>
       )}

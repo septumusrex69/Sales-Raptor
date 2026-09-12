@@ -82,9 +82,9 @@ function EmailPaneRow({ activity }: { activity: Activity }) {
         <span className="block text-[11px] text-slate-400 mt-0.5">
           {emailDayLabel(activity.activityDate)} &middot; {emailTimeLabel(activity.activityDate)}
         </span>
-        {/* No `block` on the span: it would override line-clamp's own display. See MailPage. */}
+        {/* `truncate`, not line-clamp-1 — Safari reserves the unclamped height. See MailPage. */}
         {activity.notes && (
-          <span className="text-[12px] text-slate-500 mt-0.5 line-clamp-1">
+          <span className="block text-[12px] text-slate-500 mt-0.5 truncate">
             {activity.notes.replace(/\s+/g, ' ').trim()}
           </span>
         )}
