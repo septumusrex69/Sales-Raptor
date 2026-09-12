@@ -140,7 +140,7 @@ export async function recordSentEmail(input: {
 
   await addNote({
     accountId: input.accountId,
-    body: sentEmailNote(input.to, input.subject, input.body, charge),
+    body: sentEmailNote(input.to, input.subject, input.body),
     kind: EMAIL_OUT_KIND,
     /*
      * A person's note, not Raptor's.

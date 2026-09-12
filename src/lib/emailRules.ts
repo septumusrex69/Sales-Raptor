@@ -4,11 +4,6 @@
  * Pure, so the fee decision can be read and argued with without a database in front of you, and
  * so the inbound sync can compose the same words the browser does.
  */
-// `.js`, because this module is imported by api/_lib/emailSync.ts. See the note at the top of
-// chargeEngine.ts: Vercel ships transpiled files, so a `.ts` specifier survives into the output
-// and points at nothing. Run this file's QA script with scripts/qa/tsresolve.mjs.
-import { formatMoney } from '../data/mockData.js'
-import type { ChargeOutcome } from './promiseRules.js'
 
 /**
  * Item 1(a): "Necessary ordinary letter, registered letter, facsimile or e-mail." R25 excluding
@@ -72,36 +67,16 @@ export const EMAIL_IN_KIND = 'email_in'
  * scanning two years of history to find what the debtor was actually told should not have to open
  * anything. The Emails tab shows the same message with its own structure.
  */
-export function sentEmailNote(to: string, subject: string, body: string, charge: ChargeOutcome | null): string {
-  return `Email to ${to}\nSubject: ${subject || '(no subject)'}\n\n${body.trim()}\n\n${earned(charge, '1(a)')}`
+export function sentEmailNote(to: string, subject: string, body: string): string {
+  return `Email to ${to}\nSubject: ${subject || '(no subject)'}\n\n${body.trim()}`
 }
 
 /**
  * What the timeline says when the debtor writes back.
  *
- * Carries its own fee line, under item 6 rather than item 1(a). A debtor reading their statement
- * sees two different charges for one exchange, and the timeline has to account for both or the
- * R13 looks like it came from nowhere.
  */
-export function receivedEmailNote(from: string, subject: string, body: string, charge: ChargeOutcome | null): string {
-  return `Email from ${from}\nSubject: ${subject || '(no subject)'}\n\n${body.trim()}\n\n${earned(charge, '6')}`
-}
-
-/**
- * What a charge came to, or why it did not happen, in one sentence.
- *
- * Shared by both directions so the two cannot drift into describing the same outcome
- * differently — an account at the ceiling should read the same whichever way the message went.
- */
-function earned(charge: ChargeOutcome | null, item: string): string {
-  if (!charge) return 'Not charged.'
-  switch (charge.reason) {
-    case 'charged': return `Charged ${formatMoney(charge.exclVat)} plus VAT under item ${item}.`
-    case 'written-off': return 'Not charged — the account is written off.'
-    case 'item-total-spent': return `Not charged — item ${item} has already been used on this account.`
-    case 'monthly-limit': return `Not charged — the monthly allowance for item ${item} is spent.`
-    default: return 'Not charged — the account is at the Annexure B fee ceiling.'
-  }
+export function receivedEmailNote(from: string, subject: string, body: string): string {
+  return `Email from ${from}\nSubject: ${subject || '(no subject)'}\n\n${body.trim()}`
 }
 
 /**

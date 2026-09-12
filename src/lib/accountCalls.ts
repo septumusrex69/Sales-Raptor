@@ -71,7 +71,7 @@ export async function recordDial(input: {
 
   await addNote({
     accountId: input.accountId,
-    body: dialledNote(input.number, input.extension, charge),
+    body: dialledNote(input.number, input.extension),
     // Raptor's words, not a person's: hidden when the timeline is set to show only
     // what people wrote. See TimelineEntry.automated.
     source: 'system',
@@ -160,7 +160,7 @@ export async function recordConsultation(input: {
    */
   await addNote({
     accountId: input.accountId,
-    body: consultationNote(input.number, charge),
+    body: consultationNote(input.number),
     // Raptor's words, not a person's: hidden when the timeline is set to show only
     // what people wrote. See TimelineEntry.automated.
     source: 'system',

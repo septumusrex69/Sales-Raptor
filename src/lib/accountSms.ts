@@ -65,7 +65,7 @@ export async function recordSentSms(input: {
   })
   await addNote({
     accountId: input.accountId,
-    body: smsNote(input.sent, input.text, charge),
+    body: smsNote(input.sent, input.text),
     // Raptor's words, not a person's: hidden when the timeline is set to show only
     // what people wrote. See TimelineEntry.automated.
     source: 'system',
@@ -75,12 +75,13 @@ export async function recordSentSms(input: {
   return charge
 }
 
-/** What the timeline says. The message itself, because that is the part anyone will want to read. */
-export function smsNote(sent: SentSms, text: string, charge: ChargeResult): string {
-  const cost = charge.reason === 'charged'
-    ? `Charged R${charge.exclVat.toFixed(2)} plus VAT under item 1(c)${sent.segments > 1 ? ` (${sent.segments} segments)` : ''}.`
-    : charge.reason === 'written-off'
-      ? 'Not charged — the account is written off.'
-      : 'Not charged — the account is at the Annexure B fee ceiling.'
-  return `SMS to ${sent.to}: ${text}\n${cost}`
+/**
+ * What the timeline says. The message itself, because that is the part anyone will want to read.
+ *
+ * Just the message. The fee, the segment count and all — it is on the transaction list, and on
+ * this timeline as its own entry. The firm's instruction: "don't have to say about the charges
+ * in the notes."
+ */
+export function smsNote(sent: SentSms, text: string): string {
+  return `SMS to ${sent.to}: ${text}`
 }

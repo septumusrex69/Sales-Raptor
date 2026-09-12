@@ -60,41 +60,43 @@ check('an answered call therefore costs R25 + R60 excluding VAT',
   item(ATTEMPT_ITEM_ID).amount + item(CONSULTATION_ITEM_ID).amount, 85)
 
 /* ---- what the timeline says ---- */
-check('placing a call charges item 2 there and then',
-  dialledNote('27821234567', '201', { exclVat: 25, reason: 'charged' }),
-  'Called 27821234567 from extension 201. Charged R\u00a025,00 plus VAT under item 2.')
-// The dial's own line already names the R25. Naming it again here would read as a second one.
-check('a call nobody answered names no further fee',
+check('placing a call says who was rung, and from where',
+  dialledNote('27821234567', '201'),
+  'Called 27821234567 from extension 201.')
+check('a call nobody answered says so',
   noAnswerNote('27821234567'), 'No answer on 27821234567.')
 check('...and never claims to be a consultation',
   /consultation/i.test(noAnswerNote('27821234567')), false)
 
 /* ---- an extension we do not know ---- */
 check('an unknown extension is left out rather than printed as null',
-  dialledNote('27821234567', null, { exclVat: 25, reason: 'charged' }),
-  'Called 27821234567. Charged R\u00a025,00 plus VAT under item 2.')
+  dialledNote('27821234567', null),
+  'Called 27821234567.')
 
 /* ---- what the timeline says once it connects ---- */
-const answered = consultationNote('27821234567', { exclVat: 60, reason: 'charged' })
-check('an answered call is a consultation', /Consultation with the debtor on 27821234567/.test(answered), true)
-check('...and says what it cost, under which item',
-  /Charged R\s?60,00 plus VAT under item 7\./.test(answered), true)
-
-check('a written-off account says so instead of a fee',
-  consultationNote('27821234567', { exclVat: 0, reason: 'written-off' }),
-  'Consultation with the debtor on 27821234567. Not charged — the account is written off.')
-check('so does an account at the ceiling',
-  /at the Annexure B fee ceiling/.test(consultationNote('2782', { exclVat: 0, reason: 'at-ceiling' })), true)
+check('an answered call is a consultation',
+  consultationNote('27821234567'),
+  'Consultation with the debtor on 27821234567.')
 
 /*
- * Both notes explain a blocked charge the same way. They share one helper precisely so an
- * account at the ceiling cannot read differently depending on who answered the phone.
+ * A note says what happened. It does NOT say what it cost.
+ *
+ * These notes used to end with "Charged R25,00 plus VAT under item 2." and the firm had it
+ * taken out: "don't have to say about the charges in the notes, it's on the transaction list."
+ * Every fee is already its own entry on the same timeline as well as a line on Transactions, so
+ * one call read as two events.
+ *
+ * Asserted rather than just deleted, because the natural thing for anyone touching these
+ * functions later is to helpfully put the amount back.
  */
-for (const reason of ['written-off', 'item-total-spent', 'monthly-limit', 'at-ceiling']) {
-  const tail = (note) => note.slice(note.indexOf('. ') + 2)
-  check(`"${reason}" reads the same on both notes`,
-    tail(dialledNote('x', null, { exclVat: 0, reason })).replace(/item 2/, 'ITEM'),
-    tail(consultationNote('x', { exclVat: 0, reason })).replace(/item 7/, 'ITEM'))
+const MONEY = /R\s?\d|VAT|charged|item \d|ceiling|written off|allowance/i
+for (const [name, note] of [
+  ['a dial note', dialledNote('27821234567', '201')],
+  ['a dial note with no extension', dialledNote('27821234567', null)],
+  ['a consultation note', consultationNote('27821234567')],
+  ['a no-answer note', noAnswerNote('27821234567')],
+]) {
+  check(`${name} says nothing about money`, MONEY.test(note), false)
 }
 
 /* ---- what the debtor reads ---- */
