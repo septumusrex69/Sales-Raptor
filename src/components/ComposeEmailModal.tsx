@@ -37,7 +37,13 @@ export function ComposeEmailModal({
   contextNote?: string
   /** Pre-filled subject, e.g. "Re: ..." when replying to a received email. */
   initialSubject?: string
-  /** Pre-filled body, e.g. a quoted copy of the message being replied to. */
+  /**
+   * Pre-filled body, for a template or a standard wording. No caller passes one today.
+   *
+   * Deliberately NOT used to quote the message being replied to, which is what it was for and
+   * which was removed: a debtor's reply already carries their client's own quoted chain, so
+   * quoting it again opened the box with two layers of "> " before the agent typed anything.
+   */
   initialBody?: string
   /**
    * The Message-ID being replied to, where this is a reply.
