@@ -168,13 +168,16 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
           <p className="text-sm text-slate-500">
             The primary is first. A number that has been retired is not offered at all.
           </p>
-          <div className="mt-4 space-y-1.5">
+          {/* A column, not a paragraph. `space-y` cannot separate inline-flex children, which is
+              why these ran into one another; `block` makes each one a real row. */}
+          <div className="mt-4 flex flex-col gap-1.5">
             {numbers.map((n) => (
-              <PhoneLink key={n.value} number={n.value} iconSize={14} onDialled={(c) => void dialled(c)}
-                className="w-full text-left text-sm px-3 py-2 rounded-lg border border-slate-200 hover:border-[#c9a052] hover:bg-gold-50">
-                <Phone size={14} className="inline mr-2 text-slate-400" />
-                <span className="font-medium text-slate-700">{n.value}</span>
-                <span className="text-slate-400"> &mdash; {n.label}</span>
+              <PhoneLink key={n.value} number={n.value} iconSize={14} block
+                onDialled={(c) => void dialled(c)}
+                className="w-full text-left text-sm px-3 py-2 rounded-lg border border-slate-200 hover:border-[#c9a052] hover:bg-gold-50 flex items-center gap-2">
+                <Phone size={14} className="shrink-0 text-slate-400" />
+                <span className="font-medium text-slate-700 shrink-0">{n.value}</span>
+                <span className="text-slate-400 truncate">{n.label}</span>
               </PhoneLink>
             ))}
           </div>

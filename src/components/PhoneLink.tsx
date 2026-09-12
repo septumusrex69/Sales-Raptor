@@ -29,6 +29,15 @@ interface PhoneLinkProps {
    * for a webhook that can never arrive would wait forever.
    */
   onDialled?: (call: { from: string; to: string; viaPabx: boolean }) => void
+  /**
+   * Render as a full-width row rather than something that sits in a line of text.
+   *
+   * The default wrapper is `inline-flex`, which is right beside a phone number in a details
+   * panel and wrong in a list of numbers to choose from: several of them flow like words and
+   * wrap into each other, and a `space-y` on the container does nothing because the children
+   * are not block-level. The number chooser looked exactly that broken.
+   */
+  block?: boolean
 }
 
 /**
@@ -40,7 +49,7 @@ interface PhoneLinkProps {
  * the record it was placed from, so a rep's dialled calls stop depending on them remembering
  * to log them afterwards.
  */
-export function PhoneLink({ number, className = '', iconSize = 13, children, log, onDialled }: PhoneLinkProps) {
+export function PhoneLink({ number, className = '', iconSize = 13, children, log, onDialled, block = false }: PhoneLinkProps) {
   const { canDial, status, dial } = useBuzzBox()
   const { addActivity } = useAppStore()
   const [state, setState] = useState<{ kind: 'idle' } | { kind: 'dialling' } | { kind: 'ringing' } | { kind: 'error'; message: string }>({ kind: 'idle' })
@@ -71,7 +80,7 @@ export function PhoneLink({ number, className = '', iconSize = 13, children, log
     // The device's own dialler. Still worth telling the caller it happened — an account wants
     // the call on its timeline however it was placed — but nothing will report back on it.
     return (
-      <a href={`tel:${number.replace(/\s/g, '')}`} className={className}
+      <a href={`tel:${number.replace(/\s/g, '')}`} className={`${block ? 'block w-full ' : ''}${className}`}
         onClick={() => onDialled?.({ from: '', to: number, viaPabx: false })}>
         {content}
       </a>
@@ -106,7 +115,7 @@ export function PhoneLink({ number, className = '', iconSize = 13, children, log
 
   const title = `Call via BuzzBox — rings your extension ${status?.extension} first, then dials ${number}`
   return (
-    <span className="inline-flex flex-col items-start min-w-0">
+    <span className={`${block ? 'flex w-full' : 'inline-flex'} flex-col items-start min-w-0`}>
       <button
         type="button"
         onClick={handleClick}
