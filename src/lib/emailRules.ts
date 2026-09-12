@@ -18,11 +18,7 @@ import type { ChargeOutcome } from './promiseRules.js'
  * responded to". Both halves of that describe an outgoing message — a fresh email and a reply are
  * each a letter under 1(a) — so a reply charges exactly as a first email does.
  *
- * What arrives charges nothing by itself. That is deliberate and it is the tariff's own shape:
- * the item for incoming post is item 6, "correspondence received AND ATTENDED TO", and it is
- * R13, not R25. Nothing here raises it, because whether a message was attended to is a fact
- * about a person's afternoon and not about an email arriving. In practice the reply is the
- * attending, and the reply bills at R25.
+ * What ARRIVES is charged separately, under item 6 — see CORRESPONDENCE_ITEM_ID.
  */
 export const EMAIL_ITEM_ID = '1a'
 
@@ -31,6 +27,33 @@ export const EMAIL_ACTION_CODE = 'email'
 
 /** What the debtor reads on the statement. */
 export const EMAIL_DESCRIPTION = 'Email'
+
+/**
+ * Item 6: "Correspondence received and attended to." R13 excluding VAT under the 2026 schedule.
+ *
+ * Raised on every email a debtor sends us, at the firm's instruction: "for every email received,
+ * there's also a correspondence fee." So an exchange where we write and they answer costs the
+ * debtor R25 under item 1(a) and R13 under item 6.
+ *
+ * Worth writing down that this is the firm's reading and not the only one available. The gazette
+ * says "received AND ATTENDED TO", and on a strict reading the fee is earned by an agent dealing
+ * with the message rather than by it landing in a mailbox — an out-of-office or a one-line
+ * "received, thanks" would then earn nothing. The firm was shown that reading and chose to
+ * charge on receipt. If the charge is ever queried, this comment is the reason it looks the way
+ * it does.
+ *
+ * One practical consequence to know about: this is raised by the inbound sync, with no person
+ * present, so it is the only fee on the system nobody clicks a button to create. It is capped
+ * like any other — a written-off account and the items 1–7 ceiling both stop it — and a message
+ * that earns nothing is still filed, marked unbilled.
+ */
+export const CORRESPONDENCE_ITEM_ID = '6'
+
+/** Its own action code, so the statement and the timeline can tell the two directions apart. */
+export const CORRESPONDENCE_ACTION_CODE = 'email_in'
+
+/** What the debtor reads on the statement. */
+export const CORRESPONDENCE_DESCRIPTION = 'Correspondence received'
 
 /** Note kinds, which is how the timeline knows to draw an envelope rather than a sticky note. */
 export const EMAIL_OUT_KIND = 'email_out'
@@ -44,27 +67,33 @@ export const EMAIL_IN_KIND = 'email_in'
  * anything. The Emails tab shows the same message with its own structure.
  */
 export function sentEmailNote(to: string, subject: string, body: string, charge: ChargeOutcome | null): string {
-  return `Email to ${to}\nSubject: ${subject || '(no subject)'}\n\n${body.trim()}\n\n${earned(charge)}`
+  return `Email to ${to}\nSubject: ${subject || '(no subject)'}\n\n${body.trim()}\n\n${earned(charge, '1(a)')}`
 }
 
 /**
  * What the timeline says when the debtor writes back.
  *
- * No fee named at all, not even "not charged" — there is no fee to explain. Saying "not charged"
- * on an inbound message would read as a charge that failed rather than one that was never due.
+ * Carries its own fee line, under item 6 rather than item 1(a). A debtor reading their statement
+ * sees two different charges for one exchange, and the timeline has to account for both or the
+ * R13 looks like it came from nowhere.
  */
-export function receivedEmailNote(from: string, subject: string, body: string): string {
-  return `Email from ${from}\nSubject: ${subject || '(no subject)'}\n\n${body.trim()}`
+export function receivedEmailNote(from: string, subject: string, body: string, charge: ChargeOutcome | null): string {
+  return `Email from ${from}\nSubject: ${subject || '(no subject)'}\n\n${body.trim()}\n\n${earned(charge, '6')}`
 }
 
-/** What a charge came to, or why it did not happen, in one sentence. */
-function earned(charge: ChargeOutcome | null): string {
+/**
+ * What a charge came to, or why it did not happen, in one sentence.
+ *
+ * Shared by both directions so the two cannot drift into describing the same outcome
+ * differently — an account at the ceiling should read the same whichever way the message went.
+ */
+function earned(charge: ChargeOutcome | null, item: string): string {
   if (!charge) return 'Not charged.'
   switch (charge.reason) {
-    case 'charged': return `Charged ${formatMoney(charge.exclVat)} plus VAT under item 1(a).`
+    case 'charged': return `Charged ${formatMoney(charge.exclVat)} plus VAT under item ${item}.`
     case 'written-off': return 'Not charged — the account is written off.'
-    case 'item-total-spent': return 'Not charged — item 1(a) has already been used on this account.'
-    case 'monthly-limit': return 'Not charged — the monthly allowance for item 1(a) is spent.'
+    case 'item-total-spent': return `Not charged — item ${item} has already been used on this account.`
+    case 'monthly-limit': return `Not charged — the monthly allowance for item ${item} is spent.`
     default: return 'Not charged — the account is at the Annexure B fee ceiling.'
   }
 }

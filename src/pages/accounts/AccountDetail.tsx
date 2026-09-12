@@ -614,7 +614,7 @@ export function AccountDetail() {
           // and so the debtor sees what they are replying about.
           initialBody={replyTo?.body ? `\n\n--- ${replyTo.debtorAddress} wrote ---\n${replyTo.body.trim()}` : undefined}
           inReplyTo={replyTo?.messageId ?? null}
-          contextNote={`Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). Their reply comes back to this account on its own.`}
+          contextNote={`Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). Their reply comes back to this account on its own and is charged R13 under item 6.`}
           onClose={() => { setComposeTo(null); setReplyTo(null) }}
           onSent={(rawSubject, bodyText, messageId, from) => {
             const to = composeTo

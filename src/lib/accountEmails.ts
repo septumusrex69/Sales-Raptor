@@ -16,8 +16,7 @@ import { chargeItem, type ChargeResult } from './accountCharges'
 import { addNote } from './accountWorkspace'
 import { supabase } from './supabase'
 import {
-  EMAIL_ACTION_CODE, EMAIL_DESCRIPTION, EMAIL_IN_KIND, EMAIL_ITEM_ID, EMAIL_OUT_KIND,
-  receivedEmailNote, sentEmailNote,
+  EMAIL_ACTION_CODE, EMAIL_DESCRIPTION, EMAIL_ITEM_ID, EMAIL_OUT_KIND, sentEmailNote,
 } from './emailRules'
 
 export * from './emailRules'
@@ -157,18 +156,14 @@ export async function recordSentEmail(input: {
   return charge
 }
 
-/**
- * The debtor wrote back.
+/*
+ * The inbound half lives on the server.
  *
- * Exported for the sake of one caller that does not exist in the browser: the inbound sync runs
- * on the server with the service key and files its own rows (see api/_lib/emailSync.ts). This is
- * here so the two halves of the record are described in one file, and so the note wording cannot
- * drift between what we send and what we receive.
+ * A debtor's reply is filed by api/_lib/emailSync.ts with the service key: it raises item 6, R13
+ * — the firm's "for every email received, there's also a correspondence fee" — writes the
+ * account_emails row and puts the note on the timeline. Nothing in the browser creates one, so
+ * there is no counterpart to recordSentEmail here.
  *
- * Charges nothing. See EMAIL_ITEM_ID for why that is the tariff's shape and not an oversight.
+ * Both halves compose their notes from emailRules.ts, so the wording cannot drift between what
+ * we send and what we receive.
  */
-export function receivedNoteBody(from: string, subject: string, body: string): string {
-  return receivedEmailNote(from, subject, body)
-}
-
-export { EMAIL_IN_KIND }

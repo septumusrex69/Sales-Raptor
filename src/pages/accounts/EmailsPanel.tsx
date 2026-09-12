@@ -31,8 +31,8 @@ export function EmailsPanel({ emails, canSend, onCompose, onReply }: {
           <Mail size={22} className="mx-auto text-slate-300" />
           <p className="text-sm text-slate-500 mt-3">No email with this debtor yet.</p>
           <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-            Anything sent from here is charged R25 under item 1(a), and their reply comes back to
-            this list on its own.
+            Anything sent from here is charged R25 under item 1(a). Their reply comes back to this
+            list on its own and is charged R13 under item 6.
           </p>
           <SendButton canSend={canSend} onClick={onCompose} className="mt-4" />
         </div>
@@ -101,9 +101,11 @@ function EmailRow({ email, expanded, onToggle, canSend, onReply }: {
         </span>
         <span className="shrink-0 flex items-center gap-2 pt-0.5">
           {/*
-            Null and zero say different things and are shown differently. Null is an inbound
-            message, which was never going to raise a fee. Zero is a message we sent that earned
-            nothing because a cap left no room — the work happened, it just did not bill.
+            Both directions carry a fee — R25 out under item 1(a), R13 in under item 6 — so a
+            figure here is the ordinary case. Zero is a message that earned nothing because a cap
+            left no room; it is greyed rather than hidden, because the message still happened and
+            the statement still shows it as unbilled. Null means no fee was ever recorded at all,
+            which on an inbound row means the charge failed and a R13 is owing by hand.
           */}
           {email.chargedExclVat !== null && (
             <span className={`text-[11px] tabular-nums ${
