@@ -30,12 +30,14 @@ import { EscalateModal } from './EscalateModal'
 import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
 import { fetchQueries, type AccountQuery } from '../../lib/accountQueries'
+import { fetchAccountEmails, recordSentEmail, replySubject, type AccountEmail } from '../../lib/accountEmails'
+import { EmailsPanel } from './EmailsPanel'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { CallButton } from './CallButton'
 import { feeCeiling, scheduleFor } from '../../lib/annexureB'
 import { formatMoney, formatDate } from '../../data/mockData'
 
-type Tab = 'Overview' | 'Transactions' | 'Documents'
+type Tab = 'Overview' | 'Transactions' | 'Emails' | 'Documents'
 
 /**
  * How the Overview arranges its six panels.
@@ -80,12 +82,17 @@ const TODAY = new Date().toISOString().slice(0, 10)
 export function AccountDetail() {
   const { id } = useParams<{ id: string }>()
   const { companies, users } = useAppStore()
-  const { currentUser } = useAuth()
+  const { currentUser, session } = useAuth()
   const [account, setAccount] = useState<DebtorAccount | null>(null)
   const [ledgers, setLedgers] = useState<AccountLedgers | null>(null)
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const [documents, setDocuments] = useState<AccountDocument[]>([])
   const [queries, setQueries] = useState<AccountQuery[]>([])
+  const [emails, setEmails] = useState<AccountEmail[]>([])
+  /** Whether the signed-in agent has a mailbox connected at all. Null while we are asking. */
+  const [mailbox, setMailbox] = useState<string | null>(null)
+  /** Set when writing a reply, so the debtor's client threads our answer under their message. */
+  const [replyTo, setReplyTo] = useState<AccountEmail | null>(null)
   const [tab, setTab] = useState<Tab>('Overview')
   const [layout, setLayout] = useState<Layout>(storedLayout)
   const [loading, setLoading] = useState(true)
@@ -115,12 +122,13 @@ export function AccountDetail() {
          * information gained. From Paris that is a round trip of about 200ms, spent to learn
          * something we knew before the page rendered.
          */
-        const [a, l, w, d, q] = await Promise.all([
+        const [a, l, w, d, q, e] = await Promise.all([
           fetchAccount(id), fetchLedgers(id), fetchWorkspace(id), fetchDocuments(id), fetchQueries(id),
+          fetchAccountEmails(id),
         ])
         if (cancelled) return
         setAccount(a)
-        if (a) { setLedgers(l); setWorkspace(w); setDocuments(d); setQueries(q) }
+        if (a) { setLedgers(l); setWorkspace(w); setDocuments(d); setQueries(q); setEmails(e) }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
       } finally {
@@ -141,17 +149,38 @@ export function AccountDetail() {
    * so a collector could trace a debtor and email them a statement that did not have the trace
    * on it.
    */
+  /*
+   * Can this agent send anything?
+   *
+   * Mail goes out through their OWN connected mailbox, so an agent who has not connected one in
+   * Settings cannot email a debtor at all. Asked once, up front, so the buttons can say why they
+   * are disabled instead of letting someone write a demand letter and fail on Send.
+   */
+  useEffect(() => {
+    const token = session?.access_token
+    if (!token) return
+    let cancelled = false
+    void fetch('/api/email/status', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((b: { connected?: boolean; email?: string | null }) => {
+        if (!cancelled && b.connected) setMailbox(b.email ?? null)
+      })
+      .catch(() => { /* a status we could not read just leaves the buttons disabled. */ })
+    return () => { cancelled = true }
+  }, [session])
+
   const reload = useCallback(async () => {
     if (!account) return
-    const [a, l, w, d, q] = await Promise.all([
+    const [a, l, w, d, q, e] = await Promise.all([
       fetchAccount(account.id), fetchLedgers(account.id), fetchWorkspace(account.id),
-      fetchDocuments(account.id), fetchQueries(account.id),
+      fetchDocuments(account.id), fetchQueries(account.id), fetchAccountEmails(account.id),
     ])
     if (a) setAccount(a)
     setLedgers(l)
     setWorkspace(w)
     setDocuments(d)
     setQueries(q)
+    setEmails(e)
   }, [account])
 
   const { busy: savingComment, run: runComment } = useWriter(reload)
@@ -425,13 +454,24 @@ export function AccountDetail() {
         </Banner>
       )}
 
-      <div className="flex gap-1 border-b border-slate-200">
-        {(['Overview', 'Transactions', 'Documents'] as Tab[]).map((t) => (
+      {/*
+        The strip scrolls; the page does not.
+
+        Four tabs are wider than a phone, and without this the whole page scrolled sideways —
+        measured at 360 and 420px, not guessed. The border sits on the OUTER div rather than on
+        the scroller, because a scroller whose children carry `-mb-px` overflows itself vertically
+        by that pixel and grows a scrollbar inside the tab row. Moving the -mb-px onto the
+        scroller keeps the active tab's underline sitting on the border with nothing to clip.
+      */}
+      <div className="border-b border-slate-200">
+        <div className="flex gap-1 overflow-x-auto -mb-px">
+        {(['Overview', 'Transactions', 'Emails', 'Documents'] as Tab[]).map((t) => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+            className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 ${
               tab === t ? 'border-gold-500 text-navy-950' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
             {t}
             {t === 'Transactions' && <span className="ml-1.5 text-[11px] text-slate-400 tabular-nums">{statement?.lines.length ?? 0}</span>}
+            {t === 'Emails' && emails.length > 0 && <span className="ml-1.5 text-[11px] text-slate-400 tabular-nums">{emails.length}</span>}
             {t === 'Documents' && <span className="ml-1.5 text-[11px] text-slate-400 tabular-nums">{documents.length}</span>}
           </button>
         ))}
@@ -461,10 +501,20 @@ export function AccountDetail() {
             ))}
           </div>
         )}
+        </div>
       </div>
 
       {tab === 'Transactions' && (
         <Card><StatementTable statement={statement?.lines ?? []} account={account} breakdown={b} /></Card>
+      )}
+
+      {tab === 'Emails' && (
+        <EmailsPanel
+          emails={emails}
+          canSend={!!mailbox}
+          onCompose={() => { setReplyTo(null); setComposeTo(emailContact?.value ?? '') }}
+          onReply={(e) => { setReplyTo(e); setComposeTo(e.debtorAddress) }}
+        />
       )}
 
       {tab === 'Documents' && (
@@ -551,31 +601,46 @@ export function AccountDetail() {
         <SmsModal accountId={account.id} numbers={smsNumbers} onClose={() => setSmsOpen(false)} onDone={reload} />
       )}
 
-      {composeTo && (
+      {composeTo !== null && (
         <ComposeEmailModal
           to={composeTo}
           recipients={(workspace?.contacts ?? [])
             .filter((c) => c.kind === 'email' && !c.retiredAt)
             .map((c) => ({ email: c.value, label: c.label ?? undefined }))}
-          initialSubject={`Account ${account.accountNumber ?? ''} - ${name}`.trim()}
-          contextNote="Sent from this account. A note recording what was sent is added to the timeline."
-          onClose={() => setComposeTo(null)}
-          onSent={(subject, bodyText) => {
+          initialSubject={replyTo
+            ? replySubject(replyTo.subject)
+            : `Account ${account.accountNumber ?? ''} - ${name}`.trim()}
+          // Their message, quoted, so the agent can answer it without opening another window
+          // and so the debtor sees what they are replying about.
+          initialBody={replyTo?.body ? `\n\n--- ${replyTo.debtorAddress} wrote ---\n${replyTo.body.trim()}` : undefined}
+          inReplyTo={replyTo?.messageId ?? null}
+          contextNote={`Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). Their reply comes back to this account on its own.`}
+          onClose={() => { setComposeTo(null); setReplyTo(null) }}
+          onSent={(rawSubject, bodyText, messageId, from) => {
             const to = composeTo
+            const answering = replyTo
             setComposeTo(null)
-            // The account's own record of the message, and a person's note rather than an
-            // automatic one: the words in it are theirs, so it survives "just what people wrote".
-            //
-            // A note rather than a fee. An outgoing email IS chargeable -- item 1(a), "necessary
-            // ordinary letter, registered letter, facsimile or e-mail", R25; the comment here
-            // used to say item 4, which is the acknowledgement of debt. Raising it is still the
-            // collections engine's decision rather than a side effect of a Send button, which
-            // does leave Email as the one channel that does not bill itself while SMS does.
-            void addNote({
+            setReplyTo(null)
+            /*
+             * Charged, recorded and put on the timeline — see recordSentEmail.
+             *
+             * Item 1(a), R25, on every message we send, at the firm's instruction: "25 rand for
+             * every email sent or responded to". A reply is a letter under 1(a) exactly as a
+             * first email is, so it charges the same.
+             *
+             * The subject arrives with the modal's own "Email sent: " framing, which is the CRM
+             * activity convention and means nothing on an account. Stripped here so the debtor's
+             * own subject line is what gets stored.
+             */
+            void recordSentEmail({
               accountId: account.id,
-              body: `Email sent to ${to}\nSubject: ${subject}\n\n${bodyText}`,
-              authorName: currentUser?.name ?? null,
-              createdBy: currentUser?.id ?? null,
+              to,
+              from: from ?? mailbox,
+              subject: rawSubject.replace(/^Email sent: /, ''),
+              body: bodyText,
+              messageId: messageId ?? null,
+              inReplyTo: answering?.messageId ?? null,
+              actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
             }).then(reload)
           }}
         />

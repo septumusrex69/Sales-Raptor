@@ -12,6 +12,7 @@ export function ComposeEmailModal({
   initialSubject,
   initialBody,
   contextNote,
+  inReplyTo,
   onClose,
   onSent,
 }: {
@@ -38,9 +39,19 @@ export function ComposeEmailModal({
   initialSubject?: string
   /** Pre-filled body, e.g. a quoted copy of the message being replied to. */
   initialBody?: string
+  /**
+   * The Message-ID being replied to, where this is a reply.
+   *
+   * Passed through to the server, which puts it in the In-Reply-To header so the recipient's own
+   * mail client shows the answer inside the thread rather than as a fresh message.
+   */
+  inReplyTo?: string | null
   onClose: () => void
-  /** `emailMessageId` is the sent message's own Message-ID, so a reply can be threaded back. */
-  onSent: (subject: string, bodyText: string, emailMessageId?: string) => void
+  /**
+   * `emailMessageId` is the sent message's own Message-ID, so a reply can be threaded back.
+   * `from` is the mailbox it actually left by, which decides where that reply will land.
+   */
+  onSent: (subject: string, bodyText: string, emailMessageId?: string, from?: string) => void
 }) {
   const { session } = useAuth()
   const listId = useId()
@@ -61,7 +72,12 @@ export function ComposeEmailModal({
       const res = await fetch('/api/email/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ to: address.trim(), subject: subject.trim(), bodyHtml: body.trim().replace(/\n/g, '<br>') }),
+        body: JSON.stringify({
+          to: address.trim(),
+          subject: subject.trim(),
+          bodyHtml: body.trim().replace(/\n/g, '<br>'),
+          ...(inReplyTo ? { inReplyTo } : {}),
+        }),
       })
       const responseBody = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -69,7 +85,7 @@ export function ComposeEmailModal({
         setSubmitting(false)
         return
       }
-      onSent(`Email sent: ${subject.trim()}`, body.trim(), responseBody.messageId ?? undefined)
+      onSent(`Email sent: ${subject.trim()}`, body.trim(), responseBody.messageId ?? undefined, responseBody.from ?? undefined)
       onClose()
     } catch {
       setError('Could not reach the server. Please try again.')

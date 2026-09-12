@@ -66,6 +66,20 @@ const dayOf = (iso: string) => iso.slice(0, 10)
  * day and something has to order them, or the timeline reshuffles itself between two loads. Money
  * still leads a day nobody recorded a time on. It no longer overrules a day where they did.
  */
+/**
+ * A note ABOUT something, and which something.
+ *
+ * Set when the note is written, so nothing here has to read the words and guess. An email is on
+ * this list because correspondence is not a loose thought either: a collector scanning for "what
+ * did we actually tell them" is looking for envelopes, and inbound and outbound are different
+ * events wearing different colours. See timelineStyle.ts.
+ */
+const NOTE_ACTION: Record<string, string> = {
+  call: 'phone_call',
+  email_out: 'email_out',
+  email_in: 'email_in',
+}
+
 const RANK: Record<TimelineKind, number> = { payment: 0, promise: 1, query: 2, action: 3, note: 4 }
 
 export function buildTimeline(
@@ -140,7 +154,7 @@ export function buildTimeline(
        * call, and showing it as a plain sticky beside every other note lost that. The kind is
        * set when the note is written, so nothing here has to read the words and guess.
        */
-      actionCode: n.kind === 'call' ? 'phone_call' : null,
+      actionCode: NOTE_ACTION[n.kind] ?? null,
     })
   }
 

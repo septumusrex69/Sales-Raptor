@@ -30,7 +30,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const { to, subject, bodyHtml } = (req.body ?? {}) as { to?: string; subject?: string; bodyHtml?: string }
+  const { to, subject, bodyHtml, inReplyTo } = (req.body ?? {}) as {
+    to?: string; subject?: string; bodyHtml?: string
+    /**
+     * The Message-ID this is a reply to, where it is one.
+     *
+     * Sets the In-Reply-To and References headers so the debtor's own mail client shows our
+     * answer inside the thread they started, rather than as a new message that happens to begin
+     * "Re:". Not needed for Raptor's own matching — their reply threads on the Message-ID we
+     * recorded, which their client fills in — this is about what the debtor sees.
+     */
+    inReplyTo?: string
+  }
   if (!to || !subject || !bodyHtml) {
     res.status(400).json({ error: 'to, subject, and bodyHtml are required.' })
     return
@@ -80,7 +91,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       secure: (conn.smtp_port as number) === 465,
       auth: { user: conn.email as string, pass: decrypt(conn.encrypted_password as string) },
     })
-    const info = await transporter.sendMail({ from: conn.email as string, to, subject, html: fullHtml, attachments })
+    const info = await transporter.sendMail({
+      from: conn.email as string, to, subject, html: fullHtml, attachments,
+      ...(inReplyTo ? { inReplyTo, references: [inReplyTo] } : {}),
+    })
     // Kept so an inbound reply carrying this value in In-Reply-To can be threaded back to the
     // exact deal the message was sent from. Without it a reply can only be matched on the
     // sender's address, which finds the client but not which of its deals is being discussed.
@@ -96,7 +110,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // The Sent copy carries the same attachment, so the person's own mail client shows the
     // message exactly as the recipient got it rather than with a broken image in it.
-    const raw = await new MailComposer({ from: conn.email as string, to, subject, html: fullHtml, attachments }).compile().build()
+    const raw = await new MailComposer({
+      from: conn.email as string, to, subject, html: fullHtml, attachments,
+      ...(inReplyTo ? { inReplyTo, references: [inReplyTo] } : {}),
+    }).compile().build()
     await appendToSent(
       { email: conn.email as string, imap_host: conn.imap_host as string, imap_port: conn.imap_port as number, encrypted_password: conn.encrypted_password as string },
       raw,
@@ -105,5 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ignore -- the send itself already succeeded
   }
 
-  res.status(200).json({ ok: true, messageId: sentMessageId })
+  // `from` is returned so the caller can record WHICH mailbox the message left by. That decides
+  // where the reply will land, which is the thing that matters when an agent leaves the firm.
+  res.status(200).json({ ok: true, messageId: sentMessageId, from: conn.email as string })
 }
