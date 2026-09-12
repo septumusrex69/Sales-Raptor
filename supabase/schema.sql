@@ -1548,3 +1548,80 @@ alter table public.sms_messages enable row level security;
 drop policy if exists sms_messages_read on public.sms_messages;
 create policy sms_messages_read on public.sms_messages for select to authenticated using (true);
 -- Writes are server-side only. Nothing in the browser holds the provider token.
+
+-- ---------- Email with the debtor ----------
+--
+-- Correspondence with a debtor, in both directions, on the account it belongs to.
+--
+-- Deliberately its own table rather than `activities`. That table is the CRM's: its rows hang off
+-- contacts, leads, deals and companies, which is the sales side of the business. A debtor is none
+-- of those — their history is account_notes and their money is Annexure B — so an email to one
+-- belongs here, with the account, where the statement and the timeline can both see it.
+--
+-- The body is stored rather than pointed at. The mailbox is the archive for attachments (see
+-- fetchAttachment in api/_lib/emailSync.ts, and the reasoning there about not warehousing files),
+-- but the WORDS of a demand and the words of the reply to it are the record of what was said, and
+-- a record that disappears when somebody's mailbox is closed is not a record.
+create table if not exists public.account_emails (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  -- 'out' we sent it, 'in' the debtor did.
+  direction text not null check (direction in ('out', 'in')),
+  -- The debtor's address, whichever end of the exchange it was on. One column rather than
+  -- from/to because this is the question anyone actually asks of the row: who, on their side.
+  debtor_address text not null,
+  -- The mailbox on our side — the agent's own connected address. Recorded because it decides
+  -- where a reply will land, which matters when an agent leaves.
+  our_address text,
+  subject text,
+  body text,
+  -- RFC 5322 Message-ID. The only durable handle a reply carries back to what it answers, and
+  -- therefore the whole reason a debtor's reply can find its own account. Unique: one message
+  -- is one row, however many mailboxes sync it or however often a sync reruns.
+  message_id text,
+  in_reply_to text,
+  -- Names only. The files stay in the mailbox — see fetchAttachment.
+  attachment_names text[] not null default '{}',
+  -- Breadcrumb back to the message for on-demand attachment fetching.
+  email_folder text,
+  email_uid bigint,
+  -- Null on an inbound message: the debtor sent that one.
+  sent_by uuid references public.profiles (id) on delete set null,
+  -- Free text as well as the reference, like every other author column on an account.
+  sent_by_name text,
+  -- What this message earned, excluding VAT. Item 1(a), R25, on everything we send — the firm's
+  -- instruction: "25 rand for every email sent or responded to". Null on an inbound message,
+  -- which raises nothing on its own: the reply to it is what earns the fee. Zero where a cap
+  -- left no room, which is a different thing from null and the Emails list says so.
+  --
+  -- The amount rather than a reference to the fee row, so the list can show what a message cost
+  -- without a join, and without the charge engine having to hand back an id it does not
+  -- currently produce. account_fees remains the ledger; this is a copy for display.
+  charged_excl_vat numeric(12,2),
+  -- When the message was sent or received, which is not when we wrote the row: a sync can pick
+  -- up a reply hours later, and the timeline has to show when the debtor actually wrote.
+  occurred_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+-- Deliberately NOT a partial index ("where message_id is not null"), which is the obvious way to
+-- write this and is wrong. A partial unique index cannot be inferred by "on conflict
+-- (message_id)", which is exactly what PostgREST emits for an upsert: Postgres raises 42P10 and
+-- the inbound sync throws on the first reply it tries to file. Nothing is lost by dropping the
+-- predicate — nulls are distinct in a unique index, so any number of messages may have no id.
+-- This also serves the thread lookup: In-Reply-To/References name a Message-ID we sent.
+create unique index if not exists account_emails_message_idx
+  on public.account_emails (message_id);
+create index if not exists account_emails_account_idx
+  on public.account_emails (account_id, occurred_at desc);
+
+alter table public.account_emails enable row level security;
+
+-- As wide as the account's own policies: collectors cover for each other, and correspondence
+-- anyone sent is part of the account's history.
+drop policy if exists "account_emails_select" on public.account_emails;
+create policy "account_emails_select" on public.account_emails for select using (auth.uid() is not null);
+drop policy if exists "account_emails_insert" on public.account_emails;
+create policy "account_emails_insert" on public.account_emails for insert with check (auth.uid() is not null);
+-- No update policy. What was sent was sent, and what the debtor wrote is theirs. Inbound rows are
+-- written by the sync with the service key, which these policies do not constrain.

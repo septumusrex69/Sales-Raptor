@@ -2,6 +2,9 @@ import { ImapFlow, type ListResponse } from 'imapflow'
 import { simpleParser } from 'mailparser'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decrypt } from './crypto.js'
+import {
+  EMAIL_IN_KIND, normaliseAddress, receivedEmailNote, threadIds,
+} from '../../src/lib/emailRules.js'
 
 export interface EmailConnectionRow {
   user_id: string
@@ -50,6 +53,127 @@ function realAttachmentNames(
     .filter((att) => !att.related && !(!att.filename && (att.contentType ?? '').startsWith('image/')))
     .map((att, i) => att.filename || `attachment-${i + 1}`)
     .slice(0, MAX_ATTACHMENT_NAMES)
+}
+
+/**
+ * Does this message belong to a DEBTOR account rather than to the CRM?
+ *
+ * Two ways to know, and the first is far stronger than the second.
+ *
+ * A reply carries In-Reply-To (and References) naming the Message-ID of the message it answers.
+ * We record that id on every email Raptor sends from an account, so a reply to a demand letter
+ * identifies its own account with no guessing at all — including when the debtor answers from an
+ * address nobody has ever captured, which is common and is exactly the case address matching
+ * gets wrong.
+ *
+ * Failing that, the sender's address against the account's own contacts. Compared normalised,
+ * because a From header wraps the address in a display name and mail clients disagree about
+ * capitalising the local part.
+ *
+ * Retired addresses still match on purpose. "Retired" means we stopped writing to it, not that
+ * mail from it is somebody else's — and a debtor writing from an address we had given up on is
+ * precisely the contact a collector needs to see.
+ */
+async function findAccount(
+  admin: SupabaseClient,
+  fromAddress: string,
+  parsed: { inReplyTo?: string; references?: string | string[] },
+): Promise<{ accountId: string; via: 'thread' | 'address' } | null> {
+  for (const id of threadIds(parsed.inReplyTo, parsed.references)) {
+    const { data } = await admin
+      .from('account_emails')
+      .select('account_id')
+      .eq('message_id', id)
+      .limit(1)
+      .maybeSingle()
+    if (data) return { accountId: data.account_id as string, via: 'thread' }
+  }
+
+  const address = normaliseAddress(fromAddress)
+  if (!address) return null
+  const { data: contact } = await admin
+    .from('account_contacts')
+    .select('account_id')
+    .eq('kind', 'email')
+    .ilike('value', address)
+    .limit(1)
+    .maybeSingle()
+  if (contact) return { accountId: contact.account_id as string, via: 'address' }
+  return null
+}
+
+/**
+ * File a debtor's reply against their account: the email itself, and a line on the timeline.
+ *
+ * Charges nothing. The firm's rule is "R25 for every email sent or responded to", and both
+ * halves of that are outgoing messages — the reply an agent writes is what earns item 1(a). The
+ * tariff's own item for incoming post is item 6, "correspondence received AND ATTENDED TO", at
+ * R13, and nothing here can know whether anybody has attended to anything.
+ *
+ * Returns false when the message was already filed, so the caller does not count it twice. The
+ * unique index on message_id is what actually enforces that; this just reads the outcome.
+ */
+async function fileAccountEmail(
+  admin: SupabaseClient,
+  accountId: string,
+  message: {
+    fromAddress: string
+    fromName: string
+    subject: string
+    body: string
+    messageId: string
+    inReplyTo: string | null
+    attachmentNames: string[]
+    folder: string
+    uid: number
+    at: string
+  },
+): Promise<boolean> {
+  const { data: inserted, error } = await admin
+    .from('account_emails')
+    .upsert(
+      {
+        account_id: accountId,
+        direction: 'in',
+        debtor_address: normaliseAddress(message.fromAddress) ?? message.fromAddress,
+        subject: message.subject,
+        body: message.body,
+        message_id: message.messageId,
+        in_reply_to: message.inReplyTo,
+        attachment_names: message.attachmentNames,
+        email_folder: message.folder,
+        email_uid: message.uid,
+        // The debtor wrote it, so there is no Raptor user to credit. The name off the From
+        // header is who it reads as on the timeline.
+        sent_by_name: message.fromName || message.fromAddress,
+        occurred_at: message.at,
+      },
+      { onConflict: 'message_id', ignoreDuplicates: true },
+    )
+    .select('id')
+  if (error) {
+    console.error(`[emailSync] account ${accountId}: filing inbound email failed: ${error.message}`)
+    return false
+  }
+  // ignoreDuplicates returns an empty array rather than an error when the row already existed.
+  if (!inserted || inserted.length === 0) return false
+
+  /*
+   * The note is what puts it on the Activity timeline, and it is 'manual' on purpose.
+   *
+   * The timeline can be set to show only what people wrote. A debtor's own words are exactly
+   * that — marking them 'system' would hide the reply behind the same filter that hides
+   * "Trace done — 4 credit bureau searches".
+   */
+  await admin.from('account_notes').insert({
+    account_id: accountId,
+    body: receivedEmailNote(message.fromName || message.fromAddress, message.subject, message.body),
+    kind: EMAIL_IN_KIND,
+    source: 'manual',
+    author_name: message.fromName || message.fromAddress,
+    created_at: message.at,
+  })
+  return true
 }
 
 async function findMatch(admin: SupabaseClient, fromAddress: string) {
@@ -226,15 +350,59 @@ async function syncMailbox(
        * References is checked as well as In-Reply-To because some clients drop the latter; it
        * is walked newest-first so a long thread resolves to its most recent turn.
        */
-      const threadIds: string[] = []
-      if (parsed.inReplyTo) threadIds.push(...parsed.inReplyTo.split(/\s+/).filter(Boolean))
-      const refs = parsed.references
-      if (refs) threadIds.push(...(Array.isArray(refs) ? refs : refs.split(/\s+/)).filter(Boolean).reverse())
+      /*
+       * A debtor's reply is checked for first, and it leaves by a different door.
+       *
+       * Debtor correspondence does not belong in `activities` — that table hangs off contacts,
+       * leads, deals and companies, which is the sales side of the business. A debtor's history
+       * is their account. So when a message belongs to one it is filed there and this message is
+       * finished; nothing below runs for it.
+       *
+       * The collision to know about: an address that is BOTH a CRM contact and a contact on a
+       * debtor account now files to the account. That is rare — a debtor is not usually a
+       * sales contact — and when it happens, an email from someone who is on a debtor's file is
+       * far more likely to be about the debt than about a deal.
+       */
+      const accountMatch = await findAccount(admin, fromAddress, parsed)
+      if (accountMatch) {
+        const filedOnAccount = await fileAccountEmail(admin, accountMatch.accountId, {
+          fromAddress,
+          fromName: parsed.from?.text ?? fromAddress,
+          subject: parsed.subject || '(no subject)',
+          body: (parsed.text || '').slice(0, NOTES_MAX_LENGTH),
+          messageId: parsed.messageId ?? `${conn.user_id}:${path}:${uid}`,
+          inReplyTo: parsed.inReplyTo ?? null,
+          attachmentNames: realAttachmentNames(parsed.attachments),
+          folder: path,
+          uid: msg.uid,
+          at: (parsed.date ?? new Date()).toISOString(),
+        })
+        console.log(
+          `[emailSync] ${path} UID ${uid}: debtor account ${accountMatch.accountId} via ${accountMatch.via}` +
+          `${filedOnAccount ? ', filed' : ', already filed'}`,
+        )
+        if (filedOnAccount) {
+          logged += 1
+          // Straight to the account, which is the page whoever reads this has to be on.
+          const { data: account } = await admin
+            .from('debtor_accounts').select('assigned_to').eq('id', accountMatch.accountId).maybeSingle()
+          const assignee = (account?.assigned_to as string | null) ?? null
+          if (assignee) {
+            await admin.from('notifications').insert({
+              user_id: assignee,
+              type: 'Email received',
+              message: `Reply from ${parsed.from?.text || fromAddress}: ${parsed.subject || '(no subject)'}`,
+              link: `/accounts/${accountMatch.accountId}`,
+            })
+          }
+        }
+        continue
+      }
+
+      const crmThreadIds = threadIds(parsed.inReplyTo, parsed.references)
 
       let threadMatch: { dealId?: string; leadId?: string; companyId?: string; contactId?: string } | null = null
-      for (const rawId of threadIds) {
-        const id = rawId.trim()
-        if (!id) continue
+      for (const id of crmThreadIds) {
         const { data: parent } = await admin
           .from('activities')
           .select('deal_id, lead_id, company_id, contact_id')
