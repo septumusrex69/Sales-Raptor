@@ -30,7 +30,9 @@ import { EscalateModal } from './EscalateModal'
 import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
 import { fetchQueries, type AccountQuery } from '../../lib/accountQueries'
-import { fetchAccountEmails, recordSentEmail, replySubject, type AccountEmail } from '../../lib/accountEmails'
+import {
+  fetchAccountEmails, markRepliesRead, recordSentEmail, replySubject, type AccountEmail,
+} from '../../lib/accountEmails'
 import { EmailsPanel } from './EmailsPanel'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { CallButton } from './CallButton'
@@ -94,14 +96,17 @@ export function AccountDetail() {
   /** Set when writing a reply, so the debtor's client threads our answer under their message. */
   const [replyTo, setReplyTo] = useState<AccountEmail | null>(null)
   /*
-   * Landing straight on a message, from the Messages menu.
+   * Arriving from the Messages menu.
    *
-   * Arriving on the Overview with the reply three tabs away and closed reads as a broken link —
-   * the same reasoning MessagesMenu's destinationFor uses for the CRM side.
+   * The `email` parameter picks the Emails tab and nothing more. It deliberately does NOT open
+   * the message: the firm's instruction was "just take it to the account and show the email as
+   * unread on the account", and the unread marker is what tells you which one to open. Landing
+   * on the Overview with the reply three tabs away would be the other failure, so the tab still
+   * switches.
    */
   const [params] = useSearchParams()
-  const focusEmail = params.get('email')
-  const [tab, setTab] = useState<Tab>(focusEmail ? 'Emails' : 'Overview')
+  const cameForEmail = params.get('email') !== null
+  const [tab, setTab] = useState<Tab>(cameForEmail ? 'Emails' : 'Overview')
   const [layout, setLayout] = useState<Layout>(storedLayout)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -519,10 +524,21 @@ export function AccountDetail() {
       {tab === 'Emails' && (
         <EmailsPanel
           emails={emails}
-          focusId={focusEmail}
+          userId={currentUser?.id ?? null}
           canSend={!!mailbox}
           onCompose={() => { setReplyTo(null); setComposeTo(emailContact?.value ?? '') }}
           onReply={(e) => { setReplyTo(e); setComposeTo(e.debtorAddress) }}
+          /*
+           * Marked read where it is actually read, with the row updated in place rather than by
+           * reloading the account — a full reload here would collapse the message the moment
+           * somebody opened it.
+           */
+          onRead={(e) => {
+            setEmails((list) => list.map((x) => (
+              x.id === e.id ? { ...x, readAt: new Date().toISOString() } : x
+            )))
+            void markRepliesRead([e.id])
+          }}
         />
       )}
 

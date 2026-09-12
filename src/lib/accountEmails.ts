@@ -39,6 +39,10 @@ export interface AccountEmail {
   sentByName: string | null
   /** Excluding VAT. Null where nothing was charged at all — every inbound message. */
   chargedExclVat: number | null
+  /** Null means nobody has opened it yet. Only ever set on an inbound message. */
+  readAt: string | null
+  /** Whose inbox it arrived in. Only they can mark it read — see markRepliesRead. */
+  receivedBy: string | null
   occurredAt: string
 }
 
@@ -54,6 +58,8 @@ interface EmailRow {
   attachment_names: string[] | null
   sent_by_name: string | null
   charged_excl_vat: number | string | null
+  read_at: string | null
+  received_by: string | null
   occurred_at: string
 }
 
@@ -72,6 +78,8 @@ function toEmail(r: EmailRow): AccountEmail {
     // Postgres numerics arrive as strings through PostgREST. Null stays null: it means no fee
     // was ever due, which the list shows differently from a fee that came out at zero.
     chargedExclVat: r.charged_excl_vat === null ? null : Number(r.charged_excl_vat),
+    readAt: r.read_at,
+    receivedBy: r.received_by,
     occurredAt: r.occurred_at,
   }
 }
@@ -80,7 +88,7 @@ function toEmail(r: EmailRow): AccountEmail {
 export async function fetchAccountEmails(accountId: string): Promise<AccountEmail[]> {
   const { data, error } = await supabase
     .from('account_emails')
-    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, sent_by_name, charged_excl_vat, occurred_at')
+    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, sent_by_name, charged_excl_vat, read_at, received_by, occurred_at')
     .eq('account_id', accountId)
     .order('occurred_at', { ascending: false })
   if (error) throw new Error(error.message)

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ChevronDown, ChevronRight, Mail, MailOpen, Paperclip, Reply } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { formatMoney } from '../../data/mockData'
@@ -15,25 +15,35 @@ import type { AccountEmail } from '../../lib/accountEmails'
  * the words of the reply to it are the record of what was said, and a list that only shows
  * subject lines makes a person open ten things to find the one that matters.
  */
-export function EmailsPanel({ emails, focusId, canSend, onCompose, onReply }: {
+export function EmailsPanel({ emails, userId, canSend, onCompose, onReply, onRead }: {
   emails: AccountEmail[]
-  /**
-   * One message to open on arrival, from the Messages menu's `?email=` link.
-   *
-   * Without it, following "Ryno replied" lands on a list with the reply collapsed somewhere in
-   * it, which is the same as not linking to it at all.
-   */
-  focusId?: string | null
+  /** Who is looking. Only the agent a message arrived for can mark it read. */
+  userId: string | null
   /** False when the agent has no mailbox connected — the buttons say so rather than failing. */
   canSend: boolean
   onCompose: () => void
   onReply: (email: AccountEmail) => void
+  /** Called when an unread message is actually opened, so the Messages count can drop. */
+  onRead: (email: AccountEmail) => void
 }) {
-  // Newest open by default; the linked one instead when we were sent here to read it.
-  const [open, setOpen] = useState<string | null>(focusId ?? emails[0]?.id ?? null)
-  // The list arrives empty on the first render and fills in after the fetch, so the id has to be
-  // applied when it lands rather than only at mount.
-  useEffect(() => { if (focusId) setOpen(focusId) }, [focusId])
+  /*
+   * Nothing opens on its own.
+   *
+   * This used to expand the newest message, and to expand whichever one a notification pointed
+   * at. Both were wrong for the same reason, and the firm said so: "just take it to the account
+   * and show the email as unread." Opening a message is how it becomes read, so opening it FOR
+   * somebody destroys the only signal that says which mail still needs attention.
+   */
+  const [open, setOpen] = useState<string | null>(null)
+
+  function toggle(email: AccountEmail) {
+    const opening = open !== email.id
+    setOpen(opening ? email.id : null)
+    // Reading it is what marks it read — and only for the agent it arrived for, because that is
+    // all the RLS policy permits. For anyone else it stays unread, which is correct: it is not
+    // their message to have dealt with.
+    if (opening && !email.readAt && email.receivedBy && email.receivedBy === userId) onRead(email)
+  }
 
   if (emails.length === 0) {
     return (
@@ -68,7 +78,7 @@ export function EmailsPanel({ emails, focusId, canSend, onCompose, onReply }: {
       <ul className="divide-y divide-slate-100">
         {emails.map((e) => (
           <EmailRow key={e.id} email={e} expanded={open === e.id}
-            onToggle={() => setOpen(open === e.id ? null : e.id)}
+            onToggle={() => toggle(e)}
             canSend={canSend} onReply={() => onReply(e)} />
         ))}
       </ul>
@@ -84,9 +94,11 @@ function EmailRow({ email, expanded, onToggle, canSend, onReply }: {
   onReply: () => void
 }) {
   const inbound = email.direction === 'in'
-  const Icon = inbound ? MailOpen : Mail
+  // Unread is only a thing for what arrived. Nothing we sent is waiting to be read.
+  const unread = inbound && !email.readAt
+  const Icon = inbound && email.readAt ? MailOpen : Mail
   return (
-    <li>
+    <li className={unread ? 'bg-positive-50/40' : undefined}>
       <button onClick={onToggle}
         className="w-full text-left px-5 py-3 flex items-start gap-3 hover:bg-slate-50">
         {/* Inbound takes the positive colour, like a payment does: the debtor made contact, which
@@ -97,7 +109,10 @@ function EmailRow({ email, expanded, onToggle, canSend, onReply }: {
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-2">
-            <span className="text-sm font-medium text-slate-800 truncate">
+            {/* A dot as well as the weight, because "slightly bolder" is not a signal anyone
+                reliably notices in a list of six. */}
+            {unread && <span className="w-1.5 h-1.5 rounded-full bg-positive shrink-0 self-center" />}
+            <span className={`text-sm truncate ${unread ? 'font-semibold text-navy-950' : 'font-medium text-slate-800'}`}>
               {email.subject || '(no subject)'}
             </span>
             {email.attachmentNames.length > 0 && (
@@ -105,6 +120,7 @@ function EmailRow({ email, expanded, onToggle, canSend, onReply }: {
             )}
           </span>
           <span className="block text-xs text-slate-400 mt-0.5 truncate">
+            {unread && <span className="font-semibold text-positive">Unread · </span>}
             {inbound ? 'From' : 'To'} {email.debtorAddress}
             {' · '}{relativeDayLabel(email.occurredAt)}
             {email.sentByName && !inbound && <> · {email.sentByName}</>}
