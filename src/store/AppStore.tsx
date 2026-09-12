@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
+import { refreshNavCounts } from '../lib/navCounts'
 import { useAuth } from './AuthContext'
 import { TODAY } from '../data/mockData'
 import { DEAL_STAGE_PROBABILITY } from '../types'
@@ -1130,6 +1131,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         showError(message)
       })
       addActivity({ type: 'Task', subject: `Task created: ${task.title}`, leadId: task.leadId, dealId: task.dealId, companyId: task.companyId })
+      // A task due today changes the sidebar count the moment it is created.
+      refreshNavCounts()
       return task
     },
     [ownerId, addActivity],
@@ -1160,6 +1163,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           companyId: previous.companyId,
         })
       }
+
+      // Status and due date both move the Tasks badge, so refresh on any edit rather than
+      // trying to work out which fields mattered.
+      refreshNavCounts()
     },
     [showError, addActivity],
   )

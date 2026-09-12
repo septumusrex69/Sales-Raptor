@@ -13,6 +13,7 @@
  * in this file — see the policies on user_emails.
  */
 import { supabase } from './supabase'
+import { refreshNavCounts } from './navCounts'
 import { chargeItem, type ChargeResult } from './accountCharges'
 import { addNote } from './accountWorkspace'
 import {
@@ -177,6 +178,7 @@ export async function markMailRead(ids: string[]): Promise<void> {
     .in('id', ids)
     .is('read_at', null)
   if (error) throw new Error(error.message)
+  refreshNavCounts()
 }
 
 /**
@@ -198,6 +200,7 @@ export async function deleteMail(ids: string[]): Promise<number> {
     .is('linked_account_id', null)
     .select('id')
   if (error) throw new Error(error.message)
+  refreshNavCounts()
   return data?.length ?? 0
 }
 
@@ -400,6 +403,7 @@ export async function blockSenders(input: {
     .select('id')
   if (sweepError) throw new Error(sweepError.message)
 
+  refreshNavCounts()
   return { blocked: allowed, refused, removed: gone?.length ?? 0 }
 }
 
@@ -447,6 +451,7 @@ export async function emptyJunk(input: {
     .select('id')
   if (deleteError) throw new Error(deleteError.message)
 
+  refreshNavCounts()
   return { ...outcome, deleted: (gone?.length ?? 0) + outcome.removed }
 }
 
@@ -538,5 +543,8 @@ export async function linkMailToAccount(input: {
     authorName: input.mail.fromName || input.mail.fromAddress,
     createdBy: input.actor.id,
   })
+
+  // Filed, so it is no longer waiting: the Mail badge drops now rather than at the next poll.
+  refreshNavCounts()
   return charge
 }

@@ -12,6 +12,7 @@
  * ledger.
  */
 import { supabase } from './supabase'
+import { refreshNavCounts } from './navCounts'
 import { addNote, type AccountNote } from './accountWorkspace'
 import { chargeItem, type ChargeResult } from './accountCharges'
 
@@ -435,6 +436,9 @@ export async function closeQuery(
     queryId: id,
     kind: 'query',
   })
+
+  // Closing one drops it off the badge; reassigning one moves it off mine and onto theirs.
+  refreshNavCounts()
   return toQuery(data)
 }
 
@@ -456,6 +460,9 @@ export async function markOutcomeDone(
     queryId: id,
     kind: 'query',
   })
+
+  // Closing one drops it off the badge; reassigning one moves it off mine and onto theirs.
+  refreshNavCounts()
   return toQuery(data)
 }
 

@@ -1775,3 +1775,47 @@ alter table public.mail_blocks enable row level security;
 drop policy if exists "mail_blocks_own" on public.mail_blocks;
 create policy "mail_blocks_own" on public.mail_blocks for all
   using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+
+-- ---------------------------------------------------------------------------
+-- nav_counts: the three numbers on the sidebar
+-- ---------------------------------------------------------------------------
+-- One round trip for all three. A sidebar that fired one query per badge would run four
+-- requests on every page change, for numbers nobody asked for.
+--
+-- Security invoker, and every clause is scoped by auth.uid(): the caller can only ever be
+-- counting their own rows, so this adds no read the caller did not already have through RLS.
+--
+-- Each count is something ONE PERSON CAN CLEAR TODAY. That rule is the whole design. A count
+-- of all open disputes, or of every task a person owns, sits at the same number for months,
+-- and a badge that never moves teaches people to stop reading the other two.
+create or replace function public.nav_counts()
+returns table (mail integer, tasks integer, disputes integer)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    -- Unread debtor mail waiting to be filed. Junk excluded: it is not work.
+    (select count(*)::integer from public.user_emails
+      where user_id = auth.uid()
+        and linked_account_id is null
+        and is_junk = false
+        and read_at is null),
+    -- Mine, still open, and due by the end of today. Not "all my tasks", which would be a
+    -- permanent number nobody could ever clear.
+    (select count(*)::integer from public.tasks
+      where owner_id = auth.uid()
+        and status not in ('Completed', 'Cancelled')
+        and due_date < date_trunc('day', now()) + interval '1 day'),
+    -- Disputes waiting on ME, not every dispute the firm has open. The difference between a
+    -- number somebody works and a number that sits at 20 forever.
+    -- Lowercase 'closed'. account_queries.status is one of open / with_client / answered /
+    -- closed, so "not closed" is the whole of the open book, not just stage 'open'.
+    (select count(*)::integer from public.account_queries
+      where owner_id = auth.uid()
+        and status <> 'closed');
+$$;
+
+grant execute on function public.nav_counts() to authenticated;
