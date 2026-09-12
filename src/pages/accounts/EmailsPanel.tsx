@@ -106,7 +106,7 @@ export function EmailsPanel({ emails, userId, canSend, onCompose, onReply, onRea
           onSelect={(e) => select(e)}
           emptyDetail="Pick a message on the left to read it."
           renderRow={(e) => (
-            <span className={`block px-4 py-3 ${e.direction === 'in' && !e.readAt ? 'bg-positive-50/40' : ''}`}>
+            <span className={`block px-4 py-2.5 ${e.direction === 'in' && !e.readAt ? 'bg-positive-50/40' : ''}`}>
               <EmailSummary email={e} tight />
             </span>
           )}
@@ -118,6 +118,11 @@ export function EmailsPanel({ emails, userId, canSend, onCompose, onReply, onRea
                   {e.direction === 'in' ? 'From' : 'To'} {e.debtorAddress}
                   {' · '}{relativeDayLabel(e.occurredAt)}
                   {e.sentByName && e.direction === 'out' && <> &middot; {e.sentByName}</>}
+                  {/* The fee lives here in this view: the narrow row drops it to stay one line
+                      per message, so the pane is where it gets said. */}
+                  {e.chargedExclVat !== null && (
+                    <> &middot; {e.chargedExclVat > 0 ? formatMoney(e.chargedExclVat) : 'no charge'}</>
+                  )}
                 </p>
               </div>
               <EmailBody email={e} canSend={canSend} onReply={() => onReply(e)} />

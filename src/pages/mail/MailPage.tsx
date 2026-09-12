@@ -293,7 +293,7 @@ export function MailPage() {
             onSelect={(m) => void toggleTo(m)}
             emptyDetail="Pick a message on the left to read it."
             renderRow={(m) => (
-              <span className={`block px-4 py-3 ${!m.readAt ? 'bg-positive-50/40' : ''}`}>
+              <span className={`block px-4 py-2.5 ${!m.readAt ? 'bg-positive-50/40' : ''}`}>
                 <MailSummary mail={m} tight />
               </span>
             )}
@@ -308,7 +308,15 @@ export function MailPage() {
                       {' · '}{relativeDayLabel(m.occurredAt)}
                     </p>
                   </div>
-                  {!m.linkedAccountId && (
+                  {m.linkedAccount ? (
+                    // Said here rather than on every row in the list — one place, where somebody
+                    // is actually looking at the message.
+                    <span className="shrink-0 text-xs text-[var(--c-green)] inline-flex items-center gap-1 pt-1">
+                      <Link2 size={12} />
+                      On {m.linkedAccount.debtorName ?? 'an account'}
+                      {m.linkedAccount.accountNumber && <> &middot; {m.linkedAccount.accountNumber}</>}
+                    </span>
+                  ) : (
                     <button onClick={() => setLinking(m)}
                       className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950">
                       <Link2 size={13} /> Link to account
@@ -334,6 +342,7 @@ export function MailPage() {
                 <MailRow key={m.id} mail={m}
                   chosen={chosen.has(m.id)}
                   expanded={open === m.id}
+                  showLinked={filter !== 'filed'}
                   body={bodies[m.id]}
                   loadingBody={reading === m.id}
                   bodyError={readError[m.id]}
@@ -405,7 +414,19 @@ function Empty({ filter, searching }: { filter: Exclude<Pane, 'blocked'>; search
  * Split out of the row so the reading pane can use the same block down its left-hand side. Two
  * identical-looking lists maintained separately is how they end up disagreeing.
  */
-function MailSummary({ mail, tight }: { mail: MailItem; tight?: boolean }) {
+function MailSummary({ mail, tight, showLinked }: {
+  mail: MailItem
+  /** The reading pane's narrow column: one line of preview, no address, no account line. */
+  tight?: boolean
+  /**
+   * Whether to say which account this is filed against.
+   *
+   * Off on the Filed tab, where every row carries it and it therefore distinguishes nothing —
+   * it was a line per row spent saying what the tab already said. On elsewhere, where it is the
+   * only thing telling filed mail from mail still waiting.
+   */
+  showLinked?: boolean
+}) {
   const unread = !mail.readAt
   return (
     <span className="block min-w-0">
@@ -428,11 +449,21 @@ function MailSummary({ mail, tight }: { mail: MailItem; tight?: boolean }) {
         {mail.fromName && !tight && <span className="text-slate-300"> &middot; {mail.fromAddress}</span>}
         {' · '}{relativeDayLabel(mail.occurredAt)}
       </span>
+      {/*
+        One line in the pane, two in the list. A four-line row is a row you scroll past rather
+        than scan.
+
+        No `block` class on the span, deliberately: line-clamp sets display:-webkit-box itself,
+        and Tailwind emits `.block` LATER in the stylesheet, so `block line-clamp-1` silently
+        loses the clamp and the row grows to three lines. Measured at 120px, 81px once fixed.
+      */}
       {mail.snippet && (
-        <span className="block text-[13px] text-slate-500 mt-1 line-clamp-2">{mail.snippet}</span>
+        <span className={`text-[13px] text-slate-500 mt-0.5 ${tight ? 'line-clamp-1' : 'line-clamp-2'}`}>
+          {mail.snippet}
+        </span>
       )}
-      {mail.linkedAccount && (
-        <span className="text-xs text-[var(--c-green)] mt-1.5 inline-flex items-center gap-1">
+      {showLinked && mail.linkedAccount && (
+        <span className="text-xs text-[var(--c-green)] mt-1 inline-flex items-center gap-1">
           <Link2 size={11} />
           On {mail.linkedAccount.debtorName ?? 'an account'}
           {mail.linkedAccount.accountNumber && <> &middot; {mail.linkedAccount.accountNumber}</>}
@@ -507,11 +538,14 @@ function MailBody({ mail, body, loadingBody, bodyError, onBlock }: {
 }
 
 function MailRow({
-  mail, chosen, expanded, body, loadingBody, bodyError, onToggle, onChoose, onLink, onBlock,
+  mail, chosen, expanded, showLinked, body, loadingBody, bodyError, onToggle, onChoose, onLink,
+  onBlock,
 }: {
   mail: MailItem
   chosen: boolean
   expanded: boolean
+  /** See MailSummary: off on the Filed tab, where it would be on every row. */
+  showLinked: boolean
   /** The full text, once fetched. Undefined until then. */
   body?: string
   loadingBody: boolean
@@ -535,9 +569,7 @@ function MailRow({
 
         <button onClick={onToggle} aria-expanded={expanded} className="min-w-0 flex-1 text-left">
           {/* Collapsed, the snippet is the preview. Open, the whole message replaces it below. */}
-          {expanded
-            ? <MailSummary mail={{ ...mail, snippet: null }} />
-            : <MailSummary mail={mail} />}
+          <MailSummary mail={expanded ? { ...mail, snippet: null } : mail} showLinked={showLinked} />
         </button>
 
         <div className="shrink-0 flex items-center gap-2 pt-0.5">
