@@ -45,20 +45,26 @@ export interface AccountContact {
 }
 
 /**
- * Every number on this account that an SMS could go to.
+ * Every number on this account you could reach the debtor on.
  *
  * Not one number, because a debtor is rarely one number: a mobile that stopped answering, a work
  * line, a daughter's phone somebody wrote down in March. The collector knows which of them the
- * person actually reads, and the app does not, so it offers the list rather than deciding.
+ * person actually answers, and the app does not, so it offers the list rather than deciding.
+ *
+ * One list for both SMS and calling. It was written for SMS and named for it, and then the Call
+ * button was found to be dialling the primary and nothing else -- the same complaint, about the
+ * same numbers. Two lists would eventually disagree about which numbers are usable, which is
+ * the kind of difference nobody notices until a collector swears they rang a number the app
+ * never offered.
  *
  * A landline is included and left to the collector's judgement. Some of them are cellular numbers
  * recorded under the wrong kind, and refusing to show them would hide a working number to enforce
  * a distinction the data does not reliably carry.
  *
  * Retired numbers are never offered: a number is retired precisely because using it is a mistake.
- * The primary comes first, since it is the one most messages should go to.
+ * The primary comes first, since it is the one most traffic should go to.
  */
-export function smsableNumbers(contacts: AccountContact[]): { label: string; value: string }[] {
+export function reachableNumbers(contacts: AccountContact[]): { label: string; value: string }[] {
   const phones = contacts.filter(
     (c) => !c.retiredAt && (c.kind === 'mobile' || c.kind === 'phone' || c.kind === 'work'),
   )

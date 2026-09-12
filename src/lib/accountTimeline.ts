@@ -133,6 +133,14 @@ export function buildTimeline(
        * a machine.
        */
       automated: n.source === 'system',
+      /*
+       * A note ABOUT something gets that something's icon.
+       *
+       * What a collector typed after a call is not a loose thought, it is the record of the
+       * call, and showing it as a plain sticky beside every other note lost that. The kind is
+       * set when the note is written, so nothing here has to read the words and guess.
+       */
+      actionCode: n.kind === 'call' ? 'phone_call' : null,
     })
   }
 

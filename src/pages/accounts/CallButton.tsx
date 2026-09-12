@@ -19,21 +19,28 @@ import type { ChargeResult } from '../../lib/accountCharges'
  * so today nothing on our side can tell a conversation from a ringing phone. The same shape as
  * the trace count, which asks the one question only the person who just did the work can answer.
  */
-export function CallButton({ accountId, number, actor, className, onDone }: {
+export function CallButton({ accountId, numbers, actor, className, onDone }: {
   accountId: string
-  number: string
+  /**
+   * Every number that could reach this debtor, primary first. More than one and the button asks
+   * which; exactly one and it just rings it.
+   */
+  numbers: { label: string; value: string }[]
   actor: { id: string | null; name: string | null }
   /** The action row's styling, so this matches the buttons beside it. */
   className: string
   onDone: () => Promise<void>
 }) {
+  const [choosing, setChoosing] = useState(false)
   const [asking, setAsking] = useState<string | null>(null)
   const [comment, setComment] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ChargeResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const rate = scheduleFor(new Date()).items.find((i) => i.id === '7')?.amount ?? 0
+  const schedule = scheduleFor(new Date())
+  const consultationRate = schedule.items.find((i) => i.id === '7')?.amount ?? 0
+  const callRate = schedule.items.find((i) => i.id === '2')?.amount ?? 0
 
   async function dialled(call: { from: string; to: string }) {
     setResult(null)
@@ -47,6 +54,7 @@ export function CallButton({ accountId, number, actor, className, onDone }: {
       setError(e instanceof Error ? e.message : String(e))
     }
     setComment('')
+    setChoosing(false)
     setAsking(call.to)
   }
 
@@ -55,8 +63,9 @@ export function CallButton({ accountId, number, actor, className, onDone }: {
     setBusy(true)
     setError(null)
     try {
-      if (yes) setResult(await recordConsultation({ accountId, number: asking, comment, actor }))
-      else await recordNoAnswer({ accountId, number: asking, comment, actor })
+      setResult(yes
+        ? await recordConsultation({ accountId, number: asking, comment, actor })
+        : await recordNoAnswer({ accountId, number: asking, comment, actor }))
       setAsking(null)
       setComment('')
       await onDone()
@@ -69,26 +78,61 @@ export function CallButton({ accountId, number, actor, className, onDone }: {
 
   return (
     <span className="inline-flex flex-col items-start">
-      <PhoneLink number={number} className={className} iconSize={14} onDialled={(c) => void dialled(c)}>
-        <Phone size={14} /> Call
-      </PhoneLink>
+      {/*
+        One number rings straight away; several ask first.
+
+        A debtor is rarely one number, and the button was dialling the primary with no way to
+        reach the others -- the firm's words, "it doesn't give me an option about who to call".
+        The chooser is a list of PhoneLinks rather than a picker plus a dial call of its own, so
+        every number goes out through exactly the same path, tel: fallback and all.
+      */}
+      {numbers.length <= 1 ? (
+        <PhoneLink number={numbers[0]?.value ?? ''} className={className} iconSize={14}
+          onDialled={(c) => void dialled(c)}>
+          <Phone size={14} /> Call
+        </PhoneLink>
+      ) : (
+        <button type="button" onClick={() => setChoosing(true)} className={className}
+          title={`Ring this debtor — ${numbers.length} numbers on file`}>
+          <Phone size={14} /> Call
+        </button>
+      )}
 
       {result && (
         <span className={`text-[11px] ${result.reason === 'charged' ? 'text-[var(--c-green)]' : 'text-slate-500'}`}>
           {result.reason === 'charged'
-            ? `Consultation charged R${result.exclVat.toFixed(2)} + VAT`
+            ? `Charged R${result.exclVat.toFixed(2)} + VAT`
             : result.reason === 'written-off'
               ? 'Recorded · no charge (account written off)'
               : 'Recorded · no charge (fee ceiling)'}
         </span>
       )}
 
+      {choosing && (
+        <Modal title="Which number?" onClose={() => setChoosing(false)} width={440}>
+          <p className="text-sm text-slate-500">
+            The primary is first. A number that has been retired is not offered at all.
+          </p>
+          <div className="mt-4 space-y-1.5">
+            {numbers.map((n) => (
+              <PhoneLink key={n.value} number={n.value} iconSize={14} onDialled={(c) => void dialled(c)}
+                className="w-full text-left text-sm px-3 py-2 rounded-lg border border-slate-200 hover:border-[#c9a052] hover:bg-gold-50">
+                <Phone size={14} className="inline mr-2 text-slate-400" />
+                <span className="font-medium text-slate-700">{n.value}</span>
+                <span className="text-slate-400"> &mdash; {n.label}</span>
+              </PhoneLink>
+            ))}
+          </div>
+        </Modal>
+      )}
+
       {asking && (
         <Modal title="Did they answer?" onClose={() => setAsking(null)} width={440}>
           <p className="text-sm text-slate-500">
             The call to <span className="font-medium text-slate-700">{asking}</span> is on the
-            timeline either way. A call the debtor answers is a consultation and goes on their
-            statement; a phone that rings out does not.
+            timeline either way. Either answer charges the debtor &mdash; a call they answered is
+            a consultation, a call that rang out is a phone call. They are different items and
+            never both.
           </p>
           {/*
             The one moment the answer exists, so it is also the moment to ask what was said.
@@ -104,7 +148,10 @@ export function CallButton({ accountId, number, actor, className, onDone }: {
           />
           {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
           <p className="text-xs text-slate-400 mt-3">
-            {rate > 0 && <>R{rate.toFixed(2)} plus VAT, under Annexure B item 7. </>}
+            {consultationRate > 0 && callRate > 0 && (
+              <>Answered R{consultationRate.toFixed(2)} (item 7), no answer R{callRate.toFixed(2)}
+                {' '}(item 2), both plus VAT. </>
+            )}
             Nothing is charged until you choose.
           </p>
           <div className="flex items-center justify-end gap-2 mt-5">

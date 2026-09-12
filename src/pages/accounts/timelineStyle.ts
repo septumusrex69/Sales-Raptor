@@ -82,7 +82,9 @@ const FALLBACK: TimelineStyle = { icon: ScrollText, ring: 'bg-slate-100', fg: 't
 export function styleFor(entry: TimelineEntry): TimelineStyle {
   if (entry.kind === 'payment') return entry.status === 'reversed' ? REVERSAL : PAYMENT
   if (entry.kind === 'promise') return PROMISE
-  if (entry.kind === 'note') return NOTE
+  // A note carrying an action code is a note ABOUT that action -- what was said on a call --
+  // and wears its icon. Everything else a person types is a plain note.
+  if (entry.kind === 'note') return (entry.actionCode ? CHANNEL[entry.actionCode] : undefined) ?? NOTE
   if (entry.kind === 'query') return QUERY
 
   const code = entry.actionCode ?? BY_DESCRIPTION.find(([re]) => re.test(entry.title))?.[1]

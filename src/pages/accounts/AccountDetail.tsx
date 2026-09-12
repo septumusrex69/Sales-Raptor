@@ -15,7 +15,7 @@ import { chargeMessage } from '../../lib/accountCharges'
 import { promiseProblem, recordPromise, PROMISE_ITEM_ID } from '../../lib/accountPromises'
 import {
   addNote, describeArrangement, fetchDocuments, fetchWorkspace, isOverdue,
-  keepInstalment, nextPromise, resolvePromise, saveMainComment, dialableNumber, smsableNumbers,
+  keepInstalment, nextPromise, resolvePromise, saveMainComment, dialableNumber, reachableNumbers,
   ARRANGEMENT_LABEL, WEEKDAYS,
   type AccountDocument, type Arrangement, type PromiseToPay, type Workspace,
 } from '../../lib/accountWorkspace'
@@ -189,7 +189,8 @@ export function AccountDetail() {
   const due = workspace ? nextPromise(workspace.promises) : undefined
   const emailContact = workspace?.contacts.find((c) => c.kind === 'email' && !c.retiredAt)
   const callContact = dialableNumber(workspace?.contacts ?? [])
-  const smsNumbers = smsableNumbers(workspace?.contacts ?? [])
+  // One list for both: whatever you could SMS, you could ring.
+  const smsNumbers = reachableNumbers(workspace?.contacts ?? [])
   // Who looks after this debtor's CLIENT — a different person from the pre-legal agent working
   // the debtor, and the one a query about the debt itself has to go to.
   const clientLiaison = users.find((u) => u.id === client?.accountOwnerId)
@@ -308,6 +309,7 @@ export function AccountDetail() {
 
       <ActionBar
         callNumber={callContact?.value}
+        callNumbers={smsNumbers}
         onEmail={emailContact ? () => setComposeTo(emailContact.value) : undefined}
         onNote={() => { setTab('Overview'); setNoteOpen(true); setTimeout(() => noteRef.current?.focus(), 0) }}
         onPromise={() => { setTab('Overview'); setPromiseOpen(true) }}
@@ -475,9 +477,11 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, onEmail, onNote, onPromise, onDispute, onSms, accountId, actor, onTraced }: {
-  /** The account's own number. Absent only when there is no phone number on file. */
+function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, accountId, actor, onTraced }: {
+  /** The number SMS goes to, and what the row shows when there is no number at all. */
   callNumber?: string
+  /** Every number that could reach this debtor, primary first. */
+  callNumbers: { label: string; value: string }[]
   onEmail?: () => void
   onNote: () => void
   onPromise: () => void
@@ -503,7 +507,7 @@ function ActionBar({ callNumber, onEmail, onNote, onPromise, onDispute, onSms, a
       */}
       {callNumber
         ? (
-          <CallButton accountId={accountId} number={callNumber} actor={actor}
+          <CallButton accountId={accountId} numbers={callNumbers} actor={actor}
             className={`${ACTION_BASE} ${ACTION_ENABLED}`} onDone={onTraced} />
         )
         : <Action icon={Phone} label="Call" title="No phone number on this account yet" />}

@@ -10,7 +10,8 @@
 import { chargeItem, type ChargeResult } from './accountCharges.ts'
 import { addNote } from './accountWorkspace.ts'
 import {
-  consultationNote, dialledNote, noAnswerNote, CONSULTATION_DESCRIPTION, CONSULTATION_ITEM_ID,
+  consultationNote, dialledNote, noAnswerNote,
+  ATTEMPT_DESCRIPTION, ATTEMPT_ITEM_ID, CONSULTATION_DESCRIPTION, CONSULTATION_ITEM_ID,
 } from './callRules.ts'
 
 export * from './callRules.ts'
@@ -88,24 +89,44 @@ export async function recordConsultation(input: {
   return charge
 }
 
-/** The collector's own words about a call, written only if there are any. */
+/**
+ * The collector's own words about a call, written only if there are any.
+ *
+ * `kind: 'call'` is the whole point of it being its own note. Without it the timeline showed a
+ * collector's account of a phone call as a plain yellow sticky beside every other note, and the
+ * firm said so: "it says that it's a note that's made from note, not from a telephone call".
+ * The kind gives it the phone icon and the call's colour, so the history reads as what happened.
+ */
 async function addComment(accountId: string, comment: string | undefined, actor: Actor): Promise<void> {
   const body = comment?.trim()
   if (!body) return
-  await addNote({ accountId, body, authorName: actor.name, createdBy: actor.id })
+  await addNote({ accountId, body, kind: 'call', authorName: actor.name, createdBy: actor.id })
 }
 
-/** Nobody picked up. Recorded, never charged. */
+/**
+ * Nobody picked up: a phone call, Annexure B item 2.
+ *
+ * Not a consultation, which is exactly what item 2 is for -- "necessary phone call, which is not
+ * a consultation". A call that rings out is still work done and still chargeable; it was simply
+ * never wired up, which is what the firm noticed.
+ */
 export async function recordNoAnswer(input: {
   accountId: string
   number: string
   /** Rare but real: "rang out, someone else picked up and said he moved". */
   comment?: string
   actor: Actor
-}): Promise<void> {
+}): Promise<ChargeResult> {
+  const charge = await chargeItem({
+    accountId: input.accountId,
+    itemId: ATTEMPT_ITEM_ID,
+    actionCode: 'phone_call',
+    description: ATTEMPT_DESCRIPTION,
+    createdBy: input.actor.id,
+  })
   await addNote({
     accountId: input.accountId,
-    body: noAnswerNote(input.number),
+    body: noAnswerNote(input.number, charge),
     // Raptor's words, not a person's: hidden when the timeline is set to show only
     // what people wrote. See TimelineEntry.automated.
     source: 'system',
@@ -113,4 +134,5 @@ export async function recordNoAnswer(input: {
     createdBy: input.actor.id,
   })
   await addComment(input.accountId, input.comment, input.actor)
+  return charge
 }
