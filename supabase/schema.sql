@@ -1646,3 +1646,89 @@ create policy "account_emails_insert" on public.account_emails for insert with c
 drop policy if exists "account_emails_mark_read" on public.account_emails;
 create policy "account_emails_mark_read" on public.account_emails for update
   using (received_by = auth.uid()) with check (received_by = auth.uid());
+
+-- ---------- An agent's mailbox, inside Raptor ----------
+--
+-- Every message the sync reads goes here, whether or not it could be matched to anything. That
+-- is the point: an email from a debtor we cannot place used to be skipped and lost, and at
+-- 50 agents x 50-100 messages a day nobody was ever going to find it by browsing accounts.
+--
+-- METADATA ONLY. No bodies. A short snippet is enough to recognise a message; the full text
+-- stays in the mailbox and is fetched on demand, the same principle already used for
+-- attachments (see fetchAttachment in api/_lib/emailSync.ts). At 3 750 messages a day with
+-- 30-day retention this table holds ~112 000 rows and ~54 MB, which fits the free tier. Storing
+-- bodies instead would be ~4 GB a year and climbing.
+create table if not exists public.user_emails (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+
+  -- Where to find the message again, for fetching its body or an attachment on demand.
+  folder text not null,
+  uid bigint not null,
+  -- The sync always sets this, falling back to a synthetic "user:folder:uid" when a message
+  -- carries no Message-ID of its own.
+  message_id text,
+
+  from_address text not null,
+  from_name text,
+  subject text,
+  -- The first couple of hundred characters. Enough to tell a debtor's reply from a newsletter.
+  snippet text,
+  attachment_names text[] not null default '{}',
+  -- Arrived in the Junk folder. Kept rather than dropped so a debtor's email that a mail server
+  -- wrongly binned can still be rescued, but hidden by default in the UI.
+  is_junk boolean not null default false,
+
+  occurred_at timestamptz not null,
+  read_at timestamptz,
+
+  -- Filed against a debtor account, either by the sync matching it or by an agent linking it.
+  -- Once set, the message is part of that account's record and may no longer be deleted.
+  linked_account_id uuid references public.debtor_accounts (id) on delete set null,
+  linked_at timestamptz,
+  linked_by uuid references public.profiles (id) on delete set null,
+
+  created_at timestamptz not null default now()
+);
+
+-- One message per mailbox, never twice. Per USER rather than globally: a message addressed to
+-- two agents legitimately appears in both their mailboxes.
+--
+-- Not partial, deliberately. A partial unique index cannot be inferred by "on conflict", which
+-- is what PostgREST emits for an upsert -- Postgres raises 42P10 and the sync dies on the first
+-- message it re-reads. That exact mistake was made and fixed on account_emails today.
+create unique index if not exists user_emails_message_idx
+  on public.user_emails (user_id, message_id);
+
+-- The mailbox list.
+create index if not exists user_emails_inbox_idx
+  on public.user_emails (user_id, occurred_at desc);
+-- Unread count, and the "needs filing" view.
+create index if not exists user_emails_unlinked_idx
+  on public.user_emails (user_id, occurred_at desc)
+  where linked_account_id is null;
+-- What the 30-day prune walks: unlinked mail only. Linked mail is a record and is never pruned.
+create index if not exists user_emails_prune_idx
+  on public.user_emails (occurred_at)
+  where linked_account_id is null;
+
+alter table public.user_emails enable row level security;
+
+-- Your mail is yours. Not scoped by role: an administrator has no more business reading a
+-- colleague's inbox than a collector does, and the monitoring the firm wants is answerable from
+-- counts rather than contents. The sync writes with the service key, which RLS does not
+-- constrain, so there is no insert policy for browsers at all.
+drop policy if exists "user_emails_own_select" on public.user_emails;
+create policy "user_emails_own_select" on public.user_emails for select
+  using (user_id = auth.uid());
+-- Marking read, and linking to an account.
+drop policy if exists "user_emails_own_update" on public.user_emails;
+create policy "user_emails_own_update" on public.user_emails for update
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+-- Throwing away spam. Only ever your own, and only while it is unlinked -- once a message is on
+-- an account it is part of that account's history and the fee raised against it. Both halves
+-- verified against staging: another agent's delete and a delete of linked mail each affect
+-- zero rows.
+drop policy if exists "user_emails_own_delete" on public.user_emails;
+create policy "user_emails_own_delete" on public.user_emails for delete
+  using (user_id = auth.uid() and linked_account_id is null);

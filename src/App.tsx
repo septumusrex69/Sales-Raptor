@@ -21,6 +21,7 @@ import { CompanyDetail } from './pages/companies/CompanyDetail'
 import { AccountsList } from './pages/accounts/AccountsList'
 import { AccountDetail } from './pages/accounts/AccountDetail'
 import { DisputesBoard } from './pages/accounts/DisputesBoard'
+import { MailPage } from './pages/mail/MailPage'
 import { TasksPage } from './pages/tasks/TasksPage'
 import { CalendarPage } from './pages/calendar/CalendarPage'
 import { ActivitiesPage } from './pages/activities/ActivitiesPage'
@@ -66,6 +67,7 @@ function App() {
                   on the book they are meant to be working. */}
               <Route path="/companies" element={<RequireClientAccess><CompaniesList /></RequireClientAccess>} handle={{ title: 'Clients' }} />
               <Route path="/companies/:id" element={<RequireClientAccess><CompanyDetail /></RequireClientAccess>} handle={{ title: 'Client Details' }} />
+              <Route path="/mail" element={<MailPage />} handle={{ title: 'Mail' }} />
               <Route path="/accounts" element={<AccountsList />} handle={{ title: 'Accounts' }} />
               <Route path="/accounts/:id" element={<AccountDetail />} handle={{ title: 'Account' }} />
               <Route path="/queries" element={<DisputesBoard />} handle={{ title: 'Disputes' }} />

@@ -15,6 +15,7 @@ import {
   Settings,
   ChevronDown,
   LogOut,
+  Inbox,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../store/AuthContext'
@@ -31,6 +32,9 @@ const NAV = [
   // The collections book: the debtor accounts a client hands over, which is a different thing
   // from the client record and much larger than it.
   { to: '/accounts', label: 'Accounts', icon: BookOpen },
+  // Your own mail, with the debtor emails that could not be matched to an account waiting to be
+  // filed. Sits beside Accounts because filing one is an account action.
+  { to: '/mail', label: 'Mail', icon: Inbox },
   { to: '/queries', label: 'Disputes', icon: MessageCircleQuestion },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   { to: '/calendar', label: 'Calendar', icon: Calendar },
