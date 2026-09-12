@@ -52,8 +52,14 @@ export const CORRESPONDENCE_ITEM_ID = '6'
 /** Its own action code, so the statement and the timeline can tell the two directions apart. */
 export const CORRESPONDENCE_ACTION_CODE = 'email_in'
 
-/** What the debtor reads on the statement. */
-export const CORRESPONDENCE_DESCRIPTION = 'Correspondence received'
+/**
+ * What the debtor reads on the statement.
+ *
+ * Just "Correspondence". The direction is already obvious from a debtor's own statement — they
+ * know which letters they sent — and "Correspondence received" beside "Email" read like two
+ * different kinds of thing rather than the two halves of one exchange.
+ */
+export const CORRESPONDENCE_DESCRIPTION = 'Correspondence'
 
 /** Note kinds, which is how the timeline knows to draw an envelope rather than a sticky note. */
 export const EMAIL_OUT_KIND = 'email_out'
