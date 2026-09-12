@@ -25,6 +25,10 @@ import { canViewClients } from '../../lib/permissions'
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
+  // Second, under Dashboard, at the firm's request. It is the first thing an agent checks:
+  // debtor mail that could not be matched to an account is waiting here to be filed, and
+  // nothing else in Raptor will tell them it arrived.
+  { to: '/mail', label: 'Mail', icon: Inbox },
   { to: '/leads', label: 'Leads', icon: Target },
   { to: '/deals', label: 'Deals', icon: Handshake },
   { to: '/contacts', label: 'Contacts', icon: Users },
@@ -32,9 +36,6 @@ const NAV = [
   // The collections book: the debtor accounts a client hands over, which is a different thing
   // from the client record and much larger than it.
   { to: '/accounts', label: 'Accounts', icon: BookOpen },
-  // Your own mail, with the debtor emails that could not be matched to an account waiting to be
-  // filed. Sits beside Accounts because filing one is an account action.
-  { to: '/mail', label: 'Mail', icon: Inbox },
   { to: '/queries', label: 'Disputes', icon: MessageCircleQuestion },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   { to: '/calendar', label: 'Calendar', icon: Calendar },

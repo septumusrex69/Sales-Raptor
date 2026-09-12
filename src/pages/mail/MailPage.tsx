@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  AlertTriangle, Check, Inbox, Link2, Loader2, Paperclip, RefreshCw, Search, ShieldAlert,
-  Trash2,
+  AlertTriangle, Check, ChevronDown, ChevronRight, Inbox, Link2, Loader2, Paperclip, RefreshCw,
+  Search, ShieldAlert, Trash2,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal } from '../../components/ui/Modal'
@@ -10,7 +10,7 @@ import { relativeDayLabel } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import {
-  deleteMail, fetchMail, linkMailToAccount, markMailRead,
+  deleteMail, fetchMail, fetchMailBody, linkMailToAccount, markMailRead,
   type MailFilter, type MailItem,
 } from '../../lib/userMail'
 
@@ -56,6 +56,17 @@ export function MailPage() {
   const [chosen, setChosen] = useState<Set<string>>(new Set())
   const [linking, setLinking] = useState<MailItem | null>(null)
   const [status, setStatus] = useState<string | null>(null)
+  const [open, setOpen] = useState<string | null>(null)
+  /*
+   * Bodies, once fetched, kept for as long as the page is up.
+   *
+   * Each one is an IMAP round trip, so collapsing a message and opening it again should not pay
+   * for it twice. Not cached beyond the page: it was never ours to store, which is the whole
+   * reason it is fetched.
+   */
+  const [bodies, setBodies] = useState<Record<string, string>>({})
+  const [reading, setReading] = useState<string | null>(null)
+  const [readError, setReadError] = useState<Record<string, string>>({})
 
   const load = useCallback(async (at = 0) => {
     if (!currentUser) return
@@ -106,6 +117,42 @@ export function MailPage() {
   }, [syncMine])
 
   const allChosen = items.length > 0 && chosen.size === items.length
+
+  /**
+   * Open a message and read it.
+   *
+   * Raptor holds a snippet, so opening one fetches the rest from the mailbox. Opening is also
+   * what marks it read — the same rule as the account page, and for the same reason: a list where
+   * everything is bold tells you nothing about what still needs attention.
+   */
+  async function toggle(mail: MailItem) {
+    if (open === mail.id) { setOpen(null); return }
+    setOpen(mail.id)
+
+    if (!mail.readAt) {
+      // Optimistic: the row un-bolds at once, and the write follows. A failed mark-read is not
+      // worth an error over — it will still be there to open again.
+      setItems((list) => list.map((m) => (
+        m.id === mail.id ? { ...m, readAt: new Date().toISOString() } : m
+      )))
+      void markMailRead([mail.id]).catch(() => {})
+    }
+
+    if (bodies[mail.id] !== undefined) return
+    const token = session?.access_token
+    if (!token) return
+    setReading(mail.id)
+    setReadError((e) => { const next = { ...e }; delete next[mail.id]; return next })
+    try {
+      const text = await fetchMailBody(mail.id, token)
+      setBodies((b) => ({ ...b, [mail.id]: text }))
+    } catch (e) {
+      // The snippet stays on screen, so this explains the gap rather than leaving it blank.
+      setReadError((prev) => ({ ...prev, [mail.id]: e instanceof Error ? e.message : String(e) }))
+    } finally {
+      setReading(null)
+    }
+  }
 
   async function bin() {
     const ids = [...chosen]
@@ -208,6 +255,11 @@ export function MailPage() {
               {items.map((m) => (
                 <MailRow key={m.id} mail={m}
                   chosen={chosen.has(m.id)}
+                  expanded={open === m.id}
+                  body={bodies[m.id]}
+                  loadingBody={reading === m.id}
+                  bodyError={readError[m.id]}
+                  onToggle={() => void toggle(m)}
                   onChoose={(on) => setChosen((s) => {
                     const next = new Set(s)
                     if (on) next.add(m.id)
@@ -259,54 +311,122 @@ function Empty({ filter, searching }: { filter: MailFilter; searching: boolean }
   )
 }
 
-function MailRow({ mail, chosen, onChoose, onLink }: {
+function MailRow({
+  mail, chosen, expanded, body, loadingBody, bodyError, onToggle, onChoose, onLink,
+}: {
   mail: MailItem
   chosen: boolean
+  expanded: boolean
+  /** The full text, once fetched. Undefined until then. */
+  body?: string
+  loadingBody: boolean
+  bodyError?: string
+  onToggle: () => void
   onChoose: (on: boolean) => void
   onLink: () => void
 }) {
   const unread = !mail.readAt
   return (
-    <li className={`px-5 py-3 flex items-start gap-3 ${unread ? 'bg-positive-50/40' : ''}`}>
-      <input type="checkbox" checked={chosen} onChange={(e) => onChoose(e.target.checked)}
-        aria-label={`Select the email from ${mail.fromAddress}`} className="mt-1.5 shrink-0" />
+    <li className={unread ? 'bg-positive-50/40' : undefined}>
+      <div className="px-5 py-3 flex items-start gap-3">
+        {/*
+          The checkbox sits OUTSIDE the button that opens the message. Nesting one inside the
+          other means ticking a row to delete it also opens and reads it, which is the opposite
+          of what somebody clearing spam wants.
+        */}
+        <input type="checkbox" checked={chosen} onChange={(e) => onChoose(e.target.checked)}
+          aria-label={`Select the email from ${mail.fromAddress}`} className="mt-1.5 shrink-0" />
 
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          {unread && <span className="w-1.5 h-1.5 rounded-full bg-positive shrink-0 self-center" />}
-          <span className={`text-sm truncate ${unread ? 'font-semibold text-navy-950' : 'font-medium text-slate-800'}`}>
-            {mail.subject || '(no subject)'}
+        <button onClick={onToggle} aria-expanded={expanded}
+          className="min-w-0 flex-1 text-left">
+          <span className="flex items-baseline gap-2">
+            {unread && <span className="w-1.5 h-1.5 rounded-full bg-positive shrink-0 self-center" />}
+            <span className={`text-sm truncate ${unread ? 'font-semibold text-navy-950' : 'font-medium text-slate-800'}`}>
+              {mail.subject || '(no subject)'}
+            </span>
+            {mail.attachmentNames.length > 0 && <Paperclip size={12} className="shrink-0 text-slate-400" />}
+            {mail.isJunk && (
+              <span className="shrink-0 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
+                <ShieldAlert size={10} /> Junk
+              </span>
+            )}
           </span>
-          {mail.attachmentNames.length > 0 && <Paperclip size={12} className="shrink-0 text-slate-400" />}
-          {mail.isJunk && (
-            <span className="shrink-0 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
-              <ShieldAlert size={10} /> Junk
+          <span className="block text-xs text-slate-400 mt-0.5 truncate">
+            {mail.fromName || mail.fromAddress}
+            {mail.fromName && <span className="text-slate-300"> &middot; {mail.fromAddress}</span>}
+            {' · '}{relativeDayLabel(mail.occurredAt)}
+          </span>
+          {/* Collapsed, the snippet is the preview. Open, the whole message replaces it below. */}
+          {!expanded && mail.snippet && (
+            <span className="block text-[13px] text-slate-500 mt-1 line-clamp-2">{mail.snippet}</span>
+          )}
+          {mail.linkedAccount && (
+            <span className="text-xs text-[var(--c-green)] mt-1.5 inline-flex items-center gap-1">
+              <Link2 size={11} />
+              On {mail.linkedAccount.debtorName ?? 'an account'}
+              {mail.linkedAccount.accountNumber && <> &middot; {mail.linkedAccount.accountNumber}</>}
             </span>
           )}
-        </div>
-        <p className="text-xs text-slate-400 mt-0.5 truncate">
-          {mail.fromName || mail.fromAddress}
-          {mail.fromName && <span className="text-slate-300"> &middot; {mail.fromAddress}</span>}
-          {' · '}{relativeDayLabel(mail.occurredAt)}
-        </p>
-        {mail.snippet && <p className="text-[13px] text-slate-500 mt-1 line-clamp-2">{mail.snippet}</p>}
+        </button>
 
-        {mail.linkedAccount && (
-          <p className="text-xs text-[var(--c-green)] mt-1.5 inline-flex items-center gap-1">
-            <Link2 size={11} />
-            On {mail.linkedAccount.debtorName ?? 'an account'}
-            {mail.linkedAccount.accountNumber && <> &middot; {mail.linkedAccount.accountNumber}</>}
-          </p>
-        )}
+        <div className="shrink-0 flex items-center gap-2 pt-0.5">
+          {/* Linked mail offers nothing: it is on an account, it raised a fee, and it is not
+              anybody's to re-file or delete. The database refuses both as well. */}
+          {!mail.linkedAccountId && (
+            <button onClick={onLink}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950">
+              <Link2 size={13} /> Link to account
+            </button>
+          )}
+          <button onClick={onToggle} aria-label={expanded ? 'Close this email' : 'Read this email'}
+            className="text-slate-400 hover:text-slate-600">
+            {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          </button>
+        </div>
       </div>
 
-      {/* Linked mail offers nothing: it is on an account, it raised a fee, and it is not
-          anybody's to re-file or delete. The database refuses both as well. */}
-      {!mail.linkedAccountId && (
-        <button onClick={onLink}
-          className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950">
-          <Link2 size={13} /> Link to account
-        </button>
+      {expanded && (
+        <div className="px-5 pb-4 pl-[2.9rem]">
+          {loadingBody && (
+            <p className="text-[13px] text-slate-400 inline-flex items-center gap-1.5">
+              <Loader2 size={13} className="animate-spin" /> Fetching the message from your mailbox&hellip;
+            </p>
+          )}
+
+          {!loadingBody && body !== undefined && (
+            /*
+             * The message as it was written. `whitespace-pre-wrap` because an email's own line
+             * breaks carry meaning — collapsing them turns a numbered arrangement into a
+             * paragraph. `break-words` because a pasted URL would otherwise push the page wide.
+             *
+             * Rendered as TEXT, never as HTML: this is mail from outside the building, and
+             * putting a stranger's markup into the page is not worth faithful formatting.
+             */
+            <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
+              {body.trim() || <span className="text-slate-400">This message has no text in it.</span>}
+            </p>
+          )}
+
+          {!loadingBody && bodyError && (
+            <>
+              {/* Fall back to what Raptor holds rather than showing nothing. */}
+              {mail.snippet && (
+                <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">{mail.snippet}</p>
+              )}
+              <p className="text-xs text-gold-600 mt-2">
+                {bodyError} Showing the first {mail.snippet?.length ?? 0} characters Raptor saved.
+              </p>
+            </>
+          )}
+
+          {mail.attachmentNames.length > 0 && (
+            <p className="text-xs text-slate-400 mt-3">
+              {/* Names only. The files stay in the mailbox — see fetchAttachment. */}
+              <Paperclip size={11} className="inline mr-1" />
+              {mail.attachmentNames.join(', ')}
+            </p>
+          )}
+        </div>
       )}
     </li>
   )

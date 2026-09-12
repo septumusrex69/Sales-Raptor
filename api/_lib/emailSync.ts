@@ -302,6 +302,99 @@ async function fileAccountEmail(
   return true
 }
 
+/**
+ * The full text of one message, fetched from the mailbox on demand.
+ *
+ * The mailbox tables hold a 240-character snippet and nothing more — see the note on
+ * user_emails about why storing 1.37 million bodies a year is not an option. This is how a
+ * person reads the whole thing anyway: the mailbox is the archive and Raptor reaches into it,
+ * exactly as fetchAttachment already does for files.
+ *
+ * Deliberately NOT sharing fetchAttachment's folder walk, though they look alike. The two differ
+ * where it matters: an attachment fetch keeps hunting through other folders when the named file
+ * is not in the copy it found, because a message genuinely moves and copies differ. A body fetch
+ * is done the moment it has the message. Merging them would mean a callback deciding "found, or
+ * keep looking", and getting that wrong breaks attachment downloads — which work — to tidy up
+ * twenty lines.
+ */
+export async function fetchMessageBody(
+  conn: { email: string; imap_host: string; imap_port: number; encrypted_password: string },
+  location: { folder?: string | null; uid?: number | null; messageId?: string | null },
+): Promise<{ text: string } | null> {
+  const password = decrypt(conn.encrypted_password)
+  const client = new ImapFlow({
+    host: conn.imap_host,
+    port: conn.imap_port,
+    secure: conn.imap_port === 993,
+    auth: { user: conn.email, pass: password },
+    logger: false,
+  })
+  await client.connect()
+  try {
+    const candidateFolders = location.folder ? [location.folder] : []
+    if (location.messageId) {
+      // Only worth listing mailboxes if we may need to hunt for a moved message.
+      const mailboxes = await client.list()
+      for (const box of mailboxes) if (!candidateFolders.includes(box.path)) candidateFolders.push(box.path)
+    }
+
+    for (const folder of candidateFolders) {
+      const lock = await client.getMailboxLock(folder).catch(() => null)
+      if (!lock) continue
+      try {
+        let uid = folder === location.folder ? location.uid ?? null : null
+        if (uid === null && location.messageId) {
+          const found = await client.search({ header: { 'message-id': location.messageId } }, { uid: true })
+          uid = found === false || found.length === 0 ? null : found[found.length - 1]
+        }
+        if (uid === null) continue
+
+        const msg = await client.fetchOne(String(uid), { source: true }, { uid: true })
+        if (!msg || !msg.source) continue
+        const parsed = await simpleParser(msg.source)
+        // A message found by UID alone could be a different message entirely if the original was
+        // deleted and the UID reused, so confirm identity when we can.
+        if (location.messageId && parsed.messageId && parsed.messageId !== location.messageId) continue
+
+        return { text: plainText(parsed.text, parsed.html) }
+      } finally {
+        lock.release()
+      }
+    }
+    return null
+  } finally {
+    await client.logout().catch(() => {})
+  }
+}
+
+/**
+ * Readable text for a message, whatever parts it carries.
+ *
+ * Most mail has a plain-text alternative and that is used as-is. Marketing mail and a good deal
+ * of Outlook often does not, so the HTML is reduced rather than shown as tags: scripts and
+ * styles dropped entirely, block boundaries turned into line breaks, entities decoded. Crude on
+ * purpose — the job is "can a collector read what the debtor said", not faithful rendering, and
+ * putting a debtor's HTML into the page would mean sanitising someone else's markup.
+ */
+function plainText(text: string | undefined, html: string | false | undefined): string {
+  if (text && text.trim()) return text
+  if (!html) return ''
+  return html
+    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|tr|h[1-6]|li)>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 async function findMatch(admin: SupabaseClient, fromAddress: string) {
   const email = fromAddress.toLowerCase()
   const { data: contact } = await admin.from('contacts').select('id, company_id, owner_id').ilike('email', email).limit(1).maybeSingle()
