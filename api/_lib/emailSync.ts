@@ -57,6 +57,83 @@ function realAttachmentNames(
     .slice(0, MAX_ATTACHMENT_NAMES)
 }
 
+/** How much of a body is worth keeping to recognise a message by. The rest stays in the mailbox. */
+const SNIPPET_LENGTH = 240
+
+/**
+ * Put the message in the agent's own mailbox, whatever else happens to it.
+ *
+ * This runs for EVERY message, before any attempt to match it. It is what closes the hole the
+ * firm asked about: mail that matches no account and no CRM record used to be skipped with a log
+ * line and lost, and at 50 agents x 50-100 messages a day nobody was ever going to find it by
+ * browsing 100 000 accounts.
+ *
+ * Metadata and a snippet only. No body — see the note on the table.
+ *
+ * Returns the row id so a match can mark it linked, or null when it was already there (a
+ * resynced mailbox) or could not be written. Never throws: a mailbox row is a convenience, and
+ * losing one must not stop the message being filed against an account or a deal.
+ */
+async function fileUserEmail(
+  admin: SupabaseClient,
+  userId: string,
+  message: {
+    folder: string
+    uid: number
+    messageId: string
+    fromAddress: string
+    fromName: string | null
+    subject: string
+    body: string
+    attachmentNames: string[]
+    isJunk: boolean
+    at: string
+  },
+): Promise<string | null> {
+  const { data, error } = await admin
+    .from('user_emails')
+    .upsert(
+      {
+        user_id: userId,
+        folder: message.folder,
+        uid: message.uid,
+        message_id: message.messageId,
+        from_address: message.fromAddress,
+        from_name: message.fromName,
+        subject: message.subject,
+        snippet: message.body.replace(/\s+/g, ' ').trim().slice(0, SNIPPET_LENGTH) || null,
+        attachment_names: message.attachmentNames,
+        is_junk: message.isJunk,
+        occurred_at: message.at,
+      },
+      { onConflict: 'user_id,message_id', ignoreDuplicates: true },
+    )
+    .select('id')
+  if (error) {
+    console.error(`[emailSync] mailbox row failed for ${message.messageId}: ${error.message}`)
+    return null
+  }
+  return data?.[0]?.id ?? null
+}
+
+/**
+ * Mark a mailbox row as filed against an account.
+ *
+ * Set by the sync when it matched the message itself, so the Mail page can show it as already
+ * dealt with and — importantly — will not offer to link it a second time. Linking is what raises
+ * the R13 by hand, so a row that is already linked is a row that cannot be charged twice.
+ */
+async function markUserEmailLinked(
+  admin: SupabaseClient,
+  rowId: string,
+  accountId: string,
+): Promise<void> {
+  await admin.from('user_emails')
+    .update({ linked_account_id: accountId, linked_at: new Date().toISOString() })
+    .eq('id', rowId)
+    .is('linked_account_id', null)
+}
+
 /**
  * Does this message belong to a DEBTOR account rather than to the CRM?
  *
@@ -400,6 +477,26 @@ async function syncMailbox(
        * is walked newest-first so a long thread resolves to its most recent turn.
        */
       /*
+       * The agent's own mailbox first, unconditionally.
+       *
+       * Written before any matching is attempted, so a message that matches nothing at all still
+       * exists somewhere a person can see it. Everything below only decides what ELSE happens to
+       * it.
+       */
+      const mailboxRowId = await fileUserEmail(admin, conn.user_id, {
+        folder: path,
+        uid: msg.uid,
+        messageId: parsed.messageId ?? `${conn.user_id}:${path}:${uid}`,
+        fromAddress: normaliseAddress(fromAddress) ?? fromAddress,
+        fromName: parsed.from?.text ?? null,
+        subject: parsed.subject || '(no subject)',
+        body: parsed.text || '',
+        attachmentNames: realAttachmentNames(parsed.attachments),
+        isJunk,
+        at: (parsed.date ?? new Date()).toISOString(),
+      })
+
+      /*
        * A debtor's reply is checked for first, and it leaves by a different door.
        *
        * Debtor correspondence does not belong in `activities` — that table hangs off contacts,
@@ -431,6 +528,9 @@ async function syncMailbox(
           `[emailSync] ${path} UID ${uid}: debtor account ${accountMatch.accountId} via ${accountMatch.via}` +
           `${filedOnAccount ? ', filed' : ', already filed'}`,
         )
+        // The mailbox row says "already on an account", which is also what stops the Mail page
+        // offering to link it again and charge a second R13.
+        if (mailboxRowId) await markUserEmailLinked(admin, mailboxRowId, accountMatch.accountId)
         // No notification. The bell is for things the system decided to tell you; an unread
         // email is a person waiting on a reply, and MessagesMenu says why the two are kept
         // apart -- mix them and the number beside the bell stops meaning anything. A debtor's
