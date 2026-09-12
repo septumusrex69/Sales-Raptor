@@ -10,7 +10,11 @@
  * The database is a fake precisely so the SEQUENCE is visible. check-charges.mjs already covers
  * the Annexure B arithmetic; what it cannot see is whether the engine asks the right questions.
  *
- * Run: node --experimental-strip-types scripts/qa/check-charge-engine.mjs
+ * Run: node --experimental-strip-types --import ./scripts/qa/tsresolve.mjs \
+ *        scripts/qa/check-charge-engine.mjs
+ *
+ * The --import is not optional. chargeEngine.ts imports with `.js` specifiers because Vercel
+ * needs them; tsresolve.mjs is what lets Node follow those to the `.ts` sources. See its header.
  */
 import { chargeItemWith } from '../../src/lib/chargeEngine.ts'
 import { ENFORCE_ITEM_TOTALS } from '../../src/lib/annexureB.ts'

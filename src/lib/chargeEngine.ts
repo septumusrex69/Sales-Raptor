@@ -29,11 +29,25 @@
  * whether or not it earned anything, and an account that shows no trace of the work is an account
  * nobody can prove was worked.
  */
-import { isWrittenOff } from './accountStatus.ts'
+/*
+ * `.js`, not `.ts`, and this is load-bearing.
+ *
+ * Vercel does not bundle an API route -- it transpiles each file and ships them, so Node resolves
+ * these specifiers at runtime against the EMITTED files. A `./accountStatus.ts` specifier survives
+ * into the output and points at a file that no longer exists, and every /api/buzzbox/* route dies
+ * with ERR_MODULE_NOT_FOUND. It did, on live, for eleven minutes.
+ *
+ * `.js` is the specifier TypeScript expects for that emit, and Vite resolves it back to the `.ts`
+ * source for the browser build. So it works in both places, which is the whole point of this file.
+ *
+ * The cost: `node --experimental-strip-types` cannot resolve `.js` to a `.ts` file on disk, so the
+ * QA script for this module runs with scripts/qa/tsresolve.mjs, which teaches it to.
+ */
+import { isWrittenOff } from './accountStatus.js'
 import {
   itemAmountFor, itemTotalRemaining, monthlyLimit, monthlyRoom, recoverableFee, roundToCents,
   scheduleFor,
-} from './annexureB.ts'
+} from './annexureB.js'
 
 export interface ChargeResult {
   /** Excluding VAT. Zero where a cap left no room. */
