@@ -136,6 +136,8 @@ async function fileAccountEmail(
     folder: string
     uid: number
     at: string
+    /** The mailbox this arrived in: whose Messages count it belongs to, and its address. */
+    mailbox: { userId: string; address: string }
   },
 ): Promise<boolean> {
   const { data: inserted, error } = await admin
@@ -147,6 +149,10 @@ async function fileAccountEmail(
         debtor_address: normaliseAddress(message.fromAddress) ?? message.fromAddress,
         subject: message.subject,
         body: message.body,
+        // Which of our mailboxes it came to, and therefore who is waiting on it. read_at stays
+        // null: unread is the whole point, and the Messages menu is what clears it.
+        our_address: message.mailbox.address,
+        received_by: message.mailbox.userId,
         message_id: message.messageId,
         in_reply_to: message.inReplyTo,
         attachment_names: message.attachmentNames,
@@ -419,6 +425,7 @@ async function syncMailbox(
           folder: path,
           uid: msg.uid,
           at: (parsed.date ?? new Date()).toISOString(),
+          mailbox: { userId: conn.user_id, address: conn.email },
         })
         console.log(
           `[emailSync] ${path} UID ${uid}: debtor account ${accountMatch.accountId} via ${accountMatch.via}` +

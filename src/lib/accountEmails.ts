@@ -88,6 +88,93 @@ export async function fetchAccountEmails(accountId: string): Promise<AccountEmai
 }
 
 /**
+ * A debtor's reply that the agent it arrived for has not looked at yet.
+ *
+ * This is what makes a reply findable. Across 100 000 accounts nobody browses for one, so unread
+ * debtor mail has to surface where people already look for unread mail — the Messages menu —
+ * alongside the CRM's own. Scoped to the mailbox that received it, for the reason MessagesMenu
+ * gives about its own count: a badge that climbs with other people's inboxes is ignored inside a
+ * week.
+ */
+export interface DebtorReply {
+  id: string
+  accountId: string
+  /** The account number, for a label that says which debtor without opening anything. */
+  accountNumber: string | null
+  debtorName: string | null
+  from: string
+  subject: string | null
+  body: string | null
+  occurredAt: string
+}
+
+interface ReplyRow {
+  id: string
+  account_id: string
+  debtor_address: string
+  sent_by_name: string | null
+  subject: string | null
+  body: string | null
+  occurred_at: string
+  debtor_accounts: {
+    account_number: string | null
+    debtor_first_name: string | null
+    debtor_surname: string | null
+  } | null
+}
+
+export async function fetchUnreadReplies(userId: string): Promise<DebtorReply[]> {
+  /*
+   * The account is embedded, not fetched separately, so the menu can say WHICH debtor without a
+   * second round trip per message.
+   *
+   * `debtor_accounts` resolves because account_id is the only foreign key from here to that
+   * table. Note for anyone extending this: there are TWO keys to `profiles` (received_by and
+   * sent_by), so embedding that one needs the constraint named — `profiles!account_emails_received_by_fkey`
+   * — or PostgREST refuses it as ambiguous at runtime.
+   */
+  const { data, error } = await supabase
+    .from('account_emails')
+    .select(`
+      id, account_id, debtor_address, sent_by_name, subject, body, occurred_at,
+      debtor_accounts ( account_number, debtor_first_name, debtor_surname )
+    `)
+    .eq('direction', 'in')
+    .eq('received_by', userId)
+    .is('read_at', null)
+    .order('occurred_at', { ascending: false })
+    .limit(50)
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as unknown as ReplyRow[]).map((r) => ({
+    id: r.id,
+    accountId: r.account_id,
+    accountNumber: r.debtor_accounts?.account_number ?? null,
+    debtorName: [r.debtor_accounts?.debtor_first_name, r.debtor_accounts?.debtor_surname]
+      .filter(Boolean).join(' ') || null,
+    from: r.sent_by_name || r.debtor_address,
+    subject: r.subject,
+    body: r.body,
+    occurredAt: r.occurred_at,
+  }))
+}
+
+/**
+ * Mark replies read.
+ *
+ * Only ever your own — the RLS policy is scoped to received_by, so this cannot clear somebody
+ * else's count even if it is handed their ids.
+ */
+export async function markRepliesRead(ids: string[]): Promise<void> {
+  if (ids.length === 0) return
+  const { error } = await supabase
+    .from('account_emails')
+    .update({ read_at: new Date().toISOString() })
+    .in('id', ids)
+    .is('read_at', null)
+  if (error) throw new Error(error.message)
+}
+
+/**
  * A message has gone: charge it, record it, and put it on the timeline.
  *
  * Called AFTER the send succeeded, for the same reason an SMS is: a fee for a message that never
