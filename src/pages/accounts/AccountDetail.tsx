@@ -610,9 +610,14 @@ export function AccountDetail() {
           initialSubject={replyTo
             ? replySubject(replyTo.subject)
             : `Account ${account.accountNumber ?? ''} - ${name}`.trim()}
-          // Their message, quoted, so the agent can answer it without opening another window
-          // and so the debtor sees what they are replying about.
-          initialBody={replyTo?.body ? `\n\n--- ${replyTo.debtorAddress} wrote ---\n${replyTo.body.trim()}` : undefined}
+          /*
+           * No quoted history, on a reply or anything else. The box starts empty.
+           *
+           * Quoting looked helpful and was not. A debtor's reply already carries their own
+           * client's quoted chain, so quoting it again produced a reply that opened with two
+           * layers of "> Awe" and a stray "> <signature.png>" before the agent had typed a
+           * word. The message being answered is on the page behind this modal anyway.
+           */
           inReplyTo={replyTo?.messageId ?? null}
           contextNote={`Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). Their reply comes back to this account on its own and is charged R13 under item 6.`}
           onClose={() => { setComposeTo(null); setReplyTo(null) }}
