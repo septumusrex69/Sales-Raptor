@@ -77,7 +77,10 @@ export function DebtorDetailsPanel({ account, name, workspace, onChange, userId,
   const employer = live.find((c) => c.kind === 'employer')
 
   return (
-    <Card>
+    // A container, so the fields below can reflow on the PANEL's width rather than the screen's.
+    // The two are not the same thing here: in the three-column layout this card is 19rem wide on
+    // a 27" monitor, and a screen-width breakpoint would happily lay three columns out inside it.
+    <Card className="@container/details">
       <div className="flex items-center justify-between gap-2 mb-3">
         <h3 className="text-[11px] uppercase tracking-wide text-slate-400">Debtor details</h3>
         <button onClick={() => setAddKind(addKind ? null : 'mobile')}
@@ -92,7 +95,15 @@ export function DebtorDetailsPanel({ account, name, workspace, onChange, userId,
       )}
       {err && <p className="text-xs text-negative-700 mb-2">{err}</p>}
 
-      <dl className="space-y-3">
+      {/*
+        One column when the panel is narrow, more when it is not.
+
+        Every value here is short — a number, a language, a preference — so a full-width card
+        spent most of its width on nothing, which is what the firm pointed at. The columns appear
+        only once there is room for them: unchanged at the 19rem of the three-column layout, two
+        across from 32rem, three from 56rem.
+      */}
+      <dl className="grid gap-3 @lg/details:grid-cols-2 @4xl/details:grid-cols-3">
         <NameSlot account={account} name={name} busy={busy}
           onSave={(p) => run(() => saveDebtorIdentity(account.id, p))} />
         <TextSlot icon="id" label="ID Number" value={account.debtorIdNumber} busy={busy}
