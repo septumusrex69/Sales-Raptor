@@ -14,7 +14,7 @@ import { MailOpen } from 'lucide-react'
  * EmailViewSwitcher, which hides itself at the same breakpoint for the same reason.
  */
 export function ReadingPane<T extends { id: string }>({
-  items, selectedId, onSelect, renderRow, renderDetail, emptyDetail,
+  items, selectedId, onSelect, renderRow, renderDetail, renderLead, emptyDetail,
 }: {
   items: T[]
   selectedId: string | null
@@ -23,6 +23,14 @@ export function ReadingPane<T extends { id: string }>({
   renderRow: (item: T, selected: boolean) => ReactNode
   /** The message itself, in the right-hand pane. */
   renderDetail: (item: T) => ReactNode
+  /**
+   * Something beside each row, outside the button that opens it — a tick box, in practice.
+   *
+   * It has to be a sibling rather than a child: a checkbox inside a button is invalid, and the
+   * button would swallow the click, so ticking a row to delete it would open and read it
+   * instead. That is the opposite of what somebody clearing junk wants.
+   */
+  renderLead?: (item: T) => ReactNode
   /** Shown before anything is picked. */
   emptyDetail?: ReactNode
 }) {
@@ -41,11 +49,15 @@ export function ReadingPane<T extends { id: string }>({
       */}
       <div className="lg:overflow-y-auto lg:border-r border-slate-100 divide-y divide-slate-100">
         {items.map((item) => (
-          <button key={item.id} type="button" onClick={() => onSelect(item)}
-            aria-current={item.id === selectedId}
-            className={`w-full text-left ${item.id === selectedId ? 'bg-gold-50' : 'hover:bg-slate-50'}`}>
-            {renderRow(item, item.id === selectedId)}
-          </button>
+          <div key={item.id}
+            className={`flex items-start ${item.id === selectedId ? 'bg-gold-50' : 'hover:bg-slate-50'}`}>
+            {renderLead?.(item)}
+            <button type="button" onClick={() => onSelect(item)}
+              aria-current={item.id === selectedId}
+              className="min-w-0 flex-1 text-left">
+              {renderRow(item, item.id === selectedId)}
+            </button>
+          </div>
         ))}
       </div>
 

@@ -13,9 +13,9 @@ import { useEmailView } from '../../lib/emailView'
 import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
 import {
-  blockSender, deleteMail, domainBlockProblem, domainOf, fetchBlockedSenders, fetchMail,
-  fetchMailBody, linkMailToAccount, markMailRead, unblockSender,
-  type BlockedSender, type MailFilter, type MailItem,
+  blockSender, blockSenders, deleteMail, domainBlockProblem, domainOf, emptyJunk,
+  fetchBlockedSenders, fetchMail, fetchMailBody, linkMailToAccount, markMailRead, unblockSender,
+  type BlockedSender, type BlockOutcome, type MailFilter, type MailItem,
 } from '../../lib/userMail'
 
 /**
@@ -56,6 +56,7 @@ export function MailPage() {
   const [filter, setFilter] = useState<Pane>('needs-filing')
   const [blocking, setBlocking] = useState<MailItem | null>(null)
   const [blocked, setBlocked] = useState<BlockedSender[]>([])
+  const [emptying, setEmptying] = useState(false)
   const [search, setSearch] = useState('')
   const [items, setItems] = useState<MailItem[]>([])
   const [more, setMore] = useState(false)
@@ -196,6 +197,33 @@ export function MailPage() {
     }
   }
 
+  /** What a block did, and what it refused, in one sentence. */
+  function describeBlock(outcome: BlockOutcome): string {
+    const parts: string[] = []
+    if (outcome.blocked.length > 0) {
+      parts.push(`Blocked ${outcome.blocked.length} ${outcome.blocked.length === 1 ? 'sender' : 'senders'}`)
+    }
+    if (outcome.removed > 0) {
+      parts.push(`${outcome.removed} ${outcome.removed === 1 ? 'message' : 'messages'} cleared out of Raptor`)
+    }
+    if (outcome.refused.length > 0) {
+      // Named, not counted. "One was skipped" is not something anybody can act on.
+      parts.push(`left alone: ${outcome.refused.map((r) => `${r.address} (${r.reason})`).join(', ')}`)
+    }
+    return parts.length > 0 ? `${parts.join('. ')}.` : 'Nothing to block.'
+  }
+
+  async function blockChosen() {
+    const picked = items.filter((m) => chosen.has(m.id))
+    if (picked.length === 0 || !currentUser) return
+    try {
+      setStatus(describeBlock(await blockSenders({ userId: currentUser.id, mail: picked })))
+      await load(page)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   async function readChosen() {
     const ids = [...chosen]
     if (ids.length === 0) return
@@ -233,6 +261,14 @@ export function MailPage() {
             {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             {syncing ? 'Checking…' : 'Check now'}
           </button>
+          {/* Junk earns its own one-tap answer: it is where the volume is and where nobody
+              wants to read anything. */}
+          {filter === 'junk' && items.length > 0 && (
+            <button onClick={() => setEmptying(true)}
+              className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-negative-700 hover:border-negative-100 hover:bg-negative-50">
+              <Trash2 size={14} /> Empty junk
+            </button>
+          )}
           {/* Not on the blocklist, which is a list of senders rather than of mail. */}
           {filter !== 'blocked' && <EmailViewSwitcher view={view} onChange={setView} />}
         </div>
@@ -251,12 +287,20 @@ export function MailPage() {
 
         {/* The bulk bar only exists once something is selected — an always-visible row of
             disabled buttons is furniture. */}
-        {view === 'list' && chosen.size > 0 && (
+        {chosen.size > 0 && (
           <div className="px-5 py-2.5 bg-gold-50 border-b border-gold-100 flex flex-wrap items-center gap-2 text-sm">
             <span className="text-navy-950 font-medium mr-auto">{chosen.size} selected</span>
             <button onClick={() => void readChosen()}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
               <Check size={14} /> Mark read
+            </button>
+            {/*
+              Block, without opening anything. Address only — a whole-domain block stays behind
+              the open message, because that one can silence a company and should cost a look.
+            */}
+            <button onClick={() => void blockChosen()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
+              <Ban size={14} /> Block {chosen.size === 1 ? 'sender' : 'senders'}
             </button>
             <button onClick={() => void bin()}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-negative-700 hover:bg-white">
@@ -292,8 +336,20 @@ export function MailPage() {
             selectedId={open}
             onSelect={(m) => void toggleTo(m)}
             emptyDetail="Pick a message on the left to read it."
+            renderLead={(m) => (
+              <label className="pl-4 pt-3.5 shrink-0 cursor-pointer">
+                <input type="checkbox" checked={chosen.has(m.id)}
+                  aria-label={`Select the email from ${m.fromAddress}`}
+                  onChange={(e) => setChosen((prev) => {
+                    const next = new Set(prev)
+                    if (e.target.checked) next.add(m.id)
+                    else next.delete(m.id)
+                    return next
+                  })} />
+              </label>
+            )}
             renderRow={(m) => (
-              <span className={`block px-4 py-2.5 ${!m.readAt ? 'bg-positive-50/40' : ''}`}>
+              <span className={`block px-3 py-2.5 ${!m.readAt ? 'bg-positive-50/40' : ''}`}>
                 <MailSummary mail={m} tight />
               </span>
             )}
@@ -370,6 +426,15 @@ export function MailPage() {
           </div>
         )}
       </Card>
+
+      {emptying && (
+        <EmptyJunkModal
+          count={items.length}
+          userId={currentUser?.id ?? null}
+          onClose={() => setEmptying(false)}
+          onDone={(message) => { setEmptying(false); setStatus(message); void load(0) }}
+        />
+      )}
 
       {blocking && (
         <BlockModal
@@ -604,6 +669,86 @@ function MailRow({
         </div>
       )}
     </li>
+  )
+}
+
+/**
+ * Clearing out junk, with the one choice that matters.
+ *
+ * Deleting junk is cheap and reversible in the sense that matters — the mail is still in Outlook.
+ * Blocking the senders as well is what stops the same rubbish arriving again tomorrow, and it is
+ * the difference between emptying a bin and stopping the delivery. Offered, not assumed: a
+ * legitimate sender does end up in junk sometimes.
+ */
+function EmptyJunkModal({ count, userId, onClose, onDone }: {
+  count: number
+  userId: string | null
+  onClose: () => void
+  onDone: (message: string) => void
+}) {
+  const [alsoBlock, setAlsoBlock] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function run() {
+    if (!userId) return
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await emptyJunk({ userId, alsoBlock })
+      const bits = [`${r.deleted} ${r.deleted === 1 ? 'message' : 'messages'} cleared out of Raptor`]
+      if (r.blocked.length > 0) bits.push(`${r.blocked.length} senders blocked`)
+      if (r.refused.length > 0) {
+        bits.push(`left alone: ${r.refused.map((x) => `${x.address} (${x.reason})`).join(', ')}`)
+      }
+      onDone(`${bits.join('. ')}.`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="Empty junk" onClose={onClose} width={480}>
+      <p className="text-sm text-slate-500">
+        This removes {count === 1 ? 'the message' : `all ${count} messages`} in junk from Raptor.
+        They stay in your real mailbox &mdash; nothing here touches Outlook.
+      </p>
+
+      <label className="flex items-start gap-2.5 mt-4 px-3.5 py-3 rounded-lg border border-slate-200 cursor-pointer">
+        <input type="checkbox" checked={alsoBlock} className="mt-0.5"
+          onChange={(e) => setAlsoBlock(e.target.checked)} />
+        <span>
+          <span className="block text-sm font-medium text-slate-800">
+            Block these senders too
+          </span>
+          <span className="block text-xs text-slate-400 mt-0.5">
+            Stops the same rubbish arriving again tomorrow. Addresses only, never whole domains,
+            and never an address on a debtor&rsquo;s file.
+          </span>
+        </span>
+      </label>
+
+      {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
+
+      <div className="flex items-center justify-end gap-2 mt-5">
+        {busy && <Loader2 size={15} className="animate-spin text-slate-400" />}
+        <button onClick={onClose} disabled={busy}
+          className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50">
+          Cancel
+        </button>
+        <button onClick={() => void run()} disabled={busy}
+          className="text-sm font-medium px-3.5 py-2 rounded-lg border border-negative-100 bg-negative-50 text-negative-700 disabled:opacity-50">
+          Empty junk
+        </button>
+      </div>
+
+      {/* Anything rescued onto an account is a record and is never swept — said here because it
+          is the one thing somebody might fear losing. */}
+      <p className="text-xs text-slate-400 mt-4">
+        Junk mail you have already linked to an account is left where it is.
+      </p>
+    </Modal>
   )
 }
 
