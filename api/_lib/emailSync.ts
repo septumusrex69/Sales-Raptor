@@ -3,8 +3,10 @@ import { simpleParser } from 'mailparser'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decrypt } from './crypto.js'
 import {
+  CORRESPONDENCE_ACTION_CODE, CORRESPONDENCE_DESCRIPTION, CORRESPONDENCE_ITEM_ID,
   EMAIL_IN_KIND, normaliseAddress, receivedEmailNote, threadIds,
 } from '../../src/lib/emailRules.js'
+import { chargeItemWith, type ChargeResult } from '../../src/lib/chargeEngine.js'
 
 export interface EmailConnectionRow {
   user_id: string
@@ -105,13 +107,20 @@ async function findAccount(
 /**
  * File a debtor's reply against their account: the email itself, and a line on the timeline.
  *
- * Charges nothing. The firm's rule is "R25 for every email sent or responded to", and both
- * halves of that are outgoing messages — the reply an agent writes is what earns item 1(a). The
- * tariff's own item for incoming post is item 6, "correspondence received AND ATTENDED TO", at
- * R13, and nothing here can know whether anybody has attended to anything.
+ * Raises item 6, "correspondence received and attended to", R13 — the firm's instruction: "for
+ * every email received, there's also a correspondence fee". Together with the R25 item 1(a) on
+ * what we send, an exchange costs the debtor both.
  *
- * Returns false when the message was already filed, so the caller does not count it twice. The
- * unique index on message_id is what actually enforces that; this just reads the outcome.
+ * The fee is charged AFTER the row is filed, and only when the file actually happened. That
+ * order is what makes it idempotent: the unique index on message_id means a second sync of the
+ * same message inserts nothing, returns an empty array, and never reaches the charge. A resynced
+ * mailbox therefore cannot bill a debtor twice for one email — which is the failure that matters
+ * here, since nobody is watching this run.
+ *
+ * If the charge throws, the message stays filed and unbilled. That is the safe direction to
+ * fail: a fee that was missed can be raised by hand, a fee that was raised twice is a complaint.
+ *
+ * Returns false when the message was already filed, so the caller does not count it twice.
  */
 async function fileAccountEmail(
   admin: SupabaseClient,
@@ -156,7 +165,41 @@ async function fileAccountEmail(
     return false
   }
   // ignoreDuplicates returns an empty array rather than an error when the row already existed.
+  // This is the idempotency gate: everything below it, the FEE included, runs exactly once per
+  // message however many times a mailbox is resynced.
   if (!inserted || inserted.length === 0) return false
+
+  /*
+   * Item 6, R13, raised with no person in the room.
+   *
+   * chargeItemWith takes the database as a parameter precisely so this can happen here — the
+   * same Annexure B arithmetic the browser runs, against the service-role client, with every cap
+   * applied. A written-off account and the items 1–7 ceiling both stop it, and a message that
+   * earns nothing is still filed with the fee recorded as unbilled.
+   *
+   * Wrapped, because a fee that could not be raised must not lose the debtor's message. The
+   * email is already on the account at this point; the worst case here is a R13 somebody raises
+   * by hand later.
+   */
+  let charge: ChargeResult | null = null
+  try {
+    charge = await chargeItemWith(admin, {
+      accountId,
+      itemId: CORRESPONDENCE_ITEM_ID,
+      actionCode: CORRESPONDENCE_ACTION_CODE,
+      description: CORRESPONDENCE_DESCRIPTION,
+      // Nobody clicked anything. The sync raised it, so there is no user to credit.
+      createdBy: null,
+      // Dated when the debtor wrote, not when we happened to sync — a reply that arrives on the
+      // 1st must not land in the previous month's fees because the mailbox was slow.
+      at: new Date(message.at),
+    })
+    await admin.from('account_emails')
+      .update({ charged_excl_vat: charge.exclVat })
+      .eq('id', inserted[0].id)
+  } catch (err) {
+    console.error(`[emailSync] account ${accountId}: item 6 not raised on inbound email:`, err)
+  }
 
   /*
    * The note is what puts it on the Activity timeline, and it is 'manual' on purpose.
@@ -167,7 +210,7 @@ async function fileAccountEmail(
    */
   await admin.from('account_notes').insert({
     account_id: accountId,
-    body: receivedEmailNote(message.fromName || message.fromAddress, message.subject, message.body),
+    body: receivedEmailNote(message.fromName || message.fromAddress, message.subject, message.body, charge),
     kind: EMAIL_IN_KIND,
     source: 'manual',
     author_name: message.fromName || message.fromAddress,

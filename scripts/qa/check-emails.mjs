@@ -9,6 +9,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-emails.mjs
  */
 import {
+  CORRESPONDENCE_ACTION_CODE, CORRESPONDENCE_DESCRIPTION, CORRESPONDENCE_ITEM_ID,
   EMAIL_ACTION_CODE, EMAIL_DESCRIPTION, EMAIL_IN_KIND, EMAIL_ITEM_ID, EMAIL_OUT_KIND,
   normaliseAddress, receivedEmailNote, replySubject, sentEmailNote, threadIds,
 } from '../../src/lib/emailRules.ts'
@@ -40,13 +41,32 @@ check('the timeline files it under email', EMAIL_ACTION_CODE, 'email')
 check('item 1(a) carries no per-account total', item.itemTotal ?? null, null)
 check('...and no monthly maximum', item.maxPerMonth ?? null, null)
 
-// The road not taken, asserted so nobody quietly takes it: an inbound message is item 6, and
-// item 6 is R13. Charging R25 for receiving would be charging the wrong item at the wrong rate.
-const item6 = schedule.items.find((i) => i.id === '6')
-check('the item for incoming post is a different item', item6.id !== EMAIL_ITEM_ID, true)
-check('...at a different price', item6.amount === item.amount, false)
-check('...and it requires attending to, not merely arriving',
-  /attended to/i.test(item6.description), true)
+/* ---- and what arrives: item 6, the correspondence fee ---- */
+// The firm's instruction: "for every email received, there's also a correspondence fee." So an
+// exchange bills TWICE, under two different items at two different rates, and the commonest way
+// to get this wrong would be to charge one item for both directions.
+const item6 = schedule.items.find((i) => i.id === CORRESPONDENCE_ITEM_ID)
+
+check('an incoming email is charged under item 6', CORRESPONDENCE_ITEM_ID, '6')
+check('...which is the correspondence-received item',
+  /correspondence received/i.test(item6.description), true)
+check('...and it is R13 on the current schedule', item6.amount, 13)
+check('the statement distinguishes it from what we send',
+  CORRESPONDENCE_DESCRIPTION === EMAIL_DESCRIPTION, false)
+check('...as does the timeline', CORRESPONDENCE_ACTION_CODE === EMAIL_ACTION_CODE, false)
+
+// The two directions must stay separate items at separate rates. If these ever collapse into
+// one, every exchange starts billing the same fee twice.
+check('the two directions are different items', CORRESPONDENCE_ITEM_ID === EMAIL_ITEM_ID, false)
+check('...at different rates', item6.amount === item.amount, false)
+check('an exchange therefore costs R38 excluding VAT', item.amount + item6.amount, 38)
+
+// Item 6 has no total and no monthly cap either, which is what makes "every email received"
+// chargeable rather than only the first.
+check('item 6 carries no per-account total', item6.itemTotal ?? null, null)
+check('...and no monthly maximum', item6.maxPerMonth ?? null, null)
+check('...and counts towards the items 1-7 ceiling, like item 1(a)',
+  [item6.countsTowardCap, item.countsTowardCap], [true, true])
 
 /* ---- what the timeline says ---- */
 const charged = { exclVat: 25, vat: 3.75, reason: 'charged' }
@@ -70,12 +90,20 @@ for (const [reason, expected] of [
     true)
 }
 
-const got = receivedEmailNote('Ryno <ryno@example.co.za>', 'Re: Account 12345', 'I will pay Friday.')
+const charged13 = { exclVat: 13, vat: 1.95, reason: 'charged' }
+const got = receivedEmailNote('Ryno <ryno@example.co.za>', 'Re: Account 12345', 'I will pay Friday.', charged13)
 check('a received note names the sender', got.includes('ryno@example.co.za'), true)
 check('...and carries their words', got.includes('I will pay Friday.'), true)
-// No fee is due on an inbound message, so the note must not discuss one at all. Saying "not
-// charged" would read as a charge that failed rather than one that was never owed.
-check('...and says nothing about a charge', /charg/i.test(got), false)
+check('...and what it earned, under item 6', got.includes('under item 6'), true)
+// The commonest way to get this wrong: copying the outbound wording and billing the wrong item.
+check('...and NOT under item 1(a)', got.includes('1(a)'), false)
+
+check('a received message that could not be charged says why',
+  receivedEmailNote('a@b.co', 's', 'b', { exclVat: 0, vat: 0, reason: 'written-off' })
+    .toLowerCase().includes('written off'), true)
+check('...and one charged nothing at the ceiling says that instead',
+  receivedEmailNote('a@b.co', 's', 'b', { exclVat: 0, vat: 0, reason: 'at-ceiling' })
+    .toLowerCase().includes('ceiling'), true)
 
 check('the two directions get different timeline kinds', EMAIL_OUT_KIND === EMAIL_IN_KIND, false)
 
