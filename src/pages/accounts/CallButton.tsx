@@ -1,23 +1,25 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Loader2, Phone } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { PhoneLink } from '../../components/PhoneLink'
-import { recordConsultation, recordDial, recordNoAnswer } from '../../lib/accountCalls'
+import { callOutcome, recordConsultation, recordDial, recordNoAnswer } from '../../lib/accountCalls'
 import { scheduleFor } from '../../lib/annexureB'
 import type { ChargeResult } from '../../lib/accountCharges'
 
 /**
  * Call a debtor, and put the call on the account.
  *
- * Two things the firm found missing: dialling left no trace on the timeline at all, and an
- * answered call raised no fee. Both are handled here rather than inside PhoneLink, which logs
- * CRM Activities against leads and contacts and should not learn about Annexure B.
+ * The dial charges Annexure B item 2 straight away -- the firm's rule, every outgoing call is
+ * charged whether or not anybody picks up -- and writes the call to the timeline.
  *
- * The dial is recorded immediately and charged for nothing -- placing a call is not yet work
- * done to the debtor, and the phone may ring out. Then it asks. Asking is the honest mechanism:
- * BuzzBox can call us back about a call (`CallSetup.webhookUrl`), but the payload is undocumented,
- * so today nothing on our side can tell a conversation from a ringing phone. The same shape as
- * the trace count, which asks the one question only the person who just did the work can answer.
+ * What happens next depends on whether BuzzBox can see the call. When it can, it tells us: its
+ * webhook reports the two legs bridging, and the consultation is raised server-side without
+ * anyone being asked anything. This component only watches for that and says what happened.
+ *
+ * When it cannot -- no BuzzBox connected, or no extension set, so PhoneLink fell back to a tel:
+ * link and the call went out through the device's own dialler -- nothing will ever report back,
+ * and the collector is asked. That is not a fallback for the webhook being slow; it is the only
+ * thing that can work when the PABX was never involved.
  */
 export function CallButton({ accountId, numbers, actor, className, onDone }: {
   accountId: string
@@ -32,30 +34,70 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
   onDone: () => Promise<void>
 }) {
   const [choosing, setChoosing] = useState(false)
+  /** Set only where nothing can report back — see the note about tel: above. */
   const [asking, setAsking] = useState<string | null>(null)
   const [comment, setComment] = useState('')
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<ChargeResult | null>(null)
+  const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const watching = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => () => { if (watching.current) clearInterval(watching.current) }, [])
 
   const schedule = scheduleFor(new Date())
   const consultationRate = schedule.items.find((i) => i.id === '7')?.amount ?? 0
   const callRate = schedule.items.find((i) => i.id === '2')?.amount ?? 0
 
-  async function dialled(call: { from: string; to: string }) {
-    setResult(null)
+  async function dialled(call: { from: string; to: string; viaPabx: boolean }) {
     setError(null)
-    // The dial goes on the timeline whatever happens next, including if the collector closes
-    // this without answering. A call that was made is a fact; whether it connected is a question.
+    setComment('')
+    setChoosing(false)
+    setStatus(null)
+
+    let placed: { charge: ChargeResult; callId: string | null }
     try {
-      await recordDial({ accountId, number: call.to, extension: call.from || null, actor })
+      placed = await recordDial({ accountId, number: call.to, extension: call.from || null, actor })
       await onDone()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      return
     }
-    setComment('')
-    setChoosing(false)
-    setAsking(call.to)
+
+    setStatus(placed.charge.reason === 'charged'
+      ? `Call charged R${placed.charge.exclVat.toFixed(2)} + VAT`
+      : 'Call recorded · no charge')
+
+    // Through the PABX, BuzzBox will say whether they answered. Through a tel: link nothing will.
+    if (call.viaPabx && placed.callId) watchForAnswer(placed.callId)
+    else setAsking(call.to)
+  }
+
+  /*
+   * Watch, rather than ask.
+   *
+   * The fee is raised by the webhook whether or not this page is still open, so this poll is only
+   * how the collector gets told. It gives up after three minutes: by then the answer is on the
+   * timeline, and a page left open on a desk should not poll all afternoon.
+   */
+  function watchForAnswer(callId: string) {
+    if (watching.current) clearInterval(watching.current)
+    const started = Date.now()
+    watching.current = setInterval(() => {
+      void (async () => {
+        const outcome = await callOutcome(callId)
+        if (outcome?.answeredAt) {
+          setStatus(`Answered · consultation charged R${consultationRate.toFixed(2)} + VAT`)
+          await onDone()
+        } else if (outcome?.endedAt) {
+          setStatus(outcome.hangupCause === 'NO_USER_RESPONSE' ? 'No answer' : 'Call ended · not answered')
+          await onDone()
+        } else if (Date.now() - started <= 180_000) {
+          return
+        }
+        if (watching.current) clearInterval(watching.current)
+        watching.current = null
+      })()
+    }, 3000)
   }
 
   async function answered(yes: boolean) {
@@ -63,9 +105,15 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
     setBusy(true)
     setError(null)
     try {
-      setResult(yes
-        ? await recordConsultation({ accountId, number: asking, comment, actor })
-        : await recordNoAnswer({ accountId, number: asking, comment, actor }))
+      if (yes) {
+        const charge = await recordConsultation({ accountId, number: asking, comment, actor })
+        setStatus(charge.reason === 'charged'
+          ? `Consultation charged R${charge.exclVat.toFixed(2)} + VAT`
+          : 'Consultation recorded · no charge')
+      } else {
+        await recordNoAnswer({ accountId, number: asking, comment, actor })
+        setStatus('No answer')
+      }
       setAsking(null)
       setComment('')
       await onDone()
@@ -81,8 +129,6 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
       {/*
         One number rings straight away; several ask first.
 
-        A debtor is rarely one number, and the button was dialling the primary with no way to
-        reach the others -- the firm's words, "it doesn't give me an option about who to call".
         The chooser is a list of PhoneLinks rather than a picker plus a dial call of its own, so
         every number goes out through exactly the same path, tel: fallback and all.
       */}
@@ -98,15 +144,8 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
         </button>
       )}
 
-      {result && (
-        <span className={`text-[11px] ${result.reason === 'charged' ? 'text-[var(--c-green)]' : 'text-slate-500'}`}>
-          {result.reason === 'charged'
-            ? `Charged R${result.exclVat.toFixed(2)} + VAT`
-            : result.reason === 'written-off'
-              ? 'Recorded · no charge (account written off)'
-              : 'Recorded · no charge (fee ceiling)'}
-        </span>
-      )}
+      {status && <span className="text-[11px] text-[var(--c-green)]">{status}</span>}
+      {error && <span className="text-[11px] text-negative-700">{error}</span>}
 
       {choosing && (
         <Modal title="Which number?" onClose={() => setChoosing(false)} width={440}>
@@ -123,16 +162,20 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
               </PhoneLink>
             ))}
           </div>
+          {callRate > 0 && (
+            <p className="text-xs text-slate-400 mt-4">
+              Calling charges R{callRate.toFixed(2)} plus VAT under item 2, whether or not they answer.
+            </p>
+          )}
         </Modal>
       )}
 
       {asking && (
         <Modal title="Did they answer?" onClose={() => setAsking(null)} width={440}>
           <p className="text-sm text-slate-500">
-            The call to <span className="font-medium text-slate-700">{asking}</span> is on the
-            timeline either way. Either answer charges the debtor &mdash; a call they answered is
-            a consultation, a call that rang out is a phone call. They are different items and
-            never both.
+            That call went out through the device&rsquo;s own dialler, so nothing reports back to
+            Raptor. The call to <span className="font-medium text-slate-700">{asking}</span> is
+            already on the timeline and already charged &mdash; this is only about the consultation.
           </p>
           {/*
             The one moment the answer exists, so it is also the moment to ask what was said.
@@ -148,11 +191,8 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
           />
           {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
           <p className="text-xs text-slate-400 mt-3">
-            {consultationRate > 0 && callRate > 0 && (
-              <>Answered R{consultationRate.toFixed(2)} (item 7), no answer R{callRate.toFixed(2)}
-                {' '}(item 2), both plus VAT. </>
-            )}
-            Nothing is charged until you choose.
+            {consultationRate > 0 && <>A consultation adds R{consultationRate.toFixed(2)} plus VAT under item 7. </>}
+            Nothing further is charged until you choose.
           </p>
           <div className="flex items-center justify-end gap-2 mt-5">
             {busy && <Loader2 size={15} className="animate-spin text-slate-400" />}

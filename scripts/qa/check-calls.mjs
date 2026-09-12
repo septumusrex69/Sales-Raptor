@@ -1,10 +1,10 @@
 /**
  * What a call to a debtor costs.
  *
- * Two Annexure B items are in play and EXACTLY ONE applies to any given call. Item 2 is defined
- * as the call "which is not a consultation", so the two are mutually exclusive by the gazette's
- * own wording -- answered is item 7 at R60, unanswered is item 2 at R25, never both. These
- * checks exist so a future edit cannot quietly make one call charge twice.
+ * Two Annexure B items are in play and the firm charges BOTH on an answered call: item 2 on
+ * every outgoing call whether or not it connects, and item 7 as well when it does. Their explicit
+ * instruction, made after being shown that the gazette defines item 2 as the call "which is not a
+ * consultation" -- see ATTEMPT_ITEM_ID in callRules.ts. So an answered call is R85 excluding VAT.
  *
  * Run: node --experimental-strip-types scripts/qa/check-calls.mjs
  */
@@ -46,30 +46,32 @@ check('...per occurrence, not a total for the account', item(ATTEMPT_ITEM_ID).is
 check('and the firm has always charged a phone call at that rate', TARIFF_HISTORY[0].rates.phone_call, 25)
 
 /*
- * The two are mutually exclusive, and the gazette says so rather than us.
+ * The gazette's own wording, recorded because the firm's rule departs from it.
  *
- * This is the check that matters most here: it is the reason one call cannot raise both fees.
+ * Not a check that the code refuses to charge both -- it charges both, as instructed. This pins
+ * down WHY that is a decision rather than an oversight, so nobody later "fixes" the tariff data
+ * to make the double charge look inevitable.
  */
-check('item 2 excludes a consultation by its own wording',
+check('item 2 is gazetted as the call which is NOT a consultation',
   item(ATTEMPT_ITEM_ID).description.includes('not a consultation'), true)
-check('so the two items are different items',
-  ATTEMPT_ITEM_ID === CONSULTATION_ITEM_ID, false)
-check('and an answered call costs more than one that rang out',
-  item(CONSULTATION_ITEM_ID).amount > item(ATTEMPT_ITEM_ID).amount, true)
+check('the two are different items', ATTEMPT_ITEM_ID === CONSULTATION_ITEM_ID, false)
+check('an answered call therefore costs R25 + R60 excluding VAT',
+  item(ATTEMPT_ITEM_ID).amount + item(CONSULTATION_ITEM_ID).amount, 85)
 
 /* ---- what the timeline says ---- */
-check('placing a call charges nothing yet, and says the charge is coming',
-  dialledNote('27821234567', '201'),
-  'Called 27821234567 from extension 201. Charged once we know whether it was answered.')
-const rangOut = noAnswerNote('27821234567', { exclVat: 25, reason: 'charged' })
-check('a call nobody answered is charged under item 2',
-  rangOut, 'No answer on 27821234567. Charged R\u00a025,00 plus VAT under item 2.')
-check('...and never claims to be a consultation', /consultation/i.test(rangOut), false)
+check('placing a call charges item 2 there and then',
+  dialledNote('27821234567', '201', { exclVat: 25, reason: 'charged' }),
+  'Called 27821234567 from extension 201. Charged R\u00a025,00 plus VAT under item 2.')
+// The dial's own line already names the R25. Naming it again here would read as a second one.
+check('a call nobody answered names no further fee',
+  noAnswerNote('27821234567'), 'No answer on 27821234567.')
+check('...and never claims to be a consultation',
+  /consultation/i.test(noAnswerNote('27821234567')), false)
 
 /* ---- an extension we do not know ---- */
 check('an unknown extension is left out rather than printed as null',
-  dialledNote('27821234567', null),
-  'Called 27821234567. Charged once we know whether it was answered.')
+  dialledNote('27821234567', null, { exclVat: 25, reason: 'charged' }),
+  'Called 27821234567. Charged R\u00a025,00 plus VAT under item 2.')
 
 /* ---- what the timeline says once it connects ---- */
 const answered = consultationNote('27821234567', { exclVat: 60, reason: 'charged' })
@@ -90,7 +92,7 @@ check('so does an account at the ceiling',
 for (const reason of ['written-off', 'item-total-spent', 'monthly-limit', 'at-ceiling']) {
   const tail = (note) => note.slice(note.indexOf('. ') + 2)
   check(`"${reason}" reads the same on both notes`,
-    tail(noAnswerNote('x', { exclVat: 0, reason })).replace(/item 2/, 'ITEM'),
+    tail(dialledNote('x', null, { exclVat: 0, reason })).replace(/item 2/, 'ITEM'),
     tail(consultationNote('x', { exclVat: 0, reason })).replace(/item 7/, 'ITEM'))
 }
 

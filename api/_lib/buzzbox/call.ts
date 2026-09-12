@@ -15,13 +15,22 @@ import { connectedSession } from './session.js'
 /**
  * Where BuzzBox should post what happened to the call.
  *
- * VERCEL_PROJECT_PRODUCTION_URL is the stable production hostname; VERCEL_URL is the per-
- * deployment one, which is right on a preview and wrong to hand a provider on production, since
- * it dies with the deployment. BUZZBOX_WEBHOOK_BASE overrides both for a custom domain.
+ * It has to come back to the deployment that placed it, and that is the whole point. This used
+ * to prefer VERCEL_PROJECT_PRODUCTION_URL, which is the LIVE hostname on every deployment
+ * including preview ones -- so a call placed on staging reported its answer to production, which
+ * then looked for the account in the live database and could not find it. Harmless while the
+ * webhook only logged; a silently lost fee once it started charging.
+ *
+ * So: the branch URL first. VERCEL_BRANCH_URL is stable for the life of a branch, which a
+ * webhook arriving seconds later needs and a redeploy must not break. On production that
+ * resolves to the Main branch alias, which is an alias of the live site. VERCEL_URL is the
+ * per-deployment hostname and the last resort, since it dies with its deployment.
+ * BUZZBOX_WEBHOOK_BASE overrides everything, for a custom domain.
  */
 function callbackUrl(): string | undefined {
   const key = process.env.SMS_WEBHOOK_KEY
   const host = process.env.BUZZBOX_WEBHOOK_BASE
+    ?? process.env.VERCEL_BRANCH_URL
     ?? process.env.VERCEL_PROJECT_PRODUCTION_URL
     ?? process.env.VERCEL_URL
   if (!key || !host) return undefined

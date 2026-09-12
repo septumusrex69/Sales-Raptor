@@ -9,6 +9,7 @@
  */
 import { chargeItem, type ChargeResult } from './accountCharges.ts'
 import { addNote } from './accountWorkspace.ts'
+import { supabase } from './supabase'
 import {
   consultationNote, dialledNote, noAnswerNote,
   ATTEMPT_DESCRIPTION, ATTEMPT_ITEM_ID, CONSULTATION_DESCRIPTION, CONSULTATION_ITEM_ID,
@@ -22,28 +23,83 @@ interface Actor {
 }
 
 /**
- * A call was placed.
+ * A call was placed: Annexure B item 2, the telephone call.
  *
- * Written the moment BuzzBox accepts the dial, and charged for nothing. Placing a call is not
- * yet work done to the debtor: the phone may ring out. What it IS is a fact about what the
- * collector did, and a fact the account was previously losing entirely -- the firm's complaint
- * was that dialling left no trace at all.
+ * Charged on the dial, answered or not -- the firm's rule: "if we make an outgoing call, it's
+ * charged, even if the person answers or not." An answered call then also charges item 7 when
+ * BuzzBox reports it, so a conversation costs the debtor both.
+ *
+ * Worth recording that this was their decision rather than a reading of the tariff. Item 2 is
+ * gazetted as the "necessary phone call, WHICH IS NOT a consultation", so on the face of it an
+ * answered call carries item 7 instead of item 2, not as well as. The firm was told that and
+ * chose both; if the charge is ever queried, this comment is the reason it looks the way it does.
+ *
+ * The row in account_calls is what lets the webhook find its way back to this account: BuzzBox's
+ * events carry an extension and a number and nothing of ours, so the dial has to leave a marker
+ * for them to match against.
  */
 export async function recordDial(input: {
   accountId: string
   number: string
   extension: string | null
   actor: Actor
-}): Promise<void> {
+}): Promise<{ charge: ChargeResult; callId: string | null }> {
+  const charge = await chargeItem({
+    accountId: input.accountId,
+    itemId: ATTEMPT_ITEM_ID,
+    actionCode: 'phone_call',
+    description: ATTEMPT_DESCRIPTION,
+    createdBy: input.actor.id,
+  })
+
+  /*
+   * Recorded, never allowed to fail the call.
+   *
+   * If this insert fails the collector has still made the call and the fee has still been raised;
+   * losing the marker only means the consultation has to be confirmed by hand. Throwing here
+   * would turn a missing convenience into a red error over a call that went fine.
+   */
+  let callId: string | null = null
+  const { data, error } = await supabase.from('account_calls').insert({
+    account_id: input.accountId,
+    placed_by: input.actor.id,
+    placed_by_name: input.actor.name,
+    extension: input.extension,
+    number: input.number,
+  }).select('id').maybeSingle<{ id: string }>()
+  if (!error) callId = data?.id ?? null
+
   await addNote({
     accountId: input.accountId,
-    body: dialledNote(input.number, input.extension),
+    body: dialledNote(input.number, input.extension, charge),
     // Raptor's words, not a person's: hidden when the timeline is set to show only
     // what people wrote. See TimelineEntry.automated.
     source: 'system',
     authorName: input.actor.name,
     createdBy: input.actor.id,
   })
+  return { charge, callId }
+}
+
+/**
+ * Has BuzzBox reported this call answered yet?
+ *
+ * The browser asks after dialling so it can say "consultation charged" without the collector
+ * having to tell it anything. Returns null while nothing is known, which is the ordinary state
+ * for the first few seconds and the permanent state for a call placed through the tel: fallback.
+ */
+export async function callOutcome(callId: string): Promise<{
+  answeredAt: string | null
+  endedAt: string | null
+  hangupCause: string | null
+} | null> {
+  const { data, error } = await supabase
+    .from('account_calls')
+    .select('answered_at, ended_at, hangup_cause')
+    .eq('id', callId)
+    .maybeSingle<{ answered_at: string | null; ended_at: string | null; hangup_cause: string | null }>()
+  if (error || !data) return null
+  return { answeredAt: data.answered_at, endedAt: data.ended_at, hangupCause: data.hangup_cause }
 }
 
 /**
@@ -104,11 +160,10 @@ async function addComment(accountId: string, comment: string | undefined, actor:
 }
 
 /**
- * Nobody picked up: a phone call, Annexure B item 2.
+ * Nobody picked up.
  *
- * Not a consultation, which is exactly what item 2 is for -- "necessary phone call, which is not
- * a consultation". A call that rings out is still work done and still chargeable; it was simply
- * never wired up, which is what the firm noticed.
+ * Charges nothing: the dial already raised item 2, and a call that rang out earns that and
+ * nothing more. This only closes the record and carries whatever the collector wrote.
  */
 export async function recordNoAnswer(input: {
   accountId: string
@@ -116,17 +171,10 @@ export async function recordNoAnswer(input: {
   /** Rare but real: "rang out, someone else picked up and said he moved". */
   comment?: string
   actor: Actor
-}): Promise<ChargeResult> {
-  const charge = await chargeItem({
-    accountId: input.accountId,
-    itemId: ATTEMPT_ITEM_ID,
-    actionCode: 'phone_call',
-    description: ATTEMPT_DESCRIPTION,
-    createdBy: input.actor.id,
-  })
+}): Promise<void> {
   await addNote({
     accountId: input.accountId,
-    body: noAnswerNote(input.number, charge),
+    body: noAnswerNote(input.number),
     // Raptor's words, not a person's: hidden when the timeline is set to show only
     // what people wrote. See TimelineEntry.automated.
     source: 'system',
@@ -134,5 +182,4 @@ export async function recordNoAnswer(input: {
     createdBy: input.actor.id,
   })
   await addComment(input.accountId, input.comment, input.actor)
-  return charge
 }

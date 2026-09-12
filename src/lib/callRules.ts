@@ -22,16 +22,14 @@ export const CONSULTATION_DESCRIPTION = 'Consultation'
 /**
  * Item 2: "Necessary phone call, which is not a consultation (per call)." R25.
  *
- * Charged on a call the debtor did NOT answer -- the firm asked for it: "it charges a
- * consultation correctly, but it doesn't charge the telephone call". Their own history charges
- * it the same way: a R25 charge in August 2026 commented "WhatsApp Call - No Contact" (see
- * LEGACY_NAME_OVERRIDES in actionTariff.ts).
+ * Charged on EVERY outgoing call, at the firm's instruction: "if we make an outgoing call, it's
+ * charged, even if the person answers or not. If the person answers, a consultation and the
+ * telephone call is charged." So an answered call carries both items and costs R85 excluding VAT.
  *
- * NEVER both on one call, and that is the gazette's own doing rather than a policy of ours.
- * Item 2 is defined as the call "which is not a consultation", so a call cannot be an item 2 and
- * an item 7 at once: one conversation, one fee. An answered call is a consultation at R60; an
- * unanswered one is a phone call at R25. Between them every call now earns something, which is
- * what the firm was missing, without charging twice for a single act.
+ * That is their decision and not a reading of the tariff, which is why it is written down here.
+ * The gazette defines item 2 as the call "WHICH IS NOT a consultation", and the plain reading of
+ * that is that an answered call carries item 7 INSTEAD of item 2, not as well as. The firm was
+ * shown that reading and chose both. If the charge is ever queried, this is where the answer is.
  */
 export const ATTEMPT_ITEM_ID = '2'
 
@@ -39,9 +37,9 @@ export const ATTEMPT_ITEM_ID = '2'
 export const ATTEMPT_DESCRIPTION = 'Telephone call'
 
 /** What the timeline says when the call is placed. */
-export function dialledNote(number: string, extension: string | null): string {
+export function dialledNote(number: string, extension: string | null, charge: ChargeOutcome | null): string {
   const how = extension ? ` from extension ${extension}` : ''
-  return `Called ${number}${how}. Charged once we know whether it was answered.`
+  return `Called ${number}${how}. ${earned(charge, '2')}`
 }
 
 /** What the timeline says once somebody confirms the debtor picked up. */
@@ -49,9 +47,14 @@ export function consultationNote(number: string, charge: ChargeOutcome | null): 
   return `Consultation with the debtor on ${number}. ${earned(charge, '7')}`
 }
 
-/** What the timeline says when the call was placed and nobody picked up. */
-export function noAnswerNote(number: string, charge: ChargeOutcome | null): string {
-  return `No answer on ${number}. ${earned(charge, '2')}`
+/**
+ * What the timeline says when nobody picked up.
+ *
+ * No fee named, because the dial already charged item 2 and its own line says so. Repeating it
+ * here would read as a second R25 on a call that only earned one.
+ */
+export function noAnswerNote(number: string): string {
+  return `No answer on ${number}.`
 }
 
 /**

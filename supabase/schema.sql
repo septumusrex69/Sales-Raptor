@@ -1386,6 +1386,63 @@ alter table public.account_notes
 create index if not exists account_notes_query_idx on public.account_notes (query_id, created_at)
   where query_id is not null;
 
+-- One row per call Raptor placed, so BuzzBox's webhook can find its way back to an account.
+--
+-- BuzzBox does not echo our `reference` in its call events, and its own call id (externalId) is
+-- only knowable AFTER the call is placed. So the dial writes a row here first, and the webhook
+-- matches on the two things both sides do know: which extension rang, and which number it rang.
+create table if not exists public.account_calls (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  placed_by uuid references public.profiles (id) on delete set null,
+  -- Free text as well as the reference, like every other author column on this account: the
+  -- person covering for someone else is who actually made the call.
+  placed_by_name text,
+  extension text,
+  -- Exactly as Raptor dialled it.
+  number text not null,
+  -- The last nine digits, maintained by Postgres so it can never drift from `number`.
+  --
+  -- We dial E.164 without the plus (27832573344); BuzzBox reports the local form (0832573344).
+  -- Neither string equals the other, so matching happens on the subscriber digits they share.
+  number_tail text generated always as (right(regexp_replace(number, '[^0-9]', '', 'g'), 9)) stored,
+  placed_at timestamptz not null default now(),
+
+  -- What BuzzBox told us afterwards. Null until it does, and null forever for a call placed
+  -- through the tel: fallback, where there is no PABX to report anything.
+  external_id text,
+  answered_at timestamptz,
+  ended_at timestamptz,
+  hangup_cause text,
+
+  -- The claim stamp for the consultation fee.
+  --
+  -- Both legs of a call report being answered, and a provider that gets no 200 will retry. This
+  -- column is what makes the fee happen exactly once: the webhook claims it with a conditional
+  -- update that only succeeds when it is still null, and charges only if the claim succeeded.
+  consultation_charged_at timestamptz
+);
+
+-- Once a call is identified, later events find it directly.
+create unique index if not exists account_calls_external_idx
+  on public.account_calls (external_id) where external_id is not null;
+-- ...and before that, by who rang whom, most recent first.
+create index if not exists account_calls_match_idx
+  on public.account_calls (number_tail, placed_at desc);
+create index if not exists account_calls_account_idx
+  on public.account_calls (account_id, placed_at desc);
+
+alter table public.account_calls enable row level security;
+
+-- As wide as the account's own policies: collectors cover for each other, and a call anyone
+-- placed is part of the account's history.
+drop policy if exists "account_calls_select" on public.account_calls;
+create policy "account_calls_select" on public.account_calls for select using (auth.uid() is not null);
+drop policy if exists "account_calls_insert" on public.account_calls;
+create policy "account_calls_insert" on public.account_calls for insert with check (auth.uid() is not null);
+-- No update policy for signed-in users on purpose. What happened on a call is BuzzBox's account
+-- of it, written by the webhook with the service key, and not something a browser may revise.
+
 alter table public.account_queries enable row level security;
 
 -- As wide as the account's own policies. Communications cover for each other by design, so a
