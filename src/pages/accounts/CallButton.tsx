@@ -17,10 +17,15 @@ import type { ChargeResult } from '../../lib/accountCharges'
  * exactly like a debtor. Charging item 7 off the bridge alone billed R60 every time a collector
  * left a message, which is what the firm found on their first real afternoon of calls.
  *
- * So what the webhook buys is not the answer -- it is not having to ask when the answer is
- * certain. A call that never bridged was never answered by anybody, and that case resolves
- * itself in silence. Only a call that DID connect raises the question, and then the collector
- * says whether they spoke to a person, and writes down what was said.
+ * So every call ends with the same question, and what the webhook buys is CONTEXT for it rather
+ * than an answer: the box can say whether the line connected at all, and when the call ended, so
+ * it appears at the moment the collector actually knows what to write.
+ *
+ * An earlier version skipped the question entirely when BuzzBox reported no bridge. That was too
+ * clever twice over. It lost the note on a call that rang out -- "tried again, still nothing" is
+ * worth recording -- and it meant a collector who had plainly just had a conversation was told
+ * "No answer" by a machine that had merely failed to see it. Ask every time; let the person
+ * disagree with the PABX.
  */
 export function CallButton({ accountId, numbers, actor, className, onDone }: {
   accountId: string
@@ -39,6 +44,8 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
   const [asking, setAsking] = useState<string | null>(null)
   /** The call row the question belongs to, so the fee can be claimed once. Null on a tel: call. */
   const [answeredCallId, setAnsweredCallId] = useState<string | null>(null)
+  /** What BuzzBox saw: true it connected, false it never did, null nothing reported. */
+  const [connected, setConnected] = useState<boolean | null>(null)
   const [comment, setComment] = useState('')
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
@@ -70,20 +77,21 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
       ? `Call charged R${placed.charge.exclVat.toFixed(2)} + VAT`
       : 'Call recorded · no charge')
 
-    // Through the PABX, BuzzBox says whether the line connected, which decides whether the
-    // question is worth asking. Through a tel: link nothing reports back, so it always is.
+    // Through the PABX, wait for the call to end and then ask. Through a tel: link nothing
+    // reports back, so ask straight away -- the collector will answer it when they are done.
     if (call.viaPabx && placed.callId) watchForAnswer(placed.callId, call.to)
-    else setAsking(call.to)
+    else { setConnected(null); setAsking(call.to) }
   }
 
   /*
-   * Wait for BuzzBox to say whether the line connected, then decide whether to ask anything.
+   * Ask when the call is over, not when it was placed.
    *
-   * Connected -> the question is live, because it could have been the debtor or their voicemail.
-   * Ended without ever connecting -> nobody answered, nothing more to charge, no question.
+   * That is the moment the collector knows what to write, and BuzzBox telling us the call ended
+   * is how we know it has arrived. The question is always asked; what the poll decides is only
+   * WHEN, and what the box can say about what the PABX saw.
    *
-   * Gives up after three minutes and asks anyway: a webhook that never arrived should not silently
-   * lose a consultation the collector actually had.
+   * Three minutes and it asks anyway. A webhook that never came must not swallow a consultation
+   * the collector actually had.
    */
   function watchForAnswer(callId: string, number: string) {
     if (watching.current) clearInterval(watching.current)
@@ -92,19 +100,12 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
       void (async () => {
         const outcome = await callOutcome(callId)
         const timedOut = Date.now() - started > 180_000
-        if (outcome?.answeredAt) {
-          setStatus(null)
-          setAnsweredCallId(callId)
-          setAsking(number)
-        } else if (outcome?.endedAt) {
-          setStatus('No answer')
-          await onDone()
-        } else if (timedOut) {
-          setAnsweredCallId(callId)
-          setAsking(number)
-        } else {
-          return
-        }
+        if (!outcome?.endedAt && !timedOut) return
+
+        setStatus(null)
+        setConnected(outcome?.endedAt ? !!outcome.answeredAt : null)
+        setAnsweredCallId(callId)
+        setAsking(number)
         if (watching.current) clearInterval(watching.current)
         watching.current = null
       })()
@@ -129,6 +130,7 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
       }
       setAsking(null)
       setAnsweredCallId(null)
+      setConnected(null)
       setComment('')
       await onDone()
     } catch (e) {
@@ -186,15 +188,21 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
 
       {asking && (
         <Modal title="Did you speak to them?" onClose={() => { setAsking(null); setAnsweredCallId(null) }} width={460}>
+          {/*
+            What the PABX saw, said plainly, and never as the final word. It can see that a line
+            connected; it cannot see who was on it, and it can miss a call entirely. The person who
+            just put the phone down knows better than it does and is allowed to say so.
+          */}
           <p className="text-sm text-slate-500">
-            {answeredCallId
-              ? <>The line to <span className="font-medium text-slate-700">{asking}</span> connected
-                &mdash; but a voicemail greeting answers exactly like a person does, and Raptor
-                cannot tell them apart. Only a real conversation is a consultation.</>
-              : <>That call went out through the device&rsquo;s own dialler, so nothing reports back
-                to Raptor. The call to <span className="font-medium text-slate-700">{asking}</span> is
-                already on the timeline and already charged &mdash; this is only about the
-                consultation.</>}
+            The call to <span className="font-medium text-slate-700">{asking}</span> is on the
+            timeline and the R{callRate.toFixed(2)} for it is already charged.{' '}
+            {connected === true
+              ? <>BuzzBox says the line connected &mdash; but a voicemail greeting answers exactly
+                like a person does, and it cannot tell them apart.</>
+              : connected === false
+                ? <>BuzzBox says nobody picked up. If you did speak to someone, say so anyway
+                  &mdash; it sees the line, not the conversation.</>
+                : <>Nothing reported back on this one, so only you know how it went.</>}
           </p>
           {/*
             Required, at the firm's request: "many of the debtor answers you need to fill it out,
