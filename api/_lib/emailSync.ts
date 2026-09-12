@@ -57,6 +57,44 @@ function realAttachmentNames(
     .slice(0, MAX_ATTACHMENT_NAMES)
 }
 
+/**
+ * The senders this agent has blocked, loaded once per sync rather than once per message.
+ *
+ * Returned as two sets because they are checked differently: an address must match exactly, a
+ * domain matches anything after the @. At 3 750 messages a day, one query beats 3 750.
+ */
+async function loadBlocks(
+  admin: SupabaseClient,
+  userId: string,
+): Promise<{ addresses: Set<string>; domains: Set<string> }> {
+  const { data, error } = await admin
+    .from('mail_blocks')
+    .select('pattern, kind')
+    .eq('user_id', userId)
+  if (error) {
+    // A blocklist we could not read must not stop the sync. Worst case is a week of newsletters.
+    console.error(`[emailSync] could not read the blocklist for ${userId}: ${error.message}`)
+    return { addresses: new Set(), domains: new Set() }
+  }
+  const addresses = new Set<string>()
+  const domains = new Set<string>()
+  for (const row of data ?? []) {
+    const pattern = String(row.pattern).toLowerCase()
+    if (row.kind === 'domain') domains.add(pattern)
+    else addresses.add(pattern)
+  }
+  return { addresses, domains }
+}
+
+/** Is this sender on the agent's blocklist? */
+function isBlocked(address: string | null, blocks: { addresses: Set<string>; domains: Set<string> }): boolean {
+  if (!address) return false
+  const clean = address.toLowerCase()
+  if (blocks.addresses.has(clean)) return true
+  const at = clean.lastIndexOf('@')
+  return at > -1 && blocks.domains.has(clean.slice(at + 1))
+}
+
 /** How much of a body is worth keeping to recognise a message by. The rest stays in the mailbox. */
 const SNIPPET_LENGTH = 240
 
@@ -528,6 +566,8 @@ async function syncMailbox(
   isJunk: boolean,
 ): Promise<{ logged: number; maxUid: number }> {
   let logged = 0
+  // Once per folder, not once per message.
+  const blocks = await loadBlocks(admin, conn.user_id)
   const lock = await client.getMailboxLock(path)
   try {
     let uids: number[]
@@ -576,7 +616,21 @@ async function syncMailbox(
        * exists somewhere a person can see it. Everything below only decides what ELSE happens to
        * it.
        */
-      const mailboxRowId = await fileUserEmail(admin, conn.user_id, {
+      /*
+       * A blocked sender never becomes a row.
+       *
+       * This is the firm's idea and the reason it is the best storage lever available: a
+       * newsletter that arrives weekly costs nothing instead of costing 30 days of retention,
+       * every week, forever.
+       *
+       * The matching below still runs. A block is about noise, not about silencing a debtor — if
+       * a blocked address turns out to belong to an account, or answers a demand we sent, it is
+       * still filed on that account. Only the mailbox row is skipped.
+       */
+      const blocked = isBlocked(normaliseAddress(fromAddress), blocks)
+      if (blocked) console.log(`[emailSync] ${path} UID ${uid}: sender blocked, no mailbox row`)
+
+      const mailboxRowId = blocked ? null : await fileUserEmail(admin, conn.user_id, {
         folder: path,
         uid: msg.uid,
         messageId: parsed.messageId ?? `${conn.user_id}:${path}:${uid}`,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, Inbox, Link2, Loader2, Paperclip, RefreshCw,
-  Search, ShieldAlert, Trash2,
+  AlertTriangle, Ban, Check, ChevronDown, ChevronRight, Inbox, Link2, Loader2, Paperclip,
+  RefreshCw, Search, ShieldAlert, Trash2, Undo2,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal } from '../../components/ui/Modal'
@@ -10,8 +10,9 @@ import { relativeDayLabel } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import {
-  deleteMail, fetchMail, fetchMailBody, linkMailToAccount, markMailRead,
-  type MailFilter, type MailItem,
+  blockSender, deleteMail, domainBlockProblem, domainOf, fetchBlockedSenders, fetchMail,
+  fetchMailBody, linkMailToAccount, markMailRead, unblockSender,
+  type BlockedSender, type MailFilter, type MailItem,
 } from '../../lib/userMail'
 
 /**
@@ -28,11 +29,15 @@ import {
  * Your own mail only — enforced by the database, not by this page. Not even an administrator
  * reads a colleague's inbox.
  */
-const TABS: { id: MailFilter; label: string; hint: string }[] = [
+/** 'blocked' is not a mail filter — it is the blocklist itself, shown in the same place. */
+type Pane = MailFilter | 'blocked'
+
+const TABS: { id: Pane; label: string; hint: string }[] = [
   { id: 'needs-filing', label: 'Needs filing', hint: 'Not yet on an account' },
   { id: 'filed', label: 'Filed', hint: 'Already on a debtor account' },
   { id: 'junk', label: 'Junk', hint: 'Your mail server thought this was spam' },
   { id: 'all', label: 'All', hint: 'Everything in the last 30 days' },
+  { id: 'blocked', label: 'Blocked', hint: 'Senders you never want to see again' },
 ]
 
 const PAGE = 50
@@ -45,7 +50,9 @@ const debtorLabel = (a: DebtorAccount) =>
 
 export function MailPage() {
   const { currentUser, session } = useAuth()
-  const [filter, setFilter] = useState<MailFilter>('needs-filing')
+  const [filter, setFilter] = useState<Pane>('needs-filing')
+  const [blocking, setBlocking] = useState<MailItem | null>(null)
+  const [blocked, setBlocked] = useState<BlockedSender[]>([])
   const [search, setSearch] = useState('')
   const [items, setItems] = useState<MailItem[]>([])
   const [more, setMore] = useState(false)
@@ -73,6 +80,15 @@ export function MailPage() {
     setLoading(true)
     setError(null)
     try {
+      // The blocklist is a list of senders, not of mail, so it loads by itself.
+      if (filter === 'blocked') {
+        setBlocked(await fetchBlockedSenders(currentUser.id))
+        setItems([])
+        setMore(false)
+        setPage(0)
+        setChosen(new Set())
+        return
+      }
       const res = await fetchMail({
         userId: currentUser.id, filter, search, offset: at * PAGE, limit: PAGE,
       })
@@ -188,7 +204,7 @@ export function MailPage() {
               &mdash; it stays in your real mailbox either way.
             </p>
           </div>
-          <label className="relative">
+          <label className={`relative ${filter === 'blocked' ? 'hidden' : ''}`}>
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               value={search}
@@ -240,6 +256,12 @@ export function MailPage() {
           <div className="py-14 grid place-items-center text-slate-400">
             <Loader2 size={18} className="animate-spin" />
           </div>
+        ) : filter === 'blocked' ? (
+          <BlockedList senders={blocked} onUnblock={async (id) => {
+            await unblockSender(id)
+            setStatus('Unblocked. Their mail appears again from the next sync — not retroactively.')
+            await load(0)
+          }} />
         ) : items.length === 0 ? (
           <Empty filter={filter} searching={!!search.trim()} />
         ) : (
@@ -260,6 +282,7 @@ export function MailPage() {
                   loadingBody={reading === m.id}
                   bodyError={readError[m.id]}
                   onToggle={() => void toggle(m)}
+                  onBlock={() => setBlocking(m)}
                   onChoose={(on) => setChosen((s) => {
                     const next = new Set(s)
                     if (on) next.add(m.id)
@@ -283,6 +306,15 @@ export function MailPage() {
         )}
       </Card>
 
+      {blocking && (
+        <BlockModal
+          mail={blocking}
+          userId={currentUser?.id ?? null}
+          onClose={() => setBlocking(null)}
+          onDone={(message) => { setBlocking(null); setStatus(message); void load(0) }}
+        />
+      )}
+
       {linking && (
         <LinkModal
           mail={linking}
@@ -295,7 +327,7 @@ export function MailPage() {
   )
 }
 
-function Empty({ filter, searching }: { filter: MailFilter; searching: boolean }) {
+function Empty({ filter, searching }: { filter: Exclude<Pane, 'blocked'>; searching: boolean }) {
   if (searching) return <p className="py-14 text-center text-sm text-slate-400">Nothing matches that.</p>
   const words: Record<MailFilter, string> = {
     'needs-filing': 'Nothing waiting. Every email has been filed or thrown away.',
@@ -312,7 +344,7 @@ function Empty({ filter, searching }: { filter: MailFilter; searching: boolean }
 }
 
 function MailRow({
-  mail, chosen, expanded, body, loadingBody, bodyError, onToggle, onChoose, onLink,
+  mail, chosen, expanded, body, loadingBody, bodyError, onToggle, onChoose, onLink, onBlock,
 }: {
   mail: MailItem
   chosen: boolean
@@ -324,6 +356,7 @@ function MailRow({
   onToggle: () => void
   onChoose: (on: boolean) => void
   onLink: () => void
+  onBlock: () => void
 }) {
   const unread = !mail.readAt
   return (
@@ -426,9 +459,148 @@ function MailRow({
               {mail.attachmentNames.join(', ')}
             </p>
           )}
+
+          {/*
+            Blocking lives here, on the open message, rather than as another button on every row.
+            It is the one action you should have read something before taking — and it is offered
+            even on mail already linked to an account, because blocking the sender is about
+            future noise, not about the message in front of you.
+          */}
+          <button onClick={onBlock}
+            className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-negative-100 hover:bg-negative-50 hover:text-negative-700">
+            <Ban size={13} /> Never import from this sender
+          </button>
         </div>
       )}
     </li>
+  )
+}
+
+/** The blocklist: what you have silenced, and the way back. */
+function BlockedList({ senders, onUnblock }: {
+  senders: BlockedSender[]
+  onUnblock: (id: string) => Promise<void>
+}) {
+  if (senders.length === 0) {
+    return (
+      <div className="py-14 text-center">
+        <Ban size={22} className="mx-auto text-slate-300" />
+        <p className="text-sm text-slate-500 mt-3">Nothing blocked.</p>
+        <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+          Open a message and choose &ldquo;Never import from this sender&rdquo; to keep it out of
+          Raptor for good. It stays in your real mailbox.
+        </p>
+      </div>
+    )
+  }
+  return (
+    <ul className="divide-y divide-slate-100">
+      {senders.map((b) => (
+        <li key={b.id} className="px-5 py-3 flex items-center gap-3">
+          <span className="shrink-0 grid place-items-center w-7 h-7 rounded-full bg-slate-100 text-slate-400">
+            <Ban size={13} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-slate-800 truncate">
+              {b.kind === 'domain' ? `Everything from ${b.pattern}` : b.pattern}
+            </p>
+            {b.label && <p className="text-xs text-slate-400 truncate">{b.label}</p>}
+          </div>
+          <button onClick={() => void onUnblock(b.id)}
+            className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+            <Undo2 size={13} /> Unblock
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/**
+ * Blocking a sender, with the two ways to do it and the reasons one of them may be refused.
+ *
+ * The refusals are the point of this box existing rather than it being a one-click action. A
+ * blocked sender never becomes a row, so a mistake here is invisible: the mail simply stops, and
+ * an account quietly looks unworked.
+ */
+function BlockModal({ mail, userId, onClose, onDone }: {
+  mail: MailItem
+  userId: string | null
+  onClose: () => void
+  onDone: (message: string) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const domain = domainOf(mail.fromAddress)
+  const domainProblem = domainBlockProblem(mail.fromAddress)
+
+  async function block(scope: 'address' | 'domain') {
+    if (!userId) return
+    setBusy(true)
+    setError(null)
+    try {
+      const { pattern, removed } = await blockSender({
+        userId,
+        address: mail.fromAddress,
+        scope,
+        label: mail.fromName ?? mail.subject ?? null,
+      })
+      onDone(
+        `Blocked ${pattern}.`
+        + (removed > 0 ? ` ${removed} ${removed === 1 ? 'message' : 'messages'} cleared out of Raptor.` : '')
+        + ' Nothing from them will be imported again.',
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="Never import from this sender" onClose={onClose} width={480}>
+      <p className="text-sm text-slate-500">
+        Their mail will stop appearing in Raptor from the next sync, and anything of theirs still
+        sitting here will be cleared out. It stays in your real mailbox &mdash; this only stops
+        Raptor taking a copy.
+      </p>
+
+      <div className="mt-4 space-y-2">
+        <button disabled={busy} onClick={() => void block('address')}
+          className="w-full text-left px-3.5 py-3 rounded-lg border border-slate-200 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50">
+          <span className="block text-sm font-medium text-slate-800">Just this address</span>
+          <span className="block text-xs text-slate-400 mt-0.5 truncate">{mail.fromAddress}</span>
+        </button>
+
+        <button disabled={busy || !!domainProblem} onClick={() => void block('domain')}
+          title={domainProblem ?? undefined}
+          className="w-full text-left px-3.5 py-3 rounded-lg border border-slate-200 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-transparent">
+          <span className="block text-sm font-medium text-slate-800">
+            Everything from {domain ?? 'this domain'}
+          </span>
+          <span className="block text-xs text-slate-400 mt-0.5">
+            {domainProblem ?? 'Catches the same nuisance when it changes address, which spam does.'}
+          </span>
+        </button>
+      </div>
+
+      {error && (
+        <p className="text-sm text-negative-700 mt-3 flex items-start gap-1.5">
+          <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+          {error}
+        </p>
+      )}
+
+      <p className="text-xs text-slate-400 mt-4">
+        An address that is on a debtor&rsquo;s file cannot be blocked at all. Reversible from the
+        Blocked tab, though unblocking is not retroactive &mdash; it lets their next message in,
+        not the ones already skipped.
+      </p>
+      {busy && (
+        <p className="text-xs text-slate-400 mt-2 inline-flex items-center gap-1.5">
+          <Loader2 size={12} className="animate-spin" /> Blocking&hellip;
+        </p>
+      )}
+    </Modal>
   )
 }
 

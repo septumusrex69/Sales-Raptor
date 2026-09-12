@@ -1732,3 +1732,46 @@ create policy "user_emails_own_update" on public.user_emails for update
 drop policy if exists "user_emails_own_delete" on public.user_emails;
 create policy "user_emails_own_delete" on public.user_emails for delete
   using (user_id = auth.uid() and linked_account_id is null);
+
+-- ---------- Senders an agent never wants to see again ----------
+--
+-- The firm's idea, and the best storage lever there is: repeat senders — newsletters, agencies,
+-- the same scam every week — are most of the 3 750 messages a day. A blocked sender is skipped
+-- at sync time and never becomes a row at all, so it costs nothing rather than costing 30 days
+-- of retention, every week, forever.
+--
+-- Per agent, not firm-wide. It matches the rest of the mailbox (your mail is yours) and, more
+-- importantly, it means one person cannot silence a sender for everyone else — blocking a
+-- client's domain by accident would be invisible and expensive. The storage saving is the same
+-- either way, because each agent's mailbox is its own set of rows.
+--
+-- Two guards live in the application rather than here, because both need lookups a constraint
+-- cannot do: an address on a debtor's account_contacts row can never be blocked (their mail
+-- would simply stop, and nobody would see it go missing), and a whole-domain block is refused
+-- for shared providers like gmail.com, where a debtor writing from one is the normal case.
+-- See blockSender in src/lib/userMail.ts.
+create table if not exists public.mail_blocks (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+
+  -- Lowercased. Either a full address ('winner@prize-claim.example') or a bare domain
+  -- ('prize-claim.example'), which kind says which.
+  pattern text not null,
+  kind text not null check (kind in ('address', 'domain')),
+
+  -- What it was called when it was blocked, so the list reads as something a person recognises
+  -- rather than a column of addresses.
+  label text,
+  created_at timestamptz not null default now()
+);
+
+-- One block per sender per agent. Not partial: "on conflict" inference needs it whole.
+create unique index if not exists mail_blocks_pattern_idx
+  on public.mail_blocks (user_id, pattern);
+
+alter table public.mail_blocks enable row level security;
+
+-- Your list, yours to change. Nobody else reads or writes it, including an administrator.
+drop policy if exists "mail_blocks_own" on public.mail_blocks;
+create policy "mail_blocks_own" on public.mail_blocks for all
+  using (user_id = auth.uid()) with check (user_id = auth.uid());

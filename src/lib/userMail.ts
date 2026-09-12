@@ -201,6 +201,146 @@ export async function deleteMail(ids: string[]): Promise<number> {
   return data?.length ?? 0
 }
 
+/* ------------------------------------------------------------------ *
+ * Blocked senders
+ * ------------------------------------------------------------------ */
+
+export interface BlockedSender {
+  id: string
+  pattern: string
+  kind: 'address' | 'domain'
+  label: string | null
+  createdAt: string
+}
+
+/**
+ * Domains that may never be blocked wholesale.
+ *
+ * A debtor emailing from Gmail is the normal case, not the exception — blocking gmail.com to be
+ * rid of one nuisance would silence a large share of the book, and silently, because a blocked
+ * sender never becomes a row to notice. Addresses at these domains can still be blocked one at
+ * a time; it is only the whole-domain block that is refused.
+ */
+const SHARED_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'hotmail.co.za', 'live.com',
+  'live.co.za', 'msn.com', 'yahoo.com', 'yahoo.co.za', 'ymail.com', 'icloud.com', 'me.com',
+  'mac.com', 'aol.com', 'protonmail.com', 'proton.me', 'zoho.com', 'gmx.com', 'mail.com',
+  'webmail.co.za', 'telkomsa.net', 'vodamail.co.za', 'mweb.co.za', 'absamail.co.za',
+  'iafrica.com', 'polka.co.za', 'lantic.net',
+])
+
+export function domainOf(address: string): string | null {
+  const at = address.lastIndexOf('@')
+  return at > -1 ? address.slice(at + 1).toLowerCase() : null
+}
+
+/** Why a whole-domain block is being refused, or null when it is fine. */
+export function domainBlockProblem(address: string): string | null {
+  const domain = domainOf(address)
+  if (!domain) return 'That is not an email address.'
+  if (SHARED_DOMAINS.has(domain)) {
+    return `${domain} is a shared email provider — blocking all of it would silence debtors too. `
+      + 'Block just this address instead.'
+  }
+  return null
+}
+
+export async function fetchBlockedSenders(userId: string): Promise<BlockedSender[]> {
+  const { data, error } = await supabase
+    .from('mail_blocks')
+    .select('id, pattern, kind, label, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => ({
+    id: r.id as string,
+    pattern: r.pattern as string,
+    kind: r.kind as 'address' | 'domain',
+    label: (r.label as string | null) ?? null,
+    createdAt: r.created_at as string,
+  }))
+}
+
+/**
+ * Is this address on a debtor's file?
+ *
+ * The guard that matters most. Blocking an address that belongs to a debtor would stop their
+ * mail reaching us at all, and because a blocked sender never becomes a row, nobody would ever
+ * find out — the account would simply look unworked. Retired contacts count: "retired" means we
+ * stopped writing to it, not that mail from it is somebody else's.
+ */
+export async function addressBelongsToDebtor(address: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('account_contacts')
+    .select('id')
+    .eq('kind', 'email')
+    .ilike('value', address.trim().toLowerCase())
+    .limit(1)
+  if (error) throw new Error(error.message)
+  return (data ?? []).length > 0
+}
+
+/**
+ * Never import from this sender again, and clear out what is already here.
+ *
+ * Refuses outright if the address is on a debtor's file — see addressBelongsToDebtor. A
+ * whole-domain block is refused for shared providers for the same reason.
+ *
+ * Existing UNLINKED mail from the sender goes with it, which is the point: blocking the weekly
+ * newsletter should clear the four copies already sitting there. Linked mail is untouched — it
+ * is on an account and raised a fee, and the database refuses to delete it anyway.
+ */
+export async function blockSender(input: {
+  userId: string
+  address: string
+  /** 'domain' blocks everything after the @. */
+  scope: 'address' | 'domain'
+  label?: string | null
+}): Promise<{ pattern: string; removed: number }> {
+  const address = input.address.trim().toLowerCase()
+  if (!address.includes('@')) throw new Error('That is not an email address.')
+
+  if (await addressBelongsToDebtor(address)) {
+    throw new Error(
+      `${address} is on a debtor's file. Blocking it would stop their mail reaching Raptor at all, `
+      + 'and nobody would see it go missing.',
+    )
+  }
+
+  let pattern = address
+  if (input.scope === 'domain') {
+    const problem = domainBlockProblem(address)
+    if (problem) throw new Error(problem)
+    pattern = domainOf(address)!
+  }
+
+  const { error } = await supabase
+    .from('mail_blocks')
+    .upsert(
+      { user_id: input.userId, pattern, kind: input.scope, label: input.label ?? null },
+      { onConflict: 'user_id,pattern', ignoreDuplicates: true },
+    )
+  if (error) throw new Error(error.message)
+
+  // Clear what is already sitting in the mailbox from this sender. Unlinked only.
+  let q = supabase.from('user_emails').delete()
+    .eq('user_id', input.userId)
+    .is('linked_account_id', null)
+  q = input.scope === 'domain'
+    ? q.ilike('from_address', `%@${pattern}`)
+    : q.ilike('from_address', pattern)
+  const { data: gone, error: sweepError } = await q.select('id')
+  if (sweepError) throw new Error(sweepError.message)
+
+  return { pattern, removed: gone?.length ?? 0 }
+}
+
+/** Let a sender back in. Their mail appears again from the next sync, not retroactively. */
+export async function unblockSender(id: string): Promise<void> {
+  const { error } = await supabase.from('mail_blocks').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
 /**
  * File a message against a debtor account.
  *
