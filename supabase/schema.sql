@@ -1587,6 +1587,18 @@ create table if not exists public.account_emails (
   email_uid bigint,
   -- Null on an inbound message: the debtor sent that one.
   sent_by uuid references public.profiles (id) on delete set null,
+  -- Whose inbox an INBOUND message landed in, and whether they have looked at it.
+  --
+  -- These are what let the Messages menu count a debtor's reply, exactly as it already counts
+  -- CRM mail. Without them a reply is discoverable only by opening the account it belongs to,
+  -- which across 100 000 accounts means it is not discoverable at all.
+  --
+  -- received_by is the mailbox owner, deliberately NOT the account's assigned collector: it is
+  -- literally whose inbox the message is in, and therefore who is already expecting it.
+  received_by uuid references public.profiles (id) on delete set null,
+  -- Null means unread. A timestamp rather than a boolean, so "when did someone first see this"
+  -- is answerable later without another column.
+  read_at timestamptz,
   -- Free text as well as the reference, like every other author column on an account.
   sent_by_name text,
   -- What this message earned, excluding VAT. Item 1(a), R25, on everything we send — the firm's
@@ -1614,6 +1626,10 @@ create unique index if not exists account_emails_message_idx
   on public.account_emails (message_id);
 create index if not exists account_emails_account_idx
   on public.account_emails (account_id, occurred_at desc);
+-- The Messages menu's query: my unread inbound mail, newest first.
+create index if not exists account_emails_unread_idx
+  on public.account_emails (received_by, occurred_at desc)
+  where direction = 'in' and read_at is null;
 
 alter table public.account_emails enable row level security;
 
@@ -1623,5 +1639,10 @@ drop policy if exists "account_emails_select" on public.account_emails;
 create policy "account_emails_select" on public.account_emails for select using (auth.uid() is not null);
 drop policy if exists "account_emails_insert" on public.account_emails;
 create policy "account_emails_insert" on public.account_emails for insert with check (auth.uid() is not null);
--- No update policy. What was sent was sent, and what the debtor wrote is theirs. Inbound rows are
--- written by the sync with the service key, which these policies do not constrain.
+-- Marking your own mail read is the ONE thing a browser may change here. Everything else about a
+-- message -- who sent it, what it said, what it cost -- is a record. Scoped to the recipient so
+-- one agent cannot clear another's unread count. Inbound rows are written by the sync with the
+-- service key, which these policies do not constrain.
+drop policy if exists "account_emails_mark_read" on public.account_emails;
+create policy "account_emails_mark_read" on public.account_emails for update
+  using (received_by = auth.uid()) with check (received_by = auth.uid());

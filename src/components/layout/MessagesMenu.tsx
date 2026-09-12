@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Mail, MailOpen } from 'lucide-react'
+import { Loader2, Mail, MailOpen } from 'lucide-react'
 import { timeAgo } from '../../data/mockData'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { parseEmailActivity } from '../../lib/emailActivity'
+import { fetchUnreadReplies, markRepliesRead, type DebtorReply } from '../../lib/accountEmails'
 import type { Activity } from '../../types'
 
 /**
@@ -25,20 +26,84 @@ function destinationFor(a: Activity): string | undefined {
 }
 
 /**
+ * One shape for both kinds of unread mail, so the list can be one list.
+ *
+ * A CRM email hangs off a contact, lead, deal or company; a debtor's reply hangs off an account.
+ * They are different records in different tables and they are the same thing to the person
+ * reading this menu: somebody wrote to us and nobody has answered.
+ */
+interface InboxItem {
+  id: string
+  subject: string
+  preview: string
+  at: string
+  /** Which debtor or client it is about, where we can say it in a few words. */
+  about: string | null
+  /** Where clicking goes. Null for a CRM email with nothing linked to it. */
+  to: string | null
+  markRead: () => void
+}
+
+/**
  * Unread mail, counted where people already look for a count.
  *
  * Separate from the bell on purpose. A notification is something the system decided to tell
  * you; an unread email is a person waiting on a reply, and the two want different responses.
  * Mixing them means the number beside the bell stops meaning anything in particular, and the
  * mail that actually needs answering is buried among download receipts and status changes.
+ *
+ * Debtor replies count here too, and they have to. There are 100 000 accounts: a reply that
+ * only appears on the account it belongs to is a reply nobody will ever find, and the firm said
+ * so — "how will we know someone sent a message? It's crucial."
  */
 export function MessagesMenu() {
   const { activities, updateActivity } = useAppStore()
-  const { currentUser } = useAuth()
+  const { currentUser, session } = useAuth()
   const [open, setOpen] = useState(false)
   const [stranded, setStranded] = useState<string | null>(null)
+  const [replies, setReplies] = useState<DebtorReply[]>([])
+  const [syncing, setSyncing] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
+
+  const loadReplies = useCallback(async () => {
+    if (!currentUser) return
+    try {
+      setReplies(await fetchUnreadReplies(currentUser.id))
+    } catch {
+      // A count we could not read is not worth an error on the chrome of every page.
+    }
+  }, [currentUser])
+
+  /*
+   * Read the mailbox when someone is actually here.
+   *
+   * The Vercel cron syncs every mailbox once a day (05:00 UTC) — that is the ceiling on the
+   * Hobby plan — so on the cron alone a debtor's reply could sit unseen for the better part of
+   * a day. Nothing about a notification fixes that: the mail has to be FETCHED before it can be
+   * counted.
+   *
+   * So the app pulls the signed-in agent's own mailbox when it loads and again when they open
+   * this menu, which is exactly the moment they are asking "has anyone written to me". It is
+   * one IMAP connection for one mailbox, and it means the count is current for whoever is
+   * working rather than current as of last night.
+   */
+  const syncMine = useCallback(async () => {
+    const token = session?.access_token
+    if (!token) return
+    setSyncing(true)
+    try {
+      await fetch('/api/email/sync', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+    } catch {
+      // Offline, or no mailbox connected. The list still shows whatever was already synced.
+    } finally {
+      setSyncing(false)
+      await loadReplies()
+    }
+  }, [session, loadReplies])
+
+  useEffect(() => { void syncMine() }, [syncMine])
+  useEffect(() => { if (open) void syncMine() }, [open, syncMine])
 
   /*
    * Your unread mail, not the floor's.
@@ -48,9 +113,10 @@ export function MessagesMenu() {
    * climb with other people's inboxes and be ignored inside a week. A synced email carries the
    * id of the mailbox owner it arrived for, which is the person actually being waited on.
    */
-  const unread = useMemo(() => {
+  const unread = useMemo<InboxItem[]>(() => {
     if (!currentUser) return []
-    return activities
+
+    const crm: InboxItem[] = activities
       .filter(
         (a) =>
           a.type === 'Email' &&
@@ -58,8 +124,34 @@ export function MessagesMenu() {
           a.userId === currentUser.id &&
           parseEmailActivity(a.subject)?.direction === 'received',
       )
-      .sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime())
-  }, [activities, currentUser])
+      .map((a) => ({
+        id: a.id,
+        subject: parseEmailActivity(a.subject)?.subject ?? a.subject,
+        preview: (a.notes ?? '').replace(/\s+/g, ' ').trim(),
+        at: a.activityDate,
+        about: null,
+        to: destinationFor(a) ?? null,
+        markRead: () => updateActivity(a.id, { isRead: true }),
+      }))
+
+    const debtor: InboxItem[] = replies.map((r) => ({
+      id: r.id,
+      subject: r.subject || '(no subject)',
+      preview: (r.body ?? '').replace(/\s+/g, ' ').trim(),
+      at: r.occurredAt,
+      // Says which debtor before you click, which is the whole difference between a useful
+      // count and a list of twenty identical "Re: Account ..." lines.
+      about: [r.debtorName, r.accountNumber].filter(Boolean).join(' · ') || r.from,
+      // Straight to the Emails tab with this message open — see AccountDetail's `email` param.
+      to: `/accounts/${r.accountId}?email=${encodeURIComponent(r.id)}`,
+      markRead: () => {
+        setReplies((list) => list.filter((x) => x.id !== r.id))
+        void markRepliesRead([r.id])
+      },
+    }))
+
+    return [...crm, ...debtor].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+  }, [activities, currentUser, replies, updateActivity])
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -69,20 +161,22 @@ export function MessagesMenu() {
     return () => document.removeEventListener('mousedown', onClick)
   }, [])
 
-  function handleSelect(a: Activity) {
-    setOpen(false)
-    const to = destinationFor(a)
-    if (to) {
-      navigate(to)
+  function handleSelect(item: InboxItem) {
+    if (!item.to) {
+      // No client, lead, deal or contact on the record — nowhere to send anyone. Say so rather
+      // than closing the menu and appearing to have done nothing.
+      setStranded(item.id)
       return
     }
-    // No client, lead, deal or contact on the record — nowhere to send anyone. Say so rather
-    // than closing the menu and appearing to have done nothing.
-    setStranded(a.id)
+    setOpen(false)
+    // Opening it IS reading it. The page it lands on shows the message, so leaving it bold in
+    // the count afterwards would mean the number never goes down.
+    item.markRead()
+    navigate(item.to)
   }
 
   function markAllRead() {
-    for (const a of unread) updateActivity(a.id, { isRead: true })
+    for (const item of unread) item.markRead()
   }
 
   return (
@@ -103,8 +197,11 @@ export function MessagesMenu() {
       {open && (
         <div className="absolute right-0 top-full mt-2 w-[22rem] bg-white rounded-xl shadow-lg border border-slate-100 py-2 z-50 max-h-96 overflow-y-auto">
           <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-slate-700">
-              Unread messages{unread.length > 0 && <span className="text-slate-400 font-normal"> · {unread.length}</span>}
+            <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+              Unread messages{unread.length > 0 && <span className="text-slate-400 font-normal">· {unread.length}</span>}
+              {/* Shown while the mailbox is being read, so an empty list reads as "still
+                  looking" rather than "nothing came". */}
+              {syncing && <Loader2 size={12} className="animate-spin text-slate-300" />}
             </h3>
             {unread.length > 0 && (
               <button onClick={markAllRead} className="text-xs font-medium text-brand-600 hover:underline shrink-0">
@@ -116,28 +213,30 @@ export function MessagesMenu() {
           {unread.length === 0 ? (
             <p className="px-4 py-6 text-sm text-slate-400 text-center flex flex-col items-center gap-2">
               <MailOpen size={20} className="text-slate-300" />
-              Nothing unread. Every message has been opened.
+              {syncing ? 'Checking your mailbox…' : 'Nothing unread. Every message has been opened.'}
             </p>
           ) : (
-            unread.map((a) => {
-              const subject = parseEmailActivity(a.subject)?.subject ?? a.subject
-              const preview = (a.notes ?? '').replace(/\s+/g, ' ').trim()
-              return (
-                <button key={a.id} onClick={() => handleSelect(a)} className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex gap-2 items-start">
-                  <span className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 bg-brand-500" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-[13px] font-medium text-slate-800 leading-snug truncate">{subject}</span>
-                    {preview && <span className="block text-[12px] text-slate-400 leading-snug truncate">{preview}</span>}
-                    <span className="block text-[11px] text-slate-400 mt-0.5">{timeAgo(a.activityDate)}</span>
-                    {stranded === a.id && (
-                      <span className="block text-[11px] text-[var(--c-rust-deep)] mt-1">
-                        Not linked to a client, lead or deal yet — find it under Activities.
-                      </span>
-                    )}
-                  </span>
-                </button>
-              )
-            })
+            unread.map((item) => (
+              <button key={item.id} onClick={() => handleSelect(item)} className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex gap-2 items-start">
+                <span className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 bg-brand-500" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-medium text-slate-800 leading-snug truncate">{item.subject}</span>
+                  {/* Who it is about, before the preview. On a debtor's reply the subject line is
+                      often our own "Re: Account ..." coming back, so the name is what tells the
+                      agent which of a hundred thousand accounts this is. */}
+                  {item.about && (
+                    <span className="block text-[12px] text-brand-600 leading-snug truncate">{item.about}</span>
+                  )}
+                  {item.preview && <span className="block text-[12px] text-slate-400 leading-snug truncate">{item.preview}</span>}
+                  <span className="block text-[11px] text-slate-400 mt-0.5">{timeAgo(item.at)}</span>
+                  {stranded === item.id && (
+                    <span className="block text-[11px] text-[var(--c-rust-deep)] mt-1">
+                      Not linked to a client, lead or deal yet — find it under Activities.
+                    </span>
+                  )}
+                </span>
+              </button>
+            ))
           )}
         </div>
       )}

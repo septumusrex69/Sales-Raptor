@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, Mail, MailOpen, Paperclip, Reply } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { formatMoney } from '../../data/mockData'
@@ -15,14 +15,25 @@ import type { AccountEmail } from '../../lib/accountEmails'
  * the words of the reply to it are the record of what was said, and a list that only shows
  * subject lines makes a person open ten things to find the one that matters.
  */
-export function EmailsPanel({ emails, canSend, onCompose, onReply }: {
+export function EmailsPanel({ emails, focusId, canSend, onCompose, onReply }: {
   emails: AccountEmail[]
+  /**
+   * One message to open on arrival, from the Messages menu's `?email=` link.
+   *
+   * Without it, following "Ryno replied" lands on a list with the reply collapsed somewhere in
+   * it, which is the same as not linking to it at all.
+   */
+  focusId?: string | null
   /** False when the agent has no mailbox connected — the buttons say so rather than failing. */
   canSend: boolean
   onCompose: () => void
   onReply: (email: AccountEmail) => void
 }) {
-  const [open, setOpen] = useState<string | null>(emails[0]?.id ?? null)
+  // Newest open by default; the linked one instead when we were sent here to read it.
+  const [open, setOpen] = useState<string | null>(focusId ?? emails[0]?.id ?? null)
+  // The list arrives empty on the first render and fills in after the fetch, so the id has to be
+  // applied when it lands rather than only at mount.
+  useEffect(() => { if (focusId) setOpen(focusId) }, [focusId])
 
   if (emails.length === 0) {
     return (

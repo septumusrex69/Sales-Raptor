@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle, ArrowLeft, Check, CheckCircle2, Columns3, Loader2, Mail, MessageCircle,
   MessageSquare, PanelRight, Phone, Plus, Printer, Rows3, ShieldAlert, StickyNote, X, XCircle,
@@ -93,7 +93,15 @@ export function AccountDetail() {
   const [mailbox, setMailbox] = useState<string | null>(null)
   /** Set when writing a reply, so the debtor's client threads our answer under their message. */
   const [replyTo, setReplyTo] = useState<AccountEmail | null>(null)
-  const [tab, setTab] = useState<Tab>('Overview')
+  /*
+   * Landing straight on a message, from the Messages menu.
+   *
+   * Arriving on the Overview with the reply three tabs away and closed reads as a broken link —
+   * the same reasoning MessagesMenu's destinationFor uses for the CRM side.
+   */
+  const [params] = useSearchParams()
+  const focusEmail = params.get('email')
+  const [tab, setTab] = useState<Tab>(focusEmail ? 'Emails' : 'Overview')
   const [layout, setLayout] = useState<Layout>(storedLayout)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -511,6 +519,7 @@ export function AccountDetail() {
       {tab === 'Emails' && (
         <EmailsPanel
           emails={emails}
+          focusId={focusEmail}
           canSend={!!mailbox}
           onCompose={() => { setReplyTo(null); setComposeTo(emailContact?.value ?? '') }}
           onReply={(e) => { setReplyTo(e); setComposeTo(e.debtorAddress) }}
