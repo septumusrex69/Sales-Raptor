@@ -150,16 +150,29 @@ all of it by typing the Organisation ID into the connect form.
   string. **So one real call through Raptor should show the payload in the Vercel runtime logs
   under `[buzzbox-webhook]`.** Read it there, then teach the handler which field means answered.
 
-  Until then nothing reads it, deliberately. The debtor account page asks the collector "did
-  they answer?" instead and charges Annexure B item 7 on a yes -- guessing which field means
-  "picked up" and billing on the strength of the guess is how a firm charges for calls that rang
-  out. When the shape is known the charge moves into the webhook and the question goes away.
+  **The webhook records; it does not charge.** It was written to raise item 7 on the bridge, and
+  that was wrong: a voicemail system answers and bridges exactly like a debtor, so every message
+  a collector left billed a R60 consultation that never happened. No field in the payload
+  distinguishes them and none could -- the difference is who was on the other end.
+
+  What it does buy is not having to ask when the answer is certain: a call that never bridged was
+  never answered by anybody, so that case resolves in silence. A call that DID connect asks the
+  collector whether they spoke to a person, and requires them to write what was said before the
+  consultation can be charged.
 
   The callback URL is built in `api/_lib/buzzbox/call.ts` from `BUZZBOX_WEBHOOK_BASE`, else
   `VERCEL_PROJECT_PRODUCTION_URL`, else `VERCEL_URL`. It is omitted rather than guessed when the
   deployment has no webhook key or does not know its own hostname.
-- **Call recordings.** `GET /rest/v1/pabx-organisations/{id}/call-recordings/{uuid}` exists;
-  linking a recording to the Activity needs the webhook above to learn the recording id.
+- **Call recordings.** `GET /rest/v1/pabx-organisations/{id}/call-recordings/{uuid}` exists, and
+  the uuid it wants is almost certainly the call's `externalId` -- which we now capture on every
+  call, in `account_calls.external_id`. So the missing piece is no longer the id.
+
+  What remains: confirm recording is switched ON for the organisation (nothing to fetch
+  otherwise), confirm externalId is the right uuid, then proxy it. It must be proxied rather than
+  linked: the endpoint needs the firm's BuzzBox JWT, which lives server-side only, so a direct
+  `<audio src>` would hand every collector the PABX credentials. Same shape as
+  api/email/attachment.ts -- authenticate the Raptor user, fetch with the server-side token,
+  stream it back, log who played it. Costs no extra function; it joins /api/buzzbox/[action].
 - **Inbound screen-pop.** `GET .../calls` lists active calls (with `cidNumber`), and there is a
   Pusher channel auth route, so "who is calling" against leads/contacts is feasible.
 - ~~**Debtor accounts.** Log dialled calls on the account timeline once the fee/tariff decision

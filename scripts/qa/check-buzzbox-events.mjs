@@ -126,9 +126,20 @@ check('and a bridge is an answer', parseCallEvent(bridge).answered, true)
 check('a hangup is not an answer', parseCallEvent(hangupComplete).answered, false)
 check('nor is one that rang out', parseCallEvent(rangOut).answered, false)
 
-// The whole point. If this ever flips, every unanswered call starts billing R60.
+// The whole point. If this ever flips, every unanswered call looks like a conversation.
 check('the call nobody answered produces no answered event at all',
   [createInternal, answerInternal, rangOut].some((e) => parseCallEvent(e).answered), false)
+
+/*
+ * What "answered" does NOT mean, written down because it cost the firm money to learn.
+ *
+ * It means a phone was picked up. It does not mean a PERSON picked up: a voicemail system
+ * answers and bridges exactly like a debtor, and no field here distinguishes them. So nothing
+ * downstream may charge the item 7 consultation off this flag alone -- the webhook records it
+ * and the collector decides. See api/_lib/buzzbox/webhook.ts.
+ */
+check('an answered event carries nothing that could identify a voicemail',
+  Object.keys(parseCallEvent(bridge)).filter((k) => /voice|machine|human|amd/i.test(k)), [])
 check('the answered call produces at least one',
   [createInternal, answerInternal, createExternal, answerExternal, bridge, hangupComplete]
     .some((e) => parseCallEvent(e).answered), true)

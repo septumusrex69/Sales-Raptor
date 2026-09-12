@@ -2,15 +2,14 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { adminClient } from '../auth.js'
 import { parseCallEvent, numberTail } from '../../../src/lib/buzzboxEvents.js'
-import { chargeItemWith } from '../../../src/lib/chargeEngine.js'
-import { consultationNote, CONSULTATION_DESCRIPTION, CONSULTATION_ITEM_ID } from '../../../src/lib/callRules.js'
 
 /**
  * BuzzBox telling us what happened to a call.
  *
- * This is what makes the consultation fee automatic. A collector used to be asked "did they
- * answer?" because nothing on our side could tell a conversation from a ringing phone; now
- * FreeSWITCH says so directly, and the fee is raised the moment the two legs bridge.
+ * It records what happened and charges nothing. FreeSWITCH can tell us a phone was picked up; it
+ * cannot tell us WHO picked it up, and a voicemail greeting answers exactly like a person. So the
+ * fee stays with the collector, who knows. What this does buy is certainty in the other
+ * direction: a call that never bridged was never answered, and nobody has to be asked about it.
  *
  * The payload's shape is not documented by BuzzBox -- it was read off real calls, and
  * src/lib/buzzboxEvents.ts holds both the reading and the reasoning. See
@@ -86,43 +85,24 @@ async function apply(admin: SupabaseClient, event: ReturnType<typeof parseCallEv
   if (!event.answered) return { matched: true, answered: false }
 
   /*
-   * Claim the fee before raising it.
+   * Record that the line connected. Do NOT charge for it.
    *
-   * Both legs of a call report being answered, CHANNEL_ANSWER and CHANNEL_BRIDGE can both arrive,
-   * and a provider that does not get a 200 will retry. So the stamp is set by a conditional
-   * update that only matches while it is still null, and the charge happens only for whoever won
-   * that update. Anything less and one conversation bills R60 three times.
+   * This used to raise the item 7 consultation here, and it was wrong in a way only a real
+   * afternoon of calls exposed: a voicemail system answering IS a bridge. FreeSWITCH joins two
+   * live legs whether the second one is the debtor or their network's "please leave a message".
+   * Every call that went to voicemail billed R60 for a consultation that never happened.
+   *
+   * Nothing in the payload distinguishes them, and nothing could -- the difference is who was on
+   * the other end, which is knowable only to the person who listened. So the webhook now reports
+   * and the collector decides. What this still buys is the case where the call NEVER bridged:
+   * that is certain, so nobody is asked about it.
    */
-  const { data: claimed } = await admin.from('account_calls')
-    .update({
-      consultation_charged_at: new Date().toISOString(),
-      answered_at: event.at ?? new Date().toISOString(),
-    })
+  await admin.from('account_calls')
+    .update({ answered_at: event.at ?? new Date().toISOString() })
     .eq('id', call.id)
-    .is('consultation_charged_at', null)
-    .select('id')
-    .maybeSingle<{ id: string }>()
-  if (!claimed) return { matched: true, answered: true, charged: false }
+    .is('answered_at', null)
 
-  const charge = await chargeItemWith(admin, {
-    accountId: call.account_id,
-    itemId: CONSULTATION_ITEM_ID,
-    actionCode: 'consultation',
-    description: CONSULTATION_DESCRIPTION,
-    createdBy: call.placed_by,
-  })
-
-  await admin.from('account_notes').insert({
-    account_id: call.account_id,
-    body: consultationNote(call.number, charge),
-    // Raptor's words: hidden when the timeline is set to show only what people wrote.
-    source: 'system',
-    kind: 'note',
-    author_name: call.placed_by_name,
-    created_by: call.placed_by,
-  })
-
-  return { matched: true, answered: true, charged: true, reason: charge.reason }
+  return { matched: true, answered: true, charged: false }
 }
 
 /**

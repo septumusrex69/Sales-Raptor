@@ -105,18 +105,44 @@ export async function callOutcome(callId: string): Promise<{
 /**
  * The debtor answered and the call ran: a consultation, Annexure B item 7.
  *
- * Confirmed by the person who made the call rather than detected. BuzzBox can call us back about
- * a call -- `CallSetup.webhookUrl` -- but its payload is undocumented, so there is nothing yet to
- * read "answered" out of. Asking is honest; guessing at a fee is not. See
- * docs/buzzbox-integration.md for what capturing a real payload would take.
+ * Confirmed by the person who made the call, and it has to be. BuzzBox reports that the line
+ * connected, which is not the same fact: a voicemail system answers exactly like a debtor does,
+ * and billing a consultation for a message left on an answering machine is not defensible.
+ * Whether there was a conversation is knowable only to whoever listened.
+ *
+ * The comment is REQUIRED here, at the firm's request -- "many of the debtor answers you need to
+ * fill it out, so make that obligatory". A consultation charged with nothing written about it is
+ * a R60 fee with no evidence behind it, which is the one kind nobody can defend later.
  */
 export async function recordConsultation(input: {
   accountId: string
   number: string
-  /** What was said, if the collector typed anything. Their words, so their note. */
-  comment?: string
+  /** What was said. Not optional: a consultation with no record of it is indefensible. */
+  comment: string
+  /** The account_calls row, where there is one, so the fee is claimed exactly once. */
+  callId?: string | null
   actor: Actor
 }): Promise<ChargeResult> {
+  const said = input.comment?.trim()
+  if (!said) throw new Error('Write what was said before charging a consultation.')
+
+  /*
+   * Claim the call before charging it.
+   *
+   * Only where we have a row to claim -- a tel: call has none. The claim is the same conditional
+   * update the webhook used to do: it only matches while the stamp is null, so a double-click or
+   * a retried request cannot raise two R60 fees for one conversation.
+   */
+  if (input.callId) {
+    const { data: claimed } = await supabase.from('account_calls')
+      .update({ consultation_charged_at: new Date().toISOString() })
+      .eq('id', input.callId)
+      .is('consultation_charged_at', null)
+      .select('id')
+      .maybeSingle<{ id: string }>()
+    if (!claimed) throw new Error('This call has already been charged a consultation.')
+  }
+
   const charge = await chargeItem({
     accountId: input.accountId,
     itemId: CONSULTATION_ITEM_ID,
@@ -141,7 +167,7 @@ export async function recordConsultation(input: {
     authorName: input.actor.name,
     createdBy: input.actor.id,
   })
-  await addComment(input.accountId, input.comment, input.actor)
+  await addComment(input.accountId, said, input.actor)
   return charge
 }
 
