@@ -42,6 +42,13 @@ interface InboxItem {
   /** Where clicking goes. Null for a CRM email with nothing linked to it. */
   to: string | null
   markRead: () => void
+  /**
+   * Whether following the link counts as having read it.
+   *
+   * True for CRM mail, whose destination pages open the message on arrival. False for a debtor's
+   * reply, which lands unread on the account for somebody to open — see the note where it is set.
+   */
+  readOnFollow: boolean
 }
 
 /**
@@ -132,6 +139,9 @@ export function MessagesMenu() {
         about: null,
         to: destinationFor(a) ?? null,
         markRead: () => updateActivity(a.id, { isRead: true }),
+        // The client, lead and deal pages open the linked message on arrival, so following the
+        // link really is reading it. Unchanged behaviour on the CRM side.
+        readOnFollow: true,
       }))
 
     const debtor: InboxItem[] = replies.map((r) => ({
@@ -144,10 +154,21 @@ export function MessagesMenu() {
       about: [r.debtorName, r.accountNumber].filter(Boolean).join(' · ') || r.from,
       // Straight to the Emails tab with this message open — see AccountDetail's `email` param.
       to: `/accounts/${r.accountId}?email=${encodeURIComponent(r.id)}`,
+      // Reading it is opening it on the account, not clicking it here. See handleSelect.
       markRead: () => {
         setReplies((list) => list.filter((x) => x.id !== r.id))
         void markRepliesRead([r.id])
       },
+      /*
+       * A debtor's reply is NOT marked read by following the link.
+       *
+       * The firm's instruction: "just take it to the account and show the email as unread on the
+       * account." Clicking a notification is not reading a message — it is deciding to go and
+       * read one — so the count holds until somebody actually opens it on the account, and the
+       * reply is visibly unread when they land. "Mark all read" is still there for a deliberate
+       * clear-down.
+       */
+      readOnFollow: false,
     }))
 
     return [...crm, ...debtor].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
@@ -169,9 +190,7 @@ export function MessagesMenu() {
       return
     }
     setOpen(false)
-    // Opening it IS reading it. The page it lands on shows the message, so leaving it bold in
-    // the count afterwards would mean the number never goes down.
-    item.markRead()
+    if (item.readOnFollow) item.markRead()
     navigate(item.to)
   }
 
