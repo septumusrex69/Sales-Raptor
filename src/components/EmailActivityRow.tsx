@@ -2,9 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowDownLeft, ArrowUpRight, Paperclip, Mail, Handshake } from 'lucide-react'
 import { emailDayLabel, emailTimeLabel, parseEmailActivity } from '../lib/emailActivity'
+import { useEmailView } from '../lib/emailView'
+import { EmailViewSwitcher } from './email/EmailViewSwitcher'
+import { ReadingPane } from './email/ReadingPane'
 import { DateGroupHeading } from './ui/DateGroupHeading'
 import { useAppStore } from '../store/AppStore'
 import { useAuth } from '../store/AuthContext'
+import type { ReactNode } from 'react'
 import type { Activity } from '../types'
 
 type Direction = 'sent' | 'received'
@@ -41,7 +45,7 @@ function DirectionBadge({ kind }: { kind: Direction }) {
 }
 
 /** A key to the row colours, so nobody has to work out which direction blue vs green means. */
-export function EmailLegend() {
+export function EmailLegend({ children }: { children?: ReactNode }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-3 pb-3 border-b border-slate-100">
       {(Object.keys(EMAIL_KINDS) as Direction[]).map((kind) => (
@@ -50,7 +54,44 @@ export function EmailLegend() {
           <span className="text-[11px] text-slate-500">{EMAIL_KINDS[kind].label}</span>
         </span>
       ))}
+      {/* The view switcher rides here so all three pages that use this card get it without
+          any of them having to know about it. */}
+      {children && <span className="ml-auto">{children}</span>}
     </div>
+  )
+}
+
+/**
+ * One row in the reading pane's left-hand column.
+ *
+ * Written here rather than reusing EmailActivityRow collapsed, because ReadingPane makes every
+ * row a button and EmailActivityRow is a button of its own — nesting them is invalid and the
+ * inner one would swallow the click. The pane shows the real row, opened, on the right.
+ */
+function EmailPaneRow({ activity }: { activity: Activity }) {
+  const parsed = parseEmailActivity(activity.subject)
+  const kind = directionOf(parsed)
+  const unread = parsed?.direction === 'received' && activity.isRead === false
+  return (
+    <span className="flex items-start gap-2.5 px-4 py-3">
+      <DirectionBadge kind={kind} />
+      <span className="min-w-0 flex-1">
+        <span className={`block text-sm truncate ${unread ? 'font-semibold text-navy-950' : 'font-medium text-slate-800'}`}>
+          {parsed?.subject ?? activity.subject}
+        </span>
+        <span className="block text-[11px] text-slate-400 mt-0.5">
+          {emailDayLabel(activity.activityDate)} &middot; {emailTimeLabel(activity.activityDate)}
+        </span>
+        {activity.notes && (
+          <span className="block text-[12px] text-slate-500 mt-1 line-clamp-2">
+            {activity.notes.replace(/\s+/g, ' ').trim()}
+          </span>
+        )}
+      </span>
+      {(activity.attachmentNames ?? []).length > 0 && (
+        <Paperclip size={12} className="shrink-0 text-slate-400 mt-1" />
+      )}
+    </span>
   )
 }
 
@@ -266,6 +307,9 @@ export function EmailActivityList({
 }) {
   // One at a time. Opening a message closes whatever was open before it.
   const [openId, setOpenId] = useState<string | null>(null)
+  const [view, setView] = useEmailView()
+  // Selecting a message in the reading pane marks it read, the same as opening a row does.
+  const { updateActivity } = useAppStore()
   const focusRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -278,10 +322,46 @@ export function EmailActivityList({
     return () => window.clearTimeout(timer)
   }, [focusId, activities])
 
+  if (view === 'reading') {
+    return (
+      <div className="-mx-1">
+        <EmailLegend>
+          <EmailViewSwitcher view={view} onChange={setView} />
+        </EmailLegend>
+        {/*
+          The pane shows the REAL row on the right, forced open, so the body, the attachment
+          downloads and Reply all behave exactly as they do in the list. Only the left-hand
+          summary is written separately, and only because a row cannot be a button inside a
+          button.
+        */}
+        <ReadingPane
+          items={activities}
+          selectedId={openId}
+          onSelect={(a) => {
+            if (parseEmailActivity(a.subject)?.direction === 'received' && a.isRead === false) {
+              updateActivity(a.id, { isRead: true })
+            }
+            setOpenId(a.id)
+          }}
+          emptyDetail="Pick a message on the left to read it."
+          renderRow={(a) => <EmailPaneRow activity={a} />}
+          renderDetail={(a) => (
+            <div className="px-1">
+              <EmailActivityRow activity={a} open showDeal={showDeal}
+                onReply={onReply ? () => onReply(a) : undefined} />
+            </div>
+          )}
+        />
+      </div>
+    )
+  }
+
   let lastDay: string | null = null
   return (
     <div className="-mx-1">
-      <EmailLegend />
+      <EmailLegend>
+        <EmailViewSwitcher view={view} onChange={setView} />
+      </EmailLegend>
       <div className="divide-y divide-slate-100">
         {activities.map((a) => {
           const day = emailDayLabel(a.activityDate)
