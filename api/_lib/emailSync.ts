@@ -424,21 +424,12 @@ async function syncMailbox(
           `[emailSync] ${path} UID ${uid}: debtor account ${accountMatch.accountId} via ${accountMatch.via}` +
           `${filedOnAccount ? ', filed' : ', already filed'}`,
         )
-        if (filedOnAccount) {
-          logged += 1
-          // Straight to the account, which is the page whoever reads this has to be on.
-          const { data: account } = await admin
-            .from('debtor_accounts').select('assigned_to').eq('id', accountMatch.accountId).maybeSingle()
-          const assignee = (account?.assigned_to as string | null) ?? null
-          if (assignee) {
-            await admin.from('notifications').insert({
-              user_id: assignee,
-              type: 'Email received',
-              message: `Reply from ${parsed.from?.text || fromAddress}: ${parsed.subject || '(no subject)'}`,
-              link: `/accounts/${accountMatch.accountId}`,
-            })
-          }
-        }
+        // No notification. The bell is for things the system decided to tell you; an unread
+        // email is a person waiting on a reply, and MessagesMenu says why the two are kept
+        // apart -- mix them and the number beside the bell stops meaning anything. A debtor's
+        // reply is on their account, on the timeline, and in the Emails tab; the firm's own
+        // verdict on a notification for it as well was "I don't think it's necessary".
+        if (filedOnAccount) logged += 1
         continue
       }
 
