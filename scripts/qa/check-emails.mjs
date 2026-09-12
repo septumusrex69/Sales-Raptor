@@ -69,41 +69,43 @@ check('...and counts towards the items 1-7 ceiling, like item 1(a)',
   [item6.countsTowardCap, item.countsTowardCap], [true, true])
 
 /* ---- what the timeline says ---- */
-const charged = { exclVat: 25, vat: 3.75, reason: 'charged' }
-const sent = sentEmailNote('ryno@example.co.za', 'Account 12345', 'Please call us back.', charged)
+const sent = sentEmailNote('ryno@example.co.za', 'Account 12345', 'Please call us back.')
 check('a sent note names the recipient', sent.includes('ryno@example.co.za'), true)
 check('...the subject', sent.includes('Subject: Account 12345'), true)
 check('...the body, in full', sent.includes('Please call us back.'), true)
-check('...and what it earned, under the right item', sent.includes('under item 1(a)'), true)
 
 check('a message with no subject still reads',
-  sentEmailNote('a@b.co', '', 'hi', charged).includes('(no subject)'), true)
+  sentEmailNote('a@b.co', '', 'hi').includes('(no subject)'), true)
 
-for (const [reason, expected] of [
-  ['written-off', 'written off'],
-  ['at-ceiling', 'ceiling'],
-  ['item-total-spent', 'already been used'],
-  ['monthly-limit', 'monthly allowance'],
-]) {
-  check(`a ${reason} send says why it did not charge`,
-    sentEmailNote('a@b.co', 's', 'b', { exclVat: 0, vat: 0, reason }).toLowerCase().includes(expected),
-    true)
-}
-
-const charged13 = { exclVat: 13, vat: 1.95, reason: 'charged' }
-const got = receivedEmailNote('Ryno <ryno@example.co.za>', 'Re: Account 12345', 'I will pay Friday.', charged13)
+const got = receivedEmailNote('Ryno <ryno@example.co.za>', 'Re: Account 12345', 'I will pay Friday.')
 check('a received note names the sender', got.includes('ryno@example.co.za'), true)
 check('...and carries their words', got.includes('I will pay Friday.'), true)
-check('...and what it earned, under item 6', got.includes('under item 6'), true)
-// The commonest way to get this wrong: copying the outbound wording and billing the wrong item.
-check('...and NOT under item 1(a)', got.includes('1(a)'), false)
 
-check('a received message that could not be charged says why',
-  receivedEmailNote('a@b.co', 's', 'b', { exclVat: 0, vat: 0, reason: 'written-off' })
-    .toLowerCase().includes('written off'), true)
-check('...and one charged nothing at the ceiling says that instead',
-  receivedEmailNote('a@b.co', 's', 'b', { exclVat: 0, vat: 0, reason: 'at-ceiling' })
-    .toLowerCase().includes('ceiling'), true)
+/*
+ * A note says what happened. It does NOT say what it cost.
+ *
+ * These notes used to end with "Charged R25,00 plus VAT under item 1(a)." and the firm had it
+ * taken out: "don't have to say about the charges in the notes, it's on the transaction list."
+ * Every fee is already its own entry on the same timeline as well as a line on Transactions, so
+ * the sentence made one email read as two events.
+ *
+ * Asserted rather than just deleted, because the natural thing for anyone touching these
+ * functions later is to helpfully put the amount back.
+ */
+const MONEY = /R\s?\d|VAT|charged|item 1\(a\)|item 6|ceiling|written off|allowance/i
+for (const [name, note] of [
+  ['a sent note', sent],
+  ['a received note', got],
+  ['a sent note with a long body', sentEmailNote('a@b.co', 's', 'x'.repeat(500))],
+  ['a received note with no subject', receivedEmailNote('a@b.co', '', 'hi')],
+]) {
+  check(`${name} says nothing about money`, MONEY.test(note), false)
+}
+// The body is passed through verbatim, so a debtor who writes about money is still quoted in
+// full -- it is OUR fee sentence that is gone, not their words.
+check('...but a debtor writing about money is still quoted',
+  receivedEmailNote('a@b.co', 's', 'I can pay R800 plus VAT on Friday').includes('R800 plus VAT'),
+  true)
 
 check('the two directions get different timeline kinds', EMAIL_OUT_KIND === EMAIL_IN_KIND, false)
 

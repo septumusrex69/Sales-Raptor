@@ -210,7 +210,7 @@ async function fileAccountEmail(
    */
   await admin.from('account_notes').insert({
     account_id: accountId,
-    body: receivedEmailNote(message.fromName || message.fromAddress, message.subject, message.body, charge),
+    body: receivedEmailNote(message.fromName || message.fromAddress, message.subject, message.body),
     kind: EMAIL_IN_KIND,
     source: 'manual',
     author_name: message.fromName || message.fromAddress,

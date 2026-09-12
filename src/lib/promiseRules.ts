@@ -80,7 +80,13 @@ export function promiseProblem(
   return null
 }
 
-/** What the timeline says happened. */
+/**
+ * What the timeline says happened.
+ *
+ * No fee named. Every charge is already its own entry on this timeline and its own line on
+ * Transactions, and the firm had the fee sentence taken out of the notes for exactly that
+ * reason: "it's on the transaction list."
+ */
 export function promiseNote(p: {
   amount: number
   arrangement: Arrangement
@@ -88,18 +94,7 @@ export function promiseNote(p: {
   dayOfMonth: number | null
   onLastDay: boolean
   dayOfWeek: number | null
-}, charge: ChargeOutcome | null): string {
+}): string {
   const how = describeArrangement(p).toLowerCase()
-  const earned = !charge
-    ? 'Not charged.'
-    : charge.reason === 'charged'
-      ? `Charged R${charge.exclVat.toFixed(2)} plus VAT under item 5.`
-      : charge.reason === 'written-off'
-        ? 'Not charged — the account is written off.'
-        : charge.reason === 'item-total-spent'
-          ? 'Not charged — item 5 has already been used on this account.'
-          : charge.reason === 'monthly-limit'
-            ? 'Not charged — the monthly allowance for item 5 is spent.'
-            : 'Not charged — the account is at the Annexure B fee ceiling.'
-  return `Payment arrangement taken — ${formatMoney(p.amount)} ${how}, first due ${p.dueOn}. ${earned}`
+  return `Payment arrangement taken — ${formatMoney(p.amount)} ${how}, first due ${p.dueOn}.`
 }

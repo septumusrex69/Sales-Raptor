@@ -55,7 +55,7 @@ export async function recordTrace(input: {
   })
   await addNote({
     accountId: input.accountId,
-    body: traceNote(charge, count),
+    body: traceNote(count),
     // Raptor's words, not a person's: hidden when the timeline is set to show only
     // what people wrote. See TimelineEntry.automated.
     source: 'system',
@@ -77,15 +77,13 @@ export async function recordTrace(input: {
  */
 export const TRACE_DESCRIPTION = 'Credit bureau search'
 
-/** What the timeline says happened. */
-export function traceNote(charge: ChargeResult, count = 1): string {
+/**
+ * What the timeline says happened.
+ *
+ * No fee named — it is on the transaction list, and on this timeline as its own entry. The
+ * firm's instruction: "don't have to say about the charges in the notes."
+ */
+export function traceNote(count = 1): string {
   const searches = count > 1 ? `${count} credit bureau searches` : 'credit bureau search'
-  const earned = charge.reason === 'charged'
-    ? `Charged R${charge.exclVat.toFixed(2)} plus VAT under item 4(c).`
-    : charge.reason === 'written-off'
-      ? 'Not charged — the account is written off.'
-      : charge.reason === 'monthly-limit'
-        ? 'Not charged — the monthly allowance for item 4(c) is spent.'
-        : 'Not charged — the account is at the Annexure B fee ceiling.'
-  return `Trace done — ${searches}. ${earned}`
+  return `Trace done — ${searches}.`
 }
