@@ -1,16 +1,26 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { credentialsKeyProblem } from '../_lib/crypto.js'
 import { adminClient, requireCaller } from '../_lib/auth.js'
-import { fetchAttachment } from '../_lib/emailSync.js'
+import { fetchAttachment, fetchMessageBody } from '../_lib/emailSync.js'
 
 /**
- * Streams one attachment out of the connected mailbox on demand. Nothing is stored:
- * the mailbox stays the archive, and the CRM just reaches into it when someone actually
- * wants a file (see fetchAttachment for why, given this mailbox's volume).
+ * Reaches into a connected mailbox for something that was never stored.
  *
- * Every successful download is logged as an Activity against the same client/lead, stamped
- * with the person who downloaded it — these are debt-collection documents, so who pulled a
- * client's file and when is exactly the sort of thing that needs to be on the record.
+ * Two jobs, one route, and that is deliberate: Vercel's Hobby plan caps a project at twelve
+ * serverless functions and this project is at twelve. Both jobs are the same act — open an IMAP
+ * connection, find one message, take one thing out of it — so they share a handler rather than
+ * the feature waiting on a billing change.
+ *
+ *   { activityId, filename }  one attachment off a CRM email, streamed as a download.
+ *   { mailId }                the full text of one message in the caller's own mailbox.
+ *
+ * Nothing is stored either way. The mailbox stays the archive and Raptor reaches into it when
+ * somebody actually wants something — see fetchAttachment for why, given this mailbox's volume.
+ *
+ * Every successful attachment download is logged as an Activity against the same client/lead,
+ * stamped with the person who downloaded it — these are debt-collection documents, so who pulled
+ * a client's file and when is exactly the sort of thing that needs to be on the record. Reading
+ * the text of your own mail is not logged: it is your mail, and you could read it in Outlook.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -35,7 +45,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const { activityId, filename } = (req.body ?? {}) as { activityId?: string; filename?: string }
+  const { activityId, filename, mailId } = (req.body ?? {}) as {
+    activityId?: string; filename?: string; mailId?: string
+  }
+
+  /*
+   * Reading one of your own mailbox messages.
+   *
+   * Scoped to the caller by user_id on the row itself, not merely by RLS — this runs with the
+   * service key, so the check has to be here. That is the whole privacy rule of the mailbox: an
+   * agent reads their own mail and nobody else's, including an administrator.
+   */
+  if (mailId) {
+    const { data: mail } = await admin
+      .from('user_emails')
+      .select('id, user_id, folder, uid, message_id')
+      .eq('id', mailId)
+      .eq('user_id', caller.id)
+      .maybeSingle()
+    if (!mail) {
+      res.status(404).json({ error: 'That email is not in your mailbox.' })
+      return
+    }
+
+    const { data: own } = await admin.from('email_connections').select('*').eq('user_id', caller.id).maybeSingle()
+    if (!own) {
+      res.status(400).json({ error: 'Your mailbox is no longer connected. Reconnect it under Settings → Integrations.' })
+      return
+    }
+
+    try {
+      const body = await fetchMessageBody(
+        own as { email: string; imap_host: string; imap_port: number; encrypted_password: string },
+        {
+          folder: mail.folder as string | null,
+          uid: mail.uid as number | null,
+          messageId: mail.message_id as string | null,
+        },
+      )
+      if (!body) {
+        // The snippet Raptor holds is still shown, so the page says this rather than going blank.
+        res.status(404).json({ error: 'Could not find that message in your mailbox — it may have been moved or deleted.' })
+        return
+      }
+      res.status(200).json({ ok: true, text: body.text })
+    } catch (err) {
+      res.status(502).json({ error: err instanceof Error ? err.message : 'Could not reach your mailbox.' })
+    }
+    return
+  }
+
   if (!activityId || !filename) {
     res.status(400).json({ error: 'activityId and filename are required.' })
     return

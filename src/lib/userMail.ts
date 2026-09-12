@@ -147,6 +147,28 @@ export async function countNeedsFiling(userId: string): Promise<number> {
   return count ?? 0
 }
 
+/**
+ * The full text of a message, fetched from the mailbox when somebody opens it.
+ *
+ * Raptor holds a 240-character snippet; this is how a person reads the rest. It rides on
+ * /api/email/attachment, which already opens IMAP connections — Vercel's Hobby plan caps this
+ * project at twelve functions and it is at twelve, so a thirteenth route would have made reading
+ * your own mail wait on a billing change.
+ *
+ * Throws with the server's own wording. The caller keeps showing the snippet either way: a
+ * message the mail server has since moved should not leave the row blank.
+ */
+export async function fetchMailBody(mailId: string, accessToken: string): Promise<string> {
+  const res = await fetch('/api/email/attachment', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ mailId }),
+  })
+  const body = (await res.json().catch(() => ({}))) as { text?: string; error?: string }
+  if (!res.ok) throw new Error(body.error ?? 'Could not read that message.')
+  return body.text ?? ''
+}
+
 export async function markMailRead(ids: string[]): Promise<void> {
   if (ids.length === 0) return
   const { error } = await supabase
