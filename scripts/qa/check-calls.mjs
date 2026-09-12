@@ -6,7 +6,8 @@
  * instruction, made after being shown that the gazette defines item 2 as the call "which is not a
  * consultation" -- see ATTEMPT_ITEM_ID in callRules.ts. So an answered call is R85 excluding VAT.
  *
- * Run: node --experimental-strip-types scripts/qa/check-calls.mjs
+ * Run: node --experimental-strip-types --import ./scripts/qa/tsresolve.mjs \
+ *        scripts/qa/check-calls.mjs
  */
 import {
   consultationNote, dialledNote, noAnswerNote,

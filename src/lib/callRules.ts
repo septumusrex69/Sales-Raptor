@@ -4,7 +4,10 @@
  * Pure, so the fee decision can be read and argued with without a database in front of you.
  * Annexure B prices two different things and the difference is the whole of this file.
  */
-import { formatMoney } from '../data/mockData.ts'
+// `.js`, because this module is imported by api/_lib/buzzbox/webhook.ts. See the note at the top
+// of chargeEngine.ts: Vercel ships transpiled files, so a `.ts` specifier survives into the
+// output and points at nothing. Run this file's QA script with scripts/qa/tsresolve.mjs.
+import { formatMoney } from '../data/mockData.js'
 import type { ChargeOutcome } from './promiseRules.ts'
 
 /**
