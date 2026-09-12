@@ -335,6 +335,121 @@ export async function blockSender(input: {
   return { pattern, removed: gone?.length ?? 0 }
 }
 
+export interface BlockOutcome {
+  /** Addresses now blocked. */
+  blocked: string[]
+  /** Addresses left alone, and why — a debtor's mail is never silenced by a bulk action. */
+  refused: { address: string; reason: string }[]
+  /** Messages swept out of Raptor as a result. */
+  removed: number
+}
+
+/**
+ * Block several senders at once, from the list, without opening anything.
+ *
+ * ADDRESS ONLY. A whole-domain block stays behind the open message on purpose: it is the one
+ * that can silence an entire company, and it should cost a deliberate look at what you are
+ * silencing. Ticking five bits of junk should not be able to do that by accident.
+ *
+ * The debtor guard still applies and is checked for every address in ONE query rather than one
+ * per address — fifty selected messages are usually a handful of distinct senders, but the query
+ * count should not depend on how much somebody ticked. An address on a debtor's file is refused
+ * and named; it does not fail the rest of the batch.
+ */
+export async function blockSenders(input: {
+  userId: string
+  mail: MailItem[]
+}): Promise<BlockOutcome> {
+  const addresses = [...new Set(
+    input.mail.map((m) => m.fromAddress.trim().toLowerCase()).filter((a) => a.includes('@')),
+  )]
+  if (addresses.length === 0) return { blocked: [], refused: [], removed: 0 }
+
+  const { data: onFile, error: lookupError } = await supabase
+    .from('account_contacts')
+    .select('value')
+    .eq('kind', 'email')
+    .in('value', addresses)
+  if (lookupError) throw new Error(lookupError.message)
+  const debtors = new Set((onFile ?? []).map((r) => String(r.value).trim().toLowerCase()))
+
+  const refused = addresses.filter((a) => debtors.has(a)).map((address) => ({
+    address,
+    reason: "on a debtor's file",
+  }))
+  const allowed = addresses.filter((a) => !debtors.has(a))
+  if (allowed.length === 0) return { blocked: [], refused, removed: 0 }
+
+  const labelFor = new Map(input.mail.map((m) => [
+    m.fromAddress.trim().toLowerCase(), m.fromName ?? m.subject ?? null,
+  ]))
+  const { error: writeError } = await supabase.from('mail_blocks').upsert(
+    allowed.map((pattern) => ({
+      user_id: input.userId, pattern, kind: 'address', label: labelFor.get(pattern) ?? null,
+    })),
+    { onConflict: 'user_id,pattern', ignoreDuplicates: true },
+  )
+  if (writeError) throw new Error(writeError.message)
+
+  const { data: gone, error: sweepError } = await supabase
+    .from('user_emails')
+    .delete()
+    .eq('user_id', input.userId)
+    .is('linked_account_id', null)
+    .in('from_address', allowed)
+    .select('id')
+  if (sweepError) throw new Error(sweepError.message)
+
+  return { blocked: allowed, refused, removed: gone?.length ?? 0 }
+}
+
+/**
+ * Clear out junk in one go.
+ *
+ * Junk is where the volume is and where nobody wants to read anything, so it earns a single
+ * answer rather than a page of ticking. Linked mail is excluded, as everywhere — if a debtor's
+ * email was wrongly binned by the mail server and somebody rescued it onto an account, emptying
+ * junk must not take it back out.
+ *
+ * `alsoBlock` is what stops the same senders arriving again tomorrow. The debtor guard applies
+ * to it exactly as it does to blockSenders.
+ */
+export async function emptyJunk(input: {
+  userId: string
+  alsoBlock: boolean
+}): Promise<BlockOutcome & { deleted: number }> {
+  let outcome: BlockOutcome = { blocked: [], refused: [], removed: 0 }
+
+  if (input.alsoBlock) {
+    const { data, error } = await supabase
+      .from('user_emails')
+      .select('id, from_address, from_name, subject')
+      .eq('user_id', input.userId)
+      .eq('is_junk', true)
+      .is('linked_account_id', null)
+    if (error) throw new Error(error.message)
+    const asMail = (data ?? []).map((r) => ({
+      id: r.id as string,
+      fromAddress: r.from_address as string,
+      fromName: (r.from_name as string | null) ?? null,
+      subject: (r.subject as string | null) ?? null,
+    })) as MailItem[]
+    outcome = await blockSenders({ userId: input.userId, mail: asMail })
+  }
+
+  // Whatever blocking already swept is gone; this takes the rest.
+  const { data: gone, error: deleteError } = await supabase
+    .from('user_emails')
+    .delete()
+    .eq('user_id', input.userId)
+    .eq('is_junk', true)
+    .is('linked_account_id', null)
+    .select('id')
+  if (deleteError) throw new Error(deleteError.message)
+
+  return { ...outcome, deleted: (gone?.length ?? 0) + outcome.removed }
+}
+
 /** Let a sender back in. Their mail appears again from the next sync, not retroactively. */
 export async function unblockSender(id: string): Promise<void> {
   const { error } = await supabase.from('mail_blocks').delete().eq('id', id)
