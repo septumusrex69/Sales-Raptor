@@ -597,7 +597,10 @@ export function MailPage() {
               </span>
             )}
             renderRow={(m) => (
-              <span className={`block pr-3 py-2.5 ${!m.readAt ? 'bg-brand-50/60' : ''}`}>
+              /* pl-3 to match the list view's gap-3 between the gutter and the text. It was
+                 dropped when the unread bar came off this row, which put the tick box hard up
+                 against the sender. */
+              <span className={`block pl-3 pr-3 py-2.5 ${!m.readAt ? 'bg-brand-50/60' : ''}`}>
                 <MailSummary mail={m} tight blocked={blocked} />
               </span>
             )}
