@@ -343,6 +343,8 @@ export function MailPage() {
 
   /** Moving a message that was filed on the wrong account. Administrators only. */
   const [moving, setMoving] = useState<MailItem | null>(null)
+  /** Opened by Unmatch rather than Rematch: the box starts on the unmatch step. */
+  const [moveUnmatchOnly, setMoveUnmatchOnly] = useState(false)
   const mayRefile = canRefileMail(currentUser?.role)
 
   /**
@@ -669,7 +671,9 @@ export function MailPage() {
                 <MailBody mail={m} body={bodies[m.id]} loadingBody={reading === m.id}
                   bodyError={readError[m.id]} onBlock={() => setBlocking(m)}
                   onReply={() => startReply(m)} onJunk={(j) => void junkOne(m, j)}
-                  onMove={mayRefile ? () => setMoving(m) : null}
+                  onMove={mayRefile
+                    ? (only: boolean) => { setMoveUnmatchOnly(only); setMoving(m) }
+                    : null}
                   onDownload={(f) => void download(m, f)}
                   downloading={downloading} downloadError={downloadError} />
               </div>
@@ -707,7 +711,9 @@ export function MailPage() {
                   onLink={() => startLink(m)}
                   onReply={() => startReply(m)}
                   onJunk={(j) => void junkOne(m, j)}
-                  onMove={mayRefile ? () => setMoving(m) : null}
+                  onMove={mayRefile
+                    ? (only: boolean) => { setMoveUnmatchOnly(only); setMoving(m) }
+                    : null}
                   onDownload={(f) => void download(m, f)}
                   downloading={downloading} downloadError={downloadError} />
               ))}
@@ -786,6 +792,7 @@ export function MailPage() {
         <MoveModal
           mail={moving}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          unmatchOnly={moveUnmatchOnly}
           onClose={() => setMoving(null)}
           onDone={(message) => { setMoving(null); setStatus(message); void load(page) }}
         />
@@ -1067,8 +1074,11 @@ function MailBody({
   onReply: () => void
   /** Shelve it, or rescue it. Absent on filed mail, which is a record either way. */
   onJunk: (junk: boolean) => void
-  /** Move it to the right account. Null for anyone who is not an administrator. */
-  onMove: (() => void) | null
+  /**
+   * Rematch it, or unmatch it outright. Null for anyone who is not an administrator.
+   * `unmatchOnly` opens the box straight on the unmatch step.
+   */
+  onMove: ((unmatchOnly: boolean) => void) | null
   /** Pull one attachment out of the mailbox. */
   onDownload: (filename: string) => void
   /** The file currently being fetched, so its own button shows the wait. */
@@ -1179,9 +1189,23 @@ function MailBody({
           on a lead or a client, where no fee is involved and nothing is at stake.
         */}
         {mail.linkedTo?.kind === 'account' && onMove && (
-          <button onClick={onMove}
+          <button onClick={() => onMove(false)}
             className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50">
-            <MoveRight size={13} /> Wrong account?
+            <MoveRight size={13} /> Rematch
+          </button>
+        )}
+
+        {/*
+          Unmatch, as its own button rather than a line of text inside the rematch box.
+
+          It was buried, and buried is the same as missing: taking a message off the wrong
+          account is its own decision, made far more often than moving it to a named one, and it
+          should not need somebody to open a dialog about a different action first.
+        */}
+        {mail.linkedTo?.kind === 'account' && onMove && (
+          <button onClick={() => onMove(true)}
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50">
+            <Undo2 size={13} /> Unmatch
           </button>
         )}
 
@@ -1226,7 +1250,7 @@ function MailRow({
   onBlock: () => void
   onReply: () => void
   onJunk: (junk: boolean) => void
-  onMove: (() => void) | null
+  onMove: ((unmatchOnly: boolean) => void) | null
   onDownload: (filename: string) => void
   downloading: string | null
   downloadError: string | null
@@ -1815,8 +1839,14 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
             </button>
             <button onClick={() => void link()} disabled={busy}
               className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
+              {/*
+                 The LABEL DOES NOT CHANGE while this works — only the icon does. A label that
+                 swaps to a shorter word mid-click changes the button's width, and on the firm's
+                 iPad that left the old glyphs painted under the new ones. Nothing is lost: the
+                 spinner says it is working, and the button is disabled besides.
+               */}
               {busy ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
-              {busy ? 'Matching…' : `Match to ${picked.label} · R13`}
+              {`Match to ${picked.label} · R13`}
             </button>
           </div>
         </>
@@ -1932,9 +1962,11 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
  * expects an undo, and it is not one. Far better to say so before they press it than to let them
  * discover it on a statement.
  */
-function MoveModal({ mail, actor, onClose, onDone }: {
+function MoveModal({ mail, actor, unmatchOnly, onClose, onDone }: {
   mail: MailItem
   actor: { id: string | null; name: string | null }
+  /** Opened by Unmatch: skip the search and go straight to confirming. */
+  unmatchOnly?: boolean
   onClose: () => void
   onDone: (message: string) => void
 }) {
@@ -1953,7 +1985,7 @@ function MoveModal({ mail, actor, onClose, onDone }: {
    */
   const [picked, setPicked] = useState<{ id: string; label: string } | null>(null)
   /** Taking it off the account without naming a replacement. */
-  const [unmatching, setUnmatching] = useState(false)
+  const [unmatching, setUnmatching] = useState(!!unmatchOnly)
 
   // Debounced, for the same reason the matching search is: 100 000 rows per keystroke otherwise.
   useEffect(() => {
@@ -1998,7 +2030,8 @@ function MoveModal({ mail, actor, onClose, onDone }: {
   }
 
   return (
-    <Modal title="Rematch or unmatch this email" onClose={onClose} width={520}>
+    <Modal title={unmatchOnly ? 'Unmatch this email' : 'Rematch or unmatch this email'}
+      onClose={onClose} width={520}>
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
         <p className="text-sm font-medium text-slate-800 truncate">{mail.subject || '(no subject)'}</p>
         <p className="text-xs text-slate-400 mt-0.5 truncate">
@@ -2084,10 +2117,14 @@ function MoveModal({ mail, actor, onClose, onDone }: {
             <span className="text-sm text-slate-800 min-w-0 flex-1">
               Taking it off <strong className="font-semibold">{was}</strong>
             </span>
-            <button onClick={() => { setUnmatching(false); setError(null) }} disabled={busy}
-              className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
-              Change
-            </button>
+            {/* Only where they arrived via Rematch — otherwise this would drop somebody into a
+                search they never asked for. */}
+            {!unmatchOnly && (
+              <button onClick={() => { setUnmatching(false); setError(null) }} disabled={busy}
+                className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
+                Match to another account instead
+              </button>
+            )}
           </div>
 
           <label className="block mt-3">
@@ -2114,7 +2151,7 @@ function MoveModal({ mail, actor, onClose, onDone }: {
             <button onClick={() => void unmatch()} disabled={busy}
               className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
               {busy ? <Loader2 size={14} className="animate-spin" /> : <Undo2 size={14} />}
-              {busy ? 'Unmatching…' : `Unmatch from ${was}`}
+              {`Unmatch from ${was}`}
             </button>
           </div>
         </>
@@ -2160,8 +2197,9 @@ function MoveModal({ mail, actor, onClose, onDone }: {
             </button>
             <button onClick={() => void move()} disabled={busy}
               className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
+              {/* Fixed label, spinner for the wait — see the matching button. */}
               {busy ? <Loader2 size={14} className="animate-spin" /> : <MoveRight size={14} />}
-              {busy ? 'Rematching…' : `Rematch to ${picked.label}`}
+              {`Rematch to ${picked.label}`}
             </button>
           </div>
         </>
