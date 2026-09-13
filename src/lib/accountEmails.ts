@@ -15,6 +15,7 @@
 import { chargeItem, type ChargeResult } from './accountCharges'
 import { addNote } from './accountWorkspace'
 import { supabase } from './supabase'
+import { mirrorReadToMailbox } from './mailReadState'
 import {
   EMAIL_ACTION_CODE, EMAIL_DESCRIPTION, EMAIL_ITEM_ID, EMAIL_OUT_KIND, sentEmailNote,
 } from './emailRules'
@@ -174,12 +175,18 @@ export async function fetchUnreadReplies(userId: string): Promise<DebtorReply[]>
  */
 export async function markRepliesRead(ids: string[]): Promise<void> {
   if (ids.length === 0) return
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('account_emails')
     .update({ read_at: new Date().toISOString() })
     .in('id', ids)
     .is('read_at', null)
+    .select('message_id')
   if (error) throw new Error(error.message)
+
+  // The same message is sitting in the agent's mailbox. Reading it here reads it there.
+  // (Not a badge fix: a filed message is not counted by nav_counts. It is the bold row in the
+  // mailbox's Filed and All tabs, still advertising itself as unread after it was answered.)
+  await mirrorReadToMailbox((data ?? []).map((r) => r.message_id as string | null))
 }
 
 /**
