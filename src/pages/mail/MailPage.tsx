@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  AlertTriangle, Ban, Check, ChevronDown, ChevronRight, ExternalLink, Inbox, Link2, Loader2,
-  Paperclip, Reply, RefreshCw, Search, ShieldAlert, Trash2, Undo2,
+  AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, ExternalLink, Inbox, Link2,
+  Loader2, Paperclip, Reply, RefreshCw, Search, ShieldAlert, Trash2, Undo2, X,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal } from '../../components/ui/Modal'
@@ -77,6 +77,16 @@ export function MailPage() {
    */
   const [unread, setUnread] = useState(0)
   const [unreadOnly, setUnreadOnly] = useState(false)
+
+  /*
+   * Selection mode, off by default.
+   *
+   * The firm's call, and it buys back the left gutter: a tick box on every row, every day, to
+   * serve the rare bulk action was the most prominent thing in the list and said nothing about
+   * the message. That space now shows whether a message is unread — which is what somebody
+   * scanning the list is actually looking for. Press Select and the boxes come back.
+   */
+  const [selecting, setSelecting] = useState(false)
   const [blocking, setBlocking] = useState<MailItem | null>(null)
   const [blocked, setBlocked] = useState<BlockedSender[]>([])
   const [emptying, setEmptying] = useState(false)
@@ -287,6 +297,14 @@ export function MailPage() {
   }
 
   /** Filing on its own, with no reply waiting behind it. */
+  /** Turning selection off drops the selection with it — a forgotten tick must not act later. */
+  function toggleSelecting() {
+    setSelecting((on) => {
+      if (on) setChosen(new Set())
+      return !on
+    })
+  }
+
   function startLink(mail: MailItem) {
     setLinkThenReply(false)
     setLinking(mail)
@@ -420,12 +438,35 @@ export function MailPage() {
               <Trash2 size={14} /> Empty junk
             </button>
           )}
+          {/*
+            Select, which is the only way the tick boxes appear.
+
+            Off by default so the gutter can carry the unread mark instead — see `selecting`.
+            It reads as pressed while it is on, because a mode you cannot see you are in is a
+            mode that surprises you.
+          */}
+          {filter !== 'blocked' && items.length > 0 && (
+            <button onClick={toggleSelecting} aria-pressed={selecting}
+              className={`shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border transition-colors ${
+                selecting
+                  ? 'border-gold-500 bg-gold-400 text-navy-950'
+                  : 'border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50'}`}>
+              {selecting ? <X size={14} /> : <CheckSquare size={14} />}
+              {selecting ? 'Done' : 'Select'}
+            </button>
+          )}
           {/* Not on the blocklist, which is a list of senders rather than of mail. */}
           {filter !== 'blocked' && <EmailViewSwitcher view={view} onChange={setView} />}
         </div>
 
-        <div className="border-b border-slate-200">
-          <div className="px-5 flex items-center gap-1 overflow-x-auto -mb-px">
+        {/*
+          The tabs scroll if they must; the unread pill does not scroll with them.
+          `ml-auto` inside an overflow-x-auto strip stops pushing right the moment the content
+          overflows, which on a narrow screen would carry the pill off the edge — the one place
+          somebody most needs to see it.
+        */}
+        <div className="border-b border-slate-200 flex items-center gap-2 pr-5">
+          <div className="px-5 flex items-center gap-1 overflow-x-auto -mb-px min-w-0 flex-1">
             {TABS.map((t) => (
               <button key={t.id} onClick={() => setFilter(t.id)} title={t.hint}
                 className={`shrink-0 px-3.5 py-2 text-sm font-medium border-b-2 inline-flex items-center gap-1.5 ${
@@ -444,34 +485,34 @@ export function MailPage() {
                 )}
               </button>
             ))}
-
-            {/*
-              Unread, at the right end of the same row — "at the top where there's All and
-              stuff", as the firm put it, so the fact that something is unread is visible
-              without reading a single row.
-
-              A toggle, not a tab: it narrows whichever tab you are on, so "unread junk" and
-              "unread that still needs filing" are both askable. The count is scoped to that
-              same tab and search, so it is exactly what pressing it leaves behind.
-            */}
-            {filter !== 'blocked' && (
-              <button
-                onClick={() => setUnreadOnly((on) => !on)}
-                aria-pressed={unreadOnly}
-                title={unreadOnly ? 'Show read messages as well' : 'Show only what you have not read'}
-                className={`shrink-0 ml-auto my-1 inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium transition-colors ${
-                  unreadOnly
-                    ? 'border-brand-500 bg-brand-500 text-white'
-                    : unread > 0
-                      ? 'border-brand-100 bg-brand-50 text-brand-700 hover:border-brand-500'
-                      : 'border-slate-200 text-slate-400 hover:border-slate-300'}`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${
-                  unreadOnly ? 'bg-white' : unread > 0 ? 'bg-brand-500' : 'bg-slate-300'}`} />
-                {unread > 0 ? `${unread > 99 ? '99+' : unread} unread` : 'No unread'}
-              </button>
-            )}
           </div>
+
+          {/*
+            Unread, at the right end of the tab row — "at the top where there's All and stuff",
+            as the firm put it, so the fact that something is unread is visible without reading
+            a single row.
+
+            A toggle, not a tab: it narrows whichever tab you are on, so "unread junk" and
+            "unread that still needs filing" are both askable. The count is scoped to that same
+            tab and search, so it is exactly what pressing it leaves behind.
+          */}
+          {filter !== 'blocked' && (
+            <button
+              onClick={() => setUnreadOnly((on) => !on)}
+              aria-pressed={unreadOnly}
+              title={unreadOnly ? 'Show read messages as well' : 'Show only what you have not read'}
+              className={`shrink-0 my-1 inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium transition-colors ${
+                unreadOnly
+                  ? 'border-brand-500 bg-brand-500 text-white'
+                  : unread > 0
+                    ? 'border-brand-100 bg-brand-50 text-brand-700 hover:border-brand-500'
+                    : 'border-slate-200 text-slate-400 hover:border-slate-300'}`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                unreadOnly ? 'bg-white' : unread > 0 ? 'bg-brand-500' : 'bg-slate-300'}`} />
+              {unread > 0 ? `${unread > 99 ? '99+' : unread} unread` : 'No unread'}
+            </button>
+          )}
         </div>
 
         {/* The bulk bar only exists once something is selected — an always-visible row of
@@ -545,20 +586,18 @@ export function MailPage() {
             onSelect={(m) => void toggleTo(m)}
             emptyDetail="Pick a message on the left to read it."
             renderLead={(m) => (
-              <label className="pl-4 pt-3.5 shrink-0 cursor-pointer">
-                <input type="checkbox" checked={chosen.has(m.id)}
-                  aria-label={`Select the email from ${m.fromAddress}`}
-                  onChange={(e) => setChosen((prev) => {
+              <span className="pl-4 pt-2.5 shrink-0">
+                <RowGutter mail={m} selecting={selecting} chosen={chosen.has(m.id)}
+                  onChoose={(on) => setChosen((prev) => {
                     const next = new Set(prev)
-                    if (e.target.checked) next.add(m.id)
+                    if (on) next.add(m.id)
                     else next.delete(m.id)
                     return next
                   })} />
-              </label>
+              </span>
             )}
             renderRow={(m) => (
-              <span className={`block px-3 py-2.5 border-l-[3px] ${
-                !m.readAt ? 'border-brand-500 bg-brand-50/60' : 'border-transparent'}`}>
+              <span className={`block pr-3 py-2.5 ${!m.readAt ? 'bg-brand-50/60' : ''}`}>
                 <MailSummary mail={m} tight blocked={blocked} />
               </span>
             )}
@@ -597,13 +636,15 @@ export function MailPage() {
           />
         ) : (
           <>
-            <div className="px-5 py-2 border-b border-slate-100">
-              <label className="inline-flex items-center gap-2 text-xs text-slate-500">
-                <input type="checkbox" checked={allChosen}
-                  onChange={(e) => setChosen(e.target.checked ? new Set(items.map((i) => i.id)) : new Set())} />
-                Select all on this page
-              </label>
-            </div>
+            {selecting && (
+              <div className="px-5 py-2 border-b border-slate-100">
+                <label className="inline-flex items-center gap-2 text-xs text-slate-500">
+                  <input type="checkbox" checked={allChosen}
+                    onChange={(e) => setChosen(e.target.checked ? new Set(items.map((i) => i.id)) : new Set())} />
+                  Select all on this page
+                </label>
+              </div>
+            )}
             <ul className="divide-y divide-slate-100">
               {items.map((m) => (
                 <MailRow key={m.id} mail={m}
@@ -615,6 +656,7 @@ export function MailPage() {
                   bodyError={readError[m.id]}
                   onToggle={() => void toggle(m)}
                   onBlock={() => setBlocking(m)}
+                  selecting={selecting}
                   onChoose={(on) => setChosen((s) => {
                     const next = new Set(s)
                     if (on) next.add(m.id)
@@ -800,6 +842,34 @@ function Empty({ filter, searching }: { filter: Exclude<Pane, 'blocked'>; search
  * Split out of the row so the reading pane can use the same block down its left-hand side. Two
  * identical-looking lists maintained separately is how they end up disagreeing.
  */
+/**
+ * The left gutter: a tick box while selecting, otherwise the unread mark.
+ *
+ * ONE fixed-width element carrying both, so pressing Select swaps what is in the gutter without
+ * moving a single row sideways. Two separate elements that appear and disappear would shift the
+ * whole list every time the mode changed, which reads as the page glitching.
+ *
+ * The dot is the unread signal the firm asked for — "a little colourful show about it" — in the
+ * space the tick boxes used to occupy every day for the sake of a rare bulk action.
+ */
+function RowGutter({ mail, selecting, chosen, onChoose }: {
+  mail: MailItem
+  selecting: boolean
+  chosen: boolean
+  onChoose: (on: boolean) => void
+}) {
+  return (
+    <span className="w-4 shrink-0 grid place-items-center self-start mt-1.5">
+      {selecting ? (
+        <input type="checkbox" checked={chosen} onChange={(e) => onChoose(e.target.checked)}
+          aria-label={`Select the email from ${mail.fromAddress}`} />
+      ) : !mail.readAt ? (
+        <span className="w-2 h-2 rounded-full bg-brand-500" title="Unread" />
+      ) : null}
+    </span>
+  )
+}
+
 /**
  * What has happened to this message, on the row.
  *
@@ -1020,7 +1090,9 @@ function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply, onJunk
 
         <button onClick={onBlock}
           className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-negative-100 hover:bg-negative-50 hover:text-negative-700">
-          <Ban size={13} /> Never import from this sender
+          {/* "Block", to match the Blocked tab. The long phrasing described the mechanism;
+              this names the thing, and the two now obviously belong together. */}
+          <Ban size={13} /> Block sender
         </button>
       </div>
     </>
@@ -1028,12 +1100,14 @@ function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply, onJunk
 }
 
 function MailRow({
-  mail, chosen, expanded, blocked, body, loadingBody, bodyError, onToggle, onChoose,
+  mail, chosen, expanded, selecting, blocked, body, loadingBody, bodyError, onToggle, onChoose,
   onLink, onBlock, onReply, onJunk,
 }: {
   mail: MailItem
   chosen: boolean
   expanded: boolean
+  /** Tick boxes are showing, so the gutter carries one instead of the unread mark. */
+  selecting: boolean
   /** The agent's blocklist, so the row can say a sender is silenced. */
   blocked: BlockedSender[]
   /** The full text, once fetched. Undefined until then. */
@@ -1055,15 +1129,14 @@ function MailRow({
       Read rows keep a transparent bar of the same width so nothing shifts sideways as mail is
       read, which would make the whole list twitch.
     */
-    <li className={`border-l-[3px] ${unread ? 'border-brand-500 bg-brand-50/60' : 'border-transparent'}`}>
+    <li className={unread ? 'bg-brand-50/60' : undefined}>
       <div className="px-5 py-3 flex items-start gap-3">
         {/*
-          The checkbox sits OUTSIDE the button that opens the message. Nesting one inside the
-          other means ticking a row to delete it also opens and reads it, which is the opposite
-          of what somebody clearing spam wants.
+          The gutter sits OUTSIDE the button that opens the message. Nesting a checkbox inside
+          the other means ticking a row to delete it also opens and reads it, which is the
+          opposite of what somebody clearing spam wants.
         */}
-        <input type="checkbox" checked={chosen} onChange={(e) => onChoose(e.target.checked)}
-          aria-label={`Select the email from ${mail.fromAddress}`} className="mt-1.5 shrink-0" />
+        <RowGutter mail={mail} selecting={selecting} chosen={chosen} onChoose={onChoose} />
 
         <button onClick={onToggle} aria-expanded={expanded} className="min-w-0 flex-1 text-left">
           {/* Collapsed, the snippet is the preview. Open, the whole message replaces it below. */}
@@ -1195,8 +1268,8 @@ function BlockedList({ senders, onUnblock }: {
         <Ban size={22} className="mx-auto text-slate-300" />
         <p className="text-sm text-slate-500 mt-3">Nothing blocked.</p>
         <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-          Open a message and choose &ldquo;Never import from this sender&rdquo; to keep it out of
-          Raptor for good. It stays in your real mailbox.
+          Open a message and choose &ldquo;Block sender&rdquo; to keep it out of Raptor for
+          good. It stays in your real mailbox.
         </p>
       </div>
     )
@@ -1268,7 +1341,7 @@ function BlockModal({ mail, userId, onClose, onDone }: {
   }
 
   return (
-    <Modal title="Never import from this sender" onClose={onClose} width={480}>
+    <Modal title="Block this sender" onClose={onClose} width={480}>
       <p className="text-sm text-slate-500">
         Their mail will stop appearing in Raptor from the next sync, and anything of theirs still
         sitting here will be cleared out. It stays in your real mailbox &mdash; this only stops
