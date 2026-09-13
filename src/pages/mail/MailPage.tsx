@@ -17,11 +17,10 @@ import { useEmailView } from '../../lib/emailView'
 import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
 import {
-  blockedBy, blockSender, blockSenders, countNeedsFiling, deleteMail, domainBlockProblem,
-  saveAccountContacts,
-  countUnread, domainOf, emptyJunk, fetchBlockedSenders, fetchMail, fetchMailBody,
-  downloadAttachment, linkMailToAccount, linkMailToRecord, markMailRead, moveFiledMail, setJunk,
-  unblockSender,
+  blockedBy, blockSender, blockSenders, countNeedsFiling, countUnread, deleteMail,
+  domainBlockProblem, domainOf, downloadAttachment, emptyJunk, fetchBlockedSenders, fetchMail,
+  fetchMailBody, linkMailToAccount, linkMailToRecord, markMailRead, moveFiledMail,
+  saveAccountContacts, setJunk, unblockSender, unmatchMail,
   type BlockedSender, type BlockOutcome, type LinkedRecord, type MailFilter, type MailItem,
 } from '../../lib/userMail'
 import { useAppStore } from '../../store/AppStore'
@@ -57,8 +56,8 @@ type Pane = MailFilter | 'blocked'
  */
 const TABS: { id: Pane; label: string; hint: string }[] = [
   { id: 'all', label: 'All', hint: 'Your mailbox, junk aside' },
-  { id: 'needs-filing', label: 'Needs filing', hint: 'Not on any record yet' },
-  { id: 'filed', label: 'Filed', hint: 'On an account, lead, deal or client' },
+  { id: 'needs-filing', label: 'Needs matching', hint: 'Not on any record yet' },
+  { id: 'filed', label: 'Matched', hint: 'On an account, lead, deal or client' },
   { id: 'junk', label: 'Junk', hint: 'Your mail server thought this was spam' },
   { id: 'blocked', label: 'Blocked', hint: 'Senders you never want to see again' },
 ]
@@ -365,7 +364,7 @@ export function MailPage() {
       const refused = ids.length - moved
       setStatus(
         `${moved} ${moved === 1 ? 'email' : 'emails'} ${junk ? 'moved to junk' : 'moved back to your mailbox'}.`
-        + (refused > 0 ? ` ${refused} left alone — already filed on a record.` : '')
+        + (refused > 0 ? ` ${refused} left alone — already matched to a record.` : '')
         + (junk ? ' Nothing deleted; empty the Junk tab when you want it gone.' : ''),
       )
       await load(page)
@@ -379,7 +378,7 @@ export function MailPage() {
     try {
       const moved = await setJunk([mail.id], junk)
       setStatus(moved === 0
-        ? 'That email is filed on a record, so it stays out of junk.'
+        ? 'That email is matched to a record, so it stays out of junk.'
         : junk
           ? 'Moved to junk. Nothing deleted — it is under the Junk tab.'
           : 'Moved back to your mailbox.')
@@ -663,7 +662,7 @@ export function MailPage() {
                   ) : (
                     <button onClick={() => startLink(m)}
                       className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950">
-                      <Link2 size={13} /> File
+                      <Link2 size={13} /> Match
                     </button>
                   )}
                 </div>
@@ -812,7 +811,7 @@ export function MailPage() {
             ? `Goes out from your mailbox, lands on ${replying.linkedTo?.label ?? 'the account'}, and is charged R25 under item 1(a).`
             : replying.linkedTo
               ? `Goes out from your mailbox and is logged on ${replying.linkedTo.label}. No charge — Annexure B is for debtor accounts.`
-              : 'This message is not filed anywhere, so nothing will be charged and the reply will not appear on any record. It goes out from your mailbox and that is all.'}
+              : 'This message is not matched to anything, so nothing will be charged and the reply will not appear on any record. It goes out from your mailbox and that is all.'}
           onClose={() => setReplying(null)}
           onSent={(rawSubject, bodyText, messageId, from) => {
             const answering = replying
@@ -821,7 +820,7 @@ export function MailPage() {
               // Said plainly rather than left to be discovered. The agent chose this path.
               setStatus(answering?.linkedTo
                 ? `Reply sent and logged on ${answering.linkedTo.label}. No charge — Annexure B is for debtor accounts.`
-                : 'Reply sent. Not charged and not filed — it was not on a record.')
+                : 'Reply sent. Not charged and not recorded — it was not matched to anything.')
               return
             }
             /*
@@ -878,8 +877,8 @@ function LoadFailed({ onRetry }: { onRetry: () => void }) {
 function Empty({ filter, searching }: { filter: Exclude<Pane, 'blocked'>; searching: boolean }) {
   if (searching) return <p className="py-14 text-center text-sm text-slate-400">Nothing matches that.</p>
   const words: Record<MailFilter, string> = {
-    'needs-filing': 'Nothing waiting. Every email has been filed or thrown away.',
-    filed: 'Nothing filed against a record yet.',
+    'needs-filing': 'Nothing waiting. Every email has been matched or thrown away.',
+    filed: 'Nothing matched to a record yet.',
     all: 'Your mailbox is empty. Connect it under Settings → Integrations if you have not yet.',
     // Junk is a shelf, not a bin: nothing here has been deleted, it is just kept out of All.
     junk: 'Nothing in junk.',
@@ -954,9 +953,9 @@ function MailStatus({ mail, blocked, tight }: {
     <>
       {mail.linkedTo ? (
         <span className={`${chip} bg-positive-50 text-[var(--c-green)] max-w-[14rem]`}
-          title={`Filed on ${mail.linkedTo.label} — ${CRM_OR_ACCOUNT[mail.linkedTo.kind]}`}>
+          title={`Matched to ${mail.linkedTo.label} — ${CRM_OR_ACCOUNT[mail.linkedTo.kind]}`}>
           <Link2 size={10} className="shrink-0" />
-          <span className="truncate">{tight ? 'Filed' : `On ${mail.linkedTo.label}`}</span>
+          <span className="truncate">{tight ? 'Matched' : `On ${mail.linkedTo.label}`}</span>
         </span>
       ) : mail.isJunk ? (
         <span className={`${chip} bg-slate-100 text-slate-500`}>
@@ -965,7 +964,7 @@ function MailStatus({ mail, blocked, tight }: {
       ) : (
         /* Gold, because it is the only one of the three that is somebody's to act on. */
         <span className={`${chip} bg-gold-100 text-gold-700`}>
-          <Inbox size={10} /> {tight ? 'Unfiled' : 'Needs filing'}
+          <Inbox size={10} /> {tight ? 'Unmatched' : 'Needs matching'}
         </span>
       )}
 
@@ -1260,7 +1259,7 @@ function MailRow({
           {!mail.isFiled && (
             <button onClick={onLink}
               className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950">
-              <Link2 size={13} /> File
+              <Link2 size={13} /> Match
             </button>
           )}
           <button onClick={onToggle} aria-label={expanded ? 'Close this email' : 'Read this email'}
@@ -1650,7 +1649,7 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
     setError(null)
     try {
       await linkMailToRecord({ mail, to: hit, actor })
-      onDone(`Filed on ${hit.label}. No charge — Annexure B is for debtor accounts.`, null, {
+      onDone(`Matched to ${hit.label}. No charge — Annexure B is for debtor accounts.`, null, {
         kind: hit.kind, id: hit.id, label: hit.label, path: CRM_PATH[hit.kind](hit.id),
       })
     } catch (e) {
@@ -1697,7 +1696,7 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
       }
 
       onDone(
-        `Filed on ${label}. ${chargeMessage(charge, '6')}`
+        `Matched to ${label}. ${chargeMessage(charge, '6')}`
         + (saved > 0 ? ` ${saved} contact ${saved === 1 ? 'detail' : 'details'} saved on the account.` : ''),
         accountId,
         { kind: 'account', id: accountId, label, path: `/accounts/${accountId}` },
@@ -1714,8 +1713,8 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
       {replying && (
         // Why there is a step before the composer, said once, in plain terms.
         <p className="text-[13px] text-slate-500 mb-3">
-          Filing it first is what puts your reply on the record it belongs to &mdash; and, on a
-          debtor account, what raises the R25 for sending it. Pick where it goes and the reply
+          Matching it first is what puts your reply on the record it belongs to &mdash; and, on
+          a debtor account, what raises the R25 for sending it. Pick where it goes and the reply
           opens next.
         </p>
       )}
@@ -1734,7 +1733,7 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
           <div className="mt-4 rounded-lg border border-slate-200 px-3 py-2.5 flex items-center gap-2">
             <Link2 size={15} className="shrink-0 text-slate-400" />
             <span className="text-sm text-slate-800 min-w-0 flex-1">
-              Filing on <strong className="font-semibold">{picked.label}</strong>
+              Matching to <strong className="font-semibold">{picked.label}</strong>
             </span>
             <button onClick={() => { setPicked(null); setError(null) }} disabled={busy}
               className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
@@ -1803,8 +1802,8 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
 
           <p className="text-xs text-slate-400 mt-4 flex items-start gap-1.5">
             <AlertTriangle size={13} className="shrink-0 mt-0.5 text-gold-600" />
-            Filing charges the debtor R13 under item 6, correspondence received and attended to.
-            It cannot be undone from here.
+            Matching charges the debtor R13 under item 6, correspondence received and attended
+            to. It cannot be undone from here.
           </p>
 
           {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
@@ -1817,7 +1816,7 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
             <button onClick={() => void link()} disabled={busy}
               className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
               {busy ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
-              {busy ? 'Filing…' : `File on ${picked.label} · R13`}
+              {busy ? 'Matching…' : `Match to ${picked.label} · R13`}
             </button>
           </div>
         </>
@@ -1894,13 +1893,13 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
 
       <p className="text-xs text-slate-400 mt-4 flex items-start gap-1.5">
         <AlertTriangle size={13} className="shrink-0 mt-0.5 text-gold-600" />
-        Filing on a <strong className="font-medium">debtor account</strong> charges R13 under item
-        6, correspondence received and attended to, and cannot be undone from here. Filing on a
-        lead, deal, client or contact charges nothing.
+        Matching to a <strong className="font-medium">debtor account</strong> charges R13 under
+        item 6, correspondence received and attended to, and cannot be undone from here. Matching
+        to a lead, deal, client or contact charges nothing.
       </p>
       {busy && (
         <p className="text-xs text-slate-400 mt-2 inline-flex items-center gap-1.5">
-          <Loader2 size={12} className="animate-spin" /> Filing&hellip;
+          <Loader2 size={12} className="animate-spin" /> Matching&hellip;
         </p>
       )}
 
@@ -1916,7 +1915,7 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
         <div className="mt-4 pt-3 border-t border-slate-100">
           <button onClick={onSkip} disabled={busy}
             className="text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
-            This is not about anything in Raptor — reply without filing it
+            This is not about anything in Raptor — reply without matching it
           </button>
           <p className="text-xs text-slate-400 mt-1">Nothing charged, and it appears on no account.</p>
         </div>
@@ -1953,8 +1952,10 @@ function MoveModal({ mail, actor, onClose, onDone }: {
    * belongs to and deciding to move it are different decisions and now take different taps.
    */
   const [picked, setPicked] = useState<{ id: string; label: string } | null>(null)
+  /** Taking it off the account without naming a replacement. */
+  const [unmatching, setUnmatching] = useState(false)
 
-  // Debounced, for the same reason the filing search is: 100 000 rows per keystroke otherwise.
+  // Debounced, for the same reason the matching search is: 100 000 rows per keystroke otherwise.
   useEffect(() => {
     const q = term.trim()
     if (q.length < 2) { setHits([]); return }
@@ -1968,6 +1969,18 @@ function MoveModal({ mail, actor, onClose, onDone }: {
     }, 250)
     return () => { cancelled = true; clearTimeout(t) }
   }, [term])
+
+  async function unmatch() {
+    setBusy(true)
+    setError(null)
+    try {
+      await unmatchMail({ mail, reason, actor })
+      onDone(`Unmatched from ${was}. It is back under Needs matching. The fee on ${was} stands.`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
 
   async function move() {
     if (!picked) return
@@ -1985,7 +1998,7 @@ function MoveModal({ mail, actor, onClose, onDone }: {
   }
 
   return (
-    <Modal title="Move this email to the right account" onClose={onClose} width={520}>
+    <Modal title="Rematch or unmatch this email" onClose={onClose} width={520}>
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
         <p className="text-sm font-medium text-slate-800 truncate">{mail.subject || '(no subject)'}</p>
         <p className="text-xs text-slate-400 mt-0.5 truncate">
@@ -2043,6 +2056,67 @@ function MoveModal({ mail, actor, onClose, onDone }: {
               <p className="py-3 text-sm text-slate-400">No account matches that.</p>
             )}
           </div>
+
+          {/*
+            Unmatch, without naming a replacement.
+
+            The firm's point, and it is the common case: a message matched by surname to the
+            wrong Mthembu has to come off that account TODAY, while working out whose it really
+            is is a separate job. Forcing a replacement to be named on the spot means the wrong
+            match simply stays.
+          */}
+          <div className="mt-4 pt-3 border-t border-slate-100">
+            <button onClick={() => setUnmatching(true)} disabled={busy}
+              className="text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
+              Or just unmatch it &mdash; take it off {was} without choosing another account
+            </button>
+            <p className="text-xs text-slate-400 mt-1">
+              It goes back to Needs matching. The fee and the email stay on {was}, as they do
+              either way.
+            </p>
+          </div>
+        </>
+      ) : unmatching ? (
+        /* Unmatching: the same reason box, and a button that says what it does. */
+        <>
+          <div className="mt-4 rounded-lg border border-slate-200 px-3 py-2.5 flex items-center gap-2">
+            <Undo2 size={15} className="shrink-0 text-slate-400" />
+            <span className="text-sm text-slate-800 min-w-0 flex-1">
+              Taking it off <strong className="font-semibold">{was}</strong>
+            </span>
+            <button onClick={() => { setUnmatching(false); setError(null) }} disabled={busy}
+              className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
+              Change
+            </button>
+          </div>
+
+          <label className="block mt-3">
+            <span className="text-sm font-medium text-slate-700">
+              Why? <span className="font-normal text-slate-400">Optional</span>
+            </span>
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              autoFocus
+              placeholder="Wrong Mthembu — need to find the right account"
+              className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-brand-100"
+            />
+            <span className="block text-xs text-slate-400 mt-1">
+              Kept on the email, for the firm. Nothing is written onto {was}&rsquo;s account.
+            </span>
+          </label>
+
+          <div className="mt-5 flex items-center justify-end gap-2">
+            <button onClick={onClose} disabled={busy}
+              className="text-sm font-medium px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+              Cancel
+            </button>
+            <button onClick={() => void unmatch()} disabled={busy}
+              className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Undo2 size={14} />}
+              {busy ? 'Unmatching…' : `Unmatch from ${was}`}
+            </button>
+          </div>
         </>
       ) : (
         /* STEP 2 — say why, then confirm. Still nothing has happened. */
@@ -2050,7 +2124,7 @@ function MoveModal({ mail, actor, onClose, onDone }: {
           <div className="mt-4 rounded-lg border border-slate-200 px-3 py-2.5 flex items-center gap-2">
             <MoveRight size={15} className="shrink-0 text-slate-400" />
             <span className="text-sm text-slate-800 min-w-0 flex-1">
-              Moving to <strong className="font-semibold">{picked.label}</strong>
+              Rematching to <strong className="font-semibold">{picked.label}</strong>
             </span>
             <button onClick={() => { setPicked(null); setError(null) }} disabled={busy}
               className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
@@ -2087,7 +2161,7 @@ function MoveModal({ mail, actor, onClose, onDone }: {
             <button onClick={() => void move()} disabled={busy}
               className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
               {busy ? <Loader2 size={14} className="animate-spin" /> : <MoveRight size={14} />}
-              {busy ? 'Moving…' : `Move it to ${picked.label}`}
+              {busy ? 'Rematching…' : `Rematch to ${picked.label}`}
             </button>
           </div>
         </>
