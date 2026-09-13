@@ -386,8 +386,12 @@ export function AccountDetail() {
         */}
         <div className="mt-2.5 text-right leading-tight ml-2">
           <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-gold-500">Pre-legal agent</p>
+          {/*
+            The name, and nothing under it. It used to say "from Swordfish" — which named the
+            system the book came out of, not anything about the account. The firm is moving off
+            Swordfish, and a debtor's file is not the place to keep mentioning it.
+          */}
           <p className="text-sm font-semibold text-white">{account.swordfishAssignedTo ?? 'Unassigned'}</p>
-          {account.swordfishAssignedTo && <p className="text-[11px] text-white/50">from Swordfish</p>}
         </div>
       </DashboardHero>
 
