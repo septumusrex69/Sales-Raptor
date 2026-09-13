@@ -872,9 +872,13 @@ export async function setJunk(ids: string[], junk: boolean): Promise<number> {
  *
  * NOR IS THE ORIGINAL FILING REMOVED. Keeping the fee while deleting the email that justifies it
  * would leave a charge on a statement with nothing behind it — the worst of both. The message
- * stays on the original account with a note saying it was filed there in error and where it
- * went, so anyone reading that statement, including the debtor, can see what the R13 was for and
- * that it is known to be wrong.
+ * stays where it was, so the R13 still has the correspondence behind it.
+ *
+ * NOTHING IS WRITTEN ON THAT ACCOUNT SAYING IT WAS AN ERROR. That was the first version and the
+ * firm was right to stop it: account notes have no visibility flag, so the words reach the
+ * debtor on a statement and invite the query they were meant to answer. The correction lives on
+ * the mailbox row, which only the firm sees, and the statement side is handled properly later,
+ * in the remittance.
  *
  * The destination is then filed normally, fee and all: the correspondence really is on that
  * debtor's file now, really was attended to, and item 6 applies exactly as it would have if it
@@ -922,20 +926,23 @@ export async function moveFiledMail(input: {
     throw new Error('Only an administrator can move an email that is already filed.')
   }
 
-  // The correcting note on the account it should never have been on. Written FIRST: if the
-  // filing below fails, the account that was wrongly charged still explains itself.
-  await addNote({
-    accountId: from,
-    body: [
-      `Email filed here in error and moved to ${input.toLabel}.`,
-      input.reason?.trim() ? input.reason.trim() : null,
-      'The correspondence fee already raised on this account stands and is corrected in the remittance.',
-    ].filter(Boolean).join(' '),
-    kind: EMAIL_IN_KIND,
-    authorName: input.actor.name,
-    createdBy: input.actor.id,
-    source: 'system',
-  })
+  /*
+   * The correction is recorded on the MAILBOX ROW, not as a note on the account it came off.
+   *
+   * A note would have been the obvious place and it is the wrong one: account_notes has no
+   * visibility flag, so "filed here in error" can reach the debtor on a statement or in an
+   * answer to a query — and that sentence invites exactly the query it was meant to pre-empt.
+   * The firm's instruction. Written here instead, where only the firm can see it.
+   *
+   * Best effort: the message has already moved and the destination is about to be charged.
+   * Failing to annotate it is a thinner audit trail, not a wrong statement, and is not worth
+   * throwing away a completed move over.
+   */
+  const { error: markError } = await supabase
+    .from('user_emails')
+    .update({ moved_from_account_id: from, moved_reason: input.reason?.trim() || null })
+    .eq('id', input.mail.id)
+  if (markError) console.error('[userMail] moved, but the move was not annotated:', markError.message)
 
   return fileOnAccount({
     mail: input.mail,

@@ -1699,6 +1699,22 @@ create table if not exists public.user_emails (
   linked_by uuid references public.profiles (id) on delete set null,
 
   /*
+   * Where a mis-filed message came from, and why an administrator moved it.
+   *
+   * ON THE MAILBOX ROW, deliberately, and NOT as a note on the debtor's account. account_notes
+   * has no visibility flag, so anything written there can end up in front of the debtor on a
+   * statement or in an answer to a query — and "filed here in error" is precisely the sentence
+   * that invites the query it was meant to pre-empt. The firm's instruction, and it is right.
+   * user_emails is internal: RLS scopes it to the mailbox owner and nothing debtor-facing reads
+   * it.
+   *
+   * The trail is still whole: linked_by and linked_at say who moved it and when, these two say
+   * what it came off and why.
+   */
+  moved_from_account_id uuid references public.debtor_accounts (id) on delete set null,
+  moved_reason text,
+
+  /*
    * "Is this message filed anywhere?" -- asked by the mailbox's tabs, the delete guard, the
    * retention prune and the sidebar badge.
    *
