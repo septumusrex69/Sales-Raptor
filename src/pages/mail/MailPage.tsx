@@ -18,12 +18,14 @@ import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
 import {
   blockedBy, blockSender, blockSenders, countNeedsFiling, deleteMail, domainBlockProblem,
+  saveAccountContacts,
   countUnread, domainOf, emptyJunk, fetchBlockedSenders, fetchMail, fetchMailBody,
   downloadAttachment, linkMailToAccount, linkMailToRecord, markMailRead, moveFiledMail, setJunk,
   unblockSender,
   type BlockedSender, type BlockOutcome, type LinkedRecord, type MailFilter, type MailItem,
 } from '../../lib/userMail'
 import { useAppStore } from '../../store/AppStore'
+import { findContactDetails } from '../../lib/signature'
 import { canRefileMail } from '../../lib/permissions'
 
 /**
@@ -745,6 +747,7 @@ export function MailPage() {
         <LinkModal
           mail={linking}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          body={bodies[linking.id]}
           replying={linkThenReply}
           onClose={() => { setLinking(null); setLinkThenReply(false) }}
           onDone={(message, accountId, record) => {
@@ -1517,9 +1520,11 @@ const CRM_OR_ACCOUNT: Record<LinkedRecord['kind'], string> = {
   account: 'Debtor account', lead: 'Lead', deal: 'Deal', client: 'Client', contact: 'Contact',
 }
 
-function LinkModal({ mail, actor, replying, onClose, onDone, onSkip }: {
+function LinkModal({ mail, actor, body, replying, onClose, onDone, onSkip }: {
   mail: MailItem
   actor: { id: string | null; name: string | null }
+  /** The message text, where it has been fetched — the source of the contact suggestions. */
+  body?: string
   /** Opened by Reply rather than by the Link button: say so, and offer the way out. */
   replying?: boolean
   onClose: () => void
@@ -1543,6 +1548,21 @@ function LinkModal({ mail, actor, replying, onClose, onDone, onSkip }: {
    * cannot: there are 100 000 of them and they are fetched and paged. Hence one debounced search
    * below and one synchronous filter here, for what is a single search box on screen.
    */
+  /*
+   * Two steps for a debtor account, one for a CRM record.
+   *
+   * Picking a debtor no longer files it: there are decisions to make first — whether to keep the
+   * address, and which of the details the message gave up are real. A lead has none of those and
+   * no fee, so it files on the tap, as it always did.
+   */
+  const [picked, setPicked] = useState<{ id: string; label: string } | null>(null)
+  const [keepAddress, setKeepAddress] = useState(true)
+  const [keepDetails, setKeepDetails] = useState<Set<string>>(new Set())
+
+  // Scanned from the message the agent has open. Nothing is fetched for this — no body, no
+  // suggestions, which is the honest outcome of filing a message without reading it.
+  const suggestions = useMemo(() => (body ? findContactDetails(body) : []), [body])
+
   const { leads, deals, companies, contacts } = useAppStore()
   const crmHits = useMemo<CrmHit[]>(() => {
     const q = term.trim().toLowerCase()
@@ -1617,14 +1637,43 @@ function LinkModal({ mail, actor, replying, onClose, onDone, onSkip }: {
     }
   }
 
-  async function link(accountId: string, label: string) {
+  async function link() {
+    if (!picked) return
+    const { id: accountId, label } = picked
     setBusy(true)
     setError(null)
     try {
       const charge = await linkMailToAccount({ mail, accountId, actor })
-      onDone(`Filed on ${label}. ${chargeMessage(charge, '6')}`, accountId, {
-        kind: 'account', id: accountId, label, path: `/accounts/${accountId}`,
-      })
+
+      /*
+       * Saved AFTER the filing, and never allowed to undo it. The message is on the account and
+       * the fee is raised; a contact that failed to save is a detail to re-enter, not a reason
+       * to leave the agent looking at a red box over work that actually succeeded.
+       */
+      let saved = 0
+      try {
+        saved = await saveAccountContacts({
+          accountId,
+          details: [
+            ...(keepAddress
+              ? [{ kind: 'email' as const, value: mail.fromAddress, label: mail.fromName ?? undefined }]
+              : []),
+            ...suggestions
+              .filter((c) => keepDetails.has(c.value))
+              .map((c) => ({ kind: c.kind, value: c.value, label: 'From their email' })),
+          ],
+          actor,
+        })
+      } catch (e) {
+        console.error('[MailPage] filed, but the contact details did not save:', e)
+      }
+
+      onDone(
+        `Filed on ${label}. ${chargeMessage(charge, '6')}`
+        + (saved > 0 ? ` ${saved} contact ${saved === 1 ? 'detail' : 'details'} saved on the account.` : ''),
+        accountId,
+        { kind: 'account', id: accountId, label, path: `/accounts/${accountId}` },
+      )
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setBusy(false)
@@ -1648,6 +1697,96 @@ function LinkModal({ mail, actor, replying, onClose, onDone, onSkip }: {
         {mail.snippet && <p className="text-[13px] text-slate-500 mt-1.5">{mail.snippet.slice(0, 160)}</p>}
       </div>
 
+      {picked ? (
+        /*
+          STEP 2 — what else to keep. Only for a debtor account: a lead files on the tap, since
+          there is no fee and no account_contacts to add to.
+        */
+        <>
+          <div className="mt-4 rounded-lg border border-slate-200 px-3 py-2.5 flex items-center gap-2">
+            <Link2 size={15} className="shrink-0 text-slate-400" />
+            <span className="text-sm text-slate-800 min-w-0 flex-1">
+              Filing on <strong className="font-semibold">{picked.label}</strong>
+            </span>
+            <button onClick={() => { setPicked(null); setError(null) }} disabled={busy}
+              className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
+              Change
+            </button>
+          </div>
+
+          {/*
+            On by default, because it is the whole point: findAccount matches future mail against
+            this, so saving it once means the next email from this debtor files itself. The
+            consequence is stated rather than buried — automatic filing is also automatic
+            charging, so the wrong address here bills quietly and repeatedly.
+          */}
+          <label className="flex items-start gap-2.5 mt-3 cursor-pointer">
+            <input type="checkbox" className="mt-0.5" checked={keepAddress}
+              onChange={(e) => setKeepAddress(e.target.checked)} />
+            <span className="min-w-0">
+              <span className="block text-sm text-slate-800">
+                Save <strong className="font-medium">{mail.fromAddress}</strong> on this account
+              </span>
+              <span className="block text-xs text-slate-400 mt-0.5">
+                Their next email then files itself &mdash; and charges R13 on its own. Leave this
+                off if the address is not the debtor&rsquo;s.
+              </span>
+            </span>
+          </label>
+
+          {suggestions.length > 0 && (
+            <div className="mt-3">
+              <p className="text-sm font-medium text-slate-700">
+                Also in this message <span className="font-normal text-slate-400">&mdash; tick what is right</span>
+              </p>
+              {/*
+                Off by default, every one of them. These are guesses from the debtor's own words,
+                and a wrong number saved here is one a collector later phones.
+              */}
+              <div className="mt-1.5 space-y-1.5">
+                {suggestions.map((c) => (
+                  <label key={c.value} className="flex items-start gap-2.5 cursor-pointer">
+                    <input type="checkbox" className="mt-0.5" checked={keepDetails.has(c.value)}
+                      onChange={(e) => setKeepDetails((prev) => {
+                        const next = new Set(prev)
+                        if (e.target.checked) next.add(c.value)
+                        else next.delete(c.value)
+                        return next
+                      })} />
+                    <span className="min-w-0">
+                      <span className="block text-sm text-slate-800">
+                        {c.value} <span className="text-slate-400">&middot; {c.kind === 'mobile' ? 'Mobile' : 'Phone'}</span>
+                      </span>
+                      <span className="block text-xs text-slate-400 mt-0.5 truncate">&ldquo;{c.context}&rdquo;</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <p className="text-xs text-slate-400 mt-4 flex items-start gap-1.5">
+            <AlertTriangle size={13} className="shrink-0 mt-0.5 text-gold-600" />
+            Filing charges the debtor R13 under item 6, correspondence received and attended to.
+            It cannot be undone from here.
+          </p>
+
+          {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
+
+          <div className="mt-5 flex items-center justify-end gap-2">
+            <button onClick={onClose} disabled={busy}
+              className="text-sm font-medium px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+              Cancel
+            </button>
+            <button onClick={() => void link()} disabled={busy}
+              className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+              {busy ? 'Filing…' : `File on ${picked.label} · R13`}
+            </button>
+          </div>
+        </>
+      ) : (
+      <>
       <label className="block mt-4">
         <span className="text-sm font-medium text-slate-700">Find the debtor, lead or client</span>
         <input
@@ -1675,9 +1814,9 @@ function LinkModal({ mail, actor, replying, onClose, onDone, onSkip }: {
             </p>
             <div className="divide-y divide-slate-100">
               {hits.map((h) => (
-                <button key={h.id} disabled={busy}
-                  onClick={() => void link(h.id, debtorLabel(h))}
-                  className="w-full text-left px-1 py-2.5 hover:bg-slate-50 disabled:opacity-50">
+                <button key={h.id}
+                  onClick={() => setPicked({ id: h.id, label: debtorLabel(h) })}
+                  className="w-full text-left px-1 py-2.5 hover:bg-slate-50">
                   <span className="block text-sm font-medium text-slate-800">{debtorLabel(h)}</span>
                   <span className="block text-xs text-slate-400">
                     {h.accountNumber ?? 'no account number'}
@@ -1734,6 +1873,9 @@ function LinkModal({ mail, actor, replying, onClose, onDone, onSkip }: {
         bank. Deliberately plain text rather than a second gold button: it is the right answer
         sometimes, and the wrong one by default, and the two should not look equally inviting.
       */}
+      </>
+      )}
+
       {replying && onSkip && (
         <div className="mt-4 pt-3 border-t border-slate-100">
           <button onClick={onSkip} disabled={busy}

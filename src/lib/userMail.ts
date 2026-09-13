@@ -804,6 +804,57 @@ async function fileOnAccount(input: {
 }
 
 /**
+ * Save contact details a debtor gave us, onto their account.
+ *
+ * The point is not the record — it is that findAccount() matches incoming mail against
+ * account_contacts where kind = 'email'. Save the address once and every future email from it
+ * files ITSELF, and the mailbox gets permanently quieter. That is the whole return on this.
+ *
+ * Which is also why it is never automatic. Auto-filing auto-charges item 6, so an address saved
+ * against the wrong debtor does not cause one wrong R13 — it causes a recurring one, silently,
+ * until somebody notices. A person ticks these.
+ *
+ * `source: 'email'` marks where they came from, so a later audit can tell a detail somebody
+ * confirmed on a call from one lifted out of a message.
+ */
+export async function saveAccountContacts(input: {
+  accountId: string
+  details: { kind: 'email' | 'mobile' | 'phone'; value: string; label?: string }[]
+  actor: { id: string | null }
+}): Promise<number> {
+  if (input.details.length === 0) return 0
+
+  /*
+   * Skip what the account already has. account_contacts has no unique index — deliberately, a
+   * debtor can have two mobiles — so duplicates are prevented here rather than by the database.
+   * Compared case-insensitively and without spaces, since "083 441 9922" and "0834419922" are
+   * the same number to everyone except a string comparison.
+   */
+  const flat = (v: string) => v.replace(/\s+/g, '').toLowerCase()
+  const { data: existing } = await supabase
+    .from('account_contacts')
+    .select('value')
+    .eq('account_id', input.accountId)
+  const have = new Set((existing ?? []).map((r) => flat(r.value as string)))
+
+  const rows = input.details
+    .filter((d) => !have.has(flat(d.value)))
+    .map((d) => ({
+      account_id: input.accountId,
+      kind: d.kind,
+      value: d.value,
+      label: d.label ?? null,
+      source: 'email',
+      created_by: input.actor.id,
+    }))
+  if (rows.length === 0) return 0
+
+  const { error } = await supabase.from('account_contacts').insert(rows)
+  if (error) throw new Error(error.message)
+  return rows.length
+}
+
+/**
  * File a message against a CRM record — a lead, a deal, a client or a contact.
  *
  * NOTHING IS CHARGED, and that is the difference that matters. Annexure B is the tariff for
