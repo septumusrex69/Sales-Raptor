@@ -15,6 +15,7 @@
 import { supabase } from './supabase'
 import { refreshNavCounts } from './navCounts'
 import { mirrorReadToAccount } from './mailReadState'
+import type { ContactCandidate } from './signature'
 import { chargeItem, type ChargeResult } from './accountCharges'
 import { addNote } from './accountWorkspace'
 import {
@@ -325,15 +326,22 @@ export async function countNeedsFiling(userId: string): Promise<number> {
  * Throws with the server's own wording. The caller keeps showing the snippet either way: a
  * message the mail server has since moved should not leave the row blank.
  */
-export async function fetchMailBody(mailId: string, accessToken: string): Promise<string> {
+export async function fetchMailBody(
+  mailId: string,
+  accessToken: string,
+): Promise<{ text: string; details: ContactCandidate[] }> {
   const res = await fetch('/api/email/attachment', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify({ mailId }),
   })
-  const body = (await res.json().catch(() => ({}))) as { text?: string; error?: string }
+  const body = (await res.json().catch(() => ({}))) as {
+    text?: string; details?: ContactCandidate[]; error?: string
+  }
   if (!res.ok) throw new Error(body.error ?? 'Could not read that message.')
-  return body.text ?? ''
+  // `details` are read off the message's HTML on the server — see findLinkedDetails. They are
+  // what an image signature gives up, since its text yields nothing.
+  return { text: body.text ?? '', details: body.details ?? [] }
 }
 
 /**

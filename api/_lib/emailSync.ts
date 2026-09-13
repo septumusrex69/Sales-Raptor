@@ -390,7 +390,7 @@ async function fileAccountEmail(
 export async function fetchMessageBody(
   conn: { email: string; imap_host: string; imap_port: number; encrypted_password: string },
   location: { folder?: string | null; uid?: number | null; messageId?: string | null },
-): Promise<{ text: string } | null> {
+): Promise<{ text: string; html: string } | null> {
   const password = decrypt(conn.encrypted_password)
   const client = new ImapFlow({
     host: conn.imap_host,
@@ -426,7 +426,13 @@ export async function fetchMessageBody(
         // deleted and the UID reused, so confirm identity when we can.
         if (location.messageId && parsed.messageId && parsed.messageId !== location.messageId) continue
 
-        return { text: plainText(parsed.text, parsed.html) }
+        /*
+         * The HTML comes back as well as the text, because plainText() strips every tag — and
+         * the tags are where an image signature keeps its contact details. A signature that
+         * renders as a picture still usually wraps the number in <a href="tel:...">, and that
+         * anchor was being thrown away before anything could look at it. See findLinkedDetails.
+         */
+        return { text: plainText(parsed.text, parsed.html), html: parsed.html || '' }
       } finally {
         lock.release()
       }

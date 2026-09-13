@@ -25,7 +25,9 @@ import {
   type BlockedSender, type BlockOutcome, type LinkedRecord, type MailFilter, type MailItem,
 } from '../../lib/userMail'
 import { useAppStore } from '../../store/AppStore'
-import { findContactDetails } from '../../lib/signature'
+import {
+  findContactDetails, mergeCandidates, type ContactCandidate,
+} from '../../lib/signature'
 import { canRefileMail } from '../../lib/permissions'
 
 /**
@@ -123,6 +125,8 @@ export function MailPage() {
    * reason it is fetched.
    */
   const [bodies, setBodies] = useState<Record<string, string>>({})
+  /** Contact details read off each message's hrefs, keyed the same way as the bodies. */
+  const [linkedDetails, setLinkedDetails] = useState<Record<string, ContactCandidate[]>>({})
   const [reading, setReading] = useState<string | null>(null)
   const [readError, setReadError] = useState<Record<string, string>>({})
   const [view, setView] = useEmailView()
@@ -269,8 +273,11 @@ export function MailPage() {
     setReading(mail.id)
     setReadError((e) => { const next = { ...e }; delete next[mail.id]; return next })
     try {
-      const text = await fetchMailBody(mail.id, token)
+      const { text, details } = await fetchMailBody(mail.id, token)
       setBodies((b) => ({ ...b, [mail.id]: text }))
+      // Kept beside the text: these came out of the message's LINKS, which is the only thing an
+      // image signature leaves behind.
+      setLinkedDetails((d) => ({ ...d, [mail.id]: details }))
     } catch (e) {
       // The snippet stays on screen, so this explains the gap rather than leaving it blank.
       setReadError((prev) => ({ ...prev, [mail.id]: e instanceof Error ? e.message : String(e) }))
@@ -748,6 +755,7 @@ export function MailPage() {
           mail={linking}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
           body={bodies[linking.id]}
+          linked={linkedDetails[linking.id]}
           replying={linkThenReply}
           onClose={() => { setLinking(null); setLinkThenReply(false) }}
           onDone={(message, accountId, record) => {
@@ -1520,11 +1528,13 @@ const CRM_OR_ACCOUNT: Record<LinkedRecord['kind'], string> = {
   account: 'Debtor account', lead: 'Lead', deal: 'Deal', client: 'Client', contact: 'Contact',
 }
 
-function LinkModal({ mail, actor, body, replying, onClose, onDone, onSkip }: {
+function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSkip }: {
   mail: MailItem
   actor: { id: string | null; name: string | null }
-  /** The message text, where it has been fetched — the source of the contact suggestions. */
+  /** The message text, where it has been fetched — one source of the contact suggestions. */
   body?: string
+  /** Details read off the message's links, which is what an image signature gives up. */
+  linked?: ContactCandidate[]
   /** Opened by Reply rather than by the Link button: say so, and offer the way out. */
   replying?: boolean
   onClose: () => void
@@ -1559,9 +1569,21 @@ function LinkModal({ mail, actor, body, replying, onClose, onDone, onSkip }: {
   const [keepAddress, setKeepAddress] = useState(true)
   const [keepDetails, setKeepDetails] = useState<Set<string>>(new Set())
 
-  // Scanned from the message the agent has open. Nothing is fetched for this — no body, no
-  // suggestions, which is the honest outcome of filing a message without reading it.
-  const suggestions = useMemo(() => (body ? findContactDetails(body) : []), [body])
+  /*
+   * What the message gave up, from its words and its links together.
+   *
+   * Both, because they fail in opposite cases. A debtor typing "my new number is …" leaves it in
+   * the text and nothing in the links; a corporate signature that renders as one picture leaves
+   * nothing in the text and its number in a tel: href. Merging deduplicates the common case
+   * where a signature carries the same number both ways.
+   *
+   * Nothing is fetched for this — no body, no suggestions, which is the honest outcome of
+   * filing a message without reading it.
+   */
+  const suggestions = useMemo(
+    () => mergeCandidates(body ? findContactDetails(body) : [], linked ?? []),
+    [body, linked],
+  )
 
   const { leads, deals, companies, contacts } = useAppStore()
   const crmHits = useMemo<CrmHit[]>(() => {
@@ -1660,7 +1682,13 @@ function LinkModal({ mail, actor, body, replying, onClose, onDone, onSkip }: {
               : []),
             ...suggestions
               .filter((c) => keepDetails.has(c.value))
-              .map((c) => ({ kind: c.kind, value: c.value, label: 'From their email' })),
+              .map((c) => ({
+                kind: c.kind,
+                value: c.value,
+                // Says where it came from, so a later audit can tell a detail lifted out of a
+                // message from one somebody confirmed on a call.
+                label: c.context === 'Linked in their signature' ? 'From their signature' : 'From their email',
+              })),
           ],
           actor,
         })
@@ -1739,6 +1767,11 @@ function LinkModal({ mail, actor, body, replying, onClose, onDone, onSkip }: {
               <p className="text-sm font-medium text-slate-700">
                 Also in this message <span className="font-normal text-slate-400">&mdash; tick what is right</span>
               </p>
+              {/* Said once, because a number lifted off a signature looks authoritative and is
+                  still a guess. */}
+              <p className="text-xs text-slate-400 mt-0.5">
+                Read out of what they wrote and out of their signature&rsquo;s links. Check each one.
+              </p>
               {/*
                 Off by default, every one of them. These are guesses from the debtor's own words,
                 and a wrong number saved here is one a collector later phones.
@@ -1754,8 +1787,11 @@ function LinkModal({ mail, actor, body, replying, onClose, onDone, onSkip }: {
                         return next
                       })} />
                     <span className="min-w-0">
-                      <span className="block text-sm text-slate-800">
-                        {c.value} <span className="text-slate-400">&middot; {c.kind === 'mobile' ? 'Mobile' : 'Phone'}</span>
+                      <span className="block text-sm text-slate-800 break-all">
+                        {c.value}{' '}
+                        <span className="text-slate-400">
+                          &middot; {c.kind === 'mobile' ? 'Mobile' : c.kind === 'email' ? 'Another address' : 'Phone'}
+                        </span>
                       </span>
                       <span className="block text-xs text-slate-400 mt-0.5 truncate">&ldquo;{c.context}&rdquo;</span>
                     </span>
