@@ -1716,6 +1716,13 @@ function MoveModal({ mail, actor, onClose, onDone }: {
   const [error, setError] = useState<string | null>(null)
   const was = mail.linkedTo?.label ?? 'the current account'
 
+  /*
+   * Two steps, because picking an account used to BE the move — one tap on a search result and
+   * a debtor was charged, with the reason box sitting above it never filled in. Choosing who it
+   * belongs to and deciding to move it are different decisions and now take different taps.
+   */
+  const [picked, setPicked] = useState<{ id: string; label: string } | null>(null)
+
   // Debounced, for the same reason the filing search is: 100 000 rows per keystroke otherwise.
   useEffect(() => {
     const q = term.trim()
@@ -1731,12 +1738,15 @@ function MoveModal({ mail, actor, onClose, onDone }: {
     return () => { cancelled = true; clearTimeout(t) }
   }, [term])
 
-  async function move(accountId: string, label: string) {
+  async function move() {
+    if (!picked) return
     setBusy(true)
     setError(null)
     try {
-      const charge = await moveFiledMail({ mail, toAccountId: accountId, toLabel: label, reason, actor })
-      onDone(`Moved to ${label}. ${chargeMessage(charge, '6')} The fee on ${was} stands.`)
+      const charge = await moveFiledMail({
+        mail, toAccountId: picked.id, toLabel: picked.label, reason, actor,
+      })
+      onDone(`Moved to ${picked.label}. ${chargeMessage(charge, '6')} The fee on ${was} stands.`)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setBusy(false)
@@ -1759,9 +1769,9 @@ function MoveModal({ mail, actor, onClose, onDone }: {
         </p>
         <p className="text-xs text-slate-500 mt-1.5">
           Fees feed the remittances, and a remittance that has been processed cannot be unwound,
-          so nothing is taken back off a statement here. The email stays on that account too, with
-          a note saying it was filed there in error &mdash; otherwise the fee would sit on a
-          statement with nothing behind it. Finance corrects it forward, in the remittance.
+          so nothing is taken back off a statement here. The email stays on that account as well,
+          so the fee still has the correspondence behind it. Finance corrects it forward, in the
+          remittance.
         </p>
         <p className="text-xs text-slate-500 mt-1.5">
           The account you pick below is charged R13 under item 6, exactly as it would have been
@@ -1769,60 +1779,90 @@ function MoveModal({ mail, actor, onClose, onDone }: {
         </p>
       </div>
 
-      <label className="block mt-4">
-        <span className="text-sm font-medium text-slate-700">Which account should it be on?</span>
-        <input
-          value={term}
-          onChange={(e) => setTerm(e.target.value)}
-          autoFocus
-          placeholder="Surname, account number or client reference"
-          className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-brand-100"
-        />
-      </label>
+      {/* STEP 1 — find the account. Picking one only selects it; nothing has happened yet. */}
+      {!picked ? (
+        <>
+          <label className="block mt-4">
+            <span className="text-sm font-medium text-slate-700">Which account should it be on?</span>
+            <input
+              value={term}
+              onChange={(e) => setTerm(e.target.value)}
+              autoFocus
+              placeholder="Surname, account number or client reference"
+              className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-brand-100"
+            />
+          </label>
 
-      <label className="block mt-3">
-        <span className="text-sm font-medium text-slate-700">
-          Why? <span className="font-normal text-slate-400">Optional</span>
-        </span>
-        <input
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          placeholder="Same surname, wrong debtor"
-          className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-brand-100"
-        />
-        {/* Onto the wrong account's timeline, beside the fee — where somebody querying that
-            charge in six months will actually look. */}
-        <span className="block text-xs text-slate-400 mt-1">
-          Written onto {was}&rsquo;s timeline, beside the fee.
-        </span>
-      </label>
+          {looking && <p className="text-xs text-slate-400 mt-2">Looking&hellip;</p>}
 
-      {looking && <p className="text-xs text-slate-400 mt-2">Looking&hellip;</p>}
-
-      <div className="mt-3 max-h-56 overflow-y-auto divide-y divide-slate-100">
-        {/* The account it is already on is filtered out — moving it to itself is not a move. */}
-        {hits.filter((h) => h.id !== mail.linkedAccountId).map((h) => (
-          <button key={h.id} disabled={busy}
-            onClick={() => void move(h.id, debtorLabel(h))}
-            className="w-full text-left px-1 py-2.5 hover:bg-slate-50 disabled:opacity-50">
-            <span className="block text-sm font-medium text-slate-800">{debtorLabel(h)}</span>
-            <span className="block text-xs text-slate-400">
-              {h.accountNumber ?? 'no account number'}
-              {h.clientReference && <> &middot; {h.clientReference}</>}
+          <div className="mt-3 max-h-56 overflow-y-auto divide-y divide-slate-100">
+            {/* The account it is already on is filtered out — moving it to itself is not a move. */}
+            {hits.filter((h) => h.id !== mail.linkedAccountId).map((h) => (
+              <button key={h.id}
+                onClick={() => setPicked({ id: h.id, label: debtorLabel(h) })}
+                className="w-full text-left px-1 py-2.5 hover:bg-slate-50">
+                <span className="block text-sm font-medium text-slate-800">{debtorLabel(h)}</span>
+                <span className="block text-xs text-slate-400">
+                  {h.accountNumber ?? 'no account number'}
+                  {h.clientReference && <> &middot; {h.clientReference}</>}
+                </span>
+              </button>
+            ))}
+            {term.trim().length >= 2 && !looking && hits.length === 0 && (
+              <p className="py-3 text-sm text-slate-400">No account matches that.</p>
+            )}
+          </div>
+        </>
+      ) : (
+        /* STEP 2 — say why, then confirm. Still nothing has happened. */
+        <>
+          <div className="mt-4 rounded-lg border border-slate-200 px-3 py-2.5 flex items-center gap-2">
+            <MoveRight size={15} className="shrink-0 text-slate-400" />
+            <span className="text-sm text-slate-800 min-w-0 flex-1">
+              Moving to <strong className="font-semibold">{picked.label}</strong>
             </span>
-          </button>
-        ))}
-        {term.trim().length >= 2 && !looking && hits.length === 0 && (
-          <p className="py-3 text-sm text-slate-400">No account matches that.</p>
-        )}
-      </div>
+            <button onClick={() => { setPicked(null); setError(null) }} disabled={busy}
+              className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
+              Change
+            </button>
+          </div>
+
+          <label className="block mt-3">
+            <span className="text-sm font-medium text-slate-700">
+              Why? <span className="font-normal text-slate-400">Optional</span>
+            </span>
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              autoFocus
+              placeholder="Same surname, wrong debtor"
+              className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-brand-100"
+            />
+            {/*
+              Kept inside Raptor, on the message itself — NOT written onto the debtor's account.
+              Anything on an account can reach the debtor on a statement, and a line saying an
+              email was filed there in error invites the query it was meant to answer.
+            */}
+            <span className="block text-xs text-slate-400 mt-1">
+              Kept on the email, for the firm. Nothing is written onto either debtor&rsquo;s account.
+            </span>
+          </label>
+
+          <div className="mt-5 flex items-center justify-end gap-2">
+            <button onClick={onClose} disabled={busy}
+              className="text-sm font-medium px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+              Cancel
+            </button>
+            <button onClick={() => void move()} disabled={busy}
+              className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <MoveRight size={14} />}
+              {busy ? 'Moving…' : `Move it to ${picked.label}`}
+            </button>
+          </div>
+        </>
+      )}
 
       {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
-      {busy && (
-        <p className="text-xs text-slate-400 mt-2 inline-flex items-center gap-1.5">
-          <Loader2 size={12} className="animate-spin" /> Moving&hellip;
-        </p>
-      )}
     </Modal>
   )
 }
