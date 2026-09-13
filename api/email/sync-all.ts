@@ -12,13 +12,15 @@ import { syncConnection, type EmailConnectionRow } from '../_lib/emailSync.js'
  */
 const RETENTION_DAYS = 30
 
-/** Drop unlinked mail older than the retention window. Never touches the real mailbox. */
+/** Drop unfiled mail older than the retention window. Never touches the real mailbox. */
 async function pruneOldMail(admin: NonNullable<ReturnType<typeof adminClient>>): Promise<number> {
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 86_400_000).toISOString()
   const { data, error } = await admin
     .from('user_emails')
     .delete()
-    .is('linked_account_id', null)
+    // is_filed covers a debtor account AND a lead, deal, client or contact. Filed mail is a
+    // record wherever it was filed, and the prune must never take it.
+    .eq('is_filed', false)
     .lt('occurred_at', cutoff)
     .select('id')
   if (error) {

@@ -173,6 +173,38 @@ async function markUserEmailLinked(
 }
 
 /**
+ * The same, for a message the CRM claimed rather than a debtor account.
+ *
+ * Without this the mailbox row stays unfiled forever even though the message HAS been filed —
+ * it is on the lead's timeline as an Activity. The agent then sees it sitting in "Needs filing",
+ * does the obvious thing, and files a sales reply onto a debtor account, charging somebody R13
+ * under item 6 for correspondence that had nothing to do with their debt. A wrong entry on a
+ * statement is worth more than the R13.
+ *
+ * `is_filed` is generated from these columns, so setting any one of them takes the message off
+ * the working list and out of the sidebar count at the same time.
+ *
+ * Guarded on is_filed so a re-sync cannot move a message an agent has since filed somewhere
+ * else by hand — their decision is the better one and it stands.
+ */
+async function markUserEmailOnRecord(
+  admin: SupabaseClient,
+  rowId: string,
+  on: { contactId?: string; leadId?: string; companyId?: string; dealId?: string },
+): Promise<void> {
+  await admin.from('user_emails')
+    .update({
+      linked_lead_id: on.leadId ?? null,
+      linked_deal_id: on.dealId ?? null,
+      linked_company_id: on.companyId ?? null,
+      linked_contact_id: on.contactId ?? null,
+      linked_at: new Date().toISOString(),
+    })
+    .eq('id', rowId)
+    .eq('is_filed', false)
+}
+
+/**
  * Does this message belong to a DEBTOR account rather than to the CRM?
  *
  * Two ways to know, and the first is far stronger than the second.
@@ -712,6 +744,8 @@ async function syncMailbox(
       const match = await findMatch(admin, fromAddress)
       if (!match && !threadMatch) {
         console.log(`[emailSync] ${path} UID ${uid}: sender ${fromAddress} matches no Contact/Lead/Company and no known thread, skipped`)
+        // Nothing claimed it, so the mailbox row stays unfiled and waits for a person. That is
+        // the whole reason the mailbox exists: this message used to be dropped here.
         continue
       }
 
@@ -776,6 +810,10 @@ async function syncMailbox(
       } else if (inserted && inserted.length > 0) {
         console.log(`[emailSync] ${path} UID ${uid}: activity ${inserted[0].id} inserted`)
         logged += 1
+        // On the lead/deal/client now, so the mailbox says so too rather than leaving it in
+        // "Needs filing" for somebody to file a second time onto a debtor. See
+        // markUserEmailOnRecord.
+        if (mailboxRowId) await markUserEmailOnRecord(admin, mailboxRowId, filed)
         if (match?.notifyUserId) {
           // Straight to the deal when the reply threaded onto one — that is the page the
           // person reading the notification actually needs to be on.
