@@ -93,16 +93,22 @@ interface MailRow {
  * The five places a message can be filed, each embedded for its name.
  *
  * Five embeds on one row looks expensive and is not: four of them are null on any given message,
- * and PostgREST resolves a null foreign key without touching the other table. Each resolves by
- * name because there is exactly one foreign key from user_emails to each — add a second (a
- * "filed_by_lead" alongside "linked_lead_id", say) and PostgREST starts refusing the embed as
- * ambiguous at RUNTIME, not at build time, which is a bad way to find out.
+ * and PostgREST resolves a null foreign key without touching the other table.
+ *
+ * THE DEBTOR EMBED NAMES ITS CONSTRAINT, and must. There are now TWO foreign keys from
+ * user_emails to debtor_accounts — linked_account_id and moved_from_account_id — so the bare
+ * `debtor_accounts ( ... )` form is ambiguous and PostgREST refuses the whole request with
+ * "more than one relationship was found". That is not a hypothetical: this exact comment warned
+ * about it, the very next migration added the second key, and the mailbox went blank.
+ *
+ * The other four have one key each and resolve by name. Add a second to any of them and it must
+ * be spelled out the same way.
  */
 const COLUMNS = `
   id, folder, uid, message_id, from_address, from_name, subject, snippet,
   attachment_names, is_junk, occurred_at, read_at, is_filed,
   linked_account_id, linked_lead_id, linked_deal_id, linked_company_id, linked_contact_id,
-  debtor_accounts ( account_number, debtor_first_name, debtor_surname ),
+  debtor_accounts!user_emails_linked_account_id_fkey ( account_number, debtor_first_name, debtor_surname ),
   leads ( first_name, last_name, company_name ),
   deals ( name ),
   companies ( name ),
