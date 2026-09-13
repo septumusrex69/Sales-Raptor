@@ -83,7 +83,7 @@ interface MailRow {
     debtor_first_name: string | null
     debtor_surname: string | null
   } | null
-  leads: { first_name: string | null; last_name: string | null; company: string | null } | null
+  leads: { first_name: string | null; last_name: string | null; company_name: string | null } | null
   deals: { name: string | null } | null
   companies: { name: string | null } | null
   contacts: { first_name: string | null; last_name: string | null } | null
@@ -103,7 +103,7 @@ const COLUMNS = `
   attachment_names, is_junk, occurred_at, read_at, is_filed,
   linked_account_id, linked_lead_id, linked_deal_id, linked_company_id, linked_contact_id,
   debtor_accounts ( account_number, debtor_first_name, debtor_surname ),
-  leads ( first_name, last_name, company ),
+  leads ( first_name, last_name, company_name ),
   deals ( name ),
   companies ( name ),
   contacts ( first_name, last_name )
@@ -138,7 +138,7 @@ function linkedRecord(r: MailRow): LinkedRecord | null {
     return {
       kind: 'lead',
       id: r.linked_lead_id,
-      label: fullName(r.leads?.first_name, r.leads?.last_name) ?? r.leads?.company ?? 'a lead',
+      label: fullName(r.leads?.first_name, r.leads?.last_name) ?? r.leads?.company_name ?? 'a lead',
       path: `/leads/${r.linked_lead_id}`,
     }
   }
