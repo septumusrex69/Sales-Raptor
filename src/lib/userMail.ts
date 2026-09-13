@@ -35,10 +35,28 @@ export interface MailItem {
   isJunk: boolean
   occurredAt: string
   readAt: string | null
-  /** Set once it is on an account — by the sync matching it, or by hand. */
+  /**
+   * Set once it is on a DEBTOR ACCOUNT — by the sync matching it, or by hand.
+   *
+   * Not the same question as "is this filed": a message on a lead or a client has this null and
+   * is filed all the same. Use `isFiled` for that, and `linkedTo` for where it went. This stays
+   * because only an account charges a fee, and the fee rules ask specifically about an account.
+   */
   linkedAccountId: string | null
-  /** The account it was filed against, for showing where it went. */
-  linkedAccount: { accountNumber: string | null; debtorName: string | null } | null
+  /** Filed anywhere at all — account, lead, deal, client or contact. */
+  isFiled: boolean
+  /** Where it was filed, ready to label and link. Null while it is still waiting. */
+  linkedTo: LinkedRecord | null
+}
+
+/** One of the five things a message can be filed against, named and addressable. */
+export interface LinkedRecord {
+  kind: 'account' | 'lead' | 'deal' | 'client' | 'contact'
+  id: string
+  /** What to call it on screen — a debtor, a deal name, a company. */
+  label: string
+  /** Where it lives in Raptor. */
+  path: string
 }
 
 interface MailRow {
@@ -55,22 +73,90 @@ interface MailRow {
   occurred_at: string
   read_at: string | null
   linked_account_id: string | null
+  linked_lead_id: string | null
+  linked_deal_id: string | null
+  linked_company_id: string | null
+  linked_contact_id: string | null
+  is_filed: boolean
   debtor_accounts: {
     account_number: string | null
     debtor_first_name: string | null
     debtor_surname: string | null
   } | null
+  leads: { first_name: string | null; last_name: string | null; company: string | null } | null
+  deals: { name: string | null } | null
+  companies: { name: string | null } | null
+  contacts: { first_name: string | null; last_name: string | null } | null
 }
 
+/*
+ * The five places a message can be filed, each embedded for its name.
+ *
+ * Five embeds on one row looks expensive and is not: four of them are null on any given message,
+ * and PostgREST resolves a null foreign key without touching the other table. Each resolves by
+ * name because there is exactly one foreign key from user_emails to each — add a second (a
+ * "filed_by_lead" alongside "linked_lead_id", say) and PostgREST starts refusing the embed as
+ * ambiguous at RUNTIME, not at build time, which is a bad way to find out.
+ */
 const COLUMNS = `
   id, folder, uid, message_id, from_address, from_name, subject, snippet,
-  attachment_names, is_junk, occurred_at, read_at, linked_account_id,
-  debtor_accounts ( account_number, debtor_first_name, debtor_surname )
+  attachment_names, is_junk, occurred_at, read_at, is_filed,
+  linked_account_id, linked_lead_id, linked_deal_id, linked_company_id, linked_contact_id,
+  debtor_accounts ( account_number, debtor_first_name, debtor_surname ),
+  leads ( first_name, last_name, company ),
+  deals ( name ),
+  companies ( name ),
+  contacts ( first_name, last_name )
 `
 
+/** Join the parts of a person's name, or nothing at all if we have none of them. */
+const fullName = (...parts: (string | null | undefined)[]) =>
+  parts.filter(Boolean).join(' ') || null
+
+/**
+ * Where this message was filed, as one thing the page can label and link.
+ *
+ * Order matters. A debtor account wins over everything: it is the only destination that raises a
+ * fee, and if a row somehow carried both, saying "on a lead" while a debtor has been charged R13
+ * would be the misleading half. After that, most specific first — a deal says more than the
+ * client it belongs to, and the sync fills both in on a threaded reply.
+ */
+function linkedRecord(r: MailRow): LinkedRecord | null {
+  if (r.linked_account_id) {
+    return {
+      kind: 'account',
+      id: r.linked_account_id,
+      label: fullName(r.debtor_accounts?.debtor_first_name, r.debtor_accounts?.debtor_surname)
+        ?? r.debtor_accounts?.account_number ?? 'a debtor account',
+      path: `/accounts/${r.linked_account_id}`,
+    }
+  }
+  if (r.linked_deal_id) {
+    return { kind: 'deal', id: r.linked_deal_id, label: r.deals?.name ?? 'a deal', path: `/deals/${r.linked_deal_id}` }
+  }
+  if (r.linked_lead_id) {
+    return {
+      kind: 'lead',
+      id: r.linked_lead_id,
+      label: fullName(r.leads?.first_name, r.leads?.last_name) ?? r.leads?.company ?? 'a lead',
+      path: `/leads/${r.linked_lead_id}`,
+    }
+  }
+  if (r.linked_company_id) {
+    return { kind: 'client', id: r.linked_company_id, label: r.companies?.name ?? 'a client', path: `/companies/${r.linked_company_id}` }
+  }
+  if (r.linked_contact_id) {
+    return {
+      kind: 'contact',
+      id: r.linked_contact_id,
+      label: fullName(r.contacts?.first_name, r.contacts?.last_name) ?? 'a contact',
+      path: `/contacts/${r.linked_contact_id}`,
+    }
+  }
+  return null
+}
+
 function toItem(r: MailRow): MailItem {
-  const name = [r.debtor_accounts?.debtor_first_name, r.debtor_accounts?.debtor_surname]
-    .filter(Boolean).join(' ') || null
   return {
     id: r.id,
     folder: r.folder,
@@ -85,9 +171,8 @@ function toItem(r: MailRow): MailItem {
     occurredAt: r.occurred_at,
     readAt: r.read_at,
     linkedAccountId: r.linked_account_id,
-    linkedAccount: r.linked_account_id
-      ? { accountNumber: r.debtor_accounts?.account_number ?? null, debtorName: name }
-      : null,
+    isFiled: r.is_filed,
+    linkedTo: linkedRecord(r),
   }
 }
 
@@ -115,8 +200,11 @@ export async function fetchMail(input: {
 
   // Junk is its own view rather than a flag on the others: a mailbox that mixes spam into the
   // list of things needing attention is a list nobody works.
-  if (input.filter === 'needs-filing') q = q.is('linked_account_id', null).eq('is_junk', false)
-  else if (input.filter === 'filed') q = q.not('linked_account_id', 'is', null)
+  // is_filed, not linked_account_id: a message filed against a lead or a client IS filed. See
+  // the generated column in schema.sql — it is what keeps these tabs, the delete guard, the
+  // retention prune and the sidebar badge all answering the question the same way.
+  if (input.filter === 'needs-filing') q = q.eq('is_filed', false).eq('is_junk', false)
+  else if (input.filter === 'filed') q = q.eq('is_filed', true)
   else if (input.filter === 'junk') q = q.eq('is_junk', true)
 
   const term = input.search?.trim()
@@ -142,7 +230,7 @@ export async function countNeedsFiling(userId: string): Promise<number> {
     .from('user_emails')
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
-    .is('linked_account_id', null)
+    .eq('is_filed', false)
     .eq('is_junk', false)
     .is('read_at', null)
   if (error) throw new Error(error.message)
@@ -204,7 +292,7 @@ export async function deleteMail(ids: string[]): Promise<number> {
     .from('user_emails')
     .delete()
     .in('id', ids)
-    .is('linked_account_id', null)
+    .eq('is_filed', false)
     .select('id')
   if (error) throw new Error(error.message)
   refreshNavCounts()
@@ -335,7 +423,7 @@ export async function blockSender(input: {
   // Clear what is already sitting in the mailbox from this sender. Unlinked only.
   let q = supabase.from('user_emails').delete()
     .eq('user_id', input.userId)
-    .is('linked_account_id', null)
+    .eq('is_filed', false)
   q = input.scope === 'domain'
     ? q.ilike('from_address', `%@${pattern}`)
     : q.ilike('from_address', pattern)
@@ -405,7 +493,7 @@ export async function blockSenders(input: {
     .from('user_emails')
     .delete()
     .eq('user_id', input.userId)
-    .is('linked_account_id', null)
+    .eq('is_filed', false)
     .in('from_address', allowed)
     .select('id')
   if (sweepError) throw new Error(sweepError.message)
@@ -437,7 +525,7 @@ export async function emptyJunk(input: {
       .select('id, from_address, from_name, subject')
       .eq('user_id', input.userId)
       .eq('is_junk', true)
-      .is('linked_account_id', null)
+      .eq('is_filed', false)
     if (error) throw new Error(error.message)
     const asMail = (data ?? []).map((r) => ({
       id: r.id as string,
@@ -454,7 +542,7 @@ export async function emptyJunk(input: {
     .delete()
     .eq('user_id', input.userId)
     .eq('is_junk', true)
-    .is('linked_account_id', null)
+    .eq('is_filed', false)
     .select('id')
   if (deleteError) throw new Error(deleteError.message)
 
@@ -494,11 +582,11 @@ export async function linkMailToAccount(input: {
       read_at: new Date().toISOString(),
     })
     .eq('id', input.mail.id)
-    .is('linked_account_id', null)
+    .eq('is_filed', false)
     .select('id')
     .maybeSingle<{ id: string }>()
   if (claimError) throw new Error(claimError.message)
-  if (!claimed) throw new Error('That email has already been filed against an account.')
+  if (!claimed) throw new Error('That email has already been filed.')
 
   const charge = await chargeItem({
     accountId: input.accountId,
@@ -554,4 +642,76 @@ export async function linkMailToAccount(input: {
   // Filed, so it is no longer waiting: the Mail badge drops now rather than at the next poll.
   refreshNavCounts()
   return charge
+}
+
+/**
+ * File a message against a CRM record — a lead, a deal, a client or a contact.
+ *
+ * NOTHING IS CHARGED, and that is the difference that matters. Annexure B is the tariff for
+ * collecting a debt; a lead answering a quotation owes the firm nothing, so there is no account
+ * to charge and no item that would apply. Filing to a debtor raises R13 under item 6; filing
+ * here raises nothing at all. The two look similar on screen and must never be the same code
+ * path, which is why this is a separate function rather than a flag on the one above.
+ *
+ * The message goes onto the record's timeline as an Email activity, which is where the CRM
+ * already keeps correspondence — the same table and the same shape the sync writes when it
+ * matches a reply on its own. `email_message_id` carries the mail server's own id so a later
+ * reply threads onto this one instead of arriving as a fresh message nobody can place.
+ *
+ * Claimed first, exactly as the account path is, and for the same reason: a double click or a
+ * retried request must not put the same email on a timeline twice.
+ */
+export async function linkMailToRecord(input: {
+  mail: MailItem
+  to: { kind: 'lead' | 'deal' | 'client' | 'contact'; id: string; label: string }
+  actor: { id: string | null; name: string | null }
+}): Promise<void> {
+  const column = {
+    lead: 'linked_lead_id',
+    deal: 'linked_deal_id',
+    client: 'linked_company_id',
+    contact: 'linked_contact_id',
+  }[input.to.kind]
+
+  const { data: claimed, error: claimError } = await supabase
+    .from('user_emails')
+    .update({
+      [column]: input.to.id,
+      linked_at: new Date().toISOString(),
+      linked_by: input.actor.id,
+      // Filing it is reading it.
+      read_at: new Date().toISOString(),
+    })
+    .eq('id', input.mail.id)
+    .eq('is_filed', false)
+    .select('id')
+    .maybeSingle<{ id: string }>()
+  if (claimError) throw new Error(claimError.message)
+  if (!claimed) throw new Error('That email has already been filed.')
+
+  const { error } = await supabase.from('activities').insert({
+    type: 'Email',
+    user_id: input.actor.id,
+    lead_id: input.to.kind === 'lead' ? input.to.id : null,
+    deal_id: input.to.kind === 'deal' ? input.to.id : null,
+    company_id: input.to.kind === 'client' ? input.to.id : null,
+    contact_id: input.to.kind === 'contact' ? input.to.id : null,
+    subject: `Email received: ${input.mail.subject || '(no subject)'}`,
+    notes: input.mail.snippet ?? '',
+    activity_date: input.mail.occurredAt,
+    email_message_id: input.mail.messageId,
+    email_folder: input.mail.folder,
+    email_uid: input.mail.uid,
+    attachment_names: input.mail.attachmentNames,
+    is_read: true,
+  })
+  /*
+   * Not thrown. The message is already filed — it is off the working list and linked to the
+   * record — and an error here would leave the agent looking at a red box for a message that
+   * did, in fact, get filed. The timeline entry is the part worth logging loudly and the part
+   * somebody can add by hand.
+   */
+  if (error) console.error('[userMail] filed, but the timeline entry failed:', error.message)
+
+  refreshNavCounts()
 }

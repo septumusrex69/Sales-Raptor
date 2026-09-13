@@ -1682,11 +1682,38 @@ create table if not exists public.user_emails (
   occurred_at timestamptz not null,
   read_at timestamptz,
 
-  -- Filed against a debtor account, either by the sync matching it or by an agent linking it.
-  -- Once set, the message is part of that account's record and may no longer be deleted.
+  -- Where this message was filed, either by the sync matching it or by an agent linking it.
+  -- Once any of these is set, the message is part of that record and may no longer be deleted.
+  --
+  -- A debtor account and a CRM record are genuinely different destinations, not two flavours of
+  -- one: filing to an account raises an Annexure B fee against a debtor, filing to a lead or a
+  -- client raises nothing, because the tariff is for collecting a debt and there is no debt.
+  -- Same column shape the activities table already uses, so the two agree about what "on a lead"
+  -- means.
   linked_account_id uuid references public.debtor_accounts (id) on delete set null,
+  linked_lead_id uuid references public.leads (id) on delete set null,
+  linked_deal_id uuid references public.deals (id) on delete set null,
+  linked_company_id uuid references public.companies (id) on delete set null,
+  linked_contact_id uuid references public.contacts (id) on delete set null,
   linked_at timestamptz,
   linked_by uuid references public.profiles (id) on delete set null,
+
+  /*
+   * "Is this message filed anywhere?" -- asked by the mailbox's tabs, the delete guard, the
+   * retention prune and the sidebar badge.
+   *
+   * Generated rather than written, so those four can never disagree. The alternative is the same
+   * five-way OR copied into a dozen queries, and the first one that gets missed when a sixth
+   * link is added is a bug nobody sees: mail that is filed but still counted as waiting, which
+   * is how a sales reply ends up on a debtor's account with an R13 against it.
+   */
+  is_filed boolean generated always as (
+    linked_account_id is not null
+    or linked_lead_id is not null
+    or linked_deal_id is not null
+    or linked_company_id is not null
+    or linked_contact_id is not null
+  ) stored,
 
   created_at timestamptz not null default now()
 );
@@ -1704,13 +1731,14 @@ create unique index if not exists user_emails_message_idx
 create index if not exists user_emails_inbox_idx
   on public.user_emails (user_id, occurred_at desc);
 -- Unread count, and the "needs filing" view.
-create index if not exists user_emails_unlinked_idx
+create index if not exists user_emails_unfiled_idx
   on public.user_emails (user_id, occurred_at desc)
-  where linked_account_id is null;
--- What the 30-day prune walks: unlinked mail only. Linked mail is a record and is never pruned.
-create index if not exists user_emails_prune_idx
+  where is_filed = false and is_junk = false;
+-- What the 30-day prune walks: unfiled mail only. Filed mail is a record and is never pruned.
+-- Age first, because the prune sweeps across every user at once.
+create index if not exists user_emails_prune_unfiled_idx
   on public.user_emails (occurred_at)
-  where linked_account_id is null;
+  where is_filed = false;
 
 alter table public.user_emails enable row level security;
 
@@ -1797,10 +1825,13 @@ security invoker
 set search_path to 'public'
 as $$
   select
-    -- Unread debtor mail waiting to be filed. Junk excluded: it is not work.
+    -- Unread mail waiting to be filed. Junk excluded: it is not work.
+    -- is_filed, not linked_account_id: a message filed against a lead or a client IS filed, and
+    -- counting it as waiting is how an agent ends up filing a sales reply onto a debtor account
+    -- and charging somebody R13 for it.
     (select count(*)::integer from public.user_emails
       where user_id = auth.uid()
-        and linked_account_id is null
+        and is_filed = false
         and is_junk = false
         and read_at is null),
     -- Mine, still open, and due by the end of today. Not "all my tasks", which would be a

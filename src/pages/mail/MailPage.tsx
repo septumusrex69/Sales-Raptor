@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertTriangle, Ban, Check, ChevronDown, ChevronRight, ExternalLink, Inbox, Link2, Loader2,
@@ -17,9 +17,11 @@ import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
 import {
   blockSender, blockSenders, deleteMail, domainBlockProblem, domainOf, emptyJunk,
-  fetchBlockedSenders, fetchMail, fetchMailBody, linkMailToAccount, markMailRead, unblockSender,
-  type BlockedSender, type BlockOutcome, type MailFilter, type MailItem,
+  fetchBlockedSenders, fetchMail, fetchMailBody, linkMailToAccount, linkMailToRecord,
+  markMailRead, unblockSender,
+  type BlockedSender, type BlockOutcome, type LinkedRecord, type MailFilter, type MailItem,
 } from '../../lib/userMail'
+import { useAppStore } from '../../store/AppStore'
 
 /**
  * One agent's mailbox.
@@ -39,8 +41,8 @@ import {
 type Pane = MailFilter | 'blocked'
 
 const TABS: { id: Pane; label: string; hint: string }[] = [
-  { id: 'needs-filing', label: 'Needs filing', hint: 'Not yet on an account' },
-  { id: 'filed', label: 'Filed', hint: 'Already on a debtor account' },
+  { id: 'needs-filing', label: 'Needs filing', hint: 'Not on any record yet' },
+  { id: 'filed', label: 'Filed', hint: 'On an account, lead, deal or client' },
   { id: 'junk', label: 'Junk', hint: 'Your mail server thought this was spam' },
   { id: 'all', label: 'All', hint: 'Everything in the last 30 days' },
   { id: 'blocked', label: 'Blocked', hint: 'Senders you never want to see again' },
@@ -210,7 +212,9 @@ export function MailPage() {
    * a colleague — but as the deliberate second choice, which is what it should be.
    */
   function startReply(mail: MailItem) {
-    if (mail.linkedAccountId) { setReplying(mail); return }
+    // Filed anywhere is enough — a lead's reply belongs on the lead, and the composer says
+    // plainly that nothing will be charged for it.
+    if (mail.isFiled) { setReplying(mail); return }
     setLinkThenReply(true)
     setLinking(mail)
   }
@@ -400,18 +404,19 @@ export function MailPage() {
                       {' · '}{relativeDayLabel(m.occurredAt)}
                     </p>
                   </div>
-                  {m.linkedAccount ? (
+                  {m.linkedTo ? (
                     // Said here rather than on every row in the list — one place, where somebody
-                    // is actually looking at the message.
+                    // is actually looking at the message. The kind matters: "On a lead" and "On a
+                    // debtor account" are different enough that leaving it off would mislead.
                     <span className="shrink-0 text-xs text-[var(--c-green)] inline-flex items-center gap-1 pt-1">
                       <Link2 size={12} />
-                      On {m.linkedAccount.debtorName ?? 'an account'}
-                      {m.linkedAccount.accountNumber && <> &middot; {m.linkedAccount.accountNumber}</>}
+                      On {m.linkedTo.label}
+                      <span className="text-slate-400">&middot; {CRM_OR_ACCOUNT[m.linkedTo.kind]}</span>
                     </span>
                   ) : (
                     <button onClick={() => startLink(m)}
                       className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950">
-                      <Link2 size={13} /> Link to account
+                      <Link2 size={13} /> File
                     </button>
                   )}
                 </div>
@@ -489,7 +494,7 @@ export function MailPage() {
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
           replying={linkThenReply}
           onClose={() => { setLinking(null); setLinkThenReply(false) }}
-          onDone={(message, accountId, account) => {
+          onDone={(message, accountId, record) => {
             const mail = linking
             const goOn = linkThenReply
             setLinking(null)
@@ -497,10 +502,13 @@ export function MailPage() {
             setStatus(message)
             void load(page)
             /*
-             * Straight into the composer, carrying the account it was just filed against — the
-             * list reload below has not finished and would hand back a stale copy of this row.
+             * Straight into the composer, carrying what it was just filed against — the list
+             * reload above has not finished and would hand back a stale copy of this row.
+             *
+             * accountId decides whether the reply is chargeable: a debtor account carries item
+             * 1(a), a lead or a client carries nothing, and the composer says which.
              */
-            if (goOn && mail) setReplying({ ...mail, linkedAccountId: accountId, linkedAccount: account })
+            if (goOn && mail) setReplying({ ...mail, linkedAccountId: accountId, isFiled: true, linkedTo: record })
           }}
           onSkip={() => {
             const mail = linking
@@ -522,16 +530,25 @@ export function MailPage() {
            * being answered is on the page behind this modal anyway.
            */
           inReplyTo={replying.messageId}
+          /*
+           * Three different truths, and the agent should know which one applies before typing.
+           * A debtor is charged R25; a lead is not charged anything, because Annexure B is the
+           * tariff for collecting a debt; and unfiled mail lands nowhere at all.
+           */
           contextNote={replying.linkedAccountId
-            ? `Goes out from your mailbox, lands on ${replying.linkedAccount?.debtorName ?? 'the account'}, and is charged R25 under item 1(a).`
-            : 'This message is not on an account, so nothing will be charged and the reply will not appear on any file. It goes out from your mailbox and that is all.'}
+            ? `Goes out from your mailbox, lands on ${replying.linkedTo?.label ?? 'the account'}, and is charged R25 under item 1(a).`
+            : replying.linkedTo
+              ? `Goes out from your mailbox and is logged on ${replying.linkedTo.label}. No charge — Annexure B is for debtor accounts.`
+              : 'This message is not filed anywhere, so nothing will be charged and the reply will not appear on any record. It goes out from your mailbox and that is all.'}
           onClose={() => setReplying(null)}
           onSent={(rawSubject, bodyText, messageId, from) => {
             const answering = replying
             setReplying(null)
             if (!answering?.linkedAccountId) {
               // Said plainly rather than left to be discovered. The agent chose this path.
-              setStatus('Reply sent. Not charged and not filed — it was not on an account.')
+              setStatus(answering?.linkedTo
+                ? `Reply sent and logged on ${answering.linkedTo.label}. No charge — Annexure B is for debtor accounts.`
+                : 'Reply sent. Not charged and not filed — it was not on a record.')
               return
             }
             /*
@@ -567,7 +584,7 @@ function Empty({ filter, searching }: { filter: Exclude<Pane, 'blocked'>; search
   if (searching) return <p className="py-14 text-center text-sm text-slate-400">Nothing matches that.</p>
   const words: Record<MailFilter, string> = {
     'needs-filing': 'Nothing waiting. Every email has been filed or thrown away.',
-    filed: 'Nothing filed against an account yet.',
+    filed: 'Nothing filed against a record yet.',
     junk: 'Nothing in junk.',
     all: 'Your mailbox is empty. Connect it under Settings → Integrations if you have not yet.',
   }
@@ -642,11 +659,11 @@ function MailSummary({ mail, tight, showLinked }: {
           {mail.snippet}
         </span>
       )}
-      {showLinked && mail.linkedAccount && (
+      {showLinked && mail.linkedTo && (
         <span className="text-xs text-[var(--c-green)] mt-1 inline-flex items-center gap-1">
           <Link2 size={11} />
-          On {mail.linkedAccount.debtorName ?? 'an account'}
-          {mail.linkedAccount.accountNumber && <> &middot; {mail.linkedAccount.accountNumber}</>}
+          On {mail.linkedTo.label}
+          <span className="text-slate-400">&middot; {CRM_OR_ACCOUNT[mail.linkedTo.kind]}</span>
         </span>
       )}
     </span>
@@ -730,13 +747,13 @@ function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply }: {
           A Link, not a button, so it behaves like one — middle-click and "open in new tab" both
           work, which matters when you are working a message and want the account beside it.
         */}
-        {mail.linkedAccountId && (
-          <Link to={`/accounts/${mail.linkedAccountId}`}
+        {mail.linkedTo && (
+          <Link to={mail.linkedTo.path}
             className="inline-flex items-center gap-1.5 max-w-full text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50">
             <ExternalLink size={13} className="shrink-0" />
-            {/* Truncated: a double-barrelled name would otherwise make this button wider than a
-                phone, and the row wraps rather than scrolls. */}
-            <span className="truncate">Open {mail.linkedAccount?.debtorName ?? 'the account'}</span>
+            {/* Truncated: a double-barrelled name or a long deal name would otherwise make this
+                button wider than a phone, and the row wraps rather than scrolls. */}
+            <span className="truncate">Open {mail.linkedTo.label}</span>
           </Link>
         )}
 
@@ -788,10 +805,10 @@ function MailRow({
         <div className="shrink-0 flex items-center gap-2 pt-0.5">
           {/* Linked mail offers nothing: it is on an account, it raised a fee, and it is not
               anybody's to re-file or delete. The database refuses both as well. */}
-          {!mail.linkedAccountId && (
+          {!mail.isFiled && (
             <button onClick={onLink}
               className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950">
-              <Link2 size={13} /> Link to account
+              <Link2 size={13} /> File
             </button>
           )}
           <button onClick={onToggle} aria-label={expanded ? 'Close this email' : 'Read this email'}
@@ -1025,17 +1042,38 @@ function BlockModal({ mail, userId, onClose, onDone }: {
  * A search rather than a list: there are 100 000 accounts, and the agent already has the name or
  * the number in front of them on the email.
  */
+/** A CRM record the search box turned up. Not a debtor account — those page separately. */
+interface CrmHit {
+  kind: 'lead' | 'deal' | 'client' | 'contact'
+  id: string
+  label: string
+  /** A second line telling two similar names apart — a company, an address, or the kind. */
+  hint: string | null
+}
+
+const CRM_PATH: Record<CrmHit['kind'], (id: string) => string> = {
+  lead: (id) => `/leads/${id}`,
+  deal: (id) => `/deals/${id}`,
+  client: (id) => `/companies/${id}`,
+  contact: (id) => `/contacts/${id}`,
+}
+
+/** What to call each destination on screen. "Account" means a debtor, which is the one that bills. */
+const CRM_OR_ACCOUNT: Record<LinkedRecord['kind'], string> = {
+  account: 'Debtor account', lead: 'Lead', deal: 'Deal', client: 'Client', contact: 'Contact',
+}
+
 function LinkModal({ mail, actor, replying, onClose, onDone, onSkip }: {
   mail: MailItem
   actor: { id: string | null; name: string | null }
   /** Opened by Reply rather than by the Link button: say so, and offer the way out. */
   replying?: boolean
   onClose: () => void
-  onDone: (
-    message: string,
-    accountId: string,
-    account: { accountNumber: string | null; debtorName: string | null },
-  ) => void
+  /**
+   * Filed. `accountId` is null when it went to a CRM record rather than a debtor account —
+   * which is also what tells the caller whether a reply from here can be charged.
+   */
+  onDone: (message: string, accountId: string | null, record: LinkedRecord) => void
   /** Reply anyway, with nothing charged and nothing filed. Only offered when replying. */
   onSkip?: () => void
 }) {
@@ -1044,6 +1082,48 @@ function LinkModal({ mail, actor, replying, onClose, onDone, onSkip }: {
   const [looking, setLooking] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  /*
+   * CRM records come from the store, which already holds every lead, deal, client and contact
+   * this user can see — so they filter in memory, instantly, with no round trip. Debtor accounts
+   * cannot: there are 100 000 of them and they are fetched and paged. Hence one debounced search
+   * below and one synchronous filter here, for what is a single search box on screen.
+   */
+  const { leads, deals, companies, contacts } = useAppStore()
+  const crmHits = useMemo<CrmHit[]>(() => {
+    const q = term.trim().toLowerCase()
+    if (q.length < 2) return []
+    const has = (...parts: (string | null | undefined)[]) =>
+      parts.some((x) => x?.toLowerCase().includes(q))
+    const out: CrmHit[] = []
+    for (const l of leads) {
+      if (out.length >= 12) break
+      const name = [l.firstName, l.lastName].filter(Boolean).join(' ')
+      // The lead number as text too — it is how the firm refers to a lead out loud.
+      if (has(name, l.companyName, l.email, String(l.leadNumber))) {
+        out.push({
+          kind: 'lead',
+          id: l.id,
+          label: name || l.companyName || 'Unnamed lead',
+          hint: l.companyName || l.email || null,
+        })
+      }
+    }
+    for (const d of deals) {
+      if (out.length >= 12) break
+      if (has(d.name)) out.push({ kind: 'deal', id: d.id, label: d.name, hint: 'Deal' })
+    }
+    for (const c of companies) {
+      if (out.length >= 12) break
+      if (has(c.name)) out.push({ kind: 'client', id: c.id, label: c.name, hint: 'Client' })
+    }
+    for (const c of contacts) {
+      if (out.length >= 12) break
+      const name = [c.firstName, c.lastName].filter(Boolean).join(' ')
+      if (has(name, c.email)) out.push({ kind: 'contact', id: c.id, label: name || c.email || 'Unnamed contact', hint: c.email ?? null })
+    }
+    return out
+  }, [term, leads, deals, companies, contacts])
 
   // Debounced, because otherwise this searches 100 000 rows on every keystroke.
   useEffect(() => {
@@ -1062,13 +1142,34 @@ function LinkModal({ mail, actor, replying, onClose, onDone, onSkip }: {
     return () => { cancelled = true; clearTimeout(t) }
   }, [term])
 
+  /**
+   * File against a CRM record. Nothing is charged — see linkMailToRecord.
+   *
+   * The message lands on that record's timeline and leaves the working list, which is the same
+   * outcome as filing to a debtor minus the fee. Said in the status line either way, so nobody
+   * has to remember which destinations cost the debtor money.
+   */
+  async function fileOn(hit: CrmHit) {
+    setBusy(true)
+    setError(null)
+    try {
+      await linkMailToRecord({ mail, to: hit, actor })
+      onDone(`Filed on ${hit.label}. No charge — Annexure B is for debtor accounts.`, null, {
+        kind: hit.kind, id: hit.id, label: hit.label, path: CRM_PATH[hit.kind](hit.id),
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+
   async function link(accountId: string, label: string) {
     setBusy(true)
     setError(null)
     try {
       const charge = await linkMailToAccount({ mail, accountId, actor })
       onDone(`Filed on ${label}. ${chargeMessage(charge, '6')}`, accountId, {
-        accountNumber: null, debtorName: label,
+        kind: 'account', id: accountId, label, path: `/accounts/${accountId}`,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -1077,13 +1178,14 @@ function LinkModal({ mail, actor, replying, onClose, onDone, onSkip }: {
   }
 
   return (
-    <Modal title={replying ? 'Reply — which account is this about?' : 'Which account is this about?'}
+    <Modal title={replying ? 'Reply — what is this about?' : 'What is this about?'}
       onClose={onClose} width={520}>
       {replying && (
         // Why there is a step before the composer, said once, in plain terms.
         <p className="text-[13px] text-slate-500 mb-3">
-          Filing it first is what puts your reply on the debtor&rsquo;s statement and raises the
-          R25 for sending it. Pick the account and the reply opens next.
+          Filing it first is what puts your reply on the record it belongs to &mdash; and, on a
+          debtor account, what raises the R25 for sending it. Pick where it goes and the reply
+          opens next.
         </p>
       )}
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
@@ -1093,32 +1195,69 @@ function LinkModal({ mail, actor, replying, onClose, onDone, onSkip }: {
       </div>
 
       <label className="block mt-4">
-        <span className="text-sm font-medium text-slate-700">Find the debtor</span>
+        <span className="text-sm font-medium text-slate-700">Find the debtor, lead or client</span>
         <input
           value={term}
           onChange={(e) => setTerm(e.target.value)}
           autoFocus
-          placeholder="Surname, account number or client reference"
+          placeholder="Surname, company, account number or lead number"
           className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-brand-100"
         />
       </label>
 
       {looking && <p className="text-xs text-slate-400 mt-2">Looking&hellip;</p>}
 
-      <div className="mt-3 max-h-64 overflow-y-auto divide-y divide-slate-100">
-        {hits.map((h) => (
-          <button key={h.id} disabled={busy}
-            onClick={() => void link(h.id, debtorLabel(h))}
-            className="w-full text-left px-1 py-2.5 hover:bg-slate-50 disabled:opacity-50">
-            <span className="block text-sm font-medium text-slate-800">{debtorLabel(h)}</span>
-            <span className="block text-xs text-slate-400">
-              {h.accountNumber ?? 'no account number'}
-              {h.clientReference && <> &middot; {h.clientReference}</>}
-            </span>
-          </button>
-        ))}
-        {term.trim().length >= 2 && !looking && hits.length === 0 && (
-          <p className="py-3 text-sm text-slate-400">No account matches that.</p>
+      {/*
+        Two groups, and the heading on each is doing real work rather than decorating: the only
+        difference an agent cannot see from a name is that the first group charges the debtor R13
+        and the second charges nothing. Debtor accounts come first because this is a collections
+        firm and that is what most of this mail is.
+      */}
+      <div className="mt-3 max-h-72 overflow-y-auto">
+        {hits.length > 0 && (
+          <>
+            <p className="text-[11px] uppercase tracking-wide text-slate-400 pt-1 pb-1.5">
+              Debtor accounts &mdash; charges R13
+            </p>
+            <div className="divide-y divide-slate-100">
+              {hits.map((h) => (
+                <button key={h.id} disabled={busy}
+                  onClick={() => void link(h.id, debtorLabel(h))}
+                  className="w-full text-left px-1 py-2.5 hover:bg-slate-50 disabled:opacity-50">
+                  <span className="block text-sm font-medium text-slate-800">{debtorLabel(h)}</span>
+                  <span className="block text-xs text-slate-400">
+                    {h.accountNumber ?? 'no account number'}
+                    {h.clientReference && <> &middot; {h.clientReference}</>}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {crmHits.length > 0 && (
+          <>
+            <p className="text-[11px] uppercase tracking-wide text-slate-400 pt-3 pb-1.5">
+              Leads, deals, clients &amp; contacts &mdash; no charge
+            </p>
+            <div className="divide-y divide-slate-100">
+              {crmHits.map((h) => (
+                <button key={`${h.kind}:${h.id}`} disabled={busy}
+                  onClick={() => void fileOn(h)}
+                  className="w-full text-left px-1 py-2.5 hover:bg-slate-50 disabled:opacity-50">
+                  <span className="block text-sm font-medium text-slate-800">{h.label}</span>
+                  <span className="block text-xs text-slate-400">
+                    {CRM_OR_ACCOUNT[h.kind]}
+                    {h.hint && h.hint !== CRM_OR_ACCOUNT[h.kind] && <> &middot; {h.hint}</>}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {term.trim().length >= 2 && !looking && hits.length === 0 && crmHits.length === 0 && (
+          <p className="py-3 text-sm text-slate-400">Nothing in Raptor matches that.</p>
         )}
       </div>
 
@@ -1126,8 +1265,9 @@ function LinkModal({ mail, actor, replying, onClose, onDone, onSkip }: {
 
       <p className="text-xs text-slate-400 mt-4 flex items-start gap-1.5">
         <AlertTriangle size={13} className="shrink-0 mt-0.5 text-gold-600" />
-        Filing this charges the debtor R13 under item 6, correspondence received and attended to.
-        It cannot be undone from here.
+        Filing on a <strong className="font-medium">debtor account</strong> charges R13 under item
+        6, correspondence received and attended to, and cannot be undone from here. Filing on a
+        lead, deal, client or contact charges nothing.
       </p>
       {busy && (
         <p className="text-xs text-slate-400 mt-2 inline-flex items-center gap-1.5">
@@ -1144,7 +1284,7 @@ function LinkModal({ mail, actor, replying, onClose, onDone, onSkip }: {
         <div className="mt-4 pt-3 border-t border-slate-100">
           <button onClick={onSkip} disabled={busy}
             className="text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
-            This is not about a debtor — reply without filing it
+            This is not about anything in Raptor — reply without filing it
           </button>
           <p className="text-xs text-slate-400 mt-1">Nothing charged, and it appears on no account.</p>
         </div>
