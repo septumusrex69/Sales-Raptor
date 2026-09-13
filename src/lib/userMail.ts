@@ -206,6 +206,22 @@ export async function fetchMail(input: {
   if (input.filter === 'needs-filing') q = q.eq('is_filed', false).eq('is_junk', false)
   else if (input.filter === 'filed') q = q.eq('is_filed', true)
   else if (input.filter === 'junk') q = q.eq('is_junk', true)
+  /*
+   * "All" means the whole mailbox EXCEPT junk, at the firm's instruction: "normal mailbox goes
+   * to all, junk still goes to junk, junk doesn't go to all".
+   *
+   * Which makes All the working list rather than an audit of everything, and that is the point —
+   * junk is where the volume is, and a list that mixes a hundred newsletters into the messages
+   * somebody has to act on is a list nobody works. Junk has its own tab and its own bulk clear.
+   *
+   * This stays a plain equality rather than "junk unless filed" because FILING CLEARS THE JUNK
+   * FLAG (see linkMailToAccount and linkMailToRecord). Deciding a message belongs on a debtor's
+   * account is the strongest possible statement that it is not spam, so the two states are made
+   * mutually exclusive at the moment of filing instead of every query having to ask for both.
+   * Without that, a debtor's reply the mail server misfiled as spam would be rescued onto an
+   * account and then vanish from All anyway.
+   */
+  else if (input.filter === 'all') q = q.eq('is_junk', false)
 
   const term = input.search?.trim()
   if (term) {
@@ -596,6 +612,10 @@ export async function linkMailToAccount(input: {
       linked_by: input.actor.id,
       // Filing it is reading it.
       read_at: new Date().toISOString(),
+      // And filing it says it is not spam, whatever the mail server thought. Without this a
+      // debtor's reply rescued out of Junk would be filed on their account and still not appear
+      // in All, which excludes junk.
+      is_junk: false,
     })
     .eq('id', input.mail.id)
     .eq('is_filed', false)
@@ -695,8 +715,9 @@ export async function linkMailToRecord(input: {
       [column]: input.to.id,
       linked_at: new Date().toISOString(),
       linked_by: input.actor.id,
-      // Filing it is reading it.
+      // Filing it is reading it, and says it is not spam. See linkMailToAccount.
       read_at: new Date().toISOString(),
+      is_junk: false,
     })
     .eq('id', input.mail.id)
     .eq('is_filed', false)
@@ -730,4 +751,37 @@ export async function linkMailToRecord(input: {
   if (error) console.error('[userMail] filed, but the timeline entry failed:', error.message)
 
   refreshNavCounts()
+}
+
+/**
+ * Move mail into junk, or back out of it.
+ *
+ * The mail server's spam verdict is a guess, and it is wrong in both directions: a newsletter it
+ * waves through still has to be dealt with by hand, and a debtor writing from a free address
+ * lands in Junk often enough that emptying that tab unread would be reckless. So the agent can
+ * overrule it either way.
+ *
+ * Junk is a shelf, not a bin. Nothing is deleted — the message keeps its row, keeps its snippet
+ * and is still there under the Junk tab, where "Empty junk" is the deliberate second step that
+ * actually removes it. And it stays in the real mailbox regardless; Raptor has never deleted
+ * anything from the mail server.
+ *
+ * Filed mail is refused. A message on a debtor's account is a record, it raised a fee, and
+ * hiding it in Junk would take it out of All while leaving it on the account — two places
+ * disagreeing about the same message, which is the thing the shared read state was built to
+ * stop.
+ */
+export async function setJunk(ids: string[], junk: boolean): Promise<number> {
+  if (ids.length === 0) return 0
+  const { data, error } = await supabase
+    .from('user_emails')
+    .update({ is_junk: junk })
+    .in('id', ids)
+    .eq('is_filed', false)
+    .select('id')
+  if (error) throw new Error(error.message)
+
+  // Junk is excluded from the sidebar count, so moving mail either way changes it.
+  refreshNavCounts()
+  return data?.length ?? 0
 }
