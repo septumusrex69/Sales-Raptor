@@ -925,21 +925,43 @@ function MailStatus({ mail, blocked, tight }: {
 
 function MailSummary({ mail, tight, blocked }: {
   mail: MailItem
-  /** The reading pane's narrow column: one line of preview, no address, no account line. */
+  /** The reading pane's narrow column: one line of preview, no sender address, short chips. */
   tight?: boolean
   /** The agent's blocklist, for marking a sender nothing further will arrive from. */
   blocked?: BlockedSender[]
 }) {
   const unread = !mail.readAt
   return (
+    /*
+      Who, then what about, then what it says.
+      
+      The firm's ordering, and it is how a mailbox is actually read: you recognise the sender
+      first and decide from that whether the subject is worth reading. Leading with the subject
+      made every row start with a phrase like "Re: Account Abc1111" — indistinguishable from the
+      next one — and buried the one thing that tells a debtor's reply from a newsletter.
+
+      Three tiers of weight follow the same order: the sender carries the most, the subject
+      less, the preview least. Unread deepens the sender rather than adding a fourth signal.
+    */
     <span className="block min-w-0">
-      <span className="flex items-center gap-2">
-        {/*
-          Unread is carried by WEIGHT and by the bar down the left edge of the row, not by a
-          1.5px dot — the firm could not tell read from unread at a glance, and the dot was why:
-          it was the only signal, and it was the size of a full stop.
-        */}
-        <span className={`text-sm truncate ${unread ? 'font-bold text-navy-950' : 'font-medium text-slate-800'}`}>
+      {/* 1. Who it is from, and when. */}
+      <span className="flex items-baseline gap-2">
+        <span className={`text-sm truncate ${unread ? 'font-bold text-navy-950' : 'font-semibold text-slate-700'}`}>
+          {mail.fromName || mail.fromAddress}
+          {/* The address as well as the name, but not in the reading pane's narrow column,
+              where it would push the name itself out of sight. */}
+          {mail.fromName && !tight && (
+            <span className="font-normal text-slate-400"> &middot; {mail.fromAddress}</span>
+          )}
+        </span>
+        <span className="ml-auto shrink-0 text-xs text-slate-400">
+          {relativeDayLabel(mail.occurredAt)}
+        </span>
+      </span>
+
+      {/* 2. What it is about, and where the message stands. */}
+      <span className="flex items-center gap-2 mt-0.5">
+        <span className={`text-[13px] truncate ${unread ? 'text-slate-700' : 'text-slate-500'}`}>
           {mail.subject || '(no subject)'}
         </span>
         {mail.attachmentNames.length > 0 && <Paperclip size={12} className="shrink-0 text-slate-400" />}
@@ -950,14 +972,6 @@ function MailSummary({ mail, tight, blocked }: {
         <span className="ml-auto flex items-center gap-1.5">
           <MailStatus mail={mail} blocked={blocked ?? []} tight={tight} />
         </span>
-      </span>
-      <span className={`block text-xs mt-0.5 truncate ${
-        unread ? 'font-semibold text-slate-600' : 'text-slate-400'}`}>
-        {mail.fromName || mail.fromAddress}
-        {/* The address as well as the name, but not in the reading pane's narrow column, where
-            it would push the date and the name out of sight. */}
-        {mail.fromName && !tight && <span className="text-slate-300"> &middot; {mail.fromAddress}</span>}
-        {' · '}{relativeDayLabel(mail.occurredAt)}
       </span>
       {/*
         One line in the pane, two in the list. A four-line row is one you scroll past rather than
@@ -976,7 +990,7 @@ function MailSummary({ mail, tight, blocked }: {
         whatever the browser thinks the box measures, the row cannot grow past two lines.
       */}
       {mail.snippet && (
-        <span className={`block text-[13px] text-slate-500 mt-0.5 ${
+        <span className={`block text-[13px] text-slate-400 mt-0.5 ${
           tight ? 'truncate' : 'line-clamp-2 max-h-[2.7em] overflow-hidden'}`}>
           {mail.snippet}
         </span>
