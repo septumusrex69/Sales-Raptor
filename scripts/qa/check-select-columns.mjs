@@ -14,6 +14,15 @@
  * definitions in supabase/schema.sql — which is already the repo's source of truth and already
  * kept current with every migration, so there is no second snapshot to drift.
  *
+ * TWO failure modes, because both empty the page and neither is visible to tsc:
+ *   1. a column that does not exist;
+ *   2. an embed with more than one foreign key between the two tables and no constraint named,
+ *      which PostgREST refuses with "more than one relationship was found".
+ *
+ * The second is not hypothetical either, and it happened the day after the first: a migration
+ * added moved_from_account_id to user_emails, giving it a second key to debtor_accounts, and
+ * the mailbox went blank again with this check passing.
+ *
  * WHAT IT DELIBERATELY DOES NOT DO. It will not catch a column that exists in the live database
  * but is missing from schema.sql, because it believes schema.sql. That is the right direction to
  * be wrong: a stale schema.sql makes this shout about a column that is fine, which someone then
@@ -25,6 +34,9 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 const ROOT = new URL('../..', import.meta.url).pathname
+
+/** Every foreign key in the schema, as {from, to}. Filled by readSchema; read by relationships(). */
+const fks = []
 
 /* ------------------------------------------------------------------ *
  * What the schema says
@@ -61,6 +73,9 @@ function readSchema(rawSql) {
 
   const createRe = /create table (?:if not exists )?(?:public\.)?(\w+)\s*\(([\s\S]*?)\n\);/gi
   for (const [, table, body] of sql.matchAll(createRe)) {
+    for (const [, target] of body.matchAll(/references\s+(?:public\.)?(\w+)/gi)) {
+      fks.push({ from: table, to: target })
+    }
     const cols = new Set()
     for (const raw of splitTopLevel(body)) {
       const line = raw.trim()
@@ -80,9 +95,26 @@ function readSchema(rawSql) {
     for (const [, col] of body.matchAll(/add column (?:if not exists )?"?(\w+)"?/gi)) {
       tables.get(table).add(col)
     }
+    // A column added by ALTER can carry a foreign key too — which is exactly how the second key
+    // to debtor_accounts arrived and broke the mailbox.
+    for (const [, target] of body.matchAll(/references\s+(?:public\.)?(\w+)/gi)) {
+      fks.push({ from: table, to: target })
+    }
   }
 
   return tables
+}
+
+/**
+ * How many relationships PostgREST can see between two tables, in either direction.
+ *
+ * More than one and a bare `target ( ... )` embed is ambiguous: PostgREST refuses the WHOLE
+ * request with "more than one relationship was found" and the page renders empty. The fix is to
+ * name the constraint — `target!my_table_some_column_fkey ( ... )` — which is why the parser
+ * above accepts that form.
+ */
+function relationships(a, b) {
+  return fks.filter((f) => (f.from === a && f.to === b) || (f.from === b && f.to === a)).length
 }
 
 /**
@@ -133,10 +165,10 @@ function parseSelect(select) {
     const piece = current.trim()
     current = ''
     if (!piece) return
-    const embed = piece.match(/^([\w]+)(?:!\w+)?\s*\(([\s\S]*)\)$/)
+    const embed = piece.match(/^([\w]+)(!\w+)?\s*\(([\s\S]*)\)$/)
     if (embed) {
-      const inner = parseSelect(embed[2])
-      embeds.push({ table: embed[1], columns: inner.own })
+      const inner = parseSelect(embed[3])
+      embeds.push({ table: embed[1], columns: inner.own, named: !!embed[2] })
       // A nested embed's own embeds are checked against their own table, recursively.
       embeds.push(...inner.embeds)
       return
@@ -228,7 +260,23 @@ for (const file of files) {
     }
 
     check(table, own)
-    for (const e of embeds) check(e.table, e.columns)
+    for (const e of embeds) {
+      check(e.table, e.columns)
+      /*
+       * An embed that does not name its constraint must have exactly one relationship to resolve
+       * through. Two, and PostgREST refuses the entire request — which empties the page rather
+       * than blanking a field, and does it at runtime with a green build behind it.
+       */
+      if (!e.named && schema.has(e.table)) {
+        const n = relationships(table, e.table)
+        if (n > 1) {
+          problems.push(
+            `${where}  ${table} -> ${e.table} embed is ambiguous: ${n} foreign keys between them.`
+            + ` Name the constraint, e.g. ${e.table}!${table}_<column>_fkey ( ... )`,
+          )
+        }
+      }
+    }
   }
 }
 
@@ -237,12 +285,15 @@ if (unknownTables.size > 0) {
 }
 
 if (problems.length > 0) {
-  console.error(`\nFAIL — ${problems.length} column(s) named in a select do not exist:\n`)
+  console.error(`\nFAIL — ${problems.length} select(s) PostgREST would reject:\n`)
   for (const p of problems) console.error(`  ${p}`)
-  console.error('\nPostgREST rejects the WHOLE request for one unknown column, so each of these')
-  console.error('empties a page rather than blanking a field. Fix the name, or if the column is')
-  console.error('real, add it to supabase/schema.sql — which is what this check believes.\n')
+  console.error('\nPostgREST rejects the WHOLE request for one bad column or ambiguous embed, so')
+  console.error('each of these empties a page rather than blanking a field. Fix the name, or if')
+  console.error('the column is real, add it to supabase/schema.sql — which is what this believes.\n')
   process.exit(1)
 }
 
-console.log(`PASS — ${checked} column references across ${files.length} files all exist in schema.sql`)
+console.log(
+  `PASS — ${checked} column references across ${files.length} files exist in schema.sql,`
+  + ' and every unnamed embed resolves through exactly one foreign key',
+)
