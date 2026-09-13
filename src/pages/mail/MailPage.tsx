@@ -16,9 +16,9 @@ import { useEmailView } from '../../lib/emailView'
 import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
 import {
-  blockedBy, blockSender, blockSenders, deleteMail, domainBlockProblem, domainOf, emptyJunk,
-  fetchBlockedSenders, fetchMail, fetchMailBody, linkMailToAccount, linkMailToRecord,
-  markMailRead, unblockSender,
+  blockedBy, blockSender, blockSenders, countNeedsFiling, deleteMail, domainBlockProblem,
+  domainOf, emptyJunk, fetchBlockedSenders, fetchMail, fetchMailBody, linkMailToAccount,
+  linkMailToRecord, markMailRead, setJunk, unblockSender,
   type BlockedSender, type BlockOutcome, type LinkedRecord, type MailFilter, type MailItem,
 } from '../../lib/userMail'
 import { useAppStore } from '../../store/AppStore'
@@ -49,7 +49,7 @@ type Pane = MailFilter | 'blocked'
  * MailStatus — so nothing is lost by looking at the lot.
  */
 const TABS: { id: Pane; label: string; hint: string }[] = [
-  { id: 'all', label: 'All', hint: 'Everything in the last 30 days' },
+  { id: 'all', label: 'All', hint: 'Your mailbox, junk aside' },
   { id: 'needs-filing', label: 'Needs filing', hint: 'Not on any record yet' },
   { id: 'filed', label: 'Filed', hint: 'On an account, lead, deal or client' },
   { id: 'junk', label: 'Junk', hint: 'Your mail server thought this was spam' },
@@ -123,6 +123,8 @@ export function MailPage() {
       setPage(at)
       setChosen(new Set())
       setLoadFailed(false)
+      // Alongside the page, so the badge tracks whatever the last action did.
+      void countNeedsFiling(currentUser.id).then(setOutstanding).catch(() => {})
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       /*
@@ -151,6 +153,19 @@ export function MailPage() {
    * mail is shown. It is one small query per agent — their own patterns, nothing else — and it
    * reloads only when a block is added or removed, not on every page of mail.
    */
+  /*
+   * How many messages are still waiting, shown on the All tab.
+   *
+   * The firm asked for "a small thing by the All if there is a message outstanding that needs to
+   * be attended to" — and it is needed precisely BECAUSE All is the landing view: a list that
+   * mixes filed mail into unfiled gives no sense of how much is left, and the answer is the one
+   * number somebody works down to zero.
+   *
+   * Counted in the database, not by filtering the page in hand: the page is 50 rows and the
+   * answer is usually larger than that.
+   */
+  const [outstanding, setOutstanding] = useState(0)
+
   const [blocksVersion, setBlocksVersion] = useState(0)
   useEffect(() => {
     if (!currentUser) return
@@ -265,6 +280,50 @@ export function MailPage() {
     setLinking(mail)
   }
 
+  /**
+   * Move mail onto the junk shelf, or take it back off.
+   *
+   * The firm's point: the mail server's verdict is a guess, and something in Needs filing is
+   * often simply spam it waved through. Junking it is the honest answer — it is neither filed
+   * nor deleted — and it takes it out of All, which is where the work is.
+   *
+   * Reversible, and offered from the Junk tab itself, because the guess is wrong both ways: a
+   * debtor writing from a free address lands in Junk often enough that a one-way move would be
+   * a trap.
+   */
+  async function junkChosen(junk: boolean) {
+    const ids = [...chosen]
+    if (ids.length === 0) return
+    try {
+      const moved = await setJunk(ids, junk)
+      const refused = ids.length - moved
+      setStatus(
+        `${moved} ${moved === 1 ? 'email' : 'emails'} ${junk ? 'moved to junk' : 'moved back to your mailbox'}.`
+        + (refused > 0 ? ` ${refused} left alone — already filed on a record.` : '')
+        + (junk ? ' Nothing deleted; empty the Junk tab when you want it gone.' : ''),
+      )
+      await load(page)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  /** The same, for the one message somebody has open. */
+  async function junkOne(mail: MailItem, junk: boolean) {
+    try {
+      const moved = await setJunk([mail.id], junk)
+      setStatus(moved === 0
+        ? 'That email is filed on a record, so it stays out of junk.'
+        : junk
+          ? 'Moved to junk. Nothing deleted — it is under the Junk tab.'
+          : 'Moved back to your mailbox.')
+      setOpen(null)
+      await load(page)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   async function bin() {
     const ids = [...chosen]
     if (ids.length === 0) return
@@ -357,9 +416,20 @@ export function MailPage() {
           <div className="px-5 flex gap-1 overflow-x-auto -mb-px">
             {TABS.map((t) => (
               <button key={t.id} onClick={() => setFilter(t.id)} title={t.hint}
-                className={`shrink-0 px-3.5 py-2 text-sm font-medium border-b-2 ${
+                className={`shrink-0 px-3.5 py-2 text-sm font-medium border-b-2 inline-flex items-center gap-1.5 ${
                   filter === t.id ? 'border-gold-500 text-navy-950' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
                 {t.label}
+                {/*
+                  On All and on Needs filing, because they are the same number and it belongs
+                  wherever somebody is looking for work. Nothing at zero — a badge showing 0 is
+                  furniture, and it is what teaches people to stop reading the others.
+                */}
+                {(t.id === 'all' || t.id === 'needs-filing') && outstanding > 0 && (
+                  <span className="min-w-4 h-4 px-1 rounded-full text-[10px] font-semibold
+                    inline-flex items-center justify-center tabular-nums bg-gold-500 text-navy-950">
+                    {outstanding > 99 ? '99+' : outstanding}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -382,6 +452,22 @@ export function MailPage() {
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
               <Ban size={14} /> Block {chosen.size === 1 ? 'sender' : 'senders'}
             </button>
+            {/*
+              Junk, both ways round. Which one is offered follows the tab you are standing on:
+              on the Junk tab the useful action is rescuing something, everywhere else it is
+              shelving it.
+            */}
+            {filter === 'junk' ? (
+              <button onClick={() => void junkChosen(false)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
+                <Undo2 size={14} /> Not junk
+              </button>
+            ) : (
+              <button onClick={() => void junkChosen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
+                <ShieldAlert size={14} /> Move to junk
+              </button>
+            )}
             <button onClick={() => void bin()}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-negative-700 hover:bg-white">
               <Trash2 size={14} /> Delete from Raptor
@@ -465,7 +551,7 @@ export function MailPage() {
                 </div>
                 <MailBody mail={m} body={bodies[m.id]} loadingBody={reading === m.id}
                   bodyError={readError[m.id]} onBlock={() => setBlocking(m)}
-                  onReply={() => startReply(m)} />
+                  onReply={() => startReply(m)} onJunk={(j) => void junkOne(m, j)} />
               </div>
             )}
           />
@@ -496,7 +582,8 @@ export function MailPage() {
                     return next
                   })}
                   onLink={() => startLink(m)}
-                  onReply={() => startReply(m)} />
+                  onReply={() => startReply(m)}
+                  onJunk={(j) => void junkOne(m, j)} />
               ))}
             </ul>
           </>
@@ -655,8 +742,9 @@ function Empty({ filter, searching }: { filter: Exclude<Pane, 'blocked'>; search
   const words: Record<MailFilter, string> = {
     'needs-filing': 'Nothing waiting. Every email has been filed or thrown away.',
     filed: 'Nothing filed against a record yet.',
-    junk: 'Nothing in junk.',
     all: 'Your mailbox is empty. Connect it under Settings → Integrations if you have not yet.',
+    // Junk is a shelf, not a bin: nothing here has been deleted, it is just kept out of All.
+    junk: 'Nothing in junk.',
   }
   return (
     <div className="py-14 text-center">
@@ -783,13 +871,15 @@ function MailSummary({ mail, tight, blocked }: {
 }
 
 /** The message itself, shared by the expanded row and the reading pane. */
-function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply }: {
+function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply, onJunk }: {
   mail: MailItem
   body?: string
   loadingBody: boolean
   bodyError?: string
   onBlock: () => void
   onReply: () => void
+  /** Shelve it, or rescue it. Absent on filed mail, which is a record either way. */
+  onJunk: (junk: boolean) => void
 }) {
   return (
     <>
@@ -869,6 +959,20 @@ function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply }: {
           </Link>
         )}
 
+        {/*
+          Junk sits between "file it" and "block them": it says this message is not work,
+          without claiming anything about the sender. Hidden on filed mail — a message on a
+          record is neither junk nor anybody's to reclassify.
+        */}
+        {!mail.isFiled && (
+          <button onClick={() => onJunk(!mail.isJunk)}
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50">
+            {mail.isJunk
+              ? <><Undo2 size={13} /> Not junk</>
+              : <><ShieldAlert size={13} /> Move to junk</>}
+          </button>
+        )}
+
         <button onClick={onBlock}
           className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-negative-100 hover:bg-negative-50 hover:text-negative-700">
           <Ban size={13} /> Never import from this sender
@@ -880,7 +984,7 @@ function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply }: {
 
 function MailRow({
   mail, chosen, expanded, blocked, body, loadingBody, bodyError, onToggle, onChoose,
-  onLink, onBlock, onReply,
+  onLink, onBlock, onReply, onJunk,
 }: {
   mail: MailItem
   chosen: boolean
@@ -896,6 +1000,7 @@ function MailRow({
   onLink: () => void
   onBlock: () => void
   onReply: () => void
+  onJunk: (junk: boolean) => void
 }) {
   const unread = !mail.readAt
   return (
@@ -933,7 +1038,7 @@ function MailRow({
       {expanded && (
         <div className="px-5 pb-4 pl-[2.9rem]">
           <MailBody mail={mail} body={body} loadingBody={loadingBody}
-            bodyError={bodyError} onBlock={onBlock} onReply={onReply} />
+            bodyError={bodyError} onBlock={onBlock} onReply={onReply} onJunk={onJunk} />
         </div>
       )}
     </li>
@@ -1021,6 +1126,14 @@ function EmptyJunkModal({ count, userId, onClose, onDone }: {
 }
 
 /** The blocklist: what you have silenced, and the way back. */
+/**
+ * The blocklist, newest block first.
+ *
+ * Ordered by when it was blocked rather than alphabetically, and the date is ON the row, because
+ * this list is read for one reason: something stopped arriving and somebody wants to know what
+ * they did recently. An alphabetical list makes that a search; a chronological one puts the
+ * answer at the top. (fetchBlockedSenders does the ordering, in SQL.)
+ */
 function BlockedList({ senders, onUnblock }: {
   senders: BlockedSender[]
   onUnblock: (id: string) => Promise<void>
@@ -1048,7 +1161,10 @@ function BlockedList({ senders, onUnblock }: {
             <p className="text-sm font-medium text-slate-800 truncate">
               {b.kind === 'domain' ? `Everything from ${b.pattern}` : b.pattern}
             </p>
-            {b.label && <p className="text-xs text-slate-400 truncate">{b.label}</p>}
+            <p className="text-xs text-slate-400 truncate">
+              Blocked {relativeDayLabel(b.createdAt).toLowerCase()}
+              {b.label && <> &middot; {b.label}</>}
+            </p>
           </div>
           <button onClick={() => void onUnblock(b.id)}
             className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
