@@ -12,6 +12,18 @@
  * it and let the 30-day prune take it. All three are enforced in the database rather than only
  * in this file — see the policies on user_emails.
  */
+/*
+ * A NOTE ON VOCABULARY.
+ *
+ * The interface says MATCHED, NEEDS MATCHING and UNMATCH; the database says is_filed,
+ * linked_account_id and linked_*. Same thing, two words, at the firm's instruction — "match" is
+ * what a collector calls it, and they are right.
+ *
+ * The columns were deliberately NOT renamed. is_filed is a generated column that the mailbox
+ * tabs, the delete guard, the 30-day prune and the nav_counts RPC all read, and renaming it
+ * means a migration touching every one of them for a word nobody outside this file sees. Worth
+ * doing on a quiet day; not worth doing in the middle of a feature.
+ */
 import { supabase } from './supabase'
 import { refreshNavCounts } from './navCounts'
 import { mirrorReadToAccount } from './mailReadState'
@@ -1058,4 +1070,59 @@ export async function moveFiledMail(input: {
     accountId: input.toAccountId,
     actor: input.actor,
   })
+}
+
+/**
+ * Take a message off the account it was matched to, without putting it anywhere else.
+ *
+ * ADMINISTRATOR ONLY — enforced by protect_filed_mail_target, which reverts any change to a link
+ * that is already set, clearing it included. Same rule as moving, because it is the same act.
+ *
+ * The gap this fills: until now the only way out of a wrong match was to name the right account
+ * on the spot. Often nobody knows it yet — a message matched by surname to the wrong Mthembu has
+ * to come off that account today, and finding the right one is a separate job. This puts it back
+ * in the mailbox, where it waits with everything else still to be matched.
+ *
+ * THE ACCOUNT KEEPS ITS FEE AND ITS COPY, exactly as with a move, and for the firm's reason: a
+ * statement is never rewritten after the fact, because fees feed remittances and a processed
+ * remittance cannot be unwound. Removing the email while keeping the fee would leave a charge
+ * with nothing behind it. Finance corrects it forward.
+ *
+ * So this is not an undo. It unmatches the MAILBOX message; the account's record stands.
+ */
+export async function unmatchMail(input: {
+  mail: MailItem
+  reason?: string
+  actor: { id: string | null; name: string | null }
+}): Promise<void> {
+  const from = input.mail.linkedAccountId
+  if (!from) throw new Error('That email is not matched to a debtor account.')
+
+  const { data: cleared, error } = await supabase
+    .from('user_emails')
+    .update({
+      linked_account_id: null,
+      // Where it came off, and why, kept on the message itself — never on the debtor's account,
+      // where it could reach them on a statement. See the columns in schema.sql.
+      moved_from_account_id: from,
+      moved_reason: input.reason?.trim() || null,
+      linked_at: new Date().toISOString(),
+      linked_by: input.actor.id,
+    })
+    .eq('id', input.mail.id)
+    .eq('linked_account_id', from)
+    .select('linked_account_id')
+    .maybeSingle<{ linked_account_id: string | null }>()
+  if (error) throw new Error(error.message)
+  if (!cleared) throw new Error('That email has already been unmatched.')
+  /*
+   * A non-administrator gets here only by crafting a request: the trigger puts the account back
+   * and the row returns still matched, which this catches rather than reporting a success that
+   * did not happen.
+   */
+  if (cleared.linked_account_id !== null) {
+    throw new Error('Only an administrator can unmatch an email.')
+  }
+
+  refreshNavCounts()
 }
