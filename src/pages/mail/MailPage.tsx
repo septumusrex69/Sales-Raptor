@@ -16,7 +16,7 @@ import { useEmailView } from '../../lib/emailView'
 import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
 import {
-  blockSender, blockSenders, deleteMail, domainBlockProblem, domainOf, emptyJunk,
+  blockedBy, blockSender, blockSenders, deleteMail, domainBlockProblem, domainOf, emptyJunk,
   fetchBlockedSenders, fetchMail, fetchMailBody, linkMailToAccount, linkMailToRecord,
   markMailRead, unblockSender,
   type BlockedSender, type BlockOutcome, type LinkedRecord, type MailFilter, type MailItem,
@@ -40,11 +40,19 @@ import { useAppStore } from '../../store/AppStore'
 /** 'blocked' is not a mail filter — it is the blocklist itself, shown in the same place. */
 type Pane = MailFilter | 'blocked'
 
+/*
+ * All first, and it is what the page opens on.
+ *
+ * The firm's call, and it follows from managing mail in one place: the tabs below All are
+ * filters on one mailbox, not four mailboxes, and opening onto a filtered view hides mail from
+ * somebody who came here to find a message. Every row carries its own state now — see
+ * MailStatus — so nothing is lost by looking at the lot.
+ */
 const TABS: { id: Pane; label: string; hint: string }[] = [
+  { id: 'all', label: 'All', hint: 'Everything in the last 30 days' },
   { id: 'needs-filing', label: 'Needs filing', hint: 'Not on any record yet' },
   { id: 'filed', label: 'Filed', hint: 'On an account, lead, deal or client' },
   { id: 'junk', label: 'Junk', hint: 'Your mail server thought this was spam' },
-  { id: 'all', label: 'All', hint: 'Everything in the last 30 days' },
   { id: 'blocked', label: 'Blocked', hint: 'Senders you never want to see again' },
 ]
 
@@ -58,7 +66,7 @@ const debtorLabel = (a: DebtorAccount) =>
 
 export function MailPage() {
   const { currentUser, session } = useAuth()
-  const [filter, setFilter] = useState<Pane>('needs-filing')
+  const [filter, setFilter] = useState<Pane>('all')
   const [blocking, setBlocking] = useState<MailItem | null>(null)
   const [blocked, setBlocked] = useState<BlockedSender[]>([])
   const [emptying, setEmptying] = useState(false)
@@ -99,9 +107,8 @@ export function MailPage() {
     setLoading(true)
     setError(null)
     try {
-      // The blocklist is a list of senders, not of mail, so it loads by itself.
+      // The blocklist is a list of senders, not of mail: the effect below owns it, for every tab.
       if (filter === 'blocked') {
-        setBlocked(await fetchBlockedSenders(currentUser.id))
         setItems([])
         setMore(false)
         setPage(0)
@@ -136,6 +143,24 @@ export function MailPage() {
   }, [currentUser, filter, search])
 
   useEffect(() => { void load(0) }, [load])
+
+  /*
+   * The blocklist, loaded on every tab rather than only on the Blocked one.
+   *
+   * Every row now says whether its sender is blocked, so the list has to be in hand wherever
+   * mail is shown. It is one small query per agent — their own patterns, nothing else — and it
+   * reloads only when a block is added or removed, not on every page of mail.
+   */
+  const [blocksVersion, setBlocksVersion] = useState(0)
+  useEffect(() => {
+    if (!currentUser) return
+    let cancelled = false
+    void fetchBlockedSenders(currentUser.id)
+      .then((list) => { if (!cancelled) setBlocked(list) })
+      // A blocklist we could not read costs a chip on some rows, not the mailbox. Nothing louder.
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [currentUser, blocksVersion])
 
   /*
    * Read the mailbox now, not at 05:00 tomorrow.
@@ -374,6 +399,7 @@ export function MailPage() {
         ) : filter === 'blocked' ? (
           <BlockedList senders={blocked} onUnblock={async (id) => {
             await unblockSender(id)
+            setBlocksVersion((v) => v + 1)
             setStatus('Unblocked. Their mail appears again from the next sync — not retroactively.')
             await load(0)
           }} />
@@ -407,7 +433,7 @@ export function MailPage() {
             )}
             renderRow={(m) => (
               <span className={`block px-3 py-2.5 ${!m.readAt ? 'bg-positive-50/40' : ''}`}>
-                <MailSummary mail={m} tight />
+                <MailSummary mail={m} tight blocked={blocked} />
               </span>
             )}
             renderDetail={(m) => (
@@ -457,7 +483,7 @@ export function MailPage() {
                 <MailRow key={m.id} mail={m}
                   chosen={chosen.has(m.id)}
                   expanded={open === m.id}
-                  showLinked={filter !== 'filed'}
+                  blocked={blocked}
                   body={bodies[m.id]}
                   loadingBody={reading === m.id}
                   bodyError={readError[m.id]}
@@ -492,7 +518,9 @@ export function MailPage() {
           count={items.length}
           userId={currentUser?.id ?? null}
           onClose={() => setEmptying(false)}
-          onDone={(message) => { setEmptying(false); setStatus(message); void load(0) }}
+          onDone={(message) => {
+            setEmptying(false); setStatus(message); setBlocksVersion((v) => v + 1); void load(0)
+          }}
         />
       )}
 
@@ -501,7 +529,10 @@ export function MailPage() {
           mail={blocking}
           userId={currentUser?.id ?? null}
           onClose={() => setBlocking(null)}
-          onDone={(message) => { setBlocking(null); setStatus(message); void load(0) }}
+          onDone={(message) => {
+            // The blocklist just changed, so every row's "sender blocked" chip is re-evaluated.
+            setBlocking(null); setStatus(message); setBlocksVersion((v) => v + 1); void load(0)
+          }}
         />
       )}
 
@@ -641,33 +672,82 @@ function Empty({ filter, searching }: { filter: Exclude<Pane, 'blocked'>; search
  * Split out of the row so the reading pane can use the same block down its left-hand side. Two
  * identical-looking lists maintained separately is how they end up disagreeing.
  */
-function MailSummary({ mail, tight, showLinked }: {
+/**
+ * What has happened to this message, on the row.
+ *
+ * The firm asked for it once All became the first tab: a single list of everything is only
+ * useful if each row says where it stands, otherwise filed mail, junk and mail still waiting all
+ * look identical.
+ *
+ * ON THE SUBJECT LINE, not on a line of its own. Rows were deliberately shortened earlier at the
+ * firm's request ("Make it smaller"), and a status line per row would have put every one of those
+ * pixels straight back. Right-aligned opposite the subject costs nothing.
+ *
+ * Three filing states, and they are mutually exclusive, so one chip: filed (and on what), junk,
+ * or waiting. Blocked is NOT one of them — it describes the sender, not the message — so it
+ * rides alongside as its own chip where it applies.
+ */
+function MailStatus({ mail, blocked, tight }: {
+  mail: MailItem
+  blocked: BlockedSender[]
+  /** The reading pane's narrow column: labels shorten, the record name is dropped. */
+  tight?: boolean
+}) {
+  const block = blockedBy(mail.fromAddress, blocked)
+  const chip = 'shrink-0 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap'
+
+  return (
+    <>
+      {mail.linkedTo ? (
+        <span className={`${chip} bg-positive-50 text-[var(--c-green)] max-w-[14rem]`}
+          title={`Filed on ${mail.linkedTo.label} — ${CRM_OR_ACCOUNT[mail.linkedTo.kind]}`}>
+          <Link2 size={10} className="shrink-0" />
+          <span className="truncate">{tight ? 'Filed' : `On ${mail.linkedTo.label}`}</span>
+        </span>
+      ) : mail.isJunk ? (
+        <span className={`${chip} bg-slate-100 text-slate-500`}>
+          <ShieldAlert size={10} /> Junk
+        </span>
+      ) : (
+        /* Gold, because it is the only one of the three that is somebody's to act on. */
+        <span className={`${chip} bg-gold-100 text-gold-700`}>
+          <Inbox size={10} /> {tight ? 'Unfiled' : 'Needs filing'}
+        </span>
+      )}
+
+      {block && (
+        <span className={`${chip} bg-negative-50 text-negative-700`}
+          title={`Nothing further from ${block.kind === 'domain' ? block.pattern : block.pattern} reaches Raptor. Unblock under the Blocked tab.`}>
+          <Ban size={10} /> {tight ? 'Blocked' : 'Sender blocked'}
+        </span>
+      )}
+    </>
+  )
+}
+
+function MailSummary({ mail, tight, blocked }: {
   mail: MailItem
   /** The reading pane's narrow column: one line of preview, no address, no account line. */
   tight?: boolean
-  /**
-   * Whether to say which account this is filed against.
-   *
-   * Off on the Filed tab, where every row carries it and it therefore distinguishes nothing —
-   * it was a line per row spent saying what the tab already said. On elsewhere, where it is the
-   * only thing telling filed mail from mail still waiting.
-   */
-  showLinked?: boolean
+  /** The agent's blocklist, for marking a sender nothing further will arrive from. */
+  blocked?: BlockedSender[]
 }) {
   const unread = !mail.readAt
   return (
     <span className="block min-w-0">
-      <span className="flex items-baseline gap-2">
-        {unread && <span className="w-1.5 h-1.5 rounded-full bg-positive shrink-0 self-center" />}
+      <span className="flex items-center gap-2">
+        {unread && <span className="w-1.5 h-1.5 rounded-full bg-positive shrink-0" />}
         <span className={`text-sm truncate ${unread ? 'font-semibold text-navy-950' : 'font-medium text-slate-800'}`}>
           {mail.subject || '(no subject)'}
         </span>
         {mail.attachmentNames.length > 0 && <Paperclip size={12} className="shrink-0 text-slate-400" />}
-        {mail.isJunk && (
-          <span className="shrink-0 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
-            <ShieldAlert size={10} /> Junk
-          </span>
-        )}
+        {/*
+          Pushed to the right end of the subject line rather than given a line of its own — the
+          state of a row belongs where the eye already is, and costs no height there.
+        */}
+        <span className="ml-auto flex items-center gap-1.5">
+          <MailStatus mail={mail} blocked={blocked ?? []} tight={tight} />
+        </span>
       </span>
       <span className="block text-xs text-slate-400 mt-0.5 truncate">
         {mail.fromName || mail.fromAddress}
@@ -696,13 +776,6 @@ function MailSummary({ mail, tight, showLinked }: {
         <span className={`block text-[13px] text-slate-500 mt-0.5 ${
           tight ? 'truncate' : 'line-clamp-2 max-h-[2.7em] overflow-hidden'}`}>
           {mail.snippet}
-        </span>
-      )}
-      {showLinked && mail.linkedTo && (
-        <span className="text-xs text-[var(--c-green)] mt-1 inline-flex items-center gap-1">
-          <Link2 size={11} />
-          On {mail.linkedTo.label}
-          <span className="text-slate-400">&middot; {CRM_OR_ACCOUNT[mail.linkedTo.kind]}</span>
         </span>
       )}
     </span>
@@ -806,14 +879,14 @@ function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply }: {
 }
 
 function MailRow({
-  mail, chosen, expanded, showLinked, body, loadingBody, bodyError, onToggle, onChoose, onLink,
-  onBlock, onReply,
+  mail, chosen, expanded, blocked, body, loadingBody, bodyError, onToggle, onChoose,
+  onLink, onBlock, onReply,
 }: {
   mail: MailItem
   chosen: boolean
   expanded: boolean
-  /** See MailSummary: off on the Filed tab, where it would be on every row. */
-  showLinked: boolean
+  /** The agent's blocklist, so the row can say a sender is silenced. */
+  blocked: BlockedSender[]
   /** The full text, once fetched. Undefined until then. */
   body?: string
   loadingBody: boolean
@@ -838,7 +911,7 @@ function MailRow({
 
         <button onClick={onToggle} aria-expanded={expanded} className="min-w-0 flex-1 text-left">
           {/* Collapsed, the snippet is the preview. Open, the whole message replaces it below. */}
-          <MailSummary mail={expanded ? { ...mail, snippet: null } : mail} showLinked={showLinked} />
+          <MailSummary mail={expanded ? { ...mail, snippet: null } : mail} blocked={blocked} />
         </button>
 
         <div className="shrink-0 flex items-center gap-2 pt-0.5">
