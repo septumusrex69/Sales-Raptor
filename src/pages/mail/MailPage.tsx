@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
-  AlertTriangle, Ban, Check, ChevronDown, ChevronRight, Inbox, Link2, Loader2, Paperclip,
-  RefreshCw, Search, ShieldAlert, Trash2, Undo2,
+  AlertTriangle, Ban, Check, ChevronDown, ChevronRight, ExternalLink, Inbox, Link2, Loader2,
+  Paperclip, Reply, RefreshCw, Search, ShieldAlert, Trash2, Undo2,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal } from '../../components/ui/Modal'
 import { useAuth } from '../../store/AuthContext'
 import { relativeDayLabel } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
+import { recordSentEmail, replySubject } from '../../lib/accountEmails'
+import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import { useEmailView } from '../../lib/emailView'
 import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
@@ -66,6 +69,13 @@ export function MailPage() {
   const [error, setError] = useState<string | null>(null)
   const [chosen, setChosen] = useState<Set<string>>(new Set())
   const [linking, setLinking] = useState<MailItem | null>(null)
+  /*
+   * Set when the link modal was opened by Reply rather than by the Link button, so that filing
+   * the message hands straight over to the composer instead of dropping you back on the list to
+   * find it again.
+   */
+  const [linkThenReply, setLinkThenReply] = useState(false)
+  const [replying, setReplying] = useState<MailItem | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [open, setOpen] = useState<string | null>(null)
   /*
@@ -183,6 +193,32 @@ export function MailPage() {
     } finally {
       setReading(null)
     }
+  }
+
+  /**
+   * Answer a message without leaving the mailbox.
+   *
+   * File first, then reply — and the reason is money, not tidiness. Item 1(a) is R25 on every
+   * message we send, and a fee can only be raised against an account. A reply typed here for a
+   * message that is on nobody's file goes out earning nothing and leaves no trace on any
+   * statement; and because replying from the mailbox is EASIER than opening the account, the
+   * easy path would quietly become the unbilled one. At 50 agents that is not a rounding error.
+   *
+   * So Reply on unlinked mail opens the account picker first. It is the same number of clicks as
+   * today's "find the account, then reply" and it ends with both the fee and the record in place.
+   * The picker still offers a way out for mail that genuinely belongs to no debtor — a supplier,
+   * a colleague — but as the deliberate second choice, which is what it should be.
+   */
+  function startReply(mail: MailItem) {
+    if (mail.linkedAccountId) { setReplying(mail); return }
+    setLinkThenReply(true)
+    setLinking(mail)
+  }
+
+  /** Filing on its own, with no reply waiting behind it. */
+  function startLink(mail: MailItem) {
+    setLinkThenReply(false)
+    setLinking(mail)
   }
 
   async function bin() {
@@ -373,14 +409,15 @@ export function MailPage() {
                       {m.linkedAccount.accountNumber && <> &middot; {m.linkedAccount.accountNumber}</>}
                     </span>
                   ) : (
-                    <button onClick={() => setLinking(m)}
+                    <button onClick={() => startLink(m)}
                       className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950">
                       <Link2 size={13} /> Link to account
                     </button>
                   )}
                 </div>
                 <MailBody mail={m} body={bodies[m.id]} loadingBody={reading === m.id}
-                  bodyError={readError[m.id]} onBlock={() => setBlocking(m)} />
+                  bodyError={readError[m.id]} onBlock={() => setBlocking(m)}
+                  onReply={() => startReply(m)} />
               </div>
             )}
           />
@@ -410,7 +447,8 @@ export function MailPage() {
                     else next.delete(m.id)
                     return next
                   })}
-                  onLink={() => setLinking(m)} />
+                  onLink={() => startLink(m)}
+                  onReply={() => startReply(m)} />
               ))}
             </ul>
           </>
@@ -449,8 +487,76 @@ export function MailPage() {
         <LinkModal
           mail={linking}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
-          onClose={() => setLinking(null)}
-          onDone={(message) => { setLinking(null); setStatus(message); void load(page) }}
+          replying={linkThenReply}
+          onClose={() => { setLinking(null); setLinkThenReply(false) }}
+          onDone={(message, accountId, account) => {
+            const mail = linking
+            const goOn = linkThenReply
+            setLinking(null)
+            setLinkThenReply(false)
+            setStatus(message)
+            void load(page)
+            /*
+             * Straight into the composer, carrying the account it was just filed against — the
+             * list reload below has not finished and would hand back a stale copy of this row.
+             */
+            if (goOn && mail) setReplying({ ...mail, linkedAccountId: accountId, linkedAccount: account })
+          }}
+          onSkip={() => {
+            const mail = linking
+            setLinking(null)
+            setLinkThenReply(false)
+            if (mail) setReplying(mail)
+          }}
+        />
+      )}
+
+      {replying && (
+        <ComposeEmailModal
+          to={replying.fromAddress}
+          initialSubject={replySubject(replying.subject)}
+          /*
+           * The box starts empty, on purpose, exactly as it does on the account page. A debtor's
+           * reply already carries their own client's quoted chain, so quoting it again opens the
+           * message with two layers of "> " before the agent has typed a word — and the message
+           * being answered is on the page behind this modal anyway.
+           */
+          inReplyTo={replying.messageId}
+          contextNote={replying.linkedAccountId
+            ? `Goes out from your mailbox, lands on ${replying.linkedAccount?.debtorName ?? 'the account'}, and is charged R25 under item 1(a).`
+            : 'This message is not on an account, so nothing will be charged and the reply will not appear on any file. It goes out from your mailbox and that is all.'}
+          onClose={() => setReplying(null)}
+          onSent={(rawSubject, bodyText, messageId, from) => {
+            const answering = replying
+            setReplying(null)
+            if (!answering?.linkedAccountId) {
+              // Said plainly rather than left to be discovered. The agent chose this path.
+              setStatus('Reply sent. Not charged and not filed — it was not on an account.')
+              return
+            }
+            /*
+             * Identical to the account page's own send: charged under item 1(a), filed on
+             * account_emails, and noted on the timeline. Reusing recordSentEmail is the point —
+             * a second, subtly different way to bill an email is how two systems disagree.
+             *
+             * The subject arrives with the modal's "Email sent: " framing, which is the CRM
+             * activity convention and means nothing on an account. Stripped so the debtor's own
+             * subject line is what gets stored.
+             */
+            void recordSentEmail({
+              accountId: answering.linkedAccountId,
+              to: answering.fromAddress,
+              from: from ?? null,
+              subject: rawSubject.replace(/^Email sent: /, ''),
+              body: bodyText,
+              messageId: messageId ?? null,
+              inReplyTo: answering.messageId,
+              actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
+            }).then((charge) => {
+              setStatus(`Replied to ${answering.fromAddress}. ${chargeMessage(charge, '1a')}`)
+              void load(page)
+            }).catch((e) => setError(e instanceof Error ? e.message : String(e)))
+          }}
         />
       )}
     </div>
@@ -548,12 +654,13 @@ function MailSummary({ mail, tight, showLinked }: {
 }
 
 /** The message itself, shared by the expanded row and the reading pane. */
-function MailBody({ mail, body, loadingBody, bodyError, onBlock }: {
+function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply }: {
   mail: MailItem
   body?: string
   loadingBody: boolean
   bodyError?: string
   onBlock: () => void
+  onReply: () => void
 }) {
   return (
     <>
@@ -598,22 +705,53 @@ function MailBody({ mail, body, loadingBody, bodyError, onBlock }: {
       )}
 
       {/*
-        Blocking lives on the open message rather than as another button on every row. It is the
+        Everything you can do with an open message, in one row.
+
+        Reply is first and is the whole reason the mailbox stopped being read-only: answering a
+        debtor used to mean finding their account and starting again there, so the mailbox was a
+        filing tray rather than a place you worked. What it does depends on whether this message
+        is on an account yet — see startReply.
+
+        Blocking lives on the OPEN message rather than as another button on every row. It is the
         one action you should have read something before taking — and it is offered even on mail
         already linked to an account, because blocking a sender is about future noise, not about
         the message in front of you.
       */}
-      <button onClick={onBlock}
-        className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-negative-100 hover:bg-negative-50 hover:text-negative-700">
-        <Ban size={13} /> Never import from this sender
-      </button>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button onClick={onReply}
+          className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+          <Reply size={13} /> Reply
+        </button>
+
+        {/*
+          Through to the debtor's file, which is the other half of managing mail from one place:
+          the message is here, but the balance, the arrangement and the history are there.
+
+          A Link, not a button, so it behaves like one — middle-click and "open in new tab" both
+          work, which matters when you are working a message and want the account beside it.
+        */}
+        {mail.linkedAccountId && (
+          <Link to={`/accounts/${mail.linkedAccountId}`}
+            className="inline-flex items-center gap-1.5 max-w-full text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50">
+            <ExternalLink size={13} className="shrink-0" />
+            {/* Truncated: a double-barrelled name would otherwise make this button wider than a
+                phone, and the row wraps rather than scrolls. */}
+            <span className="truncate">Open {mail.linkedAccount?.debtorName ?? 'the account'}</span>
+          </Link>
+        )}
+
+        <button onClick={onBlock}
+          className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-negative-100 hover:bg-negative-50 hover:text-negative-700">
+          <Ban size={13} /> Never import from this sender
+        </button>
+      </div>
     </>
   )
 }
 
 function MailRow({
   mail, chosen, expanded, showLinked, body, loadingBody, bodyError, onToggle, onChoose, onLink,
-  onBlock,
+  onBlock, onReply,
 }: {
   mail: MailItem
   chosen: boolean
@@ -628,6 +766,7 @@ function MailRow({
   onChoose: (on: boolean) => void
   onLink: () => void
   onBlock: () => void
+  onReply: () => void
 }) {
   const unread = !mail.readAt
   return (
@@ -665,7 +804,7 @@ function MailRow({
       {expanded && (
         <div className="px-5 pb-4 pl-[2.9rem]">
           <MailBody mail={mail} body={body} loadingBody={loadingBody}
-            bodyError={bodyError} onBlock={onBlock} />
+            bodyError={bodyError} onBlock={onBlock} onReply={onReply} />
         </div>
       )}
     </li>
@@ -886,11 +1025,19 @@ function BlockModal({ mail, userId, onClose, onDone }: {
  * A search rather than a list: there are 100 000 accounts, and the agent already has the name or
  * the number in front of them on the email.
  */
-function LinkModal({ mail, actor, onClose, onDone }: {
+function LinkModal({ mail, actor, replying, onClose, onDone, onSkip }: {
   mail: MailItem
   actor: { id: string | null; name: string | null }
+  /** Opened by Reply rather than by the Link button: say so, and offer the way out. */
+  replying?: boolean
   onClose: () => void
-  onDone: (message: string) => void
+  onDone: (
+    message: string,
+    accountId: string,
+    account: { accountNumber: string | null; debtorName: string | null },
+  ) => void
+  /** Reply anyway, with nothing charged and nothing filed. Only offered when replying. */
+  onSkip?: () => void
 }) {
   const [term, setTerm] = useState('')
   const [hits, setHits] = useState<DebtorAccount[]>([])
@@ -920,7 +1067,9 @@ function LinkModal({ mail, actor, onClose, onDone }: {
     setError(null)
     try {
       const charge = await linkMailToAccount({ mail, accountId, actor })
-      onDone(`Filed on ${label}. ${chargeMessage(charge, '6')}`)
+      onDone(`Filed on ${label}. ${chargeMessage(charge, '6')}`, accountId, {
+        accountNumber: null, debtorName: label,
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setBusy(false)
@@ -928,7 +1077,15 @@ function LinkModal({ mail, actor, onClose, onDone }: {
   }
 
   return (
-    <Modal title="Which account is this about?" onClose={onClose} width={520}>
+    <Modal title={replying ? 'Reply — which account is this about?' : 'Which account is this about?'}
+      onClose={onClose} width={520}>
+      {replying && (
+        // Why there is a step before the composer, said once, in plain terms.
+        <p className="text-[13px] text-slate-500 mb-3">
+          Filing it first is what puts your reply on the debtor&rsquo;s statement and raises the
+          R25 for sending it. Pick the account and the reply opens next.
+        </p>
+      )}
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
         <p className="text-sm font-medium text-slate-800 truncate">{mail.subject || '(no subject)'}</p>
         <p className="text-xs text-slate-400 mt-0.5 truncate">From {mail.fromAddress}</p>
@@ -976,6 +1133,21 @@ function LinkModal({ mail, actor, onClose, onDone }: {
         <p className="text-xs text-slate-400 mt-2 inline-flex items-center gap-1.5">
           <Loader2 size={12} className="animate-spin" /> Filing&hellip;
         </p>
+      )}
+
+      {/*
+        The way out, for mail that genuinely belongs to no debtor — a supplier, a colleague, the
+        bank. Deliberately plain text rather than a second gold button: it is the right answer
+        sometimes, and the wrong one by default, and the two should not look equally inviting.
+      */}
+      {replying && onSkip && (
+        <div className="mt-4 pt-3 border-t border-slate-100">
+          <button onClick={onSkip} disabled={busy}
+            className="text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
+            This is not about a debtor — reply without filing it
+          </button>
+          <p className="text-xs text-slate-400 mt-1">Nothing charged, and it appears on no account.</p>
+        </div>
       )}
     </Modal>
   )

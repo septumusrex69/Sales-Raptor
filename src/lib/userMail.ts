@@ -14,6 +14,7 @@
  */
 import { supabase } from './supabase'
 import { refreshNavCounts } from './navCounts'
+import { mirrorReadToAccount } from './mailReadState'
 import { chargeItem, type ChargeResult } from './accountCharges'
 import { addNote } from './accountWorkspace'
 import {
@@ -172,12 +173,18 @@ export async function fetchMailBody(mailId: string, accessToken: string): Promis
 
 export async function markMailRead(ids: string[]): Promise<void> {
   if (ids.length === 0) return
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('user_emails')
     .update({ read_at: new Date().toISOString() })
     .in('id', ids)
     .is('read_at', null)
+    // The ids of what actually changed, so the account copies can follow. Rows already read are
+    // not returned, which is exactly right: they were mirrored the first time.
+    .select('message_id')
   if (error) throw new Error(error.message)
+
+  // Read here means read on the debtor's file too. See mailReadState.
+  await mirrorReadToAccount((data ?? []).map((r) => r.message_id as string | null))
   refreshNavCounts()
 }
 
