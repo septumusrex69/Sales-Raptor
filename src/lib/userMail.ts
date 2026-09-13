@@ -332,6 +332,22 @@ export function domainOf(address: string): string | null {
   return at > -1 ? address.slice(at + 1).toLowerCase() : null
 }
 
+/**
+ * Is this sender on the agent's blocklist, and if so under which entry?
+ *
+ * Worth showing on a message, even though a blocked sender never becomes a mailbox row: mail
+ * that arrived BEFORE the block is still here, and filed mail survives the block sweep
+ * deliberately. So a filed message can sit there looking ordinary while nothing further from
+ * that sender will ever reach Raptor again — which matters a great deal if the sender turns out
+ * to be a debtor. Saying it on the row is how somebody notices in time to unblock.
+ */
+export function blockedBy(address: string, blocks: BlockedSender[]): BlockedSender | null {
+  const addr = address.trim().toLowerCase()
+  if (!addr) return null
+  const domain = domainOf(addr)
+  return blocks.find((b) => (b.kind === 'address' ? b.pattern === addr : b.pattern === domain)) ?? null
+}
+
 /** Why a whole-domain block is being refused, or null when it is fine. */
 export function domainBlockProblem(address: string): string | null {
   const domain = domainOf(address)
