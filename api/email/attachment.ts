@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { credentialsKeyProblem } from '../_lib/crypto.js'
 import { adminClient, requireCaller } from '../_lib/auth.js'
 import { fetchAttachment, fetchMessageBody } from '../_lib/emailSync.js'
+import { findLinkedDetails } from '../../src/lib/signature.js'
 
 /**
  * Reaches into a connected mailbox for something that was never stored.
@@ -137,7 +138,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (mailId) {
     const { data: mail } = await admin
       .from('user_emails')
-      .select('id, user_id, folder, uid, message_id, attachment_names')
+      .select('id, user_id, folder, uid, message_id, attachment_names, from_address')
       .eq('id', mailId)
       .eq('user_id', caller.id)
       .maybeSingle()
@@ -184,7 +185,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(404).json({ error: 'Could not find that message in your mailbox — it may have been moved or deleted.' })
         return
       }
-      res.status(200).json({ ok: true, text: body.text })
+      /*
+       * The contact details are extracted HERE rather than in the browser, because the browser
+       * never sees the HTML — and must not: this is markup from outside the building, and
+       * rendering it is not worth faithful formatting. The hrefs are read on the server and only
+       * the handful of candidates crosses over.
+       */
+      res.status(200).json({
+        ok: true,
+        text: body.text,
+        details: body.html ? findLinkedDetails(body.html, mail.from_address as string | undefined) : [],
+      })
     } catch (err) {
       res.status(502).json({ error: err instanceof Error ? err.message : 'Could not reach your mailbox.' })
     }

@@ -9,7 +9,9 @@
  *
  *   node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-signature-scan.mjs
  */
-import { findContactDetails, topBlock } from '../../src/lib/signature.ts'
+import {
+  findContactDetails, findLinkedDetails, mergeCandidates, topBlock,
+} from '../../src/lib/signature.ts'
 
 let failures = 0
 const check = (name, got, want) => {
@@ -106,7 +108,62 @@ check('never floods the list',
 
 check('an empty body is not an error', values(''), [])
 
+/* ---------------------------------------------------------------- *
+ * Image signatures — the details survive in the links
+ * ---------------------------------------------------------------- */
+
+const linked = (html, from) => findLinkedDetails(html, from).map((c) => `${c.kind}:${c.value}`)
+
+// The case that matters: the signature renders as a picture, but the anchors are still there.
+check('a picture signature still yields its tel: link',
+  linked('<p>Regards</p><a href="tel:+27835550199"><img src="cid:sig.png" alt="signature"></a>'),
+  ['mobile:083 555 0199'])
+
+check('tel: in local form', linked('<a href="tel:0215551234">Call</a>'), ['phone:021 555 1234'])
+check('tel: with spaces and dashes', linked('<a href="tel:+27 83-555-0199">x</a>'), ['mobile:083 555 0199'])
+check('mailto: is an alternative address',
+  linked('<a href="mailto:JM.VanWyk@work.co.za">mail me</a>'),
+  ['email:jm.vanwyk@work.co.za'])
+check('the address it came from is not offered twice',
+  linked('<a href="mailto:jm@gmail.com">x</a>', 'JM@Gmail.com'), [])
+check('a tracking link is not a contact detail',
+  linked('<a href="https://example.com/track?x=0835550199">unsubscribe</a>'), [])
+check('tel: that is not a real SA number', linked('<a href="tel:911">x</a>'), [])
+check('the same link twice is offered once',
+  linked('<a href="tel:0835550199">a</a><a href="tel:+27835550199">b</a>'),
+  ['mobile:083 555 0199'])
+
+check('nothing out of the quoted HTML chain',
+  linked('<a href="tel:0835550199">mine</a><blockquote><a href="tel:0219998888">theirs</a></blockquote>'),
+  ['mobile:083 555 0199'])
+check('nothing out of an Outlook reply header',
+  linked('<a href="tel:0835550199">mine</a><div id="divRplyFwdMsg"><a href="tel:0219998888">theirs</a></div>'),
+  ['mobile:083 555 0199'])
+check('nothing out of a gmail quote',
+  linked('<a href="tel:0835550199">mine</a><div class="gmail_quote"><a href="tel:0219998888">x</a></div>'),
+  ['mobile:083 555 0199'])
+
+check('empty html is not an error', linked(''), [])
+
+/* ---------------------------------------------------------------- *
+ * Text and links together
+ * ---------------------------------------------------------------- */
+
+check('a number written AND linked is offered once',
+  mergeCandidates(
+    findContactDetails('My number is 083 555 0199.'),
+    findLinkedDetails('<a href="tel:+27835550199">x</a>'),
+  ).map((c) => c.value),
+  ['083 555 0199'])
+
+check('text and links both contribute',
+  mergeCandidates(
+    findContactDetails('Call me on 083 555 0199.'),
+    findLinkedDetails('<a href="tel:0215551234">office</a>'),
+  ).map((c) => `${c.kind}:${c.value}`),
+  ['mobile:083 555 0199', 'phone:021 555 1234'])
+
 console.log(failures === 0
-  ? '\nPASS — signature scan finds real numbers and refuses references, IDs, amounts and quoted chains'
+  ? '\nPASS — scan finds real numbers in text AND links, and refuses references, IDs, amounts, tracking URLs and quoted chains'
   : `\nFAILED ${failures} check(s)`)
 process.exit(failures === 0 ? 0 : 1)
