@@ -55,7 +55,7 @@ type Pane = MailFilter | 'blocked'
  * MailStatus — so nothing is lost by looking at the lot.
  */
 const TABS: { id: Pane; label: string; hint: string }[] = [
-  { id: 'all', label: 'All', hint: 'Your mailbox, junk aside' },
+  { id: 'all', label: 'All', hint: 'Your whole mailbox, junk aside' },
   { id: 'needs-filing', label: 'Needs matching', hint: 'Not on any record yet' },
   { id: 'filed', label: 'Matched', hint: 'On an account, lead, deal or client' },
   { id: 'junk', label: 'Junk', hint: 'Your mail server thought this was spam' },
@@ -343,8 +343,6 @@ export function MailPage() {
 
   /** Moving a message that was filed on the wrong account. Administrators only. */
   const [moving, setMoving] = useState<MailItem | null>(null)
-  /** Opened by Unmatch rather than Rematch: the box starts on the unmatch step. */
-  const [moveUnmatchOnly, setMoveUnmatchOnly] = useState(false)
   const mayRefile = canRefileMail(currentUser?.role)
 
   /**
@@ -448,8 +446,8 @@ export function MailPage() {
           <div className="mr-auto min-w-0">
             <h2 className="text-sm font-semibold text-slate-800">My mailbox</h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              The last 30 days. Anything you do not file is removed from Raptor automatically
-              &mdash; it stays in your real mailbox either way.
+              Everything stays until you match it or block the sender. Nothing is deleted on a
+              timer, and nothing here is ever removed from your real mailbox.
             </p>
           </div>
           <label className={`relative ${filter === 'blocked' ? 'hidden' : ''}`}>
@@ -671,9 +669,7 @@ export function MailPage() {
                 <MailBody mail={m} body={bodies[m.id]} loadingBody={reading === m.id}
                   bodyError={readError[m.id]} onBlock={() => setBlocking(m)}
                   onReply={() => startReply(m)} onJunk={(j) => void junkOne(m, j)}
-                  onMove={mayRefile
-                    ? (only: boolean) => { setMoveUnmatchOnly(only); setMoving(m) }
-                    : null}
+                  onMove={mayRefile ? () => setMoving(m) : null}
                   onDownload={(f) => void download(m, f)}
                   downloading={downloading} downloadError={downloadError} />
               </div>
@@ -711,9 +707,7 @@ export function MailPage() {
                   onLink={() => startLink(m)}
                   onReply={() => startReply(m)}
                   onJunk={(j) => void junkOne(m, j)}
-                  onMove={mayRefile
-                    ? (only: boolean) => { setMoveUnmatchOnly(only); setMoving(m) }
-                    : null}
+                  onMove={mayRefile ? () => setMoving(m) : null}
                   onDownload={(f) => void download(m, f)}
                   downloading={downloading} downloadError={downloadError} />
               ))}
@@ -792,7 +786,6 @@ export function MailPage() {
         <MoveModal
           mail={moving}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
-          unmatchOnly={moveUnmatchOnly}
           onClose={() => setMoving(null)}
           onDone={(message) => { setMoving(null); setStatus(message); void load(page) }}
         />
@@ -1074,11 +1067,8 @@ function MailBody({
   onReply: () => void
   /** Shelve it, or rescue it. Absent on filed mail, which is a record either way. */
   onJunk: (junk: boolean) => void
-  /**
-   * Rematch it, or unmatch it outright. Null for anyone who is not an administrator.
-   * `unmatchOnly` opens the box straight on the unmatch step.
-   */
-  onMove: ((unmatchOnly: boolean) => void) | null
+  /** Unmatch it, or rematch it from the same box. Null for anyone who is not an administrator. */
+  onMove: (() => void) | null
   /** Pull one attachment out of the mailbox. */
   onDownload: (filename: string) => void
   /** The file currently being fetched, so its own button shows the wait. */
@@ -1188,22 +1178,16 @@ function MailBody({
           database refuses it for anyone else, so offering the button would be a lie. Not offered
           on a lead or a client, where no fee is involved and nothing is at stake.
         */}
-        {mail.linkedTo?.kind === 'account' && onMove && (
-          <button onClick={() => onMove(false)}
-            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50">
-            <MoveRight size={13} /> Rematch
-          </button>
-        )}
-
         {/*
-          Unmatch, as its own button rather than a line of text inside the rematch box.
-
-          It was buried, and buried is the same as missing: taking a message off the wrong
-          account is its own decision, made far more often than moving it to a named one, and it
-          should not need somebody to open a dialog about a different action first.
+          ONE button, and it says Unmatch.
+          
+          Two buttons made the agent choose between "rematch" and "unmatch" before knowing which
+          they could actually do — and the answer to "which account should this be on?" is
+          frequently "I do not know yet". So the box behind this leads with unmatching and offers
+          rematching underneath, for when somebody does know.
         */}
         {mail.linkedTo?.kind === 'account' && onMove && (
-          <button onClick={() => onMove(true)}
+          <button onClick={onMove}
             className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50">
             <Undo2 size={13} /> Unmatch
           </button>
@@ -1250,7 +1234,7 @@ function MailRow({
   onBlock: () => void
   onReply: () => void
   onJunk: (junk: boolean) => void
-  onMove: ((unmatchOnly: boolean) => void) | null
+  onMove: (() => void) | null
   onDownload: (filename: string) => void
   downloading: string | null
   downloadError: string | null
@@ -1954,38 +1938,36 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
   )
 }
 
+
 /**
- * Moving a message off the account it was wrongly filed on.
+ * Taking a message off the account it was wrongly matched to.
  *
- * Most of this box is spent saying what will and will NOT happen, because the surprising half is
- * what does not: the fee already raised on the wrong account stays. Somebody reaching for this
- * expects an undo, and it is not one. Far better to say so before they press it than to let them
- * discover it on a statement.
+ * UNMATCHING IS THE MAIN THING, and the box is built that way: the firm's point is that the
+ * common case is "this is not theirs" and the right account is a separate question, often one
+ * nobody can answer yet. Matching it to another account is offered underneath, for when somebody
+ * does know.
+ *
+ * The fee note sits at the BOTTOM, small. It was a warning box above the fold, which put the
+ * thing that does NOT happen ahead of the thing somebody came here to do. It still has to be
+ * said — the R13 stays, this is not an undo — but it is a footnote, not the headline.
  */
-function MoveModal({ mail, actor, unmatchOnly, onClose, onDone }: {
+function MoveModal({ mail, actor, onClose, onDone }: {
   mail: MailItem
   actor: { id: string | null; name: string | null }
-  /** Opened by Unmatch: skip the search and go straight to confirming. */
-  unmatchOnly?: boolean
   onClose: () => void
   onDone: (message: string) => void
 }) {
-  const [term, setTerm] = useState('')
-  const [hits, setHits] = useState<DebtorAccount[]>([])
-  const [looking, setLooking] = useState(false)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const was = mail.linkedTo?.label ?? 'the current account'
 
-  /*
-   * Two steps, because picking an account used to BE the move — one tap on a search result and
-   * a debtor was charged, with the reason box sitting above it never filled in. Choosing who it
-   * belongs to and deciding to move it are different decisions and now take different taps.
-   */
+  /** The search is folded away until somebody says they know where it belongs. */
+  const [rematching, setRematching] = useState(false)
+  const [term, setTerm] = useState('')
+  const [hits, setHits] = useState<DebtorAccount[]>([])
+  const [looking, setLooking] = useState(false)
   const [picked, setPicked] = useState<{ id: string; label: string } | null>(null)
-  /** Taking it off the account without naming a replacement. */
-  const [unmatching, setUnmatching] = useState(!!unmatchOnly)
 
   // Debounced, for the same reason the matching search is: 100 000 rows per keystroke otherwise.
   useEffect(() => {
@@ -2007,14 +1989,14 @@ function MoveModal({ mail, actor, unmatchOnly, onClose, onDone }: {
     setError(null)
     try {
       await unmatchMail({ mail, reason, actor })
-      onDone(`Unmatched from ${was}. It is back under Needs matching. The fee on ${was} stands.`)
+      onDone(`Unmatched from ${was}. It is back under Needs matching.`)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setBusy(false)
     }
   }
 
-  async function move() {
+  async function rematch() {
     if (!picked) return
     setBusy(true)
     setError(null)
@@ -2022,7 +2004,7 @@ function MoveModal({ mail, actor, unmatchOnly, onClose, onDone }: {
       const charge = await moveFiledMail({
         mail, toAccountId: picked.id, toLabel: picked.label, reason, actor,
       })
-      onDone(`Moved to ${picked.label}. ${chargeMessage(charge, '6')} The fee on ${was} stands.`)
+      onDone(`Rematched to ${picked.label}. ${chargeMessage(charge, '6')}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setBusy(false)
@@ -2030,8 +2012,7 @@ function MoveModal({ mail, actor, unmatchOnly, onClose, onDone }: {
   }
 
   return (
-    <Modal title={unmatchOnly ? 'Unmatch this email' : 'Rematch or unmatch this email'}
-      onClose={onClose} width={520}>
+    <Modal title="Unmatch this email" onClose={onClose} width={520}>
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
         <p className="text-sm font-medium text-slate-800 truncate">{mail.subject || '(no subject)'}</p>
         <p className="text-xs text-slate-400 mt-0.5 truncate">
@@ -2039,173 +2020,124 @@ function MoveModal({ mail, actor, unmatchOnly, onClose, onDone }: {
         </p>
       </div>
 
-      <div className="mt-4 rounded-lg border border-gold-200 bg-gold-50 px-3 py-2.5">
-        <p className="text-[13px] text-navy-950 font-medium flex items-start gap-1.5">
-          <AlertTriangle size={14} className="shrink-0 mt-0.5 text-gold-600" />
-          The R13 already on {was} is not reversed.
+      {/*
+        THE MAIN ACTION, first and on its own. Everything else in this box is an alternative to
+        it, which is the opposite of how this read before.
+      */}
+      <div className="mt-4 rounded-xl border border-gold-200 bg-gold-50/60 p-4">
+        <p className="text-sm font-semibold text-navy-950">Take it off {was}</p>
+        <p className="text-[13px] text-slate-500 mt-1">
+          It goes back to <strong className="font-medium text-slate-600">Needs matching</strong>,
+          where it waits with everything else. Match it to the right account whenever you work out
+          which one that is.
         </p>
-        <p className="text-xs text-slate-500 mt-1.5">
-          Fees feed the remittances, and a remittance that has been processed cannot be unwound,
-          so nothing is taken back off a statement here. The email stays on that account as well,
-          so the fee still has the correspondence behind it. Finance corrects it forward, in the
-          remittance.
-        </p>
-        <p className="text-xs text-slate-500 mt-1.5">
-          The account you pick below is charged R13 under item 6, exactly as it would have been
-          had the email gone to the right place first time.
-        </p>
+
+        <label className="block mt-3">
+          <span className="text-xs font-medium text-slate-600">
+            Why? <span className="font-normal text-slate-400">Optional</span>
+          </span>
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            autoFocus
+            placeholder="Wrong Mthembu"
+            className="w-full text-sm rounded-lg border border-slate-200 bg-white px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-brand-100"
+          />
+          {/* Kept on the message, never on the debtor's account — see unmatchMail. */}
+          <span className="block text-xs text-slate-400 mt-1">
+            Kept on the email, for the firm. Nothing is written onto anyone&rsquo;s account.
+          </span>
+        </label>
+
+        <button onClick={() => void unmatch()} disabled={busy}
+          className="mt-3 w-full inline-flex items-center justify-center gap-1.5 text-sm font-semibold px-3.5 py-2.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
+          {/* Fixed label, spinner for the wait — a label that shrinks mid-click leaves its old
+              glyphs behind on the firm's iPad. */}
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <Undo2 size={15} />}
+          Unmatch from {was}
+        </button>
       </div>
 
-      {/* STEP 1 — find the account. Picking one only selects it; nothing has happened yet. */}
-      {!picked ? (
-        <>
-          <label className="block mt-4">
-            <span className="text-sm font-medium text-slate-700">Which account should it be on?</span>
-            <input
-              value={term}
-              onChange={(e) => setTerm(e.target.value)}
-              autoFocus
-              placeholder="Surname, account number or client reference"
-              className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-brand-100"
-            />
-          </label>
-
-          {looking && <p className="text-xs text-slate-400 mt-2">Looking&hellip;</p>}
-
-          <div className="mt-3 max-h-56 overflow-y-auto divide-y divide-slate-100">
-            {/* The account it is already on is filtered out — moving it to itself is not a move. */}
-            {hits.filter((h) => h.id !== mail.linkedAccountId).map((h) => (
-              <button key={h.id}
-                onClick={() => setPicked({ id: h.id, label: debtorLabel(h) })}
-                className="w-full text-left px-1 py-2.5 hover:bg-slate-50">
-                <span className="block text-sm font-medium text-slate-800">{debtorLabel(h)}</span>
-                <span className="block text-xs text-slate-400">
-                  {h.accountNumber ?? 'no account number'}
-                  {h.clientReference && <> &middot; {h.clientReference}</>}
-                </span>
-              </button>
-            ))}
-            {term.trim().length >= 2 && !looking && hits.length === 0 && (
-              <p className="py-3 text-sm text-slate-400">No account matches that.</p>
-            )}
-          </div>
-
-          {/*
-            Unmatch, without naming a replacement.
-
-            The firm's point, and it is the common case: a message matched by surname to the
-            wrong Mthembu has to come off that account TODAY, while working out whose it really
-            is is a separate job. Forcing a replacement to be named on the spot means the wrong
-            match simply stays.
-          */}
-          <div className="mt-4 pt-3 border-t border-slate-100">
-            <button onClick={() => setUnmatching(true)} disabled={busy}
-              className="text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
-              Or just unmatch it &mdash; take it off {was} without choosing another account
-            </button>
-            <p className="text-xs text-slate-400 mt-1">
-              It goes back to Needs matching. The fee and the email stay on {was}, as they do
-              either way.
-            </p>
-          </div>
-        </>
-      ) : unmatching ? (
-        /* Unmatching: the same reason box, and a button that says what it does. */
-        <>
-          <div className="mt-4 rounded-lg border border-slate-200 px-3 py-2.5 flex items-center gap-2">
-            <Undo2 size={15} className="shrink-0 text-slate-400" />
-            <span className="text-sm text-slate-800 min-w-0 flex-1">
-              Taking it off <strong className="font-semibold">{was}</strong>
-            </span>
-            {/* Only where they arrived via Rematch — otherwise this would drop somebody into a
-                search they never asked for. */}
-            {!unmatchOnly && (
-              <button onClick={() => { setUnmatching(false); setError(null) }} disabled={busy}
-                className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
-                Match to another account instead
-              </button>
-            )}
-          </div>
-
-          <label className="block mt-3">
-            <span className="text-sm font-medium text-slate-700">
-              Why? <span className="font-normal text-slate-400">Optional</span>
-            </span>
-            <input
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              autoFocus
-              placeholder="Wrong Mthembu — need to find the right account"
-              className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-brand-100"
-            />
-            <span className="block text-xs text-slate-400 mt-1">
-              Kept on the email, for the firm. Nothing is written onto {was}&rsquo;s account.
-            </span>
-          </label>
-
-          <div className="mt-5 flex items-center justify-end gap-2">
-            <button onClick={onClose} disabled={busy}
-              className="text-sm font-medium px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">
-              Cancel
-            </button>
-            <button onClick={() => void unmatch()} disabled={busy}
-              className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <Undo2 size={14} />}
-              {`Unmatch from ${was}`}
-            </button>
-          </div>
-        </>
+      {/* The second answer, for when somebody does know where it belongs. */}
+      {!rematching ? (
+        <button onClick={() => setRematching(true)} disabled={busy}
+          className="mt-3 w-full text-left text-[13px] font-medium text-slate-600 hover:text-navy-950 px-1 py-1.5 disabled:opacity-50">
+          <span className="inline-flex items-center gap-1.5">
+            <MoveRight size={14} className="text-slate-400" />
+            I know which account it should be on &mdash; match it there instead
+          </span>
+        </button>
       ) : (
-        /* STEP 2 — say why, then confirm. Still nothing has happened. */
-        <>
-          <div className="mt-4 rounded-lg border border-slate-200 px-3 py-2.5 flex items-center gap-2">
-            <MoveRight size={15} className="shrink-0 text-slate-400" />
-            <span className="text-sm text-slate-800 min-w-0 flex-1">
-              Rematching to <strong className="font-semibold">{picked.label}</strong>
-            </span>
-            <button onClick={() => { setPicked(null); setError(null) }} disabled={busy}
-              className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
-              Change
-            </button>
-          </div>
-
-          <label className="block mt-3">
-            <span className="text-sm font-medium text-slate-700">
-              Why? <span className="font-normal text-slate-400">Optional</span>
-            </span>
-            <input
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              autoFocus
-              placeholder="Same surname, wrong debtor"
-              className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-brand-100"
-            />
-            {/*
-              Kept inside Raptor, on the message itself — NOT written onto the debtor's account.
-              Anything on an account can reach the debtor on a statement, and a line saying an
-              email was filed there in error invites the query it was meant to answer.
-            */}
-            <span className="block text-xs text-slate-400 mt-1">
-              Kept on the email, for the firm. Nothing is written onto either debtor&rsquo;s account.
-            </span>
-          </label>
-
-          <div className="mt-5 flex items-center justify-end gap-2">
-            <button onClick={onClose} disabled={busy}
-              className="text-sm font-medium px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+        <div className="mt-3 rounded-xl border border-slate-200 p-4">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-slate-700 flex-1">Which account should it be on?</span>
+            <button onClick={() => { setRematching(false); setPicked(null); setTerm('') }} disabled={busy}
+              className="text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
               Cancel
             </button>
-            <button onClick={() => void move()} disabled={busy}
-              className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
-              {/* Fixed label, spinner for the wait — see the matching button. */}
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <MoveRight size={14} />}
-              {`Rematch to ${picked.label}`}
-            </button>
           </div>
-        </>
+
+          {picked ? (
+            <>
+              <div className="mt-3 rounded-lg border border-slate-200 px-3 py-2.5 flex items-center gap-2">
+                <MoveRight size={15} className="shrink-0 text-slate-400" />
+                <span className="text-sm text-slate-800 min-w-0 flex-1">
+                  Rematching to <strong className="font-semibold">{picked.label}</strong>
+                </span>
+                <button onClick={() => setPicked(null)} disabled={busy}
+                  className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
+                  Change
+                </button>
+              </div>
+              <button onClick={() => void rematch()} disabled={busy}
+                className="mt-3 w-full inline-flex items-center justify-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-300 text-navy-950 hover:bg-slate-50 disabled:opacity-50">
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <MoveRight size={14} />}
+                Rematch to {picked.label} &middot; R13
+              </button>
+            </>
+          ) : (
+            <>
+              <input
+                value={term}
+                onChange={(e) => setTerm(e.target.value)}
+                autoFocus
+                placeholder="Surname, account number or client reference"
+                className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-2 focus:outline-none focus:ring-2 focus:ring-brand-100"
+              />
+              {looking && <p className="text-xs text-slate-400 mt-2">Looking&hellip;</p>}
+              <div className="mt-2 max-h-48 overflow-y-auto divide-y divide-slate-100">
+                {/* The account it is already on is filtered out — matching it to itself is not a move. */}
+                {hits.filter((h) => h.id !== mail.linkedAccountId).map((h) => (
+                  <button key={h.id}
+                    onClick={() => setPicked({ id: h.id, label: debtorLabel(h) })}
+                    className="w-full text-left px-1 py-2.5 hover:bg-slate-50">
+                    <span className="block text-sm font-medium text-slate-800">{debtorLabel(h)}</span>
+                    <span className="block text-xs text-slate-400">
+                      {h.accountNumber ?? 'no account number'}
+                      {h.clientReference && <> &middot; {h.clientReference}</>}
+                    </span>
+                  </button>
+                ))}
+                {term.trim().length >= 2 && !looking && hits.length === 0 && (
+                  <p className="py-3 text-sm text-slate-400">No account matches that.</p>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       )}
 
       {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
+
+      {/*
+        The footnote. It has to be said and it is not the headline: whichever way this goes, the
+        R13 already raised is not reversed, because fees feed remittances and a processed
+        remittance cannot be unwound. Finance corrects it forward.
+      */}
+      <p className="text-xs text-slate-400 mt-4 pt-3 border-t border-slate-100">
+        The R13 already on {was} is not reversed either way, and the email stays on that account
+        so the fee still has the correspondence behind it. Finance corrects it in the remittance.
+      </p>
     </Modal>
   )
 }

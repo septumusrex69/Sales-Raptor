@@ -2,33 +2,23 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { adminClient } from '../_lib/auth.js'
 import { syncConnection, type EmailConnectionRow } from '../_lib/emailSync.js'
 
-/**
- * How long an email nobody has filed is kept.
+/*
+ * NOTHING IS PRUNED. Mail stays until somebody deals with it.
  *
- * The firm's number. Linked mail is exempt and always will be: once a message is on an account
- * it is part of that account's record and the fee raised against it, so it is not housekeeping's
- * to throw away. This is what keeps the mailbox at a steady ~112 000 rows and ~54 MB instead of
- * growing by 1.37 million rows a year.
+ * There was a 30-day sweep of unmatched mail here, and the firm removed it: an email is either
+ * matched to a record or it is junk to be blocked, and deleting one on a timer only means the
+ * message quietly disappears before anyone gets to it. "If it doesn't work, it'll anyway be
+ * deleted" — by a person, deliberately.
+ *
+ * THE COST, measured rather than guessed. A row averages 459 bytes and carries about 1.8x that
+ * again in indexes, so ~826 bytes all told. At the firm's own 3 750 messages a day that is about
+ * 3 MB a day and 1.1 GB a year, against roughly 89 MB steady-state under the old sweep. Which
+ * puts Supabase's 500 MB free tier about five to six months out; on Pro's 8 GB it is years.
+ *
+ * Bodies are still not stored — only a ~150-character snippet — so this grows linearly and
+ * slowly. If it ever needs bounding again, the honest lever is a much longer window (a year, or
+ * two), not thirty days.
  */
-const RETENTION_DAYS = 30
-
-/** Drop unfiled mail older than the retention window. Never touches the real mailbox. */
-async function pruneOldMail(admin: NonNullable<ReturnType<typeof adminClient>>): Promise<number> {
-  const cutoff = new Date(Date.now() - RETENTION_DAYS * 86_400_000).toISOString()
-  const { data, error } = await admin
-    .from('user_emails')
-    .delete()
-    // is_filed covers a debtor account AND a lead, deal, client or contact. Filed mail is a
-    // record wherever it was filed, and the prune must never take it.
-    .eq('is_filed', false)
-    .lt('occurred_at', cutoff)
-    .select('id')
-  if (error) {
-    console.error('[sync-all] prune failed:', error.message)
-    return 0
-  }
-  return data?.length ?? 0
-}
 
 /**
  * Intended for Vercel Cron (see vercel.json) — Vercel automatically sends
@@ -54,15 +44,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  /*
-   * The prune runs FIRST, before any syncing.
-   *
-   * Deliberate: this one invocation has to sync every connected mailbox, and at 50 mailboxes
-   * that is the part most likely to run out of time. Housekeeping that is cheap and matters for
-   * storage should not be the thing that gets cut off. See the note below about that limit.
-   */
-  const pruned = await pruneOldMail(admin)
-
   const results: { userId: string; logged?: number; error?: string }[] = []
   for (const conn of (connections ?? []) as EmailConnectionRow[]) {
     try {
@@ -85,5 +66,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    *
    * `results` shows how far it actually got, which is the evidence for when that matters.
    */
-  res.status(200).json({ ok: true, pruned, syncedMailboxes: results.length, results })
+  res.status(200).json({ ok: true, syncedMailboxes: results.length, results })
 }
