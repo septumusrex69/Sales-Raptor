@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Mail, MailOpen, Paperclip, Reply } from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, Loader2, Mail, MailOpen, Paperclip, Reply } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { formatMoney } from '../../data/mockData'
 import { relativeDayLabel } from '../../lib/dateLabels'
@@ -7,6 +7,8 @@ import type { AccountEmail } from '../../lib/accountEmails'
 import { useEmailView } from '../../lib/emailView'
 import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
+import { downloadAttachment } from '../../lib/userMail'
+import { useAuth } from '../../store/AuthContext'
 
 /**
  * Every email either way on this account.
@@ -193,6 +195,26 @@ function EmailBody({ email, canSend, onReply }: {
   canSend: boolean
   onReply: () => void
 }) {
+  const { session } = useAuth()
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function download(filename: string) {
+    const token = session?.access_token
+    if (!token) return
+    setBusy(filename)
+    setError(null)
+    try {
+      // accountEmailId, not mailId: this is the account's copy, and the file comes from whichever
+      // colleague's mailbox received it. See the route.
+      await downloadAttachment({ accountEmailId: email.id, filename, accessToken: token })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   return (
     <>
       {/* `whitespace-pre-wrap` because an email's own line breaks are part of what it said —
@@ -201,13 +223,28 @@ function EmailBody({ email, canSend, onReply }: {
         {email.body?.trim() || <span className="text-slate-400">No text in this message.</span>}
       </p>
       {email.attachmentNames.length > 0 && (
-        <p className="text-xs text-slate-400 mt-3">
-          {/* Names only. The files stay in the mailbox they arrived in — see fetchAttachment
-              in api/_lib/emailSync.ts for why they are not copied into Raptor. */}
-          <Paperclip size={11} className="inline mr-1" />
-          {email.attachmentNames.join(', ')}
-        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          {/*
+            The files are still not copied into Raptor — see fetchAttachment in
+            api/_lib/emailSync.ts — but they are now reachable. Each button fetches out of the
+            mailbox the message arrived in and streams straight to the browser. A debtor's proof
+            of income is the attachment a collector needs most, and until now the account could
+            only tell you its name.
+          */}
+          <Paperclip size={11} className="text-slate-400" />
+          {email.attachmentNames.map((name) => (
+            <button key={name} onClick={() => void download(name)} disabled={busy === name}
+              title={`Download ${name}`}
+              className="inline-flex items-center gap-1 max-w-full text-xs px-2 py-1 rounded-md border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50">
+              {busy === name
+                ? <Loader2 size={11} className="shrink-0 animate-spin" />
+                : <Download size={11} className="shrink-0" />}
+              <span className="truncate">{name}</span>
+            </button>
+          ))}
+        </div>
       )}
+      {error && <p className="text-xs text-negative-700 mt-1.5">{error}</p>}
       {email.direction === 'in' && (
         <button onClick={onReply} disabled={!canSend}
           title={canSend ? undefined : 'Connect your mailbox in Settings → Integrations first'}
