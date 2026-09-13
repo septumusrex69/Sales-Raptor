@@ -3,6 +3,10 @@ import { simpleParser } from 'mailparser'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decrypt } from './crypto.js'
 import {
+  assembleBody, flattenParts, inlineImagesFromParsed, partContent, plainText, readableParts,
+  type MessageBody, type MessagePart,
+} from './mime.js'
+import {
   CORRESPONDENCE_ACTION_CODE, CORRESPONDENCE_DESCRIPTION, CORRESPONDENCE_ITEM_ID,
   EMAIL_IN_KIND, normaliseAddress, receivedEmailNote, threadIds,
 } from '../../src/lib/emailRules.js'
@@ -373,24 +377,27 @@ async function fileAccountEmail(
 }
 
 /**
- * The full text of one message, fetched from the mailbox on demand.
+ * Find one message in a mailbox and hand its shape to whoever asked.
  *
- * The mailbox tables hold a 240-character snippet and nothing more — see the note on
- * user_emails about why storing 1.37 million bodies a year is not an option. This is how a
- * person reads the whole thing anyway: the mailbox is the archive and Raptor reaches into it,
- * exactly as fetchAttachment already does for files.
+ * Shared by the body fetch and the attachment fetch, which used to keep two copies of this walk
+ * on the grounds that merging them needed a "found, or keep looking" decision. It does — and
+ * that is exactly what returning null expresses: null means this copy did not have what was
+ * wanted, so keep walking. Having one copy is what let the folder hunt below become lazy in both
+ * at once.
  *
- * Deliberately NOT sharing fetchAttachment's folder walk, though they look alike. The two differ
- * where it matters: an attachment fetch keeps hunting through other folders when the named file
- * is not in the copy it found, because a message genuinely moves and copies differ. A body fetch
- * is done the moment it has the message. Merging them would mean a callback deciding "found, or
- * keep looking", and getting that wrong breaks attachment downloads — which work — to tidy up
- * twenty lines.
+ * THE ORDER MATTERS. The recorded folder is tried on its own first, and the mailbox listing only
+ * happens if that misses. Listing unconditionally — which is what this did — spent a round trip
+ * to Johannesburg on every single open, to prepare for a hunt that almost never runs.
+ *
+ * What `take` receives is the message's SHAPE, not the message: the flattened MIME tree, read out
+ * of one small BODYSTRUCTURE fetch. Both callers use it to ask for the one or two parts they
+ * actually need. See api/_lib/mime.ts.
  */
-export async function fetchMessageBody(
+async function withMessageStructure<T>(
   conn: { email: string; imap_host: string; imap_port: number; encrypted_password: string },
   location: { folder?: string | null; uid?: number | null; messageId?: string | null },
-): Promise<{ text: string; html: string } | null> {
+  take: (client: ImapFlow, uid: number, parts: MessagePart[]) => Promise<T | null>,
+): Promise<T | null> {
   const password = decrypt(conn.encrypted_password)
   const client = new ImapFlow({
     host: conn.imap_host,
@@ -401,41 +408,43 @@ export async function fetchMessageBody(
   })
   await client.connect()
   try {
-    const candidateFolders = location.folder ? [location.folder] : []
-    if (location.messageId) {
-      // Only worth listing mailboxes if we may need to hunt for a moved message.
-      const mailboxes = await client.list()
-      for (const box of mailboxes) if (!candidateFolders.includes(box.path)) candidateFolders.push(box.path)
-    }
+    const tried = new Set<string>()
 
-    for (const folder of candidateFolders) {
+    const attempt = async (folder: string): Promise<T | null> => {
+      if (tried.has(folder)) return null
+      tried.add(folder)
       const lock = await client.getMailboxLock(folder).catch(() => null)
-      if (!lock) continue
+      if (!lock) return null
       try {
         let uid = folder === location.folder ? location.uid ?? null : null
         if (uid === null && location.messageId) {
           const found = await client.search({ header: { 'message-id': location.messageId } }, { uid: true })
           uid = found === false || found.length === 0 ? null : found[found.length - 1]
         }
-        if (uid === null) continue
+        if (uid === null) return null
 
-        const msg = await client.fetchOne(String(uid), { source: true }, { uid: true })
-        if (!msg || !msg.source) continue
-        const parsed = await simpleParser(msg.source)
+        const head = await client.fetchOne(String(uid), { envelope: true, bodyStructure: true }, { uid: true })
+        if (!head) return null
         // A message found by UID alone could be a different message entirely if the original was
         // deleted and the UID reused, so confirm identity when we can.
-        if (location.messageId && parsed.messageId && parsed.messageId !== location.messageId) continue
-
-        /*
-         * The HTML comes back as well as the text, because plainText() strips every tag — and
-         * the tags are where an image signature keeps its contact details. A signature that
-         * renders as a picture still usually wraps the number in <a href="tel:...">, and that
-         * anchor was being thrown away before anything could look at it. See findLinkedDetails.
-         */
-        return { text: plainText(parsed.text, parsed.html), html: parsed.html || '' }
+        if (location.messageId && head.envelope?.messageId && head.envelope.messageId !== location.messageId) {
+          return null
+        }
+        return await take(client, uid, flattenParts(head.bodyStructure))
       } finally {
         lock.release()
       }
+    }
+
+    if (location.folder) {
+      const hit = await attempt(location.folder)
+      if (hit !== null) return hit
+    }
+    // Only now is it worth listing mailboxes: the message has genuinely moved, or been filed.
+    if (!location.messageId) return null
+    for (const box of await client.list()) {
+      const hit = await attempt(box.path)
+      if (hit !== null) return hit
     }
     return null
   } finally {
@@ -444,32 +453,63 @@ export async function fetchMessageBody(
 }
 
 /**
- * Readable text for a message, whatever parts it carries.
+ * The full text of one message, fetched from the mailbox on demand.
  *
- * Most mail has a plain-text alternative and that is used as-is. Marketing mail and a good deal
- * of Outlook often does not, so the HTML is reduced rather than shown as tags: scripts and
- * styles dropped entirely, block boundaries turned into line breaks, entities decoded. Crude on
- * purpose — the job is "can a collector read what the debtor said", not faithful rendering, and
- * putting a debtor's HTML into the page would mean sanitising someone else's markup.
+ * The mailbox tables hold a 240-character snippet and nothing more — see the note on
+ * user_emails about why storing 1.37 million bodies a year is not an option. This is how a
+ * person reads the whole thing anyway: the mailbox is the archive and Raptor reaches into it,
+ * exactly as fetchAttachment already does for files.
+ *
+ * Asks the server what the message is made of, then fetches only the parts a person is going to
+ * look at: its text, and any pictures drawn into it. A four-megabyte message with a scanned
+ * mandate attached becomes an eight-kilobyte fetch. It used to pull all four megabytes across
+ * from Johannesburg so that somebody could read three paragraphs.
+ *
+ * The pictures are what finally makes an image signature visible. A great many South African
+ * firms sign off with one flat picture, and until now that arrived as a blank space where the
+ * sender's name, firm and number should be.
  */
-function plainText(text: string | undefined, html: string | false | undefined): string {
-  if (text && text.trim()) return text
-  if (!html) return ''
-  return html
-    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|tr|h[1-6]|li)>/gi, '\n')
-    .replace(/<li[^>]*>/gi, '• ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
+export async function fetchMessageBody(
+  conn: { email: string; imap_host: string; imap_port: number; encrypted_password: string },
+  location: { folder?: string | null; uid?: number | null; messageId?: string | null },
+): Promise<MessageBody | null> {
+  return withMessageStructure(conn, location, async (client, uid, parts) => {
+    const wanted = readableParts(parts)
+    if (wanted.length > 0) {
+      // One fetch for all of them: on this link, two round trips cost more than the bytes do.
+      const msg = await client.fetchOne(
+        String(uid),
+        { uid: true, bodyParts: wanted.map((p) => p.part) },
+        { uid: true },
+      )
+      const assembled = assembleBody(wanted, msg)
+      if (assembled) return assembled
+    }
+
+    /*
+     * Fallback: fetch the whole message and let mailparser sort it out.
+     *
+     * Slow — this is the path the rest of this exists to avoid — but correct on a message whose
+     * structure the walk above could not make sense of. Being occasionally slow beats being
+     * occasionally unable to open somebody's mail.
+     */
+    const whole = await client.fetchOne(String(uid), { source: true }, { uid: true })
+    if (!whole || !whole.source) return null
+    const parsed = await simpleParser(whole.source)
+    /*
+     * The HTML comes back as well as the text, because plainText() strips every tag — and the
+     * tags are where an image signature keeps its contact details. A signature that renders as a
+     * picture still usually wraps the number in <a href="tel:...">, and that anchor was being
+     * thrown away before anything could look at it. See findLinkedDetails.
+     */
+    return {
+      text: plainText(parsed.text, parsed.html),
+      html: parsed.html || '',
+      images: inlineImagesFromParsed(parsed.attachments),
+    }
+  })
 }
+
 
 async function findMatch(admin: SupabaseClient, fromAddress: string) {
   const email = fromAddress.toLowerCase()
@@ -533,58 +573,41 @@ export interface FetchedAttachment {
  * Looks in the folder the message was synced from first, and falls back to searching by
  * Message-ID, since a message genuinely does move (rescued from Spam, filed into a folder)
  * after the CRM logged it. Returns null if the message or the named file is gone.
+ *
+ * Fetches only the ONE part that holds the file. A debtor who attaches four photographs of a
+ * payslip sends four megabytes; downloading the one a collector clicked used to mean pulling
+ * all four across from Johannesburg and throwing three away.
  */
 export async function fetchAttachment(
   conn: { email: string; imap_host: string; imap_port: number; encrypted_password: string },
   location: { folder?: string | null; uid?: number | null; messageId?: string | null },
   filename: string,
 ): Promise<FetchedAttachment | null> {
-  const password = decrypt(conn.encrypted_password)
-  const client = new ImapFlow({
-    host: conn.imap_host,
-    port: conn.imap_port,
-    secure: conn.imap_port === 993,
-    auth: { user: conn.email, pass: password },
-    logger: false,
-  })
-  await client.connect()
-  try {
-    const candidateFolders = location.folder ? [location.folder] : []
-    if (location.messageId) {
-      // Only worth listing mailboxes if we may need to hunt for a moved message.
-      const mailboxes = await client.list()
-      for (const box of mailboxes) if (!candidateFolders.includes(box.path)) candidateFolders.push(box.path)
-    }
-
-    for (const folder of candidateFolders) {
-      const lock = await client.getMailboxLock(folder).catch(() => null)
-      if (!lock) continue
-      try {
-        let uid = folder === location.folder ? location.uid ?? null : null
-        if (uid === null && location.messageId) {
-          const found = await client.search({ header: { 'message-id': location.messageId } }, { uid: true })
-          uid = found === false || found.length === 0 ? null : found[found.length - 1]
-        }
-        if (uid === null) continue
-
-        const msg = await client.fetchOne(String(uid), { source: true }, { uid: true })
-        if (!msg || !msg.source) continue
-        const parsed = await simpleParser(msg.source)
-        // A message found by UID alone could be a different message entirely if the
-        // original was deleted and the UID reused, so confirm identity when we can.
-        if (location.messageId && parsed.messageId && parsed.messageId !== location.messageId) continue
-
-        const match = (parsed.attachments ?? []).find((att) => (att.filename || '') === filename)
-        if (!match) continue
-        return { filename, contentType: match.contentType || 'application/octet-stream', content: match.content as Buffer }
-      } finally {
-        lock.release()
+  return withMessageStructure(conn, location, async (client, uid, parts) => {
+    /*
+     * Match on the filename the STRUCTURE reports, which imapflow has already put back
+     * together: MIME-encoded words decoded, RFC 2231 continuations rejoined. That is the same
+     * string mailparser produces, which is what the sync recorded and what the caller checked
+     * the request against — so the two cannot disagree about which file was asked for.
+     */
+    const named = parts.find((p) => p.filename === filename)
+    if (named) {
+      const msg = await client.fetchOne(String(uid), { uid: true, bodyParts: [named.part] }, { uid: true })
+      const content = partContent(msg, named)
+      if (content) {
+        return { filename, contentType: named.type || 'application/octet-stream', content }
       }
     }
-    return null
-  } finally {
-    await client.logout().catch(() => {})
-  }
+
+    // Fallback for anything the structure walk could not name — an attachment with no filename
+    // parameter at all, say. Slow, but it is the behaviour this route had before, and it works.
+    const whole = await client.fetchOne(String(uid), { source: true }, { uid: true })
+    if (!whole || !whole.source) return null
+    const parsed = await simpleParser(whole.source)
+    const match = (parsed.attachments ?? []).find((att) => (att.filename || '') === filename)
+    if (!match) return null
+    return { filename, contentType: match.contentType || 'application/octet-stream', content: match.content as Buffer }
+  })
 }
 
 /**

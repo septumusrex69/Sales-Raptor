@@ -21,7 +21,8 @@ import {
   domainBlockProblem, domainOf, downloadAttachment, emptyJunk, fetchBlockedSenders, fetchMail,
   fetchMailBody, linkMailToAccount, linkMailToRecord, markMailRead, moveFiledMail,
   saveAccountContacts, setJunk, unblockSender, unmatchMail,
-  type BlockedSender, type BlockOutcome, type LinkedRecord, type MailFilter, type MailItem,
+  type BlockedSender, type BlockOutcome, type InlineImage, type LinkedRecord, type MailFilter,
+  type MailItem,
 } from '../../lib/userMail'
 import { useAppStore } from '../../store/AppStore'
 import {
@@ -126,6 +127,13 @@ export function MailPage() {
   const [bodies, setBodies] = useState<Record<string, string>>({})
   /** Contact details read off each message's hrefs, keyed the same way as the bodies. */
   const [linkedDetails, setLinkedDetails] = useState<Record<string, ContactCandidate[]>>({})
+  /**
+   * The pictures drawn into each message, keyed the same way again.
+   *
+   * Signatures, in practice — and a signature that is a picture used to leave a blank where the
+   * sender's name and number should be, which is exactly the part a collector needs.
+   */
+  const [bodyImages, setBodyImages] = useState<Record<string, InlineImage[]>>({})
   const [reading, setReading] = useState<string | null>(null)
   const [readError, setReadError] = useState<Record<string, string>>({})
   const [view, setView] = useEmailView()
@@ -272,11 +280,12 @@ export function MailPage() {
     setReading(mail.id)
     setReadError((e) => { const next = { ...e }; delete next[mail.id]; return next })
     try {
-      const { text, details } = await fetchMailBody(mail.id, token)
+      const { text, details, images } = await fetchMailBody(mail.id, token)
       setBodies((b) => ({ ...b, [mail.id]: text }))
       // Kept beside the text: these came out of the message's LINKS, which is the only thing an
       // image signature leaves behind.
       setLinkedDetails((d) => ({ ...d, [mail.id]: details }))
+      setBodyImages((i) => ({ ...i, [mail.id]: images }))
     } catch (e) {
       // The snippet stays on screen, so this explains the gap rather than leaving it blank.
       setReadError((prev) => ({ ...prev, [mail.id]: e instanceof Error ? e.message : String(e) }))
@@ -666,7 +675,8 @@ export function MailPage() {
                     </button>
                   )}
                 </div>
-                <MailBody mail={m} body={bodies[m.id]} loadingBody={reading === m.id}
+                <MailBody mail={m} body={bodies[m.id]} images={bodyImages[m.id]}
+                  loadingBody={reading === m.id}
                   bodyError={readError[m.id]} onBlock={() => setBlocking(m)}
                   onReply={() => startReply(m)} onJunk={(j) => void junkOne(m, j)}
                   onMove={mayRefile ? () => setMoving(m) : null}
@@ -693,6 +703,7 @@ export function MailPage() {
                   expanded={open === m.id}
                   blocked={blocked}
                   body={bodies[m.id]}
+                  images={bodyImages[m.id]}
                   loadingBody={reading === m.id}
                   bodyError={readError[m.id]}
                   onToggle={() => void toggle(m)}
@@ -1056,11 +1067,13 @@ function MailSummary({ mail, tight, blocked }: {
 
 /** The message itself, shared by the expanded row and the reading pane. */
 function MailBody({
-  mail, body, loadingBody, bodyError, onBlock, onReply, onJunk, onMove,
+  mail, body, images, loadingBody, bodyError, onBlock, onReply, onJunk, onMove,
   onDownload, downloading, downloadError,
 }: {
   mail: MailItem
   body?: string
+  /** Pictures drawn into the message — a signature, nearly always. */
+  images?: InlineImage[]
   loadingBody: boolean
   bodyError?: string
   onBlock: () => void
@@ -1095,6 +1108,40 @@ function MailBody({
         <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
           {body.trim() || <span className="text-slate-400">This message has no text in it.</span>}
         </p>
+      )}
+
+      {/*
+        The pictures the message was written WITH, as opposed to files attached to it.
+
+        This is the answer to a signature that is an image. Raptor read those messages as three
+        lines and a blank space where the sender's name, firm and number should have been —
+        because the text scan finds nothing in a picture, and the picture was never sent to the
+        browser at all. Now it is, and a collector can simply read it.
+
+        Every src here is a data: URI carrying its own bytes. Nothing is fetched from anybody
+        else's server, so a remote tracking pixel cannot report that this debtor's mail was
+        opened, by whom, or when — see fetchMessageBody, which is where the bytes are read.
+      */}
+      {!loadingBody && images && images.length > 0 && (
+        <div className="mt-3">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5">
+            In this message
+          </p>
+          <div className="flex flex-wrap items-start gap-2">
+            {images.map((img, i) => (
+              <img
+                key={img.cid || img.filename || i}
+                src={img.dataUri}
+                /* A signature picture has no useful alt text of its own; naming it as one is
+                   more honest to a screen reader than an empty string or a filename. */
+                alt={img.filename || 'Image from this message'}
+                /* Capped so a full-width letterhead cannot push the reading pane wide or run
+                   the actions off the bottom of the screen. */
+                className="max-w-full max-h-40 w-auto rounded border border-slate-100 bg-white"
+              />
+            ))}
+          </div>
+        </div>
       )}
 
       {!loadingBody && bodyError && (
@@ -1214,8 +1261,8 @@ function MailBody({
 }
 
 function MailRow({
-  mail, chosen, expanded, selecting, blocked, body, loadingBody, bodyError, onToggle, onChoose,
-  onLink, onBlock, onReply, onJunk, onMove, onDownload, downloading, downloadError,
+  mail, chosen, expanded, selecting, blocked, body, images, loadingBody, bodyError, onToggle,
+  onChoose, onLink, onBlock, onReply, onJunk, onMove, onDownload, downloading, downloadError,
 }: {
   mail: MailItem
   chosen: boolean
@@ -1226,6 +1273,8 @@ function MailRow({
   blocked: BlockedSender[]
   /** The full text, once fetched. Undefined until then. */
   body?: string
+  /** The pictures inside it, fetched alongside the text. */
+  images?: InlineImage[]
   loadingBody: boolean
   bodyError?: string
   onToggle: () => void
@@ -1279,7 +1328,7 @@ function MailRow({
 
       {expanded && (
         <div className="px-5 pb-4 pl-[2.9rem]">
-          <MailBody mail={mail} body={body} loadingBody={loadingBody}
+          <MailBody mail={mail} body={body} images={images} loadingBody={loadingBody}
             bodyError={bodyError} onBlock={onBlock} onReply={onReply} onJunk={onJunk}
             onMove={onMove} onDownload={onDownload}
             downloading={downloading} downloadError={downloadError} />
