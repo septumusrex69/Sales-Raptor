@@ -1804,6 +1804,45 @@ drop policy if exists "mail_blocks_own" on public.mail_blocks;
 create policy "mail_blocks_own" on public.mail_blocks for all
   using (user_id = auth.uid()) with check (user_id = auth.uid());
 
+-- ---------------------------------------------------------------------------
+-- Re-filing a message is an administrator action
+-- ---------------------------------------------------------------------------
+-- Moving a message that is ALREADY on a record moves a debtor's correspondence between accounts
+-- and raises a second item 6 fee on the destination. That is a money action, so a check in the
+-- browser is not a boundary.
+--
+-- A trigger rather than an RLS policy, because the rule is about a TRANSITION rather than about
+-- a row: an agent may still file unfiled mail (null -> account), still mark it read, still move
+-- it to junk. What they may not do is re-point a message that is already filed. RLS sees only
+-- the new row; a before-update trigger sees both.
+--
+-- Reverts silently rather than raising, exactly as protect_profile_privileged_fields does, so a
+-- crafted request keeps the prior value and changes nothing.
+create or replace function public.protect_filed_mail_target()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if public.current_user_role() <> 'Administrator' then
+    -- Only ever re-assert a link that was ALREADY set. Filing unfiled mail stays open to
+    -- everyone, which is the everyday action.
+    if old.linked_account_id is not null then new.linked_account_id := old.linked_account_id; end if;
+    if old.linked_lead_id is not null then new.linked_lead_id := old.linked_lead_id; end if;
+    if old.linked_deal_id is not null then new.linked_deal_id := old.linked_deal_id; end if;
+    if old.linked_company_id is not null then new.linked_company_id := old.linked_company_id; end if;
+    if old.linked_contact_id is not null then new.linked_contact_id := old.linked_contact_id; end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_filed_mail_target on public.user_emails;
+create trigger protect_filed_mail_target
+  before update on public.user_emails
+  for each row execute function public.protect_filed_mail_target();
+
 
 -- ---------------------------------------------------------------------------
 -- nav_counts: the three numbers on the sidebar

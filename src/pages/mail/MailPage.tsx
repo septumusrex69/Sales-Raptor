@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, ExternalLink, Inbox, Link2,
-  Loader2, Paperclip, Reply, RefreshCw, Search, ShieldAlert, Trash2, Undo2, X,
+  Loader2, MoveRight, Paperclip, Reply, RefreshCw, Search, ShieldAlert, Trash2, Undo2, X,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal } from '../../components/ui/Modal'
@@ -18,10 +18,11 @@ import { ReadingPane } from '../../components/email/ReadingPane'
 import {
   blockedBy, blockSender, blockSenders, countNeedsFiling, deleteMail, domainBlockProblem,
   countUnread, domainOf, emptyJunk, fetchBlockedSenders, fetchMail, fetchMailBody,
-  linkMailToAccount, linkMailToRecord, markMailRead, setJunk, unblockSender,
+  linkMailToAccount, linkMailToRecord, markMailRead, moveFiledMail, setJunk, unblockSender,
   type BlockedSender, type BlockOutcome, type LinkedRecord, type MailFilter, type MailItem,
 } from '../../lib/userMail'
 import { useAppStore } from '../../store/AppStore'
+import { canRefileMail } from '../../lib/permissions'
 
 /**
  * One agent's mailbox.
@@ -296,7 +297,6 @@ export function MailPage() {
     setLinking(mail)
   }
 
-  /** Filing on its own, with no reply waiting behind it. */
   /** Turning selection off drops the selection with it — a forgotten tick must not act later. */
   function toggleSelecting() {
     setSelecting((on) => {
@@ -305,10 +305,15 @@ export function MailPage() {
     })
   }
 
+  /** Filing on its own, with no reply waiting behind it. */
   function startLink(mail: MailItem) {
     setLinkThenReply(false)
     setLinking(mail)
   }
+
+  /** Moving a message that was filed on the wrong account. Administrators only. */
+  const [moving, setMoving] = useState<MailItem | null>(null)
+  const mayRefile = canRefileMail(currentUser?.role)
 
   /**
    * Move mail onto the junk shelf, or take it back off.
@@ -633,7 +638,8 @@ export function MailPage() {
                 </div>
                 <MailBody mail={m} body={bodies[m.id]} loadingBody={reading === m.id}
                   bodyError={readError[m.id]} onBlock={() => setBlocking(m)}
-                  onReply={() => startReply(m)} onJunk={(j) => void junkOne(m, j)} />
+                  onReply={() => startReply(m)} onJunk={(j) => void junkOne(m, j)}
+                  onMove={mayRefile ? () => setMoving(m) : null} />
               </div>
             )}
           />
@@ -668,7 +674,8 @@ export function MailPage() {
                   })}
                   onLink={() => startLink(m)}
                   onReply={() => startReply(m)}
-                  onJunk={(j) => void junkOne(m, j)} />
+                  onJunk={(j) => void junkOne(m, j)}
+                  onMove={mayRefile ? () => setMoving(m) : null} />
               ))}
             </ul>
           </>
@@ -736,6 +743,15 @@ export function MailPage() {
             setLinkThenReply(false)
             if (mail) setReplying(mail)
           }}
+        />
+      )}
+
+      {moving && (
+        <MoveModal
+          mail={moving}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setMoving(null)}
+          onDone={(message) => { setMoving(null); setStatus(message); void load(page) }}
         />
       )}
 
@@ -1003,7 +1019,7 @@ function MailSummary({ mail, tight, blocked }: {
 }
 
 /** The message itself, shared by the expanded row and the reading pane. */
-function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply, onJunk }: {
+function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply, onJunk, onMove }: {
   mail: MailItem
   body?: string
   loadingBody: boolean
@@ -1012,6 +1028,8 @@ function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply, onJunk
   onReply: () => void
   /** Shelve it, or rescue it. Absent on filed mail, which is a record either way. */
   onJunk: (junk: boolean) => void
+  /** Move it to the right account. Null for anyone who is not an administrator. */
+  onMove: (() => void) | null
 }) {
   return (
     <>
@@ -1096,6 +1114,18 @@ function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply, onJunk
           without claiming anything about the sender. Hidden on filed mail — a message on a
           record is neither junk nor anybody's to reclassify.
         */}
+        {/*
+          Only on mail already filed on a DEBTOR account, and only for an administrator — the
+          database refuses it for anyone else, so offering the button would be a lie. Not offered
+          on a lead or a client, where no fee is involved and nothing is at stake.
+        */}
+        {mail.linkedTo?.kind === 'account' && onMove && (
+          <button onClick={onMove}
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50">
+            <MoveRight size={13} /> Wrong account?
+          </button>
+        )}
+
         {!mail.isFiled && (
           <button onClick={() => onJunk(!mail.isJunk)}
             className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50">
@@ -1118,7 +1148,7 @@ function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply, onJunk
 
 function MailRow({
   mail, chosen, expanded, selecting, blocked, body, loadingBody, bodyError, onToggle, onChoose,
-  onLink, onBlock, onReply, onJunk,
+  onLink, onBlock, onReply, onJunk, onMove,
 }: {
   mail: MailItem
   chosen: boolean
@@ -1137,6 +1167,7 @@ function MailRow({
   onBlock: () => void
   onReply: () => void
   onJunk: (junk: boolean) => void
+  onMove: (() => void) | null
 }) {
   const unread = !mail.readAt
   return (
@@ -1179,7 +1210,8 @@ function MailRow({
       {expanded && (
         <div className="px-5 pb-4 pl-[2.9rem]">
           <MailBody mail={mail} body={body} loadingBody={loadingBody}
-            bodyError={bodyError} onBlock={onBlock} onReply={onReply} onJunk={onJunk} />
+            bodyError={bodyError} onBlock={onBlock} onReply={onReply} onJunk={onJunk}
+            onMove={onMove} />
         </div>
       )}
     </li>
@@ -1657,6 +1689,139 @@ function LinkModal({ mail, actor, replying, onClose, onDone, onSkip }: {
           </button>
           <p className="text-xs text-slate-400 mt-1">Nothing charged, and it appears on no account.</p>
         </div>
+      )}
+    </Modal>
+  )
+}
+
+/**
+ * Moving a message off the account it was wrongly filed on.
+ *
+ * Most of this box is spent saying what will and will NOT happen, because the surprising half is
+ * what does not: the fee already raised on the wrong account stays. Somebody reaching for this
+ * expects an undo, and it is not one. Far better to say so before they press it than to let them
+ * discover it on a statement.
+ */
+function MoveModal({ mail, actor, onClose, onDone }: {
+  mail: MailItem
+  actor: { id: string | null; name: string | null }
+  onClose: () => void
+  onDone: (message: string) => void
+}) {
+  const [term, setTerm] = useState('')
+  const [hits, setHits] = useState<DebtorAccount[]>([])
+  const [looking, setLooking] = useState(false)
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const was = mail.linkedTo?.label ?? 'the current account'
+
+  // Debounced, for the same reason the filing search is: 100 000 rows per keystroke otherwise.
+  useEffect(() => {
+    const q = term.trim()
+    if (q.length < 2) { setHits([]); return }
+    let cancelled = false
+    setLooking(true)
+    const t = setTimeout(() => {
+      void fetchAccounts({ search: q, pageSize: 8 })
+        .then((r) => { if (!cancelled) setHits(r.accounts) })
+        .catch(() => { if (!cancelled) setHits([]) })
+        .finally(() => { if (!cancelled) setLooking(false) })
+    }, 250)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [term])
+
+  async function move(accountId: string, label: string) {
+    setBusy(true)
+    setError(null)
+    try {
+      const charge = await moveFiledMail({ mail, toAccountId: accountId, toLabel: label, reason, actor })
+      onDone(`Moved to ${label}. ${chargeMessage(charge, '6')} The fee on ${was} stands.`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="Move this email to the right account" onClose={onClose} width={520}>
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+        <p className="text-sm font-medium text-slate-800 truncate">{mail.subject || '(no subject)'}</p>
+        <p className="text-xs text-slate-400 mt-0.5 truncate">
+          From {mail.fromAddress} &middot; currently on {was}
+        </p>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-gold-200 bg-gold-50 px-3 py-2.5">
+        <p className="text-[13px] text-navy-950 font-medium flex items-start gap-1.5">
+          <AlertTriangle size={14} className="shrink-0 mt-0.5 text-gold-600" />
+          The R13 already on {was} is not reversed.
+        </p>
+        <p className="text-xs text-slate-500 mt-1.5">
+          Fees feed the remittances, and a remittance that has been processed cannot be unwound,
+          so nothing is taken back off a statement here. The email stays on that account too, with
+          a note saying it was filed there in error &mdash; otherwise the fee would sit on a
+          statement with nothing behind it. Finance corrects it forward, in the remittance.
+        </p>
+        <p className="text-xs text-slate-500 mt-1.5">
+          The account you pick below is charged R13 under item 6, exactly as it would have been
+          had the email gone to the right place first time.
+        </p>
+      </div>
+
+      <label className="block mt-4">
+        <span className="text-sm font-medium text-slate-700">Which account should it be on?</span>
+        <input
+          value={term}
+          onChange={(e) => setTerm(e.target.value)}
+          autoFocus
+          placeholder="Surname, account number or client reference"
+          className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-brand-100"
+        />
+      </label>
+
+      <label className="block mt-3">
+        <span className="text-sm font-medium text-slate-700">
+          Why? <span className="font-normal text-slate-400">Optional</span>
+        </span>
+        <input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Same surname, wrong debtor"
+          className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-brand-100"
+        />
+        {/* Onto the wrong account's timeline, beside the fee — where somebody querying that
+            charge in six months will actually look. */}
+        <span className="block text-xs text-slate-400 mt-1">
+          Written onto {was}&rsquo;s timeline, beside the fee.
+        </span>
+      </label>
+
+      {looking && <p className="text-xs text-slate-400 mt-2">Looking&hellip;</p>}
+
+      <div className="mt-3 max-h-56 overflow-y-auto divide-y divide-slate-100">
+        {/* The account it is already on is filtered out — moving it to itself is not a move. */}
+        {hits.filter((h) => h.id !== mail.linkedAccountId).map((h) => (
+          <button key={h.id} disabled={busy}
+            onClick={() => void move(h.id, debtorLabel(h))}
+            className="w-full text-left px-1 py-2.5 hover:bg-slate-50 disabled:opacity-50">
+            <span className="block text-sm font-medium text-slate-800">{debtorLabel(h)}</span>
+            <span className="block text-xs text-slate-400">
+              {h.accountNumber ?? 'no account number'}
+              {h.clientReference && <> &middot; {h.clientReference}</>}
+            </span>
+          </button>
+        ))}
+        {term.trim().length >= 2 && !looking && hits.length === 0 && (
+          <p className="py-3 text-sm text-slate-400">No account matches that.</p>
+        )}
+      </div>
+
+      {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
+      {busy && (
+        <p className="text-xs text-slate-400 mt-2 inline-flex items-center gap-1.5">
+          <Loader2 size={12} className="animate-spin" /> Moving&hellip;
+        </p>
       )}
     </Modal>
   )

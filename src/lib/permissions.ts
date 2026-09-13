@@ -37,6 +37,21 @@ export function canViewClients(role: Pick<User, 'role'>['role'] | undefined): bo
   return role !== undefined && role !== 'Pre-legal Agent'
 }
 
+/**
+ * Whether this person may move a message that is ALREADY filed onto a different record.
+ *
+ * Administrator only, at the firm's instruction. Filing unfiled mail is everyday work and stays
+ * open to everyone; re-filing moves a debtor's correspondence between accounts and raises a
+ * second item 6 fee on the destination, which makes it a money action.
+ *
+ * The real boundary is the protect_filed_mail_target trigger in supabase/schema.sql, which
+ * silently reverts the change for anyone else. This only stops the app offering a button that
+ * would appear to work and quietly do nothing.
+ */
+export function canRefileMail(role: Pick<User, 'role'>['role'] | undefined): boolean {
+  return role === 'Administrator'
+}
+
 /** Roles eligible to own a Lead/Deal/Task/Contact/Company — i.e. show up in "assign to" / "Client Liaison" pickers. */
 export function isAssignableOwner(role: Pick<User, 'role'>['role']): boolean {
   return role === 'Administrator' || role.includes('Sales') || role === 'Liaison' || role === 'Liaison Manager'

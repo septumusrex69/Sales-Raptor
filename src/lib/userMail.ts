@@ -679,6 +679,24 @@ export async function linkMailToAccount(input: {
   if (claimError) throw new Error(claimError.message)
   if (!claimed) throw new Error('That email has already been filed.')
 
+  return fileOnAccount({ mail: input.mail, accountId: input.accountId, actor: input.actor })
+}
+
+/**
+ * Put a message on an account: the fee, the account's copy, and the timeline entry.
+ *
+ * Split out of linkMailToAccount so that moving a mis-filed message goes through EXACTLY this
+ * code rather than a second copy of it. Two ways to put an email on an account is two ways for
+ * them to disagree about what a debtor was charged.
+ *
+ * Claiming the mailbox row is deliberately NOT part of this — the two callers claim differently.
+ * Filing claims an unfiled row; moving claims a row away from the account it is already on.
+ */
+async function fileOnAccount(input: {
+  mail: MailItem
+  accountId: string
+  actor: { id: string | null; name: string | null }
+}): Promise<ChargeResult> {
   const charge = await chargeItem({
     accountId: input.accountId,
     itemId: CORRESPONDENCE_ITEM_ID,
@@ -839,4 +857,89 @@ export async function setJunk(ids: string[], junk: boolean): Promise<number> {
   // Junk is excluded from the sidebar count, so moving mail either way changes it.
   refreshNavCounts()
   return data?.length ?? 0
+}
+
+/**
+ * Move a message that was filed on the wrong debtor account.
+ *
+ * ADMINISTRATOR ONLY, at the firm's instruction — and enforced by the protect_filed_mail_target
+ * trigger, not by the button that calls this. See canRefileMail.
+ *
+ * THE ORIGINAL FEE IS NOT TOUCHED. That is the firm's rule and it is deliberate: a debtor's
+ * statement is not rewritten after the fact, because fees flow into remittances and a remittance
+ * that has been processed cannot be unwound. Corrections are made forward, in the remittance,
+ * by finance. So the R13 raised on the wrong account stands.
+ *
+ * NOR IS THE ORIGINAL FILING REMOVED. Keeping the fee while deleting the email that justifies it
+ * would leave a charge on a statement with nothing behind it — the worst of both. The message
+ * stays on the original account with a note saying it was filed there in error and where it
+ * went, so anyone reading that statement, including the debtor, can see what the R13 was for and
+ * that it is known to be wrong.
+ *
+ * The destination is then filed normally, fee and all: the correspondence really is on that
+ * debtor's file now, really was attended to, and item 6 applies exactly as it would have if it
+ * had been filed correctly the first time.
+ *
+ * Net effect is R13 on each of two accounts for one email. That is understood and accepted —
+ * it is the price of never rewriting a statement, and finance squares it in the remittance.
+ */
+export async function moveFiledMail(input: {
+  mail: MailItem
+  /** Where it should have gone. */
+  toAccountId: string
+  /** The debtor's name, for the note left on the original account. */
+  toLabel: string
+  /** Why, in the mover's words. Optional, and worth having. */
+  reason?: string
+  actor: { id: string | null; name: string | null }
+}): Promise<ChargeResult> {
+  const from = input.mail.linkedAccountId
+  if (!from) throw new Error('That email is not filed on a debtor account, so there is nothing to move.')
+  if (from === input.toAccountId) throw new Error('That email is already on that account.')
+
+  /*
+   * Claimed against the account it is CURRENTLY on, so a double click or a retried request
+   * cannot move it twice or raise the destination fee twice. Same guard as the original filing,
+   * for the same reason.
+   *
+   * A non-administrator reaches this line only by crafting a request; the trigger reverts the
+   * column and the row comes back still pointing at `from`, which the check below catches.
+   */
+  const { data: moved, error: moveError } = await supabase
+    .from('user_emails')
+    .update({
+      linked_account_id: input.toAccountId,
+      linked_at: new Date().toISOString(),
+      linked_by: input.actor.id,
+    })
+    .eq('id', input.mail.id)
+    .eq('linked_account_id', from)
+    .select('linked_account_id')
+    .maybeSingle<{ linked_account_id: string }>()
+  if (moveError) throw new Error(moveError.message)
+  if (!moved) throw new Error('That email has already been moved.')
+  if (moved.linked_account_id !== input.toAccountId) {
+    throw new Error('Only an administrator can move an email that is already filed.')
+  }
+
+  // The correcting note on the account it should never have been on. Written FIRST: if the
+  // filing below fails, the account that was wrongly charged still explains itself.
+  await addNote({
+    accountId: from,
+    body: [
+      `Email filed here in error and moved to ${input.toLabel}.`,
+      input.reason?.trim() ? input.reason.trim() : null,
+      'The correspondence fee already raised on this account stands and is corrected in the remittance.',
+    ].filter(Boolean).join(' '),
+    kind: EMAIL_IN_KIND,
+    authorName: input.actor.name,
+    createdBy: input.actor.id,
+    source: 'system',
+  })
+
+  return fileOnAccount({
+    mail: input.mail,
+    accountId: input.toAccountId,
+    actor: input.actor,
+  })
 }
