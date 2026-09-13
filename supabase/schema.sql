@@ -1655,9 +1655,15 @@ create policy "account_emails_mark_read" on public.account_emails for update
 --
 -- METADATA ONLY. No bodies. A short snippet is enough to recognise a message; the full text
 -- stays in the mailbox and is fetched on demand, the same principle already used for
--- attachments (see fetchAttachment in api/_lib/emailSync.ts). At 3 750 messages a day with
--- 30-day retention this table holds ~112 000 rows and ~54 MB, which fits the free tier. Storing
--- bodies instead would be ~4 GB a year and climbing.
+-- attachments (see fetchAttachment in api/_lib/emailSync.ts). Storing bodies instead would be
+-- ~4 GB a year and climbing.
+--
+-- NOTHING IS PRUNED. A 30-day sweep of unmatched mail was removed at the firm's instruction: an
+-- email is either matched to a record or it is junk to be blocked, and deleting one on a timer
+-- only means it disappears before anyone gets to it. Measured cost of keeping everything: a row
+-- averages 459 bytes and ~1.8x that again in indexes, so about 3 MB a day and 1.1 GB a year at
+-- 3 750 messages a day, against ~89 MB steady state under the old sweep. That is Supabase's
+-- 500 MB free tier in five to six months, and years on Pro's 8 GB.
 create table if not exists public.user_emails (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles (id) on delete cascade,
@@ -1750,11 +1756,7 @@ create index if not exists user_emails_inbox_idx
 create index if not exists user_emails_unfiled_idx
   on public.user_emails (user_id, occurred_at desc)
   where is_filed = false and is_junk = false;
--- What the 30-day prune walks: unfiled mail only. Filed mail is a record and is never pruned.
--- Age first, because the prune sweeps across every user at once.
-create index if not exists user_emails_prune_unfiled_idx
-  on public.user_emails (occurred_at)
-  where is_filed = false;
+-- The prune index is gone with the prune. Nothing sweeps this table by age any more.
 
 alter table public.user_emails enable row level security;
 
@@ -1781,8 +1783,8 @@ create policy "user_emails_own_delete" on public.user_emails for delete
 --
 -- The firm's idea, and the best storage lever there is: repeat senders — newsletters, agencies,
 -- the same scam every week — are most of the 3 750 messages a day. A blocked sender is skipped
--- at sync time and never becomes a row at all, so it costs nothing rather than costing 30 days
--- of retention, every week, forever.
+-- at sync time and never becomes a row at all. With nothing pruned on a timer, this is now the
+-- ONLY thing keeping the table's growth down, which makes it more important than it was.
 --
 -- Per agent, not firm-wide. It matches the rest of the mailbox (your mail is yours) and, more
 -- importantly, it means one person cannot silence a sender for everyone else — blocking a
