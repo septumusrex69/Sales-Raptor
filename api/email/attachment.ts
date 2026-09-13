@@ -195,6 +195,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ok: true,
         text: body.text,
         details: body.html ? findLinkedDetails(body.html, mail.from_address as string | undefined) : [],
+        /*
+         * The pictures drawn INTO the message, chiefly signatures — carried as data: URIs so
+         * the browser renders them without fetching anything from anybody else's server. That
+         * is what keeps a tracking pixel in a debtor's email from reporting when their
+         * collector opened it. See fetchMessageBody.
+         */
+        images: body.images,
       })
     } catch (err) {
       res.status(502).json({ error: err instanceof Error ? err.message : 'Could not reach your mailbox.' })

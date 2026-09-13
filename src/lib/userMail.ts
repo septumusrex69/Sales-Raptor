@@ -328,6 +328,29 @@ export async function countNeedsFiling(userId: string): Promise<number> {
 }
 
 /**
+ * A picture that was drawn into a message rather than attached to it — a signature, nearly
+ * always, which is the case this exists for: a great many South African firms sign off with one
+ * flat image, and until now that image simply vanished on the way to the screen.
+ *
+ * Declared here rather than imported from api/_lib/emailSync, which is where the server's copy
+ * lives. That module pulls in imapflow and mailparser; importing its types would drag a mail
+ * server's worth of code into the browser bundle for the sake of three field names.
+ */
+export interface InlineImage {
+  /** The cid the message's HTML referred to it by, where it had one. */
+  cid: string
+  filename: string
+  /**
+   * The bytes themselves, as a data: URI.
+   *
+   * Not a URL, and that is the point. A remote image in a debtor's email is how a sender finds
+   * out their mail was opened and when; carrying the bytes inline means the browser asks
+   * nobody for anything, so opening a message tells the outside world nothing.
+   */
+  dataUri: string
+}
+
+/**
  * The full text of a message, fetched from the mailbox when somebody opens it.
  *
  * Raptor holds a 240-character snippet; this is how a person reads the rest. It rides on
@@ -341,19 +364,19 @@ export async function countNeedsFiling(userId: string): Promise<number> {
 export async function fetchMailBody(
   mailId: string,
   accessToken: string,
-): Promise<{ text: string; details: ContactCandidate[] }> {
+): Promise<{ text: string; details: ContactCandidate[]; images: InlineImage[] }> {
   const res = await fetch('/api/email/attachment', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify({ mailId }),
   })
   const body = (await res.json().catch(() => ({}))) as {
-    text?: string; details?: ContactCandidate[]; error?: string
+    text?: string; details?: ContactCandidate[]; images?: InlineImage[]; error?: string
   }
   if (!res.ok) throw new Error(body.error ?? 'Could not read that message.')
   // `details` are read off the message's HTML on the server — see findLinkedDetails. They are
   // what an image signature gives up, since its text yields nothing.
-  return { text: body.text ?? '', details: body.details ?? [] }
+  return { text: body.text ?? '', details: body.details ?? [], images: body.images ?? [] }
 }
 
 /**
