@@ -67,6 +67,8 @@ export function MailPage() {
   const [more, setMore] = useState(false)
   const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(true)
+  /** The last load threw. Distinct from `error`, which any action can set. */
+  const [loadFailed, setLoadFailed] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [chosen, setChosen] = useState<Set<string>>(new Set())
@@ -113,8 +115,21 @@ export function MailPage() {
       setMore(res.more)
       setPage(at)
       setChosen(new Set())
+      setLoadFailed(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      /*
+       * Remembered separately from `error`, which every action shares.
+       *
+       * Without it a FAILED load fell through to the empty state, and the page cheerfully said
+       * "Nothing waiting. Every email has been filed or thrown away." over a mailbox that had
+       * simply not loaded. That is the worst possible thing to say when something is broken: it
+       * is reassuring, it is wrong, and it sends somebody looking for their mail in Outlook
+       * instead of telling us. It happened for real — see the leads.company fix.
+       */
+      setLoadFailed(true)
+      setItems([])
+      setMore(false)
     } finally {
       setLoading(false)
     }
@@ -362,6 +377,8 @@ export function MailPage() {
             setStatus('Unblocked. Their mail appears again from the next sync — not retroactively.')
             await load(0)
           }} />
+        ) : loadFailed ? (
+          <LoadFailed onRetry={() => void load(page)} />
         ) : items.length === 0 ? (
           <Empty filter={filter} searching={!!search.trim()} />
         ) : view === 'reading' ? (
@@ -576,6 +593,28 @@ export function MailPage() {
           }}
         />
       )}
+    </div>
+  )
+}
+
+/**
+ * The mailbox did not load. Said out loud, because the alternative is an empty list that reads
+ * as "you have no mail" — and the one thing worse than a broken mailbox is a broken mailbox
+ * nobody reports.
+ */
+function LoadFailed({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="py-14 text-center">
+      <AlertTriangle size={22} className="mx-auto text-gold-600" />
+      <p className="text-sm font-medium text-slate-700 mt-3">Your mailbox could not be loaded.</p>
+      <p className="text-[13px] text-slate-500 mt-1">
+        This is not an empty mailbox — nothing was read, so nothing is missing. The reason is in
+        the red line above.
+      </p>
+      <button onClick={onRetry}
+        className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+        <RefreshCw size={13} /> Try again
+      </button>
     </div>
   )
 }
