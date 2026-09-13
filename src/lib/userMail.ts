@@ -336,6 +336,50 @@ export async function fetchMailBody(mailId: string, accessToken: string): Promis
   return body.text ?? ''
 }
 
+/**
+ * One attachment off a message, handed to the browser to save.
+ *
+ * Nothing is stored in Raptor — the file is pulled out of the mailbox on demand and streamed
+ * straight through, which is the same bargain the CRM side already makes. At this mailbox's
+ * volume, copying every attachment in would be roughly 4 GB a year of files nobody opens.
+ *
+ * `accountEmailId` reads a debtor's correspondence rather than your own mail: the account's
+ * copy, readable by any collector, fetched from the mailbox it actually arrived in.
+ *
+ * A blob rather than a plain link, because the request needs an Authorization header and a link
+ * cannot carry one.
+ */
+export async function downloadAttachment(input: {
+  mailId?: string
+  accountEmailId?: string
+  filename: string
+  accessToken: string
+}): Promise<void> {
+  const res = await fetch('/api/email/attachment', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${input.accessToken}` },
+    body: JSON.stringify({
+      mailId: input.mailId,
+      accountEmailId: input.accountEmailId,
+      filename: input.filename,
+    }),
+  })
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(body.error ?? 'Could not download that attachment.')
+  }
+  const url = URL.createObjectURL(await res.blob())
+  try {
+    const link = document.createElement('a')
+    link.href = url
+    link.download = input.filename
+    link.click()
+  } finally {
+    // Revoked whatever happened, so a failed save does not leak the blob for the page's life.
+    URL.revokeObjectURL(url)
+  }
+}
+
 export async function markMailRead(ids: string[]): Promise<void> {
   if (ids.length === 0) return
   const { data, error } = await supabase

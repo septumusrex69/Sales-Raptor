@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, ExternalLink, Inbox, Link2,
-  Loader2, MoveRight, Paperclip, Reply, RefreshCw, Search, ShieldAlert, Trash2, Undo2, X,
+  Download, Loader2, MoveRight, Paperclip, Reply, RefreshCw, Search, ShieldAlert, Trash2,
+  Undo2, X,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal } from '../../components/ui/Modal'
@@ -18,7 +19,8 @@ import { ReadingPane } from '../../components/email/ReadingPane'
 import {
   blockedBy, blockSender, blockSenders, countNeedsFiling, deleteMail, domainBlockProblem,
   countUnread, domainOf, emptyJunk, fetchBlockedSenders, fetchMail, fetchMailBody,
-  linkMailToAccount, linkMailToRecord, markMailRead, moveFiledMail, setJunk, unblockSender,
+  downloadAttachment, linkMailToAccount, linkMailToRecord, markMailRead, moveFiledMail, setJunk,
+  unblockSender,
   type BlockedSender, type BlockOutcome, type LinkedRecord, type MailFilter, type MailItem,
 } from '../../lib/userMail'
 import { useAppStore } from '../../store/AppStore'
@@ -309,6 +311,26 @@ export function MailPage() {
   function startLink(mail: MailItem) {
     setLinkThenReply(false)
     setLinking(mail)
+  }
+
+  /** Which attachment is being fetched, and why the last one failed. */
+  const [downloading, setDownloading] = useState<string | null>(null)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
+
+  async function download(mail: MailItem, filename: string) {
+    const token = session?.access_token
+    if (!token) return
+    setDownloading(filename)
+    setDownloadError(null)
+    try {
+      await downloadAttachment({ mailId: mail.id, filename, accessToken: token })
+    } catch (e) {
+      // Beside the attachment rather than in the page's error line — it is about this one file,
+      // and the message itself is fine.
+      setDownloadError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setDownloading(null)
+    }
   }
 
   /** Moving a message that was filed on the wrong account. Administrators only. */
@@ -639,7 +661,9 @@ export function MailPage() {
                 <MailBody mail={m} body={bodies[m.id]} loadingBody={reading === m.id}
                   bodyError={readError[m.id]} onBlock={() => setBlocking(m)}
                   onReply={() => startReply(m)} onJunk={(j) => void junkOne(m, j)}
-                  onMove={mayRefile ? () => setMoving(m) : null} />
+                  onMove={mayRefile ? () => setMoving(m) : null}
+                  onDownload={(f) => void download(m, f)}
+                  downloading={downloading} downloadError={downloadError} />
               </div>
             )}
           />
@@ -675,7 +699,9 @@ export function MailPage() {
                   onLink={() => startLink(m)}
                   onReply={() => startReply(m)}
                   onJunk={(j) => void junkOne(m, j)}
-                  onMove={mayRefile ? () => setMoving(m) : null} />
+                  onMove={mayRefile ? () => setMoving(m) : null}
+                  onDownload={(f) => void download(m, f)}
+                  downloading={downloading} downloadError={downloadError} />
               ))}
             </ul>
           </>
@@ -1019,7 +1045,10 @@ function MailSummary({ mail, tight, blocked }: {
 }
 
 /** The message itself, shared by the expanded row and the reading pane. */
-function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply, onJunk, onMove }: {
+function MailBody({
+  mail, body, loadingBody, bodyError, onBlock, onReply, onJunk, onMove,
+  onDownload, downloading, downloadError,
+}: {
   mail: MailItem
   body?: string
   loadingBody: boolean
@@ -1030,6 +1059,11 @@ function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply, onJunk
   onJunk: (junk: boolean) => void
   /** Move it to the right account. Null for anyone who is not an administrator. */
   onMove: (() => void) | null
+  /** Pull one attachment out of the mailbox. */
+  onDownload: (filename: string) => void
+  /** The file currently being fetched, so its own button shows the wait. */
+  downloading: string | null
+  downloadError: string | null
 }) {
   return (
     <>
@@ -1066,12 +1100,27 @@ function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply, onJunk
       )}
 
       {mail.attachmentNames.length > 0 && (
-        <p className="text-xs text-slate-400 mt-3">
-          {/* Names only. The files stay in the mailbox — see fetchAttachment. */}
-          <Paperclip size={11} className="inline mr-1" />
-          {mail.attachmentNames.join(', ')}
-        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          {/*
+            The files themselves are still not stored — each of these fetches out of the mailbox
+            on demand and streams straight to the browser. Names alone were not enough: a debtor
+            attaching proof of income to a payment arrangement is exactly the attachment a
+            collector needs, and reading the filename then opening Outlook is not using Raptor.
+          */}
+          <Paperclip size={11} className="text-slate-400" />
+          {mail.attachmentNames.map((name) => (
+            <button key={name} onClick={() => onDownload(name)} disabled={downloading === name}
+              title={`Download ${name}`}
+              className="inline-flex items-center gap-1 max-w-full text-xs px-2 py-1 rounded-md border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50">
+              {downloading === name
+                ? <Loader2 size={11} className="shrink-0 animate-spin" />
+                : <Download size={11} className="shrink-0" />}
+              <span className="truncate">{name}</span>
+            </button>
+          ))}
+        </div>
       )}
+      {downloadError && <p className="text-xs text-negative-700 mt-1.5">{downloadError}</p>}
 
       {/*
         Everything you can do with an open message, in one row.
@@ -1148,7 +1197,7 @@ function MailBody({ mail, body, loadingBody, bodyError, onBlock, onReply, onJunk
 
 function MailRow({
   mail, chosen, expanded, selecting, blocked, body, loadingBody, bodyError, onToggle, onChoose,
-  onLink, onBlock, onReply, onJunk, onMove,
+  onLink, onBlock, onReply, onJunk, onMove, onDownload, downloading, downloadError,
 }: {
   mail: MailItem
   chosen: boolean
@@ -1168,6 +1217,9 @@ function MailRow({
   onReply: () => void
   onJunk: (junk: boolean) => void
   onMove: (() => void) | null
+  onDownload: (filename: string) => void
+  downloading: string | null
+  downloadError: string | null
 }) {
   const unread = !mail.readAt
   return (
@@ -1211,7 +1263,8 @@ function MailRow({
         <div className="px-5 pb-4 pl-[2.9rem]">
           <MailBody mail={mail} body={body} loadingBody={loadingBody}
             bodyError={bodyError} onBlock={onBlock} onReply={onReply} onJunk={onJunk}
-            onMove={onMove} />
+            onMove={onMove} onDownload={onDownload}
+            downloading={downloading} downloadError={downloadError} />
         </div>
       )}
     </li>

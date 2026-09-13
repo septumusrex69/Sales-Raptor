@@ -11,8 +11,10 @@ import { fetchAttachment, fetchMessageBody } from '../_lib/emailSync.js'
  * connection, find one message, take one thing out of it — so they share a handler rather than
  * the feature waiting on a billing change.
  *
- *   { activityId, filename }  one attachment off a CRM email, streamed as a download.
- *   { mailId }                the full text of one message in the caller's own mailbox.
+ *   { activityId, filename }      one attachment off a CRM email, streamed as a download.
+ *   { mailId }                    the full text of one message in the caller's own mailbox.
+ *   { mailId, filename }          one attachment off a message in the caller's own mailbox.
+ *   { accountEmailId, filename }  one attachment off a debtor's correspondence.
  *
  * Nothing is stored either way. The mailbox stays the archive and Raptor reaches into it when
  * somebody actually wants something — see fetchAttachment for why, given this mailbox's volume.
@@ -45,8 +47,84 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const { activityId, filename, mailId } = (req.body ?? {}) as {
-    activityId?: string; filename?: string; mailId?: string
+  const { activityId, filename, mailId, accountEmailId } = (req.body ?? {}) as {
+    activityId?: string; filename?: string; mailId?: string; accountEmailId?: string
+  }
+
+  /**
+   * Serve a file out of a mailbox, once we know the caller is entitled to it.
+   *
+   * Shared by all three branches so the two guards can never drift: the filename must be one the
+   * SYNC recorded on that message — otherwise this route becomes a way to pull arbitrary files
+   * out of a mailbox by guessing names — and the connection used is whichever mailbox actually
+   * received the mail.
+   */
+  async function serveAttachment(
+    conn: { email: string; imap_host: string; imap_port: number; encrypted_password: string },
+    location: { folder?: string | null; uid?: number | null; messageId?: string | null },
+    names: string[],
+    name: string,
+  ): Promise<boolean> {
+    if (!names.includes(name)) {
+      res.status(404).json({ error: 'That file is not attached to this email.' })
+      return true
+    }
+    const file = await fetchAttachment(conn, location, name)
+    if (!file) {
+      res.status(404).json({
+        error: 'Could not find that attachment — the original email may have been moved or deleted from the mailbox.',
+      })
+      return true
+    }
+    res.setHeader('Content-Type', file.contentType)
+    res.setHeader('Content-Disposition', `attachment; filename="${name.replace(/"/g, '')}"`)
+    res.status(200).send(file.content)
+    return true
+  }
+
+  /*
+   * An attachment on a debtor's correspondence.
+   *
+   * Readable by any signed-in collector, matching account_emails' own select policy: collectors
+   * cover for each other and the account's correspondence is the account's history. The FILE,
+   * though, lives in the mailbox of whoever received it, so the connection is looked up by
+   * received_by rather than by the caller — the same rule the CRM branch below uses.
+   */
+  if (accountEmailId && filename) {
+    const { data: mail } = await admin
+      .from('account_emails')
+      .select('id, received_by, email_folder, email_uid, message_id, attachment_names')
+      .eq('id', accountEmailId)
+      .maybeSingle()
+    if (!mail) {
+      res.status(404).json({ error: 'That email is no longer on the account.' })
+      return
+    }
+    if (!mail.received_by) {
+      res.status(400).json({ error: 'Raptor does not know which mailbox that email arrived in.' })
+      return
+    }
+    const { data: conn } = await admin.from('email_connections').select('*')
+      .eq('user_id', mail.received_by).maybeSingle()
+    if (!conn) {
+      res.status(400).json({ error: 'The mailbox this email came from is no longer connected.' })
+      return
+    }
+    try {
+      await serveAttachment(
+        conn as { email: string; imap_host: string; imap_port: number; encrypted_password: string },
+        {
+          folder: mail.email_folder as string | null,
+          uid: mail.email_uid as number | null,
+          messageId: mail.message_id as string | null,
+        },
+        ((mail.attachment_names as string[] | null) ?? []),
+        filename,
+      )
+    } catch (err) {
+      res.status(502).json({ error: err instanceof Error ? err.message : 'Could not reach the mailbox.' })
+    }
+    return
   }
 
   /*
@@ -59,7 +137,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (mailId) {
     const { data: mail } = await admin
       .from('user_emails')
-      .select('id, user_id, folder, uid, message_id')
+      .select('id, user_id, folder, uid, message_id, attachment_names')
       .eq('id', mailId)
       .eq('user_id', caller.id)
       .maybeSingle()
@@ -74,14 +152,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return
     }
 
+    const location = {
+      folder: mail.folder as string | null,
+      uid: mail.uid as number | null,
+      messageId: mail.message_id as string | null,
+    }
+
+    // An attachment on your own mail, rather than its text. Not logged, for the same reason
+    // reading the text is not: it is your mail, and you could open it in Outlook.
+    if (filename) {
+      try {
+        await serveAttachment(
+          own as { email: string; imap_host: string; imap_port: number; encrypted_password: string },
+          location,
+          ((mail.attachment_names as string[] | null) ?? []),
+          filename,
+        )
+      } catch (err) {
+        res.status(502).json({ error: err instanceof Error ? err.message : 'Could not reach your mailbox.' })
+      }
+      return
+    }
+
     try {
       const body = await fetchMessageBody(
         own as { email: string; imap_host: string; imap_port: number; encrypted_password: string },
-        {
-          folder: mail.folder as string | null,
-          uid: mail.uid as number | null,
-          messageId: mail.message_id as string | null,
-        },
+        location,
       )
       if (!body) {
         // The snippet Raptor holds is still shown, so the page says this rather than going blank.
