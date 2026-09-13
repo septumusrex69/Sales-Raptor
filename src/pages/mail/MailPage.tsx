@@ -17,8 +17,8 @@ import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
 import {
   blockedBy, blockSender, blockSenders, countNeedsFiling, deleteMail, domainBlockProblem,
-  domainOf, emptyJunk, fetchBlockedSenders, fetchMail, fetchMailBody, linkMailToAccount,
-  linkMailToRecord, markMailRead, setJunk, unblockSender,
+  countUnread, domainOf, emptyJunk, fetchBlockedSenders, fetchMail, fetchMailBody,
+  linkMailToAccount, linkMailToRecord, markMailRead, setJunk, unblockSender,
   type BlockedSender, type BlockOutcome, type LinkedRecord, type MailFilter, type MailItem,
 } from '../../lib/userMail'
 import { useAppStore } from '../../store/AppStore'
@@ -67,6 +67,16 @@ const debtorLabel = (a: DebtorAccount) =>
 export function MailPage() {
   const { currentUser, session } = useAuth()
   const [filter, setFilter] = useState<Pane>('all')
+  /*
+   * Unread, and whether the list is narrowed to it.
+   *
+   * A toggle rather than a sixth tab: "unread junk" and "unread that still needs filing" are
+   * both real questions, and a tab could only ever answer one of them. The count is scoped to
+   * whichever tab and search are active, so the number on the button is the number of rows
+   * pressing it leaves behind.
+   */
+  const [unread, setUnread] = useState(0)
+  const [unreadOnly, setUnreadOnly] = useState(false)
   const [blocking, setBlocking] = useState<MailItem | null>(null)
   const [blocked, setBlocked] = useState<BlockedSender[]>([])
   const [emptying, setEmptying] = useState(false)
@@ -116,15 +126,16 @@ export function MailPage() {
         return
       }
       const res = await fetchMail({
-        userId: currentUser.id, filter, search, offset: at * PAGE, limit: PAGE,
+        userId: currentUser.id, filter, search, unreadOnly, offset: at * PAGE, limit: PAGE,
       })
       setItems(res.items)
       setMore(res.more)
       setPage(at)
       setChosen(new Set())
       setLoadFailed(false)
-      // Alongside the page, so the badge tracks whatever the last action did.
+      // Alongside the page, so the badges track whatever the last action did.
       void countNeedsFiling(currentUser.id).then(setOutstanding).catch(() => {})
+      void countUnread(currentUser.id, { filter, search }).then(setUnread).catch(() => {})
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       /*
@@ -142,7 +153,7 @@ export function MailPage() {
     } finally {
       setLoading(false)
     }
-  }, [currentUser, filter, search])
+  }, [currentUser, filter, search, unreadOnly])
 
   useEffect(() => { void load(0) }, [load])
 
@@ -165,6 +176,7 @@ export function MailPage() {
    * answer is usually larger than that.
    */
   const [outstanding, setOutstanding] = useState(0)
+
 
   const [blocksVersion, setBlocksVersion] = useState(0)
   useEffect(() => {
@@ -413,7 +425,7 @@ export function MailPage() {
         </div>
 
         <div className="border-b border-slate-200">
-          <div className="px-5 flex gap-1 overflow-x-auto -mb-px">
+          <div className="px-5 flex items-center gap-1 overflow-x-auto -mb-px">
             {TABS.map((t) => (
               <button key={t.id} onClick={() => setFilter(t.id)} title={t.hint}
                 className={`shrink-0 px-3.5 py-2 text-sm font-medium border-b-2 inline-flex items-center gap-1.5 ${
@@ -432,6 +444,33 @@ export function MailPage() {
                 )}
               </button>
             ))}
+
+            {/*
+              Unread, at the right end of the same row — "at the top where there's All and
+              stuff", as the firm put it, so the fact that something is unread is visible
+              without reading a single row.
+
+              A toggle, not a tab: it narrows whichever tab you are on, so "unread junk" and
+              "unread that still needs filing" are both askable. The count is scoped to that
+              same tab and search, so it is exactly what pressing it leaves behind.
+            */}
+            {filter !== 'blocked' && (
+              <button
+                onClick={() => setUnreadOnly((on) => !on)}
+                aria-pressed={unreadOnly}
+                title={unreadOnly ? 'Show read messages as well' : 'Show only what you have not read'}
+                className={`shrink-0 ml-auto my-1 inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium transition-colors ${
+                  unreadOnly
+                    ? 'border-brand-500 bg-brand-500 text-white'
+                    : unread > 0
+                      ? 'border-brand-100 bg-brand-50 text-brand-700 hover:border-brand-500'
+                      : 'border-slate-200 text-slate-400 hover:border-slate-300'}`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  unreadOnly ? 'bg-white' : unread > 0 ? 'bg-brand-500' : 'bg-slate-300'}`} />
+                {unread > 0 ? `${unread > 99 ? '99+' : unread} unread` : 'No unread'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -518,7 +557,8 @@ export function MailPage() {
               </label>
             )}
             renderRow={(m) => (
-              <span className={`block px-3 py-2.5 ${!m.readAt ? 'bg-positive-50/40' : ''}`}>
+              <span className={`block px-3 py-2.5 border-l-[3px] ${
+                !m.readAt ? 'border-brand-500 bg-brand-50/60' : 'border-transparent'}`}>
                 <MailSummary mail={m} tight blocked={blocked} />
               </span>
             )}
@@ -824,8 +864,12 @@ function MailSummary({ mail, tight, blocked }: {
   return (
     <span className="block min-w-0">
       <span className="flex items-center gap-2">
-        {unread && <span className="w-1.5 h-1.5 rounded-full bg-positive shrink-0" />}
-        <span className={`text-sm truncate ${unread ? 'font-semibold text-navy-950' : 'font-medium text-slate-800'}`}>
+        {/*
+          Unread is carried by WEIGHT and by the bar down the left edge of the row, not by a
+          1.5px dot — the firm could not tell read from unread at a glance, and the dot was why:
+          it was the only signal, and it was the size of a full stop.
+        */}
+        <span className={`text-sm truncate ${unread ? 'font-bold text-navy-950' : 'font-medium text-slate-800'}`}>
           {mail.subject || '(no subject)'}
         </span>
         {mail.attachmentNames.length > 0 && <Paperclip size={12} className="shrink-0 text-slate-400" />}
@@ -837,7 +881,8 @@ function MailSummary({ mail, tight, blocked }: {
           <MailStatus mail={mail} blocked={blocked ?? []} tight={tight} />
         </span>
       </span>
-      <span className="block text-xs text-slate-400 mt-0.5 truncate">
+      <span className={`block text-xs mt-0.5 truncate ${
+        unread ? 'font-semibold text-slate-600' : 'text-slate-400'}`}>
         {mail.fromName || mail.fromAddress}
         {/* The address as well as the name, but not in the reading pane's narrow column, where
             it would push the date and the name out of sight. */}
@@ -1004,7 +1049,13 @@ function MailRow({
 }) {
   const unread = !mail.readAt
   return (
-    <li className={unread ? 'bg-positive-50/40' : undefined}>
+    /*
+      Unread wears a bar down its left edge, in the brand blue rather than the gold used for
+      selection — the two must not be mistakable for each other, since a row can be both.
+      Read rows keep a transparent bar of the same width so nothing shifts sideways as mail is
+      read, which would make the whole list twitch.
+    */
+    <li className={`border-l-[3px] ${unread ? 'border-brand-500 bg-brand-50/60' : 'border-transparent'}`}>
       <div className="px-5 py-3 flex items-start gap-3">
         {/*
           The checkbox sits OUTSIDE the button that opens the message. Nesting one inside the

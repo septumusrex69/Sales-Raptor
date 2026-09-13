@@ -185,27 +185,41 @@ export type MailFilter = 'needs-filing' | 'filed' | 'junk' | 'all'
  * 2 000 rows per agent. `search` matches sender and subject — the two things somebody actually
  * remembers about an email they are looking for.
  */
-export async function fetchMail(input: {
-  userId: string
+/** What a mailbox query is narrowed by — shared so the list and its count cannot disagree. */
+export interface MailScope {
   filter: MailFilter
   search?: string
-  /** Rows to skip, for paging. */
-  offset?: number
-  limit?: number
-}): Promise<{ items: MailItem[]; more: boolean }> {
-  const limit = input.limit ?? 50
-  const offset = input.offset ?? 0
+  /** Only messages not yet read. Composes with the tab rather than replacing it. */
+  unreadOnly?: boolean
+}
 
-  let q = supabase.from('user_emails').select(COLUMNS).eq('user_id', input.userId)
+/**
+ * Apply a scope to a user_emails query.
+ *
+ * Extracted because the unread COUNT on the tab strip has to mean exactly what the unread LIST
+ * shows. Two copies of these clauses would drift the first time one of them changed, and the
+ * symptom is the worst kind: a badge that says 3 over a list of 5.
+ *
+ * The cast is deliberate. Constraining the generic to PostgrestFilterBuilder's own shape makes
+ * tsc give up with "type instantiation is excessively deep" — its generics carry the whole row
+ * type through every call. Narrowable names only the three methods used here, and each of them
+ * genuinely returns the same builder, so the cast back to Q is sound.
+ */
+interface Narrowable {
+  eq(column: string, value: unknown): Narrowable
+  is(column: string, value: unknown): Narrowable
+  or(filters: string): Narrowable
+}
 
-  // Junk is its own view rather than a flag on the others: a mailbox that mixes spam into the
-  // list of things needing attention is a list nobody works.
+function scope<Q>(q: Q, input: MailScope): Q {
+  let out = q as Narrowable
+
   // is_filed, not linked_account_id: a message filed against a lead or a client IS filed. See
   // the generated column in schema.sql — it is what keeps these tabs, the delete guard, the
   // retention prune and the sidebar badge all answering the question the same way.
-  if (input.filter === 'needs-filing') q = q.eq('is_filed', false).eq('is_junk', false)
-  else if (input.filter === 'filed') q = q.eq('is_filed', true)
-  else if (input.filter === 'junk') q = q.eq('is_junk', true)
+  if (input.filter === 'needs-filing') out = out.eq('is_filed', false).eq('is_junk', false)
+  else if (input.filter === 'filed') out = out.eq('is_filed', true)
+  else if (input.filter === 'junk') out = out.eq('is_junk', true)
   /*
    * "All" means the whole mailbox EXCEPT junk, at the firm's instruction: "normal mailbox goes
    * to all, junk still goes to junk, junk doesn't go to all".
@@ -221,14 +235,55 @@ export async function fetchMail(input: {
    * Without that, a debtor's reply the mail server misfiled as spam would be rescued onto an
    * account and then vanish from All anyway.
    */
-  else if (input.filter === 'all') q = q.eq('is_junk', false)
+  else if (input.filter === 'all') out = out.eq('is_junk', false)
+
+  /*
+   * Unread NARROWS whichever tab you are on rather than being a sixth tab of its own.
+   *
+   * "Unread junk" and "unread that still needs filing" are both real questions, and a tab could
+   * only answer one of them. A toggle answers all five.
+   */
+  if (input.unreadOnly) out = out.is('read_at', null)
 
   const term = input.search?.trim()
   if (term) {
     // Commas and parentheses would be read as `or()` syntax rather than as text.
     const safe = term.replace(/[,()]/g, ' ')
-    q = q.or(`from_address.ilike.%${safe}%,subject.ilike.%${safe}%,from_name.ilike.%${safe}%`)
+    out = out.or(`from_address.ilike.%${safe}%,subject.ilike.%${safe}%,from_name.ilike.%${safe}%`)
   }
+
+  return out as Q
+}
+
+/**
+ * How many messages in this view are unread.
+ *
+ * Scoped to the same tab and search the list is showing, so the number on the toggle is the
+ * number of rows the toggle would leave behind. Counted in the database — the page is 50 rows
+ * and the answer is routinely larger.
+ */
+export async function countUnread(userId: string, input: MailScope): Promise<number> {
+  const { count, error } = await scope(
+    supabase.from('user_emails').select('id', { count: 'exact', head: true }).eq('user_id', userId),
+    { ...input, unreadOnly: true },
+  )
+  if (error) throw new Error(error.message)
+  return count ?? 0
+}
+
+export async function fetchMail(input: MailScope & {
+  userId: string
+  /** Rows to skip, for paging. */
+  offset?: number
+  limit?: number
+}): Promise<{ items: MailItem[]; more: boolean }> {
+  const limit = input.limit ?? 50
+  const offset = input.offset ?? 0
+
+  const q = scope(
+    supabase.from('user_emails').select(COLUMNS).eq('user_id', input.userId),
+    input,
+  )
 
   // One row past the page, so "is there more" needs no second count query.
   const { data, error } = await q
