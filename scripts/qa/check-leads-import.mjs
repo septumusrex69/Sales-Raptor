@@ -16,7 +16,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-leads-import.mjs
  */
 import {
-  planLeadsImport, leadInsertRows, oneAmount, isoDate, statusFor, sourceFor, rejectionFor,
+  planLeadsImport, leadInsertRows, readAmount, loneAmount, isoDate, statusFor, sourceFor, rejectionFor,
   splitName, SheetColumns, splitMarketers, marketerCredits, ownerFor, phoneNumber,
 } from '../../src/lib/leadsImport.ts'
 import { plainNumber } from '../../src/lib/xlsx.ts'
@@ -141,33 +141,109 @@ check('either() takes whichever spelling the tab uses',
   [new SheetColumns(HEADERS.narrow).either('Rejection reason', 'Reason'),
     new SheetColumns(HEADERS.common).either('Rejection reason', 'Reason')], [20, 21])
 
-/* ---------- 3. amounts: one figure, or a person ---------- */
-
-check('a plain number', oneAmount('35000'), { value: 35000, messy: false })
-check('South African spacing', oneAmount('1 250 000'), { value: 1250000, messy: false })
-check('a non-breaking space, which is what Excel leaves behind',
-  oneAmount('1 250 000'), { value: 1250000, messy: false })
-check('a rand sign', oneAmount('R450 000'), { value: 450000, messy: false })
-check('cents with a comma', oneAmount('12 500,50'), { value: 12500.5, messy: false })
-check('cents with a full stop', oneAmount('12500.50'), { value: 12500.5, messy: false })
-check('empty is empty, not messy', oneAmount(''), { value: null, messy: false })
-check('a dash means not applicable', oneAmount('-'), { value: null, messy: false })
-check('nothing at all', oneAmount(undefined), { value: null, messy: false })
-
-// Every one of these is a real cell out of the workbook.
-check('a range needs a person', oneAmount('42 000-362 000(810 000)'), { value: null, messy: true })
-check('two figures need a person', oneAmount('50 000 / 120 000'), { value: null, messy: true })
-check('words need a person', oneAmount('approx R2m'), { value: null, messy: true })
-check('a figure with a comment needs a person',
-  oneAmount('350 000 (still confirming)'), { value: null, messy: true })
+/* ---------- 3. what the handover is worth ---------- */
 
 /*
- * The bug this pattern exists for: stripping the punctuation out of "42 000-362 000(810 000)"
+ * 192 of the 1,818 cells hold more than one figure, and they do not all mean the same thing.
+ * The notes beside them settle it: "20 acc from 500- 2 000" and "Outstanding debt will range
+ * from R 1000 to R 20 000" say a DASH is the size of one account, while "1500+2500" against a
+ * count of 2 is "two jobs two different people" — an AMPERSAND OR PLUS is separate accounts.
+ */
+
+const amount = (cell, accounts = null) => readAmount(cell, accounts).value
+
+/* --- one figure, however it was decorated --- */
+check('a plain number', loneAmount('35000'), 35000)
+check('South African spacing', loneAmount('1 250 000'), 1250000)
+check('a non-breaking space, which is what Excel leaves behind',
+  loneAmount('1 250 000'), 1250000)
+check('a rand sign', loneAmount('R450 000'), 450000)
+check('cents with a comma', loneAmount('12 500,50'), 12500.5)
+check('cents with a full stop', loneAmount('12500.50'), 12500.5)
+check('a comma grouping thousands', loneAmount('1,300 000'), 1300000)
+check('about', loneAmount('40 000~'), 40000)
+check('plus or minus', loneAmount('35 000+-'), 35000)
+check('a minimum is still a figure', loneAmount('Minimum 40 000'), 40000)
+check('thousands shorthand', loneAmount('17k'), 17000)
+check('millions shorthand', loneAmount('8.5 m'), 8500000)
+check('words that are not a number', loneAmount('ask reception'), null)
+check('a foreign currency is not rands', loneAmount('$5000'), null)
+
+/* --- a range: the size of one account, so the book is that times however many --- */
+check('a range without a count is just its middle', amount('1 000-100 000'), 50500)
+check('a range across 50 accounts', amount('1 000-100 000', 50), 2525000)
+check('the real one from the workbook', amount('500-2 000', 20), 25000)
+check('spaces around the dash', amount('20 000 - 60 000', 2), 80000)
+check('no spaces at all', amount('2000-100000', 2), 102000)
+check('a count of one changes nothing', amount('300-3 000', 1), 1650)
+// Without the multiplication a 144-account book comes in at thirty thousand rand.
+ok('a big book is not valued as one account',
+  amount('1800-64 000', 144) > 4_000_000)
+check('a backwards range is not a range', amount('100 000-2 000'), null)
+
+/* --- several amounts: separate accounts, added up --- */
+check('two, ampersand', amount('135 000&185 000', 2), 320000)
+check('two, plus', amount('1500+2500', 2), 4000)
+check('two, plus, larger', amount('60 000+30 000', 2), 90000)
+check('three', amount('43 000&15 000&90 000', 3), 148000)
+check('a slash', amount('600 000/880 000', 2), 1480000)
+check('a comma separating two figures, not grouping one', amount('11 100,2800'), 13900)
+check('an amount and a range together', amount('8 000&1000-3000', 6), 10000)
+check('spaces around the ampersand', amount('900 & 2907', 2), 3807)
+check('a list is never multiplied by the count — the figures are the accounts',
+  amount('135 000&185 000', 50), 320000)
+
+check('at least this much', loneAmount('100 000+'), 100000)
+check('a range with an open top end', amount('7 000 - 1 000 000+', 10), 5035000)
+check('"and" joins a list like an ampersand does', amount('17k and 7k', 2), 24000)
+// "1500+2500" is two accounts, not one figure with a trailing plus.
+check('a plus between two figures still adds them', amount('1500+2500', 2), 4000)
+
+/* --- and what it still refuses --- */
+check('dollars', amount('$5000'), null)
+check('dollars spelled out', amount('15000USD'), null)
+check('a figure with another bracketed inside it', amount('225 000(14 500-155 000)'), null)
+check('a range with a bracketed total', amount('42 000-362 000(810 000)'), null)
+check('a malformed group', amount('1 500 00,654 000'), null)
+check('half a shorthand', amount('50 000-21.M'), null)
+check('empty is empty', amount(''), null)
+check('a dash means not applicable', amount('-'), null)
+check('nothing at all', amount(undefined), null)
+
+/*
+ * The bug the strictness exists for: stripping the punctuation out of "42 000-362 000(810 000)"
  * and keeping the digits gives 42000362000810000. Across the book that produced a total of
  * sixty-five quadrillion rand, which is how it was noticed.
  */
-ok('a range is never concatenated into one huge number',
-  oneAmount('42 000-362 000(810 000)').value !== 42000362000810000)
+ok('no reading ever concatenates the digits',
+  amount('42 000-362 000(810 000)') !== 42000362000810000)
+
+/* --- a figure that was worked out says so, on the lead --- */
+const ranged = readAmount('500-2 000', 20)
+ok('a range explains itself', ranged.basis.includes('"500-2 000"') && ranged.basis.includes('20'))
+ok('and says it is the middle of the range', ranged.basis.includes('middle'))
+const added = readAmount('135 000&185 000', 2)
+ok('a list explains itself', added.basis.includes('added together'))
+ok('and quotes the cell', added.basis.includes('"135 000&185 000"'))
+check('a plain figure needs no explanation', readAmount('35 000', 4).basis, null)
+check('and neither does one nobody could read', readAmount('$5000', 1).basis, null)
+
+/*
+ * The count multiplies a range into a handover value, so being out by a thousand here is out by
+ * a thousand on the value of the lead. "Medical practice over 2k acc" has its count written
+ * "2 000", and reading only the first run of digits made it a two-account practice.
+ */
+const counted = (n) => only(oneLead('common',
+  { ...LEAD, 'No. of Acc.': n, 'Handover Amount': '600-8 000' }))
+check('a plain count', counted('12').estimatedAccountsCount, 12)
+check('a count Excel wrote as a float', counted('12.0').estimatedAccountsCount, 12)
+check('a count with its thousands spaced', counted('2 000').estimatedAccountsCount, 2000)
+check('a count with a word after it', counted('12 accounts').estimatedAccountsCount, 12)
+check('a range of counts takes the lower', counted('20-30').estimatedAccountsCount, 20)
+check('an open-ended count takes the figure', counted('10+').estimatedAccountsCount, 10)
+check('no count is no count', counted('').estimatedAccountsCount, null)
+check('and a thousand accounts are valued as a thousand',
+  counted('2 000').estimatedHandoverAmount, 8600000)
 
 /* ---------- 4. dates that are not dates ---------- */
 
@@ -253,12 +329,40 @@ ok('the stage is never labelled as a rejection reason',
   !stageLead.notes.includes('Rejection reason as written: Mandate sent'))
 
 const messy = only(oneLead('common', { ...LEAD, 'Handover Amount': '42 000-362 000(810 000)' }))
-check('a messy amount is left empty', messy.estimatedHandoverAmount, null)
+check('an unreadable amount is left empty', messy.estimatedHandoverAmount, null)
 ok('and the cell is kept word for word',
   messy.notes.includes('Handover amount as written: "42 000-362 000(810 000)"'))
 
+// A worked-out figure must never appear in Raptor without the lead saying where it came from.
+const fromRange = only(oneLead('common', { ...LEAD, 'Handover Amount': '500-2 000', 'No. of Acc.': '20' }))
+check('a range becomes a figure', fromRange.estimatedHandoverAmount, 25000)
+ok('and the lead says how',
+  fromRange.notes.includes('"500-2 000"') && fromRange.notes.includes('middle'))
+
 const signedOff = only(oneLead('common', { ...LEAD, 'Date signed': '2025/04/02' }))
 ok('the sign date is kept', signedOff.notes.includes('Signed 2025-04-02'))
+
+/*
+ * A tidied sheet has already turned a range into a figure, so the cell holds a plain number and
+ * the original wording sits beside it. Without this the worked-out figures arrive looking
+ * exactly like quoted ones, which is the thing all of the above exists to prevent.
+ */
+const tidied = planLeadsImport([{
+  name: 'Leads',
+  rows: [
+    [...HEADERS.common, 'Handover Amount as written'],
+    [...laidOut(HEADERS.common, { ...LEAD, 'Handover Amount': '2525000', 'No. of Acc.': '50' }),
+      '1 000-100 000'],
+  ],
+}]).rows[0]
+check('the figure in the cell is the figure', tidied.estimatedHandoverAmount, 2525000)
+ok('and the lead says it was worked out rather than quoted',
+  tidied.notes.includes('"1 000-100 000"') && tidied.notes.includes('not quoted'))
+ok('with the figure in it, so the note reads on its own',
+  tidied.notes.includes('R2 525 000'))
+
+// A plainly quoted figure gets no such line — there is nothing to explain.
+ok('a quoted figure explains nothing', !common.notes.includes('not quoted'))
 
 /* ---------- 9. rejection is a status, not a column ---------- */
 
@@ -494,5 +598,5 @@ if (failures.length) {
   process.exit(1)
 }
 console.log(`PASS — ${pass} checks: the same lead reads identically off three differently-shaped`)
-console.log('       tabs, an amount written three ways in one cell waits for a person rather than')
-console.log('       becoming a number, and nothing the spreadsheet says is dropped unlabelled.')
+console.log('       tabs, a dash means the size of one account while an ampersand means several,')
+console.log('       and no figure reaches a lead without the lead saying where it came from.')
