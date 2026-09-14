@@ -10,6 +10,8 @@ import {
 } from '../../lib/diaryPriority.ts'
 import { diarise } from '../../lib/diary.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
+import { DictateButton } from '../ui/Dictate'
+import { appendSpeech } from '../../lib/dictation.ts'
 
 /**
  * Put an account back in somebody's diary.
@@ -138,9 +140,13 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
             placeholder="Said he would pay R2 000 on the 25th once his commission is in."
             className={`${inputClass} resize-none`}
           />
-          <span className="block text-[11px] text-slate-400 mt-1.5">
-            Goes on the account&rsquo;s timeline as well as the diary.
-          </span>
+          <div className="flex flex-wrap items-center gap-2 mt-1.5">
+            {/* Talk it instead of typing it. Free, built into the browser — see Dictate.tsx. */}
+            <DictateButton size="small" onText={(said) => setReason((r) => appendSpeech(r, said))} />
+            <span className="text-[11px] text-slate-400">
+              Goes on the account&rsquo;s timeline as well as the diary.
+            </span>
+          </div>
         </FormField>
 
         {/*

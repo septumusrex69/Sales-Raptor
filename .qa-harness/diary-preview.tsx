@@ -12,6 +12,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { DiaryDatePicker } from '../src/components/diary/DiaryDatePicker'
 import { DiaryList } from '../src/pages/diary/DiaryPage'
 import { DiaryWorkBar } from '../src/components/diary/DiaryWorkBar'
+import { DictateButton } from '../src/components/ui/Dictate'
 import { DashboardHero } from '../src/components/dashboard/DashboardHero'
 
 const workAccount = {
@@ -59,6 +60,16 @@ function App() {
         {[390, 768, 1280].map((w) => (
           <Row key={w} label="picker" width={w}>
             <DiaryDatePicker ownerId="x" capacity={30} value="2026-09-18" onChange={() => {}} today="2026-09-14" />
+          </Row>
+        ))}
+        {[390, 700].map((w) => (
+          <Row key={'d' + w} label="dictate" width={w}>
+            <label className="block">
+              <span className="text-xs font-medium text-slate-500">What came of it</span>
+              <textarea rows={2} defaultValue="Spoke to him. Says the insurance pays out on the 28th."
+                className="w-full mt-1 rounded-lg border border-slate-200 px-3 py-2 text-sm resize-none" />
+              <div className="mt-1.5"><DictateButton size="small" onText={() => {}} /></div>
+            </label>
           </Row>
         ))}
         {[390, 640, 1024, 1400].map((w) => (

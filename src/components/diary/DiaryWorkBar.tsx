@@ -9,6 +9,8 @@ import { fetchDay, workEntry, type DiaryRow } from '../../lib/diary.ts'
 import { DIARY_KINDS } from '../../lib/diaryPriority.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
 import { refreshNavCounts } from '../../lib/navCounts'
+import { DictateButton } from '../ui/Dictate'
+import { appendSpeech } from '../../lib/dictation.ts'
 
 /**
  * Working a diary, one account after another, without going back to a list between each.
@@ -226,6 +228,13 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
           <textarea value={outcome} onChange={(e) => setOutcome(e.target.value)} rows={2} autoFocus
             placeholder="Spoke to him. Says the insurance pays out on the 28th and he will settle then."
             className={`${inputClass} resize-none`} />
+          {/*
+            The one that matters most. An agent working sixty accounts has just put the phone
+            down and is about to type the same shape of sentence for the sixtieth time.
+          */}
+          <div className="mt-1.5">
+            <DictateButton size="small" onText={(said) => setOutcome((o) => appendSpeech(o, said))} />
+          </div>
         </FormField>
 
         {/* Same question, same rules, same component as the day list's Done — see NextDiaryFields. */}

@@ -13,6 +13,8 @@ import {
   dialableNumber,
   type AccountContact, type AccountDocument, type ContactKind, type Workspace,
 } from '../../lib/accountWorkspace'
+import { DictateButton } from '../../components/ui/Dictate'
+import { appendSpeech } from '../../lib/dictation.ts'
 
 /** Surfaces a failed write instead of leaving a button that silently did nothing. */
 export function useWriter(onChange: () => Promise<void>) {
@@ -668,6 +670,10 @@ export function MainComment({ account, onSave, busy }: {
         <textarea value={draft} onChange={(e) => setDraft(e.target.value)} autoFocus rows={3}
           placeholder="What is going on with this account? Two lines is plenty."
           className="w-full text-sm rounded-lg border border-gold-100 px-3 py-2 resize-none bg-white focus:outline-none focus:ring-2 focus:ring-gold-100" />
+        {/* Talk it instead of typing it. Free, built into the browser — see Dictate.tsx. */}
+        <div className="mt-2">
+          <DictateButton size="small" onText={(said) => setDraft((d) => appendSpeech(d, said))} />
+        </div>
         <div className="flex items-center gap-2 mt-2">
           <button disabled={busy}
             onClick={async () => { await onSave(draft); setEditing(false) }}
