@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
-  AlertTriangle, ArrowLeft, CalendarClock, Check, CheckCircle2, Loader2, Mail, MessageCircle,
+  AlertTriangle, ArrowLeft, AlarmClock, CalendarClock, Check, CheckCircle2, Loader2, Mail, MessageCircle,
   MessageSquare, Phone, Plus, Printer, ShieldAlert, StickyNote, X, XCircle,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
@@ -35,6 +35,7 @@ import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
 import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
 import { DiariseModal } from '../../components/diary/DiariseModal'
+import { RemindModal } from '../../components/reminders/RemindModal'
 import { fetchQueries, type AccountQuery } from '../../lib/accountQueries'
 import {
   fetchAccountEmails, markRepliesRead, recordSentEmail, replySubject, type AccountEmail,
@@ -115,6 +116,7 @@ export function AccountDetail() {
   const [disputing, setDisputing] = useState(false)
   const [smsOpen, setSmsOpen] = useState(false)
   const [diariseOpen, setDiariseOpen] = useState(false)
+  const [remindOpen, setRemindOpen] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -460,6 +462,7 @@ export function AccountDetail() {
         onDispute={() => setDisputing(true)}
         onSms={() => setSmsOpen(true)}
         onDiarise={() => setDiariseOpen(true)}
+        onRemind={() => setRemindOpen(true)}
         accountId={account.id}
         actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
         onTraced={reload}
@@ -560,6 +563,16 @@ export function AccountDetail() {
 
       {/* Choosing when it comes back. Charges nothing — it is a note about a day, not an action
           against the debtor. */}
+      {/* A nudge inside this shift rather than a day in the queue — see reminders.ts. */}
+      {remindOpen && (
+        <RemindModal
+          accountId={account.id}
+          who={[account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ').trim()
+            || account.accountNumber || 'this debtor'}
+          onClose={() => setRemindOpen(false)}
+        />
+      )}
+
       {diariseOpen && (
         <DiariseModal
           accountId={account.id}
@@ -644,7 +657,7 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onDiarise, accountId, actor, onTraced }: {
+function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onDiarise, onRemind, accountId, actor, onTraced }: {
   /** The number SMS goes to, and what the row shows when there is no number at all. */
   callNumber?: string
   /** Every number that could reach this debtor, primary first. */
@@ -656,6 +669,8 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
   onSms: () => void
   /** Put the account in somebody's diary. Charges nothing — it is a note about when, not an action. */
   onDiarise: () => void
+  /** A nudge inside this shift — "ring me back in an hour". Not the diary; see reminders.ts. */
+  onRemind: () => void
   /** The account being worked, and who is working it — Call and Trace both charge fees. */
   accountId: string
   actor: { id: string | null; name: string | null }
@@ -710,6 +725,15 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
       */}
       <Action icon={CalendarClock} label="Diarise" onClick={onDiarise}
         title="Choose the day this comes back — and see how full that day already is" />
+      {/*
+        Beside Diarise because they answer the same question at two scales, and the difference is
+        the whole reason both exist. Diarise is DAYS: it puts the account in a queue somebody
+        sits down to work. Remind me is THIS SHIFT: the debtor said ring me back in an hour, and
+        an hour is not a day. Sending that to the diary would either land it in tomorrow's count
+        or lose it at midnight, and the debtor was told neither.
+      */}
+      <Action icon={AlarmClock} label="Remind me" onClick={onRemind}
+        title="A nudge later today — it pops up wherever you are" />
     </RecordActions>
   )
 }

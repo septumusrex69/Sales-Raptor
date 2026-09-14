@@ -15,6 +15,7 @@ import { DiaryList } from '../src/pages/diary/DiaryPage'
 import { DiaryWorkBar } from '../src/components/diary/DiaryWorkBar'
 import { DictateButton } from '../src/components/ui/Dictate'
 import { DashboardHero } from '../src/components/dashboard/DashboardHero'
+import { ReminderWatcher } from '../src/components/reminders/ReminderWatcher'
 
 const workAccount = {
   id: 'a1', mainComment: null, mainCommentAt: null, prescriptionDate: '2027-01-01',
@@ -102,6 +103,20 @@ function App() {
                 <span />
               </DashboardHero>
               <DiaryWorkBar account={workAccount} />
+            </div>
+          </Row>
+        ))}
+        {[390, 640, 1024].map((w) => (
+          <Row key={'rem' + w} label="reminder" width={w}>
+            {/*
+              The popup is position:fixed in the app, which would escape the Row and measure
+              against the window. Pinned inside the probe by harness CSS in index.html rather
+              than by Tailwind classes here — an arbitrary class used ONLY in this file is one
+              Tailwind never scanned, so it is absent from the compiled stylesheet and silently
+              does nothing. That cost a reading once already.
+            */}
+            <div className="reminder-probe">
+              <ReminderWatcher />
             </div>
           </Row>
         ))}

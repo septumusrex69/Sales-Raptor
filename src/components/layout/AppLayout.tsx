@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { TitleSlotProvider } from './TitleSlot'
+import { ReminderWatcher } from '../reminders/ReminderWatcher'
 
 const TITLES: { test: RegExp; title: string }[] = [
   { test: /^\/$/, title: 'Dashboard' },
@@ -41,6 +42,12 @@ export function AppLayout() {
             <Outlet />
           </main>
         </div>
+        {/*
+          Mounted around every page, not on the account it belongs to. A reminder that only
+          appeared on that account would be useless by definition — the whole point is that an
+          hour has passed and you are somewhere else.
+        */}
+        <ReminderWatcher />
       </div>
     </TitleSlotProvider>
   )
