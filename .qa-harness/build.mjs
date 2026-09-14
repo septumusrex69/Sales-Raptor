@@ -16,6 +16,9 @@ const stub = {
     build.onResolve({ filter: /store\/AppStore$/ }, () => ({
       path: path.resolve('.qa-harness/store-stub.ts'),
     }))
+    build.onResolve({ filter: /store\/ThemeContext$/ }, () => ({
+      path: path.resolve('.qa-harness/theme-stub.ts'),
+    }))
   },
 }
 

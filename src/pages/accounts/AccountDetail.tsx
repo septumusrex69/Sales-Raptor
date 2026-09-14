@@ -387,6 +387,18 @@ export function AccountDetail() {
       </DashboardHero>
 
       {/*
+        Only when the account was opened FROM the diary. An account looked up by name is just an
+        account; one reached by working a queue gets the queue's controls.
+
+        Directly under the band, at the firm's instruction, and it has now been in three places:
+        fixed to the bottom of the window (which cost eighty pixels of every screen), then between
+        the comment and the actions. Here is right, and the reason is that it is not really about
+        this account at all — it says where you are in a queue of sixty-six and offers the way on.
+        That belongs with the page's chrome, in the first screenful, never scrolled past.
+      */}
+      <DiaryWorkBar account={account} onWorked={reload} />
+
+      {/*
         One number, not two. "Balance" and "To settle today" differ by the receipt fee, and a
         collector reading two figures a few hundred rand apart has to work out which one to quote
         — so only the one they quote is here. The other is on the Transactions tab, in the
@@ -434,18 +446,6 @@ export function AccountDetail() {
 
       <MainComment account={account} busy={savingComment}
         onSave={(text) => runComment(() => saveMainComment(account.id, text, currentUser?.id ?? null))} />
-
-      {/*
-        Only when the account was opened FROM the diary. An account looked up by name is just an
-        account; one reached by working a queue gets the queue's controls.
-
-        Sits between the comment and the actions at the firm's instruction, and it reads better
-        there than it did: you arrive, read the two lines that say where this account stands, see
-        what the diary wanted of you, and then reach for the phone. It was a bar fixed to the
-        bottom of the window, which cost eighty pixels of screen on every account and put the
-        controls furthest from the thing they act on.
-      */}
-      <DiaryWorkBar account={account} onWorked={reload} />
 
       <ActionBar
         callNumber={callContact?.value}
