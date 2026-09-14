@@ -2312,3 +2312,57 @@ drop trigger if exists sync_account_diary_date on public.diary_entries;
 create trigger sync_account_diary_date
   after insert or update or delete on public.diary_entries
   for each row execute function public.sync_account_diary_date();
+
+-- ---------- Reminders: "call me back in an hour" ----------
+--
+-- NOT the diary, and a separate table on purpose. The diary works in DAYS: it is the queue of
+-- accounts somebody sits down to work, ordered by a priority ladder, and an entry in it is the
+-- unit a team leader counts. A reminder lives inside one shift — minutes and hours — and exists
+-- only until the person does it. A 15:40 callback put in the diary would either pollute
+-- tomorrow's count or disappear at midnight, and the debtor was promised neither.
+create table if not exists public.account_reminders (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  -- Whose screen it pops on. Not nullable: an unowned reminder reminds nobody.
+  owner_id uuid not null references public.profiles (id) on delete cascade,
+  due_at timestamptz not null,
+  body text not null,
+  -- waiting   not yet done; pops when due and keeps popping until it is answered
+  -- done      the person confirmed they did it
+  -- cancelled called off before it came round
+  state text not null default 'waiting' check (state in ('waiting', 'done', 'cancelled')),
+  -- How many times it was pushed back. Kept because a reminder snoozed nine times is something
+  -- a team leader should be able to see, and because it stops a snooze leaving no trace.
+  snoozes smallint not null default 0,
+  done_at timestamptz,
+  created_at timestamptz not null default now(),
+  created_by uuid references public.profiles (id) on delete set null
+);
+
+-- The watcher's only query, running once every thirty seconds per signed-in agent: my waiting
+-- reminders that are due. Partial, because nothing else is ever asked for.
+create index if not exists account_reminders_due_idx
+  on public.account_reminders (owner_id, due_at)
+  where state = 'waiting';
+
+create index if not exists account_reminders_account_idx
+  on public.account_reminders (account_id, due_at desc);
+
+alter table public.account_reminders enable row level security;
+grant select, insert, update, delete on public.account_reminders to authenticated;
+
+-- Read open, like the rest of the debtor side: a team leader has to see what an agent is sitting
+-- on. Changing one is the owner's own business, or an administrator's.
+drop policy if exists account_reminders_select on public.account_reminders;
+create policy account_reminders_select on public.account_reminders
+  for select to authenticated using (auth.uid() is not null);
+
+drop policy if exists account_reminders_insert on public.account_reminders;
+create policy account_reminders_insert on public.account_reminders
+  for insert to authenticated with check (auth.uid() is not null);
+
+drop policy if exists account_reminders_update on public.account_reminders;
+create policy account_reminders_update on public.account_reminders
+  for update to authenticated
+  using (owner_id = auth.uid() or public.current_user_role() = 'Administrator')
+  with check (owner_id = auth.uid() or public.current_user_role() = 'Administrator');

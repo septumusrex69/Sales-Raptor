@@ -22,6 +22,12 @@ const stub = {
     build.onResolve({ filter: /store\/ThemeContext$/ }, () => ({
       path: path.resolve('.qa-harness/theme-stub.ts'),
     }))
+    // The reminder popup would otherwise poll Supabase every thirty seconds from the harness.
+    build.onResolve({ filter: /lib\/reminders\.ts$/ }, (args) => (
+      args.importer.includes('reminders-stub')
+        ? null
+        : { path: path.resolve('.qa-harness/reminders-stub.ts') }
+    ))
   },
 }
 

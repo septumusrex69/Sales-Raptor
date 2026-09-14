@@ -49,3 +49,18 @@ references the brand mark as a **root-relative** URL (`/brand/raptor-mark.png`),
 against `public/` when the app is served from `/` and against the filesystem root under `file://`.
 The file is in the repo and loads fine in the real app. Ignore it; any *other* console error is
 real.
+
+## The stylesheet hash goes stale, again and again
+
+`index.html` links a HASHED file out of `dist/`, and `npm run build` gives it a new name every
+time the CSS content changes. Point it at the old one and the page renders completely unstyled —
+which does not look like a broken link, it looks like a layout bug you are about to go and fix.
+It has now cost two readings. Before shooting:
+
+    ls -t dist/assets/*.css | head -1     # and put that filename in index.html
+
+## Arbitrary Tailwind classes do not work in here
+
+This directory is not scanned by Tailwind, so a class like `h-[280px]` or `[&_.fixed]:absolute`
+written ONLY in a harness file is never emitted and silently does nothing. Use the plain CSS
+block in index.html for harness-only layout, as `.reminder-probe` does.
