@@ -45,7 +45,7 @@ import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPat
 import { summaryLine } from '../../lib/summaryLine'
 import { hasDealValue } from '../../lib/dealKind'
 
-type LeadTab = 'Overview' | 'Emails' | 'Tasks'
+type LeadTab = 'Overview' | 'Emails' | 'Notes' | 'Tasks'
 
 export function LeadDetail() {
   const focusedEmailId = useFocusedEmailId()
@@ -340,12 +340,12 @@ export function LeadDetail() {
 
   /** What they say they will hand over, per service. */
   const opportunityPanel = (
-    <Card>
+    <Card className="@container">
       <CardHeader title="Opportunity Information" />
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
+      <dl className="grid grid-cols-1 @sm:grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
         {leadServiceValueList(lead).map((sv) =>
           sv.service === 'Debt Collection' ? (
-            <div key={sv.service} className="col-span-2 grid grid-cols-2 gap-x-6 gap-y-3.5">
+            <div key={sv.service} className="@sm:col-span-2 grid grid-cols-1 @sm:grid-cols-2 gap-x-6 gap-y-3.5">
               <Field label="Estimated Handover Amount" value={sv.handoverAmount != null ? formatCurrency(sv.handoverAmount) : undefined} />
               <Field label="Estimated Number of Accounts / Matters" value={sv.accountsCount != null ? String(sv.accountsCount) : undefined} />
             </div>
@@ -367,9 +367,9 @@ export function LeadDetail() {
 
   /** Where the lead came from and who owns it. */
   const leadInfoPanel = (
-    <Card>
+    <Card className="@container">
       <CardHeader title="Lead Information" />
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
+      <dl className="grid grid-cols-1 @sm:grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
         <Field label="Lead Source" value={lead.source} />
         <Field label="Campaign" value={lead.campaign} />
         <Field label="Assigned Owner" value={userById(lead.ownerId)?.name} />
@@ -393,9 +393,9 @@ export function LeadDetail() {
 
   /** The firmographics. */
   const profilePanel = (
-    <Card>
+    <Card className="@container">
       <CardHeader title="Lead Profile" />
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
+      <dl className="grid grid-cols-1 @sm:grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
         <Field label="First Name" value={lead.firstName} />
         <Field label="Last Name" value={lead.lastName} />
         <Field label="Company" value={lead.companyName} />
@@ -663,6 +663,7 @@ export function LeadDetail() {
         tabs={[
           { id: 'Overview', label: 'Overview' },
           { id: 'Emails', label: 'Emails', count: emailActivities.length },
+          { id: 'Notes', label: 'Notes', count: nonEmailActivities.length },
           { id: 'Tasks', label: 'Tasks', count: leadTasks.length },
         ]}
         active={tab}
@@ -676,20 +677,21 @@ export function LeadDetail() {
       {tab === 'Overview' && (
         <RecordLayout
           layout={layout}
+          details={contactPanel}
           /*
-            Notes UNDER contact details, not behind a tab.
+            Notes in the MIDDLE, and still on their own tab.
             
-            The firm's point: when you open a lead you want to know who to ring and what was said
-            last time, together. A note behind a tab is a note nobody reads, and the panel limits
-            itself to five with a "show more" — so it costs the overview very little.
+            Both places on purpose, at the firm's asking. On the overview they sit in the column
+            you are working in, capped at five with a "show more"; the tab is where you go when
+            you want the lot. A note behind a tab only is a note nobody reads.
           */
-          details={<div className="space-y-5">{contactPanel}{notesPanel}</div>}
-          main={<div className="space-y-5">{dealsPanel}{opportunityPanel}</div>}
+          main={<div className="space-y-5">{dealsPanel}{notesPanel}{opportunityPanel}</div>}
           side={[leadInfoPanel, profilePanel]}
         />
       )}
 
       {tab === 'Emails' && emailsPanel}
+      {tab === 'Notes' && notesPanel}
       {tab === 'Tasks' && tasksPanel}
 
       {editOpen && (

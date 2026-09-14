@@ -420,11 +420,22 @@ export function RecordLayout({ layout, details, main, side }: {
     )
   }
 
-  // Three columns, but only from xl. At iPad width the fixed side columns leave the middle about
-  // 120px wide, which is not a narrow column — it is unreadable. So lg drops to two columns with
-  // the main panel full-width underneath, and anything narrower stacks.
+  /*
+   * Three columns, but only from xl. At iPad width the fixed side columns leave the middle about
+   * 120px wide, which is not a narrow column — it is unreadable. So lg drops to two columns with
+   * the main panel full-width underneath, and anything narrower stacks.
+   *
+   * The middle is TWICE a side, at every width, and that is a proportion rather than a size on
+   * purpose. Fixed 19rem sides read as three near-equal columns on an iPad — where the sidebar
+   * leaves about 1000px of content, so 608 of it went to the sides and the middle was starved to
+   * 370. The middle is the column you came to work in; it should look like it. Proportional
+   * tracks keep that true on a 13" iPad and a 27" screen alike.
+   *
+   * The 13rem floor stops a side column collapsing to something a label/value pair cannot sit in
+   * at the narrow end of the range.
+   */
   return (
-    <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)_minmax(0,19rem)]">
+    <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-[minmax(13rem,1fr)_minmax(0,2fr)_minmax(13rem,1fr)]">
       <div className="lg:order-1 xl:order-none">{details}</div>
       <div className="lg:order-3 lg:col-span-2 xl:order-none xl:col-span-1">{main}</div>
       <div className="space-y-4 lg:order-2 xl:order-none">{keyed(side)}</div>

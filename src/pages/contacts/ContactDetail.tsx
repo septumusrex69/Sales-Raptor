@@ -20,7 +20,7 @@ import {
 } from '../../components/record/RecordComment'
 import { companyById, formatCurrency, formatDate, formatDateTime, userById } from '../../data/mockData'
 
-type ContactTab = 'Overview' | 'Activity' | 'Tasks'
+type ContactTab = 'Overview' | 'Activity' | 'Notes' | 'Tasks'
 
 export function ContactDetail() {
   const { id } = useParams()
@@ -296,6 +296,7 @@ export function ContactDetail() {
         tabs={[
           { id: 'Overview', label: 'Overview' },
           { id: 'Activity', label: 'Activity', count: contactActivities.length },
+          { id: 'Notes', label: 'Notes', count: notes.length },
           { id: 'Tasks', label: 'Tasks', count: contactTasks.length },
         ]}
         active={tab}
@@ -308,14 +309,15 @@ export function ContactDetail() {
       {tab === 'Overview' && (
         <RecordLayout
           layout={layout}
-          /* Notes under the details, not behind a tab — the same move as every other record. */
-          details={<div className="space-y-5">{detailsPanel}{notesPanel}</div>}
-          main={dealsPanel}
+          details={detailsPanel}
+          /* Notes in the middle, and still on their own tab — both places, at the firm's asking. */
+          main={<div className="space-y-5">{dealsPanel}{notesPanel}</div>}
           side={companyPanel ? [companyPanel] : []}
         />
       )}
 
       {tab === 'Activity' && activityPanel}
+      {tab === 'Notes' && notesPanel}
       {tab === 'Tasks' && tasksPanel}
 
       {noteOpen && (

@@ -45,7 +45,7 @@ import type { Company, Contact, ProductService } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
 import { summaryLine } from '../../lib/summaryLine'
 
-type ClientTab = 'Overview' | 'Emails' | 'Tasks'
+type ClientTab = 'Overview' | 'Emails' | 'Notes' | 'Tasks'
 
 export function CompanyDetail() {
   const focusedEmailId = useFocusedEmailId()
@@ -704,6 +704,7 @@ export function CompanyDetail() {
         tabs={[
           { id: 'Overview', label: 'Overview' },
           { id: 'Emails', label: 'Emails', count: emailActivities.length },
+          { id: 'Notes', label: 'Notes', count: nonEmailActivities.length },
           { id: 'Tasks', label: 'Tasks', count: companyTasks.length },
         ]}
         active={tab}
@@ -717,17 +718,16 @@ export function CompanyDetail() {
       {tab === 'Overview' && (
         <RecordLayout
           layout={layout}
-          /*
-            Notes UNDER contact details, not behind a tab. When you open a client you want to
-            know who to ring and what was said last time, together — and a note behind a tab is
-            a note nobody reads.
-          */
-          details={<div className="space-y-5">{contactPanel}{notesPanel}</div>}
+          details={contactPanel}
           main={(
             <div className="space-y-5">
               {/* Above the deals: for a debt collection client this IS the relationship. What
                   they signed is one line on a deal; what they actually send is the work. */}
               <HandoverBook company={company} onLog={() => setHandoverOpen(true)} />
+              {/* Notes in the middle, and still on their own tab — both places, at the firm's
+                  asking. Here they are capped at five with a "show more"; the tab is where you
+                  go for the lot. */}
+              {notesPanel}
               {openDealsPanel}
               {wonDealsPanel}
             </div>
@@ -745,6 +745,7 @@ export function CompanyDetail() {
       )}
 
       {tab === 'Emails' && emailsPanel}
+      {tab === 'Notes' && notesPanel}
       {tab === 'Tasks' && tasksPanel}
 
       {emailOpen && company.email && (

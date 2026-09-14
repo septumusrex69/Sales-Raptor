@@ -41,7 +41,7 @@ interface MockDocument {
   size: string
 }
 
-type DealTab = 'Overview' | 'Emails' | 'Tasks' | 'Documents'
+type DealTab = 'Overview' | 'Emails' | 'Notes' | 'Tasks' | 'Documents'
 
 export function DealDetail() {
   const focusedEmailId = useFocusedEmailId()
@@ -197,9 +197,11 @@ export function DealDetail() {
    */
   /** What this deal is, in fields. */
   const infoPanel = (
-    <Card>
+    <Card className="@container">
       <CardHeader title="Deal Information" />
-      <dl className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3.5 text-sm">
+      {/* Laid out to the CARD's width, not the window's. `md:` asks about the window, so this
+          put three columns inside a 246px side column and squeezed every value to 80px. */}
+      <dl className="grid grid-cols-1 @sm:grid-cols-2 @lg:grid-cols-3 gap-x-6 gap-y-3.5 text-sm">
         <Field label="Deal Name" value={deal.name} />
         <Field label="Date Created" value={deal.createdAt ? formatDate(deal.createdAt) : undefined} />
         <Field label="Company" value={company?.name} />
@@ -578,6 +580,7 @@ export function DealDetail() {
         tabs={[
           { id: 'Overview', label: 'Overview' },
           { id: 'Emails', label: 'Emails', count: dealEmails.length },
+          { id: 'Notes', label: 'Notes', count: dealActivities.length - dealEmails.length },
           { id: 'Tasks', label: 'Tasks', count: dealTasks.length },
           { id: 'Documents', label: 'Documents', count: docs.length },
         ]}
@@ -592,15 +595,15 @@ export function DealDetail() {
       {tab === 'Overview' && (
         <RecordLayout
           layout={layout}
-          /* Notes under the information, not behind a tab — the same move as the lead and the
-             client, for the same reason: what was said last time belongs beside who they are. */
-          details={<div className="space-y-5">{infoPanel}{notesPanel}</div>}
-          main={proposalsPanel}
+          details={infoPanel}
+          /* Notes in the middle, and still on their own tab — both places, at the firm's asking. */
+          main={<div className="space-y-5">{proposalsPanel}{notesPanel}</div>}
           side={[historyPanel]}
         />
       )}
 
       {tab === 'Emails' && emailsPanel}
+      {tab === 'Notes' && notesPanel}
       {tab === 'Tasks' && tasksPanel}
       {tab === 'Documents' && documentsPanel}
 
