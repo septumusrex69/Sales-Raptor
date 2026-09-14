@@ -934,7 +934,7 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
   const reversed = entry.status === 'reversed'
   const [open, setOpen] = useState(false)
   const long = entry.title.length > CLAMP_AT
-  const wraps = entry.kind === 'note' || entry.kind === 'query'
+  const wraps = entry.kind === 'note' || entry.kind === 'query' || entry.kind === 'main_comment'
   return (
     <div className="flex gap-3">
       <div className={`w-7 h-7 rounded-full grid place-items-center shrink-0 ${style.ring}`}>
