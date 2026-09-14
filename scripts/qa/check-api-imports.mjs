@@ -94,7 +94,33 @@ function walk(file, seen, trail) {
 const seen = new Set()
 for (const entry of apiFiles()) walk(entry, seen, [])
 
-console.log(`\nwalked ${checked} files reachable from api/`)
+/*
+ * And how many of them there are.
+ *
+ * Vercel's Hobby plan allows twelve serverless functions per deployment, and every .ts file
+ * under api/ that is not in _lib/ is one. A thirteenth does not fail the build -- it builds
+ * perfectly, passes every check here, and then fails at the deploy step with
+ * exceeded_serverless_functions_per_deployment. That is a silent failure of exactly the kind
+ * this file exists to catch: three deployments in a row died on it on 14 September 2026 while
+ * the build log said "Build Completed".
+ *
+ * At the cap, a new endpoint means folding it into an existing one -- api/invite-user.ts takes
+ * a flag rather than having a file of its own, and api/buzzbox and api/sms each route many
+ * actions through one [action].ts.
+ */
+const FUNCTION_LIMIT = 12
+const functions = apiFiles().filter((f) => !f.includes(`${path.sep}_lib${path.sep}`))
+console.log(`\n${functions.length} serverless function(s) of ${FUNCTION_LIMIT} allowed`)
+if (functions.length > FUNCTION_LIMIT) {
+  failures.push(
+    `${functions.length} serverless functions, and the Hobby plan deploys at most `
+    + `${FUNCTION_LIMIT}. This builds and then fails at deploy. Fold one into another, or move `
+    + `a group behind a single [action].ts:\n`
+    + functions.map((f) => `         ${path.relative(ROOT, f)}`).join('\n'),
+  )
+}
+
+console.log(`walked ${checked} files reachable from api/`)
 if (failures.length === 0) {
   console.log('every runtime import into src/ uses a .js specifier\n')
   process.exit(0)
