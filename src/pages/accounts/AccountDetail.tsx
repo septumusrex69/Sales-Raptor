@@ -686,12 +686,18 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
       <Action icon={StickyNote} label="Add Note" onClick={onNote} title="Write on the timeline" />
       <Action icon={Check} label="Promise to Pay" onClick={onPromise} title="Record what they agreed to" primary />
       {/*
-        The front door to the dispute system. It said "Escalate", which described what happens to
-        the record rather than what happened on the phone -- a collector who has just been told
-        "I don't owe this" is looking for the word the debtor used, not for a workflow verb.
+        The front door to the escalation system, and it has been called both things.
+
+        It was "Escalate", then "Dispute" — because a collector who has just been told "I don't
+        owe this" looks for the debtor's word, not a workflow verb. It is "Escalate" again now
+        that the box behind it does three jobs rather than one: the debtor disputes the account,
+        an agent wants a team leader's decision, or the debtor will not pay and the account should
+        go to the attorneys. Only one of those is a dispute, so the door cannot be named after it.
+        The dispute is the first and default option inside, which keeps the common case one glance
+        away rather than a hunt.
       */}
-      <Action icon={ShieldAlert} label="Dispute" onClick={onDispute}
-        title="The debtor disputes this account — raise it and give it to someone" />
+      <Action icon={ShieldAlert} label="Escalate" onClick={onDispute}
+        title="Raise a dispute, ask a team leader, or recommend it for litigation" />
       <TraceButton accountId={accountId} actor={actor} className={`${ACTION_BASE} ${ACTION_ENABLED}`} onDone={onTraced} />
       {/*
         When this account comes back, and why. Sits with the other actions rather than in a

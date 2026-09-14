@@ -5,6 +5,7 @@ import { raiseQuery, stageForAssignee } from '../../lib/accountQueries'
 import {
   categoryExamples, explanationMissing,
   CATEGORY_NEEDING_EXPLANATION, EXPLANATION_MIN_LENGTH, QUERY_CATEGORIES,
+  ESCALATION_KINDS, ESCALATION_KIND_ORDER, type EscalationKind,
 } from '../../lib/disputeCategories'
 import { chargeMessage } from '../../lib/accountCharges'
 import type { User } from '../../types'
@@ -23,9 +24,19 @@ const TODAY = new Date().toISOString().slice(0, 10)
  * account" stops being ambiguous about who is unhappy. This modal is the debtor's side, which is
  * why every word in it says dispute.
  *
- * An internal escalation and a debtor's dispute are the same object deliberately. Both are "this
- * account needs somebody else's attention", both need an owner, a chase date and an answer, and
- * building two of them would mean two queues and two places to look.
+ * An internal escalation and a debtor's dispute are the same object deliberately. All three are
+ * "this account needs somebody else's attention", all three need an owner, a chase date and an
+ * answer, and building three of them would mean three queues and three places to look.
+ *
+ * The firm asked for one door called Escalate, with three reasons behind it: the debtor disputes
+ * the account, an agent wants a team leader's decision, or the debtor simply will not pay and
+ * collections has nothing left to try — which is a recommendation to instruct the attorneys.
+ *
+ * WHAT DIFFERS BETWEEN THEM IS WHO PAYS. A dispute raises Annexure B item 3, because the debtor's
+ * objection is what caused someone else's time to be spent. The other two are the firm's own
+ * business — supervising its staff, and deciding whether to sue — and a debtor is never billed
+ * for either. raiseQuery refuses to charge on anything but a dispute; this screen simply does not
+ * offer the box.
  */
 export function EscalateModal({ accountId, users, clientLiaison, actor, onClose, onDone }: {
   accountId: string
@@ -36,6 +47,7 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
   onClose: () => void
   onDone: () => Promise<void>
 }) {
+  const [kind, setKind] = useState<EscalationKind>('dispute')
   const [toId, setToId] = useState(clientLiaison?.id ?? '')
   const [description, setDescription] = useState('')
   const [category, setCategory] = useState('')
@@ -72,7 +84,7 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
    * classification that will not be accepted without the words — long enough that "n/a" and a
    * stray keystroke do not pass, short enough that a real sentence always does.
    */
-  const needsExplanation = explanationMissing(category, description)
+  const needsExplanation = ESCALATION_KINDS[kind].needsCategory && explanationMissing(category, description)
 
   /*
    * The debtor pays when the dispute is given to somebody.
@@ -97,6 +109,7 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
       const { charge: raised } = await raiseQuery({
         accountId,
         description,
+        kind,
         category,
         ownerId: toId || null,
         stage: stageForAssignee(users.find((u) => u.id === toId)?.role, !!toId && toId === clientLiaison?.id),
@@ -116,8 +129,39 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
   }
 
   return (
-    <Modal title="Raise a dispute" onClose={onClose} width={520}>
+    <Modal title="Escalate this account" onClose={onClose} width={520}>
       <div className="space-y-3">
+        {/*
+          WHY it is being escalated, before who it goes to — because the reason decides everything
+          underneath it: whether there is a classification to pick, who it would normally go to,
+          and whether the debtor pays.
+        */}
+        <fieldset className="space-y-1.5">
+          <legend className="text-sm font-medium text-slate-700 mb-1.5">Why are you escalating it?</legend>
+          {ESCALATION_KIND_ORDER.map((k) => (
+            <label key={k}
+              className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                kind === k ? 'border-brand-500 bg-brand-50/50' : 'border-slate-200 hover:bg-slate-50'
+              }`}>
+              <input type="radio" name="escalation-kind" value={k} checked={kind === k}
+                onChange={() => {
+                  setKind(k)
+                  // A classification only means something on a dispute, so it is dropped rather
+                  // than carried across — the database refuses one on the other two anyway.
+                  if (k !== 'dispute') setCategory('')
+                  const meta = ESCALATION_KINDS[k]
+                  const suggested = meta.goesTo === 'team_leader' ? teamLeaders[0]?.id : clientLiaison?.id
+                  setToId(suggested ?? '')
+                }}
+                className="mt-0.5" />
+              <span className="min-w-0">
+                <span className="block text-sm text-slate-800">{ESCALATION_KINDS[k].label}</span>
+                <span className="block text-[11px] text-slate-500">{ESCALATION_KINDS[k].blurb}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+
         <label className="block">
           <span className="text-sm font-medium text-slate-700">Give it to</span>
           <select
@@ -145,7 +189,11 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
         </label>
 
         <label className="block">
-          <span className="text-sm font-medium text-slate-700">What is the issue?</span>
+          <span className="text-sm font-medium text-slate-700">
+            {kind === 'dispute' ? 'What is the issue?'
+              : kind === 'help' ? 'What do you need decided?'
+              : 'Why has collecting run out of road?'}
+          </span>
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -153,13 +201,15 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
             autoFocus
             placeholder={category === CATEGORY_NEEDING_EXPLANATION
               ? 'Required for "Other" — say what the debtor is actually disputing.'
-              : 'What did the debtor say, or what do you need decided? In their words if you can.'}
+              : ESCALATION_KINDS[kind].placeholder}
             className="w-full mt-1 text-sm rounded-lg border border-slate-200 px-2.5 py-2 resize-none"
           />
         </label>
 
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block">
+        <div className={ESCALATION_KINDS[kind].needsCategory ? 'grid grid-cols-2 gap-3' : ''}>
+          {/* A classification says why the DEBTOR is objecting, so it exists only on a dispute.
+              The database refuses one on the other two — account_queries_category_only_on_dispute. */}
+          <label className={ESCALATION_KINDS[kind].needsCategory ? 'block' : 'hidden'}>
             <span className="text-sm font-medium text-slate-700">Classification</span>
             <select value={category} onChange={(e) => setCategory(e.target.value)}
               className="w-full mt-1 text-sm rounded-lg border border-slate-200 px-2.5 py-2 bg-white">
@@ -177,6 +227,12 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
           </label>
         </div>
 
+        {/*
+          Only on a dispute, and not merely hidden: raiseQuery refuses to charge on the other two
+          whatever this screen sends. Asking an agent whether to bill a debtor for the firm
+          supervising its own staff is a question with one right answer, so it is not asked.
+        */}
+        {ESCALATION_KINDS[kind].chargeable ? (
         <label className="flex items-start gap-2.5 p-3 rounded-lg bg-slate-50 border border-slate-100">
           <input
             type="checkbox"
@@ -195,6 +251,14 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
             </span>
           </span>
         </label>
+        ) : (
+          <p className="text-sm text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2.5">
+            <span className="font-medium text-slate-700">Nothing is charged.</span>{' '}
+            {kind === 'help'
+              ? 'Asking a team leader what to do is the firm supervising its own staff, not an expense of collecting from this debtor.'
+              : 'Deciding whether to sue is the firm\u2019s own business. The attorneys\u2019 costs are a separate matter if it goes ahead.'}
+          </p>
+        )}
 
         {needsExplanation && (
           <p className="text-sm text-slate-500">
@@ -211,7 +275,10 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
             className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg bg-brand-600 text-white disabled:opacity-40"
           >
             <ShieldAlert size={15} />
-            {busy ? 'Raising...' : 'Raise dispute'}
+            {busy ? 'Escalating…'
+              : kind === 'dispute' ? 'Raise dispute'
+              : kind === 'help' ? 'Ask for help'
+              : 'Recommend litigation'}
           </button>
           <button onClick={onClose} className="text-sm text-slate-600 hover:text-slate-800 px-2">Cancel</button>
         </div>

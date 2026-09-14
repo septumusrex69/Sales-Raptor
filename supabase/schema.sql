@@ -1384,7 +1384,33 @@ create table if not exists public.account_queries (
   id uuid primary key default gen_random_uuid(),
   account_id uuid not null references public.debtor_accounts (id) on delete cascade,
   description text not null,
+
+  /*
+   * WHAT THIS ESCALATION IS.
+   *
+   * The table was built for one thing: a debtor saying something is wrong. The firm then
+   * described two more, and both are escalations in exactly the same sense — this account needs
+   * somebody else's attention, with an owner, a chase date and an answer — but neither is a
+   * dispute:
+   *
+   *   'help'       an agent asking a team leader what to do. Internal supervision.
+   *   'litigation' the debtor will not pay and collections has nothing left to try. A
+   *                recommendation to the liaison to instruct the attorneys.
+   *
+   * One table rather than three, because all three need the same queue and the same chasing, and
+   * three would mean three places to look for "what is waiting on me".
+   *
+   * IT DECIDES WHO PAYS. A dispute raises Annexure B item 3, because the debtor's objection is
+   * what caused someone else's time to be spent. The other two are the firm's own business —
+   * supervising its staff, and deciding whether to sue — and a debtor is never billed for either.
+   * raiseQuery() refuses to charge on anything but a dispute, and this column is what lets it
+   * know. Everything raised before the column existed reads as a dispute, which is what it was.
+   */
+  kind text not null default 'dispute' check (kind in ('dispute', 'help', 'litigation')),
+
+  -- A classification says why the DEBTOR is objecting, so it means nothing on the other two.
   category text,
+  constraint account_queries_category_only_on_dispute check (kind = 'dispute' or category is null),
   -- open: raised, nobody has taken it to the client yet.
   -- with_client: asked, waiting. answered: the client replied, needs a decision.
   -- closed: decided, with an outcome.
@@ -1412,6 +1438,8 @@ create table if not exists public.account_queries (
   updated_at timestamptz not null default now()
 );
 
+create index if not exists account_queries_kind_idx
+  on public.account_queries (kind, status) where status <> 'closed';
 create index if not exists account_queries_account_idx on public.account_queries (account_id, raised_at desc);
 create index if not exists account_queries_open_idx on public.account_queries (status, chase_on)
   where status <> 'closed';
