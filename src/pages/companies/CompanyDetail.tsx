@@ -45,7 +45,7 @@ import type { Company, Contact, ProductService } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
 import { summaryLine } from '../../lib/summaryLine'
 
-type ClientTab = 'Overview' | 'Emails' | 'Notes' | 'Tasks'
+type ClientTab = 'Overview' | 'Emails' | 'Tasks'
 
 export function CompanyDetail() {
   const focusedEmailId = useFocusedEmailId()
@@ -174,7 +174,7 @@ export function CompanyDetail() {
    */
   /** Who to ring, and the people you deal with there. */
   const contactPanel = (
-    <Card>
+    <Card className="@container">
       <CardHeader
         title="Contact Details"
         action={
@@ -183,7 +183,12 @@ export function CompanyDetail() {
           </button>
         }
       />
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-4 pb-4 border-b border-slate-100">
+      {/*
+        Three across when the CARD is wide enough, stacked when it is not. `sm:` asks about the
+        WINDOW, so in the three-column layout this laid out three columns inside a 300px card and
+        ran an email address off its right-hand edge. See the same note on the lead page.
+      */}
+      <div className="grid grid-cols-1 @md:grid-cols-3 gap-3 text-sm mb-4 pb-4 border-b border-slate-100">
         <div>
           <p className="text-xs text-slate-400 mb-0.5">Phone</p>
           {company.phone ? (
@@ -699,7 +704,6 @@ export function CompanyDetail() {
         tabs={[
           { id: 'Overview', label: 'Overview' },
           { id: 'Emails', label: 'Emails', count: emailActivities.length },
-          { id: 'Notes', label: 'Notes', count: nonEmailActivities.length },
           { id: 'Tasks', label: 'Tasks', count: companyTasks.length },
         ]}
         active={tab}
@@ -713,7 +717,12 @@ export function CompanyDetail() {
       {tab === 'Overview' && (
         <RecordLayout
           layout={layout}
-          details={contactPanel}
+          /*
+            Notes UNDER contact details, not behind a tab. When you open a client you want to
+            know who to ring and what was said last time, together — and a note behind a tab is
+            a note nobody reads.
+          */
+          details={<div className="space-y-5">{contactPanel}{notesPanel}</div>}
           main={(
             <div className="space-y-5">
               {/* Above the deals: for a debt collection client this IS the relationship. What
@@ -736,7 +745,6 @@ export function CompanyDetail() {
       )}
 
       {tab === 'Emails' && emailsPanel}
-      {tab === 'Notes' && notesPanel}
       {tab === 'Tasks' && tasksPanel}
 
       {emailOpen && company.email && (
@@ -1253,37 +1261,47 @@ function ClientBookCard({ companyId }: { companyId: string }) {
   if (!summary || summary.accounts === 0) return null
 
   return (
-    <Card>
+    /*
+      The link moved OUT of the header and down to the bottom.
+      
+      A long title, a long subtitle and a button all on one row is fine in a full-width card and
+      cramped in a narrow one — and this card lives in the side column, where it was squeezing the
+      button against the edge. Below the figures it has the whole width to itself at any size, and
+      it reads as the conclusion of the card rather than as a control competing with the heading.
+    */
+    <Card className="@container">
       <CardHeader
         title="Collections book"
         subtitle="The accounts actually handed over, as opposed to what the mandate estimated"
-        action={
-          <Link
-            to={`/accounts?client=${companyId}`}
-            className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-          >
-            Open the book <ArrowRight size={12} />
-          </Link>
-        }
       />
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+      {/* Every label reserves two lines, so a heading that wraps ("Capital handed over") does not
+          push its figure below the one beside it. The numbers share a baseline at every width. */}
+      <div className="grid grid-cols-2 @lg:grid-cols-3 gap-4">
         <div>
-          <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Accounts</p>
+          <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide leading-tight min-h-[2.2em]">Accounts</p>
           <p className="text-2xl font-bold text-slate-800 mt-0.5 tabular-nums">{summary.accounts.toLocaleString('en-ZA')}</p>
         </div>
         <div>
-          <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Capital handed over</p>
+          <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide leading-tight min-h-[2.2em]">Capital handed over</p>
           <p className="text-2xl font-bold text-slate-800 mt-0.5 tabular-nums">{formatCurrency(summary.capital)}</p>
         </div>
         {summary.commissionDrift > 0 && (
           <div>
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Off their mandate rate</p>
+            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide leading-tight min-h-[2.2em]">Off their mandate rate</p>
             <Link to={`/accounts?client=${companyId}&drift=1`} className="text-2xl font-bold text-amber-700 mt-0.5 tabular-nums block hover:underline">
               {summary.commissionDrift.toLocaleString('en-ZA')}
             </Link>
           </div>
         )}
       </div>
+
+      {/* Full width, so it never has to fight the heading for room. */}
+      <Link
+        to={`/accounts?client=${companyId}`}
+        className="mt-4 flex items-center justify-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+      >
+        Open the book <ArrowRight size={14} />
+      </Link>
     </Card>
   )
 }

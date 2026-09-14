@@ -45,7 +45,7 @@ import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPat
 import { summaryLine } from '../../lib/summaryLine'
 import { hasDealValue } from '../../lib/dealKind'
 
-type LeadTab = 'Overview' | 'Emails' | 'Notes' | 'Tasks'
+type LeadTab = 'Overview' | 'Emails' | 'Tasks'
 
 export function LeadDetail() {
   const focusedEmailId = useFocusedEmailId()
@@ -140,7 +140,7 @@ export function LeadDetail() {
    */
   /** Who to ring, and the people around them. */
   const contactPanel = (
-    <Card>
+    <Card className="@container">
       <CardHeader
         title="Contact Details"
         action={
@@ -154,7 +154,15 @@ export function LeadDetail() {
           ) : undefined
         }
       />
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-4 pb-4 border-b border-slate-100">
+      {/*
+        Three across when the CARD is wide enough, stacked when it is not.
+
+        This was `sm:grid-cols-3`, which asks about the WINDOW. In the three-column layout the
+        card is about 300px wide inside a 1200px window, so it still laid out three columns —
+        and an email address ran off the right-hand edge of the card with no way to read it.
+        A container query asks the question that actually matters.
+      */}
+      <div className="grid grid-cols-1 @md:grid-cols-3 gap-3 text-sm mb-4 pb-4 border-b border-slate-100">
         <div>
           <p className="text-xs text-slate-400 mb-0.5">Office Number</p>
           {lead.phone ? (
@@ -570,23 +578,19 @@ export function LeadDetail() {
       />
 
       <Card>
-
-        {lead.services && lead.services.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-4">
-            {lead.services.map((s) => (
-              <ServiceBadge key={s} service={s} />
-            ))}
-          </div>
-        )}
-
+        {/*
+          The service chips used to sit here as well as in the main comment above — the same
+          fact twice, a hand's width apart. The comment keeps them, because that is where
+          somebody is already reading.
+        */}
         {lead.status === 'Rejected' && lead.rejectionReason && (
-          <div className="mt-4 rounded-lg border border-red-100 bg-red-50/60 px-3.5 py-2.5">
+          <div className="mb-4 rounded-lg border border-red-100 bg-red-50/60 px-3.5 py-2.5">
             <p className="text-xs font-medium text-red-700">Rejected — {lead.rejectionReason}</p>
             {lead.rejectionNote && <p className="text-sm text-red-900/70 mt-0.5">{lead.rejectionNote}</p>}
           </div>
         )}
 
-        <div className="mt-4 pt-4 border-t border-slate-100">
+        <div>
           {/*
             The same row of actions the Account page wears, from the same component, in the same
             order of thought: REACH THEM first, then record what happened, then move the record on.
@@ -659,7 +663,6 @@ export function LeadDetail() {
         tabs={[
           { id: 'Overview', label: 'Overview' },
           { id: 'Emails', label: 'Emails', count: emailActivities.length },
-          { id: 'Notes', label: 'Notes', count: nonEmailActivities.length },
           { id: 'Tasks', label: 'Tasks', count: leadTasks.length },
         ]}
         active={tab}
@@ -673,14 +676,20 @@ export function LeadDetail() {
       {tab === 'Overview' && (
         <RecordLayout
           layout={layout}
-          details={contactPanel}
+          /*
+            Notes UNDER contact details, not behind a tab.
+            
+            The firm's point: when you open a lead you want to know who to ring and what was said
+            last time, together. A note behind a tab is a note nobody reads, and the panel limits
+            itself to five with a "show more" — so it costs the overview very little.
+          */
+          details={<div className="space-y-5">{contactPanel}{notesPanel}</div>}
           main={<div className="space-y-5">{dealsPanel}{opportunityPanel}</div>}
           side={[leadInfoPanel, profilePanel]}
         />
       )}
 
       {tab === 'Emails' && emailsPanel}
-      {tab === 'Notes' && notesPanel}
       {tab === 'Tasks' && tasksPanel}
 
       {editOpen && (
