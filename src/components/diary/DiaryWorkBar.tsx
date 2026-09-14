@@ -1,15 +1,51 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowRight, CalendarClock, CheckCircle2, Loader2, MessageSquareWarning, X } from 'lucide-react'
+import {
+  ArrowLeft, ArrowRight, CalendarClock, CheckCircle2, Loader2, MessageSquareWarning, X,
+} from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { NextDiaryFields, initialPlan, type NextPlan } from './NextDiaryFields'
-import { fetchDay, workEntry, type DiaryRow } from '../../lib/diary.ts'
+import { fetchDay, countWorkedToday, workEntry, type DiaryRow } from '../../lib/diary.ts'
+import { saveMainComment } from '../../lib/accountWorkspace.ts'
 import { DIARY_KINDS } from '../../lib/diaryPriority.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
 import { refreshNavCounts } from '../../lib/navCounts'
 import { DictateButton } from '../ui/Dictate'
+
+/**
+ * The accounts finished in this run of the diary.
+ *
+ * Kept in sessionStorage because "go back to the one I just did" is a navigation, and the bar
+ * unmounts on every navigation — React state would be gone by the time it was needed. Per tab,
+ * so an agent with the diary open in two tabs does not get one trail crossing the other.
+ *
+ * Capped, because it is a way back to the last few, not an audit trail. The audit trail is the
+ * diary entries themselves, which are never edited.
+ */
+const TRAIL_KEY = 'raptor.diary.trail'
+const TRAIL_MAX = 25
+
+interface Worked { accountId: string; entryId: string; name: string }
+
+function readTrail(): Worked[] {
+  try {
+    const raw = sessionStorage.getItem(TRAIL_KEY)
+    return raw ? (JSON.parse(raw) as Worked[]) : []
+  } catch {
+    return []
+  }
+}
+
+function pushTrail(item: Worked): void {
+  try {
+    const next = [item, ...readTrail().filter((w) => w.accountId !== item.accountId)].slice(0, TRAIL_MAX)
+    sessionStorage.setItem(TRAIL_KEY, JSON.stringify(next))
+  } catch {
+    // A private window with storage blocked loses the back button and nothing else.
+  }
+}
 
 /**
  * Working a diary, one account after another, without going back to a list between each.
@@ -51,7 +87,17 @@ export function DiaryWorkBar({ account, onWorked }: {
   const today = new Date().toISOString().slice(0, 10)
 
   const [queue, setQueue] = useState<DiaryRow[] | null>(null)
+  const [done, setDone] = useState(0)
   const [finishing, setFinishing] = useState(false)
+
+  /*
+   * The accounts already finished in this run, newest first.
+   *
+   * Kept in sessionStorage rather than state because going back is a NAVIGATION — the bar
+   * unmounts and remounts on every account — and kept per tab because two agents on one machine
+   * is not a thing, but one agent with the diary open twice is.
+   */
+  const trail = readTrail()
 
   /*
    * The whole day, re-read each time the bar mounts.
@@ -68,6 +114,20 @@ export function DiaryWorkBar({ account, onWorked }: {
     } catch {
       // A bar that cannot count is not worth an error over the account underneath it.
       setQueue(null)
+      return
+    }
+    /*
+     * The tally is fetched SEPARATELY and on purpose.
+     *
+     * It was in the same Promise.all as the day, which meant a failed count took the whole bar
+     * down with it — no Done, no Next, no way to work the diary, because a decorative number
+     * could not be read. The offline layout harness found it immediately, which is what it is
+     * for. The queue is the bar; the count is a nicety on it.
+     */
+    try {
+      setDone(await countWorkedToday(currentUser.id, today))
+    } catch {
+      setDone(0)
     }
   }, [entryId, currentUser?.id, today])
 
@@ -77,9 +137,26 @@ export function DiaryWorkBar({ account, onWorked }: {
 
   const index = queue.findIndex((e) => e.id === entryId)
   const entry = index >= 0 ? queue[index] : null
-  if (!entry) return null
+  /*
+   * An entry that is not in the open queue but is in the trail is one just finished, reached by
+   * pressing Previous. Without this the bar would simply vanish, which makes going back a dead
+   * end: you can see what you wrote and have no way back into the run.
+   */
+  const revisiting = entry ? null : trail.find((w) => w.entryId === entryId) ?? null
+  if (!entry && !revisiting) return null
 
-  const next = queue[index + 1] ?? null
+  const next = entry ? queue[index + 1] ?? null : null
+  /*
+   * One step further back than wherever you are.
+   *
+   * On the working bar the current entry is open and so is not in the trail at all, which makes
+   * this the last one finished. On a revisited entry it is the one before that — walking back
+   * rather than snapping to the most recent, which is what `find(w => w.entryId !== entryId)`
+   * would have done from the third account back.
+   */
+  const here = trail.findIndex((w) => w.entryId === entryId)
+  const previous = trail[here + 1] ?? null
+  const resume = queue[0] ?? null
   const commentFresh = !!account.mainCommentAt && account.mainCommentAt.slice(0, 10) === today
 
   const leave = () => {
@@ -89,9 +166,61 @@ export function DiaryWorkBar({ account, onWorked }: {
   }
 
   const goNext = () => {
+    // Remembered before we leave, so Previous on the next account comes back to this one.
+    if (entry) {
+      pushTrail({
+        accountId: entry.accountId,
+        entryId: entry.id,
+        name: [entry.account.debtorFirstName, entry.account.debtorSurname]
+          .filter(Boolean).join(' ').trim() || entry.account.accountNumber || 'Account',
+      })
+    }
     if (next) navigate(`/accounts/${next.accountId}?diary=${next.id}`)
     else navigate('/diary')
   }
+
+  const goTo = (w: Worked) => navigate(`/accounts/${w.accountId}?diary=${w.entryId}`)
+
+  /*
+   * Revisiting one already finished. Deliberately a different bar: there is nothing to finish
+   * here, and offering "Done & next" on a closed entry would either do nothing or book a second
+   * one. All it offers is the way back to where the run had got to.
+   */
+  if (revisiting) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-slate-50">
+        <div className="@container px-4 py-2.5">
+          <div className="flex flex-wrap items-center gap-2 @lg:gap-4">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+                Already worked today
+              </p>
+              <p className="text-xs text-slate-500 truncate">
+                You finished this one a moment ago. Anything typed here is a fresh note, not a
+                change to what was booked.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {previous && (
+                <button onClick={() => goTo(previous)}
+                  className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-2 rounded-lg text-slate-600 hover:bg-slate-200"
+                  title={`Back to ${previous.name}`}>
+                  <ArrowLeft size={13} /> Previous
+                </button>
+              )}
+              <button
+                onClick={() => (resume ? navigate(`/accounts/${resume.accountId}?diary=${resume.id}`) : navigate('/diary'))}
+                className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-950 text-white hover:bg-navy-900">
+                {resume ? 'Back to the diary' : 'Diary is clear'}
+                <ArrowRight size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+  if (!entry) return null
 
   return (
     <>
@@ -108,8 +237,16 @@ export function DiaryWorkBar({ account, onWorked }: {
         <div className="@container px-4 py-2.5">
           <div className="flex flex-col @lg:flex-row @lg:items-center gap-2 @lg:gap-4">
             <div className="min-w-0 flex-1">
+              {/*
+                DONE AND LEFT, not a position.
+                
+                It read "1 of 42", which is true and tells you nothing: a finished entry leaves
+                the queue, so the next one is always the first of what remains and the "1 of"
+                never moves. Three hours in looked identical to just starting.
+              */}
               <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-gold-500">
-                Working the diary · {index + 1} of {queue.length}
+                Working the diary · {done > 0 && `${done} done · `}
+                {queue.length} to go
               </p>
               <p className="text-xs text-slate-300 truncate">
                 {DIARY_KINDS[entry.kind].label}
@@ -129,6 +266,14 @@ export function DiaryWorkBar({ account, onWorked }: {
             )}
 
             <div className="flex items-center gap-2 shrink-0">
+              {/* Back to the one just finished — to check what was written, or fix a slip. */}
+              {previous && (
+                <button onClick={() => goTo(previous)}
+                  className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-2 rounded-lg text-slate-300 hover:bg-white/10"
+                  title={`Back to ${previous.name}`}>
+                  <ArrowLeft size={13} /> Previous
+                </button>
+              )}
               <button onClick={leave}
                 className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-2 rounded-lg text-slate-300 hover:bg-white/10"
                 title="Stop working the diary and stay on this account">
@@ -179,6 +324,16 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
   const { currentUser } = useAuth()
   const { users } = useAppStore()
   const [outcome, setOutcome] = useState('')
+  /*
+   * Ticked by default exactly when the main comment is stale.
+   *
+   * The sentence somebody types here — "says the insurance pays out on the 28th" — usually IS
+   * the new state of play, and the alternative was typing it twice: once here and once into the
+   * comment, or (much more likely) once here and never into the comment, which is how an account
+   * ends up with a warning on it for a month. Where the comment was already updated today, the
+   * agent has clearly said their piece and this stays off.
+   */
+  const [asMainComment, setAsMainComment] = useState(!commentFresh)
   const [plan, setPlan] = useState<NextPlan>(() => initialPlan(entry.kind, addWorkingDays(today, 5)))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -196,6 +351,20 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
           : { comesBack: false, exit: plan.exit },
         actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
       })
+      /*
+       * After the booking, not before, and allowed to fail on its own.
+       *
+       * The booking is the thing that must not be lost: an account that is worked but not
+       * re-diarised falls out of everybody's day silently. A main comment that did not update
+       * is visible on the very next screen, with an amber line telling you so.
+       */
+      if (asMainComment && outcome.trim()) {
+        try {
+          await saveMainComment(account.id, outcome, currentUser?.id ?? null, currentUser?.name ?? null)
+        } catch {
+          // Deliberately swallowed — see above.
+        }
+      }
       await onDone()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -237,6 +406,19 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
               Optional. Goes on the account&rsquo;s timeline too.
             </span>
           </div>
+
+          <label className="flex items-start gap-2 mt-2.5 text-sm text-slate-700">
+            <input type="checkbox" className="mt-0.5" checked={asMainComment}
+              disabled={!outcome.trim()}
+              onChange={(e) => setAsMainComment(e.target.checked)} />
+            <span>
+              Make this the main comment
+              <span className="block text-[11px] text-slate-400">
+                Replaces what the next person reads before they ring. The old one is kept on the
+                timeline, so nothing is lost.
+              </span>
+            </span>
+          </label>
         </FormField>
 
         {/* Same question, same rules, same component as the day list's Done — see NextDiaryFields. */}

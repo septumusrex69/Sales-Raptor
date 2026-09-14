@@ -445,7 +445,10 @@ export function AccountDetail() {
       </RecordFigures>
 
       <MainComment account={account} busy={savingComment}
-        onSave={(text) => runComment(() => saveMainComment(account.id, text, currentUser?.id ?? null))} />
+        onSave={(text) => runComment(
+          // The name goes with it so the timeline note says who changed it.
+          () => saveMainComment(account.id, text, currentUser?.id ?? null, currentUser?.name ?? null),
+        )} />
 
       <ActionBar
         callNumber={callContact?.value}

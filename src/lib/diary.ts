@@ -181,6 +181,39 @@ export async function fetchDay(input: {
   }
 }
 
+/**
+ * How many entries this person has closed today.
+ *
+ * The work bar used to read "1 of 42", which is true and useless: a finished entry leaves the
+ * queue, so the next one is always the first of what is left and the "1 of" never moves. An
+ * agent three hours into a diary saw the same words as one who had just started.
+ *
+ * What they actually want to know is how far they have got, and that is two numbers: what is
+ * done and what is left. The done half cannot come from the day's queue, because the queue holds
+ * only what is still open — hence its own count.
+ */
+export async function countWorkedToday(ownerId: string | null, date: string): Promise<number> {
+  if (!ownerId) return 0
+  // Never throws. Nothing depends on this number, and something important sits next to it.
+  try {
+    return await countDone(ownerId, date)
+  } catch {
+    return 0
+  }
+}
+
+async function countDone(ownerId: string, date: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('diary_entries')
+    .select('id', { count: 'exact', head: true })
+    .eq('state', 'done')
+    .eq('done_by', ownerId)
+    .gte('done_at', `${date}T00:00:00`)
+    .lte('done_at', `${date}T23:59:59.999`)
+  if (error) return 0
+  return count ?? 0
+}
+
 /** Everything ever diarised on one account, newest first — the account page's Diary tab. */
 export async function fetchAccountDiary(accountId: string): Promise<DiaryEntry[]> {
   const { data, error } = await supabase
