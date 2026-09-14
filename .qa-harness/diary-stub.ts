@@ -20,6 +20,9 @@ for (let i = -14; i < 42; i += 1) {
 
 export async function fetchDayLoads() { return loads }
 
+/** The tally beside "to go". Real one would reach Supabase. */
+export async function countWorkedToday() { return 9 }
+
 export async function fetchDay() {
   return {
     due: [

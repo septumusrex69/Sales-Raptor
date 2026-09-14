@@ -501,16 +501,52 @@ export async function deleteDocument(doc: AccountDocument): Promise<void> {
  * evidence of what was said on a day; this is what someone picking the account up needs to know
  * before they read any of it.
  */
-export async function saveMainComment(accountId: string, text: string, byId: string | null): Promise<void> {
+export async function saveMainComment(
+  accountId: string,
+  text: string,
+  byId: string | null,
+  byName?: string | null,
+): Promise<void> {
+  const body = text.trim()
   const { error } = await supabase
     .from('debtor_accounts')
     .update({
-      main_comment: text.trim() || null,
+      main_comment: body || null,
       main_comment_at: new Date().toISOString(),
       main_comment_by: byId,
     })
     .eq('id', accountId)
   if (error) throw new Error(error.message)
+
+  /*
+   * AND ON THE TIMELINE, because the main comment is overwritten and the old one is gone.
+   *
+   * That is the right behaviour for the field — it is the current state of play, not a history —
+   * but it means every previous state of play was being destroyed with nothing left to say it
+   * existed. Somebody picking an account up cold could read what is true today and never learn
+   * that it said something different, and quite possibly contradictory, last week.
+   *
+   * A note per change turns the sequence of overwrites into exactly the history the field cannot
+   * keep. Marked `main_comment` rather than `note` so the timeline can show it as the change it
+   * is, and `system` because Raptor composed the framing even though a person wrote the words.
+   *
+   * It is allowed to fail on its own. The comment is what the next caller reads before they ring;
+   * losing the timeline copy is a gap in the record, losing the comment is a gap in the work.
+   */
+  try {
+    await addNote({
+      accountId,
+      body: body
+        ? `Main comment changed to: "${body}"`
+        : 'Main comment cleared.',
+      authorName: byName ?? null,
+      createdBy: byId,
+      kind: 'main_comment',
+      source: 'system',
+    })
+  } catch {
+    // Deliberately swallowed — see above.
+  }
 }
 
 export async function saveDebtorPreferences(accountId: string, patch: {
