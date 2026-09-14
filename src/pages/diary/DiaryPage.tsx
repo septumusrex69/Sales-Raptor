@@ -6,6 +6,7 @@ import {
 import { Card } from '../../components/ui/Card'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
+import { canViewClients } from '../../lib/permissions'
 import { longDate, shortDate } from '../../components/diary/DiaryDatePicker'
 import { MoveDiaryModal } from '../../components/diary/MoveDiaryModal'
 import { CompleteDiaryModal } from '../../components/diary/CompleteDiaryModal'
@@ -214,7 +215,7 @@ export function DiaryPage() {
 
 /* ---------- the list ---------- */
 
-function DiaryList({ rows, today, empty, onComplete, onMove }: {
+export function DiaryList({ rows, today, empty, onComplete, onMove }: {
   rows: DiaryRow[]
   today: string
   empty: string
@@ -229,11 +230,45 @@ function DiaryList({ rows, today, empty, onComplete, onMove }: {
     )
   }
   return (
-    <ul className="divide-y divide-slate-100 -my-2">
-      {rows.map((row) => <DiaryRowItem key={row.id} row={row} today={today} onComplete={onComplete} onMove={onMove} />)}
-    </ul>
+    <div className="@container">
+      {/*
+        Headings, but only once the row is actually laid out in columns. Below that width the
+        row stacks and each value sits next to its own label's worth of context, so a header
+        would be pointing at nothing.
+      */}
+      <div className={`${DIARY_GRID} hidden @3xl:grid px-1 pb-1.5 border-b border-slate-100`}>
+        <span className={COL_HEAD}>Account</span>
+        <span className={COL_HEAD}>Status</span>
+        <span className={COL_HEAD}>Client</span>
+        <span className={`${COL_HEAD} text-right`}>Outstanding</span>
+        <span />
+      </div>
+      <ul className="divide-y divide-slate-100">
+        {rows.map((row) => <DiaryRowItem key={row.id} row={row} today={today} onComplete={onComplete} onMove={onMove} />)}
+      </ul>
+    </div>
   )
 }
+
+/**
+ * One grid, shared by the header and every row, so the columns actually line up.
+ *
+ * Written once as a constant rather than repeated: two copies of a column template drift by a
+ * quarter of a rem and the whole list stops reading as a table.
+ *
+ * Two shapes, and a container query decides which — NOT a window query. This list is full width
+ * on the diary page and could sit in a panel half that wide; `@3xl` asks how much room the list
+ * itself has, which is the question. Asking the window instead is what put a details grid off
+ * the edge of its card twice already in this codebase.
+ *
+ * Narrow: the account spans the width, then status and client share a line, then the money and
+ * the buttons share the next. Wide: five columns, and the empty middle of the row — which the
+ * firm pointed at — carries what it was always missing.
+ */
+const DIARY_GRID =
+  'grid gap-x-3 gap-y-1.5 grid-cols-2 @3xl:grid-cols-[minmax(0,1fr)_9.5rem_11rem_7.5rem_auto] @3xl:items-center'
+
+const COL_HEAD = 'text-[10px] font-semibold uppercase tracking-wide text-slate-400'
 
 export function DiaryRowItem({ row, today, onComplete, onMove }: {
   row: DiaryRow
@@ -241,70 +276,96 @@ export function DiaryRowItem({ row, today, onComplete, onMove }: {
   onComplete: (row: DiaryRow) => void
   onMove: (row: DiaryRow) => void
 }) {
+  const { companies } = useAppStore()
+  const { currentUser } = useAuth()
+
   const late = overdueBy(row.dueOn, today)
   const prescribing = nearPrescription(row.account.prescriptionDate, today)
   const meta = DIARY_KINDS[row.kind]
 
+  /*
+   * Whose book this account came out of.
+   *
+   * Read from the store rather than fetched with the row — every page already holds the
+   * companies, so this costs nothing. It matters in a day list because the same debtor can owe
+   * two different clients, and what a collector may say on the phone depends on which one.
+   */
+  const client = companies.find((c) => c.id === row.account.companyId)
+  // The name is shown to everyone; only the LINK is withheld, exactly as the account page does
+  // it. A pre-legal agent works debtors, and the client's mandate and rates are not their
+  // business — but knowing who they are collecting for is.
+  const canOpenClient = canViewClients(currentUser?.role)
+
   return (
     <li className="py-2.5">
-      {/*
-        A container query, not a window one. This list sits in a card that is full width on the
-        diary page and half of it inside a panel, and `sm:` asks about the WINDOW — which is how
-        the contact panels on the record pages ended up running off their cards twice.
-      */}
-      <div className="@container">
-        <div className="flex flex-col @md:flex-row @md:items-center gap-2 @md:gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <Link to={`/accounts/${row.accountId}?diary=${row.id}`}
-                className="font-medium text-sm text-slate-800 hover:text-[var(--c-steel)] truncate">
-                {debtorName(row)}
-              </Link>
-              <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-500"
-                title={meta.why}>
-                {meta.label}
-              </span>
-              {prescribing && (
-                <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--tint-rust-deep)] text-[var(--c-rust-deep)]"
-                  title={`Prescribes ${longDate(row.account.prescriptionDate as string)} — after that it cannot be enforced`}>
-                  prescribing
-                </span>
-              )}
-              {late && (
-                <span className="text-[11px] font-medium text-[var(--c-rust)]"
-                  title={`Was due ${longDate(row.dueOn)}`}>
-                  {late}
-                </span>
-              )}
-            </div>
-            {/*
-              Why it is back, in the words of whoever booked it. This is the field the imported
-              book does not have, and the reason an agent currently has to read a whole timeline
-              before they can pick up the phone.
-            */}
-            <p className="text-xs text-slate-500 mt-0.5 truncate">
-              {row.reason || row.account.mainComment || <span className="text-slate-300">No note about why</span>}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 @md:gap-3 shrink-0">
-            <span className="text-sm font-medium text-slate-700 tabular-nums">
-              {formatCurrency(row.account.capitalOutstanding)}
-            </span>
-            <button onClick={() => onMove(row)}
-              className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-              title="Move it to another day. The original entry keeps its date and says who moved it.">
-              Move
-            </button>
-            <button onClick={() => onComplete(row)}
-              className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              Done
-            </button>
+      <div className={DIARY_GRID}>
+        {/* The account: who, and why it is back. */}
+        <div className="col-span-2 @3xl:col-span-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <Link to={`/accounts/${row.accountId}?diary=${row.id}`}
-              className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600" title="Open the account">
-              <ChevronRight size={16} />
+              className="font-medium text-sm text-slate-800 hover:text-[var(--c-steel)] truncate">
+              {debtorName(row)}
             </Link>
+            {prescribing && (
+              <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--tint-rust-deep)] text-[var(--c-rust-deep)]"
+                title={`Prescribes ${longDate(row.account.prescriptionDate as string)} — after that it cannot be enforced`}>
+                prescribing
+              </span>
+            )}
+            {late && (
+              <span className="text-[11px] font-medium text-[var(--c-rust)]"
+                title={`Was due ${longDate(row.dueOn)}`}>
+                {late}
+              </span>
+            )}
           </div>
+          {/*
+            Why it is back, in the words of whoever booked it. This is the field the imported
+            book does not have, and the reason an agent currently has to read a whole timeline
+            before they can pick up the phone.
+          */}
+          <p className="text-xs text-slate-500 mt-0.5 truncate">
+            {row.reason || row.account.mainComment || <span className="text-slate-300">No note about why</span>}
+          </p>
+        </div>
+
+        {/* Status: what kind of work this is, which is also where it sits on the ladder. */}
+        <div className="min-w-0">
+          <span className="inline-block max-w-full truncate text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-500"
+            title={meta.why}>
+            {meta.label}
+          </span>
+        </div>
+
+        {/* Client. Truncated in the column, whole in the tooltip — a client called "Mzansi
+            Micro-Lending (Pty) Ltd" is unreadable at eleven rem and unmistakable on hover. */}
+        <div className="min-w-0 text-xs text-slate-500">
+          {client
+            ? canOpenClient
+              ? <Link to={`/companies/${client.id}`} title={client.name}
+                  className="hover:text-[var(--c-steel)] hover:underline truncate block">{client.name}</Link>
+              : <span title={client.name} className="truncate block">{client.name}</span>
+            : <span className="text-slate-300" title="This account is not linked to a client">—</span>}
+        </div>
+
+        <div className="text-sm font-medium text-slate-700 tabular-nums @3xl:text-right">
+          {formatCurrency(row.account.capitalOutstanding)}
+        </div>
+
+        <div className="flex items-center justify-end gap-2">
+          <button onClick={() => onMove(row)}
+            className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+            title="Move it to another day. The original entry keeps its date and says who moved it.">
+            Move
+          </button>
+          <button onClick={() => onComplete(row)}
+            className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+            Done
+          </button>
+          <Link to={`/accounts/${row.accountId}?diary=${row.id}`}
+            className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600" title="Open the account">
+            <ChevronRight size={16} />
+          </Link>
         </div>
       </div>
     </li>

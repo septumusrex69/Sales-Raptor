@@ -10,7 +10,7 @@
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router-dom'
 import { DiaryDatePicker } from '../src/components/diary/DiaryDatePicker'
-import { DiaryRowItem } from '../src/pages/diary/DiaryPage'
+import { DiaryList } from '../src/pages/diary/DiaryPage'
 import { DiaryWorkBar } from '../src/components/diary/DiaryWorkBar'
 
 const workAccount = {
@@ -31,7 +31,7 @@ const rows = [
   movedTo: null, movedAt: null, movedBy: null, movedReason: null,
   createdAt: '', createdByName: null,
   account: {
-    id: 'a' + i, accountNumber: 'BF-1002' + i, debtorFirstName: r.name,
+    id: 'a' + i, companyId: i === 2 ? null : 'c' + (i % 2 + 1), accountNumber: 'BF-1002' + i, debtorFirstName: r.name,
     debtorSurname: 'van der Westhuizen-Bekker', capitalOutstanding: r.out,
     status: 'Active', prescriptionDate: r.prescribing, mainComment: null, mainCommentAt: null,
   },
@@ -67,11 +67,7 @@ function App() {
         ))}
         {[390, 640, 1024, 1400].map((w) => (
           <Row key={'r' + w} label="rows" width={w}>
-            <ul className="divide-y divide-slate-100">
-              {rows.map((r) => (
-                <DiaryRowItem key={r.id} row={r} today="2026-09-14" onComplete={() => {}} onMove={() => {}} />
-              ))}
-            </ul>
+            <DiaryList rows={rows} today="2026-09-14" empty="" onComplete={() => {}} onMove={() => {}} />
           </Row>
         ))}
       </div>

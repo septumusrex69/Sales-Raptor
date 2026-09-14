@@ -50,6 +50,7 @@ export interface DiaryEntry {
 export interface DiaryRow extends DiaryEntry {
   account: {
     id: string
+    companyId: string | null
     accountNumber: string | null
     debtorFirstName: string | null
     debtorSurname: string | null
@@ -89,6 +90,10 @@ const toRow = (r: any): DiaryRow => ({
   ...toEntry(r),
   account: {
     id: r.debtor_accounts?.id ?? r.account_id,
+    // The id only. The client's NAME comes from AppStore, which already holds every company on
+    // every page — embedding companies through debtor_accounts would be a second join on every
+    // row of a list that pages out of a six-figure table, to fetch something already in memory.
+    companyId: r.debtor_accounts?.company_id ?? null,
     accountNumber: r.debtor_accounts?.account_number ?? null,
     debtorFirstName: r.debtor_accounts?.debtor_first_name ?? null,
     debtorSurname: r.debtor_accounts?.debtor_surname ?? null,
@@ -112,7 +117,7 @@ const toRow = (r: any): DiaryRow => ({
 const ROW_SELECT = `
   *,
   debtor_accounts!diary_entries_account_id_fkey (
-    id, account_number, debtor_first_name, debtor_surname,
+    id, company_id, account_number, debtor_first_name, debtor_surname,
     capital_outstanding, status, prescription_date, main_comment, main_comment_at
   )
 `

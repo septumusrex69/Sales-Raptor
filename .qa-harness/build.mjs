@@ -12,6 +12,10 @@ const stub = {
     build.onResolve({ filter: /store\/AuthContext$/ }, () => ({
       path: path.resolve('.qa-harness/auth-stub.ts'),
     }))
+    // The row reads the client's name out of the store, which would otherwise load the whole app.
+    build.onResolve({ filter: /store\/AppStore$/ }, () => ({
+      path: path.resolve('.qa-harness/store-stub.ts'),
+    }))
   },
 }
 
