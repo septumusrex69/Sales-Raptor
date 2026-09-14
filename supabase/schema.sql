@@ -1737,8 +1737,67 @@ create table if not exists public.user_emails (
     or linked_contact_id is not null
   ) stored,
 
+  /*
+   * Mail that belongs on nobody's file.
+   *
+   * The firm's manager asked the question that exposed the gap: a telephone provider, an
+   * accountant, a supplier writes in. It is real work mail, so it is not junk; you need their
+   * mail, so the sender cannot be blocked; and it belongs to no debtor, lead or client, so it
+   * can never be matched. It sat in Needs matching for ever -- and a work queue with permanent
+   * residents stops being a work queue, because within a month nobody reads the number on it.
+   *
+   * So: a third answer to "what is this?", beside matched and junk. Somebody has looked at it
+   * and decided it needs no record. It stays in All, stays searchable, stays in the real
+   * mailbox, and stops counting as work.
+   */
+  no_record_at timestamptz,
+  no_record_by uuid references public.profiles (id) on delete set null,
+
+  /*
+   * Everything a person has dealt with, however they dealt with it.
+   *
+   * Generated for the same reason is_filed is: the alternative is "is_filed = false and
+   * no_record_at is null" copied into every query that asks what is still waiting, and the first
+   * one that gets missed is mail that has been handled but still counted as work.
+   *
+   * Deliberately NOT folded into is_filed. Filed means "on a record", and the Matched tab means
+   * exactly that; a supplier's invoice is on no record at all and would be a lie in that list.
+   */
+  is_settled boolean generated always as (
+    linked_account_id is not null
+    or linked_lead_id is not null
+    or linked_deal_id is not null
+    or linked_company_id is not null
+    or linked_contact_id is not null
+    or no_record_at is not null
+  ) stored,
+
   created_at timestamptz not null default now()
 );
+
+-- A message cannot be both on a record and on nobody's file.
+--
+-- Without this the two states can disagree, and the disagreement is visible: the row would wear
+-- the green "Matched" chip and also sit in the No record needed tab, and nobody reading the
+-- screen could say which was true.
+--
+-- Not a trap for the useful case. Matching CLEARS no_record_at -- matching is the strongest
+-- statement anybody can make about a message, so it overrides "needs no record" exactly as it
+-- already overrides junk. A supplier's email that turns out to be a debtor's simply matches.
+-- See linkMailToAccount and linkMailToRecord.
+alter table public.user_emails
+  drop constraint if exists user_emails_no_record_unmatched;
+alter table public.user_emails
+  add constraint user_emails_no_record_unmatched check (
+    no_record_at is null
+    or (
+      linked_account_id is null
+      and linked_lead_id is null
+      and linked_deal_id is null
+      and linked_company_id is null
+      and linked_contact_id is null
+    )
+  );
 
 -- One message per mailbox, never twice. Per USER rather than globally: a message addressed to
 -- two agents legitimately appears in both their mailboxes.
@@ -1756,6 +1815,11 @@ create index if not exists user_emails_inbox_idx
 create index if not exists user_emails_unfiled_idx
   on public.user_emails (user_id, occurred_at desc)
   where is_filed = false and is_junk = false;
+-- What is still waiting. is_settled, not is_filed: mail marked as needing no record has been
+-- dealt with and must not sit in the queue.
+create index if not exists user_emails_unsettled_idx
+  on public.user_emails (user_id, occurred_at desc)
+  where is_settled = false and is_junk = false;
 -- The prune index is gone with the prune. Nothing sweeps this table by age any more.
 
 alter table public.user_emails enable row level security;
@@ -1820,6 +1884,47 @@ alter table public.mail_blocks enable row level security;
 -- Your list, yours to change. Nobody else reads or writes it, including an administrator.
 drop policy if exists "mail_blocks_own" on public.mail_blocks;
 create policy "mail_blocks_own" on public.mail_blocks for all
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- ---------- Senders whose mail never needs matching ----------
+--
+-- The point of marking one message as needing no record is lost if you have to repeat it on the
+-- same supplier every week. A rule settles their mail as it arrives, so it lands in All already
+-- dealt with and never joins the queue.
+--
+-- Its own table rather than a third `kind` on mail_blocks, because the two mean opposite things:
+-- a block stops the mail existing in Raptor at all, this one lets it in and stops it asking for
+-- attention. Sharing a table would have the Blocked tab listing senders nobody blocked.
+--
+-- Per agent, like the blocklist, and for the same reason: one person's rule must not quietly
+-- empty a colleague's work queue. Easy to widen later if the firm wants shared rules; impossible
+-- to un-widen once somebody's mail has gone missing because of somebody else's rule.
+create table if not exists public.mail_sender_rules (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+
+  -- Lowercased. A full address ('accounts@telkom.co.za') or a bare domain ('telkom.co.za').
+  pattern text not null,
+  kind text not null check (kind in ('address', 'domain')),
+
+  -- Room to grow. Today there is one rule; 'always_junk' is the obvious next one, and adding it
+  -- should not need a second table.
+  action text not null default 'no_record' check (action in ('no_record')),
+
+  -- What they were called when the rule was made, so the list reads as names not addresses.
+  label text,
+  created_at timestamptz not null default now()
+);
+
+-- One rule per sender per agent, and whole rather than partial so "on conflict" can infer it.
+create unique index if not exists mail_sender_rules_pattern_idx
+  on public.mail_sender_rules (user_id, pattern);
+
+alter table public.mail_sender_rules enable row level security;
+
+-- Your rules, yours to change. Nobody else reads or writes them, including an administrator.
+drop policy if exists "mail_sender_rules_own" on public.mail_sender_rules;
+create policy "mail_sender_rules_own" on public.mail_sender_rules for all
   using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 -- ---------------------------------------------------------------------------
