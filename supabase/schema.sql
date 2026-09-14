@@ -152,6 +152,30 @@ create table if not exists public.companies (
   mandate_signed_at timestamptz
 );
 
+-- ---------- The two lines the next person needs ----------
+--
+-- The debtor's account has had a main comment since the firm asked for it, and it is the first
+-- thing anybody reads on that page. The sales side had nothing like it: a lead or a client could
+-- carry forty activities and no answer to "what is going on here?" short of reading all forty.
+--
+-- Deliberately NOT a note. A note is a thing that happened, dated, and it belongs on the timeline
+-- with the others. This is the current state of affairs, overwritten as it changes, which is why
+-- it is a column on the record rather than a row in a list.
+alter table public.leads
+  add column if not exists main_comment text,
+  add column if not exists main_comment_at timestamptz,
+  add column if not exists main_comment_by uuid references public.profiles (id) on delete set null;
+
+alter table public.companies
+  add column if not exists main_comment text,
+  add column if not exists main_comment_at timestamptz,
+  add column if not exists main_comment_by uuid references public.profiles (id) on delete set null;
+
+alter table public.deals
+  add column if not exists main_comment text,
+  add column if not exists main_comment_at timestamptz,
+  add column if not exists main_comment_by uuid references public.profiles (id) on delete set null;
+
 -- ---------- Contacts ----------
 create table if not exists public.contacts (
   id uuid primary key default gen_random_uuid(),

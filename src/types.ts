@@ -66,6 +66,16 @@ export interface LeadServiceValue {
 }
 
 export interface Lead {
+  /**
+   * The two lines the next person needs before they read anything else.
+   *
+   * Not a note. A note is a thing that happened, dated, and it belongs on the timeline with the
+   * others; this is the current state of affairs, overwritten as it changes. The debtor's account
+   * has had one since the firm asked for it — this is the same idea on the sales side.
+   */
+  mainComment?: string
+  mainCommentAt?: string
+  mainCommentBy?: ID
   id: ID
   /** Permanent, sequential, never-reused display number (formatted via formatLeadNumber → "SR-00001"). */
   leadNumber: number
@@ -186,6 +196,16 @@ export const DEAL_STAGE_PROBABILITY: Record<DealStage, number> = {
 }
 
 export interface Deal {
+  /**
+   * The two lines the next person needs before they read anything else.
+   *
+   * Not a note. A note is a thing that happened, dated, and it belongs on the timeline with the
+   * others; this is the current state of affairs, overwritten as it changes. The debtor's account
+   * has had one since the firm asked for it — this is the same idea on the sales side.
+   */
+  mainComment?: string
+  mainCommentAt?: string
+  mainCommentBy?: ID
   id: ID
   name: string
   companyId: ID
@@ -240,6 +260,16 @@ export interface Contact {
 }
 
 export interface Company {
+  /**
+   * The two lines the next person needs before they read anything else.
+   *
+   * Not a note. A note is a thing that happened, dated, and it belongs on the timeline with the
+   * others; this is the current state of affairs, overwritten as it changes. The debtor's account
+   * has had one since the firm asked for it — this is the same idea on the sales side.
+   */
+  mainComment?: string
+  mainCommentAt?: string
+  mainCommentBy?: ID
   id: ID
   name: string
   industry?: string

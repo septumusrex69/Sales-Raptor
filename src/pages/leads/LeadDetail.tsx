@@ -23,9 +23,13 @@ import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
 import { InlineSelect } from '../../components/ui/InlineSelect'
 import {
   ACTION_BASE, ACTION_ENABLED, RecordAction, RecordActions, RecordFigure, RecordFigures,
-  RecordFigureShell, RecordLayout, RecordLayoutSwitcher, RecordTabs, useRecordLayout,
+  RecordActionsMore, RecordFigureShell, RecordLayout, RecordLayoutSwitcher, RecordMoreAction,
+  RecordTabs, useRecordLayout,
 } from '../../components/record/RecordShell'
 import { CrmCallButton } from '../../components/record/CrmCallButton'
+import {
+  RecordComment, RecordCommentFact, RecordCommentSummary,
+} from '../../components/record/RecordComment'
 import { PhoneLink } from '../../components/PhoneLink'
 import { LEAD_STATUSES, isActiveLead } from '../../lib/leadStatus'
 import { RowLimitSelect, applyRowLimitKeeping, type RowLimit } from '../../components/ui/RowLimitSelect'
@@ -513,6 +517,58 @@ export function LeadDetail() {
           note={`added ${formatDate(lead.createdAt)}`} />
       </RecordFigures>
 
+      {/*
+        The two lines the next person needs, and the facts they would otherwise go hunting for.
+
+        Above the actions, exactly where it sits on a debtor's account, because it answers the
+        question somebody opens the page with — what is going on here? — before they decide which
+        button to press. The services and the open deals ride along with it: they lived three
+        panels down, and this puts them where the eye already is.
+      */}
+      <RecordComment
+        text={lead.mainComment}
+        at={lead.mainCommentAt}
+        placeholder="Where does this lead stand? Two lines is plenty."
+        onSave={(text) => updateLead(lead.id, {
+          mainComment: text || undefined,
+          mainCommentAt: new Date().toISOString(),
+          mainCommentBy: currentUser?.id,
+        })}
+        summary={(
+          <RecordCommentSummary>
+            <RecordCommentFact label="Interested in">
+              {lead.services && lead.services.length > 0
+                ? lead.services.map((sv) => <ServiceBadge key={sv} service={sv} />)
+                : <span className="text-slate-400">Nothing captured yet</span>}
+            </RecordCommentFact>
+            <RecordCommentFact label="Deals">
+              {resultingDeals.length === 0
+                ? <span className="text-slate-400">None yet</span>
+                : (
+                  <>
+                    <span className="font-medium tabular-nums">{formatCurrency(openDealValue)}</span>
+                    <span className="text-slate-400">
+                      across {openLeadDeals.length} open of {resultingDeals.length}
+                    </span>
+                  </>
+                )}
+            </RecordCommentFact>
+            <RecordCommentFact label="Handover">
+              {estimatedHandover !== undefined
+                ? (
+                  <>
+                    <span className="font-medium tabular-nums">{formatCurrency(estimatedHandover)}</span>
+                    {estimatedAccounts !== undefined && (
+                      <span className="text-slate-400">over {estimatedAccounts} accounts</span>
+                    )}
+                  </>
+                )
+                : <span className="text-slate-400">Not estimated</span>}
+            </RecordCommentFact>
+          </RecordCommentSummary>
+        )}
+      />
+
       <Card>
 
         {lead.services && lead.services.length > 0 && (
@@ -560,27 +616,35 @@ export function LeadDetail() {
               title={lead.email ? 'Send from your connected mailbox' : 'No email address on this lead yet'} />
             <RecordAction icon={StickyNote} label="Add Note" onClick={() => setNoteOpen(true)}
               title="Write on the timeline" />
-            <RecordAction icon={Phone} label="Log Call" onClick={() => setCallOpen(true)}
-              title="Record a call you made some other way" />
-            <RecordAction icon={CalendarClock} label="Schedule Follow-up" onClick={() => setFollowUpOpen(true)} />
-            <RecordAction icon={Users2} label="Schedule Meeting" onClick={() => setMeetingOpen(true)} />
             {canEdit && active && (
               <RecordAction icon={UserPlus} label="Convert to Client" onClick={() => setConvertOpen(true)} primary />
             )}
-            {canEdit && active && <RecordAction icon={Handshake} label="Add Deal" onClick={() => setDealOpen(true)} />}
-            {canEdit && <RecordAction icon={Pencil} label="Edit" onClick={() => setEditOpen(true)} />}
-            {canEdit && active && <RecordAction icon={XCircle} label="Reject" danger onClick={() => setRejectOpen(true)} />}
-            {/* Deleting a converted lead takes its deals with it (the DB cascades on lead_id),
-                which would wipe the client's won business and drop them out of Clients entirely. */}
-            {canEdit && (
-              <RecordAction
-                icon={Trash2}
-                label="Delete"
-                danger
-                onClick={lead.status === 'Converted' ? undefined : () => setDeleteOpen(true)}
-                title={lead.status === 'Converted' ? 'Converted leads can\u2019t be deleted \u2014 it would remove the client\u2019s deals too.' : undefined}
-              />
-            )}
+
+            {/*
+              Everything else, folded away. Twelve buttons wrapped to three lines on an iPad and
+              pushed the panels below off the screen; nothing is removed, because the fix for a
+              crowded row is not to take away the button somebody needs twice a month.
+            */}
+            <RecordActionsMore>
+              <RecordMoreAction icon={Phone} label="Log Call" onClick={() => setCallOpen(true)}
+                title="Record a call you made some other way" />
+              <RecordMoreAction icon={CalendarClock} label="Schedule Follow-up" onClick={() => setFollowUpOpen(true)} />
+              <RecordMoreAction icon={Users2} label="Schedule Meeting" onClick={() => setMeetingOpen(true)} />
+              {canEdit && active && <RecordMoreAction icon={Handshake} label="Add Deal" onClick={() => setDealOpen(true)} />}
+              {canEdit && <RecordMoreAction icon={Pencil} label="Edit lead" onClick={() => setEditOpen(true)} />}
+              {canEdit && active && <RecordMoreAction icon={XCircle} label="Reject" danger onClick={() => setRejectOpen(true)} />}
+              {/* Deleting a converted lead takes its deals with it (the DB cascades on lead_id),
+                  which would wipe the client's won business and drop them out of Clients. */}
+              {canEdit && (
+                <RecordMoreAction
+                  icon={Trash2}
+                  label="Delete"
+                  danger
+                  onClick={lead.status === 'Converted' ? undefined : () => setDeleteOpen(true)}
+                  title={lead.status === 'Converted' ? 'Converted leads can\u2019t be deleted \u2014 it would remove the client\u2019s deals too.' : undefined}
+                />
+              )}
+            </RecordActionsMore>
           </RecordActions>
         </div>
       </Card>

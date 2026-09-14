@@ -1,5 +1,5 @@
 import { Fragment, useState, type ReactNode } from 'react'
-import { Columns3, PanelRight, Rows3, type LucideIcon } from 'lucide-react'
+import { ChevronDown, Columns3, MoreHorizontal, PanelRight, Rows3, type LucideIcon } from 'lucide-react'
 
 /**
  * The shape every record page in Raptor wears.
@@ -142,6 +142,90 @@ export function RecordAction({ icon: Icon, label, onClick, title, primary, dange
 /** Everything you can do, in one row that wraps rather than scrolling the page sideways. */
 export function RecordActions({ children }: { children: ReactNode }) {
   return <div className="flex flex-wrap gap-2">{children}</div>
+}
+
+/**
+ * The rest of what you can do, folded away.
+ *
+ * A row of twelve buttons is not a row, it is a wall — and on a lead or a client it wrapped to
+ * three lines on an iPad and pushed the panels below it off the screen. The debtor's account gets
+ * away with eight because every one of them is something a collector reaches for constantly.
+ *
+ * So the four the firm named — call, SMS, email, note — plus the one thing the page exists for
+ * stay out here, and everything else lives behind this. Nothing is removed, which matters: the
+ * fix for a crowded row is not to take away the button somebody needs twice a month.
+ *
+ * A details/summary rather than a popover, deliberately. It closes on Escape, it is reachable by
+ * keyboard, it needs no outside-click handler to get right, and on a touch screen it is one tap.
+ */
+export function RecordActionsMore({ children, label = 'More' }: {
+  children: ReactNode
+  label?: string
+}) {
+  return (
+    <details className="relative group">
+      <summary
+        className={`${ACTION_BASE} ${ACTION_ENABLED} list-none cursor-pointer select-none marker:hidden`}
+      >
+        <MoreHorizontal size={14} /> {label}
+        <ChevronDown size={13} className="text-slate-400 transition-transform group-open:rotate-180" />
+      </summary>
+      {/*
+        Which edge it hangs from depends on the screen, and getting this wrong is not cosmetic.
+
+        From sm up the row is one line and More sits at its right end, so the menu opens leftwards
+        from that edge — right-0 — or it would run off the right of the page.
+
+        On a phone the row WRAPS, and More lands near the left of its line. Right-aligning there
+        pushed the menu 67px off the left edge of the screen with no way to scroll to it, which is
+        exactly what happened and how this was found. So below sm it hangs from the left instead,
+        and the width is capped to the viewport so a long label cannot undo it either way.
+
+        z-20 clears the cards below, which carry their own stacking context.
+      */}
+      <div className="absolute left-0 sm:left-auto sm:right-0 z-20 mt-1 min-w-[13rem] max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
+        <div className="flex flex-col gap-0.5">{children}</div>
+      </div>
+    </details>
+  )
+}
+
+/**
+ * One thing inside the More menu.
+ *
+ * A full-width row rather than the pill shape of the row outside, because in a list the pills
+ * read as a heap of buttons rather than as a menu. Same disabled behaviour as RecordAction: a
+ * dashed, unclickable row with the reason in its tooltip beats a row that swallows the tap.
+ */
+export function RecordMoreAction({ icon: Icon, label, onClick, title, danger }: {
+  icon: LucideIcon
+  label: string
+  onClick?: () => void
+  title?: string
+  danger?: boolean
+}) {
+  const disabled = !onClick
+  return (
+    <button
+      type="button"
+      title={title}
+      disabled={disabled}
+      onClick={(e) => {
+        // Close the menu on the way out, or it stays open over whatever the click opened.
+        e.currentTarget.closest('details')?.removeAttribute('open')
+        onClick?.()
+      }}
+      className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm ${
+        disabled
+          ? 'text-slate-300 cursor-not-allowed'
+          : danger
+            ? 'text-negative-700 hover:bg-negative-50'
+            : 'text-slate-700 hover:bg-slate-50'}`}
+    >
+      <Icon size={14} className={disabled ? '' : danger ? 'text-negative-700' : 'text-slate-400'} />
+      {label}
+    </button>
+  )
 }
 
 /* ------------------------------------------------------------------ *
