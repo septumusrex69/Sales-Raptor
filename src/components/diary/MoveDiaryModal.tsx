@@ -8,7 +8,6 @@ import { bulkMove, moveEntry, debtorName, type DiaryRow } from '../../lib/diary.
 import { DEFAULT_DIARY_CAPACITY, planSpread } from '../../lib/diaryPriority.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
 import { DictateButton } from '../ui/Dictate'
-import { appendSpeech } from '../../lib/dictation.ts'
 
 /**
  * Move work that was missed onto days somebody can actually do it.
@@ -176,7 +175,7 @@ export function MoveDiaryModal({ entries, ownerId, capacity, onClose, onDone }: 
             className={inputClass} />
           {/* Talk it instead of typing it. Free, built into the browser — see Dictate.tsx. */}
           <div className="mt-1.5">
-            <DictateButton size="small" onText={(said) => setReason((r) => appendSpeech(r, said))} />
+            <DictateButton size="small" value={reason} onChange={setReason} />
           </div>
           {!bulk && (
             <span className="block text-[11px] text-slate-400 mt-1.5">

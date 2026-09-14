@@ -474,13 +474,24 @@ export function exitLabel(id: CirculationExit): string {
  */
 export async function workEntry(input: {
   entry: DiaryEntry
-  outcome: string
+  /**
+   * What came of it. Optional, and it is the ONLY note.
+   *
+   * There were two boxes — "what came of it" and, lower down, "a note" — which is the same
+   * question asked twice. Somebody who has just written two sentences about a phone call has
+   * nothing left for the second box, so it got a full stop in it. One box, carried everywhere:
+   * onto the closed entry, onto the next one as the reason it is coming back, and onto the
+   * account's own timeline.
+   */
+  outcome?: string
   /** Either when it comes back, or why it is leaving the book altogether. */
   next:
-    | { comesBack: true; dueOn: string; kind: DiaryKind; note?: string }
-    | { comesBack: false; exit: CirculationExit; note?: string }
+    | { comesBack: true; dueOn: string; kind: DiaryKind }
+    | { comesBack: false; exit: CirculationExit }
   actor: Actor
 }): Promise<void> {
+  const said = input.outcome?.trim() ?? ''
+
   if (input.next.comesBack) {
     await diarise({
       accountId: input.entry.accountId,
@@ -488,27 +499,39 @@ export async function workEntry(input: {
       ownerId: input.entry.ownerId,
       dueOn: input.next.dueOn,
       kind: input.next.kind,
-      reason: input.next.note,
-      alsoNoteOnAccount: true,
+      reason: said || null,
+      // Written here instead, as one sentence covering both halves — see below.
+      alsoNoteOnAccount: false,
       actor: input.actor,
     })
-  } else {
-    // Out of circulation is a fact about the ACCOUNT, so it is written where the account's
-    // history is read rather than only on a diary row nobody will look for.
-    try {
-      await addNote({
-        accountId: input.entry.accountId,
-        body: `Out of the diary — ${exitLabel(input.next.exit).toLowerCase()}.`
-          + (input.next.note?.trim() ? ` ${input.next.note.trim()}` : ''),
-        authorName: input.actor.name,
-        createdBy: input.actor.id,
-      })
-    } catch {
-      // See diarise: a missing note must not refuse the work.
-    }
   }
 
-  await completeEntry({ id: input.entry.id, outcome: input.outcome, actor: input.actor })
+  /*
+   * ONE note on the account's timeline, saying what happened and what happens next.
+   *
+   * Both halves in one line because they are one event: "Rang him, no answer. Back on 21
+   * September." Two separate notes a second apart read as two things having happened, and the
+   * timeline is what somebody scrolls when they pick this account up cold.
+   *
+   * Allowed to fail without failing the work. An account whose entry closed but whose note did
+   * not save is a small gap; refusing to close the entry over it would strand the agent.
+   */
+  try {
+    const next = input.next.comesBack
+      ? `Back on ${input.next.dueOn}.`
+      : `Out of the diary — ${exitLabel(input.next.exit).toLowerCase()}.`
+    const body = said ? `${said} ${next}` : next
+    await addNote({
+      accountId: input.entry.accountId,
+      body,
+      authorName: input.actor.name,
+      createdBy: input.actor.id,
+    })
+  } catch {
+    // Deliberately swallowed — see above.
+  }
+
+  await completeEntry({ id: input.entry.id, outcome: said || null, actor: input.actor })
 }
 
 /**

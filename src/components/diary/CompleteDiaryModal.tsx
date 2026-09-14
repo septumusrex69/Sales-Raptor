@@ -8,7 +8,6 @@ import { workEntry, debtorName, type DiaryRow } from '../../lib/diary.ts'
 import { DIARY_KINDS } from '../../lib/diaryPriority.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
 import { DictateButton } from '../ui/Dictate'
-import { appendSpeech } from '../../lib/dictation.ts'
 
 /**
  * Mark one diary entry worked, and say what happens to the account next.
@@ -39,15 +38,14 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
   const owner = users.find((u) => u.id === entry.ownerId)
 
   async function save() {
-    if (!outcome.trim()) { setError('Say what came of it — this is what the diary is read back from.'); return }
     setBusy(true); setError(null)
     try {
       await workEntry({
         entry,
         outcome,
         next: plan.comesBack
-          ? { comesBack: true, dueOn: plan.dueOn, kind: plan.kind, note: plan.note }
-          : { comesBack: false, exit: plan.exit, note: plan.note },
+          ? { comesBack: true, dueOn: plan.dueOn, kind: plan.kind }
+          : { comesBack: false, exit: plan.exit },
         actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
       })
       await onDone()
@@ -66,13 +64,17 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
           {entry.reason && <span className="text-slate-400"> · {entry.reason}</span>}
         </p>
 
-        <FormField label="What came of it" required>
+        <FormField label="What came of it">
           <textarea value={outcome} onChange={(e) => setOutcome(e.target.value)} rows={2} autoFocus
             placeholder="No answer on either number. Left an SMS."
             className={`${inputClass} resize-none`} />
           {/* Talk it instead of typing it. Free, built into the browser — see Dictate.tsx. */}
-          <div className="mt-1.5">
-            <DictateButton size="small" onText={(said) => setOutcome((o) => appendSpeech(o, said))} />
+          <div className="flex flex-wrap items-center gap-2 mt-1.5">
+            {/* Talk it instead of typing it — the words land in the box above. See Dictate.tsx. */}
+            <DictateButton size="small" value={outcome} onChange={setOutcome} />
+            <span className="text-[11px] text-slate-400">
+              Optional. Goes on the account&rsquo;s timeline too.
+            </span>
           </div>
         </FormField>
 
@@ -91,7 +93,7 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
           <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-2">
             Cancel
           </button>
-          <button type="button" onClick={() => void save()} disabled={busy || !outcome.trim()}
+          <button type="button" onClick={() => void save()} disabled={busy}
             className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-950 text-white hover:bg-navy-900 disabled:opacity-50">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
             {plan.comesBack ? 'Worked, book the next' : 'Worked, close the account'}

@@ -10,7 +10,6 @@ import { DIARY_KINDS } from '../../lib/diaryPriority.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
 import { refreshNavCounts } from '../../lib/navCounts'
 import { DictateButton } from '../ui/Dictate'
-import { appendSpeech } from '../../lib/dictation.ts'
 
 /**
  * Working a diary, one account after another, without going back to a list between each.
@@ -187,15 +186,14 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
   const owner = users.find((u) => u.id === entry.ownerId)
 
   async function save() {
-    if (!outcome.trim()) { setError('Say what came of it. This is what the diary is read back from.'); return }
     setBusy(true); setError(null)
     try {
       await workEntry({
         entry,
         outcome,
         next: plan.comesBack
-          ? { comesBack: true, dueOn: plan.dueOn, kind: plan.kind, note: plan.note }
-          : { comesBack: false, exit: plan.exit, note: plan.note },
+          ? { comesBack: true, dueOn: plan.dueOn, kind: plan.kind }
+          : { comesBack: false, exit: plan.exit },
         actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
       })
       await onDone()
@@ -224,7 +222,7 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
           </p>
         )}
 
-        <FormField label="What came of it" required>
+        <FormField label="What came of it">
           <textarea value={outcome} onChange={(e) => setOutcome(e.target.value)} rows={2} autoFocus
             placeholder="Spoke to him. Says the insurance pays out on the 28th and he will settle then."
             className={`${inputClass} resize-none`} />
@@ -232,8 +230,12 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
             The one that matters most. An agent working sixty accounts has just put the phone
             down and is about to type the same shape of sentence for the sixtieth time.
           */}
-          <div className="mt-1.5">
-            <DictateButton size="small" onText={(said) => setOutcome((o) => appendSpeech(o, said))} />
+          <div className="flex flex-wrap items-center gap-2 mt-1.5">
+            {/* Talk it instead of typing it — the words land in the box above. See Dictate.tsx. */}
+            <DictateButton size="small" value={outcome} onChange={setOutcome} />
+            <span className="text-[11px] text-slate-400">
+              Optional. Goes on the account&rsquo;s timeline too.
+            </span>
           </div>
         </FormField>
 
@@ -257,7 +259,7 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
             <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-2">
               Cancel
             </button>
-            <button type="button" onClick={() => void save()} disabled={busy || !outcome.trim()}
+            <button type="button" onClick={() => void save()} disabled={busy}
               className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-950 text-white hover:bg-navy-900 disabled:opacity-50">
               {busy ? <Loader2 size={14} className="animate-spin" /> : <CalendarClock size={14} />}
               {remaining > 0 ? 'Done, next account' : 'Done, back to diary'}
