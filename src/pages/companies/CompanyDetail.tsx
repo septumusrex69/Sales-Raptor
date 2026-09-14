@@ -12,7 +12,7 @@ import { StatusBadge, StageBadge, ClassificationBadge } from '../../components/u
 import { InlineSelect } from '../../components/ui/InlineSelect'
 import {
   ACTION_BASE, ACTION_ENABLED, RecordAction, RecordActions, RecordFigure, RecordFigures,
-  RecordFigureShell,
+  RecordFigureShell, RecordLayout, RecordLayoutSwitcher, RecordTabs, useRecordLayout,
 } from '../../components/record/RecordShell'
 import { CrmCallButton } from '../../components/record/CrmCallButton'
 import { PhoneLink } from '../../components/PhoneLink'
@@ -40,6 +40,8 @@ import { HandoverBook } from '../../components/companies/HandoverBook'
 import type { Company, Contact } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
 import { summaryLine } from '../../lib/summaryLine'
+
+type ClientTab = 'Overview' | 'Emails' | 'Notes' | 'Tasks'
 
 export function CompanyDetail() {
   const focusedEmailId = useFocusedEmailId()
@@ -112,6 +114,13 @@ export function CompanyDetail() {
    * A company has one switchboard number of its own; the people are on the contacts below. The
    * Call button rings the one there is, which is what somebody phoning a client expects.
    */
+  /*
+   * Which tab, and how the Overview is arranged. The layout key is per page type rather than per
+   * client: it is a preference about eyes, not about a company.
+   */
+  const [tab, setTab] = useState<ClientTab>('Overview')
+  const [layout, chooseLayout] = useRecordLayout('raptor.client.layout')
+
   const clientNumbers = useMemo(
     () => (company?.phone ? [{ label: 'Switchboard', value: company.phone }] : []),
     [company?.phone],
@@ -139,6 +148,313 @@ export function CompanyDetail() {
       </div>
     )
   }
+
+  /*
+   * The panels, built once and placed by whichever layout is chosen.
+   *
+   * Defining them here rather than three times over is the whole reason the layouts can be
+   * trusted to stay the same page: a prop added to one arrangement cannot be forgotten in the
+   * other two, and that bug is invisible until somebody switches layout.
+   */
+  /** Who to ring, and the people you deal with there. */
+  const contactPanel = (
+    <Card>
+      <CardHeader
+        title="Contact Details"
+        action={
+          <button onClick={() => setEditCompanyOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+            <Pencil size={12} /> Edit
+          </button>
+        }
+      />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-4 pb-4 border-b border-slate-100">
+        <div>
+          <p className="text-xs text-slate-400 mb-0.5">Phone</p>
+          {company.phone ? (
+            <PhoneLink number={company.phone} className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600" log={{ label: company.name, companyId: company.id }} />
+          ) : (
+            <span className="text-slate-300">—</span>
+          )}
+        </div>
+        <div>
+          <p className="text-xs text-slate-400 mb-0.5">Email</p>
+          {company.email ? (
+            <span className="inline-flex items-center gap-1.5 text-slate-700 font-medium">
+              <button onClick={() => setEmailOpen(true)} className="text-slate-400 hover:text-brand-600" title="Send email">
+                <Mail size={13} />
+              </button>
+              {company.email}
+            </span>
+          ) : (
+            <span className="text-slate-300">—</span>
+          )}
+        </div>
+        <div>
+          <p className="text-xs text-slate-400 mb-0.5">Website</p>
+          {company.website ? (
+            <span className="inline-flex items-center gap-1.5 text-slate-700 font-medium">
+              <Globe size={13} /> {company.website}
+            </span>
+          ) : (
+            <span className="text-slate-300">—</span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs text-slate-400">Contact Persons</p>
+        <button onClick={() => setAddContactOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline">
+          <Plus size={12} /> Add Contact
+        </button>
+      </div>
+      {companyContacts.length === 0 ? (
+        <p className="text-sm text-slate-400">No contact persons yet.</p>
+      ) : (
+        <div className="space-y-1">
+          {companyContacts.map((c) => (
+            <div key={c.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 hover:bg-slate-50 -mx-1 px-2 py-2 rounded-lg">
+              <Link to={`/contacts/${c.id}`} className="flex items-center gap-2.5 min-w-0">
+                <UserAvatar userId={c.ownerId} size={30} />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-700 hover:text-brand-600 truncate">{c.firstName} {c.lastName}</p>
+                  <p className="text-xs text-slate-400 truncate">{c.jobTitle}</p>
+                </div>
+              </Link>
+              <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
+                {c.phone && (
+                  <PhoneLink number={c.phone} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, contactId: c.id, companyId: company.id }} />
+                )}
+                {c.mobile && (
+                  <PhoneLink number={c.mobile} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, contactId: c.id, companyId: company.id }}>
+                    <Phone size={11} /> {c.mobile} <span className="text-slate-300">mobile</span>
+                  </PhoneLink>
+                )}
+                {c.email && (
+                  <span className="inline-flex items-center gap-1">
+                    <button onClick={() => setContactEmailTarget(c)} className="text-slate-400 hover:text-brand-600" title="Send email">
+                      <Mail size={11} />
+                    </button>
+                    {c.email}
+                  </span>
+                )}
+                <button onClick={() => setEditContact(c)} className="text-slate-400 hover:text-brand-600" title="Edit contact">
+                  <Pencil size={11} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+
+  /** The clients grouped under this one. */
+  const subAccountsPanel = subAccounts.length > 0 && (
+    <Card padded={false}>
+      <div className="p-5 pb-3">
+        <CardHeader title="Sub-accounts" subtitle={`${subAccounts.length} under this client`} />
+      </div>
+      <div className="overflow-x-auto px-5 pb-5">
+        <table className="w-full text-sm border border-slate-100 rounded-xl overflow-hidden">
+          <thead>
+            <tr className="text-left text-xs text-slate-400 bg-slate-50/70">
+              <th className="font-medium px-4 py-2.5">Sub-account</th>
+              <th className="font-medium px-3 py-2.5">Code</th>
+              <th className="font-medium px-3 py-2.5 text-right">Accounts</th>
+              <th className="font-medium px-3 py-2.5 text-right">Handover Amount</th>
+              <th className="font-medium px-3 py-2.5 text-right">Payments to Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {subAccounts.map((s) => (
+              <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/60 cursor-pointer" onClick={() => navigate(`/companies/${s.id}`)}>
+                <td className="px-4 py-2.5">
+                  <Link to={`/companies/${s.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
+                    {s.name}
+                  </Link>
+                </td>
+                <td className="px-3 py-2.5">
+                  {s.code ? <span className="font-mono text-[11px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">{s.code}</span> : '—'}
+                </td>
+                <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{s.accountCount ?? '—'}</td>
+                <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{s.handoverAmount !== undefined ? formatCurrency(s.handoverAmount) : '—'}</td>
+                <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{s.paymentsToDate !== undefined ? formatCurrency(s.paymentsToDate) : '—'}</td>
+              </tr>
+            ))}
+            <tr className="border-t border-slate-200" style={{ background: 'rgba(236,220,184,0.25)' }}>
+              <td className="px-4 py-2.5 font-bold text-slate-800">Total</td>
+              <td className="px-3 py-2.5"></td>
+              <td className="px-3 py-2.5 text-right font-bold text-slate-800 tabular-nums">{subAccounts.reduce((s, a) => s + (a.accountCount ?? 0), 0)}</td>
+              <td className="px-3 py-2.5 text-right font-bold text-slate-800 tabular-nums">{formatCurrency(subAccounts.reduce((s, a) => s + (a.handoverAmount ?? 0), 0))}</td>
+              <td className="px-3 py-2.5 text-right font-bold text-slate-800 tabular-nums">{formatCurrency(subAccounts.reduce((s, a) => s + (a.paymentsToDate ?? 0), 0))}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  )
+
+  /** Its own tab: a list that grows without limit does not belong on an overview. */
+  const emailsPanel = (
+    <Card>
+      <CardHeader
+        title="Emails"
+        subtitle={`${emailActivities.length} message${emailActivities.length === 1 ? '' : 's'}`}
+        action={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setComposeOpen(true)}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              <Mail size={12} /> Compose
+            </button>
+            <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
+          </div>
+        }
+      />
+      {emailActivities.length === 0 ? (
+        <p className="text-sm text-slate-400">No emails yet.</p>
+      ) : (
+        <EmailActivityList
+          activities={applyRowLimitKeeping(emailActivities, emailLimit, focusedEmailId)}
+            focusId={focusedEmailId}
+          showDeal
+          onReply={(a) => {
+            const replyToAddress = a.contactId ? contacts.find((c) => c.id === a.contactId)?.email : company.email
+            if (!replyToAddress) return
+            const rawSubject = parseEmailActivity(a.subject)?.subject ?? a.subject
+            setReplyTarget({
+              to: replyToAddress,
+              subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}`,
+              contactId: a.contactId,
+            })
+          }}
+        />
+      )}
+    </Card>
+  )
+
+  /** Everything that is not an email — courtesy calls, meetings, notes. */
+  const notesPanel = (
+    <Card>
+      <CardHeader
+        title="Notes"
+        subtitle={`${nonEmailActivities.length} update${nonEmailActivities.length === 1 ? '' : 's'}`}
+        action={<RowLimitSelect value={noteLimit} onChange={setNoteLimit} />}
+      />
+      {nonEmailActivities.length === 0 ? (
+        <p className="text-sm text-slate-400">No activity recorded yet.</p>
+      ) : (
+        <div className="space-y-2.5">
+          <NoteActivityList activities={nonEmailActivities} limit={noteLimit} />
+        </div>
+      )}
+    </Card>
+  )
+
+  /** What is still being sold to them. */
+  const openDealsPanel = (
+    <Card>
+      <CardHeader title="Open Deals" subtitle={`${openDeals.length} active`} />
+      {openDeals.length === 0 ? (
+        <p className="text-sm text-slate-400">No open deals.</p>
+      ) : (
+        <div className="divide-y divide-slate-50">
+          {openDeals.map((d) => (
+            <Link key={d.id} to={`/deals/${d.id}`} className="flex items-center justify-between py-2.5 hover:bg-slate-50/60 -mx-1 px-1 rounded-lg">
+              <span className="text-sm font-medium text-slate-700">{d.name}</span>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-slate-500">{formatCurrency(d.value)}</span>
+                <StageBadge stage={d.stage} />
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+
+  /** What they have already signed. */
+  const wonDealsPanel = (
+    <Card>
+      <CardHeader title="Won Deals" subtitle={`${wonDeals.length} closed`} />
+      {wonDeals.length === 0 ? (
+        <p className="text-sm text-slate-400">No won deals yet.</p>
+      ) : (
+        <div className="divide-y divide-slate-50">
+          {wonDeals.map((d) => (
+            <Link key={d.id} to={`/deals/${d.id}`} className="flex items-center justify-between py-2.5 hover:bg-slate-50/60 -mx-1 px-1 rounded-lg">
+              <span className="text-sm font-medium text-slate-700">{d.name}</span>
+              <span className="text-sm font-semibold text-[var(--c-gold-deep)]">{formatCurrency(d.value)}</span>
+            </Link>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+
+  /** The leads this client came from. */
+  const leadsPanel = (
+    <Card>
+      <CardHeader title="Leads" />
+      {companyLeads.length === 0 ? (
+        <p className="text-sm text-slate-400">No leads for this company.</p>
+      ) : (
+        <div className="divide-y divide-slate-50">
+          {companyLeads.map((l) => (
+            <Link key={l.id} to={`/leads/${l.id}`} className="flex items-center justify-between py-2.5 hover:bg-slate-50/60 -mx-1 px-1 rounded-lg">
+              <span className="text-sm font-medium text-slate-700">{l.firstName} {l.lastName}</span>
+              <StatusBadge status={l.status} />
+            </Link>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+
+  /** The firmographics. */
+  const companyInfoPanel = (
+    <Card>
+      <CardHeader title="Company Information" />
+      <dl className="space-y-3 text-sm">
+        <Field label="Industry" value={company.industry} />
+        <Field label="Province" value={company.province} />
+        <Field label="City" value={company.city} />
+        <Field label="Address" value={company.address} />
+        <Field label="Signed by (Marketing Agent)" value={company.marketingAgent} />
+        <div className="flex justify-between gap-3 items-center">
+          <dt className="text-slate-400">Account Owner</dt>
+          <dd className="flex items-center gap-1.5">
+            <span className="text-slate-700 font-medium">{users.find((u) => u.id === company.accountOwnerId)?.name ?? '—'}</span>
+            <button onClick={() => setOwnerOpen(true)} className="p-1 rounded-lg text-slate-300 hover:text-slate-600 hover:bg-slate-100">
+              <Pencil size={12} />
+            </button>
+          </dd>
+        </div>
+        {company.mandateSignedAt && <Field label="Mandate Signed" value={formatDate(company.mandateSignedAt)} />}
+        <Field label="Created" value={formatDate(company.createdAt)} />
+      </dl>
+    </Card>
+  )
+
+  /** Its own tab as well: a task list is work, not context. */
+  const tasksPanel = (
+    <Card>
+      <CardHeader title="Tasks" />
+      {companyTasks.length === 0 ? (
+        <p className="text-sm text-slate-400">No tasks yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {companyTasks.map((t) => (
+            <div key={t.id} className="text-sm">
+              <p className="text-slate-700">{t.title}</p>
+              <p className="text-xs text-slate-400">Due {formatDate(t.dueDate)}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
 
   return (
     <div className="space-y-5">
@@ -301,296 +617,55 @@ export function CompanyDetail() {
         </div>
       </Card>
 
-      <ClientBookCard companyId={company.id} />
+      {/*
+        Tabs over the detail, like the Account and Lead pages — and for the same reason.
+        Everything below used to be one scroll: contact details, sub-accounts, every email ever
+        sent, every note, the queries, the handover book, then the deals somebody actually came
+        for. The long lists get their own tabs so the Overview stays readable at a glance.
+      */}
+      <RecordTabs<ClientTab>
+        tabs={[
+          { id: 'Overview', label: 'Overview' },
+          { id: 'Emails', label: 'Emails', count: emailActivities.length },
+          { id: 'Notes', label: 'Notes', count: nonEmailActivities.length },
+          { id: 'Tasks', label: 'Tasks', count: companyTasks.length },
+        ]}
+        active={tab}
+        onChange={setTab}
+        /* Only on Overview, because it is the only tab with more than one panel to arrange. */
+        trailing={tab === 'Overview'
+          ? <RecordLayoutSwitcher layout={layout} onChange={chooseLayout} />
+          : undefined}
+      />
 
-      <Card>
-        <CardHeader
-          title="Contact Details"
-          action={
-            <button onClick={() => setEditCompanyOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              <Pencil size={12} /> Edit
-            </button>
-          }
+      {tab === 'Overview' && (
+        <RecordLayout
+          layout={layout}
+          details={contactPanel}
+          main={(
+            <div className="space-y-5">
+              {/* Above the deals: for a debt collection client this IS the relationship. What
+                  they signed is one line on a deal; what they actually send is the work. */}
+              <HandoverBook company={company} onLog={() => setHandoverOpen(true)} />
+              {openDealsPanel}
+              {wonDealsPanel}
+            </div>
+          )}
+          side={[
+            <ClientBookCard key="book" companyId={company.id} />,
+            /* Beside the handover book, because these are the two things a liaison opens this
+               page for: what came in, and what is stuck. */
+            <ClientQueries key="queries" companyId={company.id} />,
+            companyInfoPanel,
+            subAccountsPanel,
+            leadsPanel,
+          ]}
         />
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-4 pb-4 border-b border-slate-100">
-          <div>
-            <p className="text-xs text-slate-400 mb-0.5">Phone</p>
-            {company.phone ? (
-              <PhoneLink number={company.phone} className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600" log={{ label: company.name, companyId: company.id }} />
-            ) : (
-              <span className="text-slate-300">—</span>
-            )}
-          </div>
-          <div>
-            <p className="text-xs text-slate-400 mb-0.5">Email</p>
-            {company.email ? (
-              <span className="inline-flex items-center gap-1.5 text-slate-700 font-medium">
-                <button onClick={() => setEmailOpen(true)} className="text-slate-400 hover:text-brand-600" title="Send email">
-                  <Mail size={13} />
-                </button>
-                {company.email}
-              </span>
-            ) : (
-              <span className="text-slate-300">—</span>
-            )}
-          </div>
-          <div>
-            <p className="text-xs text-slate-400 mb-0.5">Website</p>
-            {company.website ? (
-              <span className="inline-flex items-center gap-1.5 text-slate-700 font-medium">
-                <Globe size={13} /> {company.website}
-              </span>
-            ) : (
-              <span className="text-slate-300">—</span>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-xs text-slate-400">Contact Persons</p>
-          <button onClick={() => setAddContactOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline">
-            <Plus size={12} /> Add Contact
-          </button>
-        </div>
-        {companyContacts.length === 0 ? (
-          <p className="text-sm text-slate-400">No contact persons yet.</p>
-        ) : (
-          <div className="space-y-1">
-            {companyContacts.map((c) => (
-              <div key={c.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 hover:bg-slate-50 -mx-1 px-2 py-2 rounded-lg">
-                <Link to={`/contacts/${c.id}`} className="flex items-center gap-2.5 min-w-0">
-                  <UserAvatar userId={c.ownerId} size={30} />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-700 hover:text-brand-600 truncate">{c.firstName} {c.lastName}</p>
-                    <p className="text-xs text-slate-400 truncate">{c.jobTitle}</p>
-                  </div>
-                </Link>
-                <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
-                  {c.phone && (
-                    <PhoneLink number={c.phone} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, contactId: c.id, companyId: company.id }} />
-                  )}
-                  {c.mobile && (
-                    <PhoneLink number={c.mobile} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, contactId: c.id, companyId: company.id }}>
-                      <Phone size={11} /> {c.mobile} <span className="text-slate-300">mobile</span>
-                    </PhoneLink>
-                  )}
-                  {c.email && (
-                    <span className="inline-flex items-center gap-1">
-                      <button onClick={() => setContactEmailTarget(c)} className="text-slate-400 hover:text-brand-600" title="Send email">
-                        <Mail size={11} />
-                      </button>
-                      {c.email}
-                    </span>
-                  )}
-                  <button onClick={() => setEditContact(c)} className="text-slate-400 hover:text-brand-600" title="Edit contact">
-                    <Pencil size={11} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {subAccounts.length > 0 && (
-        <Card padded={false}>
-          <div className="p-5 pb-3">
-            <CardHeader title="Sub-accounts" subtitle={`${subAccounts.length} under this client`} />
-          </div>
-          <div className="overflow-x-auto px-5 pb-5">
-            <table className="w-full text-sm border border-slate-100 rounded-xl overflow-hidden">
-              <thead>
-                <tr className="text-left text-xs text-slate-400 bg-slate-50/70">
-                  <th className="font-medium px-4 py-2.5">Sub-account</th>
-                  <th className="font-medium px-3 py-2.5">Code</th>
-                  <th className="font-medium px-3 py-2.5 text-right">Accounts</th>
-                  <th className="font-medium px-3 py-2.5 text-right">Handover Amount</th>
-                  <th className="font-medium px-3 py-2.5 text-right">Payments to Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {subAccounts.map((s) => (
-                  <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/60 cursor-pointer" onClick={() => navigate(`/companies/${s.id}`)}>
-                    <td className="px-4 py-2.5">
-                      <Link to={`/companies/${s.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
-                        {s.name}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {s.code ? <span className="font-mono text-[11px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">{s.code}</span> : '—'}
-                    </td>
-                    <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{s.accountCount ?? '—'}</td>
-                    <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{s.handoverAmount !== undefined ? formatCurrency(s.handoverAmount) : '—'}</td>
-                    <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{s.paymentsToDate !== undefined ? formatCurrency(s.paymentsToDate) : '—'}</td>
-                  </tr>
-                ))}
-                <tr className="border-t border-slate-200" style={{ background: 'rgba(236,220,184,0.25)' }}>
-                  <td className="px-4 py-2.5 font-bold text-slate-800">Total</td>
-                  <td className="px-3 py-2.5"></td>
-                  <td className="px-3 py-2.5 text-right font-bold text-slate-800 tabular-nums">{subAccounts.reduce((s, a) => s + (a.accountCount ?? 0), 0)}</td>
-                  <td className="px-3 py-2.5 text-right font-bold text-slate-800 tabular-nums">{formatCurrency(subAccounts.reduce((s, a) => s + (a.handoverAmount ?? 0), 0))}</td>
-                  <td className="px-3 py-2.5 text-right font-bold text-slate-800 tabular-nums">{formatCurrency(subAccounts.reduce((s, a) => s + (a.paymentsToDate ?? 0), 0))}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </Card>
       )}
 
-      <Card>
-        <CardHeader
-          title="Emails"
-          subtitle={`${emailActivities.length} message${emailActivities.length === 1 ? '' : 's'}`}
-          action={
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setComposeOpen(true)}
-                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-              >
-                <Mail size={12} /> Compose
-              </button>
-              <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
-            </div>
-          }
-        />
-        {emailActivities.length === 0 ? (
-          <p className="text-sm text-slate-400">No emails yet.</p>
-        ) : (
-          <EmailActivityList
-            activities={applyRowLimitKeeping(emailActivities, emailLimit, focusedEmailId)}
-              focusId={focusedEmailId}
-            showDeal
-            onReply={(a) => {
-              const replyToAddress = a.contactId ? contacts.find((c) => c.id === a.contactId)?.email : company.email
-              if (!replyToAddress) return
-              const rawSubject = parseEmailActivity(a.subject)?.subject ?? a.subject
-              setReplyTarget({
-                to: replyToAddress,
-                subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}`,
-                contactId: a.contactId,
-              })
-            }}
-          />
-        )}
-      </Card>
-
-      <Card>
-        <CardHeader
-          title="Notes"
-          subtitle={`${nonEmailActivities.length} update${nonEmailActivities.length === 1 ? '' : 's'}`}
-          action={<RowLimitSelect value={noteLimit} onChange={setNoteLimit} />}
-        />
-        {nonEmailActivities.length === 0 ? (
-          <p className="text-sm text-slate-400">No activity recorded yet.</p>
-        ) : (
-          <div className="space-y-2.5">
-            <NoteActivityList activities={nonEmailActivities} limit={noteLimit} />
-          </div>
-        )}
-      </Card>
-
-      {/* Beside the handover book, because these are the two things a liaison opens this page
-          for: what came in, and what is stuck. */}
-      <ClientQueries companyId={company.id} />
-
-      {/* Above the deals: for a debt collection client this is the relationship. What they
-          signed is one line on a deal; what they actually send is the work. */}
-      <HandoverBook company={company} onLog={() => setHandoverOpen(true)} />
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 space-y-5">
-          <Card>
-            <CardHeader title="Open Deals" subtitle={`${openDeals.length} active`} />
-            {openDeals.length === 0 ? (
-              <p className="text-sm text-slate-400">No open deals.</p>
-            ) : (
-              <div className="divide-y divide-slate-50">
-                {openDeals.map((d) => (
-                  <Link key={d.id} to={`/deals/${d.id}`} className="flex items-center justify-between py-2.5 hover:bg-slate-50/60 -mx-1 px-1 rounded-lg">
-                    <span className="text-sm font-medium text-slate-700">{d.name}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm text-slate-500">{formatCurrency(d.value)}</span>
-                      <StageBadge stage={d.stage} />
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          <Card>
-            <CardHeader title="Won Deals" subtitle={`${wonDeals.length} closed`} />
-            {wonDeals.length === 0 ? (
-              <p className="text-sm text-slate-400">No won deals yet.</p>
-            ) : (
-              <div className="divide-y divide-slate-50">
-                {wonDeals.map((d) => (
-                  <Link key={d.id} to={`/deals/${d.id}`} className="flex items-center justify-between py-2.5 hover:bg-slate-50/60 -mx-1 px-1 rounded-lg">
-                    <span className="text-sm font-medium text-slate-700">{d.name}</span>
-                    <span className="text-sm font-semibold text-[var(--c-gold-deep)]">{formatCurrency(d.value)}</span>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          <Card>
-            <CardHeader title="Leads" />
-            {companyLeads.length === 0 ? (
-              <p className="text-sm text-slate-400">No leads for this company.</p>
-            ) : (
-              <div className="divide-y divide-slate-50">
-                {companyLeads.map((l) => (
-                  <Link key={l.id} to={`/leads/${l.id}`} className="flex items-center justify-between py-2.5 hover:bg-slate-50/60 -mx-1 px-1 rounded-lg">
-                    <span className="text-sm font-medium text-slate-700">{l.firstName} {l.lastName}</span>
-                    <StatusBadge status={l.status} />
-                  </Link>
-                ))}
-              </div>
-            )}
-          </Card>
-        </div>
-
-        <div className="space-y-5">
-          <Card>
-            <CardHeader title="Company Information" />
-            <dl className="space-y-3 text-sm">
-              <Field label="Industry" value={company.industry} />
-              <Field label="Province" value={company.province} />
-              <Field label="City" value={company.city} />
-              <Field label="Address" value={company.address} />
-              <Field label="Signed by (Marketing Agent)" value={company.marketingAgent} />
-              <div className="flex justify-between gap-3 items-center">
-                <dt className="text-slate-400">Account Owner</dt>
-                <dd className="flex items-center gap-1.5">
-                  <span className="text-slate-700 font-medium">{users.find((u) => u.id === company.accountOwnerId)?.name ?? '—'}</span>
-                  <button onClick={() => setOwnerOpen(true)} className="p-1 rounded-lg text-slate-300 hover:text-slate-600 hover:bg-slate-100">
-                    <Pencil size={12} />
-                  </button>
-                </dd>
-              </div>
-              {company.mandateSignedAt && <Field label="Mandate Signed" value={formatDate(company.mandateSignedAt)} />}
-              <Field label="Created" value={formatDate(company.createdAt)} />
-            </dl>
-          </Card>
-
-          <Card>
-            <CardHeader title="Tasks" />
-            {companyTasks.length === 0 ? (
-              <p className="text-sm text-slate-400">No tasks yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {companyTasks.map((t) => (
-                  <div key={t.id} className="text-sm">
-                    <p className="text-slate-700">{t.title}</p>
-                    <p className="text-xs text-slate-400">Due {formatDate(t.dueDate)}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </div>
-      </div>
+      {tab === 'Emails' && emailsPanel}
+      {tab === 'Notes' && notesPanel}
+      {tab === 'Tasks' && tasksPanel}
 
       {emailOpen && company.email && (
         <ComposeEmailModal

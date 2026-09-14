@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
-  AlertTriangle, ArrowLeft, Check, CheckCircle2, Columns3, Loader2, Mail, MessageCircle,
-  MessageSquare, PanelRight, Phone, Plus, Printer, Rows3, ShieldAlert, StickyNote, X, XCircle,
-  type LucideIcon,
+  AlertTriangle, ArrowLeft, Check, CheckCircle2, Loader2, Mail, MessageCircle,
+  MessageSquare, Phone, Plus, Printer, ShieldAlert, StickyNote, X, XCircle,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
 import {
   ACTION_BASE, ACTION_ENABLED, RecordAction as Action, RecordActions, RecordFigure as Figure,
-  RecordFigures, RecordTabs,
+  RecordFigures, RecordLayout, RecordLayoutSwitcher, RecordTabs, useRecordLayout,
 } from '../../components/record/RecordShell'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
@@ -53,24 +52,12 @@ type Tab = 'Overview' | 'Transactions' | 'Emails' | 'Documents'
  * the middle column gets squeezed, an iPad held in one hand. The firm asked to be able to choose
  * rather than have the page choose for them.
  */
-type Layout = 'columns' | 'stacked' | 'wide'
-
-const LAYOUTS: { id: Layout; label: string; icon: LucideIcon; hint: string }[] = [
-  { id: 'columns', label: 'Three columns', icon: Columns3, hint: 'Details, history and money side by side' },
-  { id: 'stacked', label: 'One column', icon: Rows3, hint: 'Everything under each other, in reading order' },
-  { id: 'wide', label: 'Wide history', icon: PanelRight, hint: 'Details and history two thirds, money one third' },
-]
-
-/** Remembered per browser, not per account: it is a preference about eyes, not about a debtor. */
+/*
+ * The layout switcher is now shared with every other record page — see RecordShell. The key stays
+ * per page type, because the right arrangement genuinely differs: an account has a long timeline
+ * to give width to, a lead has not.
+ */
 const LAYOUT_KEY = 'raptor.account.layout'
-
-function storedLayout(): Layout {
-  try {
-    const saved = localStorage.getItem(LAYOUT_KEY)
-    if (LAYOUTS.some((l) => l.id === saved)) return saved as Layout
-  } catch { /* private browsing, or storage switched off. The default is fine. */ }
-  return 'columns'
-}
 
 const TODAY = new Date().toISOString().slice(0, 10)
 
@@ -111,7 +98,7 @@ export function AccountDetail() {
   const [params] = useSearchParams()
   const cameForEmail = params.get('email') !== null
   const [tab, setTab] = useState<Tab>(cameForEmail ? 'Emails' : 'Overview')
-  const [layout, setLayout] = useState<Layout>(storedLayout)
+  const [layout, chooseLayout] = useRecordLayout(LAYOUT_KEY)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [composeTo, setComposeTo] = useState<string | null>(null)
@@ -271,10 +258,7 @@ export function AccountDetail() {
   const clientLiaison = users.find((u) => u.id === client?.accountOwnerId)
   const canDelete = ['Administrator', 'Sales Manager', 'Liaison Manager'].includes(currentUser?.role ?? '')
 
-  function chooseLayout(next: Layout) {
-    setLayout(next)
-    try { localStorage.setItem(LAYOUT_KEY, next) } catch { /* nothing to remember it with. */ }
-  }
+
 
   /*
    * The six panels, built once and placed by whichever layout is chosen.
@@ -484,30 +468,11 @@ export function AccountDetail() {
         ]}
         active={tab}
         onChange={setTab}
-        trailing={tab === 'Overview' ? (
-          /*
-            How to see it, on the row that already says what you are seeing.
-
-            Only on Overview, because it is the only tab with anything to arrange — offering it
-            over a statement would be a control that does nothing. Icons rather than words: this
-            sits on a tab row, and three labelled buttons would read as three more tabs.
-
-            Hidden on a phone, where three tabs already fill the row and adding 95px to it pushed
-            the whole page sideways — measured, not guessed. Nothing is lost: every layout
-            collapses to one column below lg anyway, and the choice is remembered per browser.
-          */
-          <div className="ml-auto mb-1 hidden sm:flex items-center gap-0.5 self-end rounded-lg border border-slate-200 p-0.5">
-            {LAYOUTS.map((l) => (
-              <button key={l.id} type="button" onClick={() => chooseLayout(l.id)}
-                title={`${l.label} — ${l.hint}`} aria-label={l.label} aria-pressed={layout === l.id}
-                className={`p-1.5 rounded-md ${layout === l.id
-                  ? 'bg-navy-950 text-white'
-                  : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}>
-                <l.icon size={15} />
-              </button>
-            ))}
-          </div>
-        ) : undefined}
+        /* Only on Overview, because it is the only tab with anything to arrange — offering it
+           over a statement would be a control that does nothing. */
+        trailing={tab === 'Overview'
+          ? <RecordLayoutSwitcher layout={layout} onChange={chooseLayout} />
+          : undefined}
       />
 
       {tab === 'Transactions' && (
@@ -540,68 +505,21 @@ export function AccountDetail() {
           userId={currentUser?.id ?? null} userName={currentUser?.name ?? null} canDelete={canDelete} />
       )}
 
-      {tab === 'Overview' && layout === 'columns' && (
-        // Three columns only from xl. At iPad width the fixed side columns leave the timeline
-        // about 120px wide, which is not a narrow column — it is unreadable. So lg drops to two
-        // columns with the timeline full-width underneath, and anything narrower stacks.
-        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)_minmax(0,19rem)]">
-          <div className="lg:order-1 xl:order-none">{detailsPanel}</div>
-          <div className="lg:order-3 lg:col-span-2 xl:order-none xl:col-span-1">{timelinePanel}</div>
-          <div className="space-y-4 lg:order-2 xl:order-none">
-            {summaryPanel}
-            {promisePanel}
-            {disputesPanel}
-            {positionPanel}
-          </div>
-        </div>
-      )}
+      {tab === 'Overview' && (
+        /*
+          The same three arrangements every record page now offers, from the same component.
 
-      {tab === 'Overview' && layout === 'stacked' && (
-        // One column, in the firm's own reading order: who they are, what they owe, what has
-        // happened, what they promised, what they are arguing about, where the account stands.
-        // Capped to a readable measure — a full-width timeline on a 27" screen is a worse read
-        // than a narrow one, not a better one.
-        <div className="mx-auto w-full max-w-5xl space-y-4">
-          {/*
-            Details beside the money rather than above it. Reading order is preserved — left to
-            right is still details then summary — and it saves most of a screen of scrolling now
-            that the details panel lays its fields out across the width.
-          */}
-          <div className="grid gap-4 items-start lg:grid-cols-3">
-            <div className="lg:col-span-2">{detailsPanel}</div>
-            {summaryPanel}
-          </div>
-          {timelinePanel}
-          {/*
-            The three short cards share a row rather than each taking a full one.
-
-            `items-start` matters: without it the grid stretches all three to the height of the
-            tallest, so an account with four open disputes would leave the position card a mostly
-            empty box the same height. They keep the order they are read in, left to right.
-          */}
-          <div className="grid gap-4 items-start md:grid-cols-2 lg:grid-cols-3">
-            {promisePanel}
-            {disputesPanel}
-            {positionPanel}
-          </div>
-        </div>
-      )}
-
-      {tab === 'Overview' && layout === 'wide' && (
-        // Two thirds and one third. The work — who to ring and what was said — gets the width;
-        // the money sits beside it and stays in view while you scroll the history.
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="space-y-4 lg:col-span-2">
-            {detailsPanel}
-            {timelinePanel}
-          </div>
-          <div className="space-y-4">
-            {summaryPanel}
-            {promisePanel}
-            {disputesPanel}
-            {positionPanel}
-          </div>
-        </div>
+          Defining the panels once above and letting RecordLayout place them is the whole reason
+          the layouts can be trusted to stay the same page: a prop added to the promise panel
+          cannot be added to one arrangement and forgotten in the other two — a bug that is
+          invisible until somebody switches layout.
+        */
+        <RecordLayout
+          layout={layout}
+          details={detailsPanel}
+          main={timelinePanel}
+          side={[summaryPanel, promisePanel, disputesPanel, positionPanel]}
+        />
       )}
 
       {disputing && (
