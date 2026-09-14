@@ -542,7 +542,17 @@ export async function saveMainComment(
       authorName: byName ?? null,
       createdBy: byId,
       kind: 'main_comment',
-      source: 'system',
+      /*
+       * A PERSON'S WRITING, not the machine's — and getting this wrong made the whole thing
+       * pointless for a while.
+       *
+       * It was 'system' on the reasoning that Raptor composed the framing. But the timeline's
+       * "just what people wrote" filter is on by default and hides exactly that, so every one of
+       * these was written to the database and shown to nobody. The rule the schema states is
+       * about the WORDS: system means Raptor composed them, manual means a person typed them.
+       * The words of a main comment are always a person's.
+       */
+      source: 'manual',
     })
   } catch {
     // Deliberately swallowed — see above.

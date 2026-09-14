@@ -1,7 +1,7 @@
 import {
   Banknote, CalendarClock, FileSignature, FileSearch, HandCoins, Mail, MailOpen,
   MapPinned, MessageCircleQuestion, MessageSquare, MessagesSquare, Phone, ScrollText,
-  StickyNote, Undo2, type LucideIcon,
+  StickyNote, Undo2, MessageSquareQuote, type LucideIcon,
 } from 'lucide-react'
 import type { TimelineEntry } from '../../lib/accountTimeline'
 
@@ -29,6 +29,11 @@ const PAYMENT: TimelineStyle = { icon: Banknote, ring: 'bg-positive-50', fg: 'te
 const REVERSAL: TimelineStyle = { icon: Undo2, ring: 'bg-negative-50', fg: 'text-negative' }
 const PROMISE: TimelineStyle = { icon: HandCoins, ring: 'bg-gold-50', fg: 'text-gold-600' }
 const NOTE: TimelineStyle = { icon: StickyNote, ring: 'bg-slate-100', fg: 'text-slate-500' }
+/*
+ * The main comment, changed. Gold, because gold is this palette's "carries weight" and this is
+ * the one line the next person reads before they ring — not another sticky note among fifty.
+ */
+const MAIN_COMMENT: TimelineStyle = { icon: MessageSquareQuote, ring: 'bg-gold-50', fg: 'text-gold-600' }
 /* A dispute takes the negative colour: it is the debtor pushing back, and it changes the call. */
 const QUERY: TimelineStyle = { icon: MessageCircleQuestion, ring: 'bg-negative-50', fg: 'text-negative' }
 
@@ -86,6 +91,7 @@ export function styleFor(entry: TimelineEntry): TimelineStyle {
   // and wears its icon. Everything else a person types is a plain note.
   if (entry.kind === 'note') return (entry.actionCode ? CHANNEL[entry.actionCode] : undefined) ?? NOTE
   if (entry.kind === 'query') return QUERY
+  if (entry.kind === 'main_comment') return MAIN_COMMENT
 
   const code = entry.actionCode ?? BY_DESCRIPTION.find(([re]) => re.test(entry.title))?.[1]
   const style: TimelineStyle = (code ? CHANNEL[code] : undefined) ?? FALLBACK

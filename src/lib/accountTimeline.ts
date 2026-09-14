@@ -14,7 +14,7 @@ import type { AccountLedgers } from './accountBook'
 import type { AccountNote, PromiseToPay } from './accountWorkspace'
 import { feeLabel } from './feeLabel.ts'
 
-export type TimelineKind = 'action' | 'payment' | 'note' | 'promise' | 'query'
+export type TimelineKind = 'action' | 'payment' | 'note' | 'promise' | 'query' | 'main_comment'
 
 export interface TimelineEntry {
   id: string
@@ -80,7 +80,14 @@ const NOTE_ACTION: Record<string, string> = {
   email_in: 'email_in',
 }
 
-const RANK: Record<TimelineKind, number> = { payment: 0, promise: 1, query: 2, action: 3, note: 4 }
+/*
+ * Within one day, the order things are shown in. A main comment change sits with the notes and
+ * just above them: on a day where somebody worked the account and rewrote the comment, the
+ * rewritten comment is the summary of the rest.
+ */
+const RANK: Record<TimelineKind, number> = {
+  payment: 0, promise: 1, query: 2, action: 3, main_comment: 4, note: 5,
+}
 
 export function buildTimeline(
   ledgers: AccountLedgers | null,
@@ -129,7 +136,11 @@ export function buildTimeline(
       id: `note:${n.id}`,
       // A query's own history is not an ordinary note: it belongs to a dispute, and a collector
       // scanning the timeline needs to see that at a glance rather than read for it.
-      kind: n.kind === 'query' ? 'query' : 'note',
+      /*
+       * A main comment change is not a note about the account, it is a change to the line
+       * everybody reads first. Its own kind, so it can look like one.
+       */
+      kind: n.kind === 'query' ? 'query' : n.kind === 'main_comment' ? 'main_comment' : 'note',
       date: dayOf(n.createdAt),
       at: n.createdAt,
       title: n.body,

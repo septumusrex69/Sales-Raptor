@@ -1,6 +1,6 @@
 import { FormField, inputClass } from '../ui/Modal'
 import { DiaryDatePicker, longDate } from './DiaryDatePicker'
-import { CIRCULATION_EXITS, type CirculationExit } from '../../lib/diary.ts'
+import { type CirculationExit } from '../../lib/diary.ts'
 import { DIARY_KINDS, DIARY_KIND_ORDER, type DiaryKind } from '../../lib/diaryPriority.ts'
 
 /**
@@ -67,29 +67,21 @@ export function NextDiaryFields({ plan, onChange, ownerId, capacity, today, pres
           </FormField>
         </>
       ) : (
-        <FormField label="Why it is leaving the book" required>
-          <select value={plan.exit} onChange={(e) => set({ exit: e.target.value as CirculationExit })} className={inputClass}>
-            {CIRCULATION_EXITS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
-          </select>
-        </FormField>
+        /*
+         * Unreachable from here, and that is the point.
+         *
+         * AN AGENT CANNOT TAKE AN ACCOUNT OUT OF THE DIARY. The firm was plain about it: an
+         * account is closed by management or withdrawn by the client, and every exit behind this
+         * picker — paid in full, written off, handed to the attorneys, withdrawn, prescribed —
+         * is somebody else's decision or a fact about the balance. None of them is the
+         * collector's call, so the tick that reached them is gone.
+         *
+         * The branch stays because workEntry still takes an exit and the management action that
+         * will use it is the other half of this work. What it no longer has is a way in from an
+         * agent's screen.
+         */
+        null
       )}
-
-      {/*
-        The escape hatch, phrased as what it is rather than as an unchecked box. "Bring this
-        account back" with a tick in it invites somebody to untick it to save ten seconds; this
-        says out loud that untick means the account has stopped being collectable.
-      */}
-      <label className="flex items-start gap-2 text-sm text-slate-600 pt-1">
-        <input type="checkbox" checked={!plan.comesBack}
-          onChange={(e) => set({ comesBack: !e.target.checked })}
-          className="rounded border-slate-300 mt-0.5" />
-        <span>
-          This account is finished and leaves the diary for good
-          <span className="block text-[11px] text-slate-400">
-            Only for an account with nothing left to collect. Everything else comes back.
-          </span>
-        </span>
-      </label>
     </div>
   )
 }
