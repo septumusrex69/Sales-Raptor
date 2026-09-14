@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Mic, Square } from 'lucide-react'
 import {
   appendSpeech, dictationError, speechRecognition, storedLanguage, rememberLanguage,
@@ -17,43 +17,61 @@ import {
  * themselves, and the words arrive as text. Nothing is stored, nothing is uploaded by us, and
  * there is no bill.
  *
- * Firefox has no such API. There the button says so and names the operating system's own
- * dictation instead, rather than sitting there doing nothing.
+ * TWO THINGS HERE ARE NOT OBVIOUS AND BOTH CAME FROM USING IT.
+ *
+ * THE WORDS GO IN THE BOX, not beside the button. They used to appear as grey text next to
+ * "Listening…", which meant watching one place while the thing you were writing sat empty
+ * somewhere else. Now the box fills as you talk, exactly as if you were typing into it, and the
+ * grey tail at the end is the phrase the recogniser has not finished thinking about.
+ *
+ * AND IT DOES NOT STOP WHEN YOU PAUSE. The browser ends a session of its own accord after a few
+ * seconds of silence — which is fine for a search box and useless for somebody describing a
+ * phone call, where thinking mid-sentence is the normal case. It restarts itself, silently, for
+ * as long as the button says Listening. That is the difference between dictating a note and
+ * dictating the first sentence of one.
  */
-export function DictateButton({ onText, size = 'normal' }: {
-  /** Called with each finished phrase. Join it on with appendSpeech. */
-  onText: (text: string) => void
+export function DictateButton({ value, onChange, size = 'normal' }: {
+  /** The field's current text. Needed so speech can be joined onto the end of it. */
+  value: string
+  /** Called with the field's new text, live, as the words arrive. */
+  onChange: (next: string) => void
   size?: 'normal' | 'small'
 }) {
   const [listening, setListening] = useState(false)
-  const [interim, setInterim] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [lang, setLang] = useState(storedLanguage)
+
   const recognition = useRef<SpeechRecognitionLike | null>(null)
+  /** Still wanted? Cleared by the Stop button, and by an error there is no point retrying. */
+  const wanted = useRef(false)
+  /** The text as it stood before the phrase now being spoken — what interim words append to. */
+  const base = useRef(value)
+  /** Latest value without re-subscribing the recogniser on every keystroke. */
+  const latest = useRef(value)
+  latest.current = value
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
 
-  const Ctor = speechRecognition()
-
-  const stop = useCallback(() => {
+  const hardStop = useCallback(() => {
+    wanted.current = false
     recognition.current?.stop()
     recognition.current = null
     setListening(false)
-    setInterim('')
   }, [])
 
-  // Stop listening if the box is closed mid-sentence: a recogniser left running holds the
-  // microphone open, and the browser shows a recording dot over a page nobody is on.
-  useEffect(() => () => { recognition.current?.abort() }, [])
+  /*
+   * A recogniser left running holds the microphone open and the browser shows a recording dot
+   * over a page nobody is on. Closing the box has to end it.
+   */
+  useEffect(() => () => { wanted.current = false; recognition.current?.abort() }, [])
 
-  const start = useCallback(() => {
+  const begin = useCallback(() => {
+    const Ctor = speechRecognition()
     if (!Ctor) return
-    setError(null)
+
     const r = new Ctor()
     r.lang = lang
-    // Keep going between sentences rather than stopping at the first pause — a collector
-    // describing a call talks for thirty seconds with gaps in it.
     r.continuous = true
-    // Show the words as they are heard. Without this the box sits empty while somebody talks,
-    // and they stop and start again thinking it is broken.
     r.interimResults = true
     r.maxAlternatives = 1
 
@@ -62,28 +80,62 @@ export function DictateButton({ onText, size = 'normal' }: {
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const result = event.results[i]
         const said = result[0].transcript
-        if (result.isFinal) onText(said)
-        else pending += said
+        if (result.isFinal) {
+          // Settled. It becomes part of the text, and the next interim builds on it.
+          base.current = appendSpeech(base.current, said)
+          onChangeRef.current(base.current)
+        } else {
+          pending += said
+        }
       }
-      setInterim(pending)
+      // Shown in the box itself so there is one place to look. Joined the same way the final
+      // words will be, so nothing jumps when the recogniser makes up its mind.
+      if (pending.trim()) onChangeRef.current(appendSpeech(base.current, pending))
     }
+
     r.onerror = (event) => {
       const message = dictationError(event.error)
       if (message) setError(message)
-      setListening(false)
+      // No point restarting into a blocked microphone or a missing one — that would spin.
+      if (['not-allowed', 'service-not-allowed', 'audio-capture'].includes(event.error)) {
+        wanted.current = false
+        setListening(false)
+      }
     }
-    r.onend = () => { setListening(false); setInterim('') }
+
+    /*
+     * THE RESTART. Chrome ends a session after a few seconds of quiet whatever `continuous`
+     * says, so a long note stopped dead the first time somebody paused to think. While the
+     * button still says Listening, start again.
+     *
+     * The delay matters: starting immediately inside onend throws "already started" on some
+     * versions, and the whole thing dies silently.
+     */
+    r.onend = () => {
+      if (!wanted.current) { setListening(false); return }
+      window.setTimeout(() => { if (wanted.current) begin() }, 250)
+    }
 
     try {
       r.start()
       recognition.current = r
       setListening(true)
     } catch {
+      wanted.current = false
+      setListening(false)
       setError('Dictation could not start. Try again.')
     }
-  }, [Ctor, lang, onText])
+  }, [lang])
 
-  if (!Ctor) {
+  const start = useCallback(() => {
+    setError(null)
+    // Anything typed by hand before pressing the button is what speech joins onto.
+    base.current = latest.current
+    wanted.current = true
+    begin()
+  }, [begin])
+
+  if (!speechRecognition()) {
     return (
       <span className="text-[11px] text-slate-400 inline-flex items-center gap-1" title={NO_DICTATION_HELP}>
         <Mic size={12} className="opacity-40" /> not in this browser
@@ -97,7 +149,7 @@ export function DictateButton({ onText, size = 'normal' }: {
     <span className="inline-flex flex-wrap items-center gap-1.5">
       <button
         type="button"
-        onClick={() => (listening ? stop() : start())}
+        onClick={() => (listening ? hardStop() : start())}
         title={listening ? 'Stop listening' : `Talk instead of typing (${lang})`}
         className={`inline-flex items-center gap-1.5 rounded-lg border text-xs font-medium transition-colors ${pad} ${
           listening
@@ -106,22 +158,22 @@ export function DictateButton({ onText, size = 'normal' }: {
         }`}
       >
         {listening ? <Square size={12} className="animate-pulse" /> : <Mic size={12} />}
-        {listening ? 'Listening…' : 'Dictate'}
+        {listening ? 'Listening — tap to stop' : 'Dictate'}
       </button>
 
       {/*
-        Only once somebody is actually dictating. A language dropdown sitting beside every note
-        box on the off-chance is clutter; the moment it matters is when the words coming back are
-        in the wrong language.
+        Only once somebody is actually dictating. A language dropdown beside every note box on
+        the off-chance is clutter; the moment it matters is when the words coming back are in the
+        wrong language.
       */}
       {listening && DICTATION_LANGUAGES.length > 1 && (
         <select
           value={lang}
           onChange={(e) => {
-            // The recogniser's language cannot change mid-run, so it is stopped and restarted.
+            // A recogniser's language cannot change mid-run, so it is stopped and started again.
             const next = e.target.value
             setLang(next); rememberLanguage(next)
-            stop()
+            hardStop()
           }}
           className="text-[11px] rounded border border-slate-200 bg-white px-1 py-0.5"
           title="Stops listening so you can start again in this language"
@@ -130,35 +182,7 @@ export function DictateButton({ onText, size = 'normal' }: {
         </select>
       )}
 
-      {/* The words so far, before they are final — proof it is hearing you. */}
-      {interim && <span className="text-[11px] text-slate-400 italic truncate max-w-[16rem]">{interim}</span>}
       {error && <span className="text-[11px] text-[var(--c-rust)]">{error}</span>}
     </span>
-  )
-}
-
-/**
- * A text box you can talk into.
- *
- * Wraps any input or textarea and puts the microphone under it. The value stays the caller's —
- * this only ever hands back "here is what was said", joined on with appendSpeech so the result
- * reads as sentences rather than as a transcript.
- */
-export function Dictatable({ value, onChange, children, label }: {
-  value: string
-  onChange: (next: string) => void
-  /** The input or textarea itself. */
-  children: ReactNode
-  /** Shown beside the microphone, e.g. "or type it". */
-  label?: string
-}) {
-  return (
-    <div>
-      {children}
-      <div className="flex flex-wrap items-center gap-2 mt-1.5">
-        <DictateButton onText={(said) => onChange(appendSpeech(value, said))} size="small" />
-        {label && <span className="text-[11px] text-slate-400">{label}</span>}
-      </div>
-    </div>
   )
 }

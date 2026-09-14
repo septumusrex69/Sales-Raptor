@@ -27,6 +27,14 @@ like `max-w-[32rem]` is simply absent from a stale CSS file, so the component re
 that one respect and the measurement quietly lies. That happened while building the diary
 picker: the cap read as "not working" until the CSS was rebuilt.
 
+`dictate-drive.mjs` is a different kind of check: it installs a fake SpeechRecognition before the
+page loads and plays a real dictation through it — interim words, a final phrase, a silence
+timeout, more words, Stop. It exists because two dictation bugs were invisible in the source. The
+words appearing beside the button instead of in the box is arguably a design mistake you could
+spot by reading; a pause killing the session is not, because nothing in the file is wrong — Chrome
+simply ends a session after a few seconds of quiet whatever `continuous` says. Only driving it
+showed that.
+
 `shoot.mjs` prints a table per `data-probe` box — its width, its scroll overflow, and the worst
 left/right overhang of any descendant, naming the culprit's class. Anything non-zero is a bug.
 It also reports console errors and writes a full-page PNG.

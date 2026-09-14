@@ -2,8 +2,6 @@ import { FormField, inputClass } from '../ui/Modal'
 import { DiaryDatePicker, longDate } from './DiaryDatePicker'
 import { CIRCULATION_EXITS, type CirculationExit } from '../../lib/diary.ts'
 import { DIARY_KINDS, DIARY_KIND_ORDER, type DiaryKind } from '../../lib/diaryPriority.ts'
-import { DictateButton } from '../ui/Dictate'
-import { appendSpeech } from '../../lib/dictation.ts'
 
 /**
  * "What happens to this account next" — asked the same way wherever an entry is closed.
@@ -16,13 +14,17 @@ import { appendSpeech } from '../../lib/dictation.ts'
  * book for one of five stated reasons. Working an entry finishes an APPOINTMENT; the debt is
  * still owed, and an account nobody is booked to ring again is one that goes quiet. Three
  * hundred and fifty-five of them arrived from the old system in precisely that state.
+ *
+ * THERE IS NO NOTE HERE, and there used to be. Asking "what came of it" at the top of the box
+ * and "a note" at the bottom is asking the same question twice, and the firm said so: a person
+ * who has just written two sentences about a phone call has nothing left to put in a second box,
+ * so it gets a full stop in it or gets left blank. One note, above, and it carries.
  */
 export interface NextPlan {
   comesBack: boolean
   dueOn: string
   kind: DiaryKind
   exit: CirculationExit
-  note: string
 }
 
 export function NextDiaryFields({ plan, onChange, ownerId, capacity, today, prescriptionDate }: {
@@ -73,25 +75,6 @@ export function NextDiaryFields({ plan, onChange, ownerId, capacity, today, pres
       )}
 
       {/*
-        Optional, at the firm's instruction — it used to be a required "Why", and sometimes there
-        is genuinely nothing to add beyond the date. Where somebody does write one it lands on the
-        account's timeline as well as on the diary entry, so it is findable by whoever reads the
-        account six months from now rather than only by whoever reads the diary.
-      */}
-      <FormField label="Note">
-        <input value={plan.note} onChange={(e) => set({ note: e.target.value })}
-          placeholder={plan.comesBack ? 'Insurance pays out on the 28th — check it landed.' : 'Settlement received 12 September.'}
-          className={inputClass} />
-        <div className="flex flex-wrap items-center gap-2 mt-1.5">
-          {/* Talk it instead of typing it. Free, built into the browser — see Dictate.tsx. */}
-          <DictateButton size="small" onText={(said) => set({ note: appendSpeech(plan.note, said) })} />
-          <span className="text-[11px] text-slate-400">
-            Goes on the account&rsquo;s timeline as well as the diary.
-          </span>
-        </div>
-      </FormField>
-
-      {/*
         The escape hatch, phrased as what it is rather than as an unchecked box. "Bring this
         account back" with a tick in it invites somebody to untick it to save ten seconds; this
         says out loud that untick means the account has stopped being collectable.
@@ -113,5 +96,5 @@ export function NextDiaryFields({ plan, onChange, ownerId, capacity, today, pres
 
 /** A sensible starting plan: back in a week's working days, same kind of work as last time. */
 export function initialPlan(kind: DiaryKind, dueOn: string): NextPlan {
-  return { comesBack: true, dueOn, kind, exit: 'paid', note: '' }
+  return { comesBack: true, dueOn, kind, exit: 'paid' }
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight,
-  Loader2, Play, Users, X,
+  ListChecks, Loader2, Play, Users, X,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { useAuth } from '../../store/AuthContext'
@@ -88,7 +88,15 @@ export function DiaryPage() {
    * what you were looking at is how somebody re-diarises the wrong forty accounts.
    */
   const [picked, setPicked] = useState<Set<string>>(new Set())
-  useEffect(() => { setPicked(new Set()) }, [viewDay, viewing, tab])
+  /*
+   * Selecting is a MODE you enter on purpose, at the firm's instruction.
+   *
+   * Tick boxes sitting on every row all day is how somebody catches one with a thumb on an iPad
+   * and re-diarises an account they never meant to touch. Pressing Select is a small, deliberate
+   * "I am about to do something to several of these" — and until then the rows are just rows.
+   */
+  const [selecting, setSelecting] = useState(false)
+  useEffect(() => { setPicked(new Set()); setSelecting(false) }, [viewDay, viewing, tab])
 
   const owner = users.find((u) => u.id === viewing)
   const isMine = viewing === currentUser?.id
@@ -272,6 +280,24 @@ export function DiaryPage() {
           )}
 
           {/*
+            Enter and leave selecting. Only where there is something to select — a Select button
+            over an empty list is a button that does nothing.
+          */}
+          {(tab === 'Today' || tab === 'Backlog') && shown.length > 0 && (
+            selecting ? (
+              <button onClick={() => { setSelecting(false); setPicked(new Set()) }}
+                className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+                <X size={14} /> Done
+              </button>
+            ) : (
+              <button onClick={() => setSelecting(true)}
+                className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+                <ListChecks size={14} /> Select
+              </button>
+            )
+          )}
+
+          {/*
             The loop the firm asked for: open the first account, work it, press one button, land
             on the next. Only offered when there is something to work — a button that opens
             nothing teaches people not to trust it.
@@ -307,22 +333,25 @@ export function DiaryPage() {
             Moving forty accounts to another day is one decision about forty accounts, which is a
             different thing, and it is the one the firm asked for.
           */}
-          {!loading && pickedRows.length > 0 && (
+          {!loading && selecting && (
             <div className="flex flex-wrap items-center gap-2 mb-3 rounded-lg bg-navy-950 text-white px-3 py-2.5">
-              <span className="text-sm font-medium">
-                {pickedRows.length} selected
-              </span>
-              <span className="text-xs text-slate-400">
-                {formatCurrency(pickedRows.reduce((sum, r) => sum + r.account.capitalOutstanding, 0))}
-              </span>
-              <div className="flex-1" />
-              <button onClick={() => setMoving(pickedRows)}
-                className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
-                <CalendarClock size={14} /> Re-diarise
+              <button
+                onClick={() => setPicked(picked.size === shown.length ? new Set() : new Set(shown.map((r) => r.id)))}
+                className="text-sm font-medium underline decoration-slate-500 underline-offset-4 hover:decoration-white">
+                {picked.size === shown.length ? 'Clear all' : `Select all ${shown.length}`}
               </button>
-              <button onClick={() => setPicked(new Set())}
-                className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg text-slate-300 hover:bg-white/10">
-                <X size={13} /> Clear
+              <span className="text-sm">
+                {pickedRows.length === 0 ? 'None selected' : `${pickedRows.length} selected`}
+              </span>
+              {pickedRows.length > 0 && (
+                <span className="text-xs text-slate-400">
+                  {formatCurrency(pickedRows.reduce((sum, r) => sum + r.account.capitalOutstanding, 0))}
+                </span>
+              )}
+              <div className="flex-1" />
+              <button onClick={() => setMoving(pickedRows)} disabled={pickedRows.length === 0}
+                className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-40 disabled:hover:bg-gold-400">
+                <CalendarClock size={14} /> Re-diarise
               </button>
             </div>
           )}
@@ -330,8 +359,8 @@ export function DiaryPage() {
           {!loading && tab === 'Today' && day && (
             <DiaryList
               rows={shown}
-              picked={picked}
-              onPick={togglePick}
+              picked={selecting ? picked : undefined}
+              onPick={selecting ? togglePick : undefined}
               today={today}
               empty={day.overdue.length > 0
                 ? 'Nothing is due today — but there is a backlog behind you.'
@@ -344,8 +373,8 @@ export function DiaryPage() {
           {!loading && tab === 'Backlog' && day && (
             <Backlog
               rows={shown}
-              picked={picked}
-              onPick={togglePick}
+              picked={selecting ? picked : undefined}
+              onPick={selecting ? togglePick : undefined}
               today={today}
               capacity={owner?.diaryCapacity}
               onComplete={setCompleting}
@@ -387,7 +416,13 @@ export function DiaryPage() {
           ownerId={viewing}
           capacity={owner?.diaryCapacity ?? null}
           onClose={() => setMoving(null)}
-          onDone={async () => { setMoving(null); await load() }}
+          onDone={async () => {
+            setMoving(null)
+            // Out of selecting automatically. The firm asked for this in the mailbox and it is
+            // the same annoyance here: having done the thing, nobody wants to press Done as well.
+            setSelecting(false); setPicked(new Set())
+            await load()
+          }}
         />
       )}
     </div>

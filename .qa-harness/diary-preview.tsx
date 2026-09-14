@@ -7,6 +7,7 @@
  * looking. The date picker is a 7-column grid and the diary row wraps: both are exactly the
  * shape that breaks narrow.
  */
+import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router-dom'
 import { DiaryDatePicker } from '../src/components/diary/DiaryDatePicker'
@@ -42,6 +43,24 @@ const rows = [
 // The picker asks the database how full each day is; diary-stub.ts stands in for that module
 // (see the esbuild alias). The layout question is about the grid, not where the numbers came from.
 
+/**
+ * A live dictation box, driven by a fake recogniser the probe installs.
+ *
+ * The two things fixed this round cannot be read off the source: whether the words land IN the
+ * box, and whether a pause ends the session. Both are behaviour over time, so they are driven.
+ */
+function DictateProbe() {
+  const [text, setText] = useState('')
+  return (
+    <label className="block">
+      <span className="text-xs font-medium text-slate-500">What came of it</span>
+      <textarea rows={2} value={text} onChange={(e) => setText(e.target.value)} data-probe-field
+        className="w-full mt-1 rounded-lg border border-slate-200 px-3 py-2 text-sm resize-none" />
+      <div className="mt-1.5"><DictateButton size="small" value={text} onChange={setText} /></div>
+    </label>
+  )
+}
+
 function Row({ label, children, width }: { label: string; children: React.ReactNode; width: number }) {
   return (
     <div style={{ marginBottom: 24 }}>
@@ -68,7 +87,7 @@ function App() {
               <span className="text-xs font-medium text-slate-500">What came of it</span>
               <textarea rows={2} defaultValue="Spoke to him. Says the insurance pays out on the 28th."
                 className="w-full mt-1 rounded-lg border border-slate-200 px-3 py-2 text-sm resize-none" />
-              <div className="mt-1.5"><DictateButton size="small" onText={() => {}} /></div>
+              <DictateProbe />
             </label>
           </Row>
         ))}
