@@ -779,10 +779,11 @@ function FormerUserModal({ accessToken, onClose }: { accessToken: string; onClos
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch('/api/former-user', {
+      const res = await fetch('/api/invite-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ email, name, role }),
+        // signIn:false is what separates a record from an invitation — see api/invite-user.ts.
+        body: JSON.stringify({ email, name, role, signIn: false }),
       })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {
