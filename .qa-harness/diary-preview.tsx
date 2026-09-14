@@ -11,6 +11,12 @@ import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router-dom'
 import { DiaryDatePicker } from '../src/components/diary/DiaryDatePicker'
 import { DiaryRowItem } from '../src/pages/diary/DiaryPage'
+import { DiaryWorkBar } from '../src/components/diary/DiaryWorkBar'
+
+const workAccount = {
+  id: 'a1', mainComment: null, mainCommentAt: null, prescriptionDate: '2027-01-01',
+  debtorFirstName: 'Nomvula', debtorSurname: 'van der Westhuizen-Bekker', accountNumber: 'BF-10023',
+}
 
 // A row of each shape that could wrap badly: the longest label, a prescribing account, a very
 // late one, and one with no note at all.
@@ -47,11 +53,16 @@ function Row({ label, children, width }: { label: string; children: React.ReactN
 
 function App() {
   return (
-    <MemoryRouter>
+    <MemoryRouter initialEntries={['/accounts/a1?diary=e2']}>
       <div style={{ padding: 16, background: '#f8fafc' }}>
         {[390, 768, 1280].map((w) => (
           <Row key={w} label="picker" width={w}>
             <DiaryDatePicker ownerId="x" capacity={30} value="2026-09-18" onChange={() => {}} today="2026-09-14" />
+          </Row>
+        ))}
+        {[390, 640, 1024, 1400].map((w) => (
+          <Row key={'b' + w} label="workbar" width={w}>
+            <DiaryWorkBar account={workAccount} />
           </Row>
         ))}
         {[390, 640, 1024, 1400].map((w) => (

@@ -435,6 +435,18 @@ export function AccountDetail() {
       <MainComment account={account} busy={savingComment}
         onSave={(text) => runComment(() => saveMainComment(account.id, text, currentUser?.id ?? null))} />
 
+      {/*
+        Only when the account was opened FROM the diary. An account looked up by name is just an
+        account; one reached by working a queue gets the queue's controls.
+
+        Sits between the comment and the actions at the firm's instruction, and it reads better
+        there than it did: you arrive, read the two lines that say where this account stands, see
+        what the diary wanted of you, and then reach for the phone. It was a bar fixed to the
+        bottom of the window, which cost eighty pixels of screen on every account and put the
+        controls furthest from the thing they act on.
+      */}
+      <DiaryWorkBar account={account} onWorked={reload} />
+
       <ActionBar
         callNumber={callContact?.value}
         callNumbers={smsNumbers}
@@ -449,11 +461,6 @@ export function AccountDetail() {
         onTraced={reload}
       />
 
-      {/*
-        Only when the account was opened FROM the diary. An account looked up by name is just an
-        account; one reached by working a queue gets the queue's controls. See DiaryWorkBar.
-      */}
-      <DiaryWorkBar account={account} onWorked={reload} />
 
       <OutcomeOutstanding queries={queries} accountId={account.id}
         actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}

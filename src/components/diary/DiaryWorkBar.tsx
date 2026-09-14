@@ -96,10 +96,15 @@ export function DiaryWorkBar({ account, onWorked }: {
   return (
     <>
       {/*
-        Fixed to the bottom, above everything, with the page padded to clear it (see the spacer
-        below). A bar that scrolls away is a bar somebody loses halfway down a long account.
+        In the flow of the page, between the main comment and the action row.
+
+        It was fixed to the bottom of the window, which was wrong twice over: it cost eighty
+        pixels of every screen for the whole time somebody was working a diary, and the spacer
+        that kept the page clear of it left a visible hole under the action row. Here it costs
+        nothing when it is absent, and it reads in the order the work happens — where the account
+        stands, what the diary wanted, then the phone.
       */}
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-navy-800 bg-navy-950 text-white shadow-[0_-4px_16px_rgba(0,0,0,0.18)]">
+      <div className="rounded-xl border border-navy-800 bg-navy-950 text-white">
         <div className="@container px-4 py-2.5">
           <div className="flex flex-col @lg:flex-row @lg:items-center gap-2 @lg:gap-4">
             <div className="min-w-0 flex-1">
@@ -139,8 +144,6 @@ export function DiaryWorkBar({ account, onWorked }: {
           </div>
         </div>
       </div>
-      {/* Keeps the bar from covering the bottom of the account. */}
-      <div aria-hidden className="h-20" />
 
       {finishing && (
         <FinishModal
