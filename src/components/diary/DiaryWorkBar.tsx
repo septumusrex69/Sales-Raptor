@@ -325,15 +325,19 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
   const { users } = useAppStore()
   const [outcome, setOutcome] = useState('')
   /*
-   * Ticked by default exactly when the main comment is stale.
+   * OFF. Always, whatever state the main comment is in.
    *
-   * The sentence somebody types here — "says the insurance pays out on the 28th" — usually IS
-   * the new state of play, and the alternative was typing it twice: once here and once into the
-   * comment, or (much more likely) once here and never into the comment, which is how an account
-   * ends up with a warning on it for a month. Where the comment was already updated today, the
-   * agent has clearly said their piece and this stays off.
+   * It used to arrive ticked whenever the comment had not been touched today, on the reasoning
+   * that the sentence typed here is usually the new state of play. The firm asked for it off,
+   * and they are right: a box that is already ticked gets pressed past rather than decided, and
+   * the main comment is the one line the next person reads before they ring. Overwriting it
+   * should be somebody choosing to, not the default that happens while they are looking at the
+   * date picker.
+   *
+   * The amber prompt above still says the comment is stale. Saying so and doing it for them are
+   * different things.
    */
-  const [asMainComment, setAsMainComment] = useState(!commentFresh)
+  const [asMainComment, setAsMainComment] = useState(false)
   const [plan, setPlan] = useState<NextPlan>(() => initialPlan(entry.kind, addWorkingDays(today, 5)))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
