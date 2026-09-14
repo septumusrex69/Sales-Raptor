@@ -7,6 +7,8 @@ import { DiaryDatePicker, longDate, shortDate } from './DiaryDatePicker'
 import { bulkMove, moveEntry, debtorName, type DiaryRow } from '../../lib/diary.ts'
 import { DEFAULT_DIARY_CAPACITY, planSpread } from '../../lib/diaryPriority.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
+import { DictateButton } from '../ui/Dictate'
+import { appendSpeech } from '../../lib/dictation.ts'
 
 /**
  * Move work that was missed onto days somebody can actually do it.
@@ -172,6 +174,10 @@ export function MoveDiaryModal({ entries, ownerId, capacity, onClose, onDone }: 
           <input value={reason} onChange={(e) => setReason(e.target.value)}
             placeholder={bulk ? 'Ruben booked off — covering his diary.' : 'Debtor asked for another week.'}
             className={inputClass} />
+          {/* Talk it instead of typing it. Free, built into the browser — see Dictate.tsx. */}
+          <div className="mt-1.5">
+            <DictateButton size="small" onText={(said) => setReason((r) => appendSpeech(r, said))} />
+          </div>
           {!bulk && (
             <span className="block text-[11px] text-slate-400 mt-1.5">
               Goes on the account&rsquo;s timeline as well as the diary.

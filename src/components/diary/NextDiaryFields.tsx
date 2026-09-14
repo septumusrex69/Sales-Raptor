@@ -2,6 +2,8 @@ import { FormField, inputClass } from '../ui/Modal'
 import { DiaryDatePicker, longDate } from './DiaryDatePicker'
 import { CIRCULATION_EXITS, type CirculationExit } from '../../lib/diary.ts'
 import { DIARY_KINDS, DIARY_KIND_ORDER, type DiaryKind } from '../../lib/diaryPriority.ts'
+import { DictateButton } from '../ui/Dictate'
+import { appendSpeech } from '../../lib/dictation.ts'
 
 /**
  * "What happens to this account next" — asked the same way wherever an entry is closed.
@@ -80,9 +82,13 @@ export function NextDiaryFields({ plan, onChange, ownerId, capacity, today, pres
         <input value={plan.note} onChange={(e) => set({ note: e.target.value })}
           placeholder={plan.comesBack ? 'Insurance pays out on the 28th — check it landed.' : 'Settlement received 12 September.'}
           className={inputClass} />
-        <span className="block text-[11px] text-slate-400 mt-1.5">
-          Goes on the account&rsquo;s timeline as well as the diary.
-        </span>
+        <div className="flex flex-wrap items-center gap-2 mt-1.5">
+          {/* Talk it instead of typing it. Free, built into the browser — see Dictate.tsx. */}
+          <DictateButton size="small" onText={(said) => set({ note: appendSpeech(plan.note, said) })} />
+          <span className="text-[11px] text-slate-400">
+            Goes on the account&rsquo;s timeline as well as the diary.
+          </span>
+        </div>
       </FormField>
 
       {/*

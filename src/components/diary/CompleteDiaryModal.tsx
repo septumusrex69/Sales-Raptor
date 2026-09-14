@@ -7,6 +7,8 @@ import { NextDiaryFields, initialPlan, type NextPlan } from './NextDiaryFields'
 import { workEntry, debtorName, type DiaryRow } from '../../lib/diary.ts'
 import { DIARY_KINDS } from '../../lib/diaryPriority.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
+import { DictateButton } from '../ui/Dictate'
+import { appendSpeech } from '../../lib/dictation.ts'
 
 /**
  * Mark one diary entry worked, and say what happens to the account next.
@@ -68,6 +70,10 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
           <textarea value={outcome} onChange={(e) => setOutcome(e.target.value)} rows={2} autoFocus
             placeholder="No answer on either number. Left an SMS."
             className={`${inputClass} resize-none`} />
+          {/* Talk it instead of typing it. Free, built into the browser — see Dictate.tsx. */}
+          <div className="mt-1.5">
+            <DictateButton size="small" onText={(said) => setOutcome((o) => appendSpeech(o, said))} />
+          </div>
         </FormField>
 
         <NextDiaryFields
