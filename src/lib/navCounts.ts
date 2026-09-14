@@ -1,16 +1,21 @@
 /**
- * The three numbers the sidebar wears.
+ * The four numbers the sidebar wears.
  *
  * One rule decides what belongs here: a badge earns its place only if it counts something ONE
  * PERSON CAN CLEAR TODAY. A number that counts everything the firm has open never reaches zero,
  * and a number that never reaches zero stops being read inside a week — at which point every
  * other badge stops being read with it.
  *
- * So: unread debtor mail waiting to be filed, my tasks due by tonight, and disputes waiting on
- * me. Not Accounts (a catalogue of 100 000), not Leads, not Deals, not Clients.
+ * So: unread debtor mail waiting to be filed, my tasks due by tonight, disputes waiting on me,
+ * and my diary — what is due today plus what I am behind on. Not Accounts (a catalogue of
+ * 100 000), not Leads, not Deals, not Clients.
  *
- * One round trip, not three. Three count queries would be three trips to Paris on every page
- * load for 50 people to render three small numbers; nav_counts() returns all of them at once and
+ * The diary badge deliberately includes arrears, which is the one place this rule bends. A book
+ * arrived from the old system with 279 overdue entries; a badge showing only today would read
+ * "4" to somebody three months behind. It still reaches zero when the diary is genuinely clear.
+ *
+ * One round trip, not four. Separate count queries would be four trips to Paris on every page
+ * load for 50 people to render four small numbers; nav_counts() returns all of them at once and
  * scopes each to the caller in SQL.
  */
 import { useCallback, useEffect, useState } from 'react'
@@ -21,9 +26,10 @@ export interface NavCounts {
   mail: number
   tasks: number
   disputes: number
+  diary: number
 }
 
-const EMPTY: NavCounts = { mail: 0, tasks: 0, disputes: 0 }
+const EMPTY: NavCounts = { mail: 0, tasks: 0, disputes: 0, diary: 0 }
 
 /** Fired by a page that has just changed one of these, so the badge drops without a reload. */
 export const NAV_COUNTS_CHANGED = 'raptor:nav-counts'
@@ -51,6 +57,7 @@ export function useNavCounts(): NavCounts {
         mail: Number(data.mail ?? 0),
         tasks: Number(data.tasks ?? 0),
         disputes: Number(data.disputes ?? 0),
+        diary: Number(data.diary ?? 0),
       })
     }
   }, [])

@@ -38,10 +38,16 @@ create table if not exists public.profiles (
   email_signature_image_align text not null default 'left' check (email_signature_image_align in ('left', 'center', 'right')),
   -- This person's BuzzBox PABX extension (e.g. '201'). Click-to-dial rings this extension
   -- first, then bridges it to the number clicked. Null means "use the device's own dialler".
-  buzzbox_extension text
+  buzzbox_extension text,
+  -- How many accounts a working day holds for this person before the diary warns about
+  -- overbooking. Per agent rather than firm-wide, because a phone-heavy collector and one
+  -- working through letters and SMS do not have the same day. Null means the firm default
+  -- (DEFAULT_DIARY_CAPACITY in src/lib/diaryPriority.ts).
+  diary_capacity integer
 );
--- Older databases were created before the column existed.
+-- Older databases were created before these columns existed.
 alter table public.profiles add column if not exists buzzbox_extension text;
+alter table public.profiles add column if not exists diary_capacity integer;
 
 -- Auto-create a profile the moment someone accepts a Supabase invite /
 -- signs in for the first time. The very first person ever to sign up
@@ -833,6 +839,10 @@ create table if not exists public.debtor_accounts (
   sub_status text,
   bucket text,
   assigned_to uuid references public.profiles (id) on delete set null,
+  -- DERIVED, not written by hand: the soonest open diary_entries row for this account, kept in
+  -- step by the sync_account_diary_date trigger at the bottom of this file. It stays on the
+  -- account because the book lists fifty rows at a time out of a table that will reach six
+  -- figures, and "when is this next due" has to come off the account row itself.
   diary_date date,
 
   created_at timestamptz not null default now(),
@@ -2077,3 +2087,178 @@ as $$
 $$;
 
 grant execute on function public.nav_counts() to authenticated;
+
+-- ---------- The collections diary ----------
+--
+-- One row per appointment an agent has with an account.
+--
+-- debtor_accounts.diary_date already existed and could not do this job: it holds ONE date, so a
+-- promise due on the 25th and a dispute chase on the 10th cannot both exist; it has no reason, no
+-- owner and no state; and moving it erases the fact that anything was ever missed. That last one
+-- matters most -- a diary is what a team leader uses to judge whether the work was done, and a
+-- record that silently changes is a record that lies.
+--
+-- So: rows, never edited in place. An entry is worked (done) or moved (a new entry replaces it,
+-- and the old one keeps its original date and says who moved it and why). "Missed" is not a state
+-- anybody writes; it is simply an open entry whose date has passed. Deriving it means there is no
+-- nightly job to forget to run, and therefore no night on which the diary quietly lies.
+--
+-- What this replaces was not a blank page. The Swordfish book arrived with 327 diarised accounts
+-- of which 279 were already overdue, 102 by more than six months, and one agent carrying 44
+-- accounts all diarised onto a single day -- which is what an unbounded diary with no day-load
+-- and no audit trail produces after a few years.
+
+-- How urgent a kind of work is. Lower is sooner.
+--
+-- Immutable and in SQL because the priority column is generated from it and the day list is
+-- ordered by it in the database -- a six-figure book cannot be sorted in the browser. The same
+-- ladder is mirrored in src/lib/diaryPriority.ts for the labels, and
+-- scripts/qa/check-diary-priority.mjs reads both and fails if they drift apart.
+--
+-- The ladder is the firm's: a debtor who promised and broke it comes before everything, because
+-- they engaged and have shown they can pay. A fresh handover comes next -- debt collects best
+-- when it is new. A routine chase comes last, however long it has been waiting. Without a ladder
+-- a day that opens oldest-first buries a promise that broke this morning under the backlog.
+create or replace function public.diary_priority(kind text) returns smallint
+  language sql immutable strict as $$
+  select case kind
+    when 'promise_broken'  then 10   -- promised, did not pay
+    when 'payment_default' then 15   -- an instalment on an arrangement did not come off
+    when 'new_account'     then 20   -- freshly handed over, never worked
+    when 'promise_due'     then 30   -- check the money arrived
+    when 'callback'        then 40   -- we told the debtor we would ring back
+    when 'dispute_chase'   then 50   -- the seven-working-day clock is running
+    when 'trace'           then 60   -- waiting on a tracing result
+    else 70                          -- 'review': the ordinary diarised chase
+  end::smallint
+$$;
+
+create table if not exists public.diary_entries (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  -- Whose diary. Null is a real state: work that belongs to nobody yet, which a team leader
+  -- has to hand out. 355 accounts arrived from Swordfish in exactly that condition.
+  owner_id uuid references public.profiles (id) on delete set null,
+  due_on date not null,
+
+  kind text not null default 'review' check (kind in (
+    'promise_broken', 'payment_default', 'new_account', 'promise_due',
+    'callback', 'dispute_chase', 'trace', 'review'
+  )),
+  priority smallint generated always as (public.diary_priority(kind)) stored,
+  -- The agent's own words about why it is coming back. Shown in the day list, so the next
+  -- person to open it does not have to read the whole timeline to know what was promised.
+  reason text,
+
+  state text not null default 'open' check (state in ('open', 'done', 'moved', 'cancelled')),
+
+  -- Where it came from, so an inherited Swordfish date is never mistaken for something an
+  -- agent in this firm chose.
+  source text not null default 'manual'
+    check (source in ('manual', 'swordfish', 'promise', 'dispute', 'handover', 'system')),
+  promise_id uuid references public.promises_to_pay (id) on delete cascade,
+  query_id uuid references public.account_queries (id) on delete cascade,
+
+  -- Worked.
+  done_at timestamptz,
+  done_by uuid references public.profiles (id) on delete set null,
+  outcome text,
+
+  -- Moved. The replacement is a NEW row; this one keeps the date it was always due.
+  moved_to uuid references public.diary_entries (id) on delete set null,
+  moved_at timestamptz,
+  moved_by uuid references public.profiles (id) on delete set null,
+  moved_reason text,
+
+  created_at timestamptz not null default now(),
+  created_by uuid references public.profiles (id) on delete set null,
+  created_by_name text,
+
+  -- A closed entry has to say when it closed, and an open one must not pretend it did.
+  constraint diary_entries_done_stamped check ((state = 'done') = (done_at is not null)),
+  constraint diary_entries_moved_stamped check ((state = 'moved') = (moved_at is not null))
+);
+
+-- The agent's own day: "my open work, most urgent first, oldest first within that".
+create index if not exists diary_entries_owner_day_idx
+  on public.diary_entries (owner_id, due_on, priority) where state = 'open';
+-- Everything still open across the firm, for the team leader's view and the unassigned pile.
+create index if not exists diary_entries_open_idx
+  on public.diary_entries (due_on, priority) where state = 'open';
+create index if not exists diary_entries_account_idx
+  on public.diary_entries (account_id, due_on desc);
+-- One open entry per promise and per dispute, so a sweep that runs twice cannot double-book a day.
+create unique index if not exists diary_entries_one_open_per_promise
+  on public.diary_entries (promise_id) where promise_id is not null and state = 'open';
+create unique index if not exists diary_entries_one_open_per_query
+  on public.diary_entries (query_id) where query_id is not null and state = 'open';
+
+alter table public.diary_entries enable row level security;
+
+-- Readable by anyone signed in. A team leader has to see the team's load to balance it.
+drop policy if exists diary_entries_read on public.diary_entries;
+create policy diary_entries_read on public.diary_entries
+  for select to authenticated using (true);
+
+-- Anyone signed in may diarise an account -- booking work for a colleague is ordinary
+-- collections practice (a clerk redistributing an absent agent's day, a leader handing out the
+-- unassigned pile). What nobody may do is rewrite a closed entry; that is the trigger below.
+drop policy if exists diary_entries_write on public.diary_entries;
+create policy diary_entries_write on public.diary_entries
+  for insert to authenticated with check (true);
+drop policy if exists diary_entries_update on public.diary_entries;
+create policy diary_entries_update on public.diary_entries
+  for update to authenticated using (true) with check (true);
+
+-- A worked or moved entry is finished.
+--
+-- Re-opening one, or shifting the date it was always due, would rewrite the record a team leader
+-- reads to see whether the day was worked. Reverts silently rather than raising, exactly as
+-- protect_filed_mail_target does, so a crafted request keeps the prior values and changes
+-- nothing. This is the same instinct as the firm's rule about remittances: once something is
+-- booked, it is stamped.
+create or replace function public.protect_closed_diary_entries() returns trigger
+  language plpgsql security definer set search_path = public as $$
+begin
+  if old.state in ('done', 'moved') then
+    -- Everything except the audit trail of the closing itself.
+    new.account_id := old.account_id;
+    new.owner_id   := old.owner_id;
+    new.due_on     := old.due_on;
+    new.kind       := old.kind;
+    new.state      := old.state;
+    new.source     := old.source;
+    new.done_at    := old.done_at;
+    new.done_by    := old.done_by;
+    new.moved_at   := old.moved_at;
+    new.moved_by   := old.moved_by;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_closed_diary_entries on public.diary_entries;
+create trigger protect_closed_diary_entries
+  before update on public.diary_entries
+  for each row execute function public.protect_closed_diary_entries();
+
+-- debtor_accounts.diary_date is a mirror of the soonest open entry. See the column's own note.
+create or replace function public.sync_account_diary_date() returns trigger
+  language plpgsql security definer set search_path = public as $$
+declare
+  target uuid := coalesce(new.account_id, old.account_id);
+begin
+  update public.debtor_accounts
+     set diary_date = (
+       select min(due_on) from public.diary_entries
+        where account_id = target and state = 'open'
+     )
+   where id = target;
+  return null;
+end;
+$$;
+
+drop trigger if exists sync_account_diary_date on public.diary_entries;
+create trigger sync_account_diary_date
+  after insert or update or delete on public.diary_entries
+  for each row execute function public.sync_account_diary_date();

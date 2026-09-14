@@ -193,6 +193,27 @@ export interface AccrualRow {
   source: string
 }
 
+/**
+ * A diary appointment carried across from Swordfish.
+ *
+ * The old book kept one date on the account and nothing else — no reason, no owner, no record of
+ * whether it was ever worked. That is why 279 of the 327 diarised accounts arrived overdue, 102
+ * of them by more than six months, and why nobody can say which were missed and which were dealt
+ * with off-system. Every one of these is written with source 'swordfish' so an inherited date is
+ * never mistaken for a commitment somebody in this firm made.
+ */
+export interface DiaryEntryRow {
+  id: string
+  account_id: string
+  owner_id: string | null
+  due_on: string
+  kind: string
+  reason: string | null
+  state: string
+  source: string
+  created_by_name: string | null
+}
+
 export interface ImportPlan {
   companies: CompanyRow[]
   handovers: HandoverRow[]
@@ -203,6 +224,7 @@ export interface ImportPlan {
   contacts: ContactRow[]
   promises: PromiseRow[]
   accountNotes: NoteRow[]
+  diaryEntries: DiaryEntryRow[]
   /** Things that need a person's attention. A plan with problems still imports; it just says so. */
   problems: string[]
   /** Things worth knowing that are not faults. */
@@ -546,6 +568,7 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
   /* --------------------------------------------------------------- accounts */
 
   const debtorAccounts: DebtorAccountRow[] = []
+  const diaryEntries: DiaryEntryRow[] = []
   const accountByRef = new Map<string, DebtorAccountRow>()
   let commissionDrift = 0
   let commissionUnknown = 0
@@ -651,6 +674,32 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
     }
     debtorAccounts.push(a)
     accountByRef.set(ref, a)
+
+    /*
+     * Carry the diary date across as a real appointment.
+     *
+     * The date alone was never enough to work from — that is the whole reason diary_entries
+     * exists. What can be recovered is carried: the day, and the agent's name as Swordfish
+     * spelled it, so a leader handing the pile out can see whose it was. The owner is left null
+     * because Swordfish stores a NAME and Raptor needs a user; mapping the two is a decision a
+     * person makes once, in Settings, not something an importer should guess at.
+     *
+     * Written as 'review' rather than a kind we cannot know, and marked 'swordfish' so nothing
+     * in this firm is ever blamed for a date it did not choose.
+     */
+    if (a.diary_date) {
+      diaryEntries.push({
+        id: newId(),
+        account_id: a.id,
+        owner_id: null,
+        due_on: a.diary_date,
+        kind: 'review',
+        reason: text(r['Diary Note']) ?? text(r['Main Comment']) ?? null,
+        state: 'open',
+        source: 'swordfish',
+        created_by_name: text(r['Assigned To']) ?? null,
+      })
+    }
   }
 
   /* --------------------------------------------------------------- payments */
@@ -892,6 +941,7 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
     contacts,
     promises,
     accountNotes,
+    diaryEntries,
     problems,
     notes,
     stats: {
@@ -916,6 +966,7 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
 export const IMPORT_TABLES = [
   'companies', 'handovers', 'debtor_accounts', 'account_payments', 'account_fees',
   'account_interest_accruals', 'account_contacts', 'promises_to_pay', 'account_notes',
+  'diary_entries',
 ] as const
 
 /**
@@ -925,6 +976,7 @@ export const IMPORT_TABLES = [
  * configuration a person set up by hand, and an import must never be the thing that deletes them.
  */
 export const WIPE_TABLES = [
+  'diary_entries',
   'account_documents', 'account_notes', 'promises_to_pay', 'account_contacts',
   'account_interest_accruals', 'account_fees', 'payment_allocations', 'account_payments',
   'debtor_accounts', 'handovers', 'notifications', 'activities', 'tasks', 'proposals',
@@ -942,5 +994,6 @@ export function planRows(plan: ImportPlan): Record<(typeof IMPORT_TABLES)[number
     account_contacts: plan.contacts,
     promises_to_pay: plan.promises,
     account_notes: plan.accountNotes,
+    diary_entries: plan.diaryEntries,
   }
 }

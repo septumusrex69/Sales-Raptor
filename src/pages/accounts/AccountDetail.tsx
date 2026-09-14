@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
-  AlertTriangle, ArrowLeft, Check, CheckCircle2, Loader2, Mail, MessageCircle,
+  AlertTriangle, ArrowLeft, CalendarClock, Check, CheckCircle2, Loader2, Mail, MessageCircle,
   MessageSquare, Phone, Plus, Printer, ShieldAlert, StickyNote, X, XCircle,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
@@ -32,6 +32,8 @@ import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
 import { EscalateModal } from './EscalateModal'
 import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
+import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
+import { DiariseModal } from '../../components/diary/DiariseModal'
 import { fetchQueries, type AccountQuery } from '../../lib/accountQueries'
 import {
   fetchAccountEmails, markRepliesRead, recordSentEmail, replySubject, type AccountEmail,
@@ -111,6 +113,7 @@ export function AccountDetail() {
   const [noteOpen, setNoteOpen] = useState(false)
   const [disputing, setDisputing] = useState(false)
   const [smsOpen, setSmsOpen] = useState(false)
+  const [diariseOpen, setDiariseOpen] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -440,10 +443,17 @@ export function AccountDetail() {
         onPromise={() => { setTab('Overview'); setPromiseOpen(true) }}
         onDispute={() => setDisputing(true)}
         onSms={() => setSmsOpen(true)}
+        onDiarise={() => setDiariseOpen(true)}
         accountId={account.id}
         actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
         onTraced={reload}
       />
+
+      {/*
+        Only when the account was opened FROM the diary. An account looked up by name is just an
+        account; one reached by working a queue gets the queue's controls. See DiaryWorkBar.
+      */}
+      <DiaryWorkBar account={account} onWorked={reload} />
 
       <OutcomeOutstanding queries={queries} accountId={account.id}
         actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
@@ -537,6 +547,18 @@ export function AccountDetail() {
         <SmsModal accountId={account.id} numbers={smsNumbers} onClose={() => setSmsOpen(false)} onDone={reload} />
       )}
 
+      {/* Choosing when it comes back. Charges nothing — it is a note about a day, not an action
+          against the debtor. */}
+      {diariseOpen && (
+        <DiariseModal
+          accountId={account.id}
+          accountLabel={[name, account.accountNumber].filter(Boolean).join(' · ')}
+          prescriptionDate={account.prescriptionDate}
+          onClose={() => setDiariseOpen(false)}
+          onDone={reload}
+        />
+      )}
+
       {composeTo !== null && (
         <ComposeEmailModal
           to={composeTo}
@@ -611,7 +633,7 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, accountId, actor, onTraced }: {
+function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onDiarise, accountId, actor, onTraced }: {
   /** The number SMS goes to, and what the row shows when there is no number at all. */
   callNumber?: string
   /** Every number that could reach this debtor, primary first. */
@@ -621,6 +643,8 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
   onPromise: () => void
   onDispute: () => void
   onSms: () => void
+  /** Put the account in somebody's diary. Charges nothing — it is a note about when, not an action. */
+  onDiarise: () => void
   /** The account being worked, and who is working it — Call and Trace both charge fees. */
   accountId: string
   actor: { id: string | null; name: string | null }
@@ -662,6 +686,13 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
       <Action icon={ShieldAlert} label="Dispute" onClick={onDispute}
         title="The debtor disputes this account — raise it and give it to someone" />
       <TraceButton accountId={accountId} actor={actor} className={`${ACTION_BASE} ${ACTION_ENABLED}`} onDone={onTraced} />
+      {/*
+        When this account comes back, and why. Sits with the other actions rather than in a
+        corner because it is the last thing done to an account before it is left alone, and an
+        account left with no date on it is one nobody returns to.
+      */}
+      <Action icon={CalendarClock} label="Diarise" onClick={onDiarise}
+        title="Choose the day this comes back — and see how full that day already is" />
     </RecordActions>
   )
 }
