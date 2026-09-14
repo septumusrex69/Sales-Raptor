@@ -35,6 +35,7 @@ export type DiaryKind =
   | 'promise_due'
   | 'callback'
   | 'dispute_chase'
+  | 'no_contact'
   | 'trace'
   | 'review'
 
@@ -46,6 +47,7 @@ export const DIARY_PRIORITY: Record<DiaryKind, number> = {
   promise_due: 30,
   callback: 40,
   dispute_chase: 50,
+  no_contact: 55,
   trace: 60,
   review: 70,
 }
@@ -89,6 +91,16 @@ export const DIARY_KINDS: Record<DiaryKind, KindMeta> = {
   dispute_chase: {
     label: 'Dispute follow-up',
     why: 'The seven working days the debtor was given are running out.',
+  },
+  no_contact: {
+    /*
+     * The commonest real outcome of a day on the phone, and until the firm named it there was
+     * nowhere to put it — it went into the catch-all, where it was indistinguishable from
+     * "nothing happened, look again in sixty days". A book you cannot reach is a book going
+     * cold, and that is worth seeing as its own number.
+     */
+    label: 'No contact — retry',
+    why: 'Rang out, dead number, nobody home. Still ours to chase — try again before it goes cold.',
   },
   trace: {
     label: 'Trace follow-up',
