@@ -12,6 +12,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { DiaryDatePicker } from '../src/components/diary/DiaryDatePicker'
 import { DiaryList } from '../src/pages/diary/DiaryPage'
 import { DiaryWorkBar } from '../src/components/diary/DiaryWorkBar'
+import { DashboardHero } from '../src/components/dashboard/DashboardHero'
 
 const workAccount = {
   id: 'a1', mainComment: null, mainCommentAt: null, prescriptionDate: '2027-01-01',
@@ -62,7 +63,16 @@ function App() {
         ))}
         {[390, 640, 1024, 1400].map((w) => (
           <Row key={'b' + w} label="workbar" width={w}>
-            <DiaryWorkBar account={workAccount} />
+            <div className="space-y-4">
+              <DashboardHero
+                eyebrow="Debtor"
+                title={<span className="text-white">Thato Pontsha</span>}
+                subtitle={<span className="text-white/70">Client Growthpoint Student Accommodation Holdings (RF) Ltd</span>}
+              >
+                <span />
+              </DashboardHero>
+              <DiaryWorkBar account={workAccount} />
+            </div>
           </Row>
         ))}
         {[390, 640, 1024, 1400].map((w) => (

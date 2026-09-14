@@ -23,3 +23,11 @@ It also reports console errors and writes a full-page PNG.
 
 `diary-stub.ts` stands in for `src/lib/diary.ts` (swapped by an esbuild `onResolve` plugin in
 `build.mjs`) so nothing reaches Supabase. Point `diary-preview.tsx` at whatever needs measuring.
+
+## One expected console error
+
+`file:///brand/raptor-mark.png` fails to load. That is the harness, not the app: the compiled CSS
+references the brand mark as a **root-relative** URL (`/brand/raptor-mark.png`), which resolves
+against `public/` when the app is served from `/` and against the filesystem root under `file://`.
+The file is in the repo and loads fine in the real app. Ignore it; any *other* console error is
+real.
