@@ -463,10 +463,39 @@ ok('nothing is written camelCase',
 ok('the score and the estimated value are left to their defaults',
   insert.every((r) => !('score' in r) && !('estimated_value' in r)))
 
-// A lead with no start date takes the column default rather than a made-up one.
-const undated = planLeadsImport([oneLead('common', { ...LEAD, 'Lead - Start Date': '' })])
-ok('a lead with no date does not get an invented one',
-  !('created_at' in leadInsertRows(undated, OWNER)[0]))
+/*
+ * THE ONE THAT BIT. These rows go in as a batch, and PostgREST takes the union of the keys
+ * across the batch and fills any row missing one with NULL — not with the column default. So a
+ * key added only "when there is a value" is a landmine: three undated leads in a book of 1,818
+ * killed the whole import a thousand rows in, with
+ *
+ *     null value in column "created_at" of relation "leads" violates not-null constraint
+ *
+ * Checking created_at alone would be checking the symptom, so this checks the shape: every row
+ * carries exactly the same keys, whatever is or is not in it.
+ */
+const mixedDates = planLeadsImport([{
+  name: 'mixed',
+  rows: [HEADERS.common, ...[
+    { ...LEAD, 'Client Name': 'Dated Co' },
+    { ...LEAD, 'Client Name': 'Undated Co', 'Lead - Start Date': '' },
+    { ...LEAD, 'Client Name': 'Sparse Co', 'Lead - Start Date': '', 'Email': '', 'Cell': '',
+      'Rank': '', 'Handover Amount': '', 'No. of Acc.': '', 'Industry': '', 'Marketer': '' },
+  ].map((v) => laidOut(HEADERS.common, v))],
+}])
+const batch = leadInsertRows(mixedDates, OWNER, '2026-09-14T12:00:00.000Z')
+check('all three leads are there', batch.length, 3)
+const keysOf = (r) => Object.keys(r).sort().join(',')
+ok('every row in a batch carries exactly the same keys',
+  new Set(batch.map(keysOf)).size === 1)
+ok('including the sparsest row', keysOf(batch[2]) === keysOf(batch[0]))
+ok('and no key is ever missing rather than null',
+  batch.every((r) => Object.values(r).every((v) => v !== undefined)))
+
+check('a dated lead keeps its date', batch[0].created_at, '2025-03-14')
+check('an undated one is filled rather than left out', batch[1].created_at, '2026-09-14T12:00:00.000Z')
+ok('created_at is never null, because the column forbids it',
+  batch.every((r) => r.created_at !== null && r.created_at !== undefined))
 
 /* ---------- 12. what Excel actually stores ---------- */
 
