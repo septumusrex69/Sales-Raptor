@@ -113,9 +113,17 @@ export function isoDate(v: string | undefined): string | null {
   const m = /(\d{4})[/-](\d{1,2})[/-](\d{1,2})/.exec((v ?? '').trim())
   if (!m) return null
   const [, y, mo, d] = m
+  const year = Number(y)
   const month = Number(mo)
   const day = Number(d)
   if (month < 1 || month > 12 || day < 1 || day > 31) return null
+  /*
+   * A year nobody meant. The workbook has a sign date typed as "0206/07/27" — 2026 with the
+   * digits transposed — and without this it came through as a lead signed in the third century,
+   * which sorts to the top of every list and reads as a bug in Raptor rather than a typo in a
+   * cell. Anything outside living memory and the near future is somebody's slip.
+   */
+  if (year < 1990 || year > 2100) return null
   const date = new Date(Date.UTC(Number(y), month - 1, day))
   if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null
   return date.toISOString().slice(0, 10)
@@ -154,6 +162,32 @@ function named(v: string | undefined): string | null {
   return s && /[a-z]/i.test(s) ? s : null
 }
 
+/**
+ * A phone number that can actually be dialled.
+ *
+ * Excel stores a number typed as digits as a NUMBER, and a number has no leading zero. So a
+ * mobile entered as 0825550182 comes back as 825550182 — nine digits, and useless: dial it and
+ * nothing happens. It is 627 of the 1,706 numbers in the leads workbook, more than a third of
+ * the book, and the only symptom is a collector saying the number does not work.
+ *
+ * Nine digits is the tell, and it is unambiguous: no South African number is nine digits long.
+ * Local ones are ten with the zero, and an international one carries its country code and is
+ * longer — 263 774 555 012 is a real Zimbabwean number in this book and is left alone, as is
+ * anything that already starts with a zero or a plus.
+ *
+ * Spacing is kept exactly as somebody typed it. This restores a digit Excel removed; it does not
+ * tidy anybody's formatting.
+ */
+export function phoneNumber(v: string | undefined): string | null {
+  const s = text(v)
+  if (!s) return null
+  const digits = s.replace(/\D/g, '')
+  // "No number", "n/a", "ask reception" — a phone field with no phone in it.
+  if (digits === '') return null
+  if (digits.length === 9 && !s.trim().startsWith('+')) return `0${s.trim()}`
+  return s
+}
+
 /** How many accounts. "12", "12.0" and "12 accounts" all mean twelve. */
 function accountsCount(v: string | undefined): number | null {
   const s = (v ?? '').trim().replace(/\.0$/, '')
@@ -181,10 +215,22 @@ const STATUS_CODES: Record<string, LeadStatus> = {
   ref: 'Interested',
 }
 
+/**
+ * Raptor's own words for the same thing.
+ *
+ * The cleaned sheet writes "Converted" where the original writes "Clo", because a sheet somebody
+ * is being asked to check should say what it means. Reading both back means the tidy sheet and
+ * the firm's own workbook are interchangeable, and a person correcting a status in Excel can
+ * write either one.
+ */
+const STATUS_WORDS: LeadStatus[] = ['No Contact Yet', 'Interested', 'Hot Lead', 'Converted', 'Rejected']
+
 export function statusFor(code: string | undefined): { status: LeadStatus; known: boolean } {
   const key = (code ?? '').trim().toLowerCase()
   const found = STATUS_CODES[key]
   if (found) return { status: found, known: true }
+  const word = STATUS_WORDS.find((w) => w.toLowerCase() === key)
+  if (word) return { status: word, known: true }
   // An unrecognised code is a lead nobody has classified, not a lead to throw away.
   return { status: 'No Contact Yet', known: key === '' }
 }
@@ -293,11 +339,21 @@ function buildNotes(row: string[], c: SheetColumns, messyAmount: string | null):
   const add = (label: string, value: string | null) => { if (value) lines.push(`${label}${value}`) }
 
   add('', text(cell(row, c.at('Introductory Notes'))))
-  if (messyAmount) {
-    lines.push(`Handover amount as written: "${messyAmount}" — more than one figure, `
+  /*
+   * The cell's own words, wherever they are.
+   *
+   * In the firm's workbook they are in the Handover Amount cell itself, which is why it did not
+   * parse. On the tidy sheet that cell holds a number or nothing and the original wording sits
+   * in a column beside it, so somebody can put one figure in without losing what was there. Read
+   * both, or the tidy sheet would be the one version of this file that quietly drops it.
+   */
+  const asWritten = messyAmount ?? text(cell(row, c.at('Handover Amount as written')))
+  if (asWritten) {
+    lines.push(`Handover amount as written: "${asWritten}" — more than one figure, `
       + `so not imported as a number.`)
   }
-  add('Stage on the spreadsheet: ', text(cell(row, c.at('Status', 1))))
+  add('Stage on the spreadsheet: ',
+    text(cell(row, c.at('Status', 1))) ?? text(cell(row, c.at('Stage'))))
 
   const reasonCol = c.either('Rejection reason', 'Reason')
   const reasonText = text(cell(row, reasonCol))
@@ -333,6 +389,16 @@ function buildNotes(row: string[], c: SheetColumns, messyAmount: string | null):
 const REQUIRED_HEADING = 'Client Name'
 
 /**
+ * Headings a leads list has. Used only to tell a renamed leads tab — worth shouting about —
+ * from a covering note, which is not.
+ */
+const KNOWN_HEADINGS = [
+  'Status', 'Lead - Start Date', 'Source', 'Marketer', 'Rank', 'Handover Amount', 'Commission',
+  'No. of Acc.', 'Industry', 'Contact Person', 'Email', 'Cell', 'Location', 'Date signed',
+  'Introductory Notes',
+]
+
+/**
  * Read the workbook. Writes nothing — this is the half that can be run as often as you like.
  */
 export function planLeadsImport(sheets: LeadsSheet[]): LeadsImportPlan {
@@ -352,9 +418,22 @@ export function planLeadsImport(sheets: LeadsSheet[]): LeadsImportPlan {
     const columns = new SheetColumns(sheet.rows[0])
     const nameCol = columns.at(REQUIRED_HEADING)
     if (nameCol < 0) {
-      const skipped = `no "${REQUIRED_HEADING}" column — this tab is not a leads list`
+      /*
+       * Two different things, and only one is worth interrupting somebody about.
+       *
+       * A tab carrying Handover Amount, Rank, Industry and no Client Name is a leads list that
+       * has had its key column renamed, and importing the workbook without it would lose a
+       * month quietly. That is a warning.
+       *
+       * A tab that is a covering note, or a summary, has none of those headings and was never
+       * going to be a leads list. Warning about it trains people to ignore the warnings.
+       */
+      const looksLikeLeads = KNOWN_HEADINGS.filter((h) => columns.at(h) >= 0).length >= 3
+      const skipped = looksLikeLeads
+        ? `no "${REQUIRED_HEADING}" column, but this looks like a leads list — has it been renamed?`
+        : 'not a leads list'
       reports.push({ name: sheet.name, read: 0, duplicates: 0, skipped })
-      warnings.push(`Tab "${sheet.name}" was skipped: ${skipped}.`)
+      if (looksLikeLeads) warnings.push(`Tab "${sheet.name}" was skipped: ${skipped}`)
       continue
     }
 
@@ -396,7 +475,7 @@ export function planLeadsImport(sheets: LeadsSheet[]): LeadsImportPlan {
         companyName: company,
         // A cell holding a phone number under an "Email" heading is not an email address.
         email: rawEmail && rawEmail.includes('@') ? rawEmail : null,
-        mobile: text(cell(row, columns.at('Cell'))),
+        mobile: phoneNumber(cell(row, columns.at('Cell'))),
         source: sourceFor(cell(row, columns.at('Source'))),
         status,
         classification: rank ? (rank[1].toUpperCase() as LeadClassification) : null,
