@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Pencil, UserPlus, StickyNote, CalendarClock, Users2, XCircle, Phone, Mail, Trash2, Plus, Handshake } from 'lucide-react'
+import {
+  ArrowLeft, Pencil, UserPlus, StickyNote, CalendarClock, Users2, XCircle, Phone, Mail,
+  MessageSquare, Trash2, Plus, Handshake,
+} from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { canEditOwned, canReassign, isAssignableOwner} from '../../lib/permissions'
@@ -18,6 +21,11 @@ import { AddDealModal, QuickLogModal, ScheduleFollowUpModal, ScheduleMeetingModa
 import { RejectLeadModal } from '../../components/leads/RejectLeadModal'
 import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
 import { InlineSelect } from '../../components/ui/InlineSelect'
+import {
+  ACTION_BASE, ACTION_ENABLED, RecordAction, RecordActions, RecordFigure, RecordFigures,
+  RecordFigureShell,
+} from '../../components/record/RecordShell'
+import { CrmCallButton } from '../../components/record/CrmCallButton'
 import { PhoneLink } from '../../components/PhoneLink'
 import { LEAD_STATUSES, isActiveLead } from '../../lib/leadStatus'
 import { RowLimitSelect, applyRowLimitKeeping, type RowLimit } from '../../components/ui/RowLimitSelect'
@@ -50,6 +58,17 @@ export function LeadDetail() {
     () => openLeadDeals.filter((d) => hasDealValue(d)).reduce((sum, d) => sum + d.value, 0),
     [openLeadDeals],
   )
+  /*
+   * Every number that could reach this lead, mobile first.
+   *
+   * Mobile before office deliberately: a mobile is answered by the person, a switchboard is
+   * answered by somebody else. The Call button rings the first one when there is only one.
+   */
+  const leadNumbers = useMemo(() => [
+    ...(lead?.mobile ? [{ label: 'Mobile', value: lead.mobile }] : []),
+    ...(lead?.phone ? [{ label: 'Office', value: lead.phone }] : []),
+  ], [lead?.mobile, lead?.phone])
+
   const canEdit = canEditOwned(currentUser, lead?.ownerId)
 
   const [editOpen, setEditOpen] = useState(false)
@@ -123,77 +142,76 @@ export function LeadDetail() {
         <HeroOwner ownerId={lead.ownerId} label="Owner" />
       </DashboardHero>
 
+      {/*
+        The same row of figures the Account page wears, from the same component.
+
+        It used to be six stats strung along one line inside a card, at a different size, in a
+        different order of importance to the debtor page next door. The firm's point was simple
+        and right: moving between a debtor and the client who handed them over should not mean
+        learning the page again.
+
+        Class and Status stay HERE rather than moving into a panel, even though they are controls
+        rather than readings. They are the first two things anybody looks at on a lead, and
+        tidying them away would be neater and worse.
+      */}
+      <RecordFigures count={6}>
+        <RecordFigureShell label="Class">
+          <InlineSelect
+            value={lead.classification}
+            options={leadClassifications}
+            disabled={!canEdit}
+            onChange={(classification) => updateLead(lead.id, { classification })}
+          >
+            {lead.classification ? (
+              <ClassificationBadge classification={lead.classification} />
+            ) : (
+              // A lead often hasn't been graded yet; saying so is more useful than an empty gap
+              // that reads as though the field doesn't exist.
+              <span className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-md px-2 py-1">Not yet graded</span>
+            )}
+          </InlineSelect>
+        </RecordFigureShell>
+
+        <RecordFigureShell label="Status">
+          <InlineSelect
+            value={lead.status}
+            options={LEAD_STATUSES}
+            disabled={!canEdit}
+            onChange={(status) => {
+              // Rejection needs a reason, so route that one through the proper flow rather
+              // than letting a dropdown close a lead off with nothing recorded.
+              if (status === 'Rejected') setRejectOpen(true)
+              else if (status === 'Converted') setConvertOpen(true)
+              else updateLead(lead.id, { status })
+            }}
+          >
+            <StatusBadge status={lead.status} />
+          </InlineSelect>
+        </RecordFigureShell>
+
+        <RecordFigure label="Accounts"
+          value={estimatedAccounts !== undefined ? String(estimatedAccounts) : '\u2014'}
+          note={estimatedAccounts === undefined ? 'not estimated yet' : 'on the mandate'} />
+
+        <RecordFigure label="Handover amount"
+          value={estimatedHandover !== undefined ? formatCurrency(estimatedHandover) : '\u2014'}
+          note={estimatedHandover === undefined ? 'not estimated yet' : 'what they say they will hand over'} />
+
+        {/* Open deal value, not "estimated value". The old figure added the book to the service
+            deals and showed one number, which is the sum this whole model exists to prevent: a
+            book is work to be collected on commission, a service deal is a fee. Adding them
+            describes nothing. The book is the Handover amount beside this; what belongs here is
+            the money the open service deals are actually worth. */}
+        <RecordFigure label="Open deal value" value={formatCurrency(openDealValue)}
+          note={`${openLeadDeals.length} open deal${openLeadDeals.length === 1 ? '' : 's'}`}
+          onClick={() => navigate(buildDrilldownUrl('/deals', { view: 'table' }))}
+          title="Open the deals this lead has produced" />
+
+        <RecordFigure label="Lead score" value={String(lead.score)}
+          note={`added ${formatDate(lead.createdAt)}`} />
+      </RecordFigures>
+
       <Card>
-        <div className="flex flex-wrap items-end gap-x-10 gap-y-3">
-          <div>
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Date Added</p>
-            <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatDate(lead.createdAt)}</p>
-          </div>
-          <div>
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide mb-1.5">Class</p>
-            <InlineSelect
-              value={lead.classification}
-              options={leadClassifications}
-              disabled={!canEdit}
-              onChange={(classification) => updateLead(lead.id, { classification })}
-            >
-              {lead.classification ? (
-                <ClassificationBadge classification={lead.classification} />
-              ) : (
-                // A lead often hasn't been graded yet; saying so is more useful than an empty gap
-                // that reads as though the field doesn't exist.
-                <span className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-md px-2 py-1">Not yet graded</span>
-              )}
-            </InlineSelect>
-          </div>
-          <div>
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Status</p>
-            <div className="mt-1.5">
-              <InlineSelect
-                value={lead.status}
-                options={LEAD_STATUSES}
-                disabled={!canEdit}
-                onChange={(status) => {
-                  // Rejection needs a reason, so route that one through the proper flow rather
-                  // than letting a dropdown close a lead off with nothing recorded.
-                  if (status === 'Rejected') setRejectOpen(true)
-                  else if (status === 'Converted') setConvertOpen(true)
-                  else updateLead(lead.id, { status })
-                }}
-              >
-                <StatusBadge status={lead.status} />
-              </InlineSelect>
-            </div>
-          </div>
-          {estimatedAccounts !== undefined && (
-            <div>
-              <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Accounts</p>
-              <p className="text-2xl font-bold text-slate-800 mt-0.5">{estimatedAccounts}</p>
-            </div>
-          )}
-          {estimatedHandover !== undefined && (
-            <div>
-              <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Handover Amount</p>
-              <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(estimatedHandover)}</p>
-            </div>
-          )}
-          {/* Open deal value, not "estimated value". The old figure added the book to the
-              service deals and showed one number, which is the sum this whole model exists to
-              prevent: a book is work to be collected on commission, a service deal is a fee.
-              Adding them describes nothing. The book is the Handover Amount beside this; what
-              belongs here is the money the open service deals are actually worth. */}
-          <Link to={buildDrilldownUrl('/deals', { view: 'table' })} className="hover:opacity-70">
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Open Deal Value</p>
-            <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(openDealValue)}</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              {openLeadDeals.length} open deal{openLeadDeals.length === 1 ? '' : 's'}
-            </p>
-          </Link>
-          <div>
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Lead Score</p>
-            <p className="text-2xl font-bold text-slate-800 mt-0.5">{lead.score}</p>
-          </div>
-        </div>
 
         {lead.services && lead.services.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-4">
@@ -210,29 +228,58 @@ export function LeadDetail() {
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-slate-100">
-          {canEdit && <ActionButton icon={Pencil} label="Edit" onClick={() => setEditOpen(true)} />}
-          {canEdit && active && (
-            <ActionButton icon={UserPlus} label="Convert to Client" onClick={() => setConvertOpen(true)} />
-          )}
-          {canEdit && active && <ActionButton icon={Handshake} label="Add Deal" onClick={() => setDealOpen(true)} />}
-          <ActionButton icon={Phone} label="Log Call" onClick={() => setCallOpen(true)} />
-          <ActionButton icon={CalendarClock} label="Schedule Follow-up" onClick={() => setFollowUpOpen(true)} />
-          <ActionButton icon={Users2} label="Schedule Meeting" onClick={() => setMeetingOpen(true)} />
-          <ActionButton icon={StickyNote} label="Add Note" onClick={() => setNoteOpen(true)} />
-          {canEdit && active && <ActionButton icon={XCircle} label="Reject" tone="danger" onClick={() => setRejectOpen(true)} />}
-          {/* Deleting a converted lead takes its deals with it (the DB cascades on lead_id),
-              which would wipe the client's won business and drop them out of Clients entirely. */}
-          {canEdit && (
-            <ActionButton
-              icon={Trash2}
-              label="Delete"
-              tone="danger"
-              onClick={() => setDeleteOpen(true)}
-              disabled={lead.status === 'Converted'}
-              title={lead.status === 'Converted' ? 'Converted leads can\u2019t be deleted \u2014 it would remove the client\u2019s deals too.' : undefined}
+        <div className="mt-4 pt-4 border-t border-slate-100">
+          {/*
+            The same row of actions the Account page wears, from the same component, in the same
+            order of thought: REACH THEM first, then record what happened, then move the record on.
+            A lead page whose first button was "Edit" put the filing cabinet before the phone.
+
+            Reaching a lead costs nothing and charges nothing. Every comparable action on a debtor
+            raises an Annexure B fee, and none of these do — a lead is not a debtor and the money
+            rules must not follow the furniture. See crmComms, which cannot reach the fee engine.
+          */}
+          <RecordActions>
+            <CrmCallButton
+              numbers={leadNumbers}
+              to={{ leadId: lead.id, companyId: lead.companyId }}
+              subject={`${lead.firstName} ${lead.lastName}`}
+              className={`${ACTION_BASE} ${ACTION_ENABLED}`}
             />
-          )}
+            {/*
+              Honest rather than absent. The send endpoint is built around an account, because
+              sending a debtor an SMS raises item 1(c) — so pointing a lead at it would either
+              fail or charge somebody who owes us nothing. Saying so beats a button that
+              swallows the click, and beats pretending the firm never asked.
+            */}
+            <RecordAction icon={MessageSquare} label="SMS"
+              title="Not built for leads yet — the SMS route is tied to a debtor's account, where it raises a fee." />
+            <RecordAction icon={Mail} label="Email"
+              onClick={lead.email ? () => setEmailOpen(true) : undefined}
+              title={lead.email ? 'Send from your connected mailbox' : 'No email address on this lead yet'} />
+            <RecordAction icon={StickyNote} label="Add Note" onClick={() => setNoteOpen(true)}
+              title="Write on the timeline" />
+            <RecordAction icon={Phone} label="Log Call" onClick={() => setCallOpen(true)}
+              title="Record a call you made some other way" />
+            <RecordAction icon={CalendarClock} label="Schedule Follow-up" onClick={() => setFollowUpOpen(true)} />
+            <RecordAction icon={Users2} label="Schedule Meeting" onClick={() => setMeetingOpen(true)} />
+            {canEdit && active && (
+              <RecordAction icon={UserPlus} label="Convert to Client" onClick={() => setConvertOpen(true)} primary />
+            )}
+            {canEdit && active && <RecordAction icon={Handshake} label="Add Deal" onClick={() => setDealOpen(true)} />}
+            {canEdit && <RecordAction icon={Pencil} label="Edit" onClick={() => setEditOpen(true)} />}
+            {canEdit && active && <RecordAction icon={XCircle} label="Reject" danger onClick={() => setRejectOpen(true)} />}
+            {/* Deleting a converted lead takes its deals with it (the DB cascades on lead_id),
+                which would wipe the client's won business and drop them out of Clients entirely. */}
+            {canEdit && (
+              <RecordAction
+                icon={Trash2}
+                label="Delete"
+                danger
+                onClick={lead.status === 'Converted' ? undefined : () => setDeleteOpen(true)}
+                title={lead.status === 'Converted' ? 'Converted leads can\u2019t be deleted \u2014 it would remove the client\u2019s deals too.' : undefined}
+              />
+            )}
+          </RecordActions>
         </div>
       </Card>
 
@@ -623,20 +670,12 @@ export function LeadDetail() {
 }
 
 /** Deliberately identical in weight to the Client page's action row — same size, same padding. */
-function ActionButton({ icon: Icon, label, onClick, tone, disabled, title }: { icon: typeof Pencil; label: string; onClick: () => void; tone?: 'danger'; disabled?: boolean; title?: string }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-        tone === 'danger' ? 'border-red-200 text-red-500 hover:bg-red-50' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-      }`}
-    >
-      <Icon size={13} /> {label}
-    </button>
-  )
-}
+/*
+ * ActionButton used to live here — its own size, its own colours, its own idea of what a
+ * disabled button looks like. It is now RecordAction in components/record/RecordShell, shared
+ * with the Account and Client pages, because the firm asked for one grammar across the app and
+ * three private copies of a button is how you end up with three.
+ */
 
 function Field({ label, value, icon: Icon, href, onIconClick }: { label: string; value?: string; icon?: typeof Mail; href?: string; onIconClick?: () => void }) {
   return (
