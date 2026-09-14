@@ -268,6 +268,24 @@ create table if not exists public.leads (
 -- above is a no-op in that case, so this catches it separately).
 alter table public.leads add column if not exists service_values jsonb;
 
+-- Where an imported lead came from, and who was working it before Raptor existed.
+--
+-- `source_marketer` is a name, not a reference: the sales team's leads workbook names six people
+-- who worked these leads and none of them are Raptor users. Pointing owner_id at a stand-in and
+-- losing the name would make three years of the book unattributable, so the name is kept as
+-- written and owner_id holds whoever the import was run as.
+--
+-- `legacy_key` is the workbook's own identity for a lead — company, email and start date,
+-- flattened. It is what makes the import re-runnable: next month's workbook is the same file with
+-- another tab on it, and upserting on this key updates the leads already brought across instead
+-- of importing the whole book a second time. Unique, and deliberately NOT a partial index:
+-- Postgres cannot infer a partial index from `on conflict (legacy_key)`, which is exactly what
+-- PostgREST's upsert emits. A plain unique btree allows any number of NULLs, so leads created by
+-- hand in the app — which have no legacy key and never will — are unaffected.
+alter table public.leads add column if not exists source_marketer text;
+alter table public.leads add column if not exists legacy_key text;
+create unique index if not exists leads_legacy_key_idx on public.leads (legacy_key);
+
 -- Contact persons captured against a lead, before there's a company to hang them off — at a
 -- prospect you're usually dealing with more than one person (whoever enquired, plus whoever
 -- actually signs). Declared here rather than in the contacts table above, which is created
