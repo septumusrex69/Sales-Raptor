@@ -792,6 +792,11 @@ export function ownerFor(row: LeadsImportRow, owners: LeadOwners): string {
 export function leadInsertRows(
   plan: LeadsImportPlan,
   owners: LeadOwners | string,
+  /**
+   * For the handful of leads whose start date the spreadsheet never had. Passed in rather than
+   * read from the clock so this function stays pure and the tests stay deterministic.
+   */
+  undated: string = new Date().toISOString(),
 ): Record<string, unknown>[] {
   const resolved: LeadOwners = typeof owners === 'string' ? { fallback: owners } : owners
   return plan.rows.map((r) => ({
@@ -811,9 +816,23 @@ export function leadInsertRows(
     services: r.services,
     notes: r.notes,
     source_marketer: r.sourceMarketer,
-    // Where the spreadsheet knows when the lead arrived, that is when it arrived. Otherwise the
-    // column default stands, which is now — wrong, but not inventing a date.
-    ...(r.createdAt ? { created_at: r.createdAt } : {}),
+    /*
+     * ALWAYS PRESENT, even when there is no date — and that is the whole point of the line.
+     *
+     * This used to spread the key in only when the spreadsheet had a date, leaving the column
+     * default (now()) to cover the rest. That reads correctly and is wrong, because these rows
+     * are written in bulk: PostgREST takes the union of the keys across the batch and fills
+     * every row that lacks one with NULL, not with the default. created_at is NOT NULL, so the
+     * three undated leads in a book of 1,818 killed the insert — and killed it a thousand rows
+     * in, because that is where the first of them happened to sit.
+     *
+     * An optional key in a bulk write is a landmine generally, which is why the tests now assert
+     * that every row carries exactly the same keys rather than only checking this one.
+     *
+     * The value for an undated lead is the current time, which is what the column default would
+     * have given it anyway. It is not a real date and nothing pretends it is.
+     */
+    created_at: r.createdAt ?? undated,
     rejection_reason: r.rejectionReason,
   }))
 }
