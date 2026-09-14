@@ -109,3 +109,85 @@ export const QUERY_OUTCOME_LABEL: Record<QueryOutcome, string> = {
   not_valid: 'Not valid',
   withdrawn: 'Withdrawn by debtor',
 }
+
+/* ---------- what kind of escalation this is ---------- */
+
+/**
+ * The three reasons an account goes to somebody else.
+ *
+ * The firm asked for one door — "Escalate" — with the debtor's dispute as one of the things
+ * behind it. All three are the same object deliberately: each needs an owner, a chase date and
+ * an answer, and building three queues would mean three places to look for what is waiting on
+ * you.
+ *
+ * They are not the same about MONEY, and that is the reason this is a stored column rather than
+ * a label. A dispute raises Annexure B item 3 because the debtor's objection is what caused
+ * somebody else's time to be spent on the account. An agent asking a team leader what to do is
+ * the firm supervising its own staff. A recommendation to sue is the firm deciding how to run
+ * its business. A debtor pays for the first and must never pay for the other two.
+ */
+export type EscalationKind = 'dispute' | 'help' | 'litigation'
+
+export interface EscalationMeta {
+  /** What the option is called. */
+  label: string
+  /** The one line under it that says when to pick it. */
+  blurb: string
+  /** Only a dispute may ever raise a fee. Enforced in raiseQuery, not merely read from here. */
+  chargeable: boolean
+  /** A dispute is classified from QUERY_CATEGORIES; the other two have nothing to classify. */
+  needsCategory: boolean
+  /** What the description box should prompt for. */
+  placeholder: string
+  /** Who this normally goes to, used to preselect the assignee. */
+  goesTo: 'liaison' | 'team_leader'
+}
+
+export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
+  dispute: {
+    label: 'The debtor disputes the account',
+    blurb: 'They say something is wrong — the amount, the debt, the paperwork.',
+    chargeable: true,
+    needsCategory: true,
+    placeholder: 'Says she settled it directly with the client in March and has the proof.',
+    goesTo: 'liaison',
+  },
+  help: {
+    label: 'Ask a team leader for help',
+    blurb: 'You are not sure how to take this one forward and want a decision.',
+    chargeable: false,
+    needsCategory: false,
+    placeholder: 'Debtor keeps agreeing to pay and never does. Worth a letter of demand?',
+    goesTo: 'team_leader',
+  },
+  litigation: {
+    label: 'Recommend it for litigation',
+    blurb: 'The debtor will not pay and collections has nothing left to try.',
+    chargeable: false,
+    needsCategory: false,
+    placeholder: 'Refuses to pay, has the means, ignored three letters. Recommend we sue.',
+    goesTo: 'liaison',
+  },
+}
+
+/** In the order the options should be offered: the common one first. */
+export const ESCALATION_KIND_ORDER: EscalationKind[] = ['dispute', 'help', 'litigation']
+
+/**
+ * May this escalation raise Annexure B item 3?
+ *
+ * A function rather than a property read at the call site, so there is exactly one expression in
+ * the codebase that answers it and a new kind cannot be added without coming through here.
+ */
+export function escalationChargeable(kind: EscalationKind | null | undefined): boolean {
+  return !!kind && ESCALATION_KINDS[kind]?.chargeable === true
+}
+
+/** How the timeline records it. */
+export function escalationNote(kind: EscalationKind, description: string): string {
+  switch (kind) {
+    case 'help': return `Escalated for help: ${description}`
+    case 'litigation': return `Recommended for litigation: ${description}`
+    default: return `Dispute raised: ${description}`
+  }
+}

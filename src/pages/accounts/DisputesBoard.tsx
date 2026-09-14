@@ -93,7 +93,7 @@ export function DisputesBoard() {
       if (owner !== 'All' && r.ownerId !== owner) return false
       if (stage && columnOf(r) !== stage) return false
       if (q) {
-        const haystack = `${r.debtorName} ${r.accountNumber ?? ''} ${r.description} ${r.category ?? ''}`.toLowerCase()
+        const haystack = `${r.debtorName} ${r.accountNumber ?? ''} ${r.description} ${r.category ?? ''} ${r.kind}`.toLowerCase()
         if (!haystack.includes(q)) return false
       }
       return true
@@ -246,7 +246,11 @@ export function DisputesBoard() {
                     </td>
                     <td className="px-3 py-2 text-slate-600 max-w-[26rem]">
                       <span className="line-clamp-2 wrap-anywhere">{q.description}</span>
-                      {q.category && <span className="block text-xs text-slate-400">{q.category}</span>}
+                      {q.kind === 'dispute'
+                        ? q.category && <span className="block text-xs text-slate-400">{q.category}</span>
+                        : <span className="block text-xs font-medium text-[var(--c-navy-mid)]">
+                            {q.kind === 'help' ? 'Team leader asked' : 'For litigation'}
+                          </span>}
                     </td>
                     <td className="px-3 py-2 text-slate-500">{q.ownerId ? userById(q.ownerId)?.name ?? '—' : '—'}</td>
                     <td className="px-3 py-2"><StageChip column={columnOf(q)} /></td>
@@ -309,7 +313,19 @@ function DisputeCard({ dispute: q, ownerName, busy, onDragStart, onOpen }: {
       </div>
       <p className="text-[11px] text-slate-300">{q.accountNumber}</p>
       <p className="text-[13px] font-semibold leading-snug text-navy-950 mt-1.5 line-clamp-2 wrap-anywhere">{q.description}</p>
-      {q.category && <p className="text-xs text-slate-400 mt-1">{q.category}</p>}
+      {/*
+        A board called Disputes now carries two things that are not disputes — an agent asking a
+        team leader for a decision, and a recommendation to instruct the attorneys. Both belong
+        in the same queue (same owner, same chase date, same answer) but a litigation
+        recommendation reading as an unlabelled dispute would be actively misleading, so the kind
+        is said on the card. A dispute keeps showing its classification instead, which is the more
+        useful line and the one people already read.
+      */}
+      {q.kind === 'dispute'
+        ? q.category && <p className="text-xs text-slate-400 mt-1">{q.category}</p>
+        : <p className="text-[10px] font-semibold uppercase tracking-wide mt-1.5 inline-block px-1.5 py-0.5 rounded bg-[var(--tint-steel)] text-[var(--c-navy-mid)]">
+            {q.kind === 'help' ? 'Team leader asked' : 'For litigation'}
+          </p>}
       <div className="flex items-center justify-between gap-2 mt-2.5 text-xs">
         <span className="text-slate-500 truncate">{ownerName ?? 'Unassigned'}</span>
         {closed

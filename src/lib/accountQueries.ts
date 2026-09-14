@@ -39,15 +39,16 @@ export type QueryStatus = 'open' | 'closed'
  * import for everything about a dispute is the right shape for a caller, whatever the files do.
  */
 import {
-  canSendToClient, stageForAssignee,
-  CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL,
-  type DisputeStage as QueryStage, type QueryOutcome,
+  canSendToClient, stageForAssignee, escalationChargeable, escalationNote,
+  CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL, ESCALATION_KINDS, ESCALATION_KIND_ORDER,
+  type DisputeStage as QueryStage, type QueryOutcome, type EscalationKind,
 } from './disputeCategories'
 
 export {
-  canSendToClient, stageForAssignee,
-  CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL,
+  canSendToClient, stageForAssignee, escalationChargeable, escalationNote,
+  CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL, ESCALATION_KINDS, ESCALATION_KIND_ORDER,
 }
+export type { EscalationKind }
 export type { QueryStage, QueryOutcome }
 
 /**
@@ -90,6 +91,8 @@ export interface AccountQuery {
   id: string
   accountId: string
   description: string
+  /** What this escalation is. Everything raised before the kinds existed reads as a dispute. */
+  kind: EscalationKind
   category: string | null
   status: QueryStatus
   stage: QueryStage
@@ -110,6 +113,7 @@ const toQuery = (r: any): AccountQuery => ({
   id: r.id,
   accountId: r.account_id,
   description: r.description,
+  kind: (r.kind ?? 'dispute') as EscalationKind,
   category: r.category,
   status: r.status,
   stage: (r.stage ?? 'agent') as QueryStage,
@@ -250,6 +254,11 @@ export async function fetchQueriesForClient(companyId: string): Promise<QueueRow
 export async function raiseQuery(input: {
   accountId: string
   description: string
+  /**
+   * What this escalation is. Defaults to a debtor's dispute, which is what the table was
+   * originally for and is still the common case.
+   */
+  kind?: EscalationKind
   category?: string | null
   ownerId?: string | null
   /** Where it lands, which follows who it was given to. See {@link stageForAssignee}. */
@@ -272,7 +281,11 @@ export async function raiseQuery(input: {
     .insert({
       account_id: input.accountId,
       description: input.description.trim(),
-      category: input.category?.trim() || null,
+      kind: input.kind ?? 'dispute',
+      // Only a dispute is classified. The database refuses a category on the other two — see
+      // account_queries_category_only_on_dispute — because a classification of "the debtor
+      // objects because…" on an agent asking for help would mean nothing.
+      category: (input.kind ?? 'dispute') === 'dispute' ? input.category?.trim() || null : null,
       owner_id: input.ownerId ?? null,
       stage: input.stage ?? 'agent',
       chase_on: input.chaseOn || null,
@@ -284,7 +297,19 @@ export async function raiseQuery(input: {
   if (error) throw new Error(error.message)
   const q = toQuery(data)
 
-  const charge = input.charge === false ? null : await chargeItem({
+  /*
+   * A DEBTOR PAYS FOR A DISPUTE AND FOR NOTHING ELSE HERE.
+   *
+   * Item 3 recovers the time somebody else spent because the debtor objected. An agent asking a
+   * team leader what to do is the firm supervising its own staff; a recommendation to sue is the
+   * firm deciding how to run its business. Neither is a necessary expense of collecting from this
+   * debtor, and billing one would not survive being asked about.
+   *
+   * Decided here rather than trusted to the caller, so a future screen that forgets to pass
+   * `charge: false` still cannot raise the fee.
+   */
+  const mayCharge = escalationChargeable(input.kind ?? 'dispute')
+  const charge = (!mayCharge || input.charge === false) ? null : await chargeItem({
     accountId: input.accountId,
     itemId: '3',
     actionCode: 'perusal',
@@ -300,7 +325,7 @@ export async function raiseQuery(input: {
     accountId: input.accountId,
     // Just what happened. The fee is already its own line on the timeline with its own amount,
     // and repeating it here made a two-line event into a five-line one.
-    body: `Dispute raised: ${q.description}`,
+    body: escalationNote(input.kind ?? 'dispute', q.description),
     authorName: input.raisedByName ?? null,
     createdBy: input.raisedBy ?? null,
     queryId: q.id,
