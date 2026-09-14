@@ -15,7 +15,17 @@ export type AgentLoad = Record<string, unknown>
 export function debtorName(r: any) {
   return [r.account?.debtorFirstName, r.account?.debtorSurname].filter(Boolean).join(' ')
 }
-export async function fetchDay() { return { due: [], overdue: [] } }
+export async function fetchDay() {
+  return {
+    due: [
+      { id: 'e1', accountId: 'a1', ownerId: 'u1', kind: 'promise_broken',
+        reason: 'Agreed R2 500 on the 10th of the month and nothing came off the account at all.' },
+      { id: 'e2', accountId: 'a2', ownerId: 'u1', kind: 'review', reason: null },
+      { id: 'e3', accountId: 'a3', ownerId: 'u1', kind: 'callback', reason: 'Ring after the 12th.' },
+    ],
+    overdue: [],
+  } as never
+}
 export async function fetchTeamLoad() { return [] }
 export async function fetchOverdue() { return [] }
 export async function fetchAccountDiary() { return [] }

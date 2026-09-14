@@ -8,6 +8,10 @@ const stub = {
     build.onResolve({ filter: /lib\/diary\.ts$/ }, () => ({
       path: path.resolve('.qa-harness/diary-stub.ts'),
     }))
+    // The bar reads the signed-in user; the real context would reach for Supabase.
+    build.onResolve({ filter: /store\/AuthContext$/ }, () => ({
+      path: path.resolve('.qa-harness/auth-stub.ts'),
+    }))
   },
 }
 
