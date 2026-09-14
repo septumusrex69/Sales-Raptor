@@ -16,6 +16,7 @@ import {
   RecordTabs, useRecordLayout,
 } from '../../components/record/RecordShell'
 import { CrmCallButton } from '../../components/record/CrmCallButton'
+import { CrmSmsModal } from '../../components/record/CrmSmsModal'
 import {
   RecordComment, RecordCommentFact, RecordCommentSummary,
 } from '../../components/record/RecordComment'
@@ -124,6 +125,7 @@ export function CompanyDetail() {
    */
   const [tab, setTab] = useState<ClientTab>('Overview')
   const [layout, chooseLayout] = useRecordLayout('raptor.client.layout')
+  const [smsOpen, setSmsOpen] = useState(false)
 
   /*
    * What this client actually buys, taken from their deals.
@@ -643,7 +645,10 @@ export function CompanyDetail() {
               className={`${ACTION_BASE} ${ACTION_ENABLED}`}
             />
             <RecordAction icon={MessageSquare} label="SMS"
-              title="Not built for clients yet — the SMS route is tied to a debtor's account, where it raises a fee." />
+              onClick={clientNumbers.length > 0 ? () => setSmsOpen(true) : undefined}
+              title={clientNumbers.length > 0
+                ? 'Text this client — nothing is charged'
+                : 'No phone number on this client yet'} />
             <RecordAction icon={Mail} label="Email"
               onClick={company.email ? () => setEmailOpen(true) : undefined}
               title={company.email ? 'Send from your connected mailbox' : 'No email address on this client yet'} />
@@ -772,6 +777,17 @@ export function CompanyDetail() {
           onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, contactId: replyTarget.contactId, companyId: company.id })}
         />
       )}
+      {/* Nothing is charged for this — see CrmSmsModal, which says so on screen too. */}
+      {smsOpen && (
+        <CrmSmsModal
+          numbers={clientNumbers}
+          target={{ companyId: company.id }}
+          who={company.name}
+          onClose={() => setSmsOpen(false)}
+          onSent={(a) => addActivity({ type: 'SMS', ...a, companyId: company.id })}
+        />
+      )}
+
       {composeOpen && (
         <ChooseRecipientModal
           company={company}
