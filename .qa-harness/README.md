@@ -11,6 +11,16 @@ node .qa-harness/build.mjs
 node .qa-harness/shoot.mjs
 ```
 
+Run BOTH builds, in that order, every time. `npm run build` regenerates the stylesheet;
+`build.mjs` regenerates the bundle. Skip either and the two disagree — and the failure is silent
+in both directions:
+
+- **Stale stylesheet**: a newly added arbitrary class (`max-w-[32rem]`) is simply absent, so the
+  component renders unstyled in that one respect.
+- **Stale bundle**: the DOM still carries yesterday's class names, and Tailwind no longer emits
+  rules for them, so the element falls back to whatever it had before. This one is nastier — it
+  reported a column-alignment bug as still broken twenty minutes after it was fixed.
+
 `npm run build` first is not optional. The harness links the stylesheet that build produces, and
 Tailwind only emits a class it saw in the source *at build time*. A newly added arbitrary value
 like `max-w-[32rem]` is simply absent from a stale CSS file, so the component renders unstyled in

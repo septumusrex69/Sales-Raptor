@@ -54,7 +54,6 @@ export function MoveDiaryModal({ entries, ownerId, capacity, onClose, onDone }: 
   )
 
   async function save() {
-    if (!reason.trim()) { setError('Say why they are being moved — it stays on the record.'); return }
     setBusy(true); setError(null)
     const actor = { id: currentUser?.id ?? null, name: currentUser?.name ?? null }
     try {
@@ -66,7 +65,7 @@ export function MoveDiaryModal({ entries, ownerId, capacity, onClose, onDone }: 
         setResult({ moved: r.moved, failed: r.failed.length })
         await onDone()
       } else {
-        await moveEntry({ entry: entries[0], dueOn: startOn, ownerId: toOwner, reason, actor })
+        await moveEntry({ entry: entries[0], dueOn: startOn, reason, alsoNoteOnAccount: true, actor })
         await onDone()
       }
     } catch (e) {
@@ -141,10 +140,21 @@ export function MoveDiaryModal({ entries, ownerId, capacity, onClose, onDone }: 
           </>
         )}
 
-        {users.length > 1 && (
+        {/*
+          ONLY ON A BULK MOVE.
+
+          A single move keeps the entry where it is, at the firm's instruction: one person does
+          not put work into another person's diary, and work that belongs to somebody else moves
+          by escalation, which is a different act with its own record.
+
+          The clerk's tool is the deliberate exception, because covering an absent agent's day is
+          the entire reason it exists — that is a management action on a whole diary, not one
+          collector quietly handing an awkward account to a colleague.
+        */}
+        {bulk && users.length > 1 && (
           <FormField label="Into whose diary">
             <select value={toOwner ?? ''} onChange={(e) => setToOwner(e.target.value || null)} className={inputClass}>
-              <option value="">Nobody — put it back in the unassigned pile</option>
+              <option value="">Leave them where they are</option>
               {users.filter((u) => u.status === 'Active').map((u) => (
                 <option key={u.id} value={u.id}>{u.id === currentUser?.id ? `${u.name} (me)` : u.name}</option>
               ))}
@@ -152,10 +162,21 @@ export function MoveDiaryModal({ entries, ownerId, capacity, onClose, onDone }: 
           </FormField>
         )}
 
-        <FormField label="Why" required>
+        {/*
+          Optional, at the firm's instruction. Sometimes moving a day IS the whole thought. Where
+          somebody writes one on a SINGLE move it lands on that account's timeline too; a bulk
+          move does not, because "Ruben booked off" is a fact about a person's week and writing it
+          onto two hundred debtors' histories is noise, not a record.
+        */}
+        <FormField label="Note">
           <input value={reason} onChange={(e) => setReason(e.target.value)}
             placeholder={bulk ? 'Ruben booked off — covering his diary.' : 'Debtor asked for another week.'}
             className={inputClass} />
+          {!bulk && (
+            <span className="block text-[11px] text-slate-400 mt-1.5">
+              Goes on the account&rsquo;s timeline as well as the diary.
+            </span>
+          )}
         </FormField>
 
         {/*
@@ -173,7 +194,7 @@ export function MoveDiaryModal({ entries, ownerId, capacity, onClose, onDone }: 
           <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-2">
             Cancel
           </button>
-          <button type="button" onClick={() => void save()} disabled={busy || !reason.trim()}
+          <button type="button" onClick={() => void save()} disabled={busy}
             className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-950 text-white hover:bg-navy-900 disabled:opacity-50">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <CalendarClock size={14} />}
             {bulk ? `Move all ${entries.length}` : 'Move it'}
