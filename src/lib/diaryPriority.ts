@@ -415,3 +415,51 @@ export function orderDiary<T extends DiaryOrderable2>(entries: T[], order: Diary
 
   return sortDiary(entries, today)
 }
+
+/* ---------- a month at a time ---------- */
+
+/**
+ * The whole grid a month calendar needs: complete weeks, Monday first, covering every day of the
+ * month `anchor` falls in plus the few days either side that finish the first and last weeks.
+ *
+ * Always six weeks, never five. A grid that changes height as you page through the year makes
+ * the rows jump under the cursor, and the day you were about to click moves.
+ */
+export function monthGrid(anchor: string): string[] {
+  const first = `${anchor.slice(0, 7)}-01`
+  const start = calendarStrip(first, 1)[0]
+  return Array.from({ length: 42 }, (_, i) => shiftDate(start, i))
+}
+
+/** Is this day part of the month being shown, or one of the greyed neighbours? */
+export function inMonth(date: string, anchor: string): boolean {
+  return date.slice(0, 7) === anchor.slice(0, 7)
+}
+
+/** The first of the month `months` away from the one `anchor` is in. */
+export function shiftMonth(anchor: string, months: number): string {
+  const year = Number(anchor.slice(0, 4))
+  const month = Number(anchor.slice(5, 7)) - 1 + months
+  const d = new Date(Date.UTC(year, month, 1))
+  return d.toISOString().slice(0, 10)
+}
+
+/** Today, as the app means it: the local day, not a UTC timestamp. */
+export function todayIso(now = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * What to call the day being looked at.
+ *
+ * "Today" and "Tomorrow" by name, because that is what somebody means when they say they are
+ * going to work tomorrow's diary; anything further out gets its date, because "in 9 days" is not
+ * something anyone plans against.
+ */
+export function dayName(date: string, today: string): string {
+  const away = daysBetween(today, date)
+  if (away === 0) return 'Today'
+  if (away === 1) return 'Tomorrow'
+  if (away === -1) return 'Yesterday'
+  return ''
+}

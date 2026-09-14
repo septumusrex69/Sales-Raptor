@@ -88,7 +88,8 @@ function App() {
         ))}
         {[390, 640, 1024, 1400].map((w) => (
           <Row key={'r' + w} label="rows" width={w}>
-            <DiaryList rows={rows} today="2026-09-14" empty="" onComplete={() => {}} onMove={() => {}} />
+            <DiaryList rows={rows} today="2026-09-14" empty="" onComplete={() => {}} onMove={() => {}}
+              picked={new Set([rows[0].id])} onPick={() => {}} />
           </Row>
         ))}
       </div>
