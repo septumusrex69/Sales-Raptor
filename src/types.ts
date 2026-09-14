@@ -448,6 +448,12 @@ export interface User {
   emailSignatureImageAlign?: 'left' | 'center' | 'right'
   /** This person's BuzzBox PABX extension; set, click-to-dial rings it before bridging the call. */
   buzzboxExtension?: string
+  /**
+   * How many accounts a working day holds for this person before the diary warns about
+   * overbooking. Per agent rather than firm-wide: a phone-heavy collector and one working
+   * through letters do not have the same day. Undefined means the firm default.
+   */
+  diaryCapacity?: number
 }
 
 export type TeamKind = 'Sales' | 'Communications'

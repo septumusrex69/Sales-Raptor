@@ -17,6 +17,7 @@ import {
   ChevronDown,
   LogOut,
   Inbox,
+  CalendarClock,
   type LucideIcon,
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -46,6 +47,9 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean; badge?:
   // The collections book: the debtor accounts a client hands over, which is a different thing
   // from the client record and much larger than it.
   { to: '/accounts', label: 'Accounts', icon: BookOpen },
+  // The collections work queue: which accounts this person is due to work today, and what they
+  // are behind on. Badged, because it is the definition of something one person clears in a day.
+  { to: '/diary', label: 'Diary', icon: CalendarClock, badge: 'diary' },
   { to: '/queries', label: 'Disputes', icon: MessageCircleQuestion, badge: 'disputes' },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare, badge: 'tasks' },
   { to: '/calendar', label: 'Calendar', icon: Calendar },
