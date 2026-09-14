@@ -319,6 +319,23 @@ export function MailPage() {
     setLinking(mail)
   }
 
+  /**
+   * A bulk action has finished, so selection mode ends with it.
+   *
+   * Picking messages, choosing what to do with them and then having to press Done was a second
+   * click that said nothing: the action IS the end of selecting. Worse, the page sat there
+   * afterwards with the tick boxes still showing and nothing ticked, which reads as though the
+   * action had not gone through.
+   *
+   * Only bulk actions call this. The single-message actions on an open message leave selection
+   * alone, because they were never part of it.
+   */
+  async function afterBulk() {
+    setSelecting(false)
+    // load() clears the ticks; this clears the gutter they were sitting in.
+    await load(page)
+  }
+
   /** Turning selection off drops the selection with it — a forgotten tick must not act later. */
   function toggleSelecting() {
     setSelecting((on) => {
@@ -379,7 +396,7 @@ export function MailPage() {
         + (refused > 0 ? ` ${refused} left alone — already matched to a record.` : '')
         + (junk ? ' Nothing deleted; empty the Junk tab when you want it gone.' : ''),
       )
-      await load(page)
+      await afterBulk()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -407,7 +424,7 @@ export function MailPage() {
     try {
       const gone = await deleteMail(ids)
       setStatus(`${gone} ${gone === 1 ? 'email' : 'emails'} removed from Raptor — still in your real mailbox.`)
-      await load(page)
+      await afterBulk()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -434,7 +451,7 @@ export function MailPage() {
     if (picked.length === 0 || !currentUser) return
     try {
       setStatus(describeBlock(await blockSenders({ userId: currentUser.id, mail: picked })))
-      await load(page)
+      await afterBulk()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -445,7 +462,7 @@ export function MailPage() {
     if (ids.length === 0) return
     try {
       await markMailRead(ids)
-      await load(page)
+      await afterBulk()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -457,7 +474,7 @@ export function MailPage() {
     if (ids.length === 0) return
     try {
       await markMailUnread(ids)
-      await load(page)
+      await afterBulk()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
