@@ -2,19 +2,23 @@ import { useState } from 'react'
 import { CheckCircle2, Loader2 } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { useAuth } from '../../store/AuthContext'
-import { completeEntry, debtorName, type DiaryRow } from '../../lib/diary.ts'
+import { useAppStore } from '../../store/AppStore'
+import { NextDiaryFields, initialPlan, type NextPlan } from './NextDiaryFields'
+import { workEntry, debtorName, type DiaryRow } from '../../lib/diary.ts'
 import { DIARY_KINDS } from '../../lib/diaryPriority.ts'
+import { addWorkingDays } from '../../lib/workingDays.ts'
 
 /**
- * Mark one diary entry worked.
+ * Mark one diary entry worked, and say what happens to the account next.
+ *
+ * It used to just close the entry. That was wrong, and the firm said so: an account whose
+ * appointment is closed and whose next one is never booked drops out of circulation entirely,
+ * which is how three hundred and fifty-five accounts arrived here with nobody on them and no
+ * date. Closing and re-booking is one act, so it is one button.
  *
  * The outcome line is kept on the entry itself rather than only in the account's timeline,
- * because "how much did we get through yesterday, and what came of it" is a question about
- * diary rows. Answering it out of a timeline means reading every note on every account.
- *
- * It is optional here and required in the work loop. Closing an entry from a list is usually
- * tidying — the call happened last week and was never written down — while closing one you have
- * just worked is the moment the outcome is known.
+ * because "how much did we get through yesterday, and what came of it" is a question about diary
+ * rows. Answering it out of a timeline means reading every note on every account.
  */
 export function CompleteDiaryModal({ entry, onClose, onDone }: {
   entry: DiaryRow
@@ -22,16 +26,26 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
   onDone: () => void | Promise<void>
 }) {
   const { currentUser } = useAuth()
+  const { users } = useAppStore()
+
+  const today = new Date().toISOString().slice(0, 10)
   const [outcome, setOutcome] = useState('')
+  const [plan, setPlan] = useState<NextPlan>(() => initialPlan(entry.kind, addWorkingDays(today, 5)))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const owner = users.find((u) => u.id === entry.ownerId)
+
   async function save() {
+    if (!outcome.trim()) { setError('Say what came of it — this is what the diary is read back from.'); return }
     setBusy(true); setError(null)
     try {
-      await completeEntry({
-        id: entry.id,
+      await workEntry({
+        entry,
         outcome,
+        next: plan.comesBack
+          ? { comesBack: true, dueOn: plan.dueOn, kind: plan.kind, note: plan.note }
+          : { comesBack: false, exit: plan.exit, note: plan.note },
         actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
       })
       await onDone()
@@ -43,38 +57,38 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
   }
 
   return (
-    <Modal title="Mark this worked" onClose={onClose} width={460}>
-      <div className="space-y-3">
+    <Modal title="Mark this worked" onClose={onClose} width={560}>
+      <div className="space-y-4">
         <p className="text-sm text-slate-600">
           {debtorName(entry)} — {DIARY_KINDS[entry.kind].label.toLowerCase()}
           {entry.reason && <span className="text-slate-400"> · {entry.reason}</span>}
         </p>
 
-        <FormField label="What came of it">
+        <FormField label="What came of it" required>
           <textarea value={outcome} onChange={(e) => setOutcome(e.target.value)} rows={2} autoFocus
             placeholder="No answer on either number. Left an SMS."
             className={`${inputClass} resize-none`} />
         </FormField>
 
-        {/*
-          Said plainly, because the next thing an agent will wonder is whether this made the
-          account disappear. It does not: closing an entry only closes the appointment.
-        */}
-        <p className="text-xs text-slate-400">
-          This closes the diary entry, not the account. If it needs to come back, diarise it
-          again from the account page.
-        </p>
+        <NextDiaryFields
+          plan={plan}
+          onChange={setPlan}
+          ownerId={entry.ownerId}
+          capacity={owner?.diaryCapacity ?? null}
+          today={today}
+          prescriptionDate={entry.account.prescriptionDate}
+        />
 
         {error && <p className="text-sm text-negative-700">{error}</p>}
 
-        <div className="flex justify-end gap-2 pt-1">
+        <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-2">
             Cancel
           </button>
-          <button type="button" onClick={() => void save()} disabled={busy}
+          <button type="button" onClick={() => void save()} disabled={busy || !outcome.trim()}
             className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-950 text-white hover:bg-navy-900 disabled:opacity-50">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-            Worked
+            {plan.comesBack ? 'Worked, book the next' : 'Worked, close the account'}
           </button>
         </div>
       </div>

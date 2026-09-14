@@ -10,18 +10,16 @@ import {
 } from '../../lib/diaryPriority.ts'
 import { diarise } from '../../lib/diary.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
-import { isAssignableOwner } from '../../lib/permissions'
 
 /**
  * Put an account back in somebody's diary.
  *
- * Three decisions, in the order they actually get made: WHEN it comes back, WHAT it is, and WHY.
- * The date comes first because it is the one the agent has usually already made — they told the
- * debtor "I'll call you on the fifth" before they opened this box.
+ * Three decisions, in the order they actually get made: WHEN it comes back, WHAT it is, and a
+ * note. The date comes first because it is the one the agent has usually already made — they
+ * told the debtor "I'll call you on the fifth" before they opened this box.
  *
- * The reason is not optional dressing. It is what the next person to open the account reads
- * before they ring, and on the imported book that field is exactly what is missing: 327 diarised
- * accounts and not one word about why any of them is coming back.
+ * It always lands in the diary of whoever is doing it. Moving work to somebody else is
+ * escalation, not diarising — see the note where the owner picker used to be.
  */
 export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaultOwnerId, onClose, onDone }: {
   accountId: string
@@ -38,7 +36,8 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
   const { users } = useAppStore()
 
   const today = new Date().toISOString().slice(0, 10)
-  const [ownerId, setOwnerId] = useState<string | null>(defaultOwnerId ?? currentUser?.id ?? null)
+  // Always the person doing the diarising. See the note where the picker used to be.
+  const ownerId = defaultOwnerId ?? currentUser?.id ?? null
   // Five working days out: far enough that a debtor has had time to do what they said, near
   // enough that nothing goes cold. The agent overrides it constantly, which is the point.
   const [dueOn, setDueOn] = useState(() => addWorkingDays(today, 5))
@@ -65,7 +64,6 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
         : null
 
   async function save() {
-    if (!reason.trim()) { setError('Say why it is coming back — the next person to open it reads this first.'); return }
     setBusy(true)
     setError(null)
     try {
@@ -75,6 +73,7 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
         dueOn,
         kind,
         reason,
+        alsoNoteOnAccount: true,
         actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
       })
       await onDone()
@@ -125,7 +124,13 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
           <span className="block text-[11px] text-slate-400 mt-1.5">{DIARY_KINDS[kind].why}</span>
         </FormField>
 
-        <FormField label="Why it is coming back" required>
+        {/*
+          Optional, at the firm's instruction. It was required, and required is wrong: sometimes
+          the date IS the whole thought ("ring him Tuesday"), and a mandatory box only teaches
+          people to type a full stop. Where somebody does write one it lands on the account's
+          timeline too, so it is findable by whoever reads the account rather than the diary.
+        */}
+        <FormField label="Note">
           <textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
@@ -133,21 +138,17 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
             placeholder="Said he would pay R2 000 on the 25th once his commission is in."
             className={`${inputClass} resize-none`}
           />
+          <span className="block text-[11px] text-slate-400 mt-1.5">
+            Goes on the account&rsquo;s timeline as well as the diary.
+          </span>
         </FormField>
 
-        {/* Booking work for a colleague is ordinary practice — a leader handing out the pile, a
-            clerk covering somebody who is off. Only shown to people who can reassign. */}
-        {users.length > 1 && (
-          <FormField label="In whose diary">
-            <select value={ownerId ?? ''} onChange={(e) => setOwnerId(e.target.value || null)} className={inputClass}>
-              <option value="">Nobody yet — a team leader hands it out</option>
-              {users.filter((u) => u.status === 'Active' && (u.id === currentUser?.id || isAssignableOwner(u.role) || u.role.startsWith('Pre-legal')))
-                .map((u) => (
-                  <option key={u.id} value={u.id}>{u.id === currentUser?.id ? `${u.name} (me)` : u.name}</option>
-                ))}
-            </select>
-          </FormField>
-        )}
+        {/*
+          NO "whose diary" PICKER, at the firm's instruction: one person does not put work into
+          another person's diary. It lands in yours, and if it belongs to somebody else — a team
+          leader, or the liaison with a recommendation for litigation — that is an escalation,
+          which is a different act with a different record. See the Dispute action on the account.
+        */}
 
         {error && <p className="text-sm text-negative-700">{error}</p>}
 
@@ -155,7 +156,7 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
           <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-2">
             Cancel
           </button>
-          <button type="button" onClick={() => void save()} disabled={busy || !reason.trim()}
+          <button type="button" onClick={() => void save()} disabled={busy}
             className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-950 text-white hover:bg-navy-900 disabled:opacity-50">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <CalendarClock size={14} />}
             Diarise

@@ -328,3 +328,90 @@ export function planSpread(total: number, start: string, perDay: number): Spread
   const onLastDay = total === 0 ? 0 : total - safePerDay * (days.length - 1)
   return { days, perDay: safePerDay, onLastDay }
 }
+
+/* ---------- choosing what to look at first ---------- */
+
+/**
+ * How an agent wants their day ordered.
+ *
+ * The ladder is the right DEFAULT and the wrong law. A collector who has a settlement meeting at
+ * eleven wants the big balances; one chasing a bad month wants every promise that is due; one
+ * coming back from leave wants the oldest thing first. The firm asked to choose, and choosing is
+ * not the same as filtering — nothing is hidden, it is only reordered.
+ */
+export type DiaryOrder =
+  | 'urgent'
+  | 'amount'
+  | 'oldest'
+  /** 'first:<kind>' floats one kind to the top and leaves the ladder alone underneath it. */
+  | `first:${DiaryKind}`
+
+export const DIARY_ORDER_LABELS: { id: DiaryOrder; label: string }[] = [
+  { id: 'urgent', label: 'Most urgent first' },
+  { id: 'amount', label: 'Biggest balance first' },
+  { id: 'oldest', label: 'Longest waiting first' },
+  ...DIARY_KIND_ORDER.map((k) => ({ id: `first:${k}` as DiaryOrder, label: `${DIARY_KINDS[k].label} first` })),
+]
+
+/** The kind a 'first:<kind>' order floats, or null for the orders that do not float one. */
+export function floatedKind(order: DiaryOrder): DiaryKind | null {
+  if (!order.startsWith('first:')) return null
+  const kind = order.slice('first:'.length) as DiaryKind
+  return kind in DIARY_PRIORITY ? kind : null
+}
+
+export interface DiaryOrderable2 extends DiaryOrderable {
+  /** What is still owed. Only consulted by the 'amount' order. */
+  outstanding?: number
+}
+
+/**
+ * Order a day the way the agent asked.
+ *
+ * Every order falls back to the ladder once its own question is settled, so a list is never
+ * arbitrary below the fold: "biggest balance first" still puts a broken promise above a review
+ * when two accounts owe the same, and floating callbacks to the top leaves everything under them
+ * in the order it would have been anyway.
+ *
+ * Prescription is NOT overridden by any of this. An account that stops being enforceable next
+ * month is not a matter of preference — see compareDiary.
+ */
+export function orderDiary<T extends DiaryOrderable2>(entries: T[], order: DiaryOrder, today: string): T[] {
+  const ladder = (a: T, b: T) => compareDiary(a, b, today)
+
+  if (order === 'amount') {
+    return [...entries].sort((a, b) => {
+      const pa = nearPrescription(a.prescriptionOn, today)
+      const pb = nearPrescription(b.prescriptionOn, today)
+      if (pa !== pb) return pa ? -1 : 1
+      const d = (b.outstanding ?? 0) - (a.outstanding ?? 0)
+      return d !== 0 ? d : ladder(a, b)
+    })
+  }
+
+  if (order === 'oldest') {
+    return [...entries].sort((a, b) => {
+      const pa = nearPrescription(a.prescriptionOn, today)
+      const pb = nearPrescription(b.prescriptionOn, today)
+      if (pa !== pb) return pa ? -1 : 1
+      return a.dueOn < b.dueOn ? -1 : a.dueOn > b.dueOn ? 1 : ladder(a, b)
+    })
+  }
+
+  const floated = floatedKind(order)
+  if (floated) {
+    return [...entries].sort((a, b) => {
+      // Prescription first here too. Floating "broken promises" must not bury an account that
+      // stops being enforceable next month underneath one that has four years to run.
+      const pa = nearPrescription(a.prescriptionOn, today)
+      const pb = nearPrescription(b.prescriptionOn, today)
+      if (pa !== pb) return pa ? -1 : 1
+      const fa = a.kind === floated
+      const fb = b.kind === floated
+      if (fa !== fb) return fa ? -1 : 1
+      return ladder(a, b)
+    })
+  }
+
+  return sortDiary(entries, today)
+}

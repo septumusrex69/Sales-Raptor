@@ -13,6 +13,7 @@
  * never tries.
  */
 import { supabase } from './supabase'
+import { addNote } from './accountWorkspace.ts'
 import {
   type DiaryKind, calendarStrip, isMissed, sortDiary,
 } from './diaryPriority.ts'
@@ -240,7 +241,18 @@ export interface Actor {
   name: string | null
 }
 
-/** Put an account in somebody's diary. */
+/**
+ * Put an account in somebody's diary.
+ *
+ * The note is optional and it goes in TWO places: on the entry, where the day list reads it, and
+ * on the account's own timeline, where the history lives. At the firm's instruction — a line
+ * worth writing about why an account is coming back is a line worth finding six months later by
+ * someone reading the account rather than the diary.
+ *
+ * The timeline write is allowed to fail without failing the booking. An account that is diarised
+ * but missing one note is a small gap; a booking that was refused because a note would not save
+ * is an account nobody comes back to.
+ */
 export async function diarise(input: {
   accountId: string
   ownerId: string | null
@@ -250,6 +262,8 @@ export async function diarise(input: {
   source?: DiaryEntry['source']
   promiseId?: string | null
   queryId?: string | null
+  /** Also write the note onto the account's timeline. Off for system-generated bookings. */
+  alsoNoteOnAccount?: boolean
   actor: Actor
 }): Promise<DiaryEntry> {
   const { data, error } = await supabase.from('diary_entries').insert({
@@ -265,6 +279,19 @@ export async function diarise(input: {
     created_by_name: input.actor.name,
   }).select('*').single()
   if (error) throw new Error(error.message)
+
+  if (input.alsoNoteOnAccount && input.reason?.trim()) {
+    try {
+      await addNote({
+        accountId: input.accountId,
+        body: `Diarised for ${input.dueOn}. ${input.reason.trim()}`,
+        authorName: input.actor.name,
+        createdBy: input.actor.id,
+      })
+    } catch {
+      // Deliberately swallowed — see the note above the function.
+    }
+  }
   return toEntry(data)
 }
 
@@ -304,8 +331,23 @@ export async function completeEntry(input: {
 export async function moveEntry(input: {
   entry: DiaryEntry
   dueOn: string
+  /**
+   * Whose diary it lands in.
+   *
+   * Only the clerk's bulk tool passes this, where covering an absent agent is the entire point.
+   * A single move never does: at the firm's instruction, one person does not put work into
+   * another person's diary — that is what escalation is for.
+   */
   ownerId?: string | null
-  reason: string
+  reason?: string
+  /**
+   * Mirror the note onto the account's timeline.
+   *
+   * True for a single move, where the note is about THIS debtor ("asked for another week").
+   * False for the clerk's bulk tool, where it is about a person's week ("Ruben booked off") and
+   * writing it onto two hundred debtors' histories would be noise rather than a record.
+   */
+  alsoNoteOnAccount?: boolean
   actor: Actor
 }): Promise<DiaryEntry> {
   const replacement = await diarise({
@@ -317,6 +359,7 @@ export async function moveEntry(input: {
     source: input.entry.source,
     promiseId: null,
     queryId: null,
+    alsoNoteOnAccount: input.alsoNoteOnAccount,
     actor: input.actor,
   })
 
@@ -324,7 +367,7 @@ export async function moveEntry(input: {
     state: 'moved',
     moved_at: new Date().toISOString(),
     moved_by: input.actor.id,
-    moved_reason: input.reason.trim() || null,
+    moved_reason: input.reason?.trim() || null,
     moved_to: replacement.id,
   }).eq('id', input.entry.id).eq('state', 'open')
   if (error) {
@@ -353,7 +396,7 @@ export async function bulkMove(input: {
   days: string[]
   perDay: number
   ownerId?: string | null
-  reason: string
+  reason?: string
   actor: Actor
 }): Promise<{ moved: number; failed: { entry: DiaryEntry; error: string }[] }> {
   if (input.days.length === 0) throw new Error('No working days were given to move this work onto.')
@@ -386,6 +429,105 @@ export async function cancelEntry(input: { id: string; reason: string; actor: Ac
     moved_by: input.actor.id,
   }).eq('id', input.id).eq('state', 'open')
   if (error) throw new Error(error.message)
+}
+
+/* ---------- an account stays in circulation ---------- */
+
+/**
+ * The reasons an account may legitimately leave a diary and not come back.
+ *
+ * The firm's rule: "you can't just say an account is done without re-diarising it. An account
+ * should always be in circulation in a clerk's diary." Working an entry is finishing an
+ * APPOINTMENT, not finishing an account — the account is still owed, and an account nobody is
+ * booked to ring again is an account that goes quiet for a year. 355 of them arrived from
+ * Swordfish in exactly that condition.
+ *
+ * So closing an entry always books the next one. These are the only ways out, and every one of
+ * them is a statement that there is nothing left to collect — which is a real thing that
+ * happens, and which is why this is a short list rather than a checkbox saying "no".
+ */
+export const CIRCULATION_EXITS = [
+  { id: 'paid', label: 'Paid in full' },
+  { id: 'written_off', label: 'Written off' },
+  { id: 'legal', label: 'Handed to the attorneys' },
+  { id: 'withdrawn', label: 'Withdrawn by the client' },
+  { id: 'prescribed', label: 'Prescribed — no longer enforceable' },
+] as const
+
+export type CirculationExit = (typeof CIRCULATION_EXITS)[number]['id']
+
+export function exitLabel(id: CirculationExit): string {
+  return CIRCULATION_EXITS.find((e) => e.id === id)?.label ?? id
+}
+
+/**
+ * Work an entry: record what came of it, and say what happens to the account next.
+ *
+ * ONE CALL, because the two halves must not come apart. Closing without booking is the failure
+ * this whole design exists to prevent, and leaving it to two buttons in a modal means that one
+ * day somebody presses the first and is interrupted.
+ *
+ * The next entry is written BEFORE this one closes. If the second write fails the account is
+ * double-booked, which somebody sees and fixes in ten seconds. In the other order a failure
+ * leaves the account in nobody's diary with nothing to say it should have been — invisible,
+ * and permanent.
+ */
+export async function workEntry(input: {
+  entry: DiaryEntry
+  outcome: string
+  /** Either when it comes back, or why it is leaving the book altogether. */
+  next:
+    | { comesBack: true; dueOn: string; kind: DiaryKind; note?: string }
+    | { comesBack: false; exit: CirculationExit; note?: string }
+  actor: Actor
+}): Promise<void> {
+  if (input.next.comesBack) {
+    await diarise({
+      accountId: input.entry.accountId,
+      // Stays with whoever holds it. One person does not move work into another person's diary.
+      ownerId: input.entry.ownerId,
+      dueOn: input.next.dueOn,
+      kind: input.next.kind,
+      reason: input.next.note,
+      alsoNoteOnAccount: true,
+      actor: input.actor,
+    })
+  } else {
+    // Out of circulation is a fact about the ACCOUNT, so it is written where the account's
+    // history is read rather than only on a diary row nobody will look for.
+    try {
+      await addNote({
+        accountId: input.entry.accountId,
+        body: `Out of the diary — ${exitLabel(input.next.exit).toLowerCase()}.`
+          + (input.next.note?.trim() ? ` ${input.next.note.trim()}` : ''),
+        authorName: input.actor.name,
+        createdBy: input.actor.id,
+      })
+    } catch {
+      // See diarise: a missing note must not refuse the work.
+    }
+  }
+
+  await completeEntry({ id: input.entry.id, outcome: input.outcome, actor: input.actor })
+}
+
+/**
+ * Active accounts with nothing booked — the hole this design is meant to close.
+ *
+ * Counted rather than prevented, because the database cannot sensibly refuse to leave an account
+ * un-diarised (an import creates thousands at once, and a write-off legitimately empties one).
+ * A number a team leader can see is the honest version: it was 355 on the day the Swordfish book
+ * landed, and it should trend to nothing.
+ */
+export async function countOutOfCirculation(): Promise<number> {
+  const { data, error } = await supabase
+    .from('debtor_accounts')
+    .select('id')
+    .is('diary_date', null)
+    .ilike('status', 'Active%')
+    .limit(2000)
+  if (error) throw new Error(error.message)
+  return (data ?? []).length
 }
 
 /* ---------- the team leader's view ---------- */

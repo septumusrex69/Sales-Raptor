@@ -11,11 +11,12 @@ import { longDate, shortDate } from '../../components/diary/DiaryDatePicker'
 import { MoveDiaryModal } from '../../components/diary/MoveDiaryModal'
 import { CompleteDiaryModal } from '../../components/diary/CompleteDiaryModal'
 import {
-  fetchDay, fetchTeamLoad, debtorName,
+  countOutOfCirculation, fetchDay, fetchTeamLoad, debtorName,
   type DayOfWork, type DiaryRow, type AgentLoad,
 } from '../../lib/diary.ts'
 import {
-  DIARY_KINDS, dayLoad, dayLoadSentence, nearPrescription, overdueBy,
+  DIARY_KINDS, DIARY_ORDER_LABELS, dayLoad, dayLoadSentence, nearPrescription, orderDiary,
+  overdueBy, type DiaryOrder,
 } from '../../lib/diaryPriority.ts'
 import { formatCurrency } from '../../data/mockData'
 
@@ -43,9 +44,19 @@ export function DiaryPage() {
   const tab = (params.get('tab') as DiaryTab) ?? 'Today'
   // A team leader can stand in somebody else's diary. Defaults to your own.
   const viewing = params.get('who') ?? currentUser?.id ?? null
+  /*
+   * How the agent wants the list ordered.
+   *
+   * In the URL rather than in state: a collector who has set "promises due first" and opens an
+   * account has set it for the day, not for one render, and coming back must not silently put
+   * them back on the default.
+   */
+  const order = (params.get('order') as DiaryOrder) ?? 'urgent'
 
   const [day, setDay] = useState<DayOfWork | null>(null)
   const [team, setTeam] = useState<AgentLoad[] | null>(null)
+  /** Active accounts nobody is booked to ring. The number the circulation rule exists to kill. */
+  const [adrift, setAdrift] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [completing, setCompleting] = useState<DiaryRow | null>(null)
@@ -57,11 +68,13 @@ export function DiaryPage() {
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const [d, t] = await Promise.all([
+      const [d, t, a] = await Promise.all([
         fetchDay({ ownerId: viewing, date: today }),
         fetchTeamLoad(today),
+        // A count that fails is not worth an error over a page that otherwise works.
+        countOutOfCirculation().catch(() => null),
       ])
-      setDay(d); setTeam(t)
+      setDay(d); setTeam(t); setAdrift(a)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -123,6 +136,29 @@ export function DiaryPage() {
 
           <div className="flex-1" />
 
+          {/*
+            What to look at first.
+
+            Not a filter, at the firm's instruction — nothing is hidden, the same accounts are in
+            the same list. The ladder is the right default and the wrong law: a collector with a
+            settlement meeting at eleven wants the big balances, one chasing a bad month wants
+            every promise that is due, one back from leave wants the oldest thing. See orderDiary.
+          */}
+          {tab !== 'Team' && (
+            <select
+              value={order}
+              onChange={(e) => {
+                const p = new URLSearchParams(params)
+                p.set('order', e.target.value)
+                setParams(p, { replace: true })
+              }}
+              className="text-sm rounded-lg border border-slate-200 px-2.5 py-1.5 bg-white max-w-[13rem]"
+              title="Reorders the list. Nothing is hidden."
+            >
+              {DIARY_ORDER_LABELS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
+          )}
+
           {/* Standing in someone else's diary. Only offered where there is more than one. */}
           {users.length > 1 && (
             <select
@@ -169,7 +205,10 @@ export function DiaryPage() {
 
           {!loading && tab === 'Today' && day && (
             <DiaryList
-              rows={day.due}
+              rows={orderDiary(
+                day.due.map((r) => ({ ...r, prescriptionOn: r.account.prescriptionDate, outstanding: r.account.capitalOutstanding })),
+                order, today,
+              )}
               today={today}
               empty={day.overdue.length > 0
                 ? 'Nothing is due today — but there is a backlog behind you.'
@@ -181,7 +220,10 @@ export function DiaryPage() {
 
           {!loading && tab === 'Backlog' && day && (
             <Backlog
-              rows={day.overdue}
+              rows={orderDiary(
+                day.overdue.map((r) => ({ ...r, prescriptionOn: r.account.prescriptionDate, outstanding: r.account.capitalOutstanding })),
+                order, today,
+              )}
               today={today}
               capacity={owner?.diaryCapacity}
               onComplete={setCompleting}
@@ -189,7 +231,7 @@ export function DiaryPage() {
             />
           )}
 
-          {!loading && tab === 'Team' && team && <TeamLoad loads={team} today={today} />}
+          {!loading && tab === 'Team' && team && <TeamLoad loads={team} today={today} adrift={adrift} />}
         </div>
       </Card>
 
@@ -236,7 +278,7 @@ export function DiaryList({ rows, today, empty, onComplete, onMove }: {
         row stacks and each value sits next to its own label's worth of context, so a header
         would be pointing at nothing.
       */}
-      <div className={`${DIARY_GRID} hidden @3xl:grid px-1 pb-1.5 border-b border-slate-100`}>
+      <div className={`${DIARY_GRID} hidden @3xl:grid pb-1.5 border-b border-slate-100`}>
         <span className={COL_HEAD}>Account</span>
         <span className={COL_HEAD}>Status</span>
         <span className={COL_HEAD}>Client</span>
@@ -264,9 +306,15 @@ export function DiaryList({ rows, today, empty, onComplete, onMove }: {
  * Narrow: the account spans the width, then status and client share a line, then the money and
  * the buttons share the next. Wide: five columns, and the empty middle of the row — which the
  * firm pointed at — carries what it was always missing.
+ *
+ * THE LAST COLUMN IS A FIXED WIDTH, NOT `auto`, and that is not a preference. With `auto` the
+ * track is sized by its content, and the header's last cell is empty — so the header's action
+ * column collapsed to nothing, its `1fr` grew by the difference, and every heading sat about
+ * ten rem to the right of the values underneath it. The firm spotted it immediately. A fixed
+ * track means the header and the rows cannot disagree, whatever either happens to contain.
  */
 const DIARY_GRID =
-  'grid gap-x-3 gap-y-1.5 grid-cols-2 @3xl:grid-cols-[minmax(0,1fr)_9.5rem_11rem_7.5rem_auto] @3xl:items-center'
+  'grid gap-x-3 gap-y-1.5 grid-cols-2 @3xl:grid-cols-[minmax(0,1fr)_9.5rem_11rem_7.5rem_10rem] @3xl:items-center'
 
 const COL_HEAD = 'text-[10px] font-semibold uppercase tracking-wide text-slate-400'
 
@@ -416,11 +464,38 @@ function Backlog({ rows, today, capacity, onComplete, onMove }: {
 
 /* ---------- who is carrying what ---------- */
 
-function TeamLoad({ loads, today }: { loads: AgentLoad[]; today: string }) {
+function TeamLoad({ loads, today, adrift }: { loads: AgentLoad[]; today: string; adrift: number | null }) {
+  return (
+    <>
+      {/*
+        Accounts in NOBODY'S diary — active, collectable, and with nothing booked to ring them.
+        This is the audit behind the firm's rule that an account always stays in circulation. The
+        finish box now enforces the rule at the moment of closing; a rule with no number behind it
+        is one nobody can tell has been followed. It stood at 355 the day the Swordfish book
+        landed, and it should trend to nothing.
+
+        Counted rather than prevented, because the database cannot sensibly refuse to leave an
+        account un-diarised: an import creates thousands at once, and a write-off legitimately
+        empties one.
+      */}
+      {adrift !== null && adrift > 0 && (
+        <p className="rounded-lg bg-[var(--tint-rust)] px-3 py-2.5 mb-3 text-sm text-[var(--c-rust)]">
+          <span className="font-medium">
+            {adrift >= 2000 ? '2 000+' : adrift} active account{adrift === 1 ? '' : 's'}
+          </span>
+          {' '}in nobody&rsquo;s diary — nothing is booked to ring them.
+        </p>
+      )}
+
+      {loads.length === 0
+        ? <p className="text-sm text-slate-400 py-10 text-center">Nobody has anything open.</p>
+        : <TeamRows loads={loads} today={today} />}
+    </>
+  )
+}
+
+function TeamRows({ loads, today }: { loads: AgentLoad[]; today: string }) {
   const { users } = useAppStore()
-  if (loads.length === 0) {
-    return <p className="text-sm text-slate-400 py-10 text-center">Nobody has anything open.</p>
-  }
   return (
     <ul className="divide-y divide-slate-100 -my-2">
       {loads.map((l) => {

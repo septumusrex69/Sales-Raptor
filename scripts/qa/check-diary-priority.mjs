@@ -21,6 +21,7 @@ import {
   DIARY_PRIORITY, DIARY_KINDS, compareDiary, sortDiary, dayLoad, dayLoadSentence,
   firstDayWithRoom, calendarStrip, isMissed, overdueBy, nearPrescription, daysBetween,
   shiftDate, DEFAULT_DIARY_CAPACITY, workingDaysFrom, planSpread,
+  orderDiary, floatedKind, DIARY_ORDER_LABELS,
 } from '../../src/lib/diaryPriority.ts'
 
 let pass = 0
@@ -264,6 +265,72 @@ check('and all four land on it', small.onLastDay, 4)
 // A nonsense capacity must not divide by zero or loop forever.
 check('a zero capacity is treated as one a day', planSpread(3, '2026-09-14', 0).perDay, 1)
 check('and still terminates', planSpread(3, '2026-09-14', 0).days.length, 3)
+
+/* ---------- 10. ordering the day the way the agent asked ---------- */
+
+const mixed = [
+  { id: 'small-broken', kind: 'promise_broken', dueOn: '2026-09-14', outstanding: 1200 },
+  { id: 'huge-review', kind: 'review', dueOn: '2026-09-14', outstanding: 900000 },
+  { id: 'old-callback', kind: 'callback', dueOn: '2024-01-05', outstanding: 5000 },
+  { id: 'mid-promise-due', kind: 'promise_due', dueOn: '2026-09-14', outstanding: 40000 },
+]
+
+// The default is still the ladder.
+check('urgent is the ladder', orderDiary(mixed, 'urgent', today).map((e) => e.id),
+  ['small-broken', 'mid-promise-due', 'old-callback', 'huge-review'])
+
+check('biggest balance first', orderDiary(mixed, 'amount', today).map((e) => e.id),
+  ['huge-review', 'mid-promise-due', 'old-callback', 'small-broken'])
+
+check('longest waiting first', orderDiary(mixed, 'oldest', today).map((e) => e.id),
+  ['old-callback', 'small-broken', 'mid-promise-due', 'huge-review'])
+
+// Floating a kind reorders the top and leaves the ladder underneath untouched.
+check('call backs first', orderDiary(mixed, 'first:callback', today).map((e) => e.id),
+  ['old-callback', 'small-broken', 'mid-promise-due', 'huge-review'])
+check('promises due first', orderDiary(mixed, 'first:promise_due', today).map((e) => e.id),
+  ['mid-promise-due', 'small-broken', 'old-callback', 'huge-review'])
+check('reviews first', orderDiary(mixed, 'first:review', today).map((e) => e.id),
+  ['huge-review', 'small-broken', 'mid-promise-due', 'old-callback'])
+
+// Floating a kind nothing matches must not disturb the ladder.
+check('floating an absent kind leaves the ladder', orderDiary(mixed, 'first:trace', today).map((e) => e.id),
+  ['small-broken', 'mid-promise-due', 'old-callback', 'huge-review'])
+
+// Prescription is not a preference. It outranks every ordering the agent can pick.
+const prescribing = [
+  { id: 'rich', kind: 'promise_broken', dueOn: '2026-09-14', outstanding: 900000, prescriptionOn: '2030-01-01' },
+  { id: 'expiring', kind: 'review', dueOn: '2026-09-14', outstanding: 900, prescriptionOn: '2026-10-01' },
+]
+for (const order of ['urgent', 'amount', 'oldest', 'first:promise_broken']) {
+  check(`prescription still wins under "${order}"`,
+    orderDiary(prescribing, order, today).map((e) => e.id), ['expiring', 'rich'])
+}
+
+// An entry with no balance must not throw or sort unpredictably.
+check('a missing balance sorts last under amount',
+  orderDiary([
+    { id: 'none', kind: 'review', dueOn: today },
+    { id: 'some', kind: 'review', dueOn: today, outstanding: 10 },
+  ], 'amount', today).map((e) => e.id), ['some', 'none'])
+
+check('floatedKind reads a kind out', floatedKind('first:promise_due'), 'promise_due')
+check('floatedKind on a plain order is null', floatedKind('urgent'), null)
+check('floatedKind refuses a kind that does not exist', floatedKind('first:nonsense'), null)
+
+// Every order offered in the UI must be one orderDiary actually understands.
+ok('every offered order is handled', DIARY_ORDER_LABELS.every(
+  (o) => ['urgent', 'amount', 'oldest'].includes(o.id) || floatedKind(o.id) !== null))
+check('there is one option per kind plus the three general ones',
+  DIARY_ORDER_LABELS.length, Object.keys(DIARY_PRIORITY).length + 3)
+
+// Ordering must never lose or duplicate a row.
+for (const order of DIARY_ORDER_LABELS.map((o) => o.id)) {
+  const out = orderDiary(mixed, order, today)
+  if (out.length !== mixed.length || new Set(out.map((e) => e.id)).size !== mixed.length) {
+    failures.push(`order "${order}" lost or duplicated a row`)
+  } else pass += 1
+}
 
 /* ---------- report ---------- */
 

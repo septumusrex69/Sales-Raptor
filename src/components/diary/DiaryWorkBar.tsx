@@ -3,11 +3,10 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowRight, CalendarClock, CheckCircle2, Loader2, MessageSquareWarning, X } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { useAuth } from '../../store/AuthContext'
-import { DiaryDatePicker, longDate } from './DiaryDatePicker'
-import {
-  completeEntry, diarise, fetchDay, type DiaryRow,
-} from '../../lib/diary.ts'
-import { DIARY_KINDS, type DiaryKind, DIARY_KIND_ORDER } from '../../lib/diaryPriority.ts'
+import { useAppStore } from '../../store/AppStore'
+import { NextDiaryFields, initialPlan, type NextPlan } from './NextDiaryFields'
+import { fetchDay, workEntry, type DiaryRow } from '../../lib/diary.ts'
+import { DIARY_KINDS } from '../../lib/diaryPriority.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
 import { refreshNavCounts } from '../../lib/navCounts'
 
@@ -177,36 +176,26 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
   onDone: () => void | Promise<void>
 }) {
   const { currentUser } = useAuth()
+  const { users } = useAppStore()
   const [outcome, setOutcome] = useState('')
-  const [comesBack, setComesBack] = useState(true)
-  const [dueOn, setDueOn] = useState(() => addWorkingDays(today, 5))
-  const [kind, setKind] = useState<DiaryKind>(entry.kind)
-  const [reason, setReason] = useState('')
+  const [plan, setPlan] = useState<NextPlan>(() => initialPlan(entry.kind, addWorkingDays(today, 5)))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const owner = users.find((u) => u.id === entry.ownerId)
+
   async function save() {
     if (!outcome.trim()) { setError('Say what came of it. This is what the diary is read back from.'); return }
-    if (comesBack && !reason.trim()) { setError('Say why it is coming back.'); return }
     setBusy(true); setError(null)
-    const actor = { id: currentUser?.id ?? null, name: currentUser?.name ?? null }
     try {
-      /*
-       * The next entry FIRST, then close this one.
-       *
-       * If the second write fails the account is double-booked, which somebody sees and fixes.
-       * In the other order a failure leaves the account with nothing in anybody's diary and
-       * nothing to say it should have been — which is invisible, and is exactly how accounts go
-       * quiet for a year.
-       */
-      if (comesBack) {
-        await diarise({
-          accountId: entry.accountId,
-          ownerId: entry.ownerId ?? currentUser?.id ?? null,
-          dueOn, kind, reason, actor,
-        })
-      }
-      await completeEntry({ id: entry.id, outcome, actor })
+      await workEntry({
+        entry,
+        outcome,
+        next: plan.comesBack
+          ? { comesBack: true, dueOn: plan.dueOn, kind: plan.kind, note: plan.note }
+          : { comesBack: false, exit: plan.exit, note: plan.note },
+        actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
+      })
       await onDone()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -239,45 +228,15 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
             className={`${inputClass} resize-none`} />
         </FormField>
 
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          <input type="checkbox" checked={comesBack} onChange={(e) => setComesBack(e.target.checked)}
-            className="rounded border-slate-300" />
-          Bring this account back
-        </label>
-
-        {comesBack ? (
-          <div className="space-y-3 pl-1 border-l-2 border-slate-100 ml-1 pl-4">
-            <div>
-              <span className="block text-xs font-medium text-slate-500 mb-1.5">When</span>
-              <DiaryDatePicker
-                ownerId={entry.ownerId ?? currentUser?.id ?? null}
-                capacity={null}
-                value={dueOn}
-                onChange={setDueOn}
-                today={today}
-              />
-            </div>
-            {account.prescriptionDate && dueOn > account.prescriptionDate && (
-              <p className="text-xs text-[var(--c-rust-deep)]">
-                This account prescribes on {longDate(account.prescriptionDate)} — before that day.
-              </p>
-            )}
-            <FormField label="What kind of work">
-              <select value={kind} onChange={(e) => setKind(e.target.value as DiaryKind)} className={inputClass}>
-                {DIARY_KIND_ORDER.map((k) => <option key={k} value={k}>{DIARY_KINDS[k].label}</option>)}
-              </select>
-            </FormField>
-            <FormField label="Why it is coming back" required>
-              <input value={reason} onChange={(e) => setReason(e.target.value)}
-                placeholder="Insurance pays out on the 28th — check it landed."
-                className={inputClass} />
-            </FormField>
-          </div>
-        ) : (
-          <p className="text-xs text-slate-400 pl-1">
-            Nothing further is booked. The account stays on the book; it just leaves your diary.
-          </p>
-        )}
+        {/* Same question, same rules, same component as the day list's Done — see NextDiaryFields. */}
+        <NextDiaryFields
+          plan={plan}
+          onChange={setPlan}
+          ownerId={entry.ownerId}
+          capacity={owner?.diaryCapacity ?? null}
+          today={today}
+          prescriptionDate={account.prescriptionDate}
+        />
 
         {error && <p className="text-sm text-negative-700">{error}</p>}
 
