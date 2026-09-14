@@ -134,6 +134,8 @@ export function MailPage() {
    * sender's name and number should be, which is exactly the part a collector needs.
    */
   const [bodyImages, setBodyImages] = useState<Record<string, InlineImage[]>>({})
+  /** Pictures that were in the message and were too large to carry, so the page can say so. */
+  const [imagesSkipped, setImagesSkipped] = useState<Record<string, number>>({})
   const [reading, setReading] = useState<string | null>(null)
   const [readError, setReadError] = useState<Record<string, string>>({})
   const [view, setView] = useEmailView()
@@ -280,12 +282,13 @@ export function MailPage() {
     setReading(mail.id)
     setReadError((e) => { const next = { ...e }; delete next[mail.id]; return next })
     try {
-      const { text, details, images } = await fetchMailBody(mail.id, token)
+      const { text, details, images, imagesSkipped: skipped } = await fetchMailBody(mail.id, token)
       setBodies((b) => ({ ...b, [mail.id]: text }))
       // Kept beside the text: these came out of the message's LINKS, which is the only thing an
       // image signature leaves behind.
       setLinkedDetails((d) => ({ ...d, [mail.id]: details }))
       setBodyImages((i) => ({ ...i, [mail.id]: images }))
+      setImagesSkipped((n) => ({ ...n, [mail.id]: skipped }))
     } catch (e) {
       // The snippet stays on screen, so this explains the gap rather than leaving it blank.
       setReadError((prev) => ({ ...prev, [mail.id]: e instanceof Error ? e.message : String(e) }))
@@ -676,6 +679,7 @@ export function MailPage() {
                   )}
                 </div>
                 <MailBody mail={m} body={bodies[m.id]} images={bodyImages[m.id]}
+                  skippedImages={imagesSkipped[m.id]}
                   loadingBody={reading === m.id}
                   bodyError={readError[m.id]} onBlock={() => setBlocking(m)}
                   onReply={() => startReply(m)} onJunk={(j) => void junkOne(m, j)}
@@ -704,6 +708,7 @@ export function MailPage() {
                   blocked={blocked}
                   body={bodies[m.id]}
                   images={bodyImages[m.id]}
+                  skippedImages={imagesSkipped[m.id]}
                   loadingBody={reading === m.id}
                   bodyError={readError[m.id]}
                   onToggle={() => void toggle(m)}
@@ -1067,13 +1072,15 @@ function MailSummary({ mail, tight, blocked }: {
 
 /** The message itself, shared by the expanded row and the reading pane. */
 function MailBody({
-  mail, body, images, loadingBody, bodyError, onBlock, onReply, onJunk, onMove,
+  mail, body, images, skippedImages, loadingBody, bodyError, onBlock, onReply, onJunk, onMove,
   onDownload, downloading, downloadError,
 }: {
   mail: MailItem
   body?: string
   /** Pictures drawn into the message — a signature, nearly always. */
   images?: InlineImage[]
+  /** How many were left behind for being too big. Said out loud rather than left as a gap. */
+  skippedImages?: number
   loadingBody: boolean
   bodyError?: string
   onBlock: () => void
@@ -1122,6 +1129,16 @@ function MailBody({
         else's server, so a remote tracking pixel cannot report that this debtor's mail was
         opened, by whom, or when — see fetchMessageBody, which is where the bytes are read.
       */}
+      {!loadingBody && body !== undefined && !images?.length && !!skippedImages && (
+        /* A gap with no explanation reads as a broken feature — which is exactly how the first
+           version of this was reported. If the picture is not here, the message says why. */
+        <p className="text-xs text-slate-400 mt-3">
+          {skippedImages === 1
+            ? 'One picture in this message was too large to show here.'
+            : `${skippedImages} pictures in this message were too large to show here.`}
+        </p>
+      )}
+
       {!loadingBody && images && images.length > 0 && (
         <div className="mt-3">
           <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5">
@@ -1261,8 +1278,9 @@ function MailBody({
 }
 
 function MailRow({
-  mail, chosen, expanded, selecting, blocked, body, images, loadingBody, bodyError, onToggle,
-  onChoose, onLink, onBlock, onReply, onJunk, onMove, onDownload, downloading, downloadError,
+  mail, chosen, expanded, selecting, blocked, body, images, skippedImages, loadingBody, bodyError,
+  onToggle, onChoose, onLink, onBlock, onReply, onJunk, onMove, onDownload, downloading,
+  downloadError,
 }: {
   mail: MailItem
   chosen: boolean
@@ -1275,6 +1293,8 @@ function MailRow({
   body?: string
   /** The pictures inside it, fetched alongside the text. */
   images?: InlineImage[]
+  /** And how many were left behind for being too big. */
+  skippedImages?: number
   loadingBody: boolean
   bodyError?: string
   onToggle: () => void
@@ -1328,7 +1348,8 @@ function MailRow({
 
       {expanded && (
         <div className="px-5 pb-4 pl-[2.9rem]">
-          <MailBody mail={mail} body={body} images={images} loadingBody={loadingBody}
+          <MailBody mail={mail} body={body} images={images} skippedImages={skippedImages}
+            loadingBody={loadingBody}
             bodyError={bodyError} onBlock={onBlock} onReply={onReply} onJunk={onJunk}
             onMove={onMove} onDownload={onDownload}
             downloading={downloading} downloadError={downloadError} />

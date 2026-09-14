@@ -3,8 +3,8 @@ import { simpleParser } from 'mailparser'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decrypt } from './crypto.js'
 import {
-  assembleBody, flattenParts, inlineImagesFromParsed, partContent, plainText, readableParts,
-  type MessageBody, type MessagePart,
+  assembleBody, describeParts, flattenParts, inlineImagesFromParsed, partContent, plainText,
+  readableParts, type MessageBody, type MessagePart,
 } from './mime.js'
 import {
   CORRESPONDENCE_ACTION_CODE, CORRESPONDENCE_DESCRIPTION, CORRESPONDENCE_ITEM_ID,
@@ -474,7 +474,16 @@ export async function fetchMessageBody(
   location: { folder?: string | null; uid?: number | null; messageId?: string | null },
 ): Promise<MessageBody | null> {
   return withMessageStructure(conn, location, async (client, uid, parts) => {
-    const wanted = readableParts(parts)
+    const { parts: wanted, skippedImages } = readableParts(parts)
+    /*
+     * What this message is made of, and what we decided to fetch. Types and sizes only — no
+     * filenames, no addresses, no content. When somebody says a signature did not appear, this
+     * is the difference between reading why in ten seconds and asking them to reproduce it.
+     */
+    console.log(`[emailSync] uid ${uid} parts: ${describeParts(parts)}`)
+    console.log(`[emailSync] uid ${uid} fetching: ${wanted.map((p) => p.part).join(',') || '(none)'}`
+      + (skippedImages > 0 ? ` — ${skippedImages} picture(s) too large to show` : ''))
+
     if (wanted.length > 0) {
       // One fetch for all of them: on this link, two round trips cost more than the bytes do.
       const msg = await client.fetchOne(
@@ -482,9 +491,10 @@ export async function fetchMessageBody(
         { uid: true, bodyParts: wanted.map((p) => p.part) },
         { uid: true },
       )
-      const assembled = assembleBody(wanted, msg)
+      const assembled = assembleBody(wanted, msg, skippedImages)
       if (assembled) return assembled
     }
+    console.log(`[emailSync] uid ${uid} fell back to fetching the whole message`)
 
     /*
      * Fallback: fetch the whole message and let mailparser sort it out.
@@ -502,10 +512,12 @@ export async function fetchMessageBody(
      * picture still usually wraps the number in <a href="tel:...">, and that anchor was being
      * thrown away before anything could look at it. See findLinkedDetails.
      */
+    const fallbackImages = inlineImagesFromParsed(parsed.attachments)
     return {
       text: plainText(parsed.text, parsed.html),
       html: parsed.html || '',
-      images: inlineImagesFromParsed(parsed.attachments),
+      images: fallbackImages.images,
+      imagesSkipped: fallbackImages.skippedImages,
     }
   })
 }

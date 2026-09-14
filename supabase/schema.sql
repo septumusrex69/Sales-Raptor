@@ -1882,13 +1882,15 @@ security invoker
 set search_path to 'public'
 as $$
   select
-    -- Unread mail waiting to be filed. Junk excluded: it is not work.
-    -- is_filed, not linked_account_id: a message filed against a lead or a client IS filed, and
-    -- counting it as waiting is how an agent ends up filing a sales reply onto a debtor account
-    -- and charging somebody R13 for it.
+    -- UNREAD mail, whether or not it has been matched. Junk excluded: it is not work.
+    --
+    -- This used to count only mail that still needed matching, on the theory that a matched
+    -- message is already dealt with. In practice almost everything matches itself on arrival --
+    -- every message in the book did -- so the badge sat at nought for ever and a new email
+    -- arrived with nothing on the sidebar to say so. Unread is the thing a person actually
+    -- clears, by reading it, and it is what somebody means when they ask whether mail has come.
     (select count(*)::integer from public.user_emails
       where user_id = auth.uid()
-        and is_filed = false
         and is_junk = false
         and read_at is null),
     -- Mine, still open, and due by the end of today. Not "all my tasks", which would be a

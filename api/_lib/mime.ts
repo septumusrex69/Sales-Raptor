@@ -47,6 +47,14 @@ export interface MessageBody {
   text: string
   html: string
   images: InlineImage[]
+  /**
+   * Pictures that were in the message but were left behind for being too big.
+   *
+   * Reported rather than swallowed. A signature that silently fails to appear is indistinguishable
+   * from a message that never had one, and somebody then reports the feature as broken — which is
+   * exactly what happened. If a picture is not shown, the page says so.
+   */
+  imagesSkipped: number
 }
 
 /** A ceiling on one text part. Prose does not run to a megabyte; a dumped log does. */
@@ -56,14 +64,22 @@ const MAX_TEXT_PARTS = 4
 /*
  * Inline pictures, capped three ways.
  *
- * Below the floor is a tracking pixel or a table spacer, not a signature. The ceilings keep the
- * response small enough that showing the signature does not undo the speed this module exists
- * for — half a megabyte of pictures is already more than any signature needs.
+ * Below the floor is a tracking pixel or a table spacer, not a signature.
+ *
+ * THE CEILINGS WERE TOO MEAN. They started at 250 KB a picture and half a megabyte in total, on
+ * the reasoning that no signature needs more than that. A real one does: a designed sign-off with
+ * a photograph, a logo and a banner, exported at the resolution a retina screen wants, runs to
+ * several hundred kilobytes an image — so the first signature this was built for was thrown away
+ * by its own size limit and the message rendered blank exactly as before.
+ *
+ * These are set where a genuine signature always fits and a photo album still does not, and the
+ * worst case stays well inside what one response can carry. It is a real trade against the speed
+ * this module exists for, made deliberately: the pictures are the thing somebody asked to see.
  */
-const MIN_INLINE_IMAGE = 2 * 1024
-const MAX_INLINE_IMAGE = 250 * 1024
-const MAX_INLINE_IMAGE_TOTAL = 500 * 1024
-const MAX_INLINE_IMAGES = 6
+const MIN_INLINE_IMAGE = 1024
+const MAX_INLINE_IMAGE = 1024 * 1024
+const MAX_INLINE_IMAGE_TOTAL = 2 * 1024 * 1024
+const MAX_INLINE_IMAGES = 8
 
 /**
  * Every leaf of a message's MIME tree, in order, with its part number.
@@ -143,11 +159,17 @@ export function toText(buf: Buffer, charset?: string): string {
   }
 }
 
-/** The parts worth fetching in order to READ a message: its text, and the pictures drawn into it. */
-export function readableParts(parts: MessagePart[]): MessagePart[] {
+/**
+ * The parts worth fetching in order to READ a message: its text, and the pictures drawn into it.
+ *
+ * `skippedImages` counts pictures that belong in the body but were left behind for being too
+ * large, so the page can say so instead of showing a gap somebody has to guess at.
+ */
+export function readableParts(parts: MessagePart[]): { parts: MessagePart[]; skippedImages: number } {
   const text: MessagePart[] = []
   const images: MessagePart[] = []
   let imageBytes = 0
+  let skippedImages = 0
 
   for (const p of parts) {
     if (p.type === 'text/plain' || p.type === 'text/html') {
@@ -160,14 +182,34 @@ export function readableParts(parts: MessagePart[]): MessagePart[] {
     // Either the HTML points at it by cid, or the sender's client marked it inline. Both mean the
     // picture is part of what was written, which is exactly what a signature is.
     if (!p.cid && p.disposition !== 'inline') continue
-    if (p.size < MIN_INLINE_IMAGE || p.size > MAX_INLINE_IMAGE) continue
-    if (images.length >= MAX_INLINE_IMAGES || imageBytes + p.size > MAX_INLINE_IMAGE_TOTAL) continue
+    // A spacer or a tracking pixel was never going to be looked at, so it is not "skipped".
+    if (p.size < MIN_INLINE_IMAGE) continue
+    if (p.size > MAX_INLINE_IMAGE
+      || images.length >= MAX_INLINE_IMAGES
+      || imageBytes + p.size > MAX_INLINE_IMAGE_TOTAL) {
+      skippedImages += 1
+      continue
+    }
     imageBytes += p.size
     images.push(p)
   }
 
   // No text at all means the walk did not understand this message; the caller falls back.
-  return text.length === 0 ? [] : [...text, ...images]
+  if (text.length === 0) return { parts: [], skippedImages: 0 }
+  return { parts: [...text, ...images], skippedImages }
+}
+
+/**
+ * One line describing what a message is made of, for the log.
+ *
+ * Types, sizes and dispositions only — never a filename, an address or a byte of content. When a
+ * signature does not appear, this is the difference between reading why in ten seconds and asking
+ * somebody to reproduce it.
+ */
+export function describeParts(parts: MessagePart[]): string {
+  return parts
+    .map((p) => `${p.part}:${p.type}/${p.encoding}/${p.size}b${p.cid ? '/cid' : ''}${p.disposition ? `/${p.disposition}` : ''}`)
+    .join(' ')
 }
 
 /** Pull one requested part out of a fetch response, decoded. */
@@ -196,6 +238,7 @@ export function partContent(
 export function assembleBody(
   wanted: MessagePart[],
   msg: { bodyParts?: Map<string, Buffer>; binaryParts?: Set<string> } | false | undefined,
+  skippedImages = 0,
 ): MessageBody | null {
   const texts: string[] = []
   const htmls: string[] = []
@@ -217,7 +260,14 @@ export function assembleBody(
 
   if (texts.length === 0 && htmls.length === 0) return null
   const html = htmls.join('\n')
-  return { text: plainText(texts.join('\n\n').trim() || undefined, html), html, images }
+  return {
+    text: plainText(texts.join('\n\n').trim() || undefined, html),
+    html,
+    images,
+    // A picture we asked for and did not get counts as skipped too — the gap is the same to
+    // whoever is reading it.
+    imagesSkipped: skippedImages + (wanted.filter((p) => p.type.startsWith('image/')).length - images.length),
+  }
 }
 
 /** The same inline-picture rule, applied to what mailparser gives the whole-message fallback. */
@@ -226,25 +276,31 @@ export function inlineImagesFromParsed(
     filename?: string; cid?: string; contentType?: string; contentDisposition?: string
     content?: unknown
   }[] | undefined,
-): InlineImage[] {
-  const out: InlineImage[] = []
+): { images: InlineImage[]; skippedImages: number } {
+  const images: InlineImage[] = []
   let bytes = 0
+  let skippedImages = 0
   for (const att of attachments ?? []) {
     const type = (att.contentType ?? '').toLowerCase()
     if (!type.startsWith('image/')) continue
     if (!att.cid && att.contentDisposition !== 'inline') continue
     const content = att.content as Buffer | undefined
     if (!Buffer.isBuffer(content)) continue
-    if (content.length < MIN_INLINE_IMAGE || content.length > MAX_INLINE_IMAGE) continue
-    if (out.length >= MAX_INLINE_IMAGES || bytes + content.length > MAX_INLINE_IMAGE_TOTAL) continue
+    if (content.length < MIN_INLINE_IMAGE) continue
+    if (content.length > MAX_INLINE_IMAGE
+      || images.length >= MAX_INLINE_IMAGES
+      || bytes + content.length > MAX_INLINE_IMAGE_TOTAL) {
+      skippedImages += 1
+      continue
+    }
     bytes += content.length
-    out.push({
+    images.push({
       cid: att.cid ?? '',
       filename: att.filename ?? '',
       dataUri: `data:${type};base64,${content.toString('base64')}`,
     })
   }
-  return out
+  return { images, skippedImages }
 }
 
 /**

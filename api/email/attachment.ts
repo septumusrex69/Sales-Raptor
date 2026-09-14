@@ -202,6 +202,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
          * collector opened it. See fetchMessageBody.
          */
         images: body.images,
+        // Pictures that were there and are not shown. Said out loud, because a signature that
+        // silently fails to appear looks identical to a message that never had one.
+        imagesSkipped: body.imagesSkipped,
       })
     } catch (err) {
       res.status(502).json({ error: err instanceof Error ? err.message : 'Could not reach your mailbox.' })

@@ -17,8 +17,8 @@
  */
 import { createRequire } from 'node:module'
 import {
-  assembleBody, decodeQuotedPrintable, decodeTransfer, flattenParts, inlineImagesFromParsed,
-  partContent, plainText, readableParts, toText,
+  assembleBody, decodeQuotedPrintable, decodeTransfer, describeParts, flattenParts,
+  inlineImagesFromParsed, partContent, plainText, readableParts, toText,
 } from '../../api/_lib/mime.ts'
 
 const require = createRequire(import.meta.url)
@@ -71,7 +71,7 @@ check('the encoding is carried, because we now undo it ourselves', real[0].encod
 check('the charset is carried, or every apostrophe becomes a question mark', real[0].charset, 'utf-8')
 
 check('only the parts a person will look at are fetched — NOT the four-megabyte scan',
-  readableParts(real).map((p) => p.part),
+  readableParts(real).parts.map((p) => p.part),
   ['1.1.1', '1.1.2', '1.2'])
 
 /* ---------------------------------------------------------------- *
@@ -85,18 +85,36 @@ const attachedHtml = '("TEXT" "HTML" ("CHARSET" "utf-8") NIL NIL "BASE64" 400 6 
 const noisy = flattenParts(await structure(
   `(${TEXT}${pixel}${huge}${attachedHtml} "MIXED" ("BOUNDARY" "m") NIL NIL NIL)`,
 ))
-check('a tracking pixel is not a signature', readableParts(noisy).map((p) => p.part), ['1'])
+check('a tracking pixel is not a signature', readableParts(noisy).parts.map((p) => p.part), ['1'])
+// A pixel was never going to be looked at, so it is not reported as missing. A three-megabyte
+// photograph WAS, so it is — a blank space with no explanation is how this got reported broken.
+check('the pixel is not counted as something we failed to show', readableParts(noisy).skippedImages, 1)
 
 const plainImage = '("IMAGE" "PNG" ("NAME" "chart.png") NIL NIL "BASE64" 40000 NIL ("ATTACHMENT" ("FILENAME" "chart.png")) NIL NIL)'
 check('an image ATTACHED rather than drawn in stays in the attachment list, not the body',
   readableParts(flattenParts(await structure(
     `(${TEXT}${plainImage} "MIXED" ("BOUNDARY" "m") NIL NIL NIL)`,
-  ))).map((p) => p.part),
+  ))).parts.map((p) => p.part),
   ['1'])
 
 check('nothing at all is fetched when there is no text to anchor it',
-  readableParts(flattenParts(await structure(`(${plainImage}${PDF} "MIXED" ("BOUNDARY" "m") NIL NIL NIL)`))),
+  readableParts(flattenParts(await structure(`(${plainImage}${PDF} "MIXED" ("BOUNDARY" "m") NIL NIL NIL)`))).parts,
   [])
+
+/*
+ * The case that broke it in the field. A real designed sign-off — photograph, logo, banner, at
+ * the resolution a retina screen wants — is several hundred kilobytes an image. The first caps
+ * threw exactly that away and the message rendered blank, which is indistinguishable from the
+ * feature never having worked.
+ */
+const REAL_SIG_A = '("IMAGE" "JPEG" ("NAME" "banner.jpg") "<a@urbanhaus>" NIL "BASE64" 420000 NIL ("INLINE" ("FILENAME" "banner.jpg")) NIL NIL)'
+const REAL_SIG_B = '("IMAGE" "PNG" ("NAME" "logo.png") "<b@urbanhaus>" NIL "BASE64" 260000 NIL ("INLINE" ("FILENAME" "logo.png")) NIL NIL)'
+const richSig = readableParts(flattenParts(await structure(
+  `(${TEXT}${REAL_SIG_A}${REAL_SIG_B} "RELATED" ("BOUNDARY" "r") NIL NIL NIL)`,
+)))
+check('a real designed signature fits — both pictures, neither dropped',
+  [richSig.parts.map((p) => p.part), richSig.skippedImages],
+  [['1', '2', '3'], 0])
 
 /* ---------------------------------------------------------------- *
  * Shapes that are easy to get wrong
@@ -147,7 +165,7 @@ const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64',
 )
-const wanted = readableParts(real)
+const { parts: wanted } = readableParts(real)
 const fetched = {
   bodyParts: new Map([
     ['1.1.1', Buffer.from('Goeie dag. My nuwe nommer is 083 555 =\r\n0199.')],
@@ -167,9 +185,11 @@ check('the signature comes back as a picture the browser can render without aski
 check('and it is byte-for-byte the image that was sent',
   Buffer.from(body.images[0].dataUri.split(',')[1], 'base64').equals(PNG), true)
 
+const missingPicture = assembleBody(wanted, { bodyParts: new Map([['1.1.1', Buffer.from('Goeie dag.')]]) })
 check('a part the server never sent is skipped, not rendered as nothing',
-  assembleBody(wanted, { bodyParts: new Map([['1.1.1', Buffer.from('Goeie dag.')]]) }).text,
-  'Goeie dag.')
+  missingPicture.text, 'Goeie dag.')
+check('and a picture that did not arrive is reported, not left as a silent gap',
+  missingPicture.imagesSkipped, 1)
 
 // Null is the signal to fall back to fetching the whole message, so it has to be null and not
 // an empty body — an empty body would render as a blank message the agent cannot explain.
@@ -181,7 +201,7 @@ check('a failed fetch means null too', assembleBody(wanted, false), null)
 // HTML-only mail still arrives as words rather than as tags.
 check('HTML-only mail is reduced to something readable',
   assembleBody(
-    readableParts(flattenParts(await structure(`(${HTML} "MIXED" ("BOUNDARY" "m") NIL NIL NIL)`))),
+    readableParts(flattenParts(await structure(`(${HTML} "MIXED" ("BOUNDARY" "m") NIL NIL NIL)`))).parts,
     { bodyParts: new Map([['1', Buffer.from('<p>Goeie dag</p><b>Groete</b><br>J M van Wyk')]]) },
   ).text,
   'Goeie dag\nGroete\nJ M van Wyk')
@@ -206,11 +226,23 @@ check('mailparser\'s attachments give up the same signature',
     { contentType: 'image/png', cid: 'sig@bf', filename: 'sig.png', content: Buffer.alloc(9000, 1) },
     { contentType: 'image/gif', cid: 'px@track', content: Buffer.alloc(60) },
     { contentType: 'application/pdf', filename: 'mandate.pdf', contentDisposition: 'attachment', content: Buffer.alloc(9000) },
-  ]).map((i) => i.cid),
+  ]).images.map((i) => i.cid),
   ['sig@bf'])
 
-check('no attachments is not an error', inlineImagesFromParsed(undefined), [])
+check('and the slow path reports an oversized picture too',
+  inlineImagesFromParsed([
+    { contentType: 'image/jpeg', cid: 'huge@x', content: Buffer.alloc(4 * 1024 * 1024) },
+  ]).skippedImages,
+  1)
+
+check('no attachments is not an error', inlineImagesFromParsed(undefined).images, [])
 check('an empty message is not an error', plainText('', ''), '')
+
+// The log line that explains a missing signature without needing anyone to reproduce it. Types,
+// sizes and dispositions only — a filename or an address in a log is a debtor's data in a log.
+const described = describeParts(real)
+check('the diagnostic describes the shape', described.includes('1.2:image/png/base64/41000b/cid/inline'), true)
+check('and never carries a filename', /mandate\.pdf|sig\.png/.test(described), false)
 
 console.log(failures === 0
   ? '\nPASS — a message is taken apart from its structure, only the readable parts are fetched,'
