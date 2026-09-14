@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, ExternalLink, Inbox, Link2,
-  Download, Loader2, MoveRight, Paperclip, Reply, RefreshCw, Search, ShieldAlert, Trash2,
-  Undo2, X,
+  Download, Loader2, Mail as MailIcon, MoveRight, Paperclip, Reply, RefreshCw, Search,
+  ShieldAlert, Trash2, Undo2, X,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal } from '../../components/ui/Modal'
@@ -19,7 +19,7 @@ import { ReadingPane } from '../../components/email/ReadingPane'
 import {
   blockedBy, blockSender, blockSenders, countNeedsFiling, countUnread, deleteMail,
   domainBlockProblem, domainOf, downloadAttachment, emptyJunk, fetchBlockedSenders, fetchMail,
-  fetchMailBody, linkMailToAccount, linkMailToRecord, markMailRead, moveFiledMail,
+  fetchMailBody, linkMailToAccount, linkMailToRecord, markMailRead, markMailUnread, moveFiledMail,
   saveAccountContacts, setJunk, unblockSender, unmatchMail,
   type BlockedSender, type BlockOutcome, type InlineImage, type LinkedRecord, type MailFilter,
   type MailItem,
@@ -451,6 +451,40 @@ export function MailPage() {
     }
   }
 
+  /** Put them back the way they were found. */
+  async function unreadChosen() {
+    const ids = [...chosen]
+    if (ids.length === 0) return
+    try {
+      await markMailUnread(ids)
+      await load(page)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  /**
+   * Put ONE message back to unread — the one that actually gets used.
+   *
+   * It closes the message as well, and that is the whole point rather than a nicety: leaving it
+   * open would mean the very next click re-opened it and marked it read again, so the button
+   * would undo itself. Closing it is also what somebody means by the action — put this back on
+   * the pile, I will deal with it later.
+   */
+  async function unreadOne(mail: MailItem) {
+    // Optimistic, like marking read on open: the row goes bold at once and the write follows.
+    setItems((list) => list.map((m) => (m.id === mail.id ? { ...m, readAt: null } : m)))
+    setOpen(null)
+    try {
+      await markMailUnread([mail.id])
+      setStatus('Put back as unread. It is waiting for you in the mailbox.')
+      await load(page)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      await load(page)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <Card padded={false}>
@@ -567,10 +601,23 @@ export function MailPage() {
         {chosen.size > 0 && (
           <div className="px-5 py-2.5 bg-gold-50 border-b border-gold-100 flex flex-wrap items-center gap-2 text-sm">
             <span className="text-navy-950 font-medium mr-auto">{chosen.size} selected</span>
-            <button onClick={() => void readChosen()}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
-              <Check size={14} /> Mark read
-            </button>
+            {/*
+              Read and unread, and only the one that would change something. Offering both on a
+              selection that is all read means one of the two buttons is furniture, and a button
+              that does nothing when you press it is worse than no button.
+            */}
+            {items.some((m) => chosen.has(m.id) && !m.readAt) && (
+              <button onClick={() => void readChosen()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
+                <Check size={14} /> Mark read
+              </button>
+            )}
+            {items.some((m) => chosen.has(m.id) && !!m.readAt) && (
+              <button onClick={() => void unreadChosen()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
+                <MailIcon size={14} /> Mark unread
+              </button>
+            )}
             {/*
               Block, without opening anything. Address only — a whole-domain block stays behind
               the open message, because that one can silence a company and should cost a look.
@@ -684,6 +731,7 @@ export function MailPage() {
                   bodyError={readError[m.id]} onBlock={() => setBlocking(m)}
                   onReply={() => startReply(m)} onJunk={(j) => void junkOne(m, j)}
                   onMove={mayRefile ? () => setMoving(m) : null}
+                  onUnread={() => void unreadOne(m)}
                   onDownload={(f) => void download(m, f)}
                   downloading={downloading} downloadError={downloadError} />
               </div>
@@ -724,6 +772,7 @@ export function MailPage() {
                   onReply={() => startReply(m)}
                   onJunk={(j) => void junkOne(m, j)}
                   onMove={mayRefile ? () => setMoving(m) : null}
+                  onUnread={() => void unreadOne(m)}
                   onDownload={(f) => void download(m, f)}
                   downloading={downloading} downloadError={downloadError} />
               ))}
@@ -1073,7 +1122,7 @@ function MailSummary({ mail, tight, blocked }: {
 /** The message itself, shared by the expanded row and the reading pane. */
 function MailBody({
   mail, body, images, skippedImages, loadingBody, bodyError, onBlock, onReply, onJunk, onMove,
-  onDownload, downloading, downloadError,
+  onUnread, onDownload, downloading, downloadError,
 }: {
   mail: MailItem
   body?: string
@@ -1089,6 +1138,8 @@ function MailBody({
   onJunk: (junk: boolean) => void
   /** Unmatch it, or rematch it from the same box. Null for anyone who is not an administrator. */
   onMove: (() => void) | null
+  /** Put it back on the pile, and close it. */
+  onUnread: () => void
   /** Pull one attachment out of the mailbox. */
   onDownload: (filename: string) => void
   /** The file currently being fetched, so its own button shows the wait. */
@@ -1257,6 +1308,19 @@ function MailBody({
           </button>
         )}
 
+        {/*
+          Put it back the way you found it.
+
+          It sits with the other actions rather than beside the subject because it belongs to the
+          same decision as Reply and Junk: you have now read this, so what happens to it? "Not
+          yet" is a legitimate answer, and without a way to say it, opening a message to see
+          whether it was urgent was the same act as deciding it was not.
+        */}
+        <button onClick={onUnread}
+          className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50">
+          <MailIcon size={13} /> Mark unread
+        </button>
+
         {!mail.isFiled && (
           <button onClick={() => onJunk(!mail.isJunk)}
             className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50">
@@ -1279,7 +1343,7 @@ function MailBody({
 
 function MailRow({
   mail, chosen, expanded, selecting, blocked, body, images, skippedImages, loadingBody, bodyError,
-  onToggle, onChoose, onLink, onBlock, onReply, onJunk, onMove, onDownload, downloading,
+  onToggle, onChoose, onLink, onBlock, onReply, onJunk, onMove, onUnread, onDownload, downloading,
   downloadError,
 }: {
   mail: MailItem
@@ -1304,6 +1368,7 @@ function MailRow({
   onReply: () => void
   onJunk: (junk: boolean) => void
   onMove: (() => void) | null
+  onUnread: () => void
   onDownload: (filename: string) => void
   downloading: string | null
   downloadError: string | null
@@ -1351,7 +1416,7 @@ function MailRow({
           <MailBody mail={mail} body={body} images={images} skippedImages={skippedImages}
             loadingBody={loadingBody}
             bodyError={bodyError} onBlock={onBlock} onReply={onReply} onJunk={onJunk}
-            onMove={onMove} onDownload={onDownload}
+            onMove={onMove} onUnread={onUnread} onDownload={onDownload}
             downloading={downloading} downloadError={downloadError} />
         </div>
       )}

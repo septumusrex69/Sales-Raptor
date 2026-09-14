@@ -26,7 +26,7 @@
  */
 import { supabase } from './supabase'
 import { refreshNavCounts } from './navCounts'
-import { mirrorReadToAccount } from './mailReadState'
+import { mirrorReadToAccount, mirrorUnreadToAccount } from './mailReadState'
 import type { ContactCandidate } from './signature'
 import { chargeItem, type ChargeResult } from './accountCharges'
 import { addNote } from './accountWorkspace'
@@ -445,6 +445,31 @@ export async function markMailRead(ids: string[]): Promise<void> {
 
   // Read here means read on the debtor's file too. See mailReadState.
   await mirrorReadToAccount((data ?? []).map((r) => r.message_id as string | null))
+  refreshNavCounts()
+}
+
+/**
+ * Put a message back to unread.
+ *
+ * The one that gets used most, in practice, is one message at a time: you open a debtor's reply,
+ * see it needs a payment arrangement drawn up and twenty minutes you do not have, and put it back
+ * the way you found it so it is still waiting after lunch. Without this, opening a message to see
+ * whether it was urgent is the same act as deciding it was not.
+ *
+ * Narrowed to rows that were actually read, so the returned ids are the ones that genuinely
+ * changed and the account copies follow only those — the same bargain markMailRead makes.
+ */
+export async function markMailUnread(ids: string[]): Promise<void> {
+  if (ids.length === 0) return
+  const { data, error } = await supabase
+    .from('user_emails')
+    .update({ read_at: null })
+    .in('id', ids)
+    .not('read_at', 'is', null)
+    .select('message_id')
+  if (error) throw new Error(error.message)
+
+  await mirrorUnreadToAccount((data ?? []).map((r) => r.message_id as string | null))
   refreshNavCounts()
 }
 
