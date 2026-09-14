@@ -194,15 +194,22 @@ function UsersTab() {
   const [removingUser, setRemovingUser] = useState<User | null>(null)
   const [emailUser, setEmailUser] = useState<User | null>(null)
   const [signatureUser, setSignatureUser] = useState<User | null>(null)
+  const [formerOpen, setFormerOpen] = useState(false)
 
   return (
     <Card padded={false}>
       <div className="p-5 flex items-center justify-between">
         <CardHeader title="Users" subtitle={`${users.length} team members`} />
         {isAdmin && (
-          <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 h-fit">
-            <Plus size={15} /> Add User
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* A record rather than an invite — see FormerUserModal for why these are separate. */}
+            <button onClick={() => setFormerOpen(true)} className="text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 h-fit">
+              Add someone who has left
+            </button>
+            <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 h-fit">
+              <Plus size={15} /> Add User
+            </button>
+          </div>
         )}
       </div>
       <div className="overflow-x-auto">
@@ -304,6 +311,7 @@ function UsersTab() {
         </table>
       </div>
       {addOpen && session && <InviteUserModal accessToken={session.access_token} teams={teams} onClose={() => setAddOpen(false)} />}
+      {formerOpen && session && <FormerUserModal accessToken={session.access_token} onClose={() => setFormerOpen(false)} />}
       {editingUser && session && (
         <EditUserModal
           user={editingUser}
@@ -736,6 +744,90 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
           </button>
           <button type="submit" disabled={submitting} className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed">
             {submitting ? 'Sending…' : 'Send Invite'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+/**
+ * Recording somebody who has left.
+ *
+ * Their work has to keep belonging to them. Three years of leads name eight people in the
+ * Marketer column and several of them are no longer here; landing all of it on whoever runs the
+ * import loses what that column was keeping, and moving it onto a colleague who is still here
+ * misstates both their numbers.
+ *
+ * Adding them cannot mean inviting them. Send Invite emails a real person a real link asking
+ * them to set a password on a system they have left.
+ *
+ * So this makes an account with no password, bans it, and marks the profile Inactive — three
+ * separate locks, because each one alone has a gap. No password can still be reset by email;
+ * a ban is what closes that. The Inactive flag is the one the app itself reads.
+ */
+function FormerUserModal({ accessToken, onClose }: { accessToken: string; onClose: () => void }) {
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [role, setRole] = useState<UserRole>('Sales Representative')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!email || !name.trim()) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/former-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ email, name, role }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(body.error ?? 'Something went wrong adding the record.')
+        return
+      }
+      // The list is loaded once at start-up, so it has to be re-read to show the new person.
+      window.location.reload()
+    } catch {
+      setError('Could not reach the server. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Modal title="Add someone who has left" onClose={onClose} width={440}>
+      <form onSubmit={handleSubmit}>
+        <p className="text-sm text-slate-600 leading-relaxed mb-4">
+          A record, not a login. No email is sent, no password is ever set, and the account is
+          locked so it cannot be signed in to. It exists so that leads, deals and accounts this
+          person worked can stay theirs.
+        </p>
+        <FormField label="Full name" required>
+          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} autoFocus required />
+        </FormField>
+        <FormField label="Email address" required>
+          <input type="email" className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <p className="text-[11px] text-slate-400 mt-1">
+            Only used to tell one record from another — nothing is ever sent to it. Their old work
+            address is the usual answer.
+          </p>
+        </FormField>
+        <FormField label="Role they had" required>
+          <select className={inputClass} value={role} onChange={(e) => setRole(e.target.value as UserRole)}>
+            {INVITE_ROLES.map((r) => <option key={r}>{r}</option>)}
+          </select>
+        </FormField>
+        {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
+        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
+          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting} className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+            {submitting ? 'Adding…' : 'Add the record'}
           </button>
         </div>
       </form>

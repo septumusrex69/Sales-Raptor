@@ -17,7 +17,7 @@
  */
 import {
   planLeadsImport, leadInsertRows, oneAmount, isoDate, statusFor, sourceFor, rejectionFor,
-  splitName, SheetColumns,
+  splitName, SheetColumns, splitMarketers, marketerCredits, ownerFor,
 } from '../../src/lib/leadsImport.ts'
 import { plainNumber } from '../../src/lib/xlsx.ts'
 
@@ -367,6 +367,82 @@ check('empty is not a number', plainNumber(''), null)
 // written with a leading zero, which is text and must stay text.
 check('a word with an e in it is not scientific notation', plainNumber('Elite'), null)
 check('a phone number written as text is left as text', plainNumber('082 555 1234'), null)
+
+/* ---------- 13. who worked the lead ---------- */
+
+/*
+ * Three years of a shared spreadsheet: forty-two distinct spellings of eight people, and a
+ * quarter of the cells name more than one of them.
+ */
+check('one person', splitMarketers('Barend'), ['Barend'])
+check('two, slashed', splitMarketers('Barend/Destiny'), ['Barend', 'Destiny'])
+check('spaces around the slash', splitMarketers('Felicia / Barend'), ['Felicia', 'Barend'])
+check('four of them, spaced every which way',
+  splitMarketers('Barend/ Stephan/ Zian / Destiny'), ['Barend', 'Stephan', 'Zian', 'Destiny'])
+check('a trailing slash is not a person', splitMarketers('Barend/'), ['Barend'])
+check('nobody', splitMarketers(null), [])
+check('a blank cell is nobody', splitMarketers('   '), [])
+
+const worked = (marketer) => ({ ...LEAD, 'Marketer': marketer, 'Client Name': `Co ${marketer}` })
+const book = planLeadsImport([{
+  name: 'book',
+  rows: [HEADERS.common, ...[
+    'Nomsa', 'Nomsa', 'nomsa', 'Pieter', 'Nomsa/Pieter', 'Pieter / Thabo', '', 'Thabo',
+  ].map((m, i) => laidOut(HEADERS.common,
+    { ...worked(m), 'Client Name': `Company ${i}`, 'Lead - Start Date': `2025/03/${10 + i}` }))],
+}])
+const credits = marketerCredits(book)
+
+check('three people, commonest first', credits.map((c) => c.name), ['Nomsa', 'Pieter', 'Thabo'])
+check('counted across the cells that name several', credits.map((c) => c.leads), [4, 3, 2])
+check('and how many are shared', credits.map((c) => c.shared), [1, 2, 1])
+check('and how many they are named first on', credits.map((c) => c.owns), [4, 2, 1])
+check('a lower-case spelling is the same person',
+  credits.find((c) => c.name === 'Nomsa').spellings, ['Nomsa', 'nomsa'])
+ok('and the commonest spelling is the one shown',
+  credits.find((c) => c.name === 'Nomsa').name === 'Nomsa')
+ok('a blank marketer is not a person', !credits.some((c) => c.name === ''))
+
+/*
+ * A typo is not corrected. "Baren" is almost certainly Barend, but almost is not a basis for
+ * moving somebody's work onto somebody else — it arrives as its own name, visible on the screen,
+ * for a person who knows to resolve.
+ */
+const typo = marketerCredits(planLeadsImport([{
+  name: 't', rows: [HEADERS.common, laidOut(HEADERS.common, worked('Nomas'))],
+}]))
+check('a misspelt name is its own name, not quietly merged', typo.map((c) => c.name), ['Nomas'])
+
+const OWNERS = { fallback: 'fallback-id', byMarketer: { Nomsa: 'nomsa-id', Pieter: 'pieter-id' } }
+const lead = (marketer) => planLeadsImport([{
+  name: 'l', rows: [HEADERS.common, laidOut(HEADERS.common, worked(marketer))],
+}]).rows[0]
+
+check('a lead lands on the person who worked it', ownerFor(lead('Nomsa'), OWNERS), 'nomsa-id')
+check('a joint lead lands on whoever is named first',
+  ownerFor(lead('Nomsa/Pieter'), OWNERS), 'nomsa-id')
+check('and the other way round', ownerFor(lead('Pieter/Nomsa'), OWNERS), 'pieter-id')
+check('an unmapped first name falls through to the next one named',
+  ownerFor(lead('Thabo/Pieter'), OWNERS), 'pieter-id')
+check('nobody mapped at all falls back', ownerFor(lead('Thabo'), OWNERS), 'fallback-id')
+check('a blank marketer falls back', ownerFor(lead(''), OWNERS), 'fallback-id')
+check('case does not decide who gets the lead', ownerFor(lead('nomsa'), OWNERS), 'nomsa-id')
+
+// Choosing an owner must not lose the fact that two people worked it.
+check('the cell is kept exactly as written whoever it lands on',
+  lead('Nomsa/Pieter').sourceMarketer, 'Nomsa/Pieter')
+
+const mixed = planLeadsImport([{
+  name: 'm',
+  rows: [HEADERS.common, ...['Nomsa', 'Pieter/Nomsa', 'Thabo'].map((m, i) => laidOut(HEADERS.common,
+    { ...worked(m), 'Client Name': `Co ${i}`, 'Lead - Start Date': `2025/04/${10 + i}` }))],
+}])
+check('a whole book splits across its owners',
+  leadInsertRows(mixed, OWNERS).map((r) => r.owner_id),
+  ['nomsa-id', 'pieter-id', 'fallback-id'])
+check('and one owner for everybody still works',
+  leadInsertRows(mixed, 'everyone-id').map((r) => r.owner_id),
+  ['everyone-id', 'everyone-id', 'everyone-id'])
 
 /* ---------- report ---------- */
 
