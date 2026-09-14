@@ -99,6 +99,39 @@ function isBlocked(address: string | null, blocks: { addresses: Set<string>; dom
   return at > -1 && blocks.domains.has(clean.slice(at + 1))
 }
 
+/**
+ * The senders whose mail this agent has said never needs matching.
+ *
+ * Loaded once per folder, exactly like the blocklist, and matched exactly like it. The two are
+ * kept apart because they mean opposite things: a block stops the mail becoming a row at all,
+ * this lets it in and stops it asking for attention. A supplier's invoice you need to keep and
+ * may need to find again is the whole reason the second one exists.
+ */
+async function loadSenderRules(
+  admin: SupabaseClient,
+  userId: string,
+): Promise<{ addresses: Set<string>; domains: Set<string> }> {
+  const { data, error } = await admin
+    .from('mail_sender_rules')
+    .select('pattern, kind')
+    .eq('user_id', userId)
+    .eq('action', 'no_record')
+  if (error) {
+    // A rule we could not read must not stop the sync. Worst case is a supplier's mail asking to
+    // be matched one more time, which is a nuisance rather than a loss.
+    console.error(`[emailSync] could not read sender rules for ${userId}: ${error.message}`)
+    return { addresses: new Set(), domains: new Set() }
+  }
+  const addresses = new Set<string>()
+  const domains = new Set<string>()
+  for (const row of data ?? []) {
+    const pattern = String(row.pattern).toLowerCase()
+    if (row.kind === 'domain') domains.add(pattern)
+    else addresses.add(pattern)
+  }
+  return { addresses, domains }
+}
+
 /** How much of a body is worth keeping to recognise a message by. The rest stays in the mailbox. */
 const SNIPPET_LENGTH = 240
 
@@ -130,6 +163,8 @@ async function fileUserEmail(
     attachmentNames: string[]
     isJunk: boolean
     at: string
+    /** The agent has a standing rule for this sender: it arrives already dealt with. */
+    noRecordNeeded?: boolean
   },
 ): Promise<string | null> {
   const { data, error } = await admin
@@ -146,6 +181,9 @@ async function fileUserEmail(
         snippet: message.body.replace(/\s+/g, ' ').trim().slice(0, SNIPPET_LENGTH) || null,
         attachment_names: message.attachmentNames,
         is_junk: message.isJunk,
+        // Settled on arrival, so a supplier who writes every week never joins the queue. Not
+        // marked read: whether anybody has read the invoice is a different question.
+        no_record_at: message.noRecordNeeded ? new Date().toISOString() : null,
         occurred_at: message.at,
       },
       { onConflict: 'user_id,message_id', ignoreDuplicates: true },
@@ -641,6 +679,7 @@ async function syncMailbox(
   let logged = 0
   // Once per folder, not once per message.
   const blocks = await loadBlocks(admin, conn.user_id)
+  const senderRules = await loadSenderRules(admin, conn.user_id)
   const lock = await client.getMailboxLock(path)
   try {
     let uids: number[]
@@ -714,6 +753,8 @@ async function syncMailbox(
         attachmentNames: realAttachmentNames(parsed.attachments),
         isJunk,
         at: (parsed.date ?? new Date()).toISOString(),
+        // isBlocked's twin — the same matching, the opposite intent. See loadSenderRules.
+        noRecordNeeded: isBlocked(normaliseAddress(fromAddress), senderRules),
       })
 
       /*
