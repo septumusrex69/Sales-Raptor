@@ -41,6 +41,25 @@ export async function mirrorReadToAccount(messageIds: (string | null | undefined
   if (error) console.error('[mailReadState] the account copy stayed unread:', error.message)
 }
 
+/**
+ * Put it back to unread in your mailbox → the copy on the debtor's file goes back with it.
+ *
+ * The other direction of the same rule, and it matters for the same reason. Somebody who opens a
+ * message, realises they cannot deal with it now and marks it unread has made a decision about
+ * the work; if only one of the two copies hears about it, the account still reads as dealt with
+ * and the message is quietly lost again.
+ */
+export async function mirrorUnreadToAccount(messageIds: (string | null | undefined)[]): Promise<void> {
+  const ids = usable(messageIds)
+  if (ids.length === 0) return
+  const { error } = await supabase
+    .from('account_emails')
+    .update({ read_at: null })
+    .in('message_id', ids)
+    .not('read_at', 'is', null)
+  if (error) console.error('[mailReadState] the account copy stayed read:', error.message)
+}
+
 /** Read it on the account → the copy in your mailbox stops being unread. */
 export async function mirrorReadToMailbox(messageIds: (string | null | undefined)[]): Promise<void> {
   const ids = usable(messageIds)
