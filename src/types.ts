@@ -243,6 +243,15 @@ export interface Deal {
 }
 
 export interface Contact {
+  /**
+   * The two lines the next person needs before they read anything else.
+   *
+   * On a person rather than a relationship: "prefers to be called after four", "goes through his
+   * PA". What is going on with the CLIENT belongs on the client.
+   */
+  mainComment?: string
+  mainCommentAt?: string
+  mainCommentBy?: ID
   id: ID
   firstName: string
   lastName: string
