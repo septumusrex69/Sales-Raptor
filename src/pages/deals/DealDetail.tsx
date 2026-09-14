@@ -41,7 +41,7 @@ interface MockDocument {
   size: string
 }
 
-type DealTab = 'Overview' | 'Emails' | 'Notes' | 'Tasks' | 'Documents'
+type DealTab = 'Overview' | 'Emails' | 'Tasks' | 'Documents'
 
 export function DealDetail() {
   const focusedEmailId = useFocusedEmailId()
@@ -578,7 +578,6 @@ export function DealDetail() {
         tabs={[
           { id: 'Overview', label: 'Overview' },
           { id: 'Emails', label: 'Emails', count: dealEmails.length },
-          { id: 'Notes', label: 'Notes', count: dealActivities.length - dealEmails.length },
           { id: 'Tasks', label: 'Tasks', count: dealTasks.length },
           { id: 'Documents', label: 'Documents', count: docs.length },
         ]}
@@ -593,14 +592,15 @@ export function DealDetail() {
       {tab === 'Overview' && (
         <RecordLayout
           layout={layout}
-          details={infoPanel}
+          /* Notes under the information, not behind a tab — the same move as the lead and the
+             client, for the same reason: what was said last time belongs beside who they are. */
+          details={<div className="space-y-5">{infoPanel}{notesPanel}</div>}
           main={proposalsPanel}
           side={[historyPanel]}
         />
       )}
 
       {tab === 'Emails' && emailsPanel}
-      {tab === 'Notes' && notesPanel}
       {tab === 'Tasks' && tasksPanel}
       {tab === 'Documents' && documentsPanel}
 
