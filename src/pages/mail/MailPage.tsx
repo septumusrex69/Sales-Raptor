@@ -16,6 +16,7 @@ import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import { useEmailView } from '../../lib/emailView'
 import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
+import { ZoomableImage } from '../../components/ui/ZoomableImage'
 import {
   blockedBy, blockSender, blockSenders, countNeedsFiling, countUnread, deleteMail,
   domainBlockProblem, domainOf, downloadAttachment, emptyJunk, fetchBlockedSenders, fetchMail,
@@ -1214,15 +1215,20 @@ function MailBody({
           </p>
           <div className="flex flex-wrap items-start gap-2">
             {images.map((img, i) => (
-              <img
+              <ZoomableImage
                 key={img.cid || img.filename || i}
                 src={img.dataUri}
                 /* A signature picture has no useful alt text of its own; naming it as one is
                    more honest to a screen reader than an empty string or a filename. */
                 alt={img.filename || 'Image from this message'}
-                /* Capped so a full-width letterhead cannot push the reading pane wide or run
-                   the actions off the bottom of the screen. */
-                className="max-w-full max-h-40 w-auto rounded border border-slate-100 bg-white"
+                /*
+                  Twice the height it used to be. A signature sets its own telephone number in
+                  about eight points, and at 160px the number was there but not readable — which
+                  is no better than not showing it. The width cap still stops a full-width
+                  letterhead pushing the reading pane wide, and it is the width that binds on a
+                  phone; click it for anything bigger.
+                */
+                className="max-w-full max-h-80 w-auto block"
               />
             ))}
           </div>
