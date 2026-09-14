@@ -572,21 +572,71 @@ export async function fetchBlockedSenders(userId: string): Promise<BlockedSender
   }))
 }
 
+/** The debtor whose file an address is saved on, when there is one. */
+export interface DebtorFile {
+  contactId: string
+  accountId: string
+  /** The debtor's name, for saying out loud which file it is on. */
+  label: string
+  accountNumber: string | null
+}
+
 /**
- * Is this address on a debtor's file?
+ * Whose file is this address saved on?
  *
  * The guard that matters most. Blocking an address that belongs to a debtor would stop their
  * mail reaching us at all, and because a blocked sender never becomes a row, nobody would ever
  * find out — the account would simply look unworked. Retired contacts count: "retired" means we
  * stopped writing to it, not that mail from it is somebody else's.
+ *
+ * It returns WHICH account rather than a yes or no, and that is not decoration. A refusal that
+ * only says "this is on a debtor's file" is a dead end: the address got there by a tick box at
+ * matching time, the agent has no memory of ticking it, and there is nothing on the screen
+ * saying where to go. Naming the account — and linking to it — turns the same refusal into two
+ * clicks. That happened for real: a Yahoo Finance newsletter was matched to a debtor, its
+ * address was saved as a contact, and blocking it became impossible with no way to find out why.
  */
-export async function addressBelongsToDebtor(address: string): Promise<boolean> {
+export async function debtorFileFor(address: string): Promise<DebtorFile | null> {
   const { data, error } = await supabase
     .from('account_contacts')
-    .select('id')
+    .select('id, account_id, debtor_accounts ( debtor_first_name, debtor_surname, account_number )')
     .eq('kind', 'email')
     .ilike('value', address.trim().toLowerCase())
     .limit(1)
+  if (error) throw new Error(error.message)
+  const row = (data ?? [])[0]
+  if (!row) return null
+  const account = row.debtor_accounts as unknown as {
+    debtor_first_name: string | null; debtor_surname: string | null; account_number: string | null
+  } | null
+  return {
+    contactId: row.id as string,
+    accountId: row.account_id as string,
+    label: [account?.debtor_first_name, account?.debtor_surname].filter(Boolean).join(' ')
+      || 'a debtor account',
+    accountNumber: account?.account_number ?? null,
+  }
+}
+
+/**
+ * Take an address off a debtor's file.
+ *
+ * Deleted rather than retired, and that is deliberate: retiring says "this reached the debtor and
+ * has stopped working", which is a fact about the debtor worth keeping. This is for an address
+ * that was never theirs — saved by the tick box when a message was matched to the wrong account.
+ * Keeping it would leave the block refused for ever, and leave a newsletter looking like a way to
+ * reach somebody it has never reached.
+ *
+ * Scoped to the account AND the address, so it cannot take an address off a file it is not on.
+ */
+export async function removeAccountContact(accountId: string, address: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('account_contacts')
+    .delete()
+    .eq('account_id', accountId)
+    .eq('kind', 'email')
+    .ilike('value', address.trim().toLowerCase())
+    .select('id')
   if (error) throw new Error(error.message)
   return (data ?? []).length > 0
 }
@@ -611,10 +661,13 @@ export async function blockSender(input: {
   const address = input.address.trim().toLowerCase()
   if (!address.includes('@')) throw new Error('That is not an email address.')
 
-  if (await addressBelongsToDebtor(address)) {
+  const onFile = await debtorFileFor(address)
+  if (onFile) {
     throw new Error(
-      `${address} is on a debtor's file. Blocking it would stop their mail reaching Raptor at all, `
-      + 'and nobody would see it go missing.',
+      `${address} is saved as a contact on ${onFile.label}`
+      + `${onFile.accountNumber ? ` (${onFile.accountNumber})` : ''}. Blocking it would stop their `
+      + 'mail reaching Raptor at all, and nobody would see it go missing. Take the address off '
+      + 'that account first.',
     )
   }
 
@@ -1150,6 +1203,18 @@ export async function unmatchMail(input: {
   mail: MailItem
   reason?: string
   actor: { id: string | null; name: string | null }
+  /**
+   * Take the sender's address off that account's contacts as well.
+   *
+   * Offered because unmatching and the saved address are the same mistake seen twice: matching a
+   * message ticks "save this address" by default, so a newsletter matched to a debtor by accident
+   * lands on their file as a contact — and then cannot be blocked, with nothing on screen saying
+   * why. Unmatching says the message does not belong there; the address usually does not either.
+   *
+   * Never assumed. The address may have been the debtor's all along, with only this one message
+   * matched wrongly, and deleting a real contact is not something to do on somebody's behalf.
+   */
+  removeContact?: boolean
 }): Promise<void> {
   const from = input.mail.linkedAccountId
   if (!from) throw new Error('That email is not matched to a debtor account.')
@@ -1179,6 +1244,10 @@ export async function unmatchMail(input: {
   if (cleared.linked_account_id !== null) {
     throw new Error('Only an administrator can unmatch an email.')
   }
+
+  // After the unmatch, not before: if the unmatch is refused there is nothing to tidy up, and
+  // taking the address off first would leave the account edited and the message still matched.
+  if (input.removeContact) await removeAccountContact(from, input.mail.fromAddress)
 
   refreshNavCounts()
 }
