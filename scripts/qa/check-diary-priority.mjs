@@ -82,6 +82,7 @@ if (kindsInCheck) {
     promise_due: 'PTP due',
     callback: 'Callback requested',
     dispute_chase: 'Dispute follow-up',
+    no_contact: 'No contact — retry',
     trace: 'Trace follow-up',
     review: 'Follow-up',
   })

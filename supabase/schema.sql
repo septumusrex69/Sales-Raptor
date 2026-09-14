@@ -2172,8 +2172,12 @@ create or replace function public.diary_priority(kind text) returns smallint
     when 'payment_default' then 15   -- an instalment on an arrangement did not come off
     when 'new_account'     then 20   -- freshly handed over, never worked
     when 'promise_due'     then 30   -- check the money arrived
-    when 'callback'        then 40   -- we told the debtor we would ring back
+    when 'callback'        then 40   -- the debtor asked to be rung on this day
     when 'dispute_chase'   then 50   -- the seven-working-day clock is running
+    -- Rang out, dead number, nobody home. The commonest real outcome of a day's calling.
+    -- Below a dispute, which has a clock running; above a trace, which waits on somebody else.
+    -- This one is still yours to act on.
+    when 'no_contact'      then 55
     when 'trace'           then 60   -- waiting on a tracing result
     else 70                          -- 'review': the ordinary diarised chase
   end::smallint
@@ -2189,7 +2193,7 @@ create table if not exists public.diary_entries (
 
   kind text not null default 'review' check (kind in (
     'promise_broken', 'payment_default', 'new_account', 'promise_due',
-    'callback', 'dispute_chase', 'trace', 'review'
+    'callback', 'dispute_chase', 'no_contact', 'trace', 'review'
   )),
   priority smallint generated always as (public.diary_priority(kind)) stored,
   -- The agent's own words about why it is coming back. Shown in the day list, so the next
