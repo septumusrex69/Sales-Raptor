@@ -15,6 +15,7 @@ import {
   applyEnrichment, fetchAccountRefs, planEnrichment, type EnrichPlan,
 } from '../../lib/accountEnrich'
 import { formatCurrency } from '../../data/mockData'
+import { LeadsImportCard } from './LeadsImportCard'
 
 /**
  * Which database this app is actually pointed at.
@@ -239,6 +240,8 @@ export function DataImportTab() {
 
   return (
     <div className="space-y-4">
+      <LeadsImportCard />
+
       <DebtorDetailsCard />
 
       <Card>
