@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import type { LucideIcon } from 'lucide-react'
+import { Fragment, useState, type ReactNode } from 'react'
+import { Columns3, PanelRight, Rows3, type LucideIcon } from 'lucide-react'
 
 /**
  * The shape every record page in Raptor wears.
@@ -192,6 +192,158 @@ export function RecordTabs<T extends string>({ tabs, active, onChange, trailing 
         ))}
         {trailing}
       </div>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ *
+ * Layouts
+ * ------------------------------------------------------------------ */
+
+/**
+ * How the Overview is arranged.
+ *
+ * Not a preference for its own sake. The same page is worked on very different screens: a wide
+ * desktop where three columns read at a glance, a laptop where the middle column gets squeezed,
+ * an iPad held in one hand. The firm asked to be able to choose rather than have the page choose
+ * for them — first on the debtor's account, and then, seeing it, on every other record page.
+ */
+export type RecordLayoutId = 'columns' | 'stacked' | 'wide'
+
+export const RECORD_LAYOUTS: { id: RecordLayoutId; label: string; icon: LucideIcon; hint: string }[] = [
+  { id: 'columns', label: 'Three columns', icon: Columns3, hint: 'Everything side by side' },
+  { id: 'stacked', label: 'One column', icon: Rows3, hint: 'Under each other, in reading order' },
+  { id: 'wide', label: 'Wide', icon: PanelRight, hint: 'The work two thirds, the rest one third' },
+]
+
+/**
+ * The chosen layout, remembered per browser.
+ *
+ * The KEY is per page type, not per record: it is a preference about eyes, not about a debtor or
+ * a client. Separate keys per page because the right arrangement genuinely differs — an account
+ * has a long timeline to give width to, a lead has not.
+ */
+export function useRecordLayout(key: string): [RecordLayoutId, (next: RecordLayoutId) => void] {
+  const [layout, setLayout] = useState<RecordLayoutId>(() => {
+    try {
+      const saved = localStorage.getItem(key)
+      if (RECORD_LAYOUTS.some((l) => l.id === saved)) return saved as RecordLayoutId
+    } catch { /* private browsing, or storage switched off. The default is fine. */ }
+    return 'columns'
+  })
+  const choose = (next: RecordLayoutId) => {
+    setLayout(next)
+    try { localStorage.setItem(key, next) } catch { /* nothing to remember it with. */ }
+  }
+  return [layout, choose]
+}
+
+/**
+ * The three little icons, for the tab row's trailing slot.
+ *
+ * Icons rather than words: this sits on a tab row, and three labelled buttons would read as three
+ * more tabs. Hidden on a phone, where the tabs already fill the row and adding 95px to it pushes
+ * the whole page sideways — measured, not guessed. Nothing is lost, because every layout collapses
+ * to one column below lg anyway.
+ */
+export function RecordLayoutSwitcher({ layout, onChange }: {
+  layout: RecordLayoutId
+  onChange: (next: RecordLayoutId) => void
+}) {
+  return (
+    <div className="ml-auto mb-1 hidden sm:flex items-center gap-0.5 self-end rounded-lg border border-slate-200 p-0.5">
+      {RECORD_LAYOUTS.map((l) => (
+        <button key={l.id} type="button" onClick={() => onChange(l.id)}
+          title={`${l.label} — ${l.hint}`} aria-label={l.label} aria-pressed={layout === l.id}
+          className={`p-1.5 rounded-md ${layout === l.id
+            ? 'bg-navy-950 text-white'
+            : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}>
+          <l.icon size={15} />
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * Place a record's panels according to the chosen layout.
+ *
+ * Three roles, which every record page turns out to have: who this is (`details`), the thing you
+ * came to work on (`main`), and the shorter cards beside it (`side`). Passing them in once and
+ * letting this arrange them is the whole reason the three layouts can be trusted to stay the same
+ * page — a prop added to one arrangement and forgotten in the other two is the bug this prevents,
+ * and it is invisible until somebody switches layout.
+ *
+ * `side` is a list rather than one node because the stacked arrangement treats the first one
+ * differently: it is the summary, and it belongs beside the details rather than under them.
+ */
+/**
+ * Wrap each panel so React has a key for it.
+ *
+ * The panels come in as a plain array of elements the page built by hand, and most of them have
+ * no key of their own — without this every layout logs a warning per panel, and a console full of
+ * warnings is a console nobody reads when something real goes wrong. Position is a sound key
+ * here: the list is fixed by the page, not by data that reorders.
+ */
+function keyed(panels: ReactNode[]): ReactNode[] {
+  return panels.map((panel, i) => <Fragment key={i}>{panel}</Fragment>)
+}
+
+export function RecordLayout({ layout, details, main, side }: {
+  layout: RecordLayoutId
+  details: ReactNode
+  /** The long one — a timeline, a list of deals. Gets the width. */
+  main: ReactNode
+  /** The shorter cards. The first is treated as the summary. */
+  side: ReactNode[]
+}) {
+  const [first, ...rest] = side
+
+  if (layout === 'stacked') {
+    // One column, in reading order: who they are, what the figures say, what has happened, then
+    // the rest. Capped to a readable measure — a full-width timeline on a 27" screen is a worse
+    // read than a narrow one, not a better one.
+    return (
+      <div className="mx-auto w-full max-w-5xl space-y-4">
+        {/* Details beside the summary rather than above it. Reading order is preserved — left to
+            right is still details then summary — and it saves most of a screen of scrolling. */}
+        <div className="grid gap-4 items-start lg:grid-cols-3">
+          <div className="lg:col-span-2">{details}</div>
+          {first}
+        </div>
+        {main}
+        {rest.length > 0 && (
+          /* The short cards share a row rather than each taking a full one. `items-start`
+             matters: without it the grid stretches them all to the height of the tallest, so one
+             busy card leaves the others as mostly empty boxes the same height. */
+          <div className="grid gap-4 items-start md:grid-cols-2 lg:grid-cols-3">{keyed(rest)}</div>
+        )}
+      </div>
+    )
+  }
+
+  if (layout === 'wide') {
+    // Two thirds and one third. The work gets the width; the figures sit beside it and stay in
+    // view while you scroll.
+    return (
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="space-y-4 lg:col-span-2">
+          {details}
+          {main}
+        </div>
+        <div className="space-y-4">{keyed(side)}</div>
+      </div>
+    )
+  }
+
+  // Three columns, but only from xl. At iPad width the fixed side columns leave the middle about
+  // 120px wide, which is not a narrow column — it is unreadable. So lg drops to two columns with
+  // the main panel full-width underneath, and anything narrower stacks.
+  return (
+    <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)_minmax(0,19rem)]">
+      <div className="lg:order-1 xl:order-none">{details}</div>
+      <div className="lg:order-3 lg:col-span-2 xl:order-none xl:col-span-1">{main}</div>
+      <div className="space-y-4 lg:order-2 xl:order-none">{keyed(side)}</div>
     </div>
   )
 }

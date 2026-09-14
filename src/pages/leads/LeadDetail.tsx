@@ -23,7 +23,7 @@ import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
 import { InlineSelect } from '../../components/ui/InlineSelect'
 import {
   ACTION_BASE, ACTION_ENABLED, RecordAction, RecordActions, RecordFigure, RecordFigures,
-  RecordFigureShell,
+  RecordFigureShell, RecordLayout, RecordLayoutSwitcher, RecordTabs, useRecordLayout,
 } from '../../components/record/RecordShell'
 import { CrmCallButton } from '../../components/record/CrmCallButton'
 import { PhoneLink } from '../../components/PhoneLink'
@@ -40,6 +40,8 @@ import type { Contact, LeadStatus } from '../../types'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, serviceValueLabel, leadServiceValueList } from '../../components/leads/LeadOpportunityFields'
 import { summaryLine } from '../../lib/summaryLine'
 import { hasDealValue } from '../../lib/dealKind'
+
+type LeadTab = 'Overview' | 'Emails' | 'Notes' | 'Tasks'
 
 export function LeadDetail() {
   const focusedEmailId = useFocusedEmailId()
@@ -64,6 +66,16 @@ export function LeadDetail() {
    * Mobile before office deliberately: a mobile is answered by the person, a switchboard is
    * answered by somebody else. The Call button rings the first one when there is only one.
    */
+  /*
+   * Which tab, and how the Overview is arranged.
+   *
+   * The layout key is per page type rather than per lead: it is a preference about eyes. Separate
+   * from the account page's key because the right arrangement genuinely differs — an account has
+   * a long timeline to give width to, a lead has not.
+   */
+  const [tab, setTab] = useState<LeadTab>('Overview')
+  const [layout, chooseLayout] = useRecordLayout('raptor.lead.layout')
+
   const leadNumbers = useMemo(() => [
     ...(lead?.mobile ? [{ label: 'Mobile', value: lead.mobile }] : []),
     ...(lead?.phone ? [{ label: 'Office', value: lead.phone }] : []),
@@ -113,6 +125,296 @@ export function LeadDetail() {
   }
 
   const active = isActiveLead(lead)
+
+  /*
+   * The panels, built once and placed by whichever layout is chosen.
+   *
+   * Defining them here rather than three times over is the whole reason the layouts can be
+   * trusted to stay the same page: a prop added to one arrangement cannot be forgotten in the
+   * other two, and that bug is invisible until somebody switches layout. The Account page has
+   * worked this way for a while; this is the same shape, from the same components.
+   */
+  /** Who to ring, and the people around them. */
+  const contactPanel = (
+    <Card>
+      <CardHeader
+        title="Contact Details"
+        action={
+          canEdit ? (
+            <button
+              onClick={() => setEditOpen(true)}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              <Pencil size={12} /> Edit
+            </button>
+          ) : undefined
+        }
+      />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-4 pb-4 border-b border-slate-100">
+        <div>
+          <p className="text-xs text-slate-400 mb-0.5">Office Number</p>
+          {lead.phone ? (
+            <PhoneLink
+              number={lead.phone}
+              className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600"
+              log={{ label: `${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId }}
+              onDialled={() => updateLead(lead.id, { lastContactAt: new Date().toISOString() })}
+            />
+          ) : (
+            <span className="text-slate-300">—</span>
+          )}
+        </div>
+        <div>
+          <p className="text-xs text-slate-400 mb-0.5">Mobile</p>
+          {lead.mobile ? (
+            <PhoneLink
+              number={lead.mobile}
+              className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600"
+              log={{ label: `${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId }}
+              onDialled={() => updateLead(lead.id, { lastContactAt: new Date().toISOString() })}
+            />
+          ) : (
+            <span className="text-slate-300">—</span>
+          )}
+        </div>
+        <div>
+          <p className="text-xs text-slate-400 mb-0.5">Email</p>
+          {lead.email ? (
+            <span className="inline-flex items-center gap-1.5 text-slate-700 font-medium">
+              <button onClick={() => setEmailOpen(true)} className="text-slate-400 hover:text-brand-600" title="Send email">
+                <Mail size={13} />
+              </button>
+              {lead.email}
+            </span>
+          ) : (
+            <span className="text-slate-300">—</span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs text-slate-400">Contact Persons</p>
+        <button onClick={() => setAddContactOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline">
+          <Plus size={12} /> Add Contact
+        </button>
+      </div>
+      {leadContacts.length === 0 ? (
+        <p className="text-sm text-slate-400">
+          Just {lead.firstName} so far. Add anyone else you deal with at {lead.companyName}.
+        </p>
+      ) : (
+        <div className="space-y-1">
+          {leadContacts.map((c) => (
+            <div key={c.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 hover:bg-slate-50 -mx-1 px-2 py-2 rounded-lg">
+              <Link to={`/contacts/${c.id}`} className="flex items-center gap-2.5 min-w-0">
+                <UserAvatar userId={c.ownerId} size={30} />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-700 hover:text-brand-600 truncate">
+                    {c.firstName} {c.lastName}
+                  </p>
+                  <p className="text-xs text-slate-400 truncate">{c.jobTitle}</p>
+                </div>
+              </Link>
+              <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
+                {c.phone && (
+                  <PhoneLink number={c.phone} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, leadId: lead.id, contactId: c.id, companyId: lead.companyId }} />
+                )}
+                {c.mobile && (
+                  <PhoneLink number={c.mobile} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, leadId: lead.id, contactId: c.id, companyId: lead.companyId }}>
+                    <Phone size={11} /> {c.mobile} <span className="text-slate-300">mobile</span>
+                  </PhoneLink>
+                )}
+                {c.email && (
+                  <span className="inline-flex items-center gap-1">
+                    <button onClick={() => setContactEmailTarget(c)} className="text-slate-400 hover:text-brand-600" title="Send email">
+                      <Mail size={11} />
+                    </button>
+                    {c.email}
+                  </span>
+                )}
+                <button onClick={() => setEditContact(c)} className="text-slate-300 hover:text-brand-600" title="Edit contact">
+                  <Pencil size={12} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+
+  /** Its own tab, like the Account page: a list that grows without limit does not belong on an overview. */
+  const emailsPanel = (
+    <Card>
+      <CardHeader
+        title="Emails"
+        subtitle={`${emailActivities.length} message${emailActivities.length === 1 ? '' : 's'}`}
+        action={
+          <div className="flex items-center gap-2">
+            {lead.email && (
+              <button
+                onClick={() => setEmailOpen(true)}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+              >
+                <Mail size={12} /> Compose
+              </button>
+            )}
+            <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
+          </div>
+        }
+      />
+      {emailActivities.length === 0 ? (
+        <p className="text-sm text-slate-400">No emails yet.</p>
+      ) : (
+        <EmailActivityList
+          activities={applyRowLimitKeeping(emailActivities, emailLimit, focusedEmailId)}
+          focusId={focusedEmailId}
+          showDeal
+          onReply={
+            lead.email
+              ? (a) => {
+                  const rawSubject = parseEmailActivity(a.subject)?.subject ?? a.subject
+                  setReplyTarget({ subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}` })
+                }
+              : undefined
+          }
+        />
+      )}
+    </Card>
+  )
+
+  /** Everything that is not an email — calls, meetings, notes. */
+  const notesPanel = (
+    <Card>
+      <CardHeader
+        title="Notes"
+        subtitle={`${nonEmailActivities.length} update${nonEmailActivities.length === 1 ? '' : 's'}`}
+        action={<RowLimitSelect value={noteLimit} onChange={setNoteLimit} />}
+      />
+      {nonEmailActivities.length === 0 ? (
+        <p className="text-sm text-slate-400">No activity recorded yet.</p>
+      ) : (
+        <div className="space-y-2.5">
+          <NoteActivityList activities={nonEmailActivities} limit={noteLimit} />
+        </div>
+      )}
+    </Card>
+  )
+
+  /** What this lead has actually produced. */
+  const dealsPanel = resultingDeals.length > 0 && (
+      <Card>
+        <CardHeader title="Deals" subtitle={`${resultingDeals.length} on this lead`} />
+        <div className="space-y-2">
+          {resultingDeals.map((d) => (
+            <Link
+              key={d.id}
+              to={`/deals/${d.id}`}
+              className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors"
+            >
+              <div>
+                <p className="text-sm font-medium text-slate-700">{d.name}</p>
+                {d.service && <p className="text-xs text-slate-400">{d.service}</p>}
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-semibold text-slate-700">{formatCurrency(d.value)}</span>
+                <StageBadge stage={d.stage} />
+              </div>
+            </Link>
+          ))}
+        </div>
+      </Card>
+  )
+
+  /** What they say they will hand over, per service. */
+  const opportunityPanel = (
+    <Card>
+      <CardHeader title="Opportunity Information" />
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
+        {leadServiceValueList(lead).map((sv) =>
+          sv.service === 'Debt Collection' ? (
+            <div key={sv.service} className="col-span-2 grid grid-cols-2 gap-x-6 gap-y-3.5">
+              <Field label="Estimated Handover Amount" value={sv.handoverAmount != null ? formatCurrency(sv.handoverAmount) : undefined} />
+              <Field label="Estimated Number of Accounts / Matters" value={sv.accountsCount != null ? String(sv.accountsCount) : undefined} />
+            </div>
+          ) : (
+            <Field
+              key={sv.service}
+              label={lead.services && lead.services.length > 1 ? `${sv.service} — ${serviceValueLabel(sv.service)}` : serviceValueLabel(sv.service)}
+              value={sv.value != null ? formatCurrency(sv.value) : undefined}
+            />
+          ),
+        )}
+        {lead.services?.includes('Other') && <Field label="Other Service — Please Specify" value={lead.otherServiceDetail} />}
+      </dl>
+      {(!lead.services || lead.services.length === 0) && !lead.estimatedProjectValue && (
+        <p className="text-xs text-slate-400">No products or services captured yet. Use Edit to add opportunity details.</p>
+      )}
+    </Card>
+  )
+
+  /** Where the lead came from and who owns it. */
+  const leadInfoPanel = (
+    <Card>
+      <CardHeader title="Lead Information" />
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
+        <Field label="Lead Source" value={lead.source} />
+        <Field label="Campaign" value={lead.campaign} />
+        <Field label="Assigned Owner" value={userById(lead.ownerId)?.name} />
+        <Field label="Lead Status" value={lead.status} />
+        <Field label="Lead Score" value={`${lead.score} / 100`} />
+        <Field label="Estimated Value" value={formatCurrency(lead.estimatedValue)} />
+        <Field label="Classification" value={lead.classification ? `Class ${lead.classification}` : undefined} />
+        <Field label="Date Created" value={formatDate(lead.createdAt)} />
+        <Field label="Last Contact" value={formatDate(lead.lastContactAt)} />
+        <Field label="Next Follow-up" value={formatDate(lead.nextFollowUpAt)} />
+        {lead.status === 'Rejected' && <Field label="Rejection Reason" value={lead.rejectionReason} />}
+      </dl>
+      {lead.notes && (
+        <div className="mt-4 pt-4 border-t border-slate-100">
+          <p className="text-xs font-medium text-slate-400 mb-1">Notes</p>
+          <p className="text-sm text-slate-600">{lead.notes}</p>
+        </div>
+      )}
+    </Card>
+  )
+
+  /** The firmographics. */
+  const profilePanel = (
+    <Card>
+      <CardHeader title="Lead Profile" />
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
+        <Field label="First Name" value={lead.firstName} />
+        <Field label="Last Name" value={lead.lastName} />
+        <Field label="Company" value={lead.companyName} />
+        <Field label="Job Title" value={lead.jobTitle} />
+        <Field label="Industry" value={lead.industry} />
+        <Field label="Country" value={lead.country} />
+        <Field label="Province" value={lead.province} />
+        <Field label="City / Town" value={lead.city} />
+        <Field label="Address" value={lead.address} />
+      </dl>
+    </Card>
+  )
+
+  /** Its own tab as well: a task list is work, not context. */
+  const tasksPanel = (
+    <Card>
+      <CardHeader title="Tasks" />
+      {leadTasks.length === 0 ? (
+        <p className="text-sm text-slate-400">No tasks yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {leadTasks.map((t) => (
+            <div key={t.id} className="text-sm">
+              <p className="text-slate-700">{t.title}</p>
+              <p className="text-xs text-slate-400">Due {formatDate(t.dueDate)}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
 
   return (
     <div className="space-y-5">
@@ -283,273 +585,39 @@ export function LeadDetail() {
         </div>
       </Card>
 
-      <div className="space-y-5">
-        <Card>
-          <CardHeader
-            title="Contact Details"
-            action={
-              canEdit ? (
-                <button
-                  onClick={() => setEditOpen(true)}
-                  className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-                >
-                  <Pencil size={12} /> Edit
-                </button>
-              ) : undefined
-            }
-          />
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-4 pb-4 border-b border-slate-100">
-            <div>
-              <p className="text-xs text-slate-400 mb-0.5">Office Number</p>
-              {lead.phone ? (
-                <PhoneLink
-                  number={lead.phone}
-                  className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600"
-                  log={{ label: `${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId }}
-                  onDialled={() => updateLead(lead.id, { lastContactAt: new Date().toISOString() })}
-                />
-              ) : (
-                <span className="text-slate-300">—</span>
-              )}
-            </div>
-            <div>
-              <p className="text-xs text-slate-400 mb-0.5">Mobile</p>
-              {lead.mobile ? (
-                <PhoneLink
-                  number={lead.mobile}
-                  className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600"
-                  log={{ label: `${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId }}
-                  onDialled={() => updateLead(lead.id, { lastContactAt: new Date().toISOString() })}
-                />
-              ) : (
-                <span className="text-slate-300">—</span>
-              )}
-            </div>
-            <div>
-              <p className="text-xs text-slate-400 mb-0.5">Email</p>
-              {lead.email ? (
-                <span className="inline-flex items-center gap-1.5 text-slate-700 font-medium">
-                  <button onClick={() => setEmailOpen(true)} className="text-slate-400 hover:text-brand-600" title="Send email">
-                    <Mail size={13} />
-                  </button>
-                  {lead.email}
-                </span>
-              ) : (
-                <span className="text-slate-300">—</span>
-              )}
-            </div>
-          </div>
+      {/*
+        Tabs over the detail, like the Account page — and for the same reason. Everything below
+        used to be one scroll: contact details, then every email ever sent, then every note, then
+        the information panels somebody actually came for. The long lists get their own tabs so
+        the Overview stays the thing you can read at a glance.
+      */}
+      <RecordTabs<LeadTab>
+        tabs={[
+          { id: 'Overview', label: 'Overview' },
+          { id: 'Emails', label: 'Emails', count: emailActivities.length },
+          { id: 'Notes', label: 'Notes', count: nonEmailActivities.length },
+          { id: 'Tasks', label: 'Tasks', count: leadTasks.length },
+        ]}
+        active={tab}
+        onChange={setTab}
+        /* Only on Overview, because it is the only tab with more than one panel to arrange. */
+        trailing={tab === 'Overview'
+          ? <RecordLayoutSwitcher layout={layout} onChange={chooseLayout} />
+          : undefined}
+      />
 
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs text-slate-400">Contact Persons</p>
-            <button onClick={() => setAddContactOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline">
-              <Plus size={12} /> Add Contact
-            </button>
-          </div>
-          {leadContacts.length === 0 ? (
-            <p className="text-sm text-slate-400">
-              Just {lead.firstName} so far. Add anyone else you deal with at {lead.companyName}.
-            </p>
-          ) : (
-            <div className="space-y-1">
-              {leadContacts.map((c) => (
-                <div key={c.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 hover:bg-slate-50 -mx-1 px-2 py-2 rounded-lg">
-                  <Link to={`/contacts/${c.id}`} className="flex items-center gap-2.5 min-w-0">
-                    <UserAvatar userId={c.ownerId} size={30} />
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-700 hover:text-brand-600 truncate">
-                        {c.firstName} {c.lastName}
-                      </p>
-                      <p className="text-xs text-slate-400 truncate">{c.jobTitle}</p>
-                    </div>
-                  </Link>
-                  <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
-                    {c.phone && (
-                      <PhoneLink number={c.phone} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, leadId: lead.id, contactId: c.id, companyId: lead.companyId }} />
-                    )}
-                    {c.mobile && (
-                      <PhoneLink number={c.mobile} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, leadId: lead.id, contactId: c.id, companyId: lead.companyId }}>
-                        <Phone size={11} /> {c.mobile} <span className="text-slate-300">mobile</span>
-                      </PhoneLink>
-                    )}
-                    {c.email && (
-                      <span className="inline-flex items-center gap-1">
-                        <button onClick={() => setContactEmailTarget(c)} className="text-slate-400 hover:text-brand-600" title="Send email">
-                          <Mail size={11} />
-                        </button>
-                        {c.email}
-                      </span>
-                    )}
-                    <button onClick={() => setEditContact(c)} className="text-slate-300 hover:text-brand-600" title="Edit contact">
-                      <Pencil size={12} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
+      {tab === 'Overview' && (
+        <RecordLayout
+          layout={layout}
+          details={contactPanel}
+          main={<div className="space-y-5">{dealsPanel}{opportunityPanel}</div>}
+          side={[leadInfoPanel, profilePanel]}
+        />
+      )}
 
-        <Card>
-          <CardHeader
-            title="Emails"
-            subtitle={`${emailActivities.length} message${emailActivities.length === 1 ? '' : 's'}`}
-            action={
-              <div className="flex items-center gap-2">
-                {lead.email && (
-                  <button
-                    onClick={() => setEmailOpen(true)}
-                    className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-                  >
-                    <Mail size={12} /> Compose
-                  </button>
-                )}
-                <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
-              </div>
-            }
-          />
-          {emailActivities.length === 0 ? (
-            <p className="text-sm text-slate-400">No emails yet.</p>
-          ) : (
-            <EmailActivityList
-              activities={applyRowLimitKeeping(emailActivities, emailLimit, focusedEmailId)}
-              focusId={focusedEmailId}
-              showDeal
-              onReply={
-                lead.email
-                  ? (a) => {
-                      const rawSubject = parseEmailActivity(a.subject)?.subject ?? a.subject
-                      setReplyTarget({ subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}` })
-                    }
-                  : undefined
-              }
-            />
-          )}
-        </Card>
-
-        <Card>
-          <CardHeader
-            title="Notes"
-            subtitle={`${nonEmailActivities.length} update${nonEmailActivities.length === 1 ? '' : 's'}`}
-            action={<RowLimitSelect value={noteLimit} onChange={setNoteLimit} />}
-          />
-          {nonEmailActivities.length === 0 ? (
-            <p className="text-sm text-slate-400">No activity recorded yet.</p>
-          ) : (
-            <div className="space-y-2.5">
-              <NoteActivityList activities={nonEmailActivities} limit={noteLimit} />
-            </div>
-          )}
-        </Card>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          <div className="lg:col-span-2 space-y-5">
-
-          {resultingDeals.length > 0 && (
-            <Card>
-              <CardHeader title="Deals" subtitle={`${resultingDeals.length} on this lead`} />
-              <div className="space-y-2">
-                {resultingDeals.map((d) => (
-                  <Link
-                    key={d.id}
-                    to={`/deals/${d.id}`}
-                    className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-slate-700">{d.name}</p>
-                      {d.service && <p className="text-xs text-slate-400">{d.service}</p>}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-semibold text-slate-700">{formatCurrency(d.value)}</span>
-                      <StageBadge stage={d.stage} />
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </Card>
-          )}
-
-          <Card>
-            <CardHeader title="Opportunity Information" />
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
-              {leadServiceValueList(lead).map((sv) =>
-                sv.service === 'Debt Collection' ? (
-                  <div key={sv.service} className="col-span-2 grid grid-cols-2 gap-x-6 gap-y-3.5">
-                    <Field label="Estimated Handover Amount" value={sv.handoverAmount != null ? formatCurrency(sv.handoverAmount) : undefined} />
-                    <Field label="Estimated Number of Accounts / Matters" value={sv.accountsCount != null ? String(sv.accountsCount) : undefined} />
-                  </div>
-                ) : (
-                  <Field
-                    key={sv.service}
-                    label={lead.services && lead.services.length > 1 ? `${sv.service} — ${serviceValueLabel(sv.service)}` : serviceValueLabel(sv.service)}
-                    value={sv.value != null ? formatCurrency(sv.value) : undefined}
-                  />
-                ),
-              )}
-              {lead.services?.includes('Other') && <Field label="Other Service — Please Specify" value={lead.otherServiceDetail} />}
-            </dl>
-            {(!lead.services || lead.services.length === 0) && !lead.estimatedProjectValue && (
-              <p className="text-xs text-slate-400">No products or services captured yet. Use Edit to add opportunity details.</p>
-            )}
-          </Card>
-          </div>
-          <div className="space-y-5">
-          <Card>
-            <CardHeader title="Lead Information" />
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
-              <Field label="Lead Source" value={lead.source} />
-              <Field label="Campaign" value={lead.campaign} />
-              <Field label="Assigned Owner" value={userById(lead.ownerId)?.name} />
-              <Field label="Lead Status" value={lead.status} />
-              <Field label="Lead Score" value={`${lead.score} / 100`} />
-              <Field label="Estimated Value" value={formatCurrency(lead.estimatedValue)} />
-              <Field label="Classification" value={lead.classification ? `Class ${lead.classification}` : undefined} />
-              <Field label="Date Created" value={formatDate(lead.createdAt)} />
-              <Field label="Last Contact" value={formatDate(lead.lastContactAt)} />
-              <Field label="Next Follow-up" value={formatDate(lead.nextFollowUpAt)} />
-              {lead.status === 'Rejected' && <Field label="Rejection Reason" value={lead.rejectionReason} />}
-            </dl>
-            {lead.notes && (
-              <div className="mt-4 pt-4 border-t border-slate-100">
-                <p className="text-xs font-medium text-slate-400 mb-1">Notes</p>
-                <p className="text-sm text-slate-600">{lead.notes}</p>
-              </div>
-            )}
-          </Card>
-
-          <Card>
-            <CardHeader title="Lead Profile" />
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
-              <Field label="First Name" value={lead.firstName} />
-              <Field label="Last Name" value={lead.lastName} />
-              <Field label="Company" value={lead.companyName} />
-              <Field label="Job Title" value={lead.jobTitle} />
-              <Field label="Industry" value={lead.industry} />
-              <Field label="Country" value={lead.country} />
-              <Field label="Province" value={lead.province} />
-              <Field label="City / Town" value={lead.city} />
-              <Field label="Address" value={lead.address} />
-            </dl>
-          </Card>
-
-            <Card>
-              <CardHeader title="Tasks" />
-              {leadTasks.length === 0 ? (
-                <p className="text-sm text-slate-400">No tasks yet.</p>
-              ) : (
-                <div className="space-y-2">
-                  {leadTasks.map((t) => (
-                    <div key={t.id} className="text-sm">
-                      <p className="text-slate-700">{t.title}</p>
-                      <p className="text-xs text-slate-400">Due {formatDate(t.dueDate)}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-          </div>
-        </div>
-      </div>
+      {tab === 'Emails' && emailsPanel}
+      {tab === 'Notes' && notesPanel}
+      {tab === 'Tasks' && tasksPanel}
 
       {editOpen && (
         <EditLeadModal lead={lead} reps={reps} canReassign={canReassign(currentUser)} onClose={() => setEditOpen(false)} onSave={(patch) => updateLead(lead.id, patch)} />
