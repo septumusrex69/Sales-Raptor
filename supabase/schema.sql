@@ -176,6 +176,14 @@ alter table public.deals
   add column if not exists main_comment_at timestamptz,
   add column if not exists main_comment_by uuid references public.profiles (id) on delete set null;
 
+-- And on a contact, which was the one record page left without it. A grammar with one exception
+-- is a grammar people stop trusting -- and there is a real use: "prefers to be called after four",
+-- "goes through his PA" is about the person, not the client they happen to work for.
+alter table public.contacts
+  add column if not exists main_comment text,
+  add column if not exists main_comment_at timestamptz,
+  add column if not exists main_comment_by uuid references public.profiles (id) on delete set null;
+
 -- ---------- Contacts ----------
 create table if not exists public.contacts (
   id uuid primary key default gen_random_uuid(),
