@@ -7,6 +7,10 @@ import {
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
+import {
+  ACTION_BASE, ACTION_ENABLED, RecordAction as Action, RecordActions, RecordFigure as Figure,
+  RecordFigures, RecordTabs,
+} from '../../components/record/RecordShell'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { StatusPill } from './AccountsList'
@@ -403,7 +407,7 @@ export function AccountDetail() {
 
         Status and flags earn their place beside the money: they decide what the call is about.
       */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5">
+      <RecordFigures count={5}>
         {/*
           The figure moves every day, so the tile says so. A collector who quotes a settlement and
           is asked "why is it more than yesterday" needs the answer on the same screen.
@@ -439,7 +443,7 @@ export function AccountDetail() {
           note={clientLiaison ? `for ${client?.name ?? 'this client'}` : 'set one on the client record'}
           small
         />
-      </div>
+      </RecordFigures>
 
       <MainComment account={account} busy={savingComment}
         onSave={(text) => runComment(() => saveMainComment(account.id, text, currentUser?.id ?? null))} />
@@ -471,41 +475,27 @@ export function AccountDetail() {
         </Banner>
       )}
 
-      {/*
-        The strip scrolls; the page does not.
+      <RecordTabs<Tab>
+        tabs={[
+          { id: 'Overview', label: 'Overview' },
+          { id: 'Transactions', label: 'Transactions', count: statement?.lines.length ?? 0 },
+          { id: 'Emails', label: 'Emails', count: emails.length },
+          { id: 'Documents', label: 'Documents', count: documents.length },
+        ]}
+        active={tab}
+        onChange={setTab}
+        trailing={tab === 'Overview' ? (
+          /*
+            How to see it, on the row that already says what you are seeing.
 
-        Four tabs are wider than a phone, and without this the whole page scrolled sideways —
-        measured at 360 and 420px, not guessed. The border sits on the OUTER div rather than on
-        the scroller, because a scroller whose children carry `-mb-px` overflows itself vertically
-        by that pixel and grows a scrollbar inside the tab row. Moving the -mb-px onto the
-        scroller keeps the active tab's underline sitting on the border with nothing to clip.
-      */}
-      <div className="border-b border-slate-200">
-        <div className="flex gap-1 overflow-x-auto -mb-px">
-        {(['Overview', 'Transactions', 'Emails', 'Documents'] as Tab[]).map((t) => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 ${
-              tab === t ? 'border-gold-500 text-navy-950' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-            {t}
-            {t === 'Transactions' && <span className="ml-1.5 text-[11px] text-slate-400 tabular-nums">{statement?.lines.length ?? 0}</span>}
-            {t === 'Emails' && emails.length > 0 && <span className="ml-1.5 text-[11px] text-slate-400 tabular-nums">{emails.length}</span>}
-            {t === 'Documents' && <span className="ml-1.5 text-[11px] text-slate-400 tabular-nums">{documents.length}</span>}
-          </button>
-        ))}
+            Only on Overview, because it is the only tab with anything to arrange — offering it
+            over a statement would be a control that does nothing. Icons rather than words: this
+            sits on a tab row, and three labelled buttons would read as three more tabs.
 
-        {/*
-          How to see it, on the row that already says what you are seeing.
-
-          Only on Overview, because it is the only tab with anything to arrange — offering it over
-          a statement would be a control that does nothing. Icons rather than words: this sits on
-          a tab row, and three labelled buttons would read as three more tabs.
-
-          Hidden on a phone, where three tabs already fill the row and adding 95px to it pushed the
-          whole page sideways — measured, not guessed. Nothing is lost: every layout collapses to
-          one column below lg anyway, and the choice is remembered per browser, so a collector who
-          sets it at their desk still has it on the iPad.
-        */}
-        {tab === 'Overview' && (
+            Hidden on a phone, where three tabs already fill the row and adding 95px to it pushed
+            the whole page sideways — measured, not guessed. Nothing is lost: every layout
+            collapses to one column below lg anyway, and the choice is remembered per browser.
+          */
           <div className="ml-auto mb-1 hidden sm:flex items-center gap-0.5 self-end rounded-lg border border-slate-200 p-0.5">
             {LAYOUTS.map((l) => (
               <button key={l.id} type="button" onClick={() => chooseLayout(l.id)}
@@ -517,9 +507,8 @@ export function AccountDetail() {
               </button>
             ))}
           </div>
-        )}
-        </div>
-      </div>
+        ) : undefined}
+      />
 
       {tab === 'Transactions' && (
         <Card><StatementTable statement={statement?.lines ?? []} account={account} breakdown={b} /></Card>
@@ -722,7 +711,7 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
 }) {
   const soon = 'Not built yet — needs a provider connected and a decision on whether it charges the debtor.'
   return (
-    <div className="flex flex-wrap gap-2">
+    <RecordActions>
       {/*
         The same PhoneLink the number in Debtor details uses, wearing the action row's clothes —
         so this button and that number cannot disagree about what dialling does. Without BuzzBox
@@ -755,53 +744,18 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
       <Action icon={ShieldAlert} label="Dispute" onClick={onDispute}
         title="The debtor disputes this account — raise it and give it to someone" />
       <TraceButton accountId={accountId} actor={actor} className={`${ACTION_BASE} ${ACTION_ENABLED}`} onDone={onTraced} />
-    </div>
+    </RecordActions>
   )
 }
 
-/** Shared with the Call button above, which is a PhoneLink rather than an Action. */
-const ACTION_BASE = 'inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition-colors'
-const ACTION_ENABLED = 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50'
 
-function Action({ icon: Icon, label, onClick, title, primary }: {
-  icon: typeof Phone; label: string; onClick?: () => void; title?: string; primary?: boolean
-}) {
-  const disabled = !onClick
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className={`${ACTION_BASE} ${
-        disabled
-          ? 'border-dashed border-slate-200 text-slate-300 cursor-not-allowed'
-          : primary
-            ? 'border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500'
-            : ACTION_ENABLED}`}
-    >
-      <Icon size={14} /> {label}
-    </button>
-  )
-}
 
 /* ---------- small shared pieces ---------- */
-
-/**
- * One figure. `small` is for the two that hold words rather than money — a status set at the
- * size of a rand amount reads as the most important thing on the page, and it is not.
+/*
+ * Action and Figure used to live here. They are now in components/record/RecordShell, which the
+ * Lead and Client pages use as well — the firm asked for one grammar across the app, and a shared
+ * component the model page keeps a private copy of drifts inside a month.
  */
-function Figure({ label, value, note, strong, danger, small }: {
-  label: string; value: string; note?: string; strong?: boolean; danger?: boolean; small?: boolean
-}) {
-  return (
-    <div className={`card px-3.5 py-2.5 ${strong ? 'border-gold-100' : ''}`}>
-      <p className="text-[10px] uppercase tracking-wide text-slate-400">{label}</p>
-      <p className={`font-semibold mt-0.5 ${small ? 'text-sm leading-snug' : 'text-lg tabular-nums'} ${
-        danger ? 'text-negative' : strong ? 'text-navy-950' : 'text-slate-800'}`}>{value}</p>
-      {note && <p className={`text-[11px] mt-0.5 leading-snug ${danger ? 'text-negative-700' : 'text-slate-500'}`}>{note}</p>}
-    </div>
-  )
-}
 
 function Banner({ title, children }: { title?: string; children: React.ReactNode }) {
   return (

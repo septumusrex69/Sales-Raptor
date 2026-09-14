@@ -1,12 +1,20 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { UserPlus, ArrowLeft, ArrowRight, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock, Users2, Link2, Unlink, Trash2, Inbox, Plus } from 'lucide-react'
+import {
+  UserPlus, ArrowLeft, ArrowRight, Mail, Phone, Globe, StickyNote, Pencil, Handshake,
+  CalendarClock, Users2, Link2, Unlink, Trash2, Inbox, MessageSquare, Plus,
+} from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { StatusBadge, StageBadge, ClassificationBadge } from '../../components/ui/Badge'
 import { InlineSelect } from '../../components/ui/InlineSelect'
+import {
+  ACTION_BASE, ACTION_ENABLED, RecordAction, RecordActions, RecordFigure, RecordFigures,
+  RecordFigureShell,
+} from '../../components/record/RecordShell'
+import { CrmCallButton } from '../../components/record/CrmCallButton'
 import { PhoneLink } from '../../components/PhoneLink'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
@@ -98,6 +106,16 @@ export function CompanyDetail() {
   const wonDeals = companyDeals.filter((d) => d.stage === 'Won')
   const subAccounts = useMemo(() => companies.filter((c) => c.parentCompanyId === id), [companies, id])
   const isClient = wonDeals.length > 0 || !!company?.code
+  /*
+   * Every number that could reach this client.
+   *
+   * A company has one switchboard number of its own; the people are on the contacts below. The
+   * Call button rings the one there is, which is what somebody phoning a client expects.
+   */
+  const clientNumbers = useMemo(
+    () => (company?.phone ? [{ label: 'Switchboard', value: company.phone }] : []),
+    [company?.phone],
+  )
   const companyActivities = useMemo(
     () => activities.filter((a) => a.companyId === id).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()),
     [activities, id],
@@ -167,56 +185,51 @@ export function CompanyDetail() {
         <HeroOwner ownerId={company.accountOwnerId} label="Client Liaison" />
       </DashboardHero>
 
+      {/*
+        The same row of figures the Account and Lead pages wear, from the same component.
+
+        It used to be a line of stats inside a card, at a different size, in a different order to
+        the debtor page next door. The firm's point: a client liaison moving between a client and
+        the debtors they handed over should not have to learn the page twice.
+      */}
+      <RecordFigures count={collectionsCoefficient !== undefined ? 6 : 5}>
+        {/* Class sits first because it applies to every client, and it was previously invisible
+            on any client without handover totals — including the ungraded ones, which are
+            exactly the ones you would want to grade. */}
+        <RecordFigureShell label="Class">
+          <InlineSelect
+            value={company.classification}
+            options={leadClassifications}
+            onChange={(classification) => updateCompany(company.id, { classification })}
+          >
+            {company.classification ? (
+              <ClassificationBadge classification={company.classification} />
+            ) : (
+              <span className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-md px-2 py-1">Not yet graded</span>
+            )}
+          </InlineSelect>
+        </RecordFigureShell>
+
+        <RecordFigure label="Accounts" value={String(company.accountCount ?? 0)}
+          note="handed over to us" />
+        <RecordFigure label="Handover amount" value={formatCurrency(company.handoverAmount ?? 0)}
+          note={company.estimatedHandoverAmount != null
+            ? `estimated ${formatCurrency(company.estimatedHandoverAmount)} at signup`
+            : 'capital in the book'} />
+        <RecordFigure label="Paid to date" value={formatCurrency(company.paymentsToDate ?? 0)} strong />
+        {collectionsCoefficient !== undefined && (
+          /* Can exceed 100%: payments here include fees on top of the handover amount, which
+             this system deliberately never discloses, so the ratio is not meant to cap. */
+          <RecordFigure label="Coefficient" value={`${collectionsCoefficient.toFixed(0)}%`}
+            note="of what was handed over" />
+        )}
+        <RecordFigure label="Deals won" value={formatCurrency(lifetimeValue)}
+          note={`${openDeals.length} open`}
+          onClick={() => navigate(buildDrilldownUrl('/deals', { company: company.id, open: '1', view: 'table' }))}
+          title="Open this client's deals" />
+      </RecordFigures>
+
       <Card>
-        <div className="flex flex-wrap items-end gap-x-10 gap-y-3">
-          {/* Class sits outside the debt-collection block: it applies to every client, and it
-              was previously invisible on any client without handover totals — including the
-              ones nobody had graded yet, which are exactly the ones you'd want to grade. */}
-          <div>
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide mb-1.5">Class</p>
-            <InlineSelect
-              value={company.classification}
-              options={leadClassifications}
-              onChange={(classification) => updateCompany(company.id, { classification })}
-            >
-              {company.classification ? (
-                <ClassificationBadge classification={company.classification} />
-              ) : (
-                <span className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-md px-2 py-1">Not yet graded</span>
-              )}
-            </InlineSelect>
-          </div>
-          {(company.accountCount !== undefined || company.handoverAmount !== undefined) && (
-            <>
-              <div>
-                <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Accounts</p>
-                <p className="text-2xl font-bold text-slate-800 mt-0.5">{company.accountCount ?? 0}</p>
-              </div>
-              <div>
-                <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Handover Amount</p>
-                <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(company.handoverAmount ?? 0)}</p>
-              </div>
-              <div>
-                <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Paid to Date</p>
-                <p className="text-2xl font-bold text-[var(--c-gold-deep)] mt-0.5">{formatCurrency(company.paymentsToDate ?? 0)}</p>
-              </div>
-              {collectionsCoefficient !== undefined && (
-                <div>
-                  <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Coefficient</p>
-                  <p className="text-2xl font-bold text-slate-800 mt-0.5">{collectionsCoefficient.toFixed(0)}%</p>
-                </div>
-              )}
-            </>
-          )}
-          <div>
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Deals Won</p>
-            <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(lifetimeValue)}</p>
-          </div>
-          <Link to={buildDrilldownUrl('/deals', { company: company.id, open: '1', view: 'table' })} className="hover:opacity-70">
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Open Deals</p>
-            <p className="text-2xl font-bold text-slate-800 mt-0.5">{openDeals.length}</p>
-          </Link>
-        </div>
 
         {company.estimatedHandoverAmount != null && (
           <p className="text-xs text-slate-400 mt-3">
@@ -227,65 +240,64 @@ export function CompanyDetail() {
           </p>
         )}
 
-        <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-slate-100">
-          {isClient && (
-            <button onClick={() => setDealOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              <Handshake size={13} /> Add Deal
-            </button>
-          )}
-          {isClient && (
-            <button onClick={() => setFollowUpOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              <CalendarClock size={13} /> Schedule Follow-up
-            </button>
-          )}
-          {isClient && (
-            <button onClick={() => setMeetingOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              <Users2 size={13} /> Schedule Meeting
-            </button>
-          )}
-          {isClient && (
-            <button onClick={() => setCourtesyCallOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              <Phone size={13} /> Log Courtesy Call
-            </button>
-          )}
-          {isClient && (
-            <button onClick={() => setHandoverOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              <Inbox size={13} /> Import Handover
-            </button>
-          )}
+        <div className="mt-4 pt-4 border-t border-slate-100">
           {/*
-            Beside the import, because they are the two ways an account gets into the book and a
-            person looking for one will look for the other. The import takes a batch; this takes
-            the single account a client phones in, which until now had no way in at all.
+            The same action row as the Account and Lead pages, in the same order of thought:
+            reach them first, then record what happened, then move the record on. A client page
+            whose first button was "Add Deal" put the paperwork before the phone.
+
+            Nothing here charges anybody. Every comparable action on a debtor raises an Annexure B
+            fee, because a debtor pays for the work of collecting from them — a client is the
+            person paying US. See CrmCallButton, which never reaches the charge engine.
           */}
-          {isClient && (
-            <button
-              onClick={async () => {
-                setDebtorError(null)
-                // Fetched BEFORE the modal opens, not alongside it. The reference it proposes is
-                // worked out once when the form mounts, so references arriving a moment later
-                // would leave the field blank — which is exactly what it did.
-                setDebtorRefs(await fetchAccountReferences(company.id).catch(() => []))
-                setDebtorOpen(true)
-              }}
-              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-            >
-              <UserPlus size={13} /> Add Debtor
-            </button>
-          )}
-          <button onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-            <StickyNote size={13} /> Add Note
-          </button>
-          {subAccounts.length === 0 && (
-            <button onClick={() => setParentOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              <Link2 size={13} /> {company.parentCompanyId ? 'Change Parent' : 'Assign to Parent'}
-            </button>
-          )}
-          {isAdmin && (
-            <button onClick={() => setDeleteOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">
-              <Trash2 size={13} /> Delete
-            </button>
-          )}
+          <RecordActions>
+            <CrmCallButton
+              numbers={clientNumbers}
+              to={{ companyId: company.id }}
+              subject={company.name}
+              className={`${ACTION_BASE} ${ACTION_ENABLED}`}
+            />
+            <RecordAction icon={MessageSquare} label="SMS"
+              title="Not built for clients yet — the SMS route is tied to a debtor's account, where it raises a fee." />
+            <RecordAction icon={Mail} label="Email"
+              onClick={company.email ? () => setEmailOpen(true) : undefined}
+              title={company.email ? 'Send from your connected mailbox' : 'No email address on this client yet'} />
+            <RecordAction icon={StickyNote} label="Add Note" onClick={() => setNoteOpen(true)}
+              title="Write on the timeline" />
+            {isClient && (
+              <RecordAction icon={Phone} label="Log Courtesy Call" onClick={() => setCourtesyCallOpen(true)}
+                title="Record a call you made some other way" />
+            )}
+            {isClient && <RecordAction icon={CalendarClock} label="Schedule Follow-up" onClick={() => setFollowUpOpen(true)} />}
+            {isClient && <RecordAction icon={Users2} label="Schedule Meeting" onClick={() => setMeetingOpen(true)} />}
+            {isClient && (
+              <RecordAction icon={Inbox} label="Import Handover" onClick={() => setHandoverOpen(true)} primary
+                title="Bring a batch of accounts into the book" />
+            )}
+            {/*
+              Beside the import, because they are the two ways an account gets into the book and a
+              person looking for one will look for the other. The import takes a batch; this takes
+              the single account a client phones in, which until now had no way in at all.
+            */}
+            {isClient && (
+              <RecordAction icon={UserPlus} label="Add Debtor"
+                onClick={async () => {
+                  setDebtorError(null)
+                  // Fetched BEFORE the modal opens, not alongside it. The reference it proposes is
+                  // worked out once when the form mounts, so references arriving a moment later
+                  // would leave the field blank — which is exactly what it did.
+                  setDebtorRefs(await fetchAccountReferences(company.id).catch(() => []))
+                  setDebtorOpen(true)
+                }} />
+            )}
+            {isClient && <RecordAction icon={Handshake} label="Add Deal" onClick={() => setDealOpen(true)} />}
+            {subAccounts.length === 0 && (
+              <RecordAction icon={Link2}
+                label={company.parentCompanyId ? 'Change Parent' : 'Assign to Parent'}
+                onClick={() => setParentOpen(true)} />
+            )}
+            {isAdmin && <RecordAction icon={Trash2} label="Delete" danger onClick={() => setDeleteOpen(true)} />}
+          </RecordActions>
         </div>
       </Card>
 
