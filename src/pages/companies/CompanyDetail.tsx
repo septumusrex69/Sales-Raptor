@@ -8,13 +8,17 @@ import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
 import { Card, CardHeader } from '../../components/ui/Card'
-import { StatusBadge, StageBadge, ClassificationBadge } from '../../components/ui/Badge'
+import { StatusBadge, StageBadge, ClassificationBadge, ServiceBadge } from '../../components/ui/Badge'
 import { InlineSelect } from '../../components/ui/InlineSelect'
 import {
   ACTION_BASE, ACTION_ENABLED, RecordAction, RecordActions, RecordFigure, RecordFigures,
-  RecordFigureShell, RecordLayout, RecordLayoutSwitcher, RecordTabs, useRecordLayout,
+  RecordActionsMore, RecordFigureShell, RecordLayout, RecordLayoutSwitcher, RecordMoreAction,
+  RecordTabs, useRecordLayout,
 } from '../../components/record/RecordShell'
 import { CrmCallButton } from '../../components/record/CrmCallButton'
+import {
+  RecordComment, RecordCommentFact, RecordCommentSummary,
+} from '../../components/record/RecordComment'
 import { PhoneLink } from '../../components/PhoneLink'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
@@ -37,7 +41,7 @@ import { AddDebtorModal } from '../../components/companies/AddDebtorModal'
 import { createDebtorAccount, fetchAccountReferences, fetchClientCommissionRate } from '../../lib/accountBook'
 import { toAccountRow, toContactRows, type NewDebtorInput } from '../../lib/newDebtor'
 import { HandoverBook } from '../../components/companies/HandoverBook'
-import type { Company, Contact } from '../../types'
+import type { Company, Contact, ProductService } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
 import { summaryLine } from '../../lib/summaryLine'
 
@@ -120,6 +124,18 @@ export function CompanyDetail() {
    */
   const [tab, setTab] = useState<ClientTab>('Overview')
   const [layout, chooseLayout] = useRecordLayout('raptor.client.layout')
+
+  /*
+   * What this client actually buys, taken from their deals.
+   *
+   * A company carries no services column of its own: what they wanted was captured on the lead
+   * and what they signed is on the deals, so the deals are the honest answer to "what do we do
+   * for them?".
+   */
+  const companyServices = useMemo(
+    () => [...new Set(companyDeals.map((d) => d.service).filter(Boolean))] as ProductService[],
+    [companyDeals],
+  )
 
   const clientNumbers = useMemo(
     () => (company?.phone ? [{ label: 'Switchboard', value: company.phone }] : []),
@@ -545,6 +561,54 @@ export function CompanyDetail() {
           title="Open this client's deals" />
       </RecordFigures>
 
+      {/*
+        The two lines the next person needs, and the facts they would otherwise go hunting for.
+
+        Above the actions, exactly where it sits on a debtor's account, because it answers the
+        question somebody opens the page with — what is going on here? — before they decide which
+        button to press. The deals and the book ride along with it: they lived several panels
+        down, and this puts them where the eye already is.
+      */}
+      <RecordComment
+        text={company.mainComment}
+        at={company.mainCommentAt}
+        placeholder="Where does this client stand? Two lines is plenty."
+        onSave={(text) => updateCompany(company.id, {
+          mainComment: text || undefined,
+          mainCommentAt: new Date().toISOString(),
+          mainCommentBy: currentUser?.id,
+        })}
+        summary={(
+          <RecordCommentSummary>
+            <RecordCommentFact label="Services">
+              {companyServices.length > 0
+                ? companyServices.map((sv) => <ServiceBadge key={sv} service={sv} />)
+                : <span className="text-slate-400">Nothing signed yet</span>}
+            </RecordCommentFact>
+            <RecordCommentFact label="Deals">
+              {companyDeals.length === 0
+                ? <span className="text-slate-400">None yet</span>
+                : (
+                  <>
+                    <span className="font-medium tabular-nums">{formatCurrency(lifetimeValue)}</span>
+                    <span className="text-slate-400">won · {openDeals.length} still open</span>
+                  </>
+                )}
+            </RecordCommentFact>
+            <RecordCommentFact label="Book">
+              {company.accountCount
+                ? (
+                  <>
+                    <span className="font-medium tabular-nums">{formatCurrency(company.handoverAmount ?? 0)}</span>
+                    <span className="text-slate-400">over {company.accountCount} accounts</span>
+                  </>
+                )
+                : <span className="text-slate-400">Nothing handed over</span>}
+            </RecordCommentFact>
+          </RecordCommentSummary>
+        )}
+      />
+
       <Card>
 
         {company.estimatedHandoverAmount != null && (
@@ -581,38 +645,46 @@ export function CompanyDetail() {
             <RecordAction icon={StickyNote} label="Add Note" onClick={() => setNoteOpen(true)}
               title="Write on the timeline" />
             {isClient && (
-              <RecordAction icon={Phone} label="Log Courtesy Call" onClick={() => setCourtesyCallOpen(true)}
-                title="Record a call you made some other way" />
-            )}
-            {isClient && <RecordAction icon={CalendarClock} label="Schedule Follow-up" onClick={() => setFollowUpOpen(true)} />}
-            {isClient && <RecordAction icon={Users2} label="Schedule Meeting" onClick={() => setMeetingOpen(true)} />}
-            {isClient && (
               <RecordAction icon={Inbox} label="Import Handover" onClick={() => setHandoverOpen(true)} primary
                 title="Bring a batch of accounts into the book" />
             )}
+
             {/*
-              Beside the import, because they are the two ways an account gets into the book and a
-              person looking for one will look for the other. The import takes a batch; this takes
-              the single account a client phones in, which until now had no way in at all.
+              Everything else, folded away. Twelve buttons wrapped to three lines on an iPad and
+              pushed the panels below off the screen; nothing is removed, because the fix for a
+              crowded row is not to take away the button somebody needs twice a month.
             */}
-            {isClient && (
-              <RecordAction icon={UserPlus} label="Add Debtor"
-                onClick={async () => {
-                  setDebtorError(null)
-                  // Fetched BEFORE the modal opens, not alongside it. The reference it proposes is
-                  // worked out once when the form mounts, so references arriving a moment later
-                  // would leave the field blank — which is exactly what it did.
-                  setDebtorRefs(await fetchAccountReferences(company.id).catch(() => []))
-                  setDebtorOpen(true)
-                }} />
-            )}
-            {isClient && <RecordAction icon={Handshake} label="Add Deal" onClick={() => setDealOpen(true)} />}
-            {subAccounts.length === 0 && (
-              <RecordAction icon={Link2}
-                label={company.parentCompanyId ? 'Change Parent' : 'Assign to Parent'}
-                onClick={() => setParentOpen(true)} />
-            )}
-            {isAdmin && <RecordAction icon={Trash2} label="Delete" danger onClick={() => setDeleteOpen(true)} />}
+            <RecordActionsMore>
+              {/*
+                First in the menu, beside the import, because they are the two ways an account
+                gets into the book and a person looking for one will look for the other. The
+                import takes a batch; this takes the single account a client phones in.
+              */}
+              {isClient && (
+                <RecordMoreAction icon={UserPlus} label="Add debtor"
+                  onClick={async () => {
+                    setDebtorError(null)
+                    // Fetched BEFORE the modal opens, not alongside it. The reference it proposes
+                    // is worked out once when the form mounts, so references arriving a moment
+                    // later would leave the field blank — which is exactly what it did.
+                    setDebtorRefs(await fetchAccountReferences(company.id).catch(() => []))
+                    setDebtorOpen(true)
+                  }} />
+              )}
+              {isClient && (
+                <RecordMoreAction icon={Phone} label="Log courtesy call" onClick={() => setCourtesyCallOpen(true)}
+                  title="Record a call you made some other way" />
+              )}
+              {isClient && <RecordMoreAction icon={CalendarClock} label="Schedule follow-up" onClick={() => setFollowUpOpen(true)} />}
+              {isClient && <RecordMoreAction icon={Users2} label="Schedule meeting" onClick={() => setMeetingOpen(true)} />}
+              {isClient && <RecordMoreAction icon={Handshake} label="Add deal" onClick={() => setDealOpen(true)} />}
+              {subAccounts.length === 0 && (
+                <RecordMoreAction icon={Link2}
+                  label={company.parentCompanyId ? 'Change parent' : 'Assign to parent'}
+                  onClick={() => setParentOpen(true)} />
+              )}
+              {isAdmin && <RecordMoreAction icon={Trash2} label="Delete" danger onClick={() => setDeleteOpen(true)} />}
+            </RecordActionsMore>
           </RecordActions>
         </div>
       </Card>
