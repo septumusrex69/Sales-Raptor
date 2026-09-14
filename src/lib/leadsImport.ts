@@ -445,13 +445,112 @@ export function planLeadsImport(sheets: LeadsSheet[]): LeadsImportPlan {
   }
 }
 
+/* ------------------------------------------------------------------------ who worked them */
+
+/** One person named in the Marketer column, and how much of the book they touched. */
+export interface MarketerCredit {
+  /** The spelling to show, which is whichever one the spreadsheet used most often. */
+  name: string
+  /** Every spelling that resolved to this person, so an odd one is visible rather than hidden. */
+  spellings: string[]
+  /** Leads naming them, alone or alongside somebody else. */
+  leads: number
+  /** Of those, the ones they share with somebody else. */
+  shared: number
+  /** Leads where they are named first, which is what decides who the lead lands on. */
+  owns: number
+}
+
+/**
+ * The people named in the Marketer column, split out of the cells that name several.
+ *
+ * Three years of a shared spreadsheet produce forty-two distinct spellings of eight people.
+ * "Barend/Destiny", "Felicia / Barend" and "Barend/ Stephan/ Zian / Destiny" are all several
+ * people in one cell; "zian" and "Barend/felicia" are the same people in lower case.
+ *
+ * WHAT THIS DOES NOT DO IS CORRECT ANYBODY'S SPELLING. "Baren/Ruben" and "BarendRuben" are
+ * almost certainly Barend, but almost is not a basis for reassigning somebody's work. They come
+ * back as their own names, carrying one lead each, where they are visible on the screen and
+ * somebody who knows can say so. Guessing would move a lead onto a person quietly and there
+ * would be nothing on the screen to notice.
+ */
+export function splitMarketers(cell: string | null): string[] {
+  if (!cell) return []
+  return cell.split('/').map((s) => s.trim()).filter(Boolean)
+}
+
+/** Case-insensitively the same person. Used to gather spellings, never to correct them. */
+const samePerson = (name: string): string => name.toLowerCase().replace(/\s+/g, ' ')
+
+export function marketerCredits(plan: LeadsImportPlan): MarketerCredit[] {
+  const found = new Map<string, {
+    spellings: Map<string, number>; leads: number; shared: number; owns: number
+  }>()
+
+  for (const row of plan.rows) {
+    const named = splitMarketers(row.sourceMarketer)
+    named.forEach((name, i) => {
+      const key = samePerson(name)
+      const entry = found.get(key) ?? { spellings: new Map(), leads: 0, shared: 0, owns: 0 }
+      entry.spellings.set(name, (entry.spellings.get(name) ?? 0) + 1)
+      entry.leads += 1
+      if (named.length > 1) entry.shared += 1
+      if (i === 0) entry.owns += 1
+      found.set(key, entry)
+    })
+  }
+
+  return [...found.values()]
+    .map((e) => ({
+      // The commonest spelling wins the label: it is the one the firm will recognise.
+      name: [...e.spellings].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0],
+      spellings: [...e.spellings.keys()].sort(),
+      leads: e.leads,
+      shared: e.shared,
+      owns: e.owns,
+    }))
+    .sort((a, b) => b.leads - a.leads || a.name.localeCompare(b.name))
+}
+
+/** Who each lead lands on: a Raptor user per marketer, and somebody for everything else. */
+export interface LeadOwners {
+  /** Used for a lead whose marketer is blank, or is not mapped to anybody. */
+  fallback: string
+  /** Marketer name (any spelling) to a Raptor user id. */
+  byMarketer?: Record<string, string>
+}
+
+/**
+ * Whose lead it is.
+ *
+ * The first person named owns it. Where two people worked one lead the spreadsheet writes them
+ * in the order they were involved, and a lead has one owner — but nothing is lost by choosing,
+ * because source_marketer keeps the cell exactly as it was written, both names and all.
+ */
+export function ownerFor(row: LeadsImportRow, owners: LeadOwners): string {
+  // Keyed case-insensitively at both ends: the screen offers "Nomsa" and the spreadsheet also
+  // says "nomsa", and which of the two somebody happened to map should not decide anything.
+  const map = new Map(
+    Object.entries(owners.byMarketer ?? {}).map(([name, id]) => [samePerson(name), id]),
+  )
+  for (const name of splitMarketers(row.sourceMarketer)) {
+    const found = map.get(samePerson(name))
+    if (found) return found
+  }
+  return owners.fallback
+}
+
 /**
  * The rows as the database wants them.
  *
  * `score` and `estimated_value` are left to their column defaults: the spreadsheet has no
  * opinion on either, and a made-up score is worse than the default one.
  */
-export function leadInsertRows(plan: LeadsImportPlan, ownerId: string): Record<string, unknown>[] {
+export function leadInsertRows(
+  plan: LeadsImportPlan,
+  owners: LeadOwners | string,
+): Record<string, unknown>[] {
+  const resolved: LeadOwners = typeof owners === 'string' ? { fallback: owners } : owners
   return plan.rows.map((r) => ({
     legacy_key: r.legacyKey,
     first_name: r.firstName,
@@ -461,7 +560,7 @@ export function leadInsertRows(plan: LeadsImportPlan, ownerId: string): Record<s
     mobile: r.mobile,
     source: r.source,
     status: r.status,
-    owner_id: ownerId,
+    owner_id: ownerFor(r, resolved),
     industry: r.industry,
     classification: r.classification,
     estimated_handover_amount: r.estimatedHandoverAmount,

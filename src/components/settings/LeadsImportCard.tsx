@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { AlertTriangle, CheckCircle2, FileUp, Loader2, Upload } from 'lucide-react'
 import { Card, CardHeader } from '../ui/Card'
 import { inputClass } from '../ui/Modal'
@@ -8,7 +8,8 @@ import { supabase } from '../../lib/supabase'
 import { parseCsv } from '../../lib/csv'
 import { readXlsxSheets } from '../../lib/xlsx'
 import {
-  planLeadsImport, leadInsertRows, type LeadsImportPlan, type LeadsSheet,
+  planLeadsImport, leadInsertRows, marketerCredits,
+  type LeadsImportPlan, type LeadsSheet, type MarketerCredit,
 } from '../../lib/leadsImport'
 import { formatCurrency } from '../../data/mockData'
 
@@ -30,12 +31,14 @@ export function LeadsImportCard() {
   const [file, setFile] = useState<File | undefined>()
   const [ownerId, setOwnerId] = useState(currentUser?.id ?? '')
   const [plan, setPlan] = useState<LeadsImportPlan | null>(null)
+  /** Marketer name from the spreadsheet to the Raptor user their leads land on. */
+  const [byMarketer, setByMarketer] = useState<Record<string, string>>({})
   const [reading, setReading] = useState(false)
   const [writing, setWriting] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
 
-  const clear = () => { setPlan(null); setDone(null); setError(null) }
+  const clear = () => { setPlan(null); setDone(null); setError(null); setByMarketer({}) }
 
   const read = useCallback(async () => {
     if (!file) return
@@ -65,17 +68,30 @@ export function LeadsImportCard() {
         )
       }
       setPlan(built)
+      /*
+       * Offer a match where the name is plainly the same person, and leave the rest on the
+       * fallback. Matching on the first word of the Raptor name is what makes "Barend" find
+       * "Barend Ferreira" — the spreadsheet only ever wrote first names.
+       */
+      const guess: Record<string, string> = {}
+      for (const credit of marketerCredits(built)) {
+        const key = credit.name.toLowerCase()
+        const match = users.find((u) => u.name.toLowerCase() === key
+          || u.name.toLowerCase().split(' ')[0] === key)
+        if (match) guess[credit.name] = match.id
+      }
+      setByMarketer(guess)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setReading(false)
     }
-  }, [file])
+  }, [file, users])
 
   const write = useCallback(async () => {
     if (!plan || !ownerId) return
     setError(null); setDone(null)
-    const rows = leadInsertRows(plan, ownerId)
+    const rows = leadInsertRows(plan, { fallback: ownerId, byMarketer })
     setWriting({ done: 0, total: rows.length })
     try {
       let written = 0
@@ -99,7 +115,7 @@ export function LeadsImportCard() {
     } finally {
       setWriting(null)
     }
-  }, [plan, ownerId])
+  }, [plan, ownerId, byMarketer])
 
   return (
     <Card>
@@ -132,15 +148,16 @@ export function LeadsImportCard() {
       </label>
 
       <label className="block mt-4 max-w-sm">
-        <span className="block text-xs font-medium text-slate-500 mb-1">Leads land on</span>
+        <span className="block text-xs font-medium text-slate-500 mb-1">
+          Anyone not named below lands on
+        </span>
         <select className={inputClass} value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
           {users.filter((u) => u.status === 'Active').map((u) => (
             <option key={u.id} value={u.id}>{u.name}</option>
           ))}
         </select>
         <span className="block text-[11px] text-slate-400 mt-1">
-          Whoever worked each lead on the spreadsheet is kept on the lead either way — most of
-          them are not Raptor users, so somebody here has to own the record.
+          For leads whose Marketer cell is blank, or names somebody with nobody to map them to.
         </span>
       </label>
 
@@ -180,8 +197,120 @@ export function LeadsImportCard() {
         </p>
       )}
 
-      {plan && <PlanReport plan={plan} />}
+      {plan && (
+        <>
+          <Marketers plan={plan} chosen={byMarketer} onChange={setByMarketer} fallback={ownerId} />
+          <PlanReport plan={plan} />
+        </>
+      )}
     </Card>
+  )
+}
+
+
+/**
+ * Who worked these leads.
+ *
+ * The spreadsheet names the person in a column and Raptor needs a user, and the two do not line
+ * up: some of the eight people named have left, and the ones who are here are written as first
+ * names in forty-two different spellings. Landing three years of somebody else's work on
+ * whoever happens to run the import loses the one thing the column was keeping.
+ *
+ * So the question is asked here rather than guessed at, and asked every time — next month's
+ * workbook will name somebody new, and a screen that silently defaulted would never say so.
+ * Names that plainly match a user are matched; the rest wait.
+ */
+function Marketers({ plan, chosen, onChange, fallback }: {
+  plan: LeadsImportPlan
+  chosen: Record<string, string>
+  onChange: (next: Record<string, string>) => void
+  fallback: string
+}) {
+  const { users } = useAppStore()
+  const credits = useMemo(() => marketerCredits(plan), [plan])
+  const unmapped = credits.filter((c) => !chosen[c.name])
+  if (credits.length === 0) return null
+
+  return (
+    <div className="mt-5 pt-4 border-t border-slate-100">
+      <p className="text-sm font-medium text-slate-700">Who worked these leads</p>
+      <p className="text-xs text-slate-500 mt-0.5">
+        {credits.length} named in the spreadsheet.
+        {unmapped.length > 0 && (
+          <>
+            {' '}
+            <span className="text-slate-600">
+              {unmapped.length} with nobody to map to
+            </span>
+            {' '}— those land on the person above. Somebody who has left the firm can be added
+            under Users as a record with no sign-in.
+          </>
+        )}
+      </p>
+
+      <div className="mt-3 space-y-1.5">
+        {credits.map((c) => (
+          <MarketerRow
+            key={c.name}
+            credit={c}
+            users={users}
+            value={chosen[c.name] ?? ''}
+            fallback={fallback}
+            onPick={(id) => {
+              const next = { ...chosen }
+              if (id) next[c.name] = id
+              else delete next[c.name]
+              onChange(next)
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function MarketerRow({ credit, users, value, fallback, onPick }: {
+  credit: MarketerCredit
+  users: ReturnType<typeof useAppStore>['users']
+  value: string
+  fallback: string
+  onPick: (id: string) => void
+}) {
+  const fallbackName = users.find((u) => u.id === fallback)?.name ?? 'the person above'
+  /*
+   * Every other spelling of the same name, shown only where there is one. "Barend/felicia" and
+   * "BarendRuben" are the shapes that want a person's eye on them, and they are invisible in a
+   * count.
+   */
+  const others = credit.spellings.filter((sp) => sp !== credit.name)
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
+      <span className="min-w-0 flex-1">
+        <span className="text-sm text-slate-700">{credit.name}</span>
+        <span className="text-[11px] text-slate-400 ml-2 tabular-nums">
+          {credit.leads.toLocaleString('en-ZA')} lead{credit.leads === 1 ? '' : 's'}
+          {credit.shared > 0 && ` · ${credit.shared} shared`}
+        </span>
+        {others.length > 0 && (
+          <span className="block text-[11px] text-slate-400 truncate" title={others.join(', ')}>
+            also written {others.join(', ')}
+          </span>
+        )}
+      </span>
+      <select
+        className="text-xs rounded-lg border border-slate-200 bg-white px-2 py-1.5 max-w-[14rem]"
+        value={value}
+        onChange={(e) => onPick(e.target.value)}
+      >
+        <option value="">— {fallbackName} —</option>
+        {users.map((u) => (
+          <option key={u.id} value={u.id}>
+            {u.name}{u.status === 'Inactive' ? ' (left)' : ''}
+          </option>
+        ))}
+      </select>
+    </div>
   )
 }
 
