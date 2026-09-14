@@ -57,3 +57,36 @@ export function dateGroupLabel(iso?: string): string {
   const sameYear = date.getFullYear() === now.getFullYear()
   return date.toLocaleDateString('en-ZA', { month: 'long', year: sameYear ? undefined : 'numeric' })
 }
+
+/**
+ * How long an account has been on the desk: "11 months on the desk".
+ *
+ * WHOLE MONTHS, ROUNDED DOWN, because that is how the work is talked about — a collector says
+ * "we have had this one eleven months", never "three hundred and thirty-four days". Under a
+ * month says so rather than reading "0 months", and past two years it switches to years, since
+ * by then the month is no longer the interesting part.
+ *
+ * The day-of-month comparison is the whole of the difference between right and nearly right.
+ * Handed over on the 20th of September and read on the 14th of the following September is
+ * ELEVEN months, not twelve: the anniversary has not come round yet. Without that line the
+ * account would claim to be a year old six days early, which on a book where prescription is
+ * counted in years is not a rounding error.
+ *
+ * A date in the future is a data error rather than an age, and comes back empty so the caller
+ * shows the date alone.
+ */
+export function timeOnDesk(iso?: string | null, now: Date = new Date()): string {
+  if (!iso) return ''
+  const from = new Date(iso)
+  if (Number.isNaN(from.getTime())) return ''
+
+  let months = (now.getFullYear() - from.getFullYear()) * 12 + (now.getMonth() - from.getMonth())
+  if (now.getDate() < from.getDate()) months -= 1
+
+  if (months < 0) return ''
+  if (months === 0) return 'this month'
+  if (months === 1) return '1 month on the desk'
+  if (months < 24) return `${months} months on the desk`
+  const years = Math.floor(months / 12)
+  return `${years} years on the desk`
+}

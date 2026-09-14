@@ -26,6 +26,7 @@ import {
 import { buildTimeline, filterTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
 import { isWrittenOff } from '../../lib/accountStatus'
 import { canViewClients } from '../../lib/permissions'
+import { timeOnDesk } from '../../lib/dateLabels'
 import { styleFor, PROMISE_CHIP } from './timelineStyle'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
@@ -1256,6 +1257,10 @@ function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName }: 
   chargedExclVat: number
   clientLiaisonName: string | null
 }) {
+  const handedOver = account.handoverDate
+    ? [formatDate(account.handoverDate), timeOnDesk(account.handoverDate)].filter(Boolean).join(' · ')
+    : null
+
   return (
     <Card>
       <PanelTitle>Position</PanelTitle>
@@ -1284,6 +1289,18 @@ function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName }: 
         <Field label="Commission" value={account.commissionRate === null ? 'not resolved' : pct(account.commissionRate)} />
         <Field label="Status" value={[account.status, account.subStatus].filter(Boolean).join(' · ')} />
         <Field label="Bucket" value={account.bucket} />
+        {/*
+          HANDED OVER, and it belongs above the other dates because it is the one they are all
+          measured from — prescription runs from it, and how long an account has sat on the desk
+          is judged against it.
+
+          It was only in the hero band, which is the first thing off the top of the screen: the
+          moment somebody scrolls to the figures they are working from, the date the clock
+          started is gone. Shown with its age because that is the question actually being asked
+          — "how long have we had this one" — and nobody counts months off a date in their head
+          while a debtor is on the phone.
+        */}
+        <Field label="Handed over" value={handedOver} />
         <Field label="Prescribes" value={account.prescriptionDate ? formatDate(account.prescriptionDate) : null} />
         <Field label="Diary date" value={account.diaryDate ? formatDate(account.diaryDate) : null} />
         <Field label="Last action" value={account.lastActionAt ? formatDate(account.lastActionAt) : null} />
