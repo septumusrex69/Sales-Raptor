@@ -89,6 +89,8 @@ export interface LeadsImportPlan {
     withAmount: number
     withDate: number
     amountsNeedingAHuman: number
+    /** Figures worked out from a range or a list rather than read straight off the cell. */
+    amountsEstimated: number
   }
   byStatus: Record<string, number>
 }
@@ -129,25 +131,140 @@ export function isoDate(v: string | undefined): string | null {
   return date.toISOString().slice(0, 10)
 }
 
+/** Money, grouped the way South Africans write it, for a sentence on the lead. */
+function rands(n: number): string {
+  return `R${Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}`
+}
+
 /**
- * One amount, or nothing — and it says which.
+ * A number out of a cell that holds one, after the ways people write "about".
  *
- * The pattern is deliberately strict. It accepts a single figure with the spaces South African
- * money is written with, optionally prefixed R and with cents, and nothing else. Anything with a
- * second figure in it comes back `messy`, which is not the same as empty: an empty cell is a lead
- * whose handover was never quoted, and a messy one is a lead whose handover was quoted three
- * different ways and needs a person.
+ * "35 000+-", "40 000~", "Minimum 40 000", "8.5 m" and "17k" are all one figure with something
+ * around it. None of them change what the figure is. Anything else — a dollar sign, a second
+ * figure, a word — is not a number and comes back as nothing.
  */
-export function oneAmount(v: string | undefined): { value: number | null; messy: boolean } {
-  const s = (v ?? '').trim()
-  if (s === '' || s === '-') return { value: null, messy: false }
-  //   is the non-breaking space Excel leaves behind when a number is pasted from elsewhere.
-  const m = /^R?\s*(\d{1,3}(?:[\s ]\d{3})*|\d+)([.,]\d{1,2})?$/.exec(s)
-  if (!m) return { value: null, messy: true }
-  const whole = m[1].replace(/\D/g, '')
+export function loneAmount(part: string | undefined): number | null {
+  let s = (part ?? '').trim()
+    .replace(/^(minimum|min|approx\.?|approximately|about|circa|ca\.?|around|over|est\.?)\s+/i, '')
+    .replace(/[~±]|\+-/g, '')
+    // "100 000+" is at least a hundred thousand. Taking the figure is the conservative reading,
+    // and the only one that does not invent a ceiling nobody wrote down.
+    .replace(/\+$/, '')
+    .trim()
+
+  // 8.5m / 17k / 2 mil. The suffix multiplies; anything else with letters in it is not a number.
+  const suffix = /^(.*?)\s*(k|m|mil|million)$/i.exec(s)
+  let scale = 1
+  if (suffix) {
+    s = suffix[1].trim()
+    scale = /^k$/i.test(suffix[2]) ? 1_000 : 1_000_000
+  }
+
+  /*
+   * A comma is two different things in this book. In "1,300 000" it groups thousands, the same
+   * as the space beside it. In "11 100,2800" it separates two amounts. The tell is the grouping:
+   * every run after the first is exactly three digits, or it is not a grouped number at all.
+   *
+   *   is the non-breaking space Excel leaves behind when a number is pasted from elsewhere.
+   */
+  const cleaned = s.replace(/^R\s*/i, '').trim()
+  const m = /^(\d{1,3}(?:[,\s\u00a0]\d{3})+|\d+)([.,]\d{1,2})?$/.exec(cleaned)
+  if (!m) return null
+
+  const whole = m[1].replace(/[,\s\u00a0]/g, '')
   const frac = (m[2] ?? '').replace(',', '.')
   const value = Number(whole + frac)
-  return Number.isFinite(value) ? { value, messy: false } : { value: null, messy: true }
+  return Number.isFinite(value) ? value * scale : null
+}
+
+/** "1 000-100 000" as its two ends, or nothing. */
+function asRange(part: string): [number, number] | null {
+  const m = /^(.+?)\s*[-–]\s*(.+)$/.exec(part.trim())
+  if (!m) return null
+  const low = loneAmount(m[1])
+  const high = loneAmount(m[2])
+  if (low === null || high === null || high < low) return null
+  return [low, high]
+}
+
+export interface AmountReading {
+  value: number | null
+  /** How the figure was reached, for the lead's own notes. Null when the cell held one amount. */
+  basis: string | null
+}
+
+/**
+ * What the handover is worth, out of a cell that says it three different ways.
+ *
+ * 192 of the 1,818 cells hold more than one figure, and they do not all mean the same thing.
+ * The notes the sales team wrote beside them settle it:
+ *
+ *   A DASH IS THE SIZE OF ONE ACCOUNT, not the size of the book. "20 acc from 500- 2 000" says
+ *   so outright, and so does "Outstanding debt will range from R 1000 to R 20 000" against a
+ *   count of two. So a range becomes the middle of itself, multiplied by however many accounts
+ *   there are. Without that multiplication a 144-account book comes in at thirty thousand rand.
+ *
+ *   AN AMPERSAND OR A PLUS IS SEPARATE ACCOUNTS, and the handover is their total. "1500+2500"
+ *   against a count of two is "two jobs two different people"; "60 000+30 000" against two is
+ *   "2 rentals". Those are added, and NOT multiplied by anything — the figures already are the
+ *   accounts, and multiplying would count them twice.
+ *
+ * WHAT IT STILL WILL NOT DO IS GUESS. A cell in dollars, a figure with a second one bracketed
+ * inside it, "50 000-21.M" — those are left empty with their own words kept, because no reading
+ * of them is obviously right and a wrong number is worse than a missing one.
+ *
+ * Any figure that is not simply the cell's own contents carries `basis`, a sentence saying how it
+ * was reached, which goes onto the lead. Nobody should find a number in Raptor that is not in the
+ * spreadsheet without being told where it came from.
+ */
+export function readAmount(raw: string | undefined, accounts: number | null): AmountReading {
+  const s = (raw ?? '').trim()
+  if (s === '' || s === '-') return { value: null, basis: null }
+
+  // One plain figure, however it was decorated. Much the commonest case, and it says nothing.
+  const single = loneAmount(s)
+  if (single !== null) return { value: single, basis: null }
+
+  // A range on its own: the size of one account, so the book is that times however many.
+  const range = asRange(s)
+  if (range) {
+    const middle = (range[0] + range[1]) / 2
+    const many = accounts && accounts > 1 ? accounts : 1
+    const value = Math.round(middle * many)
+    return {
+      value,
+      basis: many > 1
+        ? `Handover estimated at ${rands(value)}: the spreadsheet said "${s}" per account across `
+          + `${many} accounts, so this is the middle of that range times ${many}.`
+        : `Handover estimated at ${rands(value)}: the spreadsheet said "${s}", so this is the `
+          + `middle of that range.`,
+    }
+  }
+
+  /*
+   * A list — separate accounts, added up. Split on the separators people actually used, then
+   * allow each part to be an amount or a range of its own ("8 000&1000-3000"). The comma is only
+   * a separator where it is not grouping thousands.
+   */
+  const parts = s.split(/[&+/]|\band\b|,(?!\d{3}(?:\D|$))/i).map((p) => p.trim()).filter(Boolean)
+  if (parts.length > 1) {
+    let total = 0
+    for (const part of parts) {
+      const one = loneAmount(part)
+      if (one !== null) { total += one; continue }
+      const r = asRange(part)
+      if (!r) return { value: null, basis: null }
+      total += (r[0] + r[1]) / 2
+    }
+    const value = Math.round(total)
+    return {
+      value,
+      basis: `Handover ${rands(value)}: the spreadsheet said "${s}" — ${parts.length} separate `
+        + `amounts, added together.`,
+    }
+  }
+
+  return { value: null, basis: null }
 }
 
 /**
@@ -188,12 +305,24 @@ export function phoneNumber(v: string | undefined): string | null {
   return s
 }
 
-/** How many accounts. "12", "12.0" and "12 accounts" all mean twelve. */
+/**
+ * How many accounts.
+ *
+ * "12", "12.0" and "12 accounts" all mean twelve, and "20-30" and "10+" both mean twenty and ten
+ * — the lower end, which is the figure somebody actually committed to.
+ *
+ * THE SPACE MATTERS. A count is written "2 000" as readily as an amount is, and reading only the
+ * first run of digits turned a two-thousand-account medical practice into a two-account one.
+ * That count multiplies a range into a handover value, so being out by a thousand there is out
+ * by a thousand on the value of the lead.
+ */
 function accountsCount(v: string | undefined): number | null {
   const s = (v ?? '').trim().replace(/\.0$/, '')
   if (s === '' || s === '-') return null
-  const m = /^\s*(\d+)/.exec(s)
-  return m ? Number(m[1]) : null
+  const m = /^\s*(\d[\d\s\u00a0]*)/.exec(s)
+  if (!m) return null
+  const n = Number(m[1].replace(/[\s\u00a0]/g, ''))
+  return Number.isFinite(n) ? n : null
 }
 
 /* ------------------------------------------------------------- the spreadsheet's vocabulary */
@@ -334,7 +463,7 @@ const cell = (row: string[], i: number): string | undefined => (i < 0 ? undefine
  * years later, and getting a label one column out — the second Status column arriving as
  * "Rejection reason" — is a mistake that survives the import and misleads whoever reads it.
  */
-function buildNotes(row: string[], c: SheetColumns, messyAmount: string | null): string | null {
+function buildNotes(row: string[], c: SheetColumns, amount: AmountReading & { raw: string }): string | null {
   const lines: string[] = []
   const add = (label: string, value: string | null) => { if (value) lines.push(`${label}${value}`) }
 
@@ -347,10 +476,32 @@ function buildNotes(row: string[], c: SheetColumns, messyAmount: string | null):
    * in a column beside it, so somebody can put one figure in without losing what was there. Read
    * both, or the tidy sheet would be the one version of this file that quietly drops it.
    */
-  const asWritten = messyAmount ?? text(cell(row, c.at('Handover Amount as written')))
-  if (asWritten) {
-    lines.push(`Handover amount as written: "${asWritten}" — more than one figure, `
-      + `so not imported as a number.`)
+  /*
+   * Where the figure is not simply what the cell said, the lead says so. Three ways in:
+   *
+   * A range or a list read straight off the firm's own workbook explains itself in full.
+   *
+   * A tidied sheet has already done that arithmetic, so its Handover Amount column holds a plain
+   * number and the cell's original wording sits in a column beside it. Without this, 172 worked-
+   * out figures would arrive looking exactly like quoted ones — which is the whole thing this
+   * was meant to prevent.
+   *
+   * And a cell nobody could read keeps its own words and no number.
+   */
+  const asWritten = text(cell(row, c.at('Handover Amount as written')))
+  if (amount.basis) {
+    lines.push(amount.basis)
+  } else if (amount.value !== null) {
+    if (asWritten) {
+      lines.push(`Handover amount ${rands(amount.value)}. The spreadsheet had `
+        + `"${asWritten}" — this figure was worked out from it, not quoted.`)
+    }
+  } else {
+    const unread = (amount.raw !== '' && amount.raw !== '-' ? amount.raw : null) ?? asWritten
+    if (unread) {
+      lines.push(`Handover amount as written: "${unread}" — no reading of it is obviously `
+        + `right, so it was left for a person rather than guessed at.`)
+    }
   }
   add('Stage on the spreadsheet: ',
     text(cell(row, c.at('Status', 1))) ?? text(cell(row, c.at('Stage'))))
@@ -408,6 +559,7 @@ export function planLeadsImport(sheets: LeadsSheet[]): LeadsImportPlan {
   const seen = new Set<string>()
   let duplicates = 0
   let messyAmounts = 0
+  let estimated = 0
   let unknownCodes = 0
 
   for (const sheet of sheets) {
@@ -460,9 +612,13 @@ export function planLeadsImport(sheets: LeadsSheet[]): LeadsImportPlan {
       const { status, known } = statusFor(code)
       if (!known) unknownCodes += 1
 
-      const rawAmount = cell(row, columns.at('Handover Amount'))
-      const { value: amount, messy } = oneAmount(rawAmount)
-      if (messy) messyAmounts += 1
+      const counted = accountsCount(cell(row, columns.at('No. of Acc.')))
+      const rawAmount = (cell(row, columns.at('Handover Amount')) ?? '').trim()
+      const reading = readAmount(rawAmount, counted)
+      const amount = reading.value
+      // Only the cells nobody could read. A range turned into a figure is not one of them.
+      if (amount === null && rawAmount !== '' && rawAmount !== '-') messyAmounts += 1
+      if (reading.basis) estimated += 1
 
       const rank = /^([ABCD])$/i.exec((text(cell(row, columns.at('Rank'))) ?? ''))
       const [firstName, lastName] = splitName(text(cell(row, columns.at('Contact Person'))), company)
@@ -480,9 +636,9 @@ export function planLeadsImport(sheets: LeadsSheet[]): LeadsImportPlan {
         status,
         classification: rank ? (rank[1].toUpperCase() as LeadClassification) : null,
         estimatedHandoverAmount: amount,
-        estimatedAccountsCount: accountsCount(cell(row, columns.at('No. of Acc.'))),
+        estimatedAccountsCount: counted,
         industry: text(cell(row, columns.at('Industry'))),
-        notes: buildNotes(row, columns, messy ? (rawAmount ?? '').trim() : null),
+        notes: buildNotes(row, columns, { ...reading, raw: rawAmount }),
         sourceMarketer: text(cell(row, columns.at('Marketer'))),
         createdAt: started,
         // Only where the lead was actually turned down. A reason against a live lead is a note.
@@ -495,9 +651,16 @@ export function planLeadsImport(sheets: LeadsSheet[]): LeadsImportPlan {
     reports.push({ name: sheet.name, read, duplicates: dupes, skipped: null })
   }
 
+  if (estimated) {
+    warnings.push(`${estimated} handover amounts were written as a range or as several amounts. `
+      + `A range is the size of one account, so it becomes the middle of that range times the `
+      + `number of accounts; several amounts are added up. Each lead's notes says which was done `
+      + `and quotes the cell.`)
+  }
   if (messyAmounts) {
-    warnings.push(`${messyAmounts} handover amounts hold more than one figure and were not `
-      + `imported as numbers. Each lead's notes keeps the cell exactly as it was written.`)
+    warnings.push(`${messyAmounts} handover amounts could not be read as a figure at all — a `
+      + `foreign currency, or a figure with another one bracketed inside it. Those are empty, `
+      + `with the cell kept word for word in the lead's notes.`)
   }
   if (unknownCodes) {
     warnings.push(`${unknownCodes} leads have a status code this importer does not recognise `
@@ -519,6 +682,7 @@ export function planLeadsImport(sheets: LeadsSheet[]): LeadsImportPlan {
       withAmount: rows.filter((r) => r.estimatedHandoverAmount !== null).length,
       withDate: rows.filter((r) => r.createdAt).length,
       amountsNeedingAHuman: messyAmounts,
+      amountsEstimated: estimated,
     },
     byStatus,
   }
