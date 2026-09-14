@@ -364,19 +364,27 @@ export interface InlineImage {
 export async function fetchMailBody(
   mailId: string,
   accessToken: string,
-): Promise<{ text: string; details: ContactCandidate[]; images: InlineImage[] }> {
+): Promise<{
+  text: string; details: ContactCandidate[]; images: InlineImage[]; imagesSkipped: number
+}> {
   const res = await fetch('/api/email/attachment', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify({ mailId }),
   })
   const body = (await res.json().catch(() => ({}))) as {
-    text?: string; details?: ContactCandidate[]; images?: InlineImage[]; error?: string
+    text?: string; details?: ContactCandidate[]; images?: InlineImage[]
+    imagesSkipped?: number; error?: string
   }
   if (!res.ok) throw new Error(body.error ?? 'Could not read that message.')
   // `details` are read off the message's HTML on the server — see findLinkedDetails. They are
   // what an image signature gives up, since its text yields nothing.
-  return { text: body.text ?? '', details: body.details ?? [], images: body.images ?? [] }
+  return {
+    text: body.text ?? '',
+    details: body.details ?? [],
+    images: body.images ?? [],
+    imagesSkipped: body.imagesSkipped ?? 0,
+  }
 }
 
 /**
