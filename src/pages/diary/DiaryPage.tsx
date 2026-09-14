@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
-  AlertTriangle, CalendarClock, CheckCircle2, ChevronRight, Loader2, Play, Users,
+  AlertTriangle, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight,
+  Loader2, Play, Users, X,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { useAuth } from '../../store/AuthContext'
@@ -11,12 +12,13 @@ import { longDate, shortDate } from '../../components/diary/DiaryDatePicker'
 import { MoveDiaryModal } from '../../components/diary/MoveDiaryModal'
 import { CompleteDiaryModal } from '../../components/diary/CompleteDiaryModal'
 import {
-  countOutOfCirculation, fetchDay, fetchTeamLoad, debtorName,
-  type DayOfWork, type DiaryRow, type AgentLoad,
+  countOutOfCirculation, fetchDay, fetchDayLoads, fetchTeamLoad, debtorName,
+  type DayLoads, type DayOfWork, type DiaryRow, type AgentLoad,
 } from '../../lib/diary.ts'
 import {
-  DIARY_KINDS, DIARY_ORDER_LABELS, dayLoad, dayLoadSentence, nearPrescription, orderDiary,
-  overdueBy, type DiaryOrder,
+  DIARY_KINDS, DIARY_ORDER_LABELS, dayLoad, dayLoadSentence, dayName, inMonth, monthGrid,
+  nearPrescription, orderDiary, overdueBy, shiftDate, shiftMonth, todayIso,
+  type DayLoadLevel, type DiaryOrder,
 } from '../../lib/diaryPriority.ts'
 import { formatCurrency } from '../../data/mockData'
 
@@ -33,15 +35,31 @@ import { formatCurrency } from '../../data/mockData'
  * urgent first, with a tool to move a pile of it onto real days rather than one entry at a time.
  */
 
-type DiaryTab = 'Today' | 'Backlog' | 'Team'
+type DiaryTab = 'Today' | 'Backlog' | 'Month' | 'Team'
 
 export function DiaryPage() {
   const { currentUser } = useAuth()
   const { users } = useAppStore()
   const [params, setParams] = useSearchParams()
 
-  const today = new Date().toISOString().slice(0, 10)
+  /*
+   * The LOCAL day, not a UTC timestamp.
+   *
+   * toISOString() rolls a South African evening into tomorrow: an agent opening the app at ten at
+   * night would be shown work that is not due yet, and today's would have vanished.
+   */
+  const today = todayIso()
   const tab = (params.get('tab') as DiaryTab) ?? 'Today'
+
+  /*
+   * WHICH DAY is on screen, which is not always today.
+   *
+   * The firm asked to be able to work tomorrow's diary once today's is clear, and to look at any
+   * other day besides. In the URL so it survives opening an account and coming back, and so a
+   * team leader can send somebody a link to a particular day.
+   */
+  const viewDay = params.get('day') ?? today
+  const isToday = viewDay === today
   // A team leader can stand in somebody else's diary. Defaults to your own.
   const viewing = params.get('who') ?? currentUser?.id ?? null
   /*
@@ -61,6 +79,16 @@ export function DiaryPage() {
   const [error, setError] = useState<string | null>(null)
   const [completing, setCompleting] = useState<DiaryRow | null>(null)
   const [moving, setMoving] = useState<DiaryRow[] | null>(null)
+  /*
+   * Which rows are ticked.
+   *
+   * Ids rather than rows, so a selection survives the list reloading underneath it — a colleague
+   * moving something into your day must not silently change what you thought you had selected.
+   * Cleared whenever the day, the owner or the tab changes, because a selection that outlives
+   * what you were looking at is how somebody re-diarises the wrong forty accounts.
+   */
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  useEffect(() => { setPicked(new Set()) }, [viewDay, viewing, tab])
 
   const owner = users.find((u) => u.id === viewing)
   const isMine = viewing === currentUser?.id
@@ -69,7 +97,7 @@ export function DiaryPage() {
     setLoading(true); setError(null)
     try {
       const [d, t, a] = await Promise.all([
-        fetchDay({ ownerId: viewing, date: today }),
+        fetchDay({ ownerId: viewing, date: viewDay }),
         fetchTeamLoad(today),
         // A count that fails is not worth an error over a page that otherwise works.
         countOutOfCirculation().catch(() => null),
@@ -80,26 +108,92 @@ export function DiaryPage() {
     } finally {
       setLoading(false)
     }
-  }, [viewing, today])
+  }, [viewing, viewDay, today])
 
   useEffect(() => { void load() }, [load])
 
-  const setTab = (next: DiaryTab) => {
+  const setParam = useCallback((key: string, value: string | null) => {
     const p = new URLSearchParams(params)
-    p.set('tab', next)
+    if (value === null) p.delete(key); else p.set(key, value)
     setParams(p, { replace: true })
-  }
+  }, [params, setParams])
+
+  const setTab = (next: DiaryTab) => setParam('tab', next)
+  /** Move the day on screen. Null means back to today, which drops the parameter entirely. */
+  const goToDay = (date: string) => setParam('day', date === today ? null : date)
+
+  /**
+   * The rows actually on screen, in the order asked for.
+   *
+   * Worked out once rather than in each branch, because "select all" and the bulk bar have to
+   * mean exactly what is visible — a selection that quietly included rows below the fold would
+   * be the worst possible bug in a tool that moves two hundred records at a time.
+   */
+  const shown = useMemo(() => {
+    if (!day || (tab !== 'Today' && tab !== 'Backlog')) return []
+    const source = tab === 'Today' ? day.due : day.overdue
+    return orderDiary(
+      source.map((r) => ({
+        ...r,
+        prescriptionOn: r.account.prescriptionDate,
+        outstanding: r.account.capitalOutstanding,
+      })),
+      order, today,
+    )
+  }, [day, tab, order, today])
+
+  const togglePick = useCallback((id: string) => {
+    setPicked((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }, [])
+
+  const pickedRows = useMemo(() => shown.filter((r) => picked.has(r.id)), [shown, picked])
 
   const todayLoad = useMemo(
-    () => dayLoad({ date: today, booked: day?.due.length ?? 0, capacity: owner?.diaryCapacity }),
-    [today, day, owner],
+    () => dayLoad({ date: viewDay, booked: day?.due.length ?? 0, capacity: owner?.diaryCapacity }),
+    [viewDay, day, owner],
   )
 
   return (
     <div className="space-y-4">
+      {/*
+        WHICH DAY. Arrows either side, the day named where it has a name, and a way back to today
+        that only appears when you are not on it.
+
+        Asked for so an agent who has cleared today can get on with tomorrow rather than waiting
+        for it. Working ahead is a good habit and the app should not be the thing that stops it.
+      */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={() => goToDay(shiftDate(viewDay, -1))}
+          className="p-2 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+          title="The day before">
+          <ChevronLeft size={15} />
+        </button>
+        <button onClick={() => goToDay(shiftDate(viewDay, 1))}
+          className="p-2 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+          title="The day after">
+          <ChevronRight size={15} />
+        </button>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-slate-800">{longDate(viewDay)}</p>
+          {dayName(viewDay, today) && (
+            <p className="text-[11px] text-slate-400">{dayName(viewDay, today)}</p>
+          )}
+        </div>
+        {!isToday && (
+          <button onClick={() => goToDay(today)}
+            className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">
+            Back to today
+          </button>
+        )}
+      </div>
+
       {/* The four numbers that decide what the day looks like. */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Tile label="Due today" value={day ? String(day.due.length) : '—'}
+        <Tile label={isToday ? 'Due today' : `Due ${shortDate(viewDay)}`} value={day ? String(day.due.length) : '—'}
           note={day ? dayLoadSentence(todayLoad) : undefined}
           tone={todayLoad.level === 'over' || todayLoad.level === 'full' ? 'warn' : undefined} />
         {/*
@@ -121,7 +215,7 @@ export function DiaryPage() {
       <Card padded={false}>
         <div className="flex flex-wrap items-center gap-2 p-4 border-b border-slate-100">
           <div className="flex gap-1">
-            {(['Today', 'Backlog', 'Team'] as DiaryTab[]).map((t) => (
+            {(['Today', 'Backlog', 'Month', 'Team'] as DiaryTab[]).map((t) => (
               <button key={t} onClick={() => setTab(t)}
                 className={`text-sm font-medium px-3 py-1.5 rounded-lg transition-colors ${
                   tab === t ? 'bg-navy-950 text-white' : 'text-slate-500 hover:bg-slate-100'
@@ -203,12 +297,41 @@ export function DiaryPage() {
             <Loader2 size={15} className="animate-spin" /> Reading the diary…
           </p>}
 
+          {/*
+            What you do with a handful of ticked accounts.
+
+            Re-diarise and nothing else, deliberately. Marking work DONE in bulk cannot be right:
+            every finished entry takes an outcome and a next date, and a button that applied one
+            sentence to forty different conversations would produce forty identical, useless
+            records — exactly the kind of tidy-looking history that tells a team leader nothing.
+            Moving forty accounts to another day is one decision about forty accounts, which is a
+            different thing, and it is the one the firm asked for.
+          */}
+          {!loading && pickedRows.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 mb-3 rounded-lg bg-navy-950 text-white px-3 py-2.5">
+              <span className="text-sm font-medium">
+                {pickedRows.length} selected
+              </span>
+              <span className="text-xs text-slate-400">
+                {formatCurrency(pickedRows.reduce((sum, r) => sum + r.account.capitalOutstanding, 0))}
+              </span>
+              <div className="flex-1" />
+              <button onClick={() => setMoving(pickedRows)}
+                className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+                <CalendarClock size={14} /> Re-diarise
+              </button>
+              <button onClick={() => setPicked(new Set())}
+                className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg text-slate-300 hover:bg-white/10">
+                <X size={13} /> Clear
+              </button>
+            </div>
+          )}
+
           {!loading && tab === 'Today' && day && (
             <DiaryList
-              rows={orderDiary(
-                day.due.map((r) => ({ ...r, prescriptionOn: r.account.prescriptionDate, outstanding: r.account.capitalOutstanding })),
-                order, today,
-              )}
+              rows={shown}
+              picked={picked}
+              onPick={togglePick}
               today={today}
               empty={day.overdue.length > 0
                 ? 'Nothing is due today — but there is a backlog behind you.'
@@ -220,14 +343,30 @@ export function DiaryPage() {
 
           {!loading && tab === 'Backlog' && day && (
             <Backlog
-              rows={orderDiary(
-                day.overdue.map((r) => ({ ...r, prescriptionOn: r.account.prescriptionDate, outstanding: r.account.capitalOutstanding })),
-                order, today,
-              )}
+              rows={shown}
+              picked={picked}
+              onPick={togglePick}
               today={today}
               capacity={owner?.diaryCapacity}
               onComplete={setCompleting}
               onMove={setMoving}
+            />
+          )}
+
+          {/*
+            A month at a glance, with the count on every day. The same question the date picker
+            answers when you are booking one account — "how full is that day" — asked about your
+            own diary, so you can see where the week is heavy before you get to it.
+          */}
+          {!loading && tab === 'Month' && (
+            <MonthView
+              anchor={params.get('month') ?? viewDay}
+              onAnchor={(m) => setParam('month', m)}
+              ownerId={viewing}
+              capacity={owner?.diaryCapacity ?? null}
+              today={today}
+              selected={viewDay}
+              onPick={(date) => { goToDay(date); setTab('Today') }}
             />
           )}
 
@@ -257,12 +396,15 @@ export function DiaryPage() {
 
 /* ---------- the list ---------- */
 
-export function DiaryList({ rows, today, empty, onComplete, onMove }: {
+export function DiaryList({ rows, today, empty, onComplete, onMove, picked, onPick }: {
   rows: DiaryRow[]
   today: string
   empty: string
   onComplete: (row: DiaryRow) => void
   onMove: (row: DiaryRow) => void
+  /** Ticked ids. Omit to render a list with no tick boxes at all. */
+  picked?: Set<string>
+  onPick?: (id: string) => void
 }) {
   if (rows.length === 0) {
     return (
@@ -279,14 +421,34 @@ export function DiaryList({ rows, today, empty, onComplete, onMove }: {
         would be pointing at nothing.
       */}
       <div className={`${DIARY_GRID} hidden @3xl:grid pb-1.5 border-b border-slate-100`}>
-        <span className={COL_HEAD}>Account</span>
+        <span className={COL_HEAD}>
+          {/* Select all — and "all" means exactly what is on screen, nothing below the fold. */}
+          {picked && onPick && rows.length > 0 && (
+            <input
+              type="checkbox"
+              checked={rows.every((r) => picked.has(r.id))}
+              onChange={() => {
+                const allOn = rows.every((r) => picked.has(r.id))
+                for (const r of rows) {
+                  if (allOn === picked.has(r.id)) onPick(r.id)
+                }
+              }}
+              className="rounded border-slate-300 mr-2 align-middle"
+              title={rows.every((r) => picked.has(r.id)) ? 'Clear the selection' : `Select all ${rows.length}`}
+            />
+          )}
+          Account
+        </span>
         <span className={COL_HEAD}>Status</span>
         <span className={COL_HEAD}>Client</span>
         <span className={`${COL_HEAD} text-right`}>Outstanding</span>
         <span />
       </div>
       <ul className="divide-y divide-slate-100">
-        {rows.map((row) => <DiaryRowItem key={row.id} row={row} today={today} onComplete={onComplete} onMove={onMove} />)}
+        {rows.map((row) => (
+          <DiaryRowItem key={row.id} row={row} today={today} onComplete={onComplete} onMove={onMove}
+            picked={picked?.has(row.id)} onPick={onPick && (() => onPick(row.id))} />
+        ))}
       </ul>
     </div>
   )
@@ -318,11 +480,13 @@ const DIARY_GRID =
 
 const COL_HEAD = 'text-[10px] font-semibold uppercase tracking-wide text-slate-400'
 
-export function DiaryRowItem({ row, today, onComplete, onMove }: {
+export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }: {
   row: DiaryRow
   today: string
   onComplete: (row: DiaryRow) => void
   onMove: (row: DiaryRow) => void
+  picked?: boolean
+  onPick?: () => void
 }) {
   const { companies } = useAppStore()
   const { currentUser } = useAuth()
@@ -350,6 +514,11 @@ export function DiaryRowItem({ row, today, onComplete, onMove }: {
         {/* The account: who, and why it is back. */}
         <div className="col-span-2 @3xl:col-span-1 min-w-0">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {onPick && (
+              <input type="checkbox" checked={!!picked} onChange={onPick}
+                className="rounded border-slate-300 shrink-0"
+                title={`Select ${debtorName(row)}`} />
+            )}
             <Link to={`/accounts/${row.accountId}?diary=${row.id}`}
               className="font-medium text-sm text-slate-800 hover:text-[var(--c-steel)] truncate">
               {debtorName(row)}
@@ -422,12 +591,14 @@ export function DiaryRowItem({ row, today, onComplete, onMove }: {
 
 /* ---------- the backlog, and the tool for it ---------- */
 
-function Backlog({ rows, today, capacity, onComplete, onMove }: {
+function Backlog({ rows, today, capacity, onComplete, onMove, picked, onPick }: {
   rows: DiaryRow[]
   today: string
   capacity: number | null | undefined
   onComplete: (row: DiaryRow) => void
   onMove: (rows: DiaryRow[]) => void
+  picked?: Set<string>
+  onPick?: (id: string) => void
 }) {
   if (rows.length === 0) {
     return (
@@ -457,7 +628,135 @@ function Backlog({ rows, today, capacity, onComplete, onMove }: {
           Re-diarise all {rows.length}
         </button>
       </div>
-      <DiaryList rows={rows} today={today} empty="" onComplete={onComplete} onMove={(r) => onMove([r])} />
+      <DiaryList rows={rows} today={today} empty="" onComplete={onComplete} onMove={(r) => onMove([r])}
+        picked={picked} onPick={onPick} />
+    </div>
+  )
+}
+
+
+/* ---------- a month at a glance ---------- */
+
+const MONTH_LEVEL: Record<DayLoadLevel, string> = {
+  free: 'text-slate-700',
+  filling: 'text-[var(--c-gold-dark)] bg-[var(--tint-gold)]',
+  full: 'text-[var(--c-rust)] bg-[var(--tint-rust)]',
+  over: 'text-[var(--c-rust-deep)] bg-[var(--tint-rust-deep)]',
+}
+
+/**
+ * The month, with a count on every day.
+ *
+ * The same question the date picker answers while you are booking one account — how full is that
+ * day — asked about the whole month, so a heavy week is visible before you walk into it rather
+ * than on the morning it arrives. Click a day and it opens.
+ *
+ * One query for the whole grid, not one per day: forty-two round trips to draw a calendar is how
+ * a page comes to take a second to change month.
+ */
+function MonthView({ anchor, onAnchor, ownerId, capacity, today, selected, onPick }: {
+  anchor: string
+  onAnchor: (month: string) => void
+  ownerId: string | null
+  capacity: number | null
+  today: string
+  selected: string
+  onPick: (date: string) => void
+}) {
+  const [loads, setLoads] = useState<DayLoads | null>(null)
+  const [busy, setBusy] = useState(true)
+
+  const days = useMemo(() => monthGrid(anchor), [anchor])
+
+  useEffect(() => {
+    let cancelled = false
+    setBusy(true)
+    fetchDayLoads({ ownerId, from: days[0], to: days[days.length - 1] })
+      .then((l) => { if (!cancelled) setLoads(l) })
+      // A calendar that cannot count is still a calendar. Better than a page that will not open.
+      .catch(() => { if (!cancelled) setLoads(new Map()) })
+      .finally(() => { if (!cancelled) setBusy(false) })
+    return () => { cancelled = true }
+  }, [ownerId, days])
+
+  const total = days
+    .filter((d) => inMonth(d, anchor))
+    .reduce((sum, d) => sum + (loads?.get(d) ?? 0), 0)
+
+  return (
+    <div className="@container">
+      <div className="flex items-center justify-between mb-3">
+        <button onClick={() => onAnchor(shiftMonth(anchor, -1))}
+          className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
+          title="The month before">
+          <ChevronLeft size={15} />
+        </button>
+        <div className="text-center">
+          <p className="text-sm font-semibold text-slate-800">
+            {new Intl.DateTimeFormat('en-ZA', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+              .format(new Date(`${anchor.slice(0, 7)}-01T00:00:00Z`))}
+            {busy && <Loader2 size={12} className="inline ml-2 animate-spin text-slate-400" />}
+          </p>
+          <p className="text-[11px] text-slate-400">
+            {total === 0 ? 'Nothing booked this month' : `${total} account${total === 1 ? '' : 's'} booked`}
+          </p>
+        </div>
+        <button onClick={() => onAnchor(shiftMonth(anchor, 1))}
+          className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
+          title="The month after">
+          <ChevronRight size={15} />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-7 gap-1 mb-1">
+        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+          <span key={d} className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 text-center">
+            {/* One letter on a phone, three where there is room. */}
+            <span className="@md:hidden">{d.slice(0, 1)}</span>
+            <span className="hidden @md:inline">{d}</span>
+          </span>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7 gap-1">
+        {days.map((date) => {
+          const booked = loads?.get(date) ?? 0
+          const load = dayLoad({ date, booked, capacity })
+          const here = inMonth(date, anchor)
+          const isToday = date === today
+
+          return (
+            <button
+              key={date}
+              onClick={() => onPick(date)}
+              title={`${longDate(date)} — ${dayLoadSentence(load)}`}
+              className={[
+                'rounded-lg border px-1 py-2 text-center transition-colors min-h-[3.25rem]',
+                // Days from the neighbouring months stay visible but recede: they are context,
+                // not this month's work.
+                here ? 'border-slate-200 hover:border-slate-300' : 'border-transparent opacity-40',
+                load.closed ? 'bg-slate-50' : MONTH_LEVEL[load.level],
+                date === selected ? 'ring-2 ring-navy-900 ring-offset-1' : '',
+              ].join(' ')}
+            >
+              <span className={`block text-sm leading-none ${isToday ? 'font-bold text-navy-950' : 'font-semibold'}`}>
+                {Number(date.slice(8, 10))}
+              </span>
+              {/*
+                The count, and nothing where there is none. A month of zeroes is harder to scan
+                than a month with numbers only where the work is.
+              */}
+              <span className="block text-[11px] leading-none mt-1.5 tabular-nums">
+                {booked > 0 ? booked : load.closed ? '' : <span className="text-slate-300">–</span>}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      <p className="text-[11px] text-slate-400 mt-3">
+        Tap a day to work it. Weekends and public holidays are shaded — nobody is at a desk.
+      </p>
     </div>
   )
 }

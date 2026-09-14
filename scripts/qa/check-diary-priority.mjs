@@ -22,6 +22,7 @@ import {
   firstDayWithRoom, calendarStrip, isMissed, overdueBy, nearPrescription, daysBetween,
   shiftDate, DEFAULT_DIARY_CAPACITY, workingDaysFrom, planSpread,
   orderDiary, floatedKind, DIARY_ORDER_LABELS,
+  monthGrid, inMonth, shiftMonth, todayIso, dayName,
 } from '../../src/lib/diaryPriority.ts'
 
 let pass = 0
@@ -331,6 +332,48 @@ for (const order of DIARY_ORDER_LABELS.map((o) => o.id)) {
     failures.push(`order "${order}" lost or duplicated a row`)
   } else pass += 1
 }
+
+/* ---------- 11. a month at a time ---------- */
+
+const grid = monthGrid('2026-09-14')
+// Always six weeks, so the grid does not change height as you page through the year and move
+// the day you were about to click.
+check('a month grid is six whole weeks', grid.length, 42)
+check('it starts on a Monday', new Date(`${grid[0]}T00:00:00Z`).getUTCDay(), 1)
+// 1 September 2026 is a Tuesday, so the grid opens on Monday 31 August.
+check('it reaches back to finish the first week', grid[0], '2026-08-31')
+check('and forward to finish the last', grid[41], '2026-10-11')
+ok('every day of September is in it',
+  Array.from({ length: 30 }, (_, i) => `2026-09-${String(i + 1).padStart(2, '0')}`).every((d) => grid.includes(d)))
+
+// A month that begins on a Monday must not gain a blank week in front of it.
+const october = monthGrid('2026-10-05')
+check('a month starting on a Thursday still starts its grid on a Monday', october[0], '2026-09-28')
+// February in a leap year, the classic off-by-one.
+const feb = monthGrid('2028-02-10')
+ok('a leap February contains the 29th', feb.includes('2028-02-29'))
+check('and is still six weeks', feb.length, 42)
+
+check('a day in the month is in the month', inMonth('2026-09-30', '2026-09-14'), true)
+check('a neighbour is not', inMonth('2026-10-01', '2026-09-14'), false)
+check('nor is the one before', inMonth('2026-08-31', '2026-09-14'), false)
+
+check('next month', shiftMonth('2026-09-14', 1), '2026-10-01')
+check('previous month', shiftMonth('2026-09-14', -1), '2026-08-01')
+check('across a year end forwards', shiftMonth('2026-12-20', 1), '2027-01-01')
+check('across a year end backwards', shiftMonth('2026-01-20', -1), '2025-12-01')
+check('a whole year', shiftMonth('2026-09-14', 12), '2027-09-01')
+
+// todayIso must use the LOCAL day. toISOString() would roll a South African evening into
+// tomorrow, and an agent would open the app at 22:00 and be shown work that is not due yet.
+check('today is the local day, not UTC',
+  todayIso(new Date(2026, 8, 14, 23, 30)), '2026-09-14')
+check('and pads single digits', todayIso(new Date(2026, 0, 5, 9, 0)), '2026-01-05')
+
+check('today is named', dayName('2026-09-14', today), 'Today')
+check('tomorrow is named', dayName('2026-09-15', today), 'Tomorrow')
+check('yesterday is named', dayName('2026-09-13', today), 'Yesterday')
+check('further out is not', dayName('2026-09-23', today), '')
 
 /* ---------- report ---------- */
 
