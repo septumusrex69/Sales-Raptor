@@ -17,7 +17,7 @@
  */
 import {
   planLeadsImport, leadInsertRows, oneAmount, isoDate, statusFor, sourceFor, rejectionFor,
-  splitName, SheetColumns, splitMarketers, marketerCredits, ownerFor,
+  splitName, SheetColumns, splitMarketers, marketerCredits, ownerFor, phoneNumber,
 } from '../../src/lib/leadsImport.ts'
 import { plainNumber } from '../../src/lib/xlsx.ts'
 
@@ -180,6 +180,12 @@ check('the 31st of February is not a day', isoDate('2025/02/31'), null)
 check('a leap day that exists', isoDate('2024/02/29'), '2024-02-29')
 check('a leap day that does not', isoDate('2025/02/29'), null)
 check('a note is not a date', isoDate('call him back'), null)
+// "0206/07/27" is in the workbook — 2026 with the digits transposed. Left alone it produced a
+// lead signed in the third century, which sorts above everything and reads as a bug in Raptor.
+check('a year nobody meant', isoDate('0206/07/27'), null)
+check('nor one far in the future', isoDate('2206/07/27'), null)
+check('the near future is fine — these are diarised ahead', isoDate('2026/07/27'), '2026-07-27')
+check('and so is the past the firm actually has', isoDate('2023/02/11'), '2023-02-11')
 check('nothing', isoDate(''), null)
 
 /* ---------- 5. the status codes ---------- */
@@ -290,11 +296,23 @@ const plan = planLeadsImport(workbook)
 check('the same lead on two tabs comes through once', plan.counts.total, 2)
 check('and the duplicate is counted', plan.counts.duplicates, 1)
 check('the tab that is not a leads list is skipped',
-  plan.sheets.find((s) => s.name === 'Targets').skipped !== null, true)
-check('and says why',
-  (plan.sheets.find((s) => s.name === 'Targets').skipped ?? '').includes('Client Name'), true)
-ok('a skipped tab is a warning somebody sees',
-  plan.warnings.some((w) => w.includes('Targets')))
+  plan.sheets.find((s) => s.name === 'Targets').skipped, 'not a leads list')
+/*
+ * A covering note is not worth a warning — warning about it trains people to ignore warnings.
+ * A leads tab whose key column has been RENAMED is the opposite: importing without it loses a
+ * month quietly, so that one shouts.
+ */
+ok('a tab that was never a leads list is not warned about',
+  !plan.warnings.some((w) => w.includes('Targets')))
+
+const renamed = HEADERS.common.map((h) => (h === 'Client Name' ? 'Company' : h))
+const lost = planLeadsImport([{
+  name: '9. 11 Sep - 10 Oct 2025',
+  rows: [renamed, laidOut(HEADERS.common, LEAD)],
+}])
+check('a leads tab with its key column renamed is skipped', lost.rows.length, 0)
+ok('and it is warned about, because a month would go missing quietly',
+  lost.warnings.some((w) => w.includes('9. 11 Sep - 10 Oct 2025') && w.includes('renamed')))
 check('an empty tab is reported as empty, not as a broken tab',
   plan.sheets.find((s) => s.name === 'Leads Closed Previous months').skipped, 'no rows')
 ok('an empty tab is not worth warning about',
@@ -443,6 +461,30 @@ check('a whole book splits across its owners',
 check('and one owner for everybody still works',
   leadInsertRows(mixed, 'everyone-id').map((r) => r.owner_id),
   ['everyone-id', 'everyone-id', 'everyone-id'])
+
+/* ---------- 14. numbers that can be dialled ---------- */
+
+/*
+ * Excel stores a number typed as digits as a number, and a number has no leading zero, so
+ * 0828258252 comes back as 828258252 — 627 of the 1,706 numbers in this workbook. The only
+ * symptom is a collector saying the number does not work.
+ */
+check('a mobile that lost its zero gets it back', phoneNumber('828258252'), '0828258252')
+check('and one starting 7', phoneNumber('722519378'), '0722519378')
+check('and one starting 6', phoneNumber('660185836'), '0660185836')
+check('a landline too — nine digits is nine digits', phoneNumber('117894561'), '0117894561')
+check('one that still has its zero is left alone', phoneNumber('082 555 1234'), '082 555 1234')
+check('spacing is not tidied up', phoneNumber('082  555-1234'), '082  555-1234')
+check('an international number is left alone', phoneNumber('263 774 452 774'), '263 774 452 774')
+check('and one written with a plus', phoneNumber('+27 82 555 1234'), '+27 82 555 1234')
+// The nine-digit rule must not fire on something that only looks like nine digits.
+check('nine digits behind a plus is not a local number', phoneNumber('+12345 6789'), '+12345 6789')
+check('a field with no number in it is no number', phoneNumber('No number'), null)
+check('a dash is no number', phoneNumber('-'), null)
+check('nothing is nothing', phoneNumber(''), null)
+
+const dialable = only(oneLead('common', { ...LEAD, 'Cell': '828258252' }))
+check('and it reaches the lead that way', dialable.mobile, '0828258252')
 
 /* ---------- report ---------- */
 
