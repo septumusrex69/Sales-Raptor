@@ -16,6 +16,7 @@ import { DiaryWorkBar } from '../src/components/diary/DiaryWorkBar'
 import { DictateButton } from '../src/components/ui/Dictate'
 import { DashboardHero } from '../src/components/dashboard/DashboardHero'
 import { ReminderWatcher } from '../src/components/reminders/ReminderWatcher'
+import { DiariseModal } from '../src/components/diary/DiariseModal'
 
 const workAccount = {
   id: 'a1', mainComment: null, mainCommentAt: null, prescriptionDate: '2027-01-01',
@@ -106,6 +107,13 @@ function App() {
             </div>
           </Row>
         ))}
+        {/*
+          ONE of these, and not inside a Row: Modal portals to document.body, so it escapes any
+          wrapper and a probe around it measures an empty div. The width comes from the viewport
+          in crop.mjs instead.
+        */}
+        <DiariseModal accountId="a1" accountLabel="Nomvula van der Westhuizen-Bekker · BF-10023"
+          prescriptionDate="2026-10-01" onClose={() => {}} onDone={() => {}} />
         {[390, 640, 1024].map((w) => (
           <Row key={'rem' + w} label="reminder" width={w}>
             {/*

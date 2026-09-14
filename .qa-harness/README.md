@@ -50,17 +50,24 @@ against `public/` when the app is served from `/` and against the filesystem roo
 The file is in the repo and loads fine in the real app. Ignore it; any *other* console error is
 real.
 
-## The stylesheet hash goes stale, again and again
+## The stylesheet hash: handled, and why it is worth handling
 
-`index.html` links a HASHED file out of `dist/`, and `npm run build` gives it a new name every
-time the CSS content changes. Point it at the old one and the page renders completely unstyled —
+`index.html` links a HASHED file out of `dist/`, and `npm run build` renames it every time the
+CSS content changes. A stale link does not fail loudly — the page renders completely unstyled,
 which does not look like a broken link, it looks like a layout bug you are about to go and fix.
-It has now cost two readings. Before shooting:
+It cost three false readings in one day.
 
-    ls -t dist/assets/*.css | head -1     # and put that filename in index.html
+`build.mjs` now repoints it on every run, so the rule is simply: **run `npm run build`, then
+`node .qa-harness/build.mjs`, then shoot.** Never shoot without building the bundle.
 
 ## Arbitrary Tailwind classes do not work in here
 
 This directory is not scanned by Tailwind, so a class like `h-[280px]` or `[&_.fixed]:absolute`
 written ONLY in a harness file is never emitted and silently does nothing. Use the plain CSS
 block in index.html for harness-only layout, as `.reminder-probe` does.
+
+## Modal portals out of any wrapper
+
+`components/ui/Modal` renders through `createPortal` to `document.body`, so a probe div wrapped
+around one measures an empty box. Render a single modal, set the PAGE viewport to the width you
+care about, and measure `[data-modal-open]` itself.
