@@ -14,6 +14,7 @@ export const MEANINGFUL_ACTIVITY_TYPES: ActivityType[] = [
   'Call',
   'Email',
   'WhatsApp',
+  'SMS',
   'Meeting',
   'Note',
   'Proposal',
@@ -27,7 +28,7 @@ export function isMeaningfulActivity(activity: Activity): boolean {
 }
 
 /** Activity types that count as an attempt to reach a lead — used for response-time / contact metrics. */
-export const CONTACT_ACTIVITY_TYPES: ActivityType[] = ['Call', 'Email', 'WhatsApp', 'Meeting']
+export const CONTACT_ACTIVITY_TYPES: ActivityType[] = ['Call', 'Email', 'WhatsApp', 'SMS', 'Meeting']
 
 export function isContactActivity(activity: Activity): boolean {
   return CONTACT_ACTIVITY_TYPES.includes(activity.type)

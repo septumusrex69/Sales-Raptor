@@ -28,6 +28,7 @@ import {
   RecordTabs, useRecordLayout,
 } from '../../components/record/RecordShell'
 import { CrmCallButton } from '../../components/record/CrmCallButton'
+import { CrmSmsModal } from '../../components/record/CrmSmsModal'
 import {
   RecordComment, RecordCommentFact, RecordCommentSummary,
 } from '../../components/record/RecordComment'
@@ -80,6 +81,7 @@ export function DealDetail() {
    */
   const [tab, setTab] = useState<DealTab>('Overview')
   const [layout, chooseLayout] = useRecordLayout('raptor.deal.layout')
+  const [smsOpen, setSmsOpen] = useState(false)
 
   const [editOpen, setEditOpen] = useState(false)
   const [wonOpen, setWonOpen] = useState(false)
@@ -539,7 +541,10 @@ export function DealDetail() {
             className={`${ACTION_BASE} ${ACTION_ENABLED}`}
           />
           <RecordAction icon={MessageSquare} label="SMS"
-            title="Not built for deals yet \u2014 the SMS route is tied to a debtor's account, where it raises a fee." />
+            onClick={contactNumbers.length > 0 ? () => setSmsOpen(true) : undefined}
+            title={contactNumbers.length > 0
+              ? 'Text the contact on this deal \u2014 nothing is charged'
+              : 'No phone number on this deal\u2019s contact'} />
           <RecordAction icon={Mail} label="Email" onClick={() => setComposeOpen(true)}
             title="Send from your connected mailbox" />
           <RecordAction icon={StickyNote} label="Add Activity" onClick={() => setActivityOpen(true)}
@@ -614,6 +619,17 @@ export function DealDetail() {
 
 
 
+
+      {/* Nothing is charged for this — see CrmSmsModal, which says so on screen too. */}
+      {smsOpen && (
+        <CrmSmsModal
+          numbers={contactNumbers}
+          target={{ dealId: deal.id }}
+          who={contact ? `${contact.firstName} ${contact.lastName}` : deal.name}
+          onClose={() => setSmsOpen(false)}
+          onSent={(a) => addActivity({ type: 'SMS', ...a, dealId: deal.id, companyId: deal.companyId, contactId: deal.contactId })}
+        />
+      )}
 
       {composeOpen && (
         <ComposeEmailModal

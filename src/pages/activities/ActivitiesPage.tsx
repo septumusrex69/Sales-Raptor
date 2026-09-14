@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Phone, Mail, MessageCircle, Calendar, StickyNote, FileText, CheckSquare, ArrowRightLeft, Trophy, XOctagon, Inbox } from 'lucide-react'
+import { Phone, Mail, MessageCircle, MessageSquare, Calendar, StickyNote, FileText, CheckSquare, ArrowRightLeft, Trophy, XOctagon, Inbox } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
@@ -15,6 +15,7 @@ const ACTIVITY_TYPES: ActivityType[] = [
   'Call',
   'Email',
   'WhatsApp',
+  'SMS',
   'Meeting',
   'Note',
   'Proposal',
@@ -32,6 +33,7 @@ const ICONS: Record<ActivityType, typeof Phone> = {
   Call: Phone,
   Email: Mail,
   WhatsApp: MessageCircle,
+  SMS: MessageSquare,
   Meeting: Calendar,
   Note: StickyNote,
   Proposal: FileText,

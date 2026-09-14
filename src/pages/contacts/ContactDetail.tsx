@@ -15,6 +15,7 @@ import {
   RecordFigures, RecordLayout, RecordLayoutSwitcher, RecordMoreAction, RecordTabs, useRecordLayout,
 } from '../../components/record/RecordShell'
 import { CrmCallButton } from '../../components/record/CrmCallButton'
+import { CrmSmsModal } from '../../components/record/CrmSmsModal'
 import {
   RecordComment, RecordCommentFact, RecordCommentSummary,
 } from '../../components/record/RecordComment'
@@ -29,6 +30,7 @@ export function ContactDetail() {
   const contact = contacts.find((c) => c.id === id)
   const [tab, setTab] = useState<ContactTab>('Overview')
   const [layout, chooseLayout] = useRecordLayout('raptor.contact.layout')
+  const [smsOpen, setSmsOpen] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)
   const [emailOpen, setEmailOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
@@ -280,7 +282,10 @@ export function ContactDetail() {
             className={`${ACTION_BASE} ${ACTION_ENABLED}`}
           />
           <RecordAction icon={MessageSquare} label="SMS"
-            title="Not built for contacts yet \u2014 the SMS route is tied to a debtor's account, where it raises a fee." />
+            onClick={contactNumbers.length > 0 ? () => setSmsOpen(true) : undefined}
+            title={contactNumbers.length > 0
+              ? 'Text them \u2014 nothing is charged'
+              : 'No phone number on this contact yet'} />
           <RecordAction icon={Mail} label="Email"
             onClick={contact.email ? () => setEmailOpen(true) : undefined}
             title={contact.email ? 'Send from your connected mailbox' : 'No email address on this contact yet'} />
@@ -319,6 +324,17 @@ export function ContactDetail() {
       {tab === 'Activity' && activityPanel}
       {tab === 'Notes' && notesPanel}
       {tab === 'Tasks' && tasksPanel}
+
+      {/* Nothing is charged for this — see CrmSmsModal, which says so on screen too. */}
+      {smsOpen && (
+        <CrmSmsModal
+          numbers={contactNumbers}
+          target={{ contactId: contact.id }}
+          who={`${contact.firstName} ${contact.lastName}`}
+          onClose={() => setSmsOpen(false)}
+          onSent={(a) => addActivity({ type: 'SMS', ...a, contactId: contact.id, companyId: contact.companyId })}
+        />
+      )}
 
       {noteOpen && (
         <NoteModal

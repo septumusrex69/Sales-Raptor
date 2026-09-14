@@ -1545,7 +1545,20 @@ create unique index if not exists account_payments_swordfish_id_idx
 -- then delivered or not, and a debtor may answer it. A timeline entry cannot change its mind.
 create table if not exists public.sms_messages (
   id uuid primary key default gen_random_uuid(),
+  -- WHO THIS IS ADDRESSED TO, and with it who pays. Exactly one of the five is set.
+  --
+  -- account_id is a DEBTOR, and only a debtor's message raises Annexure B item 1(c) at R3,50 a
+  -- segment, because that tariff recovers the cost of collecting from them. The other four are
+  -- the firm's own side of the business: a lead owes the firm nothing, and a client is the party
+  -- paying the firm. Nothing is charged for those.
+  --
+  -- Written as columns and constraints rather than as a rule in the application, because a rule
+  -- somebody has to remember is a rule that gets forgotten the day a new page is added.
   account_id uuid references public.debtor_accounts (id) on delete cascade,
+  lead_id uuid references public.leads (id) on delete cascade,
+  deal_id uuid references public.deals (id) on delete cascade,
+  company_id uuid references public.companies (id) on delete cascade,
+  contact_id uuid references public.contacts (id) on delete cascade,
   direction text not null default 'outbound' check (direction in ('outbound', 'inbound')),
   -- International format, digits only, as the network addresses it.
   msisdn text not null,
@@ -1567,10 +1580,28 @@ create table if not exists public.sms_messages (
   delivered_at timestamptz,
   created_by uuid references public.profiles (id) on delete set null,
   created_by_name text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+
+  -- One record, not several. A message on both a lead and an account would be ambiguous about
+  -- who pays for it, and ambiguity in a fee is the one thing this table exists to prevent.
+  constraint sms_messages_one_target check (
+    (account_id is not null)::int
+      + (lead_id is not null)::int
+      + (deal_id is not null)::int
+      + (company_id is not null)::int
+      + (contact_id is not null)::int = 1
+  ),
+  -- A fee can only hang off a debtor. This is the structural half of "fees for SMSs are never
+  -- charged to clients, deals or leads": even the service key, which bypasses RLS entirely, cannot
+  -- write a fee onto a message that is not addressed to an account.
+  constraint sms_messages_fee_needs_account check (fee_id is null or account_id is not null)
 );
 
 create index if not exists sms_messages_account_idx on public.sms_messages (account_id, created_at desc);
+create index if not exists sms_messages_lead_idx on public.sms_messages (lead_id, created_at desc) where lead_id is not null;
+create index if not exists sms_messages_deal_idx on public.sms_messages (deal_id, created_at desc) where deal_id is not null;
+create index if not exists sms_messages_company_idx on public.sms_messages (company_id, created_at desc) where company_id is not null;
+create index if not exists sms_messages_contact_idx on public.sms_messages (contact_id, created_at desc) where contact_id is not null;
 create index if not exists sms_messages_reference_idx on public.sms_messages (reference);
 create index if not exists sms_messages_provider_idx on public.sms_messages (provider_id) where provider_id is not null;
 

@@ -353,6 +353,14 @@ export interface Task {
 export type ActivityType =
   | 'Call'
   | 'Email'
+  /*
+   * A text message, on a record that is not a debtor's account.
+   *
+   * A debtor's SMS lives on the account's own timeline and raises Annexure B item 1(c); a lead's
+   * or a client's is sales activity and charges nobody, so it belongs here with the calls and the
+   * emails. See crmSms.
+   */
+  | 'SMS'
   | 'WhatsApp'
   | 'Meeting'
   | 'Note'

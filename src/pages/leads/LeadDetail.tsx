@@ -27,6 +27,7 @@ import {
   RecordTabs, useRecordLayout,
 } from '../../components/record/RecordShell'
 import { CrmCallButton } from '../../components/record/CrmCallButton'
+import { CrmSmsModal } from '../../components/record/CrmSmsModal'
 import {
   RecordComment, RecordCommentFact, RecordCommentSummary,
 } from '../../components/record/RecordComment'
@@ -79,6 +80,7 @@ export function LeadDetail() {
    */
   const [tab, setTab] = useState<LeadTab>('Overview')
   const [layout, chooseLayout] = useRecordLayout('raptor.lead.layout')
+  const [smsOpen, setSmsOpen] = useState(false)
 
   const leadNumbers = useMemo(() => [
     ...(lead?.mobile ? [{ label: 'Mobile', value: lead.mobile }] : []),
@@ -607,14 +609,11 @@ export function LeadDetail() {
               subject={`${lead.firstName} ${lead.lastName}`}
               className={`${ACTION_BASE} ${ACTION_ENABLED}`}
             />
-            {/*
-              Honest rather than absent. The send endpoint is built around an account, because
-              sending a debtor an SMS raises item 1(c) — so pointing a lead at it would either
-              fail or charge somebody who owes us nothing. Saying so beats a button that
-              swallows the click, and beats pretending the firm never asked.
-            */}
             <RecordAction icon={MessageSquare} label="SMS"
-              title="Not built for leads yet — the SMS route is tied to a debtor's account, where it raises a fee." />
+              onClick={leadNumbers.length > 0 ? () => setSmsOpen(true) : undefined}
+              title={leadNumbers.length > 0
+                ? 'Text this lead — nothing is charged'
+                : 'No phone number on this lead yet'} />
             <RecordAction icon={Mail} label="Email"
               onClick={lead.email ? () => setEmailOpen(true) : undefined}
               title={lead.email ? 'Send from your connected mailbox' : 'No email address on this lead yet'} />
@@ -693,6 +692,17 @@ export function LeadDetail() {
       {tab === 'Emails' && emailsPanel}
       {tab === 'Notes' && notesPanel}
       {tab === 'Tasks' && tasksPanel}
+
+      {/* Nothing is charged for this — see CrmSmsModal, which says so on screen too. */}
+      {smsOpen && (
+        <CrmSmsModal
+          numbers={leadNumbers}
+          target={{ leadId: lead.id }}
+          who={`${lead.firstName} ${lead.lastName}`}
+          onClose={() => setSmsOpen(false)}
+          onSent={(a) => addActivity({ type: 'SMS', ...a, leadId: lead.id, companyId: lead.companyId })}
+        />
+      )}
 
       {editOpen && (
         <EditLeadModal lead={lead} reps={reps} canReassign={canReassign(currentUser)} onClose={() => setEditOpen(false)} onSave={(patch) => updateLead(lead.id, patch)} />
