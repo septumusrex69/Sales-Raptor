@@ -63,6 +63,34 @@ if (kindsInCheck) {
   check('every kind the database allows has a priority', allowed, Object.keys(DIARY_PRIORITY).sort())
 }
 
+/*
+ * The words themselves, pinned.
+ *
+ * These are the firm's own terms, given in their own voice — "Broken PTP", not "Broken promise".
+ * A label is what an agent picks from under time pressure sixty times a day, so drifting back to
+ * a developer's wording is a real regression and an invisible one: nothing breaks, the vocabulary
+ * just stops being theirs.
+ */
+{
+  const labels = Object.fromEntries(
+    Object.entries(DIARY_KINDS).map(([k, v]) => [k, v.label]),
+  )
+  check('the firm\'s own words', labels, {
+    promise_broken: 'Broken PTP',
+    payment_default: 'Arrangement default',
+    new_account: 'New account',
+    promise_due: 'PTP due',
+    callback: 'Callback requested',
+    dispute_chase: 'Dispute follow-up',
+    trace: 'Trace follow-up',
+    review: 'Follow-up',
+  })
+  ok('no two kinds read the same',
+    new Set(Object.values(labels)).size === Object.keys(labels).length)
+  ok('every kind says why it exists',
+    Object.values(DIARY_KINDS).every((v) => typeof v.why === 'string' && v.why.length > 20))
+}
+
 /* ---------- 2. the case the real book is full of ---------- */
 
 const today = '2026-09-14'
@@ -112,7 +140,7 @@ ok('a missing prescription date is not urgent', !nearPrescription(null, today))
 ok('a missing prescription date is not urgent (undefined)', !nearPrescription(undefined, today))
 
 check(
-  'a routine review that is about to prescribe beats a broken promise that is not',
+  'a routine review that is about to prescribe beats a broken PTP that is not',
   sortDiary([
     { id: 'broken', kind: 'promise_broken', dueOn: today, prescriptionOn: '2029-01-01' },
     { id: 'prescribing', kind: 'review', dueOn: today, prescriptionOn: '2026-10-01' },
@@ -382,5 +410,5 @@ if (failures.length > 0) {
   for (const f of failures) console.error(`  ✗ ${f}`)
   process.exit(1)
 }
-console.log(`PASS — ${pass} checks: the TypeScript ladder matches the SQL, and a broken promise`)
-console.log('       is worked before a year-old review while an account about to prescribe beats both.')
+console.log(`PASS — ${pass} checks: the TypeScript ladder matches the SQL, and a broken PTP`)
+console.log('       is worked before a year-old follow-up while an account about to prescribe beats both.')

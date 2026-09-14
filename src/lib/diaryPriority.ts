@@ -57,38 +57,55 @@ interface KindMeta {
   why: string
 }
 
+/*
+ * THE LABELS ARE THE FIRM'S OWN WORDS; the keys underneath them are not.
+ *
+ * `promise_broken` and the rest are stored in diary_entries.kind, checked by a constraint, and
+ * fed to diary_priority() in the database. Renaming what an agent reads is a change to this
+ * file; renaming the keys would be a migration across every row, the CHECK, the function and
+ * the type, to no one's benefit. Nobody outside this file ever sees a key.
+ */
 export const DIARY_KINDS: Record<DiaryKind, KindMeta> = {
   promise_broken: {
-    label: 'Broken promise',
+    label: 'Broken PTP',
     why: 'They agreed an amount and a date and did not pay. Most collectable, and most likely to go quiet if left.',
   },
   payment_default: {
-    label: 'Payment defaulted',
-    why: 'An instalment on a running arrangement did not come off.',
+    label: 'Arrangement default',
+    why: 'An instalment on a running arrangement did not come off. Different conversation to a one-off promise that broke.',
   },
   new_account: {
     label: 'New account',
     why: 'Freshly handed over and never worked. Debt collects best while it is new.',
   },
   promise_due: {
-    label: 'Promise due',
-    why: 'Money was due today. Check it arrived before it becomes a broken promise.',
+    label: 'PTP due',
+    why: 'The day the money was promised for. Check it arrived, before it becomes a broken PTP.',
   },
   callback: {
-    label: 'Call back',
-    why: 'We told the debtor we would ring on this day.',
+    label: 'Callback requested',
+    why: 'The debtor asked to be rung on this day. Their appointment, not ours.',
   },
   dispute_chase: {
-    label: 'Dispute chase',
+    label: 'Dispute follow-up',
     why: 'The seven working days the debtor was given are running out.',
   },
   trace: {
-    label: 'Trace',
+    label: 'Trace follow-up',
     why: 'Waiting on a tracing result.',
   },
   review: {
-    label: 'Review',
-    why: 'The ordinary diarised chase.',
+    /*
+     * The catch-all, named honestly.
+     *
+     * It was "Review", which nobody could define — including the firm, who asked what it meant.
+     * A vocabulary needs somewhere to put "nothing specific happened, look at this again in
+     * sixty days", or an agent with exactly that has to pick something untrue, and then it sits
+     * in the queue claiming to be a callback and corrupts both the order and any report run off
+     * it. Bottom of the ladder, so it can never jump a broken PTP.
+     */
+    label: 'Follow-up',
+    why: 'The ordinary diarised chase, where nothing more specific applies.',
   },
 }
 

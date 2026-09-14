@@ -119,7 +119,7 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
           </select>
           {/*
             The ladder is not obvious from the labels, so the box says what choosing this one
-            does. An agent who knows that "Broken promise" jumps the queue will use it honestly;
+            does. An agent who knows that "Broken PTP" jumps the queue will use it honestly;
             one who does not will pick whatever is at the top.
           */}
           <span className="block text-[11px] text-slate-400 mt-1.5">{DIARY_KINDS[kind].why}</span>
