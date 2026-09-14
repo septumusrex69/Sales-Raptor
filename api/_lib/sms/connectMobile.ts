@@ -118,14 +118,32 @@ export async function sendSms(input: {
   if (!input.text.trim()) throw new SmsError(400, 'An SMS needs a message.')
 
   const url = new URL(CONNECT_MOBILE_URL)
-  url.searchParams.set('api_token', token)
   url.searchParams.set('da', msisdn)
   url.searchParams.set('ud', input.text)
   url.searchParams.set('id', input.reference)
 
+  /*
+   * THE TOKEN GOES IN A HEADER, NOT THE QUERY STRING.
+   *
+   * Connect Mobile's own credential sheet documents `Authorization: Bearer <token>` and shows a
+   * sample URL with no token in it at all. Their first email had shown `?api_token=`, which is
+   * what this sent, and it worked — but a secret in a query string is a secret in every access
+   * log, proxy log and error report it passes through on the way, at both ends. This token has
+   * now been reissued twice; there is no reason to keep writing it into URLs.
+   *
+   * The query parameter is kept as well, deliberately and temporarily. Sending is working today
+   * on that form, and dropping it on the strength of a PDF would risk breaking the one thing we
+   * know works. Once a real send has gone out and been delivered on the header alone, delete the
+   * `api_token` line below — and then the token stops appearing in anybody's logs.
+   */
+  url.searchParams.set('api_token', token)
+
   let res: Response
   try {
-    res = await fetch(url, { method: 'GET' })
+    res = await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    })
   } catch {
     throw new SmsError(502, 'Could not reach Connect Mobile.')
   }
