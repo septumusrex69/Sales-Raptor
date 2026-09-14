@@ -18,12 +18,12 @@ import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
 import { ZoomableImage } from '../../components/ui/ZoomableImage'
 import {
-  blockedBy, blockSender, blockSenders, countNeedsFiling, countUnread, deleteMail,
+  blockedBy, blockSender, blockSenders, countNeedsFiling, countUnread, debtorFileFor, deleteMail,
   domainBlockProblem, domainOf, downloadAttachment, emptyJunk, fetchBlockedSenders, fetchMail,
   fetchMailBody, linkMailToAccount, linkMailToRecord, markMailRead, markMailUnread, moveFiledMail,
   saveAccountContacts, setJunk, unblockSender, unmatchMail,
-  type BlockedSender, type BlockOutcome, type InlineImage, type LinkedRecord, type MailFilter,
-  type MailItem,
+  type BlockedSender, type BlockOutcome, type DebtorFile, type InlineImage, type LinkedRecord,
+  type MailFilter, type MailItem,
 } from '../../lib/userMail'
 import { useAppStore } from '../../store/AppStore'
 import {
@@ -1595,6 +1595,26 @@ function BlockModal({ mail, userId, onClose, onDone }: {
   const [error, setError] = useState<string | null>(null)
   const domain = domainOf(mail.fromAddress)
   const domainProblem = domainBlockProblem(mail.fromAddress)
+  /*
+   * Whether this can be blocked at all, asked when the box opens rather than after the click.
+   *
+   * It used to offer both choices, let you press one, and only then say no — with a footnote
+   * underneath stating the rule in general terms, which read as a caution rather than a refusal.
+   * The address is on the file because a tick box put it there at matching time, so the agent has
+   * no memory of it and nothing on screen said which account to go and look at. A dead end.
+   */
+  const [onFile, setOnFile] = useState<DebtorFile | null | undefined>(undefined)
+  useEffect(() => {
+    let alive = true
+    void debtorFileFor(mail.fromAddress)
+      .then((f) => { if (alive) setOnFile(f) })
+      // A lookup that fails must not silently turn the guard off: blockSender checks again on the
+      // server side and refuses there, so the worst case is the old behaviour, not a wrong block.
+      .catch(() => { if (alive) setOnFile(null) })
+    return () => { alive = false }
+  }, [mail.fromAddress])
+  const checking = onFile === undefined
+  const refused = !!onFile
 
   async function block(scope: 'address' | 'domain') {
     if (!userId) return
@@ -1620,6 +1640,36 @@ function BlockModal({ mail, userId, onClose, onDone }: {
 
   return (
     <Modal title="Block this sender" onClose={onClose} width={480}>
+      {/*
+        The refusal comes first and says what to do about it, because it is the whole answer: no
+        amount of reading the rest helps if this address cannot be blocked.
+      */}
+      {refused && onFile && (
+        <div className="rounded-lg border border-gold-200 bg-gold-50 p-3.5 mb-4">
+          <p className="text-sm text-navy-950 flex items-start gap-1.5">
+            <AlertTriangle size={14} className="shrink-0 mt-0.5 text-gold-600" />
+            <span>
+              <span className="font-medium">{mail.fromAddress}</span> is saved as a contact on{' '}
+              <span className="font-medium">{onFile.label}</span>
+              {onFile.accountNumber ? ` (${onFile.accountNumber})` : ''}.
+            </span>
+          </p>
+          <p className="text-xs text-slate-500 mt-2">
+            Blocking it would stop that debtor&rsquo;s mail reaching Raptor at all, and because a
+            blocked sender never becomes a row, nobody would see it go missing. Take the address
+            off the account first, then block it.
+          </p>
+          {/*
+            The way out. It usually got onto the file by the tick box when this message was
+            matched — so Unmatch offers to take it off again, which is the one-click route.
+          */}
+          <Link to={`/accounts/${onFile.accountId}`}
+            className="inline-flex items-center gap-1.5 mt-3 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300">
+            <ExternalLink size={13} /> Open {onFile.label}
+          </Link>
+        </div>
+      )}
+
       <p className="text-sm text-slate-500">
         Their mail will stop appearing in Raptor from the next sync, and anything of theirs still
         sitting here will be cleared out. It stays in your real mailbox &mdash; this only stops
@@ -1627,13 +1677,13 @@ function BlockModal({ mail, userId, onClose, onDone }: {
       </p>
 
       <div className="mt-4 space-y-2">
-        <button disabled={busy} onClick={() => void block('address')}
-          className="w-full text-left px-3.5 py-3 rounded-lg border border-slate-200 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50">
+        <button disabled={busy || checking || refused} onClick={() => void block('address')}
+          className="w-full text-left px-3.5 py-3 rounded-lg border border-slate-200 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-transparent">
           <span className="block text-sm font-medium text-slate-800">Just this address</span>
           <span className="block text-xs text-slate-400 mt-0.5 truncate">{mail.fromAddress}</span>
         </button>
 
-        <button disabled={busy || !!domainProblem} onClick={() => void block('domain')}
+        <button disabled={busy || checking || refused || !!domainProblem} onClick={() => void block('domain')}
           title={domainProblem ?? undefined}
           className="w-full text-left px-3.5 py-3 rounded-lg border border-slate-200 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-transparent">
           <span className="block text-sm font-medium text-slate-800">
@@ -1652,14 +1702,16 @@ function BlockModal({ mail, userId, onClose, onDone }: {
         </p>
       )}
 
+      {/* The general rule is said above, and only when it applies. What is left is the part that
+          is true either way. */}
       <p className="text-xs text-slate-400 mt-4">
-        An address that is on a debtor&rsquo;s file cannot be blocked at all. Reversible from the
-        Blocked tab, though unblocking is not retroactive &mdash; it lets their next message in,
-        not the ones already skipped.
+        Reversible from the Blocked tab, though unblocking is not retroactive &mdash; it lets
+        their next message in, not the ones already skipped.
       </p>
-      {busy && (
+      {(busy || checking) && (
         <p className="text-xs text-slate-400 mt-2 inline-flex items-center gap-1.5">
-          <Loader2 size={12} className="animate-spin" /> Blocking&hellip;
+          <Loader2 size={12} className="animate-spin" />
+          {busy ? 'Blocking\u2026' : 'Checking whether this address is on a debtor\u2019s file\u2026'}
         </p>
       )}
     </Modal>
@@ -2127,6 +2179,30 @@ function MoveModal({ mail, actor, onClose, onDone }: {
   const [looking, setLooking] = useState(false)
   const [picked, setPicked] = useState<{ id: string; label: string } | null>(null)
 
+  /*
+   * Is the sender's address saved as a contact on the very account we are taking this off?
+   *
+   * Because that is the same mistake seen twice. Matching a message ticks "save this address" by
+   * default, so a newsletter matched to a debtor by accident ends up ON their file — and from
+   * then on it cannot be blocked, with nothing anywhere saying why. That happened: a Yahoo
+   * Finance brief was matched to a debtor, unmatched again, and blocking it was still refused.
+   *
+   * Offered, never assumed. The address may have been the debtor's all along with only this one
+   * message matched wrongly, and quietly deleting a real contact is not ours to decide.
+   */
+  const [savedOnFile, setSavedOnFile] = useState<DebtorFile | null>(null)
+  const [alsoRemove, setAlsoRemove] = useState(false)
+  useEffect(() => {
+    let alive = true
+    void debtorFileFor(mail.fromAddress)
+      .then((f) => {
+        // Only when it is on THIS account. On another debtor's file it is somebody else's fact.
+        if (alive && f && f.accountId === mail.linkedAccountId) setSavedOnFile(f)
+      })
+      .catch(() => { /* Not knowing just means the tick box is not offered. */ })
+    return () => { alive = false }
+  }, [mail.fromAddress, mail.linkedAccountId])
+
   // Debounced, for the same reason the matching search is: 100 000 rows per keystroke otherwise.
   useEffect(() => {
     const q = term.trim()
@@ -2146,8 +2222,12 @@ function MoveModal({ mail, actor, onClose, onDone }: {
     setBusy(true)
     setError(null)
     try {
-      await unmatchMail({ mail, reason, actor })
-      onDone(`Unmatched from ${was}. It is back under Needs matching.`)
+      const removeContact = alsoRemove && !!savedOnFile
+      await unmatchMail({ mail, reason, actor, removeContact })
+      onDone(
+        `Unmatched from ${was}. It is back under Needs matching.`
+        + (removeContact ? ` ${mail.fromAddress} is off their contacts, so it can be blocked now.` : ''),
+      )
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setBusy(false)
@@ -2206,6 +2286,26 @@ function MoveModal({ mail, actor, onClose, onDone }: {
             Kept on the email, for the firm. Nothing is written onto anyone&rsquo;s account.
           </span>
         </label>
+
+        {/*
+          The address that came with it. Only shown when there is one, so the ordinary unmatch —
+          a debtor's genuine reply on the wrong file — is not cluttered by it.
+        */}
+        {savedOnFile && (
+          <label className="flex items-start gap-2 mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5 cursor-pointer">
+            <input type="checkbox" checked={alsoRemove} disabled={busy}
+              onChange={(e) => setAlsoRemove(e.target.checked)} className="mt-0.5 shrink-0" />
+            <span className="min-w-0">
+              <span className="block text-[13px] font-medium text-slate-700">
+                Also take {mail.fromAddress} off their contacts
+              </span>
+              <span className="block text-xs text-slate-400 mt-0.5">
+                It was saved onto this account when the email was matched. While it is there the
+                sender cannot be blocked. Leave it if the address really is theirs.
+              </span>
+            </span>
+          </label>
+        )}
 
         <button onClick={() => void unmatch()} disabled={busy}
           className="mt-3 w-full inline-flex items-center justify-center gap-1.5 text-sm font-semibold px-3.5 py-2.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
