@@ -43,6 +43,9 @@ export interface DebtorAccount {
   frozenBy: FrozenBy | null
   frozenReason: string | null
   frozenAt: string | null
+  /** What the firm needs from the client before this account can move. Null = nothing owed. */
+  clientActionAsk: string | null
+  clientActionDue: string | null
   bucket: string | null
   writeOffReason: string | null
   handoverDate: string | null
@@ -100,6 +103,8 @@ const toAccount = (r: any): DebtorAccount => ({
   frozenBy: (r.frozen_by as FrozenBy | null) ?? null,
   frozenReason: r.frozen_reason ?? null,
   frozenAt: r.frozen_at ?? null,
+  clientActionAsk: r.client_action_ask ?? null,
+  clientActionDue: r.client_action_due ?? null,
   bucket: r.bucket,
   writeOffReason: r.write_off_reason,
   handoverDate: r.handover_date,

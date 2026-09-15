@@ -996,6 +996,12 @@ alter table public.companies
   -- reference: these are names on a spreadsheet, and not all of them will have a login.
   add column if not exists liaison text;
 
+-- Every account waiting on a client is the list the monthly report leads with. Partial, so it
+-- indexes only the handful actually outstanding.
+create index if not exists debtor_accounts_client_action_idx
+  on public.debtor_accounts (company_id, client_action_due)
+  where client_action_ask is not null;
+
 create index if not exists companies_registration_number_idx
   on public.companies (registration_number) where registration_number is not null;
 
@@ -1035,6 +1041,14 @@ alter table public.debtor_accounts
   -- which cannot answer a client asking why theirs has not moved in four months -- and cannot
   -- tell the firm whether it was the client who asked for the stop. Keys not labels ('firm',
   -- not the firm's name), so a rebrand is a TypeScript change and not a data migration.
+  -- THE ONE CLIENT-FACING FLAG THAT CANNOT BE DERIVED. Green, amber and grey follow from the
+  -- sub-status; "we are waiting on YOU" is true of a disputed, frozen or legal account alike.
+  -- Raised by the ask being present — a request with no words is not a request, and a boolean
+  -- beside it would only be a second thing to keep in step.
+  add column if not exists client_action_ask text,
+  add column if not exists client_action_due date,
+  add column if not exists client_action_raised_at timestamptz,
+  add column if not exists client_action_raised_by uuid references public.profiles (id) on delete set null,
   add column if not exists frozen_by text check (frozen_by in ('firm', 'client')),
   add column if not exists frozen_reason text,
   add column if not exists frozen_at timestamptz,
