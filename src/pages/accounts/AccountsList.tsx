@@ -15,7 +15,7 @@ import {
 } from '../../lib/accountViews'
 import { CLIENT_FLAGS, CLIENT_POSITIONS, clientFlag, clientPosition } from '../../lib/clientPosition'
 import { AccountFilters } from './AccountFilters'
-import { AllocateModal } from './AllocateModal'
+import { HandOutModal } from './HandOutModal'
 import type { Selection } from '../../lib/accountAllocation'
 import { formatCurrency, formatDate } from '../../data/mockData'
 
@@ -346,7 +346,7 @@ export function AccountsList() {
                   onClick={() => setAllocating(allMatching
                     ? { kind: 'matching', query }
                     : { kind: 'ids', ids: [...ticked] })}>
-                  <UserCheck size={14} /> Allocate
+                  <UserCheck size={14} /> Hand out
                 </button>
               )}
               <button type="button" className="text-slate-400 hover:text-slate-600 p-1" onClick={clearSelection}
@@ -510,8 +510,9 @@ export function AccountsList() {
       </Card>
 
       {allocating && (
-        <AllocateModal
+        <HandOutModal
           selection={allocating}
+          selectedCount={selectedCount}
           users={users}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
           onClose={() => setAllocating(null)}

@@ -212,8 +212,15 @@ export function sortDiary<T extends DiaryOrderable>(entries: T[], today: string)
 
 /* ---------- how full a day is ---------- */
 
-/** What the firm assumes a day holds when nobody has set a figure for this person. */
-export const DEFAULT_DIARY_CAPACITY = 30
+/**
+ * What the firm assumes a day holds when nobody has set a figure for this person.
+ *
+ * The company standard, in the firm's own words: 500 accounts on the book and 50 worked a day.
+ * It does NOT vary by grade — a junior and an elite collector carry the same volume, and the
+ * grade decides which ACCOUNTS they may be given, never how many. Individuals differ, and that
+ * is what the per-person override on profiles.diary_capacity is for.
+ */
+export const DEFAULT_DIARY_CAPACITY = 50
 
 /**
  * The smallest and largest working rate a person may set for themselves.
