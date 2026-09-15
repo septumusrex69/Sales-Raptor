@@ -17,7 +17,8 @@ import {
   CLIENT_FLAGS, CLIENT_POSITIONS, CLIENT_POSITION_ORDER,
   clientFlag, clientPosition, frozenByLabel, needsClient, positionReport,
 } from '../../src/lib/clientPosition.ts'
-import { accountNarrative } from '../../src/lib/accountNarrative.ts'
+import { accountNarrative, clientLine } from '../../src/lib/accountNarrative.ts'
+import { DIARY_KINDS, DIARY_KIND_ORDER } from '../../src/lib/diaryPriority.ts'
 
 let pass = 0
 const failures = []
@@ -232,13 +233,46 @@ check('nothing owed leaves the tone alone',
 
 /* ---------- the sentence the client reads ---------- */
 
-check('a reached call with a promise and a date reads as one sentence',
-  accountNarrative({
-    lastAttemptOn: '2026-09-14', lastAttemptChannel: 'phone', reached: true,
-    promise: { amount: 2000, dueOn: '2026-09-25' }, nextFollowUpOn: '2026-09-26',
-  }),
-  // en-ZA renders September as "Sept", which is what the diary already shows on screen.
-  'Contacted 14 Sept 2026 by phone. Debtor undertook to pay R2\u00a0000 by 25 Sept 2026. Next follow-up 26 Sept 2026.')
+/*
+ * TWO SENTENCES, NOT ONE. What HAPPENED and what we will DO are different facts and a client
+ * reads them differently — the first is the firm showing its work, the second is a commitment it
+ * can be held to. Run together, the commitment gets lost at the end of a longer sentence.
+ *
+ * This is the firm's own worked example: a promise taken on the 15th to pay on the 30th, with the
+ * diary booked to confirm it.
+ */
+{
+  const l = clientLine({
+    promise: { amount: 2000, dueOn: '2026-09-30', takenOn: '2026-09-15', status: 'open', arrangement: 'once_off' },
+    next: { kind: 'promise_due', dueOn: '2026-09-30' },
+  })
+  check('the promise says who promised, what, when they said it and when it falls due',
+    l.happened, 'On 15 September 2026 the debtor promised to pay R2\u00a0000 by 30 September 2026.')
+  check('...and the next action names the work, not just a date',
+    l.next, 'We will confirm the promised payment on 30 September 2026.')
+}
+check('a recurring promise says so',
+  clientLine({ promise: { amount: 750, dueOn: '2026-09-30', takenOn: '2026-09-15', arrangement: 'monthly' } }).happened,
+  'On 15 September 2026 the debtor promised to pay R750 (monthly instalment) by 30 September 2026.')
+check('a broken promise is reported as broken',
+  clientLine({ promise: { amount: 2000, dueOn: '2026-08-30', status: 'broken' } }).happened,
+  'The promise to pay R2\u00a0000 by 30 August 2026 was not kept.')
+
+/*
+ * EVERY DIARY KIND HAS ITS OWN NEXT ACTION, and none of them may fall back to a bare date. The
+ * diary already records WHY an account comes back; "we will follow up on the 22nd" throws that
+ * away, and it is the half of the sentence a client actually checks the firm against.
+ */
+for (const kind of DIARY_KIND_ORDER) {
+  const line = clientLine({ next: { kind, dueOn: '2026-09-30' } }).next
+  ok(`${DIARY_KINDS[kind].label} has its own next action`, line.length > 0)
+  ok(`...naming the date`, /30 September 2026/.test(line))
+  ok(`...and saying what we will do`, /^We will /.test(line))
+}
+ok('no two kinds produce the same next action',
+  new Set(DIARY_KIND_ORDER.map((k) => clientLine({ next: { kind: k, dueOn: '2026-09-30' } }).next)).size
+    === DIARY_KIND_ORDER.length)
+check('nothing booked promises nothing', clientLine({ lastAttemptOn: '2026-09-07' }).next, '')
 
 /*
  * THREE STATES FOR "DID THEY ANSWER", not two. The imported book logs 8 calls across 736
@@ -249,14 +283,15 @@ check('a reached call with a promise and a date reads as one sentence',
 ok('a recorded non-answer says no reply',
   /no reply/.test(accountNarrative({ lastAttemptOn: '2026-09-12', reached: false })))
 ok('an unrecorded outcome says only what is known',
-  /Last worked/.test(accountNarrative({ lastAttemptOn: '2026-09-12' })))
+  /was worked on/.test(accountNarrative({ lastAttemptOn: '2026-09-12' })))
 ok('...and never claims the debtor failed to reply',
   !/no reply/.test(accountNarrative({ lastAttemptOn: '2026-09-12', reached: null })))
 
+// "attempted" is now in the sentence itself, so the count is what must be absent, not the word.
 ok('a single attempt does not boast about being the first',
-  !/attempt/.test(accountNarrative({ lastAttemptOn: '2026-09-12', reached: false, attemptsThisPeriod: 1 })))
+  !/attempt this period/.test(accountNarrative({ lastAttemptOn: '2026-09-12', reached: false, attemptsThisPeriod: 1 })))
 ok('several attempts are counted',
-  /Third attempt this period/.test(accountNarrative({
+  /third attempt this period/.test(accountNarrative({
     lastAttemptOn: '2026-09-12', reached: false, attemptsThisPeriod: 3 })))
 
 /*
@@ -264,18 +299,20 @@ ok('several attempts are counted',
  * A client report that dressed the firm's own silence up as the debtor's would be the one
  * dishonest thing in the document, and it is the easiest to write by accident.
  */
-check('nothing done reads as nothing done', accountNarrative({}), 'No contact attempted.')
+check('nothing done reads as nothing done', accountNarrative({}), 'No contact has been attempted yet.')
 ok('...and is not hidden by a follow-up date being booked',
-  /No contact attempted/.test(accountNarrative({ nextFollowUpOn: '2026-09-20' })))
+  /No contact has been attempted/.test(accountNarrative({ next: { kind: 'review', dueOn: '2026-09-20' } })))
 
-ok('a freeze is said first', /^Work is on hold/.test(accountNarrative({
+ok('a freeze is said first', /^Work was paused/.test(accountNarrative({
   frozenReason: 'Debtor in debt review.', lastAttemptOn: '2026-09-12' })))
+ok('...and a paused account promises no next action it cannot keep',
+  /stays paused/.test(clientLine({ frozenReason: 'Debtor in debt review.' }).next))
 ok('a freeze reason is not double-stopped',
   !/\.\./.test(accountNarrative({ frozenReason: 'Debtor in debt review.' })))
 ok('money received is reported',
-  /R1\u00a0500 received/.test(accountNarrative({ paidInPeriod: { amount: 1500, on: '2026-09-03' } })))
+  /payment of R1\u00a0500 was received/.test(accountNarrative({ paidInPeriod: { amount: 1500, on: '2026-09-03' } })))
 check('a frozen account does not also claim nobody rang',
-  /No contact attempted/.test(accountNarrative({ frozenReason: 'Client asked us to hold.' })), false)
+  /No contact has been attempted/.test(accountNarrative({ frozenReason: 'Client asked us to hold.' })), false)
 
 /* ---------- the database has to agree ---------- */
 
@@ -310,7 +347,7 @@ for (const [field, col] of [['frozenBy', 'frozen_by'], ['frozenReason', 'frozen_
  */
 const detail = readFileSync(new URL('../../src/pages/accounts/AccountDetail.tsx', import.meta.url), 'utf8')
 ok('the account page shows the client line', /What the client sees/.test(detail))
-ok('...composed, not taken from the main comment', /accountNarrative\(\{/.test(detail))
+ok('...composed, not taken from the main comment', /clientLine\(\{/.test(detail))
 {
   const panel = detail.slice(detail.indexOf('function ClientLinePanel'), detail.indexOf('/* ---------- right: the figures'))
   ok('...and it cannot be typed into', !/<textarea|<input|contentEditable/.test(panel))
@@ -324,7 +361,7 @@ ok('...composed, not taken from the main comment', /accountNarrative\(\{/.test(d
 for (const file of ['CompleteDiaryModal', 'DiaryWorkBar']) {
   const src = readFileSync(new URL(`../../src/components/diary/${file}.tsx`, import.meta.url), 'utf8')
   ok(`${file} previews the client line`, /<ClientLinePreview/.test(src))
-  ok(`${file} follows the date being chosen`, /nextOn=\{plan\./.test(src))
+  ok(`${file} follows the kind AND date being chosen`, /next=\{plan\.comesBack \? \{ kind: plan\.kind/.test(src))
 }
 {
   const preview = readFileSync(new URL('../../src/components/diary/ClientLinePreview.tsx', import.meta.url), 'utf8')

@@ -34,7 +34,7 @@ import { EscalateModal } from './EscalateModal'
 import { FreezeModal } from './FreezeModal'
 import { ClientActionModal } from './ClientActionModal'
 import { CLIENT_FLAGS, CLIENT_POSITIONS, frozenByLabel, positionReport, type ClientFlag } from '../../lib/clientPosition.ts'
-import { accountNarrative } from '../../lib/accountNarrative.ts'
+import { clientLine, type ClientLine } from '../../lib/accountNarrative.ts'
 import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
 import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
@@ -312,14 +312,23 @@ export function AccountDetail() {
   })
   const clientLinePanel = (
     <ClientLinePanel
-      text={accountNarrative({
+      line={clientLine({
         lastAttemptOn: account.lastActionAt,
         // Deliberately not passed: the book records that something was done and never what came
-        // of it, so the sentence says "last worked" rather than claiming a non-answer.
+        // of it, so claiming a non-answer would be a statement about the debtor, not a record.
         reached: null,
-        promise: due ? { amount: due.amount, dueOn: due.dueOn } : null,
-        nextFollowUpOn: account.diaryDate,
+        promise: due
+          ? { amount: due.amount, dueOn: due.dueOn, takenOn: due.createdAt?.slice(0, 10) ?? null,
+              status: due.status === 'broken' ? 'broken' : 'open', arrangement: due.arrangement }
+          : null,
+        /*
+         * The account knows WHEN it comes back but not WHY — the kind lives on the diary entry,
+         * which this page does not load. 'review' is the honest fallback: it produces "We will
+         * follow the account up on ...", which is true of every diary date whatever its kind.
+         */
+        next: account.diaryDate ? { kind: 'review', dueOn: account.diaryDate } : null,
         frozenReason: account.frozenReason,
+        frozenOn: account.frozenAt?.slice(0, 10) ?? null,
       })}
       position={CLIENT_POSITIONS[clientReport.position]}
       flag={clientReport.flag}
@@ -1085,8 +1094,8 @@ function PromiseChip({ status }: { status: string }) {
  * where the truth is kept. What changes it is doing the work — ringing the debtor, taking the
  * promise, setting the next date — which is the point of showing it.
  */
-function ClientLinePanel({ text, position, flag, ask, askDue, onAsk }: {
-  text: string
+function ClientLinePanel({ line, position, flag, ask, askDue, onAsk }: {
+  line: ClientLine
   position: { label: string; meaning: string }
   flag: ClientFlag
   /** What is outstanding from the client, or null when nothing is. */
@@ -1125,9 +1134,11 @@ function ClientLinePanel({ text, position, flag, ask, askDue, onAsk }: {
         document. An agent should be able to tell at a glance that these are the words leaving
         the building.
       */}
-      <p className="text-sm text-slate-700 border-l-2 border-slate-200 pl-3">
-        {text || 'Nothing to report on this account yet.'}
-      </p>
+      <div className="text-sm border-l-2 border-slate-200 pl-3 space-y-0.5">
+        <p className="text-slate-700">{line.happened}</p>
+        {/* The commitment on its own line — run into the sentence above, it stops being read. */}
+        {line.next && <p className="font-medium text-slate-800">{line.next}</p>}
+      </div>
       <button type="button" onClick={onAsk}
         className="mt-2.5 text-xs font-medium text-[var(--c-steel)] hover:underline">
         {ask ? 'The client came back' : 'Ask the client for something'}
