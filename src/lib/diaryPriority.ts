@@ -202,6 +202,41 @@ export function sortDiary<T extends DiaryOrderable>(entries: T[], today: string)
 /** What the firm assumes a day holds when nobody has set a figure for this person. */
 export const DEFAULT_DIARY_CAPACITY = 30
 
+/**
+ * The smallest and largest working rate a person may set for themselves.
+ *
+ * Bounded because the number is a denominator. Zero divides every load sentence by nothing and
+ * makes an empty day read as over capacity; five hundred is not a working rate, it is a
+ * mistyped thirty with a stuck key. Either one is a typo, and a typo silently accepted becomes
+ * a figure nobody can explain three weeks later when a team leader asks why one desk is green.
+ */
+export const MIN_DIARY_CAPACITY = 1
+export const MAX_DIARY_CAPACITY = 200
+
+/**
+ * A capacity somebody typed, or null if it is not one.
+ *
+ * REFUSES rather than clamps. Clamping 500 to 200 stores a number the person never chose and
+ * never sees themselves choosing; refusing puts their old number back and lets them try again.
+ */
+export function validCapacity(raw: string | number): number | null {
+  const n = Math.round(Number(raw))
+  if (!Number.isFinite(n)) return null
+  if (n < MIN_DIARY_CAPACITY || n > MAX_DIARY_CAPACITY) return null
+  return n
+}
+
+/**
+ * Is this day already at or past the working rate?
+ *
+ * The test the warnings use, in one place so the box that warns and the test that proves it
+ * warns cannot drift apart. At — not past: the thirtieth account of a thirty-a-day desk is the
+ * one worth mentioning, because the thirty-first is the one that will not get worked.
+ */
+export function atCapacity(load: { booked: number; capacity: number }): boolean {
+  return load.booked >= load.capacity
+}
+
 export type DayLoadLevel = 'free' | 'filling' | 'full' | 'over'
 
 export interface DayLoad {

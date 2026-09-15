@@ -17,6 +17,7 @@ import { DictateButton } from '../src/components/ui/Dictate'
 import { DashboardHero } from '../src/components/dashboard/DashboardHero'
 import { ReminderWatcher } from '../src/components/reminders/ReminderWatcher'
 import { DiariseModal } from '../src/components/diary/DiariseModal'
+import { DiaryCapacity } from '../src/components/diary/DiaryCapacity'
 
 const workAccount = {
   id: 'a1', mainComment: null, mainCommentAt: null, prescriptionDate: '2027-01-01',
@@ -114,6 +115,14 @@ function App() {
         */}
         <DiariseModal accountId="a1" accountLabel="Nomvula van der Westhuizen-Bekker · BF-10023"
           prescriptionDate="2026-10-01" onClose={() => {}} onDone={() => {}} />
+        {[390, 640].map((w) => (
+          <Row key={'cap' + w} label="capacity" width={w}>
+            <div className="flex items-center gap-3 bg-white rounded-xl p-3">
+              <DiaryCapacity userId="u1" value={25} editable />
+              <DiaryCapacity userId="u2" value={null} editable={false} />
+            </div>
+          </Row>
+        ))}
         {[390, 640, 1024].map((w) => (
           <Row key={'rem' + w} label="reminder" width={w}>
             {/*

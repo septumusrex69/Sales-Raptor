@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { publicHolidays } from '../../lib/workingDays.ts'
 import {
@@ -33,7 +33,7 @@ const LEVEL_STYLE: Record<DayLoadLevel, string> = {
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-export function DiaryDatePicker({ ownerId, capacity, value, onChange, weeks = 3, today, showLoad = true }: {
+export function DiaryDatePicker({ ownerId, capacity, value, onChange, weeks = 3, today, showLoad = true, onLoad }: {
   /** Whose diary the counts are for. Null counts the unassigned pile. */
   ownerId: string | null
   /** This person's accounts-per-day, or null for the firm default. */
@@ -52,6 +52,14 @@ export function DiaryDatePicker({ ownerId, capacity, value, onChange, weeks = 3,
    * calendar either way, because two calendars drift apart inside a month.
    */
   showLoad?: boolean
+  /**
+   * How full the chosen day is, reported back as it changes.
+   *
+   * The counts are fetched in here, so a box that wants to say something about the day the
+   * agent has landed on — "that day is already full, book it anyway?" — has no other way to
+   * know. Fired on a change of day or of counts, never on every render.
+   */
+  onLoad?: (load: DayLoad) => void
 }) {
   // Which stretch of weeks is on screen. Starts on the week the chosen date falls in.
   const [from, setFrom] = useState(() => calendarStrip(value || today, 1)[0])
@@ -86,6 +94,22 @@ export function DiaryDatePicker({ ownerId, capacity, value, onChange, weeks = 3,
 
   const chosen = loadFor(value)
   const suggestion = loads ? firstDayWithRoom(today, loads, capacity) : null
+
+  /*
+   * Report the chosen day upward, but only once the counts have actually arrived.
+   *
+   * Reporting the pre-fetch state would tell the caller every day is empty, and a warning that
+   * says "nothing booked" and then silently becomes "already full" a moment later is worse than
+   * no warning. The ref is what stops a re-render firing this again with the same figures.
+   */
+  const reported = useRef('')
+  useEffect(() => {
+    if (!onLoad || loading) return
+    const key = `${chosen.date}:${chosen.booked}:${chosen.capacity}`
+    if (reported.current === key) return
+    reported.current = key
+    onLoad(chosen)
+  }, [onLoad, loading, chosen])
 
   return (
     /*

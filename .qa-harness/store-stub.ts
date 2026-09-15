@@ -7,5 +7,6 @@ export function useAppStore() {
     ],
     users: [],
     addActivity: () => {},
+    updateUser: () => {},
   }
 }
