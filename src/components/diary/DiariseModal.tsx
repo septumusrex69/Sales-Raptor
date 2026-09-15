@@ -10,7 +10,9 @@ import {
 } from '../../lib/diaryPriority.ts'
 import { diarise } from '../../lib/diary.ts'
 import { setReminder } from '../../lib/reminders.ts'
-import { REMINDER_PRESETS, atClockTime, clockTime, dueAt } from '../../lib/reminderTime.ts'
+import {
+  REMINDER_PRESETS, atDayAndTime, clockTime, dueAt, whenItLands,
+} from '../../lib/reminderTime.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
 import { DictateButton } from '../ui/Dictate'
 
@@ -57,9 +59,11 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
   const [dueOn, setDueOn] = useState(() => addWorkingDays(today, 5))
   const [kind, setKind] = useState<DiaryKind>('review')
   const [reason, setReason] = useState('')
-  /** Minutes out, for the "later today" side. An hour is what a debtor says most often. */
+  /** Minutes out, for a reminder today. An hour is what a debtor says most often. */
   const [minutes, setMinutes] = useState(60)
   const [custom, setCustom] = useState('')
+  /** Which day the reminder is on. Today unless somebody picks otherwise. */
+  const [remindOn, setRemindOn] = useState(today)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -80,10 +84,17 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
         ? `Only ${daysToPrescription} day${daysToPrescription === 1 ? '' : 's'} between that day and prescription on ${longDate(prescriptionDate as string)}.`
         : null
 
-  /** Where "later today" lands. Null while a typed time is unusable, which disables the button. */
-  const remindAt = mode === 'today'
-    ? (custom ? atClockTime(custom) : dueAt(minutes))
-    : null
+  /*
+   * Where a reminder lands. Null while there is nothing usable, which disables the button.
+   *
+   * The presets are relative to NOW, so they only mean anything on today — "in 15 minutes" on a
+   * day next week is not a sentence. Pick another day and the clock time becomes the only way to
+   * say when, which is why it stops being optional there.
+   */
+  const remindingToday = remindOn === today
+  const remindAt = mode !== 'today' ? null
+    : remindingToday && !custom ? dueAt(minutes)
+      : custom ? atDayAndTime(remindOn, custom) : null
   const customBad = mode === 'today' && custom !== '' && remindAt === null
 
   async function save() {
@@ -134,8 +145,8 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
         */}
         <div className="flex gap-1 p-1 rounded-xl bg-slate-100">
           {([
-            ['day', 'On a day', 'Goes in your diary'],
-            ['today', 'Later today', 'Pops up on your screen'],
+            ['day', 'In the diary', 'A day in your queue'],
+            ['today', 'A reminder', 'Pops up on your screen'],
           ] as const).map(([value, label, hint]) => (
             <button key={value} type="button" onClick={() => setMode(value)}
               className={`flex-1 rounded-lg px-3 py-2 text-sm transition-colors ${
@@ -148,36 +159,63 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
 
         <p className="text-sm text-slate-500">
           {mode === 'today'
-            ? `${accountLabel} — a nudge later today. Not the diary; nothing is booked.`
+            ? `${accountLabel} — a nudge that pops up on your screen. Not the diary; nothing is booked.`
             : `${accountLabel} comes back on a day you choose.`}
         </p>
 
         {mode === 'today' ? (
           <>
-            <div className="flex flex-wrap gap-2">
-              {REMINDER_PRESETS.map((p) => (
-                <button key={p.minutes} type="button"
-                  onClick={() => { setMinutes(p.minutes); setCustom('') }}
-                  className={`text-sm px-3 py-2 rounded-lg border transition-colors ${
-                    !custom && minutes === p.minutes
-                      ? 'border-gold-500 bg-gold-400 text-navy-950 font-medium'
-                      : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-                  {p.label}
-                  <span className="block text-[11px] opacity-70 tabular-nums">{clockTime(dueAt(p.minutes))}</span>
-                </button>
-              ))}
-            </div>
+            {/*
+              The presets come first and only work on today, because they are relative to now —
+              "in 15 minutes" on a day next week is not a sentence. They disappear rather than
+              grey out when another day is chosen: a row of dead buttons invites a second attempt
+              at pressing them.
+            */}
+            {remindingToday && (
+              <div className="flex flex-wrap gap-2">
+                {REMINDER_PRESETS.map((p) => (
+                  <button key={p.minutes} type="button"
+                    onClick={() => { setMinutes(p.minutes); setCustom('') }}
+                    className={`text-sm px-3 py-2 rounded-lg border transition-colors ${
+                      !custom && minutes === p.minutes
+                        ? 'border-gold-500 bg-gold-400 text-navy-950 font-medium'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                    {p.label}
+                    <span className="block text-[11px] opacity-70 tabular-nums">{clockTime(dueAt(p.minutes))}</span>
+                  </button>
+                ))}
+              </div>
+            )}
 
-            <FormField label="Or at a time today">
+            <FormField label={remindingToday ? 'Or at a time' : 'At what time'} required={!remindingToday}>
               <input className={`${inputClass} max-w-[9rem]`} placeholder="15:40" value={custom}
                 onChange={(e) => setCustom(e.target.value)} />
               {customBad && (
-                // A time already gone would pop the instant it saved, which reads as a fault.
+                // A moment already gone would pop the instant it saved, which reads as a fault.
                 <p className="text-[11px] text-[var(--c-rust-deep)] mt-1">
-                  Not a time later today. Use 24-hour, like 15:40.
+                  {remindingToday
+                    ? 'Not a time later today. Use 24-hour, like 15:40.'
+                    : 'Use 24-hour, like 15:40.'}
                 </p>
               )}
             </FormField>
+
+            {/*
+              The same calendar the diary uses, with the per-day counts turned off — a reminder
+              books nothing, and a number under the date would say it did. Today unless somebody
+              says otherwise, which is the whole point of this side of the box.
+            */}
+            <div>
+              <span className="block text-xs font-medium text-slate-500 mb-1.5">Which day</span>
+              <DiaryDatePicker
+                ownerId={ownerId}
+                capacity={null}
+                showLoad={false}
+                value={remindOn}
+                onChange={(d) => { setRemindOn(d); if (d !== today && !custom) setCustom('09:00') }}
+                today={today}
+              />
+            </div>
           </>
         ) : (
           <>
@@ -255,7 +293,7 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs text-slate-400">
             {mode === 'today'
-              ? remindAt ? `Pops up at ${clockTime(remindAt)}, on whatever page you are on.` : 'Pick a time.'
+              ? remindAt ? `Pops up ${whenItLands(remindAt)}, on whatever page you are on.` : 'Pick a time.'
               : `Lands in your diary for ${longDate(dueOn)}.`}
           </span>
           <div className="flex gap-2">

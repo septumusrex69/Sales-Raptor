@@ -9,7 +9,8 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-reminders.mjs
  */
 import {
-  REMINDER_PRESETS, SNOOZE_MINUTES, atClockTime, clockTime, dueAt, isDue, lateness,
+  REMINDER_PRESETS, SNOOZE_MINUTES, atClockTime, atDayAndTime, clockTime, dueAt, isDue,
+  lateness, todayIso, whenItLands,
 } from '../../src/lib/reminderTime.ts'
 
 let pass = 0
@@ -88,6 +89,58 @@ check('an hour that does not exist', atClockTime('25:00', now), null)
 check('a minute that does not exist', atClockTime('15:75', now), null)
 check('empty', atClockTime('', now), null)
 check('spaces are forgiven', clockTime(atClockTime('  15:40  ', now)), '15:40')
+
+/* ---------- 5b. a reminder on another day ---------- */
+
+/*
+ * A reminder is not only "later today". A debtor who says "ring me on Friday morning" gets a
+ * day AND a time, and the past-check has to be against the whole moment rather than the clock:
+ * 09:00 has gone today and is perfectly good tomorrow. Getting that backwards either refuses a
+ * valid Friday or accepts a Friday that has already been.
+ */
+check('nine in the morning, tomorrow',
+  atDayAndTime('2026-09-15', '09:00', at('2026-09-14T14:20:00')).toISOString(),
+  at('2026-09-15T09:00:00').toISOString())
+check('the same time, but today, is already gone',
+  atDayAndTime('2026-09-14', '09:00', at('2026-09-14T14:20:00')), null)
+check('later today is fine',
+  clockTime(atDayAndTime('2026-09-14', '16:00', at('2026-09-14T14:20:00'))), '16:00')
+check('next week', atDayAndTime('2026-09-21', '08:30', at('2026-09-14T14:20:00')).getDate(), 21)
+check('a day that has gone is refused whatever the time',
+  atDayAndTime('2026-09-13', '23:59', at('2026-09-14T14:20:00')), null)
+
+check('a date that does not exist', atDayAndTime('2026-02-31', '09:00', at('2026-01-01T09:00:00')), null)
+check('not a date at all', atDayAndTime('Friday', '09:00', at('2026-09-14T14:20:00')), null)
+check('a date with no time', atDayAndTime('2026-09-15', '', at('2026-09-14T14:20:00')), null)
+
+// atClockTime is the same thing against today, and must stay that way.
+check('atClockTime is atDayAndTime on today',
+  atClockTime('16:00', at('2026-09-14T14:20:00')).toISOString(),
+  atDayAndTime('2026-09-14', '16:00', at('2026-09-14T14:20:00')).toISOString())
+
+/* ---------- 5c. the local day, not the UTC one ---------- */
+
+/*
+ * toISOString() gives the UTC day, which in South Africa rolls the evening into tomorrow. A
+ * reminder set at half past ten at night would be filed against the wrong date and the presets
+ * would stop being "today".
+ */
+check('half past ten at night is still today', todayIso(at('2026-09-14T22:30:00')), '2026-09-14')
+check('and one minute to midnight', todayIso(at('2026-09-14T23:59:00')), '2026-09-14')
+check('just after midnight is tomorrow', todayIso(at('2026-09-15T00:01:00')), '2026-09-15')
+
+/* ---------- 5d. how it reads back ---------- */
+
+const nowish = at('2026-09-14T14:20:00')
+check('today says only the time', whenItLands(at('2026-09-14T15:40:00'), nowish), 'at 15:40')
+check('tomorrow says so', whenItLands(at('2026-09-15T09:00:00'), nowish), 'tomorrow at 09:00')
+// Four hours at eleven at night crosses midnight — the one case relative wording would mislead.
+check('a preset that crosses midnight says tomorrow',
+  whenItLands(dueAt(240, at('2026-09-14T23:00:00')), at('2026-09-14T23:00:00')),
+  'tomorrow at 03:00')
+ok('further out names the day',
+  whenItLands(at('2026-09-21T08:30:00'), nowish).includes('08:30')
+  && /Mon|21/.test(whenItLands(at('2026-09-21T08:30:00'), nowish)))
 
 /* ---------- 6. the presets a collector actually reaches for ---------- */
 
