@@ -287,7 +287,7 @@ export function AccountDetail() {
       setNoteOpen={setNoteOpen}
     />
   )
-  const summaryPanel = <SummaryPanel account={account} breakdown={b} />
+  const summaryPanel = <SummaryPanel account={account} breakdown={b} note={statement?.note} />
   const promisePanel = (
     <PromisePanel
       accountId={account.id}
@@ -469,8 +469,6 @@ export function AccountDetail() {
       <OutcomeOutstanding queries={queries} accountId={account.id}
         actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
         busy={queryBusy} run={runQuery} />
-
-      {statement?.note && <Banner>{statement.note}</Banner>}
 
       {drift && (
         <Banner title={`Billed at ${pct(account.commissionRate)}, but the mandate says ${pct(account.commissionRateExpected)}`}>
@@ -990,7 +988,20 @@ function PromiseChip({ status }: { status: string }) {
 
 /* ---------- right: the figures ---------- */
 
-function SummaryPanel({ account, breakdown }: { account: DebtorAccount; breakdown: BalanceBreakdown | undefined }) {
+function SummaryPanel({ account, breakdown, note }: {
+  account: DebtorAccount
+  breakdown: BalanceBreakdown | undefined
+  /**
+   * Why the figures above stop where they do — the in duplum ceiling, or a write-off date.
+   *
+   * It used to be a banner of its own, sitting between the action row and the tabs, which is
+   * nowhere: a sentence about capital and interest, floating a long way from any of the numbers
+   * it is about. Here it sits under the very figures it explains and beside the VAT footnote
+   * that plays the same role, and it reads as part of the statement rather than as an alert
+   * about the page.
+   */
+  note?: string
+}) {
   const b = breakdown
   return (
     <Card>
@@ -1013,6 +1024,17 @@ function SummaryPanel({ account, breakdown }: { account: DebtorAccount; breakdow
           Fees and receipt fees are shown including VAT
           {b ? <> &mdash; {formatMoney(b.vat)} of the above is VAT</> : null}. Capital and interest carry none.
         </p>
+        {/*
+          Amber rather than grey, and above the divider: the VAT line explains how a figure is
+          PRESENTED, this one explains that money the firm has charged cannot be collected. Same
+          place, different weight.
+        */}
+        {note && (
+          <p className="flex items-start gap-1.5 text-[11px] text-[var(--c-gold-dark)] bg-[var(--tint-gold)] rounded-lg px-2.5 py-2 mt-1">
+            <AlertTriangle size={12} className="shrink-0 mt-px" />
+            <span>{note}</span>
+          </p>
+        )}
         <div className="border-t border-slate-100 pt-2 mt-1 space-y-1.5">
           <Money label="Balance" value={b?.balance} strong />
           <Money label="Receipt fee if settled" value={b?.settlementFee} />
