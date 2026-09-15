@@ -47,6 +47,11 @@ Two reasons it matters beyond being nice to have:
 - **It is the evidence for a promotion.** Grade is set by a person and must stay that way, but a
   team leader deciding it should be looking at numbers rather than an impression.
 
+**Settled:** a payment belongs to whoever held the account ON THE DATE THE MONEY CAME IN, not to
+whoever holds it today. `account_desk_history` records every change of desk, the trigger is the
+only writer, and `collector_performance` reads the holder per payment. The engine and its checks
+are built; what remains is the screen.
+
 Rank on the book-independent figures. Raw rand collected measures the book somebody was handed,
 not the collector — give a junior a book of R1 800 gym memberships and they cannot produce an
 elite's number however good they are.

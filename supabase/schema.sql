@@ -2748,20 +2748,94 @@ $$;
 
 grant execute on function public.diary_day_load(date, date) to authenticated;
 
+-- ---------- Who held an account, and from when ----------
+--
+-- THE FIRM'S RULE: a payment belongs to whoever held the account ON THE DATE THE MONEY CAME IN,
+-- not to whoever holds it today. Without this table the only answer available is "whoever holds
+-- it now", so an account moving desks on the 28th hands its whole month's collections to the new
+-- person -- and if commission or a promotion ever keys off these figures, that is an argument
+-- nobody can settle.
+--
+-- EVENT ROWS, NOT SPANS. There is no `to_at`: the holder at any moment is the latest row at or
+-- before it. A span has two ends that can disagree, and a closing write that can fail and leave
+-- the account held by two people at once. One row per change cannot.
+--
+-- user_id is nullable and null MEANS SOMETHING: unallocated. Taking an account off every desk is
+-- a real act a team leader performs, and a gap in the history would read as "still theirs".
+create table if not exists public.account_desk_history (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  user_id uuid references public.profiles (id) on delete set null,
+  effective_from timestamptz not null default now(),
+  -- change   observed: the trigger saw assigned_to move
+  -- backfill reconstructed when this table was created; a guess, and marked as one
+  -- import   set by a data load
+  source text not null default 'change' check (source in ('change', 'backfill', 'import')),
+  changed_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+-- The lookup this exists for: the latest row at or before a moment, for one account.
+create index if not exists account_desk_history_lookup_idx
+  on public.account_desk_history (account_id, effective_from desc);
+create index if not exists account_desk_history_user_idx
+  on public.account_desk_history (user_id, effective_from);
+
+alter table public.account_desk_history enable row level security;
+
+-- Readable by everyone signed in, and WRITABLE BY NOBODY. The trigger below is security definer
+-- and is the only writer. A ledger that decides who earned what should not be editable from the
+-- browser by the people it measures.
+drop policy if exists "account_desk_history_select" on public.account_desk_history;
+create policy "account_desk_history_select" on public.account_desk_history
+  for select using (auth.uid() is not null);
+
+create or replace function public.record_account_desk_change() returns trigger
+  language plpgsql security definer set search_path = public as $$
+begin
+  -- `is distinct from` rather than <>, so a move to or from NULL (unallocated) is recorded. With
+  -- <> those two transitions are silently dropped -- exactly the ones a team leader performs
+  -- when somebody leaves.
+  if tg_op = 'INSERT' or (new.assigned_to is distinct from old.assigned_to) then
+    insert into public.account_desk_history (account_id, user_id, effective_from, source, changed_by)
+    values (new.id, new.assigned_to, now(),
+            case when tg_op = 'INSERT' then 'import' else 'change' end, auth.uid());
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists account_desk_change on public.debtor_accounts;
+create trigger account_desk_change
+  after insert or update of assigned_to on public.debtor_accounts
+  for each row execute function public.record_account_desk_change();
+
+-- Backfill: every account on a desk today, dated from when the firm received it. A
+-- RECONSTRUCTION, marked `backfill` so it is never mistaken for something observed. It asserts
+-- the current holder has had the account since handover, which is not known to be true -- but the
+-- alternative is that every payment before today belongs to nobody.
+insert into public.account_desk_history (account_id, user_id, effective_from, source)
+select id, assigned_to,
+       coalesce(handover_date::timestamptz, created_at, now() - interval '5 years'),
+       'backfill'
+  from public.debtor_accounts
+ where assigned_to is not null
+   and not exists (select 1 from public.account_desk_history h where h.account_id = debtor_accounts.id);
+
 -- ---------- How every collector is doing over a period ----------
 --
 -- One call, every figure, aggregated in the database. Pulling payments, calls, emails, notes and
 -- promises into the browser to count them is several megabytes to produce a dozen numbers, on a
 -- book built for six figures.
 --
--- MONEY FOLLOWS THE BOOK, WORK FOLLOWS THE PERSON. A payment is credited to whoever holds the
--- account now: an EFT that lands overnight is "created by" nobody, and a debtor who pays after
--- three months of chasing was collected by the person chasing, not by whoever opened the bank
--- file. A call is an act by a person and is credited to whoever made it.
+-- A PAYMENT BELONGS TO WHOEVER HELD THE ACCOUNT ON THE DATE THE MONEY CAME IN -- the firm's
+-- rule, read out of account_desk_history payment by payment. It replaces "whoever holds it now",
+-- under which an account moving desks on the 28th handed its whole month's collections to the
+-- new person. Where commission or a promotion keys off these figures, that is the difference
+-- between a number and an argument.
 --
--- The known imperfection: an account changing desks mid-period takes its whole period's
--- collections with it. Fixing that needs a history of who held what and when, which the book
--- does not carry -- so it is a stated limitation rather than a silent one.
+-- Work is credited differently, and deliberately: a call is an act by a person, so it belongs to
+-- whoever made it wherever the account has since gone.
 --
 -- A PROMISE THAT HAS NOT COME DUE IS NEITHER KEPT NOR BROKEN. Three numbers rather than two, so
 -- the kept rate can be kept / (kept + broken) -- resolved only. Dividing by promises made would
@@ -2800,15 +2874,27 @@ as $$
   -- Reversed payments are not collections. A debit order that bounced was never money, and
   -- leaving it in would make somebody's best month the one where a payment failed.
   paid as (
-    select d.assigned_to as uid,
+    select h.user_id as uid,
            coalesce(sum(p.amount), 0) as collected,
            count(*)::integer as payments
       from public.account_payments p
-      join public.debtor_accounts d on d.id = p.account_id
-     where d.assigned_to is not null
-       and p.reversed_at is null
+      -- The holder at the moment the money landed: the latest history row at or before it.
+      -- Indexed on (account_id, effective_from desc), so this is a one-row lookup per payment.
+      cross join lateral (
+        select dh.user_id
+          from public.account_desk_history dh
+         where dh.account_id = p.account_id
+           and dh.effective_from <= p.received_at
+         order by dh.effective_from desc
+         limit 1
+      ) h
+     -- Reversed payments are not collections. A debit order that bounced was never money.
+     where p.reversed_at is null
        and p.received_at >= p_from and p.received_at < p_to
-     group by d.assigned_to
+       -- A payment on an account that was on nobody's desk that day belongs to nobody. Silently
+       -- giving it to the current holder is the very thing this change removes.
+       and h.user_id is not null
+     group by h.user_id
   ),
   rang as (
     select placed_by as uid,
@@ -2885,8 +2971,9 @@ as $$
   left join wrote w on w.uid = pr.id
   left join promised pm on pm.uid = pr.id
   left join touched tc on tc.uid = pr.id
-  -- Only people who collect. A liaison with no grade and no book is not a row on this screen.
-  where pr.collector_grade is not null or b.in_play > 0;
+  -- Somebody may have collected in the period and hold nothing today, so a row is owed to
+  -- anyone with a grade, a book, OR money credited to them.
+  where pr.collector_grade is not null or b.in_play > 0 or pd.payments > 0;
 $$;
 
 grant execute on function public.collector_performance(timestamptz, timestamptz) to authenticated;
