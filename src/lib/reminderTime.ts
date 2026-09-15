@@ -76,21 +76,57 @@ export function isDue(due: Date, now: Date = new Date()): boolean {
   return due.getTime() <= now.getTime()
 }
 
+/** The local day, as yyyy-mm-dd. NOT toISOString(), which gives the UTC day and rolls a South
+ *  African evening into tomorrow. */
+export function todayIso(now: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+}
+
 /**
- * A time typed as "15:40" against a day, for the custom option.
+ * A time typed as "15:40", on a chosen day.
  *
- * Returns null rather than a guess for anything that is not a time, and for a time that has
- * already gone today — a reminder in the past would pop the instant it was saved, which reads
- * as the app malfunctioning rather than as the mistake it is.
+ * Returns null rather than a guess for anything that is not a time, and for any moment that has
+ * already gone — a reminder in the past would pop the instant it was saved, which reads as the
+ * app malfunctioning rather than as the slip it is. That check is against the WHOLE moment, not
+ * against the clock: 09:00 is in the past today and perfectly good tomorrow.
  */
-export function atClockTime(value: string, from: Date = new Date()): Date | null {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(value.trim())
-  if (!m) return null
-  const hours = Number(m[1])
-  const minutes = Number(m[2])
+export function atDayAndTime(dayIso: string, value: string, now: Date = new Date()): Date | null {
+  const t = /^(\d{1,2}):(\d{2})$/.exec(value.trim())
+  const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayIso.trim())
+  if (!t || !d) return null
+
+  const hours = Number(t[1])
+  const minutes = Number(t[2])
   if (hours > 23 || minutes > 59) return null
 
-  const at = new Date(from)
-  at.setHours(hours, minutes, 0, 0)
-  return at.getTime() <= from.getTime() ? null : at
+  const at = new Date(Number(d[1]), Number(d[2]) - 1, Number(d[3]), hours, minutes, 0, 0)
+  if (Number.isNaN(at.getTime())) return null
+  // A date that rolled — "2026-02-31" — is not the day anybody asked for.
+  if (at.getDate() !== Number(d[3]) || at.getMonth() !== Number(d[2]) - 1) return null
+  return at.getTime() <= now.getTime() ? null : at
+}
+
+/** The same thing against today, which is what the presets and the common case use. */
+export function atClockTime(value: string, from: Date = new Date()): Date | null {
+  return atDayAndTime(todayIso(from), value, from)
+}
+
+/**
+ * When a reminder lands, said the way somebody would say it.
+ *
+ * The day is named only when it is not today, because "at 15:40" is how the common case is
+ * spoken and prefixing every one of them with "today" is noise. A preset that crosses midnight
+ * — four hours at eleven at night — says "tomorrow", which is the one case where the relative
+ * wording could otherwise mislead.
+ */
+export function whenItLands(at: Date, now: Date = new Date()): string {
+  const day = todayIso(at)
+  const tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+
+  if (day === todayIso(now)) return `at ${clockTime(at)}`
+  if (day === todayIso(tomorrow)) return `tomorrow at ${clockTime(at)}`
+  return `on ${at.toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short' })}`
+    + ` at ${clockTime(at)}`
 }

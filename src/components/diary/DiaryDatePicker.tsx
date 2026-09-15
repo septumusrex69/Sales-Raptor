@@ -33,7 +33,7 @@ const LEVEL_STYLE: Record<DayLoadLevel, string> = {
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-export function DiaryDatePicker({ ownerId, capacity, value, onChange, weeks = 3, today }: {
+export function DiaryDatePicker({ ownerId, capacity, value, onChange, weeks = 3, today, showLoad = true }: {
   /** Whose diary the counts are for. Null counts the unassigned pile. */
   ownerId: string | null
   /** This person's accounts-per-day, or null for the firm default. */
@@ -43,6 +43,15 @@ export function DiaryDatePicker({ ownerId, capacity, value, onChange, weeks = 3,
   weeks?: number
   /** 'YYYY-MM-DD'. Passed in rather than read from the clock so it can be tested. */
   today: string
+  /**
+   * Show how full each day is.
+   *
+   * On for the diary, where the count IS the point — the firm's own requirement was seeing what
+   * a day already holds before adding to it. Off for a reminder, which books nothing: a number
+   * under the date there would say a reminder adds to the day's load, and it does not. Same
+   * calendar either way, because two calendars drift apart inside a month.
+   */
+  showLoad?: boolean
 }) {
   // Which stretch of weeks is on screen. Starts on the week the chosen date falls in.
   const [from, setFrom] = useState(() => calendarStrip(value || today, 1)[0])
@@ -53,6 +62,7 @@ export function DiaryDatePicker({ ownerId, capacity, value, onChange, weeks = 3,
 
   useEffect(() => {
     let cancelled = false
+    if (!showLoad) { setLoads(new Map()); setLoading(false); return }
     setLoading(true)
     fetchDayLoads({ ownerId, from: days[0], to: days[days.length - 1] })
       .then((l) => { if (!cancelled) setLoads(l) })
@@ -61,7 +71,7 @@ export function DiaryDatePicker({ ownerId, capacity, value, onChange, weeks = 3,
       .catch(() => { if (!cancelled) setLoads(new Map()) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [ownerId, days])
+  }, [ownerId, days, showLoad])
 
   // Holiday names, so a greyed-out Thursday says "Heritage Day" rather than nothing.
   const holidays = useMemo(() => {
@@ -126,7 +136,7 @@ export function DiaryDatePicker({ ownerId, capacity, value, onChange, weeks = 3,
               onClick={() => onChange(date)}
               title={disabled
                 ? (holiday ?? (past ? 'Already gone' : 'Nobody is at a desk'))
-                : `${longDate(date)} — ${dayLoadSentence(load)}`}
+                : showLoad ? `${longDate(date)} — ${dayLoadSentence(load)}` : longDate(date)}
               className={[
                 'rounded-lg border px-1 py-1.5 text-center transition-colors',
                 disabled
@@ -141,9 +151,11 @@ export function DiaryDatePicker({ ownerId, capacity, value, onChange, weeks = 3,
                 at zero — a column of counts that appears and disappears is harder to scan than
                 one with a dash in it.
               */}
-              <span className="block text-[10px] leading-none mt-1 tabular-nums">
-                {disabled ? '·' : load.booked || '–'}
-              </span>
+              {showLoad && (
+                <span className="block text-[10px] leading-none mt-1 tabular-nums">
+                  {disabled ? '·' : load.booked || '–'}
+                </span>
+              )}
             </button>
           )
         })}
@@ -156,13 +168,13 @@ export function DiaryDatePicker({ ownerId, capacity, value, onChange, weeks = 3,
       <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <span className="text-sm text-slate-700">
           <span className="font-medium">{longDate(value)}</span>
-          <span className="text-slate-400"> · {dayLoadSentence(chosen)}</span>
+          {showLoad && <span className="text-slate-400"> · {dayLoadSentence(chosen)}</span>}
         </span>
         {/*
           Offered, never imposed. An agent who told the debtor "the fifth" gets the fifth even
           if it is full — they made a promise and the app does not get to overrule it.
         */}
-        {suggestion && suggestion !== value && (chosen.level === 'full' || chosen.level === 'over') && (
+        {showLoad && suggestion && suggestion !== value && (chosen.level === 'full' || chosen.level === 'over') && (
           <button type="button" onClick={() => onChange(suggestion)}
             className="text-xs font-medium text-[var(--c-steel)] hover:underline">
             {shortDate(suggestion)} has room
