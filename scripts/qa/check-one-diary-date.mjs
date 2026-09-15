@@ -71,27 +71,60 @@ ok('...and says who moved it', /moved_by: input\.actor\.id/.test(diariseBody))
  */
 ok('a failed supersede throws', /supersedeError\) throw new Error\(supersedeError\.message\)/.test(diariseBody))
 
-/* ---------- the one entry that is spared ---------- */
+/* ---------- nothing is spared, because sparing was the bug ---------- */
 
 /*
- * workEntry and moveEntry are both holding an open entry they are about to close THEMSELVES —
- * done with the agent's outcome, or moved with where it went. Letting diarise() mark it `moved`
- * first would lose that, and worse, protect_closed_diary_entries would then silently revert the
- * proper close: a closed entry may not be edited, and the trigger does not raise, it reverts.
+ * THE REGRESSION THIS SECTION EXISTS FOR. diarise() once took a `supersedeExcept` so a caller
+ * could keep the entry it was in the middle of closing. workEntry and moveEntry both used it,
+ * and both were broken the moment the unique index landed: the caller's entry stayed OPEN, the
+ * insert made a second, and the index refused it. Working an entry and booking the next threw a
+ * constraint violation at the agent every single time.
+ *
+ * The escape hatch is gone rather than fixed. An option whose only use recreated the bug is a
+ * trap, not a feature.
  */
-ok('diarise can spare one entry', /supersedeExcept\?: string \| null/.test(diary))
-ok('...and it is excluded by id', /neq\('id', input\.supersedeExcept\)/.test(diary))
-ok('moveEntry spares the entry it is moving', /supersedeExcept: input\.entry\.id/.test(diary))
-
-const moveBody = diary.slice(diary.indexOf('export async function moveEntry'))
-ok('moveEntry still closes it itself', /state: 'moved',[\s\S]{0,200}moved_to: replacement\.id/.test(moveBody))
+ok('nothing can be spared from a supersede', !/supersedeExcept/.test(diary))
+ok('every open entry on the account is superseded',
+  /\.eq\('account_id', input\.accountId\)\s*\n\s*\.eq\('state', 'open'\)/.test(diary))
 
 /*
- * The supersede is guarded rather than unconditional: `if (input.supersedeExcept)`. An undefined
- * id passed to neq would filter on the string "undefined" and spare nothing — or, on some
- * clients, nothing at all — and the bug would only show on the paths that do not pass one.
+ * workEntry CLOSES BEFORE IT BOOKS. The old order booked first so that a failure would
+ * double-book rather than leave the account un-diarised — sound reasoning before the index made
+ * double-booking impossible and before the No diary date view made un-diarised visible.
  */
-ok('sparing is opt-in', /if \(input\.supersedeExcept\) superseding = superseding\.neq/.test(diary))
+const workBody = diary.slice(diary.indexOf('export async function workEntry'), diary.indexOf('export async function countOutOfCirculation'))
+ok('workEntry closes the worked entry first',
+  workBody.indexOf('await completeEntry(') < workBody.indexOf('await diarise('))
+ok('...as done, carrying the outcome', /completeEntry\(\{ id: input\.entry\.id, outcome: said \|\| null/.test(workBody))
+/*
+ * And if the booking then fails, the agent is told exactly what did and did not happen. "Failed"
+ * on its own would have somebody redo a call they have already made.
+ */
+ok('a failed booking says the work was saved', /The work was saved, but/.test(workBody))
+ok('...and where the account went', /No diary date/.test(workBody))
+
+/*
+ * moveEntry cannot close first — the old entry has to point at the replacement, which does not
+ * exist yet. So diarise supersedes it on the way past and the trail is completed afterwards.
+ * That is only possible because protect_closed_diary_entries preserves account, owner, date,
+ * kind, state, source and the stamps on a closed row, and deliberately NOT moved_to or
+ * moved_reason. Add those to the trigger and the move loses its trail silently.
+ */
+/*
+ * Bounded at the NEXT export, not at workEntry — there is another function between the two, and
+ * slicing to workEntry swept it in. A check that reads a neighbouring function is a check that
+ * reports on code it was never about.
+ */
+const moveStart = diary.indexOf('export async function moveEntry')
+const moveBody = diary.slice(moveStart, diary.indexOf('export async function', moveStart + 40))
+ok('moveEntry lets the supersede close the original', /NOTHING IS SPARED/.test(moveBody))
+ok('...then writes where it went', /moved_to: replacement\.id/.test(moveBody))
+ok('...without trying to set state again', !/state: 'moved'/.test(moveBody))
+ok('...and does not filter on a state the row has left', !/\.eq\('state', 'open'\)/.test(moveBody))
+
+const schemaTrigger = schema.slice(schema.indexOf('function public.protect_closed_diary_entries'))
+ok('the trigger still leaves moved_to writable', !/new\.moved_to\s*:=/.test(schemaTrigger.slice(0, 900)))
+ok('...and moved_reason', !/new\.moved_reason\s*:=/.test(schemaTrigger.slice(0, 900)))
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
