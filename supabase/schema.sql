@@ -2177,8 +2177,11 @@ grant execute on function public.nav_counts() to authenticated;
 create or replace function public.diary_priority(kind text) returns smallint
   language sql immutable strict as $$
   select case kind
-    when 'promise_broken'  then 10   -- promised, did not pay
-    when 'payment_default' then 15   -- an instalment on an arrangement did not come off
+    -- Promised and did not pay: a figure and a date agreed on a call, or an instalment on a
+    -- running arrangement. ONE RUNG, at the firm's instruction -- either way a payment they
+    -- committed to did not come. See the migration
+    -- diary_merge_payment_default_into_promise_broken.
+    when 'promise_broken'  then 10
     when 'new_account'     then 20   -- freshly handed over, never worked
     when 'promise_due'     then 30   -- check the money arrived
     when 'callback'        then 40   -- the debtor asked to be rung on this day
@@ -2201,9 +2204,17 @@ create table if not exists public.diary_entries (
   due_on date not null,
 
   kind text not null default 'review' check (kind in (
-    'promise_broken', 'payment_default', 'new_account', 'promise_due',
+    'promise_broken', 'new_account', 'promise_due',
     'callback', 'dispute_chase', 'no_contact', 'trace', 'review'
   )),
+  -- COMPUTED ON WRITE AND NEVER AGAIN. A stored generated column is not recomputed when the
+  -- function behind it changes, so an edit to diary_priority() that MOVES a number owes a
+  -- forced rewrite of every row on top of itself -- otherwise the table quietly disagrees with
+  -- the function and the day is ordered by a ladder nobody can read any more.
+  --
+  -- And a rewrite has to reckon with protect_closed_diary_entries below, which reverts edits to
+  -- entries already done or moved: without disabling it for the rewrite, closed rows keep their
+  -- old value and the constraint fails. That is how the merge migration failed on its first run.
   priority smallint generated always as (public.diary_priority(kind)) stored,
   -- The agent's own words about why it is coming back. Shown in the day list, so the next
   -- person to open it does not have to read the whole timeline to know what was promised.

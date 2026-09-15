@@ -114,17 +114,25 @@ ok('the firm\u2019s order is one of the options offered',
   DIARY_ORDER_GROUPS.flatMap((g) => g.options).some((o) => o.id === FIRM_DIARY_ORDER))
 check('a button never shows a blank order', orderLabel('first:nonsense'), orderLabel(FIRM_DIARY_ORDER))
 
-/* ---------- the two that read as synonyms have to read as two things ---------- */
+/* ---------- one rung for one fact ---------- */
 
+/*
+ * The firm asked whether a broken PTP and a missed instalment were the same thing, twice, and
+ * settled it: they are. "If you've missed an instalment or you missed a PTP, you've missed a
+ * payment that you've made."
+ *
+ * So there must be exactly ONE rung covering both, and its reason has to say so — otherwise an
+ * agent with a returned debit order has no obvious rung to reach for and picks the catch-all,
+ * where it stops counting as a broken promise at all.
+ */
 const broken = DIARY_KINDS.promise_broken
-const missed = DIARY_KINDS.payment_default
-ok('they are not the same label', broken.label !== missed.label)
-// The firm asked whether these were the same thing. If neither reason names what separates
-// them -- one promise against a running arrangement -- the labels have not answered.
-ok('the broken promise says it is a one-off', /one-off/i.test(broken.why))
-ok('the missed instalment says it is a running arrangement', /arrangement/i.test(missed.why))
-ok('neither is called an "arrangement default" any more',
-  ![broken.label, missed.label].some((l) => /arrangement default/i.test(l)))
+ok('the retired rung is gone from the labels', !('payment_default' in DIARY_KINDS))
+ok('the surviving rung names the instalment case too', /instalment/i.test(broken.why))
+ok('...and the promise-on-a-call case', /promise|agreed/i.test(broken.why))
+ok('nothing is called an "arrangement default" any more',
+  !Object.values(DIARY_KINDS).some((k) => /arrangement default|missed instalment/i.test(k.label)))
+ok('no two rungs read the same',
+  new Set(Object.values(DIARY_KINDS).map((k) => k.label)).size === Object.keys(DIARY_KINDS).length)
 
 /* ---------- the warnings are wired to the shared test ---------- */
 

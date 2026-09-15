@@ -17,12 +17,15 @@ import { isWorkingDay } from './workingDays.ts'
  *
  * The order of this list is the firm's order of importance, and it is not arbitrary:
  *
- * A BROKEN PROMISE comes before everything. That debtor answered the phone, agreed an amount
- * and a date, and then did not pay -- which makes them the most collectable person on the book
- * and the most likely to slip away if nobody rings the day it fails.
+ * A BROKEN PROMISE comes before everything. That debtor answered the phone, agreed to pay, and
+ * then did not -- which makes them the most collectable person on the book and the most likely
+ * to slip away if nobody rings the day it fails. One rung covers both a promise made on a call
+ * and an instalment on a running arrangement, at the firm's instruction: either way a payment
+ * they committed to did not come, and splitting that across two rungs only split the queue.
  *
- * A NEW ACCOUNT is next. Debt collects best when it is fresh; a handover that sits for a month
- * before its first call is worth measurably less than one worked in its first week.
+ * A NEW ACCOUNT is next, and it is deliberately high. Debt collects best when it is fresh, and
+ * a clerk can be handed twenty in a morning -- a band that arrives in bulk and goes cold quietly
+ * is exactly the one a ladder has to protect.
  *
  * A ROUTINE REVIEW comes last however long it has waited. This is the point of having a ladder
  * at all: without one, a day that opens oldest-first buries a promise that broke this morning
@@ -30,7 +33,6 @@ import { isWorkingDay } from './workingDays.ts'
  */
 export type DiaryKind =
   | 'promise_broken'
-  | 'payment_default'
   | 'new_account'
   | 'promise_due'
   | 'callback'
@@ -42,7 +44,6 @@ export type DiaryKind =
 /** Lower is sooner. Mirrors public.diary_priority() exactly. */
 export const DIARY_PRIORITY: Record<DiaryKind, number> = {
   promise_broken: 10,
-  payment_default: 15,
   new_account: 20,
   promise_due: 30,
   callback: 40,
@@ -69,24 +70,24 @@ interface KindMeta {
  */
 export const DIARY_KINDS: Record<DiaryKind, KindMeta> = {
   promise_broken: {
-    label: 'Broken PTP',
-    why: 'A one-off promise: an amount and a date agreed on a call, and the date passed with nothing. Most collectable person on the book, and the quickest to go quiet.',
-  },
-  payment_default: {
     /*
-     * RENAMED from "Arrangement default", which the firm read as a synonym for a broken PTP —
-     * and fairly: two labels both meaning "agreed to pay, did not pay" tell nobody which list
-     * they are looking at. They are not the same work.
+     * ONE RUNG, NOT TWO. There was a separate 'payment_default' — "Arrangement default", then
+     * "Missed instalment" — for an instalment on a running arrangement that did not come off.
+     * The firm collapsed them: "if you've missed an instalment or you missed a PTP, you've
+     * missed a payment that you've made."
      *
-     * A broken PTP is a ONE-OFF: a figure and a date agreed on a call, with nothing behind it.
-     * You ring to re-negotiate from nothing.
+     * They are right, and the split was costing more than it explained. Two rungs for one fact
+     * put the same debtor in two places on the ladder depending on which word the last agent
+     * reached for, and split every count run off the diary. Whether the figure was agreed on a
+     * call or set up as a debit order six months ago, the fact is the same one: they engaged,
+     * they committed, the money did not come — and that is what makes them the most collectable
+     * person on the book.
      *
-     * This is a RUNNING ARRANGEMENT one instalment short. There is a payment history, usually a
-     * debit order, and often an ordinary reason — a salary date moved, a bank change. You ring
-     * to repair something that was working, which is a different call and a better account.
+     * The merge is in the database too, in diary_entries.kind and diary_priority(). See the
+     * migration diary_merge_payment_default_into_promise_broken.
      */
-    label: 'Missed instalment',
-    why: 'A running arrangement came up one instalment short. There is a payment history behind it — a different call to a one-off promise that broke.',
+    label: 'Broken PTP',
+    why: 'They agreed to pay and the money did not come — a promise made on a call, or an instalment on a running arrangement. Most collectable person on the book, and the quickest to go quiet.',
   },
   new_account: {
     label: 'New account',

@@ -29,7 +29,7 @@ const workAccount = {
 // late one, and one with no note at all.
 const rows = [
   { kind: 'promise_broken', dueOn: '2026-09-14', reason: 'Agreed R2 500 on the 10th of the month and nothing came off the account at all.', prescribing: '2026-10-01', out: 184320.55, name: 'Nomvula' },
-  { kind: 'payment_default', dueOn: '2023-12-10', reason: 'Debit order returned unpaid.', prescribing: null, out: 9400, name: 'Christoffel' },
+  { kind: 'promise_broken', dueOn: '2023-12-10', reason: 'Debit order returned unpaid.', prescribing: null, out: 9400, name: 'Christoffel' },
   { kind: 'dispute_chase', dueOn: '2026-08-14', reason: '', prescribing: null, out: 1250.5, name: 'Sipho' },
 ].map((r, i) => ({
   id: String(i), accountId: 'a' + i, ownerId: 'x', dueOn: r.dueOn, kind: r.kind as never, priority: 10,
