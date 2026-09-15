@@ -125,11 +125,10 @@ const fn = sql.slice(sql.indexOf('function public.collector_performance'))
  */
 ok('reversed payments are excluded', /p\.reversed_at is null/.test(fn.slice(0, 4000)))
 /*
- * MONEY FOLLOWS THE BOOK, WORK FOLLOWS THE PERSON. An EFT landing overnight is "created by"
- * nobody, so a payment is credited to whoever holds the account; a call is an act by a person
- * and is credited to whoever made it.
+ * WORK FOLLOWS THE PERSON, even where money does not. A call is an act by somebody and stays
+ * theirs wherever the account later goes — unlike a payment, which belongs to whoever held the
+ * account on the day it landed (checked below).
  */
-ok('collections are credited to whoever holds the account', /d\.assigned_to as uid/.test(fn.slice(0, 4000)))
 ok('calls are credited to whoever made them', /select placed_by as uid/.test(fn.slice(0, 5000)))
 /*
  * System notes are not work. Raptor composes one on every trace and freeze, and counting them
@@ -137,6 +136,67 @@ ok('calls are credited to whoever made them', /select placed_by as uid/.test(fn.
  */
 ok('only a person’s own notes count', /source = 'manual'/.test(fn.slice(0, 6000)))
 ok('accounts touched is distinct, not a count of actions', /count\(distinct account_id\)/.test(fn.slice(0, 6000)))
+
+/* ---------- a payment belongs to whoever held the account THAT DAY ---------- */
+
+/*
+ * THE FIRM'S RULE, and the reason account_desk_history exists. "Whoever holds it now" hands an
+ * account that moved desks on the 28th its whole month's collections — proved against staging:
+ * R1 000 paid while a junior held it stays with the junior, and only the R7 000 paid after the
+ * handover goes to the senior who holds it today. Under the old rule the senior took all R8 000.
+ *
+ * It matters because commission and promotions may key off these numbers, and a figure somebody
+ * can argue with is not a figure.
+ */
+const history = sql.slice(sql.indexOf('create table if not exists public.account_desk_history'))
+ok('there is a history of who held what', /create table if not exists public\.account_desk_history/.test(sql))
+ok('the payment is matched to the holder at the time',
+  /dh\.effective_from <= p\.received_at/.test(fn.slice(0, 5000)))
+ok('...taking the latest such row', /order by dh\.effective_from desc\s*\n\s*limit 1/.test(fn.slice(0, 5000)))
+ok('...and not to whoever holds it now', !/select d\.assigned_to as uid/.test(fn.slice(0, 5000)))
+
+/*
+ * A payment on an account that was on NOBODY's desk that day belongs to nobody. Falling back to
+ * the current holder is precisely the behaviour being removed, so the guard has to be explicit.
+ */
+ok('an unheld account credits nobody', /and h\.user_id is not null/.test(fn.slice(0, 5000)))
+/*
+ * And somebody who collected in the period but holds nothing today is still owed a row — they
+ * did the work, and a leaver's last month should not vanish.
+ */
+ok('a collector with no book today still appears', /or pd\.payments > 0/.test(fn.slice(0, 8000)))
+
+/*
+ * `is distinct from`, not `<>`. With <> a move TO or FROM null is silently dropped — and those
+ * are exactly the transitions a team leader makes when somebody leaves and their book goes back
+ * to the unallocated pile.
+ */
+ok('unallocating is recorded too', /new\.assigned_to is distinct from old\.assigned_to/.test(history.slice(0, 4000)))
+// Read from the whole file: the reasoning sits in the comment block ABOVE `create table`, which
+// a slice starting at the table itself cannot see.
+ok('null means unallocated, not missing', /null MEANS SOMETHING: unallocated/.test(sql))
+
+/*
+ * EVENT ROWS, NOT SPANS. A span has two ends that can disagree and a closing write that can fail,
+ * leaving an account held by two people at once. One row per change cannot.
+ */
+ok('no span end to fall out of step', !/\bto_at\b/.test(history.slice(0, 2500)))
+
+/*
+ * WRITABLE BY NOBODY. The trigger is security definer and is the only writer — a ledger deciding
+ * who earned what must not be editable from the browser by the people it measures.
+ */
+ok('the history is readable', /create policy "account_desk_history_select"/.test(history.slice(0, 4000)))
+ok('...and writable by no policy',
+  !/create policy "account_desk_history_(insert|update|delete)"/.test(history.slice(0, 4000)))
+ok('the only writer is a definer trigger',
+  /function public\.record_account_desk_change\(\) returns trigger\s*\n\s*language plpgsql security definer/.test(history.slice(0, 4000)))
+
+/*
+ * The backfill is a reconstruction and is marked as one, so nobody later reads a guess as an
+ * observation.
+ */
+ok('the backfill admits it is a guess', /'backfill'/.test(history.slice(0, 6000)))
 
 /* ---------- the over-book notice ---------- */
 
