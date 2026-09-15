@@ -20,6 +20,7 @@ export interface EmailConnectionRow {
   encrypted_password: string
   last_seen_uid: number | null
   last_seen_uid_junk: number | null
+  last_seen_uid_sent: number | null
 }
 
 /** On the very first sync of a mailbox there's no watermark yet — pull only the most recent messages instead of its entire history. */
@@ -165,6 +166,11 @@ async function fileUserEmail(
     at: string
     /** The agent has a standing rule for this sender: it arrives already dealt with. */
     noRecordNeeded?: boolean
+    /** Pulled from the Sent folder: a mailbox row and nothing else. Never filed, never charged. */
+    isSent?: boolean
+    /** Who it went to. The useful address on a sent message; From is always us. */
+    toAddress?: string | null
+    toName?: string | null
   },
 ): Promise<string | null> {
   const { data, error } = await admin
@@ -181,9 +187,15 @@ async function fileUserEmail(
         snippet: message.body.replace(/\s+/g, ' ').trim().slice(0, SNIPPET_LENGTH) || null,
         attachment_names: message.attachmentNames,
         is_junk: message.isJunk,
-        // Settled on arrival, so a supplier who writes every week never joins the queue. Not
-        // marked read: whether anybody has read the invoice is a different question.
-        no_record_at: message.noRecordNeeded ? new Date().toISOString() : null,
+        is_sent: message.isSent ?? false,
+        to_address: message.toAddress ?? null,
+        to_name: message.toName ?? null,
+        /*
+         * Sent mail arrives settled. It is not waiting to be matched to anything — we wrote it,
+         * we know where it went — and a Sent folder dropping 2 000 messages into the queue an
+         * agent works is a queue nobody works.
+         */
+        no_record_at: (message.noRecordNeeded || message.isSent) ? new Date().toISOString() : null,
         occurred_at: message.at,
       },
       { onConflict: 'user_id,message_id', ignoreDuplicates: true },
@@ -674,8 +686,18 @@ async function syncMailbox(
   conn: EmailConnectionRow,
   path: string,
   sinceUid: number | null,
-  isJunk: boolean,
+  /**
+   * What sort of folder this is, and it decides far more than a label.
+   *
+   * 'sent' takes a different path entirely: a mailbox row and nothing else. The matching below
+   * files a message onto a debtor's account and raises Annexure B item 6 for RECEIVING it, and a
+   * message we sent is item 1(a), already charged when it went out. Running sent mail through
+   * the same code would bill the debtor twice for one email.
+   */
+  kind: 'inbox' | 'junk' | 'sent',
 ): Promise<{ logged: number; maxUid: number }> {
+  const isJunk = kind === 'junk'
+  const isSent = kind === 'sent'
   let logged = 0
   // Once per folder, not once per message.
   const blocks = await loadBlocks(admin, conn.user_id)
@@ -742,6 +764,8 @@ async function syncMailbox(
       const blocked = isBlocked(normaliseAddress(fromAddress), blocks)
       if (blocked) console.log(`[emailSync] ${path} UID ${uid}: sender blocked, no mailbox row`)
 
+      const firstTo = parsed.to && 'value' in parsed.to ? parsed.to.value?.[0] : undefined
+
       const mailboxRowId = blocked ? null : await fileUserEmail(admin, conn.user_id, {
         folder: path,
         uid: msg.uid,
@@ -752,10 +776,24 @@ async function syncMailbox(
         body: parsed.text || '',
         attachmentNames: realAttachmentNames(parsed.attachments),
         isJunk,
+        isSent,
+        toAddress: firstTo?.address ? normaliseAddress(firstTo.address) ?? firstTo.address : null,
+        toName: firstTo?.name || null,
         at: (parsed.date ?? new Date()).toISOString(),
         // isBlocked's twin — the same matching, the opposite intent. See loadSenderRules.
         noRecordNeeded: isBlocked(normaliseAddress(fromAddress), senderRules),
       })
+
+      /*
+       * SENT MAIL STOPS HERE. Everything below files the message onto a record and charges for
+       * it — item 6 for a debtor's email, an activity for a CRM contact. A message we sent was
+       * charged as item 1(a) when it went out, and the account already has its own copy from the
+       * send. Going on would bill the debtor twice and file the message against itself.
+       */
+      if (isSent) {
+        if (mailboxRowId) logged += 1
+        continue
+      }
 
       /*
        * A debtor's reply is checked for first, and it leaves by a different door.
@@ -944,24 +982,32 @@ export async function syncConnection(admin: SupabaseClient, conn: EmailConnectio
 
   await client.connect()
   try {
-    const inboxResult = await syncMailbox(client, admin, conn, 'INBOX', conn.last_seen_uid, false)
+    const inboxResult = await syncMailbox(client, admin, conn, 'INBOX', conn.last_seen_uid, 'inbox')
 
     const mailboxes = await client.list()
     const junkPath = findFolder(mailboxes, '\\Junk', ['junk', 'spam', 'junk email', 'bulk mail', 'inbox.junk', 'inbox.spam', 'inbox/junk', 'inbox/spam'])
+    const sentPath = findFolder(mailboxes, '\\Sent', ['sent', 'sent items', 'sent messages', 'inbox.sent', 'inbox/sent'])
     console.log(
-      `[emailSync] mailboxes: ${mailboxes.map((m) => `${m.path}${m.specialUse ? ` (${m.specialUse})` : ''}`).join(', ')} -- junk folder detected as: ${junkPath ?? '(none found)'}`,
+      `[emailSync] mailboxes: ${mailboxes.map((m) => `${m.path}${m.specialUse ? ` (${m.specialUse})` : ''}`).join(', ')} -- junk: ${junkPath ?? '(none)'}, sent: ${sentPath ?? '(none)'}`,
     )
-    const junkResult = junkPath ? await syncMailbox(client, admin, conn, junkPath, conn.last_seen_uid_junk, true) : { logged: 0, maxUid: conn.last_seen_uid_junk ?? 0 }
+    const junkResult = junkPath ? await syncMailbox(client, admin, conn, junkPath, conn.last_seen_uid_junk, 'junk') : { logged: 0, maxUid: conn.last_seen_uid_junk ?? 0 }
+    /*
+     * The Sent folder, so an agent can see what they sent — including mail sent from Outlook or a
+     * phone, which Raptor never saw. Messages Raptor sends are appended to this same folder by
+     * api/email/send.ts, so they come back through here rather than needing a second path.
+     */
+    const sentResult = sentPath ? await syncMailbox(client, admin, conn, sentPath, conn.last_seen_uid_sent, 'sent') : { logged: 0, maxUid: conn.last_seen_uid_sent ?? 0 }
 
     // Checked deliberately: a swallowed error here would leave a watermark stuck, so a
     // future sync silently reprocesses the same already-logged messages from scratch (only
     // caught downstream by the dedup upsert above, at the cost of a full re-fetch every time).
     const patch: Record<string, unknown> = { last_seen_uid: inboxResult.maxUid, last_synced_at: new Date().toISOString() }
     if (junkPath) patch.last_seen_uid_junk = junkResult.maxUid
+    if (sentPath) patch.last_seen_uid_sent = sentResult.maxUid
     const { error: watermarkError } = await admin.from('email_connections').update(patch).eq('user_id', conn.user_id)
     if (watermarkError) throw new Error(`Failed to save sync watermark: ${watermarkError.message}`)
 
-    return { logged: inboxResult.logged + junkResult.logged }
+    return { logged: inboxResult.logged + junkResult.logged + sentResult.logged }
   } finally {
     await client.logout().catch(() => {})
   }

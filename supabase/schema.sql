@@ -57,6 +57,12 @@ create table if not exists public.profiles (
 alter table public.profiles add column if not exists buzzbox_extension text;
 alter table public.profiles add column if not exists diary_capacity integer;
 alter table public.profiles add column if not exists diary_order text;
+alter table public.user_emails add column if not exists is_sent boolean not null default false;
+alter table public.user_emails add column if not exists to_address text;
+alter table public.user_emails add column if not exists to_name text;
+-- Its own watermark: sharing the inbox one would make the first Sent sync skip everything older
+-- than the newest inbox message, which on a busy mailbox is everything.
+alter table public.email_connections add column if not exists last_seen_uid_sent integer;
 
 -- Auto-create a profile the moment someone accepts a Supabase invite /
 -- signs in for the first time. The very first person ever to sign up
@@ -1913,6 +1919,20 @@ create table if not exists public.user_emails (
    * Deliberately NOT folded into is_filed. Filed means "on a record", and the Matched tab means
    * exactly that; a supplier's invoice is on no record at all and would be a lie in that list.
    */
+  /*
+   * SENT MAIL IS A DIFFERENT ANIMAL, and the columns say so rather than the code having to
+   * remember. The sync files an incoming message onto a debtor's account and raises Annexure B
+   * item 6 for RECEIVING it; a message we sent is item 1(a), already charged when it went out.
+   * Putting sent mail through the same path would bill the debtor twice for one email, so it
+   * gets a mailbox row and nothing else — see api/_lib/emailSync.ts.
+   *
+   * to_address because "who is this from" is the wrong question about a sent message: From is
+   * always us, and the useful address is the recipient.
+   */
+  is_sent boolean not null default false,
+  to_address text,
+  to_name text,
+
   is_settled boolean generated always as (
     linked_account_id is not null
     or linked_lead_id is not null
@@ -1962,6 +1982,10 @@ create unique index if not exists user_emails_message_idx
 create index if not exists user_emails_inbox_idx
   on public.user_emails (user_id, occurred_at desc);
 -- Unread count, and the "needs filing" view.
+-- The Sent tab, newest first. Partial, so it indexes sent mail rather than the whole mailbox.
+create index if not exists user_emails_sent_idx
+  on public.user_emails (user_id, occurred_at desc)
+  where is_sent = true;
 create index if not exists user_emails_unfiled_idx
   on public.user_emails (user_id, occurred_at desc)
   where is_filed = false and is_junk = false;

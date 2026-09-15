@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, CircleCheck, ExternalLink,
-  Inbox, Link2, Download, Loader2, Mail as MailIcon, MoveRight, Paperclip, Reply, RefreshCw,
+  Inbox, Link2, Download, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
+  Forward as ForwardIcon,
   Search, ShieldAlert, Trash2, Undo2, X,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
@@ -11,6 +12,7 @@ import { useAuth } from '../../store/AuthContext'
 import { relativeDayLabel } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
 import { recordSentEmail, replySubject } from '../../lib/accountEmails'
+import { forwardBody, forwardSubject } from '../../lib/emailRules'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import { useEmailView } from '../../lib/emailView'
@@ -71,6 +73,12 @@ const TABS: { id: Pane; label: string; hint: string }[] = [
    */
   { id: 'no-record', label: 'No record needed', hint: 'Suppliers and the like — dealt with, on nobody\u2019s file' },
   { id: 'junk', label: 'Junk', hint: 'Your mail server thought this was spam' },
+  /*
+   * Read off the mailbox's own Sent folder rather than only what Raptor sent, so mail sent from
+   * Outlook or a phone is here too. Its own tab and no other: sent mail is not waiting to be
+   * matched and is not part of the incoming working list.
+   */
+  { id: 'sent', label: 'Sent', hint: 'What you have sent, from anywhere' },
   { id: 'blocked', label: 'Senders', hint: 'Blocked, and senders that never need matching' },
 ]
 
@@ -129,6 +137,10 @@ export function MailPage() {
    */
   const [linkThenReply, setLinkThenReply] = useState(false)
   const [replying, setReplying] = useState<MailItem | null>(null)
+  /** A brand-new message to anybody. Not a reply, so it carries no thread and no record. */
+  const [composing, setComposing] = useState(false)
+  /** A message being passed on, with the original underneath it. */
+  const [forwarding, setForwarding] = useState<{ mail: MailItem; body: string; complete: boolean } | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [open, setOpen] = useState<string | null>(null)
   /*
@@ -535,6 +547,25 @@ export function MailPage() {
    * would undo itself. Closing it is also what somebody means by the action — put this back on
    * the pile, I will deal with it later.
    */
+  /**
+   * Start a forward, with the original underneath it.
+   *
+   * THE BODY IS FETCHED, not taken from the row. The mailbox stores a 240-character snippet and
+   * the message itself stays in the mailbox — forwarding the snippet would send somebody a
+   * truncated message with no sign it had been cut. Where the fetch fails the snippet goes
+   * instead, and says so in the quoted block rather than passing itself off as the whole thing.
+   */
+  async function startForward(mail: MailItem) {
+    const token = session?.access_token
+    if (!token) { setForwarding({ mail, body: mail.snippet ?? '', complete: false }); return }
+    try {
+      const full = await fetchMailBody(mail.id, token)
+      setForwarding({ mail, body: full.text || mail.snippet || '', complete: !!full.text })
+    } catch {
+      setForwarding({ mail, body: mail.snippet ?? '', complete: false })
+    }
+  }
+
   async function unreadOne(mail: MailItem) {
     // Optimistic, like marking read on open: the row goes bold at once and the write follows.
     setItems((list) => list.map((m) => (m.id === mail.id ? { ...m, readAt: null } : m)))
@@ -574,6 +605,17 @@ export function MailPage() {
             className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50">
             {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             {syncing ? 'Checking…' : 'Check now'}
+          </button>
+          {/*
+            A message to anybody, from here. Every other compose in Raptor hangs off a record —
+            a debtor, a lead, a deal — which covers replying and covers nothing else. Writing to
+            an attorney, a client's accountant or a bureau had to be done in Outlook, which is
+            how a mailbox managed in one place stops being managed in one place.
+          */}
+          <button onClick={() => setComposing(true)}
+            className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+            <PenLine size={14} />
+            New email
           </button>
           {/* Junk earns its own one-tap answer: it is where the volume is and where nobody
               wants to read anything. */}
@@ -813,7 +855,7 @@ export function MailPage() {
                   skippedImages={imagesSkipped[m.id]}
                   loadingBody={reading === m.id}
                   bodyError={readError[m.id]} onBlock={() => setBlocking(m)}
-                  onReply={() => startReply(m)} onJunk={(j) => void junkOne(m, j)}
+                  onReply={() => startReply(m)} onForward={() => startForward(m)} onJunk={(j) => void junkOne(m, j)}
                   onMove={mayRefile ? () => setMoving(m) : null}
                   onUnread={() => void unreadOne(m)}
                   onNoRecord={() => setSettling(m)}
@@ -856,6 +898,7 @@ export function MailPage() {
                   })}
                   onLink={() => startLink(m)}
                   onReply={() => startReply(m)}
+                  onForward={() => startForward(m)}
                   onJunk={(j) => void junkOne(m, j)}
                   onMove={mayRefile ? () => setMoving(m) : null}
                   onUnread={() => void unreadOne(m)}
@@ -956,6 +999,32 @@ export function MailPage() {
         />
       )}
 
+      {composing && (
+        <ComposeEmailModal
+          contextNote={'This goes out from your mailbox and lands on no record. To put a message on '
+            + 'a debtor\u2019s file, send it from the account instead — that is what charges item 1(a) '
+            + 'and files the copy.'}
+          onClose={() => setComposing(false)}
+          onSent={() => { setComposing(false); setStatus('Sent.'); void load(page) }}
+        />
+      )}
+
+      {forwarding && (
+        <ComposeEmailModal
+          initialSubject={forwardSubject(forwarding.mail.subject)}
+          initialBody={forwardBody(forwarding.mail, forwarding.body, forwarding.complete)}
+          /*
+            NOT inReplyTo. A forward starts a new conversation with somebody who was not in the
+            old one; threading it onto the original would file the recipient's reply against the
+            debtor the original came from.
+          */
+          contextNote={'Forwarded from your mailbox. It lands on no record and nothing is charged '
+            + '\u2014 a forward is not correspondence with the debtor.'}
+          onClose={() => setForwarding(null)}
+          onSent={() => { setForwarding(null); setStatus('Forwarded.'); void load(page) }}
+        />
+      )}
+
       {replying && (
         <ComposeEmailModal
           to={replying.fromAddress}
@@ -1048,6 +1117,7 @@ function Empty({ filter, searching }: { filter: Exclude<Pane, 'blocked'>; search
     all: 'Your mailbox is empty. Connect it under Settings → Integrations if you have not yet.',
     // Junk is a shelf, not a bin: nothing here has been deleted, it is just kept out of All.
     junk: 'Nothing in junk.',
+    sent: 'Nothing sent yet. This fills from your mailbox\u2019s Sent folder, so mail you send from Outlook or your phone shows here too.',
   }
   return (
     <div className="py-14 text-center">
@@ -1230,8 +1300,8 @@ function MailSummary({ mail, tight, blocked }: {
 
 /** The message itself, shared by the expanded row and the reading pane. */
 function MailBody({
-  mail, body, images, skippedImages, loadingBody, bodyError, onBlock, onReply, onJunk, onMove,
-  onUnread, onNoRecord, onUndoNoRecord, onDownload, downloading, downloadError,
+  mail, body, images, skippedImages, loadingBody, bodyError, onBlock, onReply, onForward, onJunk,
+  onMove, onUnread, onNoRecord, onUndoNoRecord, onDownload, downloading, downloadError,
 }: {
   mail: MailItem
   body?: string
@@ -1243,6 +1313,8 @@ function MailBody({
   bodyError?: string
   onBlock: () => void
   onReply: () => void
+  /** Pass it on to somebody who was not in the conversation — an attorney, the client. */
+  onForward: () => void
   /** Shelve it, or rescue it. Absent on filed mail, which is a record either way. */
   onJunk: (junk: boolean) => void
   /** Unmatch it, or rematch it from the same box. Null for anyone who is not an administrator. */
@@ -1385,6 +1457,16 @@ function MailBody({
         </button>
 
         {/*
+          FORWARD, which Reply alone could not cover. Passing a debtor's dispute to the client who
+          has to answer it, or a mandate to the attorney, is everyday work that otherwise meant
+          opening Outlook — and mail managed in two places is mail managed in neither.
+        */}
+        <button onClick={onForward}
+          className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+          <ForwardIcon size={13} /> Forward
+        </button>
+
+        {/*
           Through to the debtor's file, which is the other half of managing mail from one place:
           the message is here, but the balance, the arrangement and the history are there.
 
@@ -1483,7 +1565,7 @@ function MailBody({
 
 function MailRow({
   mail, chosen, expanded, selecting, blocked, body, images, skippedImages, loadingBody, bodyError,
-  onToggle, onChoose, onLink, onBlock, onReply, onJunk, onMove, onUnread, onNoRecord,
+  onToggle, onChoose, onLink, onBlock, onReply, onForward, onJunk, onMove, onUnread, onNoRecord,
   onUndoNoRecord, onDownload, downloading, downloadError,
 }: {
   mail: MailItem
@@ -1506,6 +1588,7 @@ function MailRow({
   onLink: () => void
   onBlock: () => void
   onReply: () => void
+  onForward: () => void
   onJunk: (junk: boolean) => void
   onMove: (() => void) | null
   onUnread: () => void
@@ -1557,7 +1640,7 @@ function MailRow({
         <div className="px-5 pb-4 pl-[2.9rem]">
           <MailBody mail={mail} body={body} images={images} skippedImages={skippedImages}
             loadingBody={loadingBody}
-            bodyError={bodyError} onBlock={onBlock} onReply={onReply} onJunk={onJunk}
+            bodyError={bodyError} onBlock={onBlock} onReply={onReply} onForward={onForward} onJunk={onJunk}
             onMove={onMove} onUnread={onUnread}
             onNoRecord={onNoRecord} onUndoNoRecord={onUndoNoRecord} onDownload={onDownload}
             downloading={downloading} downloadError={downloadError} />
@@ -2530,8 +2613,23 @@ function MoveModal({ mail, actor, onClose, onDone }: {
     try {
       const removeContact = alsoRemove && !!savedOnFile
       await unmatchMail({ mail, reason, actor, removeContact })
+      /*
+       * WHERE IT ACTUALLY WENT, not where it usually goes.
+       *
+       * This said "It is back under Needs matching" unconditionally, and for a junk message that
+       * is simply false — Needs matching excludes junk, so the agent unmatched a newsletter, was
+       * told where to find it, looked there, and found an empty list. Junk is the common case
+       * for an unmatch, too: matching a newsletter to a debtor by mistake is exactly the thing
+       * being undone.
+       *
+       * A message settled some other way (marked as needing no record, or still on a lead or a
+       * deal) is not in Needs matching either, and saying so beats sending somebody hunting.
+       */
+      const landsIn = mail.isJunk ? 'Junk'
+        : mail.noRecordAt ? 'No record needed'
+          : 'Needs matching'
       onDone(
-        `Unmatched from ${was}. It is back under Needs matching.`
+        `Unmatched from ${was}. You will find it under ${landsIn}.`
         + (removeContact ? ` ${mail.fromAddress} is off their contacts, so it can be blocked now.` : ''),
       )
     } catch (e) {
