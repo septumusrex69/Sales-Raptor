@@ -127,8 +127,30 @@ export function DiaryPage() {
   }, [params, setParams])
 
   const setTab = (next: DiaryTab) => setParam('tab', next)
-  /** Move the day on screen. Null means back to today, which drops the parameter entirely. */
-  const goToDay = (date: string) => setParam('day', date === today ? null : date)
+
+  /**
+   * Move the day on screen — and show that day's work when you get there.
+   *
+   * THE TAB HAS TO FOLLOW THE DAY. It did not, and the result looked broken: on Backlog, pressing
+   * an arrow moved the heading and the four tiles to the 18th while the list underneath carried
+   * on showing the backlog, because the backlog is what the Backlog tab renders whatever date is
+   * set. Somebody who had just re-diarised three accounts onto the 21st went to look at the 21st
+   * and saw overdue work instead.
+   *
+   * It is not that the backlog ignores the date — "overdue" means before the day being viewed,
+   * so it does change. But nobody presses a day to see what was overdue as of that day. They
+   * press it to see what they have to work, so that is what it now shows.
+   *
+   * Both parameters move in one write. Two calls would be two navigations, and the second would
+   * be built from a stale copy of the first's search params.
+   */
+  const goToDay = (date: string) => {
+    const p = new URLSearchParams(params)
+    if (date === today) p.delete('day'); else p.set('day', date)
+    // From anywhere, not only the Backlog: pressing a day means "show me that day".
+    p.set('tab', 'Today')
+    setParams(p, { replace: true })
+  }
 
   /**
    * The rows actually on screen, in the order asked for.
@@ -228,7 +250,12 @@ export function DiaryPage() {
                 className={`text-sm font-medium px-3 py-1.5 rounded-lg transition-colors ${
                   tab === t ? 'bg-navy-950 text-white' : 'text-slate-500 hover:bg-slate-100'
                 }`}>
-                {t}
+                {/*
+                  The first tab is the DAY being looked at, so it cannot keep saying "Today" once
+                  that day is the 18th — a tab reading Today above a list of Friday's work is the
+                  same confusion the arrows caused, one line further down.
+                */}
+                {t === 'Today' && !isToday ? shortDate(viewDay) : t}
                 {t === 'Backlog' && day && day.overdue.length > 0 && (
                   <span className="ml-1.5 text-[11px] opacity-80">{day.overdue.length}</span>
                 )}
@@ -395,7 +422,13 @@ export function DiaryPage() {
               capacity={owner?.diaryCapacity ?? null}
               today={today}
               selected={viewDay}
-              onPick={(date) => { goToDay(date); setTab('Today') }}
+              /*
+                One call, not two. It was `goToDay(date); setTab('Today')`, and both build a
+                URLSearchParams from the same render's `params` — so the second write clobbered
+                the day the first had just set, and clicking a day in the month landed you on
+                today. goToDay now moves both together.
+              */
+              onPick={goToDay}
             />
           )}
 
