@@ -160,7 +160,7 @@ export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
      * says so.
      */
     label: 'In progress',
-    meaning: 'Ordinary collection is under way. Nothing has come of it yet.',
+    meaning: 'Ordinary collection is under way, including where a Section 129 demand has been issued.',
     inPlay: true,
     tone: 'progressing',
   },
@@ -178,7 +178,7 @@ export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
   },
   legal: {
     label: 'Legal',
-    meaning: 'A Section 129 letter of demand has been issued, or the matter is with attorneys on your instruction.',
+    meaning: 'The matter has been handed to attorneys, or summons has been issued, on your instruction.',
     inPlay: false,
     tone: 'progressing',
   },
@@ -280,8 +280,20 @@ export function clientPosition(input: PositionInput): ClientPosition {
     return 'under_administration'
   }
 
-  // A legal step is a fact about where the matter IS, not about how it is going.
-  if (input.inLegal || /section\s*129|summons|attorney|litigat/i.test(sub)) return 'legal'
+  /*
+   * SECTION 129 IS NOT HERE, at the firm's instruction, and it belongs nowhere near this rung.
+   *
+   * A section 129 letter of demand is the statutory step a credit provider must take BEFORE it
+   * may go to court. It is not legal action; it is ordinary collection carried out in the form
+   * the Act requires, and the firm telephones the debtor the day it goes out. So it falls
+   * through to `in_progress` with everything else that is simply being collected.
+   *
+   * It is 279 accounts on the book — 38% — and reporting them as Legal would have told clients a
+   * third of their book was in court when none of it was.
+   *
+   * What is left here is the real thing: summons issued, or the matter handed to attorneys.
+   */
+  if (input.inLegal || /summons|attorney|litigat/i.test(sub)) return 'legal'
   if (input.disputed || /defended|dispute/i.test(sub)) return 'disputed'
   if (/tracing|trace/i.test(sub)) return 'tracing'
 

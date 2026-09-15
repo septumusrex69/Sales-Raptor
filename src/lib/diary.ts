@@ -57,6 +57,9 @@ export interface DiaryRow extends DiaryEntry {
     debtorSurname: string | null
     capitalOutstanding: number
     status: string
+    /* Carried so the finish box can preview the client's own line before the date is booked. */
+    subStatus: string | null
+    clientActionAsk: string | null
     prescriptionDate: string | null
     mainComment: string | null
     mainCommentAt: string | null
@@ -100,6 +103,8 @@ const toRow = (r: any): DiaryRow => ({
     debtorSurname: r.debtor_accounts?.debtor_surname ?? null,
     capitalOutstanding: Number(r.debtor_accounts?.capital_outstanding ?? 0),
     status: r.debtor_accounts?.status ?? '',
+    subStatus: r.debtor_accounts?.sub_status ?? null,
+    clientActionAsk: r.debtor_accounts?.client_action_ask ?? null,
     prescriptionDate: r.debtor_accounts?.prescription_date ?? null,
     mainComment: r.debtor_accounts?.main_comment ?? null,
     mainCommentAt: r.debtor_accounts?.main_comment_at ?? null,
@@ -119,7 +124,8 @@ const ROW_SELECT = `
   *,
   debtor_accounts!diary_entries_account_id_fkey (
     id, company_id, account_number, debtor_first_name, debtor_surname,
-    capital_outstanding, status, prescription_date, main_comment, main_comment_at
+    capital_outstanding, status, sub_status, client_action_ask,
+    prescription_date, main_comment, main_comment_at
   )
 `
 
