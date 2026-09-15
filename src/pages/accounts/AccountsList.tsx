@@ -6,17 +6,26 @@ import { inputClass } from '../../components/ui/Modal'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import {
-  fetchAccounts, fetchBookFacets, fetchBookSummary, hasCommissionDrift,
+  fetchAccounts, fetchBookFacets, fetchBookSummary, fetchViewCounts, hasCommissionDrift,
   type BookFacets, type BookSummary, type DebtorAccount,
 } from '../../lib/accountBook'
 import { clearedFilters, filterChips, queryFromParams } from '../../lib/accountFilters'
+import {
+  QUIET_VIEW_DAYS, activeView, viewParams, viewsFor, type ViewCounts,
+} from '../../lib/accountViews'
 import { CLIENT_FLAGS, CLIENT_POSITIONS, clientFlag, clientPosition } from '../../lib/clientPosition'
 import { AccountFilters } from './AccountFilters'
 import { AllocateModal } from './AllocateModal'
 import type { Selection } from '../../lib/accountAllocation'
 import { formatCurrency, formatDate } from '../../data/mockData'
 
-const PAGE_SIZE = 50
+/*
+ * A hundred, not fifty. The cost is the same request either way — the narrowing happens in the
+ * database — and fifty rows of a three-thousand-account client reads as a sample rather than a
+ * book. Pages are appended rather than replaced, so working down a client is one continuous
+ * scroll instead of Next, Next, Next.
+ */
+const PAGE_SIZE = 100
 
 /** Who may ask for somebody else's desk. An agent's book is their own. */
 const CAN_SEE_OTHER_DESKS = ['Administrator', 'Sales Manager', 'Liaison Manager', 'Pre-legal Team Leader']
@@ -34,12 +43,15 @@ const CAN_SEE_OTHER_DESKS = ['Administrator', 'Sales Manager', 'Liaison Manager'
  * you cannot paste into a message is half a tool.
  */
 export function AccountsList() {
-  const { companies, users } = useAppStore()
+  const { companies, users, teams } = useAppStore()
   const { currentUser } = useAuth()
   const [params, setParams] = useSearchParams()
   const [accounts, setAccounts] = useState<DebtorAccount[]>([])
   const [summary, setSummary] = useState<BookSummary | null>(null)
   const [facets, setFacets] = useState<BookFacets | null>(null)
+  const [viewCounts, setViewCounts] = useState<ViewCounts | null>(null)
+  /** Appending, not replacing: pages beyond the first are added to what is already on screen. */
+  const [loadingMore, setLoadingMore] = useState(false)
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -77,22 +89,34 @@ export function AccountsList() {
   }, [search, params, setParam])
 
   const key = params.toString()
-  const query = useMemo(() => queryFromParams(new URLSearchParams(key)), [key])
+  const teamMembers = useCallback(
+    (id: string) => teams.find((t) => t.id === id)?.memberIds ?? [],
+    [teams],
+  )
+  const query = useMemo(
+    () => queryFromParams(new URLSearchParams(key), new Date(), { teamMembers }),
+    [key, teamMembers],
+  )
 
   /*
    * A SELECTION DOES NOT SURVIVE A CHANGE OF QUESTION. Ticking eleven rows, then narrowing the
    * filters, then allocating would act on accounts no longer on screen — the worst kind of bulk
    * action, because it looks exactly like the right one.
    */
-  useEffect(() => { setTicked(new Set()); setAllMatching(false) }, [key, page])
+  useEffect(() => { setTicked(new Set()); setAllMatching(false) }, [key])
 
+  /*
+   * The first page, whenever the question changes. Pages after it are appended by loadMore, so
+   * this effect deliberately does not depend on `page` — otherwise loading more would refetch
+   * from the top and throw away what is already on screen.
+   */
   useEffect(() => {
     let cancelled = false
-    setLoading(true); setError(null)
+    setLoading(true); setError(null); setPage(0)
     void (async () => {
       try {
         const [res, sum] = await Promise.all([
-          fetchAccounts({ ...query, page, pageSize: PAGE_SIZE }),
+          fetchAccounts({ ...query, page: 0, pageSize: PAGE_SIZE }),
           fetchBookSummary(query.companyId),
         ])
         if (cancelled) return
@@ -104,7 +128,31 @@ export function AccountsList() {
       }
     })()
     return () => { cancelled = true }
-  }, [query, page])
+  }, [query])
+
+  async function loadMore() {
+    setLoadingMore(true); setError(null)
+    try {
+      const next = page + 1
+      const res = await fetchAccounts({ ...query, page: next, pageSize: PAGE_SIZE })
+      /*
+       * Merged by id rather than concatenated. The book is ordered by account number and rows can
+       * move between pages while somebody reads — an account allocated, or a new handover landing
+       * — and a blind concat shows the same account twice, which reads as a duplicate in the book
+       * rather than as a paging artefact.
+       */
+      setAccounts((prev) => {
+        const seen = new Set(prev.map((a) => a.id))
+        return [...prev, ...res.accounts.filter((a) => !seen.has(a.id))]
+      })
+      setTotal(res.total)
+      setPage(next)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   // The dropdowns offer what the book holds, which changes with the client. Its own request, so
   // a slow facet count never holds up the list itself.
@@ -115,6 +163,23 @@ export function AccountsList() {
       .catch(() => { if (!cancelled) setFacets(null) })
     return () => { cancelled = true }
   }, [companyId])
+
+  /*
+   * The badges on the views row. Their own request too, and failing quietly: a view without a
+   * number is still a working link, and a screen that refuses to show accounts because a count
+   * did not come back would be trading the thing people came for against a decoration.
+   */
+  useEffect(() => {
+    let cancelled = false
+    void fetchViewCounts({
+      userId: currentUser?.id ?? null,
+      companyId,
+      quietDays: QUIET_VIEW_DAYS,
+    })
+      .then((c) => { if (!cancelled) setViewCounts(c) })
+      .catch(() => { if (!cancelled) setViewCounts(null) })
+    return () => { cancelled = true }
+  }, [companyId, currentUser?.id])
 
   const pageIds = accounts.map((a) => a.id)
   const allOnPageTicked = allMatching || (pageIds.length > 0 && pageIds.every((id) => ticked.has(id)))
@@ -147,17 +212,22 @@ export function AccountsList() {
 
   const reload = async () => {
     clearSelection()
-    const [res, sum] = await Promise.all([
-      fetchAccounts({ ...query, page, pageSize: PAGE_SIZE }),
+    setPage(0)
+    const [res, sum, counts] = await Promise.all([
+      fetchAccounts({ ...query, page: 0, pageSize: PAGE_SIZE }),
       fetchBookSummary(query.companyId),
+      fetchViewCounts({ userId: currentUser?.id ?? null, companyId, quietDays: QUIET_VIEW_DAYS })
+        .catch(() => null),
     ])
     setAccounts(res.accounts); setTotal(res.total); setSummary(sum)
+    if (counts) setViewCounts(counts)
   }
 
   const driftOnly = params.get('drift') === '1'
   const narrowed = filterChips(params).length > 0 || !!query.search
-  const from = total === 0 ? 0 : page * PAGE_SIZE + 1
-  const to = Math.min(total, (page + 1) * PAGE_SIZE)
+  const shown = accounts.length
+  const current = activeView(params, currentUser?.id ?? null)
+  const views = viewsFor(canSeeOthers)
 
   return (
     <div className="space-y-4">
@@ -182,6 +252,45 @@ export function AccountsList() {
         </div>
       )}
 
+      {/*
+        THE VIEWS ROW EXISTS BECAUSE THE DEFAULT WAS ARBITRARY. Six figures of accounts sorted
+        alphabetically by account number is nobody's question — you open the book, land on
+        "Abc1111", and cannot tell whether you are looking at the whole thing or a stray filter.
+        The answer is not to start blank and make people build a query before they see anything;
+        it is to make the questions people actually ask one click away, with the number attached.
+
+        Each view is nothing but a set of URL parameters, so clicking one leaves the address bar
+        saying exactly what is on screen: it can be pasted, bookmarked, narrowed further by hand,
+        and cleared. None of that is true of a hidden mode.
+      */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {views.map((v) => {
+          const on = current === v.id
+          const count = viewCounts?.[v.countKey as keyof ViewCounts]
+          return (
+            <button key={v.id} type="button" title={v.hint}
+              onClick={() => {
+                const next = viewParams(v.id, currentUser?.id ?? null)
+                // The client survives a change of view: scoping the book to one client is a
+                // different question from which view is being asked of it.
+                if (companyId) next.set('client', companyId)
+                setParams(next, { replace: true })
+              }}
+              className={`inline-flex items-center gap-1.5 text-sm rounded-lg border px-2.5 py-1.5 ${
+                on
+                  ? 'border-navy-950 bg-navy-950 text-white'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
+              {v.label}
+              {count !== undefined && (
+                <span className={`tabular-nums text-[11px] ${on ? 'text-white/70' : 'text-slate-400'}`}>
+                  {count.toLocaleString('en-ZA')}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
       <Card padded={false}>
         <div className="flex flex-wrap items-center gap-2 p-4 border-b border-slate-100">
           <div className="relative flex-1 min-w-[220px]">
@@ -203,7 +312,7 @@ export function AccountsList() {
           </select>
           <AccountFilters
             params={params} setParam={setParam} onClear={clearFilters}
-            facets={facets} users={users} canSeeOthers={canSeeOthers}
+            facets={facets} users={users} teams={teams} canSeeOthers={canSeeOthers}
           />
         </div>
 
@@ -261,6 +370,31 @@ export function AccountsList() {
           <div className="p-4 text-sm text-rose-700 bg-rose-50/50 flex items-start gap-2">
             <AlertTriangle size={15} className="shrink-0 mt-0.5" />
             <span>{error}</span>
+          </div>
+        )}
+
+        {/*
+          WHAT IS ON SCREEN AND WHY, said out loud. Without this line a filter left set from an
+          hour ago looks exactly like a small book, and the only clue is a number on a button
+          somebody has to notice. It is the sentence that answers "is this everything?" before
+          anybody has to ask it.
+        */}
+        {!loading && accounts.length > 0 && (
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 px-4 py-2 border-b border-slate-100 bg-slate-50/50 text-xs text-slate-500">
+            <span className="tabular-nums">
+              Showing {shown.toLocaleString('en-ZA')} of {total.toLocaleString('en-ZA')}
+            </span>
+            <span className="text-slate-300">·</span>
+            <span>{companyName ?? 'all clients'}</span>
+            {narrowed && (
+              <>
+                <span className="text-slate-300">·</span>
+                <span className="text-amber-700">narrowed</span>
+                <button type="button" className="font-medium text-brand-600 hover:underline" onClick={clearFilters}>
+                  Show the whole book
+                </button>
+              </>
+            )}
           </div>
         )}
 
@@ -361,13 +495,16 @@ export function AccountsList() {
           </div>
         )}
 
-        {total > PAGE_SIZE && (
-          <div className="flex items-center justify-between p-4 border-t border-slate-100 text-sm">
-            <span className="text-slate-500 tabular-nums">{from}–{to} of {total.toLocaleString('en-ZA')}</span>
-            <div className="flex gap-2">
-              <button className="btn-secondary" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Previous</button>
-              <button className="btn-secondary" disabled={to >= total} onClick={() => setPage((p) => p + 1)}>Next</button>
-            </div>
+        {!loading && shown < total && (
+          <div className="flex flex-wrap items-center justify-between gap-2 p-4 border-t border-slate-100 text-sm">
+            <span className="text-slate-500 tabular-nums">
+              {(total - shown).toLocaleString('en-ZA')} more
+            </span>
+            <button className="btn-secondary inline-flex items-center gap-1.5"
+              disabled={loadingMore} onClick={() => void loadMore()}>
+              {loadingMore && <Loader2 size={14} className="animate-spin" />}
+              Load {Math.min(PAGE_SIZE, total - shown).toLocaleString('en-ZA')} more
+            </button>
           </div>
         )}
       </Card>

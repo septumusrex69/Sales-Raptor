@@ -5,7 +5,7 @@ import {
   PRESCRIBING_CHOICES, QUIET_CHOICES, STATUS_GROUPS, filterChips, type FilterParam,
 } from '../../lib/accountFilters'
 import type { BookFacets } from '../../lib/accountBook'
-import type { User } from '../../types'
+import type { Team, User } from '../../types'
 
 /**
  * Narrowing the book.
@@ -24,13 +24,14 @@ import type { User } from '../../types'
  * `.filter()` over a page of fifty, which would produce a list that is correct about the fifty
  * and wrong about the book.
  */
-export function AccountFilters({ params, setParam, onClear, facets, users, canSeeOthers }: {
+export function AccountFilters({ params, setParam, onClear, facets, users, teams, canSeeOthers }: {
   params: URLSearchParams
   setParam: (key: string, value: string | null) => void
   /** Drops every filter key in one navigation, rather than thirteen re-queries on the way. */
   onClear: () => void
   facets: BookFacets | null
   users: User[]
+  teams: Team[]
   /** Team leaders and administrators pick a desk; an agent's book is their own. */
   canSeeOthers: boolean
 }) {
@@ -39,6 +40,7 @@ export function AccountFilters({ params, setParam, onClear, facets, users, canSe
 
   const chips = filterChips(params, {
     userName: (id) => users.find((u) => u.id === id)?.name,
+    teamName: (id) => teams.find((t) => t.id === id)?.name,
   })
 
   useEffect(() => {
@@ -91,14 +93,13 @@ export function AccountFilters({ params, setParam, onClear, facets, users, canSe
                     ))}
                   </Select>
                 </Row>
-                <Row label="Bucket">
-                  <Select value={params.get('bucket') ?? ''} onChange={(v) => setParam('bucket', v)}>
-                    <option value="">Any bucket</option>
-                    {(facets?.buckets ?? []).map((b) => (
-                      <option key={b.value} value={b.value}>{b.value} ({b.accounts})</option>
-                    ))}
-                  </Select>
-                </Row>
+                {/*
+                  NO BUCKET CONTROL. "Bucket" is Swordfish's word for its own work queue — Diary,
+                  PTPs, Failed PTPs — and nobody at the firm uses it, so as a filter label it was
+                  a question people could not answer. Its one piece of real information survives
+                  as the "Broken promises" view, which reads bucket = 'Failed PTPs' because that
+                  column is more truthful than the sub-status: 40 accounts against 3.
+                */}
               </Group>
 
               {canSeeOthers && (
@@ -114,6 +115,24 @@ export function AccountFilters({ params, setParam, onClear, facets, users, canSe
                       ))}
                     </Select>
                   </Row>
+                  {/*
+                    A team is a set of desks, and it is the question a manager actually asks —
+                    "how is pre-legal doing" rather than "how is each of these four people doing".
+                    Only offered where teams exist; an empty dropdown is a promise the app cannot
+                    keep.
+                  */}
+                  {teams.length > 0 && (
+                    <Row label="Team">
+                      <Select value={params.get('team') ?? ''} onChange={(v) => setParam('team', v)}>
+                        <option value="">Any team</option>
+                        {teams.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name} ({t.memberIds.length})
+                          </option>
+                        ))}
+                      </Select>
+                    </Row>
+                  )}
                 </Group>
               )}
 
@@ -159,8 +178,12 @@ export function AccountFilters({ params, setParam, onClear, facets, users, canSe
                   label="In duplum" note="Interest and fees have reached the capital; they may not grow." />
                 <Check param="waiting" params={params} setParam={setParam}
                   label="Waiting on the client" note="We have asked them for something and cannot move until it comes." />
-                <Check param="drift" params={params} setParam={setParam}
-                  label="Off their mandate rate" note="The billed rate disagrees with the signed mandate." />
+                {/*
+                  Mandate drift is not a filter here any more, at the firm's instruction. The
+                  summary tile above still counts it and still links through, because 60 accounts
+                  billed at a rate that disagrees with a signed mandate is money, and the tile is
+                  the one place it is visible at all.
+                */}
               </Group>
 
               <Group heading="Handed over">

@@ -13,6 +13,7 @@
  */
 import { supabase } from './supabase'
 import type { FrozenBy } from './clientPosition.ts'
+import type { ViewCounts } from './accountViews.ts'
 
 export interface DebtorAccount {
   id: string
@@ -173,6 +174,18 @@ export interface AccountQuery {
   bucket?: string
   /** Whose desk it is on. 'nobody' finds the unallocated pile, which is its own kind of problem. */
   assignedTo?: string | 'nobody'
+  /**
+   * On any of these desks. What a team filter becomes.
+   *
+   * Resolved to member ids in the browser rather than joined in SQL: team membership lives on
+   * profiles, which is a handful of rows the app already holds, and a join would make the
+   * account query depend on a table it otherwise never touches.
+   *
+   * AN EMPTY ARRAY MATCHES NOTHING, on purpose. A team with no members has no accounts, and
+   * treating "no members" as "no filter" would answer a question about one team with the whole
+   * book — the most dangerous shape a filter can fail in.
+   */
+  assignedToAny?: string[]
   /** Handed over on or after this date. */
   handedOverFrom?: string
   /** Handed over on or before this date. */
@@ -233,6 +246,8 @@ export function applyAccountFilters<T>(query: T, q: AccountQuery): T {
   if (q.bucket) out = out.eq('bucket', q.bucket)
   if (q.assignedTo === 'nobody') out = out.is('assigned_to', null)
   else if (q.assignedTo) out = out.eq('assigned_to', q.assignedTo)
+  // See assignedToAny: an empty list narrows to nothing rather than to everything.
+  if (q.assignedToAny) out = out.in('assigned_to', q.assignedToAny)
 
   if (q.handedOverFrom) out = out.gte('handover_date', q.handedOverFrom)
   if (q.handedOverTo) out = out.lte('handover_date', q.handedOverTo)
@@ -540,4 +555,36 @@ export async function fetchBookFacets(companyId?: string): Promise<BookFacets> {
     .filter((r) => r.kind === kind)
     .map((r) => ({ value: r.value, accounts: Number(r.accounts) }))
   return { subStatuses: of('sub_status'), buckets: of('bucket') }
+}
+
+/**
+ * How much work each view holds.
+ *
+ * One request, not seven. The views row is only worth having if it says how many — "No diary
+ * date" with no number beside it is a link somebody clicks once and stops clicking — but seven
+ * separate head-counts before the first account appears is a screen that feels slow for the sake
+ * of seven badges.
+ */
+export async function fetchViewCounts(input: {
+  userId: string | null
+  companyId?: string
+  quietDays: number
+}): Promise<ViewCounts> {
+  const { data, error } = await supabase.rpc('account_view_counts', {
+    p_user: input.userId,
+    p_company: input.companyId ?? null,
+    p_quiet_days: input.quietDays,
+  })
+  if (error) throw new Error(error.message)
+  const row = (Array.isArray(data) ? data[0] : data) ?? {}
+  const n = (k: string) => Number((row as Record<string, unknown>)[k] ?? 0)
+  return {
+    whole_book: n('whole_book'),
+    my_desk: n('my_desk'),
+    unallocated: n('unallocated'),
+    adrift: n('adrift'),
+    broken_promises: n('broken_promises'),
+    promises_due: n('promises_due'),
+    gone_quiet: n('gone_quiet'),
+  }
 }
