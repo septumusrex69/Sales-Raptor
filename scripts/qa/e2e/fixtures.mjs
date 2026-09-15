@@ -60,6 +60,34 @@ export const COLLEAGUE = {
   book_ceiling: 150,
 }
 
+/**
+ * A full collections floor. Eight people fitted in cards; thirty-five is the case the search box
+ * and the scroll cap exist for, so the fixture carries thirty-five.
+ */
+const BENCH_NAMES = [
+  'Annelize Venter', 'Thabo Mokoena', 'Rehana Patel', 'Gerhard Kruger', 'Nomsa Dube',
+  'Sipho Khumalo', 'Marlize du Toit', 'Kagiso Molefe', 'Priya Naidoo', 'Johan Steyn',
+  'Lerato Mahlangu', 'Bongani Zulu', 'Chantelle Botha', 'Tshepo Radebe', 'Aisha Cassim',
+  'Riaan Pretorius', 'Zanele Ngcobo', 'Werner Nel', 'Palesa Sithole', 'Devan Pillay',
+  'Elmarie Swanepoel', 'Musa Ndlovu', 'Carla Meyer', 'Katlego Maseko', 'Shireen Abrahams',
+  'Pieter Coetzee', 'Nandi Mthembu', 'Ryno Fourie', 'Ayanda Buthelezi', 'Michelle Jacobs',
+  'Sabelo Mahlaba', 'Yusuf Ismail', 'Hanlie Grobler', 'Refilwe Tau', 'Dylan Adams',
+]
+const GRADES = ['Junior', 'Skilled', 'Senior', 'Elite']
+
+export const BENCH = BENCH_NAMES.map((name, i) => ({
+  ...PROFILE,
+  id: `bench-${String(i).padStart(4, '0')}-4000-8000-000000000000`,
+  name,
+  email: `${name.toLowerCase().replace(/[^a-z]/g, '.')}@raptor.test`,
+  role: i < 5 ? 'Pre-legal Team Leader' : 'Pre-legal Agent',
+  // The last six ungraded, mirroring the real floor and the case that once vanished.
+  collector_grade: i >= BENCH_NAMES.length - 6 ? null : GRADES[i % 4],
+  book_ceiling: i === 5 ? 700 : null,
+  diary_capacity: i === 11 ? 35 : null,
+  team_id: TEAM_ID,
+}))
+
 export const COMPANY = {
   id: COMPANY_ID,
   name: 'Northbank Properties',

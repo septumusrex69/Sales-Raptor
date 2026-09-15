@@ -178,7 +178,12 @@ ok('...and never offers allocate-without-booking', !/Allocate only|allocate_only
  * modes. Modes would leave "I chose Elite, then unticked one" with nowhere to live.
  */
 ok('everyone can be chosen at once', /setChosen\(new Set\(context\.collectors\.map/.test(handOutModal))
-ok('...by grade', /context\.collectors\.filter\(\(c\) => c\.grade === g\)/.test(handOutModal))
+/*
+ * `&& !c.ungraded` matters. An ungraded person is treated as Junior internally so they can be
+ * given generic work — but clicking the "Junior" quick-pick should select the people a team
+ * leader actually graded Junior, not sweep in everybody nobody has got round to grading.
+ */
+ok('...by grade', /c\.grade === g && !c\.ungraded/.test(handOutModal))
 ok('...by team', /teamOf\(users, c\.userId\) === t\.id/.test(handOutModal))
 ok('...and cleared', /onClick=\{\(\) => setChosen\(new Set\(\)\)\}/.test(handOutModal))
 /*
@@ -186,7 +191,24 @@ ok('...and cleared', /onClick=\{\(\) => setChosen\(new Set\(\)\)\}/.test(handOut
  * Offered only where it would narrow something.
  */
 ok('an empty grade is not offered',
-  /COLLECTOR_GRADES\.filter\(\(g\) => context\.collectors\.some\(\(c\) => c\.grade === g\)\)/.test(handOutModal))
+  /COLLECTOR_GRADES\.filter\(\(g\) => context\.collectors\.some\(\(c\) => c\.grade === g && !c\.ungraded\)\)/.test(handOutModal))
+
+/*
+ * THIRTY-FIVE COLLECTORS DO NOT FIT IN CARDS. Eight did; a real floor does not, and choosing four
+ * of them meant scrolling past thirty-one. A capped, searchable list with the choice summarised
+ * above it is what makes the modal usable at that size -- and the cap matters on its own, because
+ * a modal taller than the screen hides its own buttons.
+ */
+ok('the list is searchable', /Search \$\{context\.collectors\.length\} collectors by name/.test(handOutModal))
+ok('...and capped rather than growing with the team', /max-h-56 overflow-y-auto/.test(handOutModal))
+ok('...with the choice visible while scrolling', /of \$\{context\.collectors\.length\} chosen/.test(handOutModal))
+ok('...and a way back to just the chosen', /Show only chosen/.test(handOutModal))
+/*
+ * Ordered by who is taking most. Alphabetical buries the four people the plan actually used
+ * somewhere in the middle of thirty-five.
+ */
+ok('the busiest are listed first',
+  /\(taking\.get\(b\.userId\) \?\? 0\) - \(taking\.get\(a\.userId\) \?\? 0\)/.test(handOutModal))
 ok('a team with no collectors is not offered',
   /teams\s*\n?\s*\.filter\(\(t\) => context\.collectors\.some/.test(handOutModal))
 /* Choosing nobody is now reachable, so it must read as a state rather than an empty panel. */

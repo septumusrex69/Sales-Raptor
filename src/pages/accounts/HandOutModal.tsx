@@ -40,6 +40,8 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
   const [windowDays, setWindowDays] = useState(DEFAULT_WINDOW)
   const [mode, setMode] = useState<HandOutMode>('allocate_and_refer')
   const [reason, setReason] = useState('')
+  const [search, setSearch] = useState('')
+  const [onlyChosen, setOnlyChosen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -83,6 +85,19 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
       skipAlreadyBooked: false,
     })
   }, [context, chosen, startOn, windowDays])
+
+  /*
+   * Ordered by who is taking most, then by name. A list of thirty-five sorted alphabetically
+   * buries the four people the plan actually used somewhere in the middle of it.
+   */
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const taking = new Map(plan?.collectors.map((c) => [c.userId, c.taking]) ?? [])
+    return (context?.collectors ?? [])
+      .filter((c) => (!onlyChosen || chosen.has(c.userId)) && (!q || c.name.toLowerCase().includes(q)))
+      .sort((a, b) => (taking.get(b.userId) ?? 0) - (taking.get(a.userId) ?? 0)
+        || a.name.localeCompare(b.name))
+  }, [context, plan, chosen, search, onlyChosen])
 
   const toggle = useCallback((id: string) => setChosen((prev) => {
     const next = new Set(prev)
@@ -155,80 +170,108 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
               </p>
             ) : (
               <>
-                <div>
-                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 mb-1.5">
-                    <span className="text-xs font-medium text-slate-500">Who</span>
-                    {/*
-                      QUICK WAYS TO PICK, not four separate modes. Everyone, a grade, a team --
-                      each one just sets the ticks below, which stay adjustable afterwards. Modes
-                      would mean "I chose Elite, then unticked one" had nowhere to live.
+                {/*
+                  A LIST, NOT A GRID OF CARDS. Eight collectors fitted in cards; thirty-five do
+                  not — that is eighteen rows of ninety-pixel tiles inside a modal, and choosing
+                  four of them means scrolling past thirty-one you do not want. On an iPad it is
+                  most of a screen before the plan is even visible.
 
-                      Only offered where they would narrow anything: a grade nobody holds, or a
+                  So: one line each, a search box, and the choice summarised above the list so it
+                  stays visible while you scroll. The quick-picks remain, because "everyone on
+                  Bravo" should not require finding six names.
+                */}
+                <div>
+                  <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                    <span className="text-xs font-medium text-slate-500 mr-0.5">Who</span>
+                    <Pick onClick={() => setChosen(new Set(context.collectors.map((c) => c.userId)))}>
+                      Everyone
+                    </Pick>
+                    {/*
+                      Only offered where they would narrow something: a grade nobody holds, or a
                       team with no collectors in it, is a button that appears to do nothing.
                     */}
-                    <button type="button" onClick={() => setChosen(new Set(context.collectors.map((c) => c.userId)))}
-                      className="text-[11px] font-medium text-brand-600 hover:underline">
-                      Everyone
-                    </button>
-                    {COLLECTOR_GRADES.filter((g) => context.collectors.some((c) => c.grade === g)).map((g) => (
-                      <button key={g} type="button"
-                        onClick={() => setChosen(new Set(context.collectors.filter((c) => c.grade === g).map((c) => c.userId)))}
-                        className="text-[11px] text-slate-500 hover:text-brand-600 hover:underline">
-                        {g}
-                      </button>
+                    {COLLECTOR_GRADES.filter((g) => context.collectors.some((c) => c.grade === g && !c.ungraded)).map((g) => (
+                      <Pick key={g} onClick={() => setChosen(new Set(
+                        context.collectors.filter((c) => c.grade === g && !c.ungraded).map((c) => c.userId),
+                      ))}>{g}</Pick>
                     ))}
                     {teams
                       .filter((t) => context.collectors.some((c) => teamOf(users, c.userId) === t.id))
                       .map((t) => (
-                        <button key={t.id} type="button"
-                          onClick={() => setChosen(new Set(
-                            context.collectors.filter((c) => teamOf(users, c.userId) === t.id).map((c) => c.userId),
-                          ))}
-                          className="text-[11px] text-slate-500 hover:text-brand-600 hover:underline">
-                          {t.name}
-                        </button>
+                        <Pick key={t.id} onClick={() => setChosen(new Set(
+                          context.collectors.filter((c) => teamOf(users, c.userId) === t.id).map((c) => c.userId),
+                        ))}>{t.name}</Pick>
                       ))}
-                    <button type="button" onClick={() => setChosen(new Set())}
-                      className="text-[11px] text-slate-400 hover:text-slate-600 hover:underline ml-auto">
-                      None
-                    </button>
+                    <Pick onClick={() => setChosen(new Set())} quiet>None</Pick>
                   </div>
-                  <div className="grid sm:grid-cols-2 gap-1.5">
-                    {context.collectors.map((c) => {
+
+                  <input
+                    className={`${inputClass} mb-1.5`}
+                    placeholder={`Search ${context.collectors.length} collectors by name…`}
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+
+                  {/*
+                    The choice, stated above the list. Scrolling a list of thirty-five to find who
+                    is ticked is exactly the work the search box was added to avoid, and the
+                    count is the only thing that makes "did I get everyone" answerable at a glance.
+                  */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-1 text-[11px]">
+                    <span className={chosen.size === 0 ? 'text-amber-700' : 'text-slate-500'}>
+                      {chosen.size === 0
+                        ? 'Nobody chosen'
+                        : `${chosen.size} of ${context.collectors.length} chosen`}
+                    </span>
+                    {plan && plan.placements.length > 0 && (
+                      <span className="text-slate-400 tabular-nums">
+                        taking {plan.placements.length.toLocaleString('en-ZA')} between them
+                      </span>
+                    )}
+                    {chosen.size > 0 && (
+                      <button type="button" onClick={() => setOnlyChosen((v) => !v)}
+                        className="text-brand-600 hover:underline ml-auto">
+                        {onlyChosen ? 'Show all' : 'Show only chosen'}
+                      </button>
+                    )}
+                  </div>
+
+                  {/*
+                    Capped and scrolled rather than growing with the team. A modal that is taller
+                    than the screen hides its own Done button, which is how somebody ends up
+                    unable to finish a hand-out they have already set up.
+                  */}
+                  <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-50">
+                    {visible.length === 0 ? (
+                      <p className="px-2.5 py-3 text-xs text-slate-400">
+                        {search.trim() ? `Nobody matching “${search.trim()}”.` : 'Nobody to show.'}
+                      </p>
+                    ) : visible.map((c) => {
                       const ceiling = bookCeilingOf(c.bookCeiling)
                       const taking = plan?.collectors.find((x) => x.userId === c.userId)
+                      const over = c.inPlayNow > ceiling
                       return (
                         <label key={c.userId}
-                          className={`flex items-start gap-2 rounded-lg border px-2.5 py-2 cursor-pointer ${
-                            chosen.has(c.userId) ? 'border-brand-200 bg-brand-50/60' : 'border-slate-200'}`}>
-                          <input type="checkbox" className="mt-1 accent-brand-600"
+                          className={`flex items-center gap-2 px-2.5 py-1.5 cursor-pointer ${
+                            chosen.has(c.userId) ? 'bg-brand-50/60' : 'hover:bg-slate-50'}`}>
+                          <input type="checkbox" className="shrink-0 accent-brand-600"
                             checked={chosen.has(c.userId)} onChange={() => toggle(c.userId)} />
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-sm text-slate-800 leading-tight">{c.name}</span>
-                            <span className="block text-[11px] text-slate-500 tabular-nums">
-                              {c.ungraded ? 'Not graded' : c.grade} · {c.inPlayNow}/{ceiling} on the book · {c.capacity} a day
-                            </span>
-                            {c.ungraded && (
-                              <span className="block text-[11px] text-slate-400">
-                                generic accounts only until graded
-                              </span>
-                            )}
-                            {/*
-                              Said plainly, because it is the reason this person is getting
-                              little or nothing and the plan would otherwise look arbitrary.
-                            */}
-                            {c.inPlayNow > ceiling && (
-                              <span className="block text-[11px] text-amber-700">
-                                already {(c.inPlayNow - ceiling).toLocaleString('en-ZA')} over their ceiling
-                              </span>
-                            )}
-                            {taking && taking.taking > 0 && (
-                              <span className={`block text-[11px] font-medium tabular-nums ${
-                                taking.overBy > 0 ? 'text-rose-700' : 'text-brand-700'}`}>
-                                taking {taking.taking} → {taking.after}
-                                {taking.overBy > 0 && ` (${taking.overBy} over)`}
-                              </span>
-                            )}
+                          <span className="min-w-0 flex-1 truncate text-sm text-slate-800">{c.name}</span>
+                          <span className="shrink-0 text-[11px] text-slate-400 tabular-nums">
+                            {c.ungraded ? 'Not graded' : c.grade}
+                          </span>
+                          <span className={`shrink-0 text-[11px] tabular-nums w-20 text-right ${
+                            over ? 'text-amber-700' : 'text-slate-500'}`}
+                            title={over
+                              ? `${c.inPlayNow - ceiling} over their ceiling of ${ceiling}`
+                              : `${c.inPlayNow} of ${ceiling} on the book, ${c.capacity} a day`}>
+                            {c.inPlayNow}/{ceiling}
+                          </span>
+                          {/* The plan's own figure, so a row shows what choosing it actually did. */}
+                          <span className={`shrink-0 text-[11px] font-medium tabular-nums w-14 text-right ${
+                            !taking || taking.taking === 0 ? 'text-slate-300'
+                              : taking.overBy > 0 ? 'text-rose-700' : 'text-brand-700'}`}>
+                            {taking && taking.taking > 0 ? `+${taking.taking}` : '·'}
                           </span>
                         </label>
                       )
@@ -416,6 +459,21 @@ function reasonLine(plan: HandOutPlan): string {
 /** Which team somebody is in. The collector list carries no team, so it is read off the people. */
 function teamOf(users: User[], userId: string): string | undefined {
   return users.find((u) => u.id === userId)?.teamId
+}
+
+/** A quick-pick. Small and chip-shaped, because with five teams these now wrap onto a second row. */
+function Pick({ onClick, children, quiet }: {
+  onClick: () => void; children: React.ReactNode; quiet?: boolean
+}) {
+  return (
+    <button type="button" onClick={onClick}
+      className={`text-[11px] rounded-full border px-2 py-0.5 ${
+        quiet
+          ? 'border-slate-200 text-slate-400 hover:text-slate-600 ml-auto'
+          : 'border-slate-200 text-slate-600 hover:border-brand-300 hover:text-brand-700'}`}>
+      {children}
+    </button>
+  )
 }
 
 function ModeCard({ chosen, onChoose, label, note }: {
