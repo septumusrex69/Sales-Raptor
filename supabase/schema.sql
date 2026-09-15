@@ -2676,3 +2676,74 @@ as $$
 $$;
 
 grant execute on function public.account_view_counts(uuid, uuid, integer) to authenticated;
+
+-- ---------- What a collector is trusted with, and how much of it ----------
+--
+-- Three numbers, all null by default, because null means "the company standard" rather than a
+-- figure somebody typed once and forgot. The same shape diary_capacity already uses: the firm's
+-- default lives in code (src/lib/collectorGrade.ts), a team leader overrides it per person, and
+-- nothing has to be set for the app to behave sensibly the day a person is invited.
+alter table public.profiles
+  -- Junior, Skilled, Senior, Elite. Null means "not a collector" -- a liaison or a sales rep has
+  -- no grade, and giving them one by default would put accounts on a desk that does not work them.
+  --
+  -- SET BY A PERSON, never computed. The collector's dashboard can show that somebody's numbers
+  -- look like a Skilled collector's; a team leader decides. One large settlement is not a
+  -- promotion, and it is an employment matter besides.
+  add column if not exists collector_grade text
+    check (collector_grade in ('Junior', 'Skilled', 'Senior', 'Elite')),
+  -- The most accounts this person should carry at once, counting only what is IN PLAY. 372 of the
+  -- 736 accounts on staging are written off; a collector "carrying 500" where 372 are dead is
+  -- carrying 128, and a ceiling that counted the corpses would refuse them work they have room for.
+  add column if not exists book_ceiling integer check (book_ceiling is null or book_ceiling > 0),
+  -- How many of the day's slots are held back for work handed TO this person.
+  --
+  -- The firm's rule: a clerk who can work 45 a day may only diarise 35 of them himself, leaving
+  -- 10 for whatever a team leader sends. It constrains the agent's own booking only -- the
+  -- distributor fills to the full capacity -- so neither side has to know about the other.
+  add column if not exists diary_reserve integer
+    check (diary_reserve is null or diary_reserve >= 0);
+
+-- How much each collector is actually carrying, and what it is worth.
+--
+-- IN PLAY ONLY, which is the whole point. "How many accounts has Stefan got" has two answers that
+-- differ by a factor of four once a book has run a few years, and the one that decides whether he
+-- can take more work is the one excluding the written-off, the frozen and the closed.
+create or replace function public.collector_book_load()
+returns table (user_id uuid, in_play_accounts integer, in_play_value numeric, total_accounts integer)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    assigned_to,
+    count(*) filter (where status ilike 'Active%')::integer,
+    coalesce(sum(capital_outstanding) filter (where status ilike 'Active%'), 0),
+    count(*)::integer
+  from public.debtor_accounts
+  where assigned_to is not null
+  group by assigned_to;
+$$;
+
+grant execute on function public.collector_book_load() to authenticated;
+
+-- What is already booked in each person's diary, day by day.
+--
+-- Open entries only: a day's load is what is still to be done on it, not what was done. Bounded
+-- to a date range because the caller is planning a window, and an unbounded count would carry
+-- years of history to answer a question about next week.
+create or replace function public.diary_day_load(p_from date, p_to date)
+returns table (owner_id uuid, due_on date, entries integer)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select owner_id, due_on, count(*)::integer
+  from public.diary_entries
+  where state = 'open' and due_on between p_from and p_to
+  group by owner_id, due_on;
+$$;
+
+grant execute on function public.diary_day_load(date, date) to authenticated;

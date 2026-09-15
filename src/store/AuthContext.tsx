@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import type { User, UserRole } from '../types'
+import type { CollectorGrade } from '../lib/collectorGrade'
 
 interface ProfileRow {
   id: string
@@ -19,6 +20,9 @@ interface ProfileRow {
   buzzbox_extension: string | null
   diary_capacity: number | null
   diary_order: string | null
+  collector_grade: CollectorGrade | null
+  book_ceiling: number | null
+  diary_reserve: number | null
 }
 
 function mapProfileRow(row: ProfileRow): User {
@@ -49,6 +53,9 @@ function mapProfileRow(row: ProfileRow): User {
      */
     diaryCapacity: row.diary_capacity ?? undefined,
     diaryOrder: row.diary_order ?? undefined,
+    collectorGrade: row.collector_grade ?? undefined,
+    bookCeiling: row.book_ceiling ?? undefined,
+    diaryReserve: row.diary_reserve ?? undefined,
   }
 }
 
