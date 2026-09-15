@@ -30,8 +30,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const { to, subject, bodyHtml, inReplyTo } = (req.body ?? {}) as {
-    to?: string; subject?: string; bodyHtml?: string
+  const { to, cc, bcc, subject, bodyHtml, inReplyTo, attachments } = (req.body ?? {}) as {
+    to?: string; cc?: string; bcc?: string; subject?: string; bodyHtml?: string
+    /**
+     * Files to send with the message.
+     *
+     * Base64 in the request body rather than uploaded to storage first, which is the trade this
+     * project's twelve-function cap forces: a storage round trip would want its own endpoint to
+     * hand back a signed upload URL, and there is no thirteenth slot. See the size guard below
+     * for what that costs.
+     */
+    attachments?: { filename?: string; contentType?: string; dataBase64?: string }[]
     /**
      * The Message-ID this is a reply to, where it is one.
      *
@@ -45,6 +54,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!to || !subject || !bodyHtml) {
     res.status(400).json({ error: 'to, subject, and bodyHtml are required.' })
     return
+  }
+
+  /*
+   * The attachments, decoded and bounded.
+   *
+   * WHY THERE IS A CEILING AT ALL. Vercel caps the request body of a serverless function (4.5 MB
+   * at the time of writing) and base64 inflates whatever it carries by about a third, so roughly
+   * 3 MB of actual file is what fits with room for the message around it. Past that the platform
+   * rejects the request before this code runs, and the agent sees a generic failure with no idea
+   * which of their four attachments was the problem.
+   *
+   * So it is checked here, in bytes, and refused by name. A collector who has just typed a demand
+   * letter needs to be told "that scan is too big", not "send failed".
+   */
+  const MAX_ATTACHMENTS = 10
+  const MAX_TOTAL_BYTES = 3 * 1024 * 1024
+
+  const wanted = Array.isArray(attachments) ? attachments : []
+  if (wanted.length > MAX_ATTACHMENTS) {
+    res.status(400).json({ error: `A message can carry at most ${MAX_ATTACHMENTS} attachments.` })
+    return
+  }
+
+  const files: { filename: string; content: Buffer; contentType?: string }[] = []
+  let totalBytes = 0
+  for (const file of wanted) {
+    if (!file?.filename || !file?.dataBase64) {
+      res.status(400).json({ error: 'Every attachment needs a filename and its contents.' })
+      return
+    }
+    // Strip any path the browser handed us. A filename is a label on a MIME part here, and one
+    // carrying slashes is either a mistake or someone being clever.
+    const filename = file.filename.replace(/[\\/]/g, '_').slice(0, 200)
+    const content = Buffer.from(file.dataBase64, 'base64')
+    if (content.length === 0) {
+      res.status(400).json({ error: `${filename} came through empty and was not sent.` })
+      return
+    }
+    totalBytes += content.length
+    if (totalBytes > MAX_TOTAL_BYTES) {
+      res.status(400).json({
+        error: `Those attachments come to more than ${Math.round(MAX_TOTAL_BYTES / (1024 * 1024))} MB `
+          + 'together, which is more than can be sent in one message. Send the largest separately, '
+          + 'or put it on the account as a document and send a link.',
+      })
+      return
+    }
+    files.push({ filename, content, contentType: file.contentType || undefined })
   }
 
   const { data: conn } = await admin.from('email_connections').select('*').eq('user_id', caller.id).maybeSingle()
@@ -77,9 +134,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const image = signatureImageUrl ? { width: signatureImageWidth, align: signatureImageAlign } : null
   const embedded = signatureImageUrl ? await fetchSignatureImage(signatureImageUrl) : null
   const imageSrc = signatureImageUrl ? (embedded ? `cid:${SIGNATURE_CID}` : signatureImageUrl) : null
-  const attachments = embedded
-    ? [{ filename: 'signature', content: embedded.content, contentType: embedded.contentType, cid: SIGNATURE_CID }]
-    : undefined
+  /*
+   * The signature rides with the files, and keeps its cid.
+   *
+   * Only the signature carries one: a cid is what makes a part an INLINE image the HTML points
+   * at, and giving a debtor's statement one would hide it from the attachment list in their mail
+   * client while leaving it in the message.
+   */
+  const outgoing = [
+    ...(embedded
+      ? [{ filename: 'signature', content: embedded.content, contentType: embedded.contentType, cid: SIGNATURE_CID }]
+      : []),
+    ...files,
+  ]
+  const mailAttachments = outgoing.length > 0 ? outgoing : undefined
 
   const fullHtml = composeBody(bodyHtml, signatureHtml(signatureText, image, imageSrc))
 
@@ -92,7 +160,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       auth: { user: conn.email as string, pass: decrypt(conn.encrypted_password as string) },
     })
     const info = await transporter.sendMail({
-      from: conn.email as string, to, subject, html: fullHtml, attachments,
+      from: conn.email as string, to, subject, html: fullHtml, attachments: mailAttachments,
+      ...(cc ? { cc } : {}),
+      ...(bcc ? { bcc } : {}),
       ...(inReplyTo ? { inReplyTo, references: [inReplyTo] } : {}),
     })
     // Kept so an inbound reply carrying this value in In-Reply-To can be threaded back to the
@@ -111,7 +181,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // The Sent copy carries the same attachment, so the person's own mail client shows the
     // message exactly as the recipient got it rather than with a broken image in it.
     const raw = await new MailComposer({
-      from: conn.email as string, to, subject, html: fullHtml, attachments,
+      from: conn.email as string, to, subject, html: fullHtml, attachments: mailAttachments,
+      /*
+       * Cc travels; Bcc deliberately does NOT.
+       *
+       * A blind copy that appears in the Sent folder is no longer blind — anybody who is later
+       * shown that message, in Outlook or through Raptor's own Sent tab, can read who else got
+       * it. The recipient's copy never carried the header, and neither should ours.
+       */
+      ...(cc ? { cc } : {}),
       ...(inReplyTo ? { inReplyTo, references: [inReplyTo] } : {}),
     }).compile().build()
     await appendToSent(
@@ -124,5 +202,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // `from` is returned so the caller can record WHICH mailbox the message left by. That decides
   // where the reply will land, which is the thing that matters when an agent leaves the firm.
-  res.status(200).json({ ok: true, messageId: sentMessageId, from: conn.email as string })
+  // attachmentNames so the account's copy can record what went with the message — a statement
+  // sent and not recorded is a statement nobody can prove was sent.
+  res.status(200).json({
+    ok: true,
+    messageId: sentMessageId,
+    from: conn.email as string,
+    attachmentNames: files.map((f) => f.filename),
+  })
 }

@@ -70,8 +70,9 @@ export function EmailsPanel({ emails, userId, canSend, onCompose, onReply, onRea
           <Mail size={22} className="mx-auto text-slate-300" />
           <p className="text-sm text-slate-500 mt-3">No email with this debtor yet.</p>
           <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-            Anything sent from here is charged R25 under item 1(a). Their reply comes back to this
-            list on its own and is charged R13 under item 6.
+            Anything sent from here is charged R38 — R25 for the email under item 1(a) and R13 for
+            the correspondence under item 6. Their reply comes back to this list on its own and is
+            charged R13 under item 6.
           </p>
           <SendButton canSend={canSend} onClick={onCompose} className="mt-4" />
         </div>

@@ -11,7 +11,7 @@ import { Modal } from '../../components/ui/Modal'
 import { useAuth } from '../../store/AuthContext'
 import { relativeDayLabel } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
-import { recordSentEmail, replySubject } from '../../lib/accountEmails'
+import { recordSentEmail, sentEmailChargeMessage, replySubject } from '../../lib/accountEmails'
 import { forwardBody, forwardSubject } from '../../lib/emailRules'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
@@ -1035,7 +1035,7 @@ export function MailPage() {
       {composing && (
         <ComposeEmailModal
           contextNote={'This goes out from your mailbox and lands on no record. To put a message on '
-            + 'a debtor\u2019s file, send it from the account instead — that is what charges item 1(a) '
+            + 'a debtor\u2019s file, send it from the account instead — that is what raises the fees '
             + 'and files the copy.'}
           onClose={() => setComposing(false)}
           onSent={() => { setComposing(false); setStatus('Sent.'); void load(page) }}
@@ -1071,16 +1071,17 @@ export function MailPage() {
           inReplyTo={replying.messageId}
           /*
            * Three different truths, and the agent should know which one applies before typing.
-           * A debtor is charged R25; a lead is not charged anything, because Annexure B is the
+           * A debtor is charged R38 — item 1(a) for the letter and item 6 for the correspondence,
+           * because sending is corresponding. A lead is charged nothing, because Annexure B is the
            * tariff for collecting a debt; and unfiled mail lands nowhere at all.
            */
           contextNote={replying.linkedAccountId
-            ? `Goes out from your mailbox, lands on ${replying.linkedTo?.label ?? 'the account'}, and is charged R25 under item 1(a).`
+            ? `Goes out from your mailbox, lands on ${replying.linkedTo?.label ?? 'the account'}, and is charged R38 — R25 under item 1(a) and R13 under item 6.`
             : replying.linkedTo
               ? `Goes out from your mailbox and is logged on ${replying.linkedTo.label}. No charge — Annexure B is for debtor accounts.`
               : 'This message is not matched to anything, so nothing will be charged and the reply will not appear on any record. It goes out from your mailbox and that is all.'}
           onClose={() => setReplying(null)}
-          onSent={(rawSubject, bodyText, messageId, from) => {
+          onSent={(rawSubject, bodyText, messageId, from, attachmentNames) => {
             const answering = replying
             setReplying(null)
             if (!answering?.linkedAccountId) {
@@ -1104,6 +1105,7 @@ export function MailPage() {
                   subject: rawSubject,
                   body: bodyText,
                   messageId: messageId ?? null,
+                  attachmentNames,
                   actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
                 }).then(() => load(page)).catch(() => {})
               }
@@ -1130,9 +1132,10 @@ export function MailPage() {
               body: bodyText,
               messageId: messageId ?? null,
               inReplyTo: answering.messageId,
+              attachmentNames,
               actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
             }).then((charge) => {
-              setStatus(`Replied to ${answering.fromAddress}. ${chargeMessage(charge, '1a')}`)
+              setStatus(`Replied to ${answering.fromAddress}. ${sentEmailChargeMessage(charge)}`)
               void load(page)
             }).catch((e) => setError(e instanceof Error ? e.message : String(e)))
           }}

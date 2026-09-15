@@ -8,10 +8,11 @@
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-emails.mjs
  */
+import { readFileSync } from 'node:fs'
 import {
   CORRESPONDENCE_ACTION_CODE, CORRESPONDENCE_DESCRIPTION, CORRESPONDENCE_ITEM_ID,
   EMAIL_ACTION_CODE, EMAIL_DESCRIPTION, EMAIL_IN_KIND, EMAIL_ITEM_ID, EMAIL_OUT_KIND,
-  normaliseAddress, receivedEmailNote, replySubject, sentEmailNote, threadIds,
+  normaliseAddress, receivedEmailNote, replySubject, sentEmailItems, sentEmailNote, threadIds,
 } from '../../src/lib/emailRules.ts'
 import { scheduleFor } from '../../src/lib/annexureB.ts'
 
@@ -59,7 +60,44 @@ check('...as does the timeline', CORRESPONDENCE_ACTION_CODE === EMAIL_ACTION_COD
 // one, every exchange starts billing the same fee twice.
 check('the two directions are different items', CORRESPONDENCE_ITEM_ID === EMAIL_ITEM_ID, false)
 check('...at different rates', item6.amount === item.amount, false)
-check('an exchange therefore costs R38 excluding VAT', item.amount + item6.amount, 38)
+check('an exchange therefore costs R51 excluding VAT',
+  item.amount + item6.amount + item6.amount, 51)
+
+/* ------------------------------------------------------------------ *
+ * What a message we SEND costs, which changed.
+ *
+ * It was item 1(a) alone, R25. The firm's instruction: "any email that is sent for any data
+ * under anything that is matched charges a mail and correspondence, because you're corresponding
+ * and you're sending an email." So sending raises BOTH, R38, and an exchange where the debtor
+ * then answers costs R51 rather than R38.
+ *
+ * Priced off the gazetted schedule rather than against a number written down here, so the day
+ * the tariff changes this check moves with it instead of arguing with it.
+ * ------------------------------------------------------------------ */
+
+check('a sent email raises two items', sentEmailItems.length, 2)
+check('...the letter first, under item 1(a)', sentEmailItems[0].itemId, EMAIL_ITEM_ID)
+/*
+ * ORDER, and it is not cosmetic. chargeItem applies the items 1-7 ceiling against what the
+ * account has already been charged, so on an account with room for only one of the two it is
+ * whichever is charged first that lands. The firm's letter is the one worth keeping.
+ */
+check('...the correspondence second, under item 6', sentEmailItems[1].itemId, CORRESPONDENCE_ITEM_ID)
+check('...and they are not the same item', sentEmailItems[0].itemId === sentEmailItems[1].itemId, false)
+
+{
+  const priced = sentEmailItems.map((i) => {
+    const row = schedule.items.find((x) => x.id === i.itemId)
+    return row ? row.amount : null
+  })
+  check('both items are on the current schedule', priced.some((a) => a === null), false)
+  check('...and a sent message therefore costs R38 excluding VAT',
+    priced.reduce((sum, a) => sum + a, 0), 38)
+}
+
+// The statement has to read as two different things, or a debtor sees "Email R25 / Email R13".
+check('the two lines are described differently',
+  sentEmailItems[0].description === sentEmailItems[1].description, false)
 
 // Item 6 has no total and no monthly cap either, which is what makes "every email received"
 // chargeable rather than only the first.
@@ -150,6 +188,34 @@ check('replying three times still reads once',
   replySubject(replySubject(replySubject('Account 12345'))), 'Re: Account 12345')
 check('a missing subject still gives something to send', replySubject(null), 'Re:')
 check('so does an empty one', replySubject('   '), 'Re:')
+
+/* ------------------------------------------------------------------ *
+ * What the screen tells the agent it will cost
+ * ------------------------------------------------------------------ */
+
+/*
+ * The wording is the part that goes stale silently.
+ *
+ * When sending became R38 the code changed and five sentences across three screens went on
+ * saying "charged R25 under item 1(a)" — each of them a promise about somebody's money that the
+ * system no longer keeps. Nothing failed; the notes simply lied, in the one place an agent is
+ * told what an action will cost before they take it.
+ *
+ * So no surface may state the old single-item price for a message we send. This asserts the
+ * ABSENCE of a phrase rather than the presence of one, deliberately: there are several honest
+ * ways to word R38 and only one way to be wrong about it.
+ */
+for (const file of [
+  'src/pages/mail/MailPage.tsx',
+  'src/pages/accounts/EmailsPanel.tsx',
+  'src/pages/accounts/AccountDetail.tsx',
+]) {
+  const src = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8')
+  // Presence first: a path typo would read as an empty file and pass by describing nothing.
+  check(`${file} was read`, src.length > 100, true)
+  check(`${file} does not still quote the old R25-only price`,
+    /charged R25 under item 1\(a\)/.test(src), false)
+}
 
 console.log(`\n${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  FAIL ${f}`)

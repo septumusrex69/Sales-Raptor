@@ -670,9 +670,9 @@ export function AccountDetail() {
            * word. The message being answered is on the page behind this modal anyway.
            */
           inReplyTo={replyTo?.messageId ?? null}
-          contextNote={`Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). Their reply comes back to this account on its own and is charged R13 under item 6.`}
+          contextNote={`Goes out from ${mailbox ?? 'your mailbox'} and is charged R38 — R25 under item 1(a) and R13 under item 6. Their reply comes back to this account on its own and is charged R13 under item 6.`}
           onClose={() => { setComposeTo(null); setReplyTo(null) }}
-          onSent={(rawSubject, bodyText, messageId, from) => {
+          onSent={(rawSubject, bodyText, messageId, from, attachmentNames) => {
             const to = composeTo
             const answering = replyTo
             setComposeTo(null)
@@ -680,9 +680,11 @@ export function AccountDetail() {
             /*
              * Charged, recorded and put on the timeline — see recordSentEmail.
              *
-             * Item 1(a), R25, on every message we send, at the firm's instruction: "25 rand for
-             * every email sent or responded to". A reply is a letter under 1(a) exactly as a
-             * first email is, so it charges the same.
+             * TWO items on every message we send: 1(a) R25 for the letter and 6 R13 for the
+             * correspondence, R38 excluding VAT. The firm's instruction — "25 rand for every
+             * email sent or responded to", and "any email that is sent ... charges a mail and
+             * correspondence, because you're corresponding and you're sending an email". A reply
+             * is a letter under 1(a) exactly as a first email is, so it charges the same.
              *
              * The subject arrives with the modal's own "Email sent: " framing, which is the CRM
              * activity convention and means nothing on an account. Stripped here so the debtor's
@@ -696,6 +698,7 @@ export function AccountDetail() {
               body: bodyText,
               messageId: messageId ?? null,
               inReplyTo: answering?.messageId ?? null,
+              attachmentNames,
               actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
             }).then(reload)
           }}

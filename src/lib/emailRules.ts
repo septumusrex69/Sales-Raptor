@@ -13,7 +13,8 @@
  * responded to". Both halves of that describe an outgoing message — a fresh email and a reply are
  * each a letter under 1(a) — so a reply charges exactly as a first email does.
  *
- * What ARRIVES is charged separately, under item 6 — see CORRESPONDENCE_ITEM_ID.
+ * NOT ON ITS OWN. A message we send also raises item 6, because sending is corresponding — see
+ * CORRESPONDENCE_ITEM_ID and sentEmailItems below.
  */
 export const EMAIL_ITEM_ID = '1a'
 
@@ -37,10 +38,22 @@ export const EMAIL_DESCRIPTION = 'Email'
  * charge on receipt. If the charge is ever queried, this comment is the reason it looks the way
  * it does.
  *
- * One practical consequence to know about: this is raised by the inbound sync, with no person
- * present, so it is the only fee on the system nobody clicks a button to create. It is capped
- * like any other — a written-off account and the items 1–7 ceiling both stop it — and a message
- * that earns nothing is still filed, marked unbilled.
+ * One practical consequence to know about: on an INCOMING message this is raised by the sync,
+ * with no person present, so it is the only fee on the system nobody clicks a button to create.
+ * It is capped like any other — a written-off account and the items 1–7 ceiling both stop it —
+ * and a message that earns nothing is still filed, marked unbilled.
+ *
+ * RAISED IN BOTH DIRECTIONS, at the firm's instruction. It was incoming-only until they said
+ * otherwise: "any email that is sent for any data under anything that is matched charges a mail
+ * and correspondence, because you're corresponding and you're sending an email." So a message we
+ * send earns item 1(a) for the letter AND item 6 for the correspondence — R38 excluding VAT, not
+ * R25 — and an exchange where the debtor then answers costs R51 rather than R38.
+ *
+ * Worth being plain that this is the firm's reading of the tariff and a broad one: item 6 is
+ * "correspondence received and attended to", and "received" most naturally describes what
+ * arrives. The firm's position is that answering a debtor is attending to correspondence
+ * whichever way the letter travels. They were asked directly and confirmed it. If it is ever
+ * queried, this paragraph is why the statement looks the way it does.
  */
 export const CORRESPONDENCE_ITEM_ID = '6'
 
@@ -55,6 +68,22 @@ export const CORRESPONDENCE_ACTION_CODE = 'email_in'
  * different kinds of thing rather than the two halves of one exchange.
  */
 export const CORRESPONDENCE_DESCRIPTION = 'Correspondence'
+
+/**
+ * Every Annexure B item a message we SEND raises, in the order they go on the statement.
+ *
+ * Pure and exported so the rule can be read, checked and argued with on its own — see
+ * scripts/qa/check-emails.mjs, which prices this list against the gazetted schedule rather than
+ * against a number written down twice.
+ *
+ * The order is the order they are charged in, and it matters at the ceiling: item 1(a) is the
+ * letter itself and takes precedence, so where an account has room for only one of the two it is
+ * the R25 that lands and the R13 that comes back unbilled.
+ */
+export const sentEmailItems = [
+  { itemId: EMAIL_ITEM_ID, description: EMAIL_DESCRIPTION },
+  { itemId: CORRESPONDENCE_ITEM_ID, description: CORRESPONDENCE_DESCRIPTION },
+] as const
 
 /** Note kinds, which is how the timeline knows to draw an envelope rather than a sticky note. */
 export const EMAIL_OUT_KIND = 'email_out'

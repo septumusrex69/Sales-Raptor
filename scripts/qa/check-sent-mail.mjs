@@ -174,6 +174,34 @@ ok('...and labels it To, so it cannot be mistaken for the sender', /isSent && <s
   ok('...but only there', /input\.filter === 'sent'[\s\S]{0,200}to_address\.ilike/.test(scopeBody))
 }
 
+/* ---------- a sent message raises BOTH items ---------- */
+
+/*
+ * The firm changed this rule: "any email that is sent for any data under anything that is matched
+ * charges a mail and correspondence, because you're corresponding and you're sending an email."
+ * R38 on a message we send, where it was R25.
+ *
+ * check-emails.mjs prices the rule against the gazetted schedule. This checks the code actually
+ * walks it — a rule stated in one file and ignored in the one that bills is worse than no rule,
+ * because it reads as done.
+ */
+{
+  const accountEmails = readFileSync(new URL('../../src/lib/accountEmails.ts', import.meta.url), 'utf8')
+  const at = accountEmails.indexOf('export async function recordSentEmail')
+  const body = at === -1 ? '' : accountEmails.slice(at, accountEmails.indexOf('\n}\n', at))
+  ok('recordSentEmail was found and has a body to read', body.length > 100)
+  ok('...and charges every item in sentEmailItems', /for \(const item of sentEmailItems\)/.test(body))
+  /*
+   * SEQUENTIALLY. chargeItem reads what the account has already been charged to apply the items
+   * 1-7 ceiling, so two running at once would each read the total from before the other and could
+   * carry the account past it. A Promise.all here would be a silent breach of the ceiling.
+   */
+  check('...one after the other, not in parallel', /Promise\.all/.test(body), false)
+  ok('...and the account copy records both together', /charged_excl_vat: charge\.totalExclVat/.test(body))
+  // A single-item charge left behind would quietly put the firm back on R25.
+  check('...with no lone item 1(a) charge left behind', /itemId: EMAIL_ITEM_ID/.test(body), false)
+}
+
 /* ---------- a sent message can never be matched, and so never charged item 6 ---------- */
 
 /*

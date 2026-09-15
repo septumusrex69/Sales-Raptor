@@ -1374,6 +1374,8 @@ export async function recordSentToRecord(input: {
    * here is the whole of the mechanism.
    */
   messageId: string | null
+  /** What went with it, so the record shows the quotation was actually attached. */
+  attachmentNames?: string[]
   actor: { id: string | null; name: string | null }
 }): Promise<void> {
   const { error } = await supabase.from('activities').insert({
@@ -1387,6 +1389,7 @@ export async function recordSentToRecord(input: {
     notes: input.body,
     activity_date: new Date().toISOString(),
     email_message_id: input.messageId,
+    attachment_names: input.attachmentNames ?? [],
     // We wrote it, so there is nobody waiting to read it.
     is_read: true,
   })

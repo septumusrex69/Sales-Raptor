@@ -12,12 +12,12 @@
  *
  * The fee rules live in emailRules.ts, which touches no database.
  */
-import { chargeItem, type ChargeResult } from './accountCharges'
+import { chargeItem, chargeMessage, type ChargeResult } from './accountCharges'
 import { addNote } from './accountWorkspace'
 import { supabase } from './supabase'
 import { mirrorReadToMailbox } from './mailReadState'
 import {
-  EMAIL_ACTION_CODE, EMAIL_DESCRIPTION, EMAIL_ITEM_ID, EMAIL_OUT_KIND, sentEmailNote,
+  EMAIL_ACTION_CODE, EMAIL_OUT_KIND, sentEmailItems, sentEmailNote,
 } from './emailRules'
 
 export * from './emailRules'
@@ -25,6 +25,53 @@ export * from './emailRules'
 interface Actor {
   id: string | null
   name: string | null
+}
+
+/**
+ * What one message we sent cost the debtor, item by item.
+ *
+ * Both are kept rather than only the total, because they are capped independently: an account
+ * with room for the letter but not the correspondence charges R25 and records the R13 unbilled,
+ * and the agent should be told which of the two happened rather than shown a number that is
+ * quietly short.
+ */
+export interface SentEmailCharge {
+  /** Item 1(a) — the letter itself. */
+  email: ChargeResult
+  /** Item 6 — the correspondence, which sending also earns. See emailRules.ts. */
+  correspondence: ChargeResult
+  /** Both together, excluding VAT. What goes on the account's copy of the message. */
+  totalExclVat: number
+}
+
+/**
+ * What to tell the agent, for a message that raised two items.
+ *
+ * chargeMessage answers for one item at a time and would have to be shown twice, which reads as
+ * two separate things having happened rather than one email with two lines against it. Where a
+ * cap stopped one of them, the reason is named — a fee that silently did not happen is how a
+ * month's billing goes quietly short.
+ */
+export function sentEmailChargeMessage(charge: SentEmailCharge): string {
+  const { email, correspondence, totalExclVat } = charge
+  if (email.reason === 'charged' && correspondence.reason === 'charged') {
+    return `Charged R${totalExclVat.toFixed(2)} plus VAT — R${email.exclVat.toFixed(2)} for the `
+      + `email under item 1(a) and R${correspondence.exclVat.toFixed(2)} for the correspondence `
+      + 'under item 6.'
+  }
+  if (email.reason === 'charged') {
+    return `Charged R${email.exclVat.toFixed(2)} plus VAT under item 1(a). `
+      + `${chargeMessage(correspondence, '6')}`
+  }
+  if (correspondence.reason === 'charged') {
+    return `Charged R${correspondence.exclVat.toFixed(2)} plus VAT under item 6. `
+      + `${chargeMessage(email, '1a')}`
+  }
+  // Neither landed, and they nearly always fail for the same reason — a written-off account, or
+  // the ceiling. Saying it once is the whole message.
+  return email.reason === correspondence.reason
+    ? chargeMessage(email, '1a').replace('item 1a', 'items 1(a) and 6')
+    : `${chargeMessage(email, '1a')} ${chargeMessage(correspondence, '6')}`
 }
 
 export interface AccountEmail {
@@ -208,15 +255,48 @@ export async function recordSentEmail(input: {
   messageId: string | null
   /** Set when this was a reply, naming the message it answers. */
   inReplyTo?: string | null
+  /**
+   * What went with it, as the server named the parts.
+   *
+   * Recorded because a statement or a section 129 letter that was sent and not written down is
+   * one nobody can prove was sent — and proving it is the entire point of sending it.
+   */
+  attachmentNames?: string[]
   actor: Actor
-}): Promise<ChargeResult> {
-  const charge = await chargeItem({
-    accountId: input.accountId,
-    itemId: EMAIL_ITEM_ID,
-    actionCode: EMAIL_ACTION_CODE,
-    description: EMAIL_DESCRIPTION,
-    createdBy: input.actor.id,
-  })
+}): Promise<SentEmailCharge> {
+  /*
+   * BOTH ITEMS, in the order sentEmailItems gives them.
+   *
+   * Item 1(a) for the letter and item 6 for the correspondence — the firm's instruction: "any
+   * email that is sent for any data under anything that is matched charges a mail and
+   * correspondence, because you're corresponding and you're sending an email." R38 excluding VAT
+   * on a message we send, where it used to be R25.
+   *
+   * Sequentially rather than in parallel, and that is deliberate: chargeItem reads what the
+   * account has already been charged in order to apply the items 1–7 ceiling, so two of them
+   * running at once would each read the total from before the other and could take the account
+   * past it. The letter goes first, so where there is room for only one it is the R25 that lands.
+   *
+   * Each is capped on its own and a capped one comes back with exclVat 0 and a reason, which the
+   * caller shows. Neither is allowed to fail the send: the message has already gone.
+   */
+  const charges: ChargeResult[] = []
+  for (const item of sentEmailItems) {
+    charges.push(await chargeItem({
+      accountId: input.accountId,
+      itemId: item.itemId,
+      // The same action earned both, so both carry the outgoing code. The item id is what tells
+      // the two apart on a statement; the action code says what the agent did, and they sent.
+      actionCode: EMAIL_ACTION_CODE,
+      description: item.description,
+      createdBy: input.actor.id,
+    }))
+  }
+  const charge: SentEmailCharge = {
+    email: charges[0],
+    correspondence: charges[1],
+    totalExclVat: charges.reduce((sum, c) => sum + c.exclVat, 0),
+  }
 
   /*
    * Recorded, never allowed to fail the send.
@@ -236,7 +316,9 @@ export async function recordSentEmail(input: {
     in_reply_to: input.inReplyTo ?? null,
     sent_by: input.actor.id,
     sent_by_name: input.actor.name,
-    charged_excl_vat: charge.exclVat,
+    attachment_names: input.attachmentNames ?? [],
+    // Both items together: what this one message actually cost the debtor.
+    charged_excl_vat: charge.totalExclVat,
   })
   if (error) console.error('[accountEmails] the message went but was not filed:', error.message)
 

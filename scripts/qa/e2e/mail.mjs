@@ -395,6 +395,36 @@ try {
 
   await t.shot(page, 'mail-sent')
 
+  /* ---------- the composer can carry files and copies ---------- */
+
+  /*
+   * The reason this is in the browser and not only in the source: the whole point of the change
+   * is that a collector can attach a statement without opening Outlook, and a control that is
+   * built but never rendered is indistinguishable from one that was never built. That exact
+   * failure is why this e2e layer exists.
+   */
+  await page.locator('button:has-text("New email")').first().click()
+  await page.waitForSelector('text=New Email', { timeout: 10000 })
+
+  const dialog = page.locator('form').filter({ has: page.locator('input[type="file"]') }).first()
+  t.ok('the composer opened', await dialog.count() > 0)
+
+  t.check('it takes a file', await dialog.locator('input[type="file"]').count(), 1)
+  t.ok('...and says so where somebody will look',
+    await dialog.locator('button:has-text("Attach a file")').count() > 0)
+  // Cc and Bcc are folded away until asked for — so the link must be there, and the fields not.
+  t.ok('Cc and Bcc are offered', await dialog.locator('button:has-text("Add Cc or Bcc")').count() > 0)
+  t.check('...but not shown until asked for',
+    await dialog.locator('input[placeholder*="Separate addresses"]').count(), 0)
+
+  await dialog.locator('button:has-text("Add Cc or Bcc")').click()
+  t.check('...and appear when asked for',
+    await dialog.locator('input[placeholder*="Separate addresses"]').count(), 1)
+  t.ok('Bcc says plainly that nobody else sees it',
+    await dialog.locator('input[placeholder*="Nobody else"]').count() > 0)
+
+  await t.shot(page, 'mail-composer')
+
   /*
    * Console errors fail the run. A page that renders and throws is a page that has stopped
    * fetching something, and the symptom arrives later as a number that never updates.
