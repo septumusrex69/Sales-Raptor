@@ -1,3 +1,5 @@
+import type { CollectorGrade } from './lib/collectorGrade'
+
 export type ID = string
 
 export type LeadStatus =
@@ -454,6 +456,18 @@ export interface User {
    * through letters do not have the same day. Undefined means the firm default.
    */
   diaryCapacity?: number
+  /**
+   * What this person is trusted with: Junior, Skilled, Senior, Elite.
+   *
+   * Undefined means "not a collector" — a liaison or a sales rep has no grade, and defaulting
+   * one would put accounts on a desk that does not work them. Set by a team leader, never
+   * computed: one large settlement is not a promotion, and it is an employment matter besides.
+   */
+  collectorGrade?: CollectorGrade
+  /** The most accounts they should carry at once, in play. Undefined means the firm standard. */
+  bookCeiling?: number
+  /** Slots held back each day for work handed to them. Undefined means the firm standard. */
+  diaryReserve?: number
   /**
    * How this person likes their diary ordered, when they have said.
    *
