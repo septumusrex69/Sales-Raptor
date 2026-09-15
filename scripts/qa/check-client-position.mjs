@@ -38,9 +38,25 @@ check('a defended matter is disputed', at('Active: Activated', 'Defended Matter'
 check('tracing is tracing', at('Active: Activated', 'Tracing'), 'tracing')
 check('section 129 is legal', at('Active: Activated', 'Section 129'), 'legal')
 check('a payment default is a broken arrangement', at('Active: Activated', 'Payment Default'), 'broken_arrangement')
-// The firm should confirm this one -- it is 88 accounts, the largest single group on the book.
-check('a delinquent payer is read as a broken arrangement',
-  at('Active: Activated', 'Delinquent Payer'), 'broken_arrangement')
+/*
+ * NOT THE SAME FACT, and they were briefly reported as one. A payment default is an arrangement
+ * that came up short -- they committed and an instalment did not arrive. A delinquent payer, in
+ * the firm's words, "just doesn't pay at all, he refuses to pay" -- nothing was ever agreed, so
+ * there is no arrangement to break. 90 accounts, the largest active group on the book, and
+ * collapsing them told the client the wrong thing about all of them.
+ */
+check('a delinquent payer is refusing to pay',
+  at('Active: Activated', 'Delinquent Payer'), 'refusing')
+check('...on an unfrozen account too', at('Active: Unfrozen', 'Delinquent Payer'), 'refusing')
+check('...and the plainer wording maps the same way', at('Active: Activated', 'Refuses to pay'), 'refusing')
+// The two must never collapse back into one another.
+ok('a refusal is not a broken arrangement',
+  at('Active: Activated', 'Delinquent Payer') !== at('Active: Activated', 'Payment Default'))
+// Reached and refused beats "we are still trying": contact HAS been made and the answer was no.
+check('a refusal is not softened into being worked',
+  at('Active: Activated', 'Delinquent Payer', { reachedInPeriod: false }), 'refusing')
+check('money still beats a refusal — they paid after all',
+  at('Active: Activated', 'Delinquent Payer', { paidInPeriod: true }), 'paying')
 check('an active account with no sub-status is being worked', at('Active: Activated', null), 'being_worked')
 check('a re-opened account with no sub-status is being worked', at('Active: Re-opened', null), 'being_worked')
 
@@ -101,6 +117,10 @@ ok('closed is not in play', !CLIENT_POSITIONS.closed.inPlay)
 ok('legal is not in play', !CLIENT_POSITIONS.legal.inPlay)
 ok('being worked is in play', CLIENT_POSITIONS.being_worked.inPlay)
 ok('a dispute is still in play', CLIENT_POSITIONS.disputed.inPlay)
+// The whole point of separating it: it is the one position that asks the CLIENT a question.
+ok('a refusal is in play', CLIENT_POSITIONS.refusing.inPlay)
+ok('...and its meaning names the decision the client has to make',
+  /legal/i.test(CLIENT_POSITIONS.refusing.meaning))
 
 /* ---------- needs you ---------- */
 

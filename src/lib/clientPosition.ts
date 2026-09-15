@@ -26,6 +26,7 @@ export type ClientPosition =
   | 'paying'
   | 'arranged'
   | 'broken_arrangement'
+  | 'refusing'
   | 'negotiating'
   | 'being_worked'
   | 'tracing'
@@ -63,6 +64,25 @@ export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
   broken_arrangement: {
     label: 'Broken arrangement',
     meaning: 'They committed to pay and the money did not come. Being chased.',
+    inPlay: true,
+  },
+  refusing: {
+    /*
+     * ITS OWN POSITION, because none of the other ten described it and it is the largest active
+     * group on the book -- 88 accounts, 90 with the unfrozen ones.
+     *
+     * It was first read as a broken arrangement, which was wrong: a broken arrangement means
+     * they committed and then failed, and this debtor never committed to anything. Nor is it
+     * "being worked", which means contact has not been made -- contact HAS been made and the
+     * answer was no.
+     *
+     * The distinction is the client's decision to make, which is why it cannot be hidden inside
+     * a softer position. Somebody who cannot be found needs tracing; somebody who broke a
+     * promise needs chasing; somebody who has refused needs the client to decide whether to go
+     * legal. Three different questions, and only this one is asked of the client.
+     */
+    label: 'Refusing to pay',
+    meaning: 'The debtor has been reached and will not pay. The next step is usually a legal decision.',
     inPlay: true,
   },
   negotiating: {
@@ -104,7 +124,7 @@ export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
 
 /** Dashboard order: money first, then the work, then the ones that are elsewhere. */
 export const CLIENT_POSITION_ORDER: ClientPosition[] = [
-  'paying', 'arranged', 'broken_arrangement', 'negotiating', 'being_worked',
+  'paying', 'arranged', 'broken_arrangement', 'refusing', 'negotiating', 'being_worked',
   'tracing', 'disputed', 'legal', 'frozen', 'closed',
 ]
 
@@ -156,15 +176,16 @@ export function clientPosition(input: PositionInput): ClientPosition {
   if (/promise\s*to\s*pay|\bptp\b/i.test(sub)) return 'arranged'
 
   /*
-   * ASSUMPTION, AND THE FIRM SHOULD CONFIRM IT. "Delinquent Payer" is inherited from Swordfish
-   * and is the largest single group on the book -- 88 accounts. It is read here as somebody who
-   * has defaulted on payments, which puts it with a broken arrangement.
+   * TWO DIFFERENT FACTS, and they were briefly read as one.
    *
-   * If it turns out to mean only "this debtor pays late" as a character note rather than a live
-   * default, it belongs in `being_worked` and the report currently overstates broken
-   * arrangements by 88. One line to change.
+   * A payment default is an arrangement that came up short: they committed, and an instalment
+   * did not arrive. "Delinquent Payer" -- the firm's inherited Swordfish term -- is somebody who
+   * does not pay at all and refuses to, which is not a default because nothing was ever agreed.
+   * Collapsing them would have reported 90 refusals as broken arrangements and told the client
+   * the wrong thing about the biggest active group on their book.
    */
-  if (/payment\s*default|delinquent/i.test(sub)) return 'broken_arrangement'
+  if (/payment\s*default/i.test(sub)) return 'broken_arrangement'
+  if (/delinquent|refus/i.test(sub)) return 'refusing'
 
   if (input.reachedInPeriod) return 'negotiating'
 
