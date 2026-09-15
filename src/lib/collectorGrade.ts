@@ -9,6 +9,12 @@
  * types a difficulty in — a number that has to be maintained by hand is a number that is right
  * on the day it is set and wrong for ever afterwards.
  *
+ * GRADE IS ABOUT WHICH ACCOUNTS, NEVER HOW MANY. A junior and an elite collector carry the same
+ * book and work the same number of days: the company standard is 500 accounts and 50 a day for
+ * everybody. What the grade changes is which of those 500 they may be given. Individual people
+ * differ — some carry more, some work more in a day — and that is what the per-person overrides
+ * are for, not the grade.
+ *
  * GRADE IS SET BY A PERSON, NEVER COMPUTED. The collector's dashboard can show that somebody's
  * numbers look like a Skilled collector's; a team leader decides. One large settlement is not a
  * promotion, and it is an employment matter besides.
@@ -118,6 +124,9 @@ export function mayTake(grade: CollectorGrade, band: AccountBand): boolean {
  * The firm's own figure: "on average, a collector can manage about 500 accounts, but there are
  * exceptions". The exceptions are the per-person override on profiles.book_ceiling; this is what
  * applies until somebody sets one.
+ *
+ * Flat across every grade, deliberately. A junior does not carry a smaller book than an elite —
+ * they carry a different KIND of account out of the same 500.
  */
 export const DEFAULT_BOOK_CEILING = 500
 

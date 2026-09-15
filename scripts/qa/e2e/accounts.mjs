@@ -44,9 +44,33 @@ const handlers = [
   [(u) => u.includes('/rpc/book_facets'), () => ({ body: FACETS })],
   [(u) => u.includes('/rpc/account_view_counts'), () => ({ body: [VIEW_COUNTS] })],
   [(u) => u.includes('/rpc/nav_counts'), () => ({ body: { mail: 0, tasks: 0, disputes: 0 } })],
+  /* What the hand-out planner reads: who carries what, and what is already in their diaries. */
+  [(u) => u.includes('/rpc/collector_book_load'), () => ({
+    body: [
+      { user_id: PROFILE.id, in_play_accounts: 120, in_play_value: 900000, total_accounts: 140 },
+      { user_id: COLLEAGUE.id, in_play_accounts: 470, in_play_value: 300000, total_accounts: 480 },
+    ],
+  })],
+  [(u) => u.includes('/rpc/diary_day_load'), () => ({ body: [] })],
+  [(u) => u.includes('/rest/v1/diary_entries'), () => ({ body: [] })],
   [
     (u) => u.includes('/rest/v1/debtor_accounts'),
     (u) => {
+      /*
+       * An id list is a different question from a filter: the hand-out modal asks for exactly
+       * the accounts that were ticked. Answering it with a page of the whole book would make the
+       * modal offer to hand out a hundred accounts somebody never selected — and look correct.
+       */
+      const idList = /id=in\.\(([^)]*)\)/.exec(decodeURIComponent(u))?.[1]
+      if (idList) {
+        const wanted = new Set(idList.split(',').map((s) => s.replace(/^"|"$/g, '')))
+        const rows = accountsPage(VIEW_COUNTS.whole_book).filter((r) => wanted.has(r.id))
+        return {
+          body: rows,
+          headers: { 'content-range': `0-${Math.max(0, rows.length - 1)}/${rows.length}` },
+        }
+      }
+
       /*
        * The total comes from the content-range header, not the body — that is how PostgREST
        * reports a count and how fetchAccounts reads it. A fixture that returned the rows and
@@ -183,13 +207,41 @@ try {
 
   /* ---------- the allocate modal ---------- */
 
-  await page.getByRole('button', { name: /^Allocate/ }).click()
-  await page.waitForTimeout(800)
-  await t.shot(page, '05-accounts-allocate')
+  /* ---------- the hand-out planner ---------- */
+
+  /*
+   * Back to a page-sized selection first: the plan is built in the browser from the accounts it
+   * actually loaded, and "all 736 matching" is above the bulk ceiling on purpose.
+   */
+  await page.getByRole('button', { name: /Broken promises/ }).first().click()
+  await page.waitForFunction(() => /Showing \d+ of 40/.test(document.body.innerText), { timeout: 15000 })
+  await page.locator('thead input[type="checkbox"]').check()
+  await page.getByRole('button', { name: /^Hand out/ }).click()
+  await page.waitForFunction(
+    () => /accounts to hand out/.test(document.body.innerText), { timeout: 20000 },
+  )
+  await page.waitForTimeout(400)
+  await t.shot(page, '05-hand-out-plan')
   const modal = await page.locator('body').innerText()
-  t.ok('the modal names a number before it does anything', /736|Counting/.test(modal))
-  t.ok('...and offers a person', modal.includes('Choose a person'))
-  t.ok('...and the unallocated pile as a real destination', modal.includes('Take off every desk'))
+
+  t.ok('the modal says how many it is handing out', /40 accounts to hand out/.test(modal))
+  /*
+   * A grade is what makes somebody a collector, and both fixture people have one — so both are
+   * offered, with what they carry and what they work in a day.
+   */
+  t.ok('it offers the graded people', modal.includes('Test Leader') && modal.includes('Thandi Junior'))
+  t.ok('...with their grade and book', /Senior · 120\/500 on the book · 40 a day/.test(modal))
+  t.ok('...and the junior’s real ceiling', /Junior · 470\/150 on the book/.test(modal))
+
+  /*
+   * THE GATE THAT MATTERS. Every eighth fixture account is R180 000 — Major — and only the
+   * Senior may take those. If the plan gave one to the Junior the screen would look identical.
+   */
+  t.ok('the plan is on screen', /across \d+ (person|people)/.test(modal))
+  t.ok('the day grid shows what lands when', /\+\d+ \/\d+/.test(modal))
+  t.ok('...and warns when somebody goes over their ceiling',
+    /over their book ceiling|\d+ over/.test(modal))
+  t.ok('booking is on by default', await page.getByRole('button', { name: /Hand out and book/ }).isVisible())
 
   /* ---------- nothing broke on the way ---------- */
 

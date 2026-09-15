@@ -76,8 +76,18 @@ export interface CollectorPlan {
   before: number
   taking: number
   after: number
-  /** How far past the ceiling this plan pushes them. Zero when it does not. */
+  /**
+   * How far past the ceiling THIS PLAN pushes them. Zero when it does not.
+   *
+   * Measured as the excess the plan is responsible for, not the total excess — because a person
+   * who is already over their ceiling and is given nothing has not been pushed anywhere by this
+   * plan, and counting them would fire the warning on a hand-out that carefully avoided them.
+   * A warning that cries wolf on the plan that did the right thing is a warning people stop
+   * reading, and then it is worse than no warning at all.
+   */
   overBy: number
+  /** They were over their ceiling before this plan. Why they are getting little or nothing. */
+  alreadyOver: boolean
 }
 
 export interface DayPlan {
@@ -250,6 +260,8 @@ export function planHandOut(input: PlanInput): HandOutPlan {
 
   const collectors: CollectorPlan[] = state.map((s) => {
     const after = s.c.inPlayNow + s.taking
+    const excessBefore = Math.max(0, s.c.inPlayNow - s.ceiling)
+    const excessAfter = Math.max(0, after - s.ceiling)
     return {
       userId: s.c.userId,
       name: s.c.name,
@@ -258,7 +270,8 @@ export function planHandOut(input: PlanInput): HandOutPlan {
       before: s.c.inPlayNow,
       taking: s.taking,
       after,
-      overBy: Math.max(0, after - s.ceiling),
+      overBy: Math.max(0, excessAfter - excessBefore),
+      alreadyOver: excessBefore > 0,
     }
   })
 
@@ -299,6 +312,12 @@ export function planSummary(plan: HandOutPlan): string {
   const n = plan.placements.length
   if (n === 0) return 'Nothing can be booked in. See the reasons below.'
   const people = plan.collectors.filter((c) => c.taking > 0).length
+  /*
+   * overBy is already plan-relative — it counts only the excess THIS hand-out added — so
+   * somebody who took nothing has an overBy of zero however overloaded they already were, and no
+   * `taking > 0` guard is needed here. Do not add one: a second rule saying the same thing is a
+   * second rule that can disagree, and this one is the tested half.
+   */
   const over = plan.collectors.filter((c) => c.overBy > 0)
   const parts = [
     `${n.toLocaleString('en-ZA')} ${n === 1 ? 'account' : 'accounts'} across ${people} ${people === 1 ? 'person' : 'people'}`,

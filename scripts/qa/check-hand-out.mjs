@@ -201,8 +201,57 @@ ok('an elite may take anything', ACCOUNT_BANDS.every((b) => mayTake('Elite', b))
   )
   check('a full book still takes the work', p.placements.length, 10)
   check('...and the plan says how far over', p.collectors[0].overBy, 10)
+  ok('...and that it was exactly at the line before', !p.collectors[0].alreadyOver)
   check('...and what it becomes', p.collectors[0].after, 510)
   ok('...and the summary warns', /over their book ceiling/.test(planSummary(p)))
+}
+
+/*
+ * A WARNING MUST BE ABOUT THE PLAN, not about the world it found. Somebody already over their
+ * ceiling who is given nothing has not been pushed anywhere by this hand-out — and counting them
+ * fires the warning on exactly the plan that did the right thing by avoiding them. A screenshot
+ * caught this: "1 person goes over their book ceiling" on a plan where the only person taking
+ * work went from 120 to 160 against a ceiling of 500.
+ */
+{
+  const p = plan(
+    Array.from({ length: 10 }, (_, i) => acc(`a${i}`, 1000)),
+    [
+      col('Roomy', 'Senior', { inPlay: 120, ceiling: 500 }),
+      col('Swamped', 'Junior', { inPlay: 470, ceiling: 150 }),
+    ],
+  )
+  const swamped = p.collectors.find((c) => c.name === 'Swamped')
+  const roomy = p.collectors.find((c) => c.name === 'Roomy')
+  check('the work avoids the swamped desk', swamped.taking, 0)
+  check('...and the plan does not claim to have pushed them over', swamped.overBy, 0)
+  ok('...but still says they are over', swamped.alreadyOver)
+  check('the person who took the work is nowhere near their ceiling', roomy.after, 130)
+  check('...and is not flagged', roomy.overBy, 0)
+  ok('...so the summary warns about nobody', !/over their book ceiling/.test(planSummary(p)))
+}
+
+/* But a plan that pushes somebody FURTHER over owns that much and says so. */
+{
+  const p = plan(
+    Array.from({ length: 10 }, (_, i) => acc(`a${i}`, 1000)),
+    [col('Swamped', 'Junior', { inPlay: 470, ceiling: 150, capacity: 100 })],
+  )
+  const c = p.collectors[0]
+  check('it takes the work anyway', c.taking, 10)
+  check('...and owns exactly the excess it added', c.overBy, 10)
+  ok('...and says so', /over their book ceiling/.test(planSummary(p)))
+}
+
+/* Crossing the ceiling from below is owned in full, not just the part past it. */
+{
+  const p = plan(
+    Array.from({ length: 30 }, (_, i) => acc(`a${i}`, 1000)),
+    [col('Nearly', 'Senior', { inPlay: 140, ceiling: 150, capacity: 100 })],
+  )
+  check('everything still lands', p.collectors[0].taking, 30)
+  check('and the excess is what went past the line', p.collectors[0].overBy, 20)
+  ok('...and they were not over to begin with', !p.collectors[0].alreadyOver)
 }
 
 /* ================= gate 3: which day ================= */
