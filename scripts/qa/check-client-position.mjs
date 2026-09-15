@@ -14,8 +14,8 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  CLIENT_POSITIONS, CLIENT_POSITION_ORDER,
-  clientPosition, frozenByLabel, needsClient, positionReport,
+  CLIENT_FLAGS, CLIENT_POSITIONS, CLIENT_POSITION_ORDER,
+  clientFlag, clientPosition, frozenByLabel, needsClient, positionReport,
 } from '../../src/lib/clientPosition.ts'
 import { accountNarrative } from '../../src/lib/accountNarrative.ts'
 
@@ -182,6 +182,47 @@ ok('the firm name can be changed without a migration', /Acme/.test(frozenByLabel
 // The state this whole feature exists to end: 150 accounts saying "Frozen" and nothing else.
 ok('a freeze with nobody against it says so', /no reason recorded/i.test(frozenByLabel(null)))
 
+/* ---------- the four-state indicator ---------- */
+
+/*
+ * THREE OF THE FOUR ARE DERIVED, one is stored. Every sub-status maps to a fixed tone in the
+ * firm's own table -- Paying is always progressing, Tracing always attention, Frozen always
+ * inactive -- so storing them would only create a way for the two to disagree. These assertions
+ * are that table, so a tone cannot drift from what the firm published to its clients.
+ */
+for (const [pos, tone] of [
+  ['paying', 'progressing'], ['arranged', 'progressing'], ['broken_arrangement', 'attention'],
+  ['refusing', 'attention'], ['cannot_pay', 'attention'], ['negotiating', 'progressing'],
+  ['in_progress', 'progressing'], ['tracing', 'attention'], ['disputed', 'attention'],
+  ['legal', 'progressing'], ['under_administration', 'attention'],
+  ['frozen', 'inactive'], ['closed', 'inactive'],
+]) {
+  check(`${CLIENT_POSITIONS[pos].label} shows as ${tone}`, clientFlag(pos), tone)
+}
+ok('every position has a tone', CLIENT_POSITION_ORDER.every((p) => CLIENT_POSITIONS[p].tone))
+ok('no position stores the red flag as its tone',
+  CLIENT_POSITION_ORDER.every((p) => CLIENT_POSITIONS[p].tone !== 'client_action'))
+check('the four flags all have words beside the colour',
+  Object.values(CLIENT_FLAGS).every((f) => f.label && f.dot), true)
+
+/*
+ * A CLIENT REQUEST BEATS EVERYTHING, especially a paused or finished account. "The account
+ * remains frozen pending your instruction" is precisely what a client must see, and a grey dot
+ * reading "inactive" would bury it.
+ */
+for (const pos of CLIENT_POSITION_ORDER) {
+  check(`a request overrides ${CLIENT_POSITIONS[pos].label}`, clientFlag(pos, true), 'client_action')
+}
+
+{
+  const r = positionReport({ status: 'Frozen', subStatus: null, openQueryWithClient: true })
+  check('a frozen account waiting on the client is not reported as inactive', r.flag, 'client_action')
+  check('...while its position still says frozen', r.position, 'frozen')
+  check('...and the flag carries its words', r.flagLabel, 'Client action required')
+}
+check('nothing owed leaves the tone alone',
+  positionReport({ status: 'Active: Activated', subStatus: 'Tracing' }).flag, 'attention')
+
 /* ---------- the sentence the client reads ---------- */
 
 check('a reached call with a promise and a date reads as one sentence',
@@ -266,6 +307,19 @@ ok('...composed, not taken from the main comment', /accountNarrative\(\{/.test(d
 {
   const panel = detail.slice(detail.indexOf('function ClientLinePanel'), detail.indexOf('/* ---------- right: the figures'))
   ok('...and it cannot be typed into', !/<textarea|<input|contentEditable/.test(panel))
+}
+
+/*
+ * The ask is the feature, not the flag. "Client action required" tells a client nothing; a
+ * request with no words cannot be acted on, so it must be refused rather than raised empty.
+ */
+const freezeSrc = readFileSync(new URL('../../src/lib/accountFreeze.ts', import.meta.url), 'utf8')
+ok('a client request with no words is refused', /if \(!ask\) throw/.test(freezeSrc))
+ok('the flag is raised by the ask, never by a separate switch',
+  !/client_action_required/.test(freezeSrc))
+for (const col of ['client_action_ask', 'client_action_due']) {
+  ok(`schema.sql carries ${col}`, new RegExp(`\\b${col}\\b`).test(schema))
+  ok(`accountBook maps ${col}`, new RegExp(`${col.replace(/_(.)/g, (_, c) => c.toUpperCase())}:`).test(book))
 }
 
 // A freeze without a reason is the state being fixed; it must be refused, not defaulted.

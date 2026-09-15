@@ -47,6 +47,28 @@ export type ClientPosition =
   | 'frozen'
   | 'closed'
 
+/**
+ * The four-state indicator beside a status: does anyone need to act?
+ *
+ * THREE OF THE FOUR ARE DERIVED, one is stored. Reading the firm's own table, every sub-status
+ * maps to a fixed tone -- Paying is always progressing, Tracing is always attention, Frozen is
+ * always inactive. A field whose value is a pure function of another field is not a second field;
+ * it is presentation, and storing it only creates a way for the two to disagree.
+ *
+ * 'client_action' is the exception and the reason the indicator is worth having at all. It cannot
+ * be derived from the status, because "we are waiting on YOU" is true of a disputed account, a
+ * frozen one and a legal one alike. It is the flag that turns "why have you not collected" into
+ * "here are eleven you can unblock today".
+ */
+export type ClientFlag = 'progressing' | 'attention' | 'client_action' | 'inactive'
+
+export const CLIENT_FLAGS: Record<ClientFlag, { label: string; dot: string }> = {
+  progressing: { label: 'Progressing', dot: '\u{1F7E2}' },
+  attention: { label: 'Attention', dot: '\u{1F7E0}' },
+  client_action: { label: 'Client action required', dot: '\u{1F534}' },
+  inactive: { label: 'Inactive', dot: '\u26AA' },
+}
+
 interface PositionMeta {
   /** What the client reads. The firm's words, not the database's. */
   label: string
@@ -60,6 +82,13 @@ interface PositionMeta {
    * accounts an agent rings makes a book look busier than it is.
    */
   inPlay: boolean
+  /**
+   * How it is going, when nothing is owed by the client.
+   *
+   * Separate from inPlay, which asks whether anybody is expected to be ringing. Legal is not in
+   * play -- it sits with attorneys -- but it is progressing. Under administration is neither.
+   */
+  tone: Exclude<ClientFlag, 'client_action'>
 }
 
 export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
@@ -67,17 +96,20 @@ export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
     label: 'Paying',
     meaning: 'Money received from this debtor during the period.',
     inPlay: true,
+    tone: 'progressing',
   },
   arranged: {
     label: 'Arranged',
     meaning: 'The debtor has arranged instalments, or a settlement, to clear the account.',
     inPlay: true,
+    tone: 'progressing',
   },
   broken_arrangement: {
     label: 'Broken arrangement',
     /* The firm's own words: speed is what recovers a defaulted payment. */
     meaning: 'An arranged instalment was not paid. We make contact immediately — speed is what recovers a defaulted payment.',
     inPlay: true,
+    tone: 'attention',
   },
   refusing: {
     /*
@@ -92,6 +124,7 @@ export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
     label: 'Refusing to pay',
     meaning: 'The debtor will not pay, or is avoiding us on details that work. Usually a legal decision.',
     inPlay: true,
+    tone: 'attention',
   },
   cannot_pay: {
     /*
@@ -103,11 +136,13 @@ export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
     label: 'Cannot pay',
     meaning: 'The debtor is unable to pay — unemployed, a pensioner, in hospital, or the business has closed. We check back.',
     inPlay: true,
+    tone: 'attention',
   },
   negotiating: {
     label: 'Negotiating',
     meaning: 'We have reached the debtor and are working towards an arrangement.',
     inPlay: true,
+    tone: 'progressing',
   },
   in_progress: {
     /*
@@ -127,21 +162,25 @@ export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
     label: 'In progress',
     meaning: 'Ordinary collection is under way. Nothing has come of it yet.',
     inPlay: true,
+    tone: 'progressing',
   },
   tracing: {
     label: 'Tracing',
     meaning: 'We could not reach the debtor on the details supplied. A trace is lodged with the credit and information bureaus.',
     inPlay: true,
+    tone: 'attention',
   },
   disputed: {
     label: 'Disputed',
     meaning: 'The debtor disputes the account. We are establishing the dispute in writing and resolving it with our legal team.',
     inPlay: true,
+    tone: 'attention',
   },
   legal: {
     label: 'Legal',
     meaning: 'A Section 129 letter of demand has been issued, or the matter is with attorneys on your instruction.',
     inPlay: false,
+    tone: 'progressing',
   },
   under_administration: {
     /*
@@ -165,16 +204,19 @@ export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
     label: 'Under administration',
     meaning: 'A practitioner, liquidator, trustee or executor is administering the debtor. We deal with them, not the debtor.',
     inPlay: false,
+    tone: 'attention',
   },
   frozen: {
     label: 'Frozen',
     meaning: 'Work is stopped. See the reason and who asked for it.',
     inPlay: false,
+    tone: 'inactive',
   },
   closed: {
     label: 'Closed',
     meaning: 'Back with you — settled, withdrawn, prescribed, untraceable, or recommended for write-off.',
     inPlay: false,
+    tone: 'inactive',
   },
 }
 
@@ -309,16 +351,38 @@ export function frozenByLabel(by: FrozenBy | null | undefined, firmName = 'Brede
   return 'Frozen — no reason recorded'
 }
 
+/**
+ * The indicator shown beside the status.
+ *
+ * A client request beats everything, including a closed or frozen account -- especially those.
+ * "The account remains frozen pending your instruction" is precisely the case a client needs to
+ * see, and a grey dot saying "inactive" would bury it.
+ */
+export function clientFlag(position: ClientPosition, clientActionRequired = false): ClientFlag {
+  if (clientActionRequired) return 'client_action'
+  return CLIENT_POSITIONS[position].tone
+}
+
 /** Everything a client needs said about one account's position, in one place. */
 export interface PositionReport {
   position: ClientPosition
   label: string
   needsClient: boolean
+  flag: ClientFlag
+  flagLabel: string
 }
 
 export function positionReport(
   input: PositionInput & { openQueryWithClient?: boolean },
 ): PositionReport {
   const position = clientPosition(input)
-  return { position, label: CLIENT_POSITIONS[position].label, needsClient: needsClient(input) }
+  const needs = needsClient(input)
+  const flag = clientFlag(position, needs)
+  return {
+    position,
+    label: CLIENT_POSITIONS[position].label,
+    needsClient: needs,
+    flag,
+    flagLabel: CLIENT_FLAGS[flag].label,
+  }
 }

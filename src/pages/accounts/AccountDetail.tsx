@@ -32,7 +32,8 @@ import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './Ac
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
 import { EscalateModal } from './EscalateModal'
 import { FreezeModal } from './FreezeModal'
-import { CLIENT_POSITIONS, clientPosition, frozenByLabel } from '../../lib/clientPosition.ts'
+import { ClientActionModal } from './ClientActionModal'
+import { CLIENT_FLAGS, CLIENT_POSITIONS, frozenByLabel, positionReport, type ClientFlag } from '../../lib/clientPosition.ts'
 import { accountNarrative } from '../../lib/accountNarrative.ts'
 import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
@@ -117,6 +118,7 @@ export function AccountDetail() {
   const [noteOpen, setNoteOpen] = useState(false)
   const [disputing, setDisputing] = useState(false)
   const [freezing, setFreezing] = useState(false)
+  const [askingClient, setAskingClient] = useState(false)
   const [smsOpen, setSmsOpen] = useState(false)
   const [diariseOpen, setDiariseOpen] = useState(false)
 
@@ -302,6 +304,12 @@ export function AccountDetail() {
    *
    * Composed from records, never from the main comment. See accountNarrative.
    */
+  const clientReport = positionReport({
+    status: account.status,
+    subStatus: account.subStatus,
+    paidInPeriod: false,
+    openQueryWithClient: account.clientActionAsk !== null,
+  })
   const clientLinePanel = (
     <ClientLinePanel
       text={accountNarrative({
@@ -313,11 +321,11 @@ export function AccountDetail() {
         nextFollowUpOn: account.diaryDate,
         frozenReason: account.frozenReason,
       })}
-      position={CLIENT_POSITIONS[clientPosition({
-        status: account.status,
-        subStatus: account.subStatus,
-        paidInPeriod: false,
-      })]}
+      position={CLIENT_POSITIONS[clientReport.position]}
+      flag={clientReport.flag}
+      ask={account.clientActionAsk}
+      askDue={account.clientActionDue}
+      onAsk={() => setAskingClient(true)}
     />
   )
   const promisePanel = (
@@ -583,6 +591,19 @@ export function AccountDetail() {
             : null}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
           onClose={() => setFreezing(false)}
+          onDone={reload}
+        />
+      )}
+
+      {askingClient && (
+        <ClientActionModal
+          accountId={account.id}
+          accountLabel={`${[account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ')} \u00b7 ${account.accountNumber}`}
+          outstanding={account.clientActionAsk
+            ? { ask: account.clientActionAsk, dueOn: account.clientActionDue }
+            : null}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setAskingClient(false)}
           onDone={reload}
         />
       )}
@@ -1056,15 +1077,41 @@ function PromiseChip({ status }: { status: string }) {
  * where the truth is kept. What changes it is doing the work — ringing the debtor, taking the
  * promise, setting the next date — which is the point of showing it.
  */
-function ClientLinePanel({ text, position }: {
+function ClientLinePanel({ text, position, flag, ask, askDue, onAsk }: {
   text: string
   position: { label: string; meaning: string }
+  flag: ClientFlag
+  /** What is outstanding from the client, or null when nothing is. */
+  ask: string | null
+  askDue: string | null
+  onAsk: () => void
 }) {
+  const f = CLIENT_FLAGS[flag]
   return (
     <Card>
       <PanelTitle>What the client sees</PanelTitle>
-      <p className="text-xs font-medium text-[var(--c-steel)]">{position.label}</p>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+        <p className="text-xs font-medium text-[var(--c-steel)]">{position.label}</p>
+        {/*
+          The dot and the words together. A colour alone is not a flag on a page somebody reads
+          aloud down a telephone, and it is not a flag at all to anyone who cannot see colour.
+        */}
+        <p className={`text-[11px] font-medium ${flag === 'client_action' ? 'text-[var(--c-rust-deep)]' : 'text-slate-400'}`}>
+          {f.dot} {f.label}
+        </p>
+      </div>
       <p className="text-[11px] text-slate-400 mb-2">{position.meaning}</p>
+
+      {/*
+        THE ASK, WORD FOR WORD. It is the one line on a client report that asks them to do
+        something, so it is shown exactly as they will read it rather than summarised.
+      */}
+      {ask && (
+        <p className="text-sm text-[var(--c-rust-deep)] bg-[var(--tint-rust-deep)] rounded-lg px-3 py-2 mb-2">
+          {ask}
+          {askDue && <span className="block text-[11px] mt-0.5 opacity-80">Needed by {formatDate(askDue)}</span>}
+        </p>
+      )}
       {/*
         Quoted and set apart, because it is not this page talking — it is a preview of another
         document. An agent should be able to tell at a glance that these are the words leaving
@@ -1073,6 +1120,10 @@ function ClientLinePanel({ text, position }: {
       <p className="text-sm text-slate-700 border-l-2 border-slate-200 pl-3">
         {text || 'Nothing to report on this account yet.'}
       </p>
+      <button type="button" onClick={onAsk}
+        className="mt-2.5 text-xs font-medium text-[var(--c-steel)] hover:underline">
+        {ask ? 'The client came back' : 'Ask the client for something'}
+      </button>
     </Card>
   )
 }
