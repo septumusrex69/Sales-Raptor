@@ -5,6 +5,7 @@ import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { SignatureEditor } from '../../components/settings/SignatureEditor'
 import { DataImportTab } from '../../components/settings/DataImportTab'
+import { CollectorsPanel } from '../../components/settings/CollectorsPanel'
 import { customFields as initialCustomFields, industries, leadSources as initialLeadSources } from '../../data/mockData'
 import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
@@ -197,6 +198,7 @@ function UsersTab() {
   const [formerOpen, setFormerOpen] = useState(false)
 
   return (
+    <div className="space-y-5">
     <Card padded={false}>
       <div className="p-5 flex items-center justify-between">
         <CardHeader title="Users" subtitle={`${users.length} team members`} />
@@ -241,7 +243,7 @@ function UsersTab() {
                       value={u.role}
                       onChange={(e) => updateUser(u.id, { role: e.target.value as UserRole })}
                     >
-                      {(['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Agent', 'Read Only'] as UserRole[]).map((r) => (
+                      {(['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Team Leader', 'Pre-legal Agent', 'Read Only'] as UserRole[]).map((r) => (
                         <option key={r}>{r}</option>
                       ))}
                     </select>
@@ -335,6 +337,15 @@ function UsersTab() {
         <AdminSignatureModal user={signatureUser} onClose={() => setSignatureUser(null)} onSave={(patch) => updateUser(signatureUser.id, patch)} />
       )}
     </Card>
+
+    {/*
+      Beneath the people, not inside them. A grade and a book ceiling are not attributes of an
+      account in the CRM sense -- they are what makes somebody eligible to be handed collections
+      work at all -- and four more columns on a table that is already seven wide would put the
+      thing being changed off the right-hand edge of an iPad.
+    */}
+    <CollectorsPanel canEdit={isAdmin || currentUser?.role === 'Pre-legal Team Leader'} />
+    </div>
   )
 }
 

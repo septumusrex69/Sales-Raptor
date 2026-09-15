@@ -5,9 +5,10 @@ import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { DiaryDatePicker, longDate } from './DiaryDatePicker'
 import {
-  DIARY_KINDS, DIARY_KIND_ORDER, atCapacity, daysBetween, shiftDate,
+  DEFAULT_DIARY_CAPACITY, DIARY_KINDS, DIARY_KIND_ORDER, atCapacity, daysBetween, shiftDate,
   type DayLoad, type DiaryKind,
 } from '../../lib/diaryPriority.ts'
+import { diaryReserveOf, selfBookingLimit } from '../../lib/collectorGrade.ts'
 import { diarise } from '../../lib/diary.ts'
 import { setReminder } from '../../lib/reminders.ts'
 import {
@@ -78,7 +79,22 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
   const [error, setError] = useState<string | null>(null)
 
   const owner = users.find((u) => u.id === ownerId)
-  const capacity = owner?.diaryCapacity ?? null
+  /*
+   * THE SELF-BOOKING LIMIT, NOT THE WHOLE DAY.
+   *
+   * The firm's rule: a clerk who works 50 accounts a day may only diarise 40 of them himself,
+   * leaving 10 for whatever a team leader hands him. So the warning here fires at 40 — and the
+   * distributor in handOut.ts still fills all 50, which is the only reason the slots are held
+   * back at all. Warning at the full capacity would let an agent's own bookings eat the room a
+   * hand-out needs, and the first anybody would know of it is a plan that runs a week past the
+   * window it was asked for.
+   *
+   * Reserving nothing (a reserve of 0) is a real choice and gives back the whole day.
+   */
+  const fullDay = owner?.diaryCapacity && owner.diaryCapacity > 0
+    ? owner.diaryCapacity : DEFAULT_DIARY_CAPACITY
+  const reserve = diaryReserveOf(owner?.diaryReserve)
+  const capacity = selfBookingLimit(fullDay, reserve)
 
   /*
    * A day at or past the agent's own working rate.
@@ -299,9 +315,18 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
         {overCapacity && dayFull && (
           <p className="flex items-start gap-2 text-xs text-[var(--c-gold-dark)] bg-[var(--tint-gold)] rounded-lg px-3 py-2">
             <AlertTriangle size={14} className="shrink-0 mt-px" />
+            {/*
+              The sentence has to stay TRUE once a reserve is set. dayFull.capacity is now the
+              self-booking limit, not the working day — saying "you work 40 a day" to somebody who
+              works 50 is a small lie that makes the whole warning untrustworthy, and the reserve
+              is exactly the thing they would query.
+            */}
             <span>
               {longDate(dueOn)} already has {dayFull.booked} account{dayFull.booked === 1 ? '' : 's'} on
-              it, and you work {dayFull.capacity} a day. This one makes {dayFull.booked + 1}.
+              it, and this one makes {dayFull.booked + 1}.{' '}
+              {reserve > 0
+                ? `You book ${capacity} of your ${fullDay} a day yourself — the other ${reserve} are kept for work sent to you.`
+                : `You work ${fullDay} a day.`}
             </span>
           </p>
         )}
