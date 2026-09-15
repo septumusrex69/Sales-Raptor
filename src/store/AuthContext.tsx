@@ -17,6 +17,8 @@ interface ProfileRow {
   email_signature_image_width: number | null
   email_signature_image_align: 'left' | 'center' | 'right' | null
   buzzbox_extension: string | null
+  diary_capacity: number | null
+  diary_order: string | null
 }
 
 function mapProfileRow(row: ProfileRow): User {
@@ -34,6 +36,19 @@ function mapProfileRow(row: ProfileRow): User {
     emailSignatureImageWidth: row.email_signature_image_width ?? undefined,
     emailSignatureImageAlign: row.email_signature_image_align ?? undefined,
     buzzboxExtension: row.buzzbox_extension ?? undefined,
+    /*
+     * THIS MAPPER IS HAND-WRITTEN AND THAT IS WHY IT DROPS THINGS.
+     *
+     * AppStore converts every row generically (snake_case -> camelCase), so a column added there
+     * arrives on its own. Here every field is listed by hand, so a column added to profiles is
+     * present in the database, present in the User type, fetched by the select('*') above — and
+     * silently absent from currentUser. diary_capacity spent months in exactly that state.
+     *
+     * Anything added to profiles has to be added here too. check-diary-capacity.mjs fails if a
+     * column the diary depends on is missing from this list.
+     */
+    diaryCapacity: row.diary_capacity ?? undefined,
+    diaryOrder: row.diary_order ?? undefined,
   }
 }
 

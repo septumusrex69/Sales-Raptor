@@ -20,8 +20,9 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  DEFAULT_DIARY_CAPACITY, MAX_DIARY_CAPACITY, MIN_DIARY_CAPACITY,
-  atCapacity, dayLoad, validCapacity,
+  DEFAULT_DIARY_CAPACITY, DIARY_KINDS, DIARY_ORDER_GROUPS, DIARY_ORDER_LABELS,
+  FIRM_DIARY_ORDER, MAX_DIARY_CAPACITY, MIN_DIARY_CAPACITY,
+  atCapacity, dayLoad, orderLabel, validCapacity, validOrder,
 } from '../../src/lib/diaryPriority.ts'
 
 let pass = 0
@@ -69,6 +70,7 @@ ok('...and still warns once the default is reached', atCapacity(day(DEFAULT_DIAR
 
 const schema = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8')
 ok('profiles carries diary_capacity', /diary_capacity/.test(schema))
+ok('profiles carries diary_order', /diary_order/.test(schema))
 
 // The exact rule AppStore uses on the way out, applied to the exact key the control writes.
 const camelToSnake = (key) => key.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`)
@@ -80,6 +82,49 @@ ok('the control writes exactly one field', written.length === 1)
 check('...and it is diaryCapacity', written[0], 'diaryCapacity')
 ok('every field it writes is a real column',
   written.every((f) => new RegExp(`\\b${camelToSnake(f)}\\b`).test(schema)))
+
+/* ---------- the hand-written profile mapper has to carry them ---------- */
+
+/*
+ * AppStore converts rows generically; AuthContext lists every field by hand. A column the diary
+ * depends on can therefore be in the database, in the type and in the select, and still never
+ * reach currentUser. That is exactly the state diary_capacity was in.
+ */
+const auth = readFileSync(new URL('../../src/store/AuthContext.tsx', import.meta.url), 'utf8')
+for (const [column, field] of [['diary_capacity', 'diaryCapacity'], ['diary_order', 'diaryOrder']]) {
+  ok(`AuthContext declares ${column} on the row`, new RegExp(`${column}:`).test(auth))
+  ok(`AuthContext maps it to ${field}`, new RegExp(`${field}:\\s*row\\.${column}`).test(auth))
+}
+
+/* ---------- the order somebody picked has to survive ---------- */
+
+check('a stored order is honoured', validOrder('first:new_account'), 'first:new_account')
+check('the firm\u2019s own order is a valid stored value', validOrder(FIRM_DIARY_ORDER), FIRM_DIARY_ORDER)
+check('never chosen reads as null, not as an error', validOrder(null), null)
+check('an empty string reads as never chosen', validOrder(''), null)
+// A kind retired from the ladder leaves stored rows behind. They must read as "never chosen"
+// rather than blanking the control or sorting by something that no longer exists.
+check('an order we no longer offer is refused', validOrder('first:carrier_pigeon'), null)
+check('junk is refused', validOrder('DROP TABLE'), null)
+ok('every grouped option is a real order',
+  DIARY_ORDER_GROUPS.flatMap((g) => g.options).every((o) => validOrder(o.id) === o.id))
+check('the groups offer exactly what the flat list does',
+  DIARY_ORDER_GROUPS.reduce((n, g) => n + g.options.length, 0), DIARY_ORDER_LABELS.length)
+ok('the firm\u2019s order is one of the options offered',
+  DIARY_ORDER_GROUPS.flatMap((g) => g.options).some((o) => o.id === FIRM_DIARY_ORDER))
+check('a button never shows a blank order', orderLabel('first:nonsense'), orderLabel(FIRM_DIARY_ORDER))
+
+/* ---------- the two that read as synonyms have to read as two things ---------- */
+
+const broken = DIARY_KINDS.promise_broken
+const missed = DIARY_KINDS.payment_default
+ok('they are not the same label', broken.label !== missed.label)
+// The firm asked whether these were the same thing. If neither reason names what separates
+// them -- one promise against a running arrangement -- the labels have not answered.
+ok('the broken promise says it is a one-off', /one-off/i.test(broken.why))
+ok('the missed instalment says it is a running arrangement', /arrangement/i.test(missed.why))
+ok('neither is called an "arrangement default" any more',
+  ![broken.label, missed.label].some((l) => /arrangement default/i.test(l)))
 
 /* ---------- the warnings are wired to the shared test ---------- */
 

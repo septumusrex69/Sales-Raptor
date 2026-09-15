@@ -454,6 +454,14 @@ export interface User {
    * through letters do not have the same day. Undefined means the firm default.
    */
   diaryCapacity?: number
+  /**
+   * How this person likes their diary ordered, when they have said.
+   *
+   * Undefined means they never chose, which is the firm's own order. Typed loosely rather than
+   * as DiaryOrder so that types.ts does not have to import the diary module; the diary validates
+   * it on the way in and falls back when it no longer offers the value.
+   */
+  diaryOrder?: string
 }
 
 export type TeamKind = 'Sales' | 'Communications'

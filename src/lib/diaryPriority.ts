@@ -70,11 +70,23 @@ interface KindMeta {
 export const DIARY_KINDS: Record<DiaryKind, KindMeta> = {
   promise_broken: {
     label: 'Broken PTP',
-    why: 'They agreed an amount and a date and did not pay. Most collectable, and most likely to go quiet if left.',
+    why: 'A one-off promise: an amount and a date agreed on a call, and the date passed with nothing. Most collectable person on the book, and the quickest to go quiet.',
   },
   payment_default: {
-    label: 'Arrangement default',
-    why: 'An instalment on a running arrangement did not come off. Different conversation to a one-off promise that broke.',
+    /*
+     * RENAMED from "Arrangement default", which the firm read as a synonym for a broken PTP —
+     * and fairly: two labels both meaning "agreed to pay, did not pay" tell nobody which list
+     * they are looking at. They are not the same work.
+     *
+     * A broken PTP is a ONE-OFF: a figure and a date agreed on a call, with nothing behind it.
+     * You ring to re-negotiate from nothing.
+     *
+     * This is a RUNNING ARRANGEMENT one instalment short. There is a payment history, usually a
+     * debit order, and often an ordinary reason — a salary date moved, a bank change. You ring
+     * to repair something that was working, which is a different call and a better account.
+     */
+    label: 'Missed instalment',
+    why: 'A running arrangement came up one instalment short. There is a payment history behind it — a different call to a one-off promise that broke.',
   },
   new_account: {
     label: 'New account',
@@ -410,12 +422,82 @@ export type DiaryOrder =
   /** 'first:<kind>' floats one kind to the top and leaves the ladder alone underneath it. */
   | `first:${DiaryKind}`
 
+/**
+ * The order the firm recommends, and the one anybody who has never chosen gets.
+ *
+ * Named rather than written as 'urgent' in six places, because the whole point of a house order
+ * is that there is exactly one of it and everybody can see which one it is.
+ */
+export const FIRM_DIARY_ORDER: DiaryOrder = 'urgent'
+
+export interface DiaryOrderOption {
+  id: DiaryOrder
+  /** What it says in the menu, under its heading. */
+  label: string
+}
+
+export interface DiaryOrderGroup {
+  heading: string
+  /** One line under the heading, where the group needs explaining. */
+  note?: string
+  options: DiaryOrderOption[]
+}
+
+/**
+ * The orders on offer, in three groups, because they are three different kinds of thing.
+ *
+ * They used to be one flat list of thirteen, where "Most urgent first" and "Broken PTP first"
+ * sat as peers — which reads as thirteen alternatives to choose between when it is really one
+ * house order, two ways to sort the whole day, and nine ways to float a single kind to the top
+ * while leaving the house order intact underneath. Nobody could tell from the list which of
+ * those they were picking.
+ */
+export const DIARY_ORDER_GROUPS: DiaryOrderGroup[] = [
+  {
+    heading: 'The firm’s order',
+    note: 'What the ladder says, with anything about to prescribe pulled above it.',
+    options: [{ id: 'urgent', label: 'Most urgent first' }],
+  },
+  {
+    heading: 'Sort the whole day instead',
+    options: [
+      { id: 'amount', label: 'Biggest balance first' },
+      { id: 'oldest', label: 'Longest waiting first' },
+    ],
+  },
+  {
+    heading: 'Or bring one kind to the top',
+    note: 'Everything else keeps the firm’s order underneath it. Nothing is hidden either way.',
+    // Short labels here: under this heading "Broken PTP" is the sentence, and "Broken PTP
+    // first first" is what appending the suffix would amount to.
+    options: DIARY_KIND_ORDER.map((k) => ({ id: `first:${k}` as DiaryOrder, label: DIARY_KINDS[k].label })),
+  },
+]
+
+/**
+ * Every order on offer, flat, each with a label that stands on its own.
+ *
+ * The standalone form — "Broken PTP first", not "Broken PTP" — because this is what a control
+ * shows when it has to say which order is in force without the menu's headings around it.
+ */
 export const DIARY_ORDER_LABELS: { id: DiaryOrder; label: string }[] = [
   { id: 'urgent', label: 'Most urgent first' },
   { id: 'amount', label: 'Biggest balance first' },
   { id: 'oldest', label: 'Longest waiting first' },
   ...DIARY_KIND_ORDER.map((k) => ({ id: `first:${k}` as DiaryOrder, label: `${DIARY_KINDS[k].label} first` })),
 ]
+
+/** How the order in force reads on a button. Falls back to the firm's own, never to a blank. */
+export function orderLabel(order: DiaryOrder): string {
+  return DIARY_ORDER_LABELS.find((o) => o.id === order)?.label
+    ?? DIARY_ORDER_LABELS.find((o) => o.id === FIRM_DIARY_ORDER)!.label
+}
+
+/** A stored order string, or null if it is not one we still offer. */
+export function validOrder(raw: string | null | undefined): DiaryOrder | null {
+  if (!raw) return null
+  return DIARY_ORDER_LABELS.some((o) => o.id === raw) ? (raw as DiaryOrder) : null
+}
 
 /** The kind a 'first:<kind>' order floats, or null for the orders that do not float one. */
 export function floatedKind(order: DiaryOrder): DiaryKind | null {

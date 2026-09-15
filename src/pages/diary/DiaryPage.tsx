@@ -10,6 +10,7 @@ import { useAppStore } from '../../store/AppStore'
 import { canViewClients } from '../../lib/permissions'
 import { longDate, shortDate } from '../../components/diary/DiaryDatePicker'
 import { DiaryCapacity } from '../../components/diary/DiaryCapacity'
+import { DiaryOrderMenu } from '../../components/diary/DiaryOrderMenu'
 import { MoveDiaryModal } from '../../components/diary/MoveDiaryModal'
 import { CompleteDiaryModal } from '../../components/diary/CompleteDiaryModal'
 import {
@@ -17,8 +18,8 @@ import {
   type DayLoads, type DayOfWork, type DiaryRow, type AgentLoad,
 } from '../../lib/diary.ts'
 import {
-  DIARY_KINDS, DIARY_ORDER_LABELS, dayLoad, dayLoadSentence, dayName, inMonth, monthGrid,
-  nearPrescription, orderDiary, overdueBy, shiftDate, shiftMonth, todayIso,
+  DIARY_KINDS, FIRM_DIARY_ORDER, dayLoad, dayLoadSentence, dayName, inMonth, monthGrid,
+  nearPrescription, orderDiary, overdueBy, shiftDate, shiftMonth, todayIso, validOrder,
   type DayLoadLevel, type DiaryOrder,
 } from '../../lib/diaryPriority.ts'
 import { formatCurrency } from '../../data/mockData'
@@ -39,8 +40,8 @@ import { formatCurrency } from '../../data/mockData'
 type DiaryTab = 'Today' | 'Backlog' | 'Month' | 'Team'
 
 export function DiaryPage() {
-  const { currentUser } = useAuth()
-  const { users } = useAppStore()
+  const { currentUser, updateCurrentUserLocal } = useAuth()
+  const { users, updateUser } = useAppStore()
   const [params, setParams] = useSearchParams()
 
   /*
@@ -70,7 +71,39 @@ export function DiaryPage() {
    * account has set it for the day, not for one render, and coming back must not silently put
    * them back on the default.
    */
-  const order = (params.get('order') as DiaryOrder) ?? 'urgent'
+  /*
+   * THREE PLACES, IN THIS ORDER, and each one answers a different question.
+   *
+   * The URL wins, because a link somebody was sent shows what they were sent.
+   * Then the person's own saved order, because "this agent works their new accounts first" is a
+   * standing habit and should survive a logout, not just a page.
+   * Then the firm's, because somebody who has never chosen should be working the house ladder.
+   *
+   * A saved value the diary no longer offers reads as "never chosen" rather than blanking the
+   * control — see validOrder.
+   */
+  const order = validOrder(params.get('order'))
+    ?? validOrder(currentUser?.diaryOrder)
+    ?? FIRM_DIARY_ORDER
+
+  /**
+   * Choosing an order sets it for this tab AND remembers it for next time.
+   *
+   * Both, not either: the URL keeps it through a reload and a shared link, the profile keeps it
+   * through a logout. Only ever the signed-in person's own — standing in a colleague's diary
+   * reorders what you are looking at without touching how they work.
+   */
+  const chooseOrder = useCallback((next: DiaryOrder) => {
+    const p = new URLSearchParams(params)
+    p.set('order', next)
+    setParams(p, { replace: true })
+    if (currentUser?.id && currentUser.diaryOrder !== next) {
+      updateUser(currentUser.id, { diaryOrder: next })
+      // AppStore holds the list of everybody; AuthContext holds the signed-in copy the diary
+      // reads. Patch both or the menu snaps back to the old order on the next render.
+      updateCurrentUserLocal({ diaryOrder: next })
+    }
+  }, [params, setParams, currentUser, updateUser, updateCurrentUserLocal])
 
   const [day, setDay] = useState<DayOfWork | null>(null)
   const [team, setTeam] = useState<AgentLoad[] | null>(null)
@@ -282,20 +315,7 @@ export function DiaryPage() {
             settlement meeting at eleven wants the big balances, one chasing a bad month wants
             every promise that is due, one back from leave wants the oldest thing. See orderDiary.
           */}
-          {tab !== 'Team' && (
-            <select
-              value={order}
-              onChange={(e) => {
-                const p = new URLSearchParams(params)
-                p.set('order', e.target.value)
-                setParams(p, { replace: true })
-              }}
-              className="text-sm rounded-lg border border-slate-200 px-2.5 py-1.5 bg-white max-w-[13rem]"
-              title="Reorders the list. Nothing is hidden."
-            >
-              {DIARY_ORDER_LABELS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-            </select>
-          )}
+          {tab !== 'Team' && <DiaryOrderMenu value={order} onChange={chooseOrder} />}
 
           {/* Standing in someone else's diary. Only offered where there is more than one. */}
           {users.length > 1 && (
