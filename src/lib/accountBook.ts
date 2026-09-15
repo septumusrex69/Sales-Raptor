@@ -53,6 +53,8 @@ export interface DebtorAccount {
   swordfishBalanceAtImport: number | null
   swordfishFeesAtImport: number | null
   swordfishAssignedTo: string | null
+  /** Whose desk it is on now, as a profiles.id. Null is the unallocated pile. */
+  assignedTo: string | null
   diaryDate: string | null
   lastActionAt: string | null
   lastPaymentAt: string | null
@@ -112,6 +114,7 @@ const toAccount = (r: any): DebtorAccount => ({
   swordfishBalanceAtImport: r.swordfish_balance_at_import === null ? null : Number(r.swordfish_balance_at_import),
   swordfishFeesAtImport: r.swordfish_fees_at_import === null ? null : Number(r.swordfish_fees_at_import),
   swordfishAssignedTo: r.swordfish_assigned_to,
+  assignedTo: r.assigned_to ?? null,
   diaryDate: r.diary_date,
   lastActionAt: r.last_action_at,
   lastPaymentAt: r.last_payment_at,
@@ -134,11 +137,57 @@ export function accountFlagList(a: DebtorAccount): string[] {
   return (a.accountFlags ?? '').split(';').map((f) => f.trim()).filter(Boolean)
 }
 
+/**
+ * How the book is narrowed.
+ *
+ * EVERY ONE OF THESE IS A QUESTION SOMEBODY ASKS OUT LOUD, which is the test each had to pass to
+ * be here. "Show me Nedbank's book" and "show me everything handed over in August" are obvious.
+ * The ones worth explaining are the three that find neglect rather than accounts:
+ *
+ *   adrift       — active, and nobody is booked to ring it. 355 accounts arrived from Swordfish
+ *                  in exactly that state. It is the firm's own problem, never a debtor's.
+ *   neverWorked  — handed over and not one action logged against it since.
+ *   quietSince   — nothing logged in N days.
+ *
+ * Applied in the database, not in the browser. This table reaches six figures, and a filter that
+ * loads the book to count it is a filter that stops working the month it matters.
+ */
 export interface AccountQuery {
   companyId?: string
   /** Matches account number, client reference, or debtor surname. */
   search?: string
   status?: string
+  /**
+   * The three answers anybody actually gives to "which accounts".
+   *
+   * The stored status is five values, three of which begin "Active:" and differ only in how the
+   * account got there. Nobody asks for "Active: Unfrozen". They ask for the live book, the
+   * stopped ones, or the ones already back with the client.
+   */
+  statusGroup?: 'active' | 'frozen' | 'closed'
+  /** The inherited Swordfish sub-status: 'Promise To Pay', 'Delinquent Payer', and so on. */
+  subStatus?: string
+  bucket?: string
+  /** Whose desk it is on. 'nobody' finds the unallocated pile, which is its own kind of problem. */
+  assignedTo?: string | 'nobody'
+  /** Handed over on or after this date. */
+  handedOverFrom?: string
+  /** Handed over on or before this date. */
+  handedOverTo?: string
+  /** Active, with no diary date: nobody is booked to ring it. */
+  adrift?: boolean
+  /** Handed over, and not one action logged since. */
+  neverWorked?: boolean
+  /** Nothing logged on or after this date. Includes accounts never worked at all. */
+  quietSince?: string
+  /** Prescribes on or before this date, and has not already. */
+  prescribingBefore?: string
+  /** Interest and fees have hit the in duplum ceiling. */
+  inDuplum?: boolean
+  /** Waiting on the client for something. The list a monthly report leads with. */
+  waitingOnClient?: boolean
+  /** Capital outstanding at or above this figure. */
+  minOutstanding?: number
   /** Only accounts whose billed rate disagrees with their mandate. */
   commissionDriftOnly?: boolean
   page?: number
@@ -163,6 +212,41 @@ export async function fetchAccounts(q: AccountQuery = {}): Promise<AccountPage> 
 
   if (q.companyId) query = query.eq('company_id', q.companyId)
   if (q.status) query = query.eq('status', q.status)
+  /*
+   * Prefix matching, not a list of the five values seen today. The import writes whatever
+   * Swordfish sends, so 'Active: Reinstated' can arrive tomorrow and would silently fall out of
+   * the live book if this were an `in` against values counted this afternoon.
+   */
+  if (q.statusGroup === 'active') query = query.ilike('status', 'Active%')
+  else if (q.statusGroup === 'frozen') query = query.ilike('status', 'Frozen%')
+  else if (q.statusGroup === 'closed') query = query.or('status.ilike.Written-off%,status.ilike.Closed%')
+  if (q.subStatus) query = query.eq('sub_status', q.subStatus)
+  if (q.bucket) query = query.eq('bucket', q.bucket)
+  if (q.assignedTo === 'nobody') query = query.is('assigned_to', null)
+  else if (q.assignedTo) query = query.eq('assigned_to', q.assignedTo)
+
+  if (q.handedOverFrom) query = query.gte('handover_date', q.handedOverFrom)
+  if (q.handedOverTo) query = query.lte('handover_date', q.handedOverTo)
+
+  /*
+   * ADRIFT. Active and nobody booked to ring it — the hole the whole diary design exists to
+   * close, and the one filter here that is about the firm rather than the debtor.
+   */
+  if (q.adrift) query = query.is('diary_date', null).ilike('status', 'Active%')
+  if (q.neverWorked) query = query.is('last_action_at', null)
+  /*
+   * QUIET. Nothing logged since the date given — and an account never worked at all is the
+   * quietest of the lot, so a null counts rather than being filtered out. Without the `or` it
+   * would silently exclude exactly the accounts most worth finding.
+   */
+  if (q.quietSince) query = query.or(`last_action_at.lt.${q.quietSince},last_action_at.is.null`)
+
+  // Already prescribed is not "about to": it has happened, and it is a different conversation.
+  if (q.prescribingBefore) query = query.lte('prescription_date', q.prescribingBefore).eq('prescribed', false)
+  if (q.inDuplum) query = query.eq('in_duplum', true)
+  if (q.waitingOnClient) query = query.not('client_action_ask', 'is', null)
+  if (q.minOutstanding !== undefined) query = query.gte('capital_outstanding', q.minOutstanding)
+
   if (q.search?.trim()) {
     const s = q.search.trim().replace(/[%,]/g, '')
     query = query.or(`account_number.ilike.%${s}%,client_reference.ilike.%${s}%,debtor_surname.ilike.%${s}%`)
@@ -394,4 +478,29 @@ export async function fetchClientCommissionRate(companyId: string): Promise<numb
   if (error) throw new Error(error.message)
   const rate = data?.commission_rate
   return rate === null || rate === undefined ? null : Number(rate)
+}
+
+export interface BookFacets {
+  /** The sub-statuses present in the book, busiest first. */
+  subStatuses: { value: string; accounts: number }[]
+  /** The Swordfish work buckets present, busiest first. */
+  buckets: { value: string; accounts: number }[]
+}
+
+/**
+ * What values the book actually holds, for the filter panel's dropdowns.
+ *
+ * Asked rather than hardcoded. The import writes whatever Swordfish sends, so a list of the
+ * sub-statuses seen this afternoon is wrong the first time a new one arrives — and it is wrong
+ * in the worst direction, because the accounts carrying it become unfindable rather than
+ * conspicuous. Aggregated in the database: a dozen rows come back whatever the book's size.
+ */
+export async function fetchBookFacets(companyId?: string): Promise<BookFacets> {
+  const { data, error } = await supabase.rpc('book_facets', { p_company: companyId ?? null })
+  if (error) throw new Error(error.message)
+  const rows = (data ?? []) as { kind: string; value: string; accounts: number }[]
+  const of = (kind: string) => rows
+    .filter((r) => r.kind === kind)
+    .map((r) => ({ value: r.value, accounts: Number(r.accounts) }))
+  return { subStatuses: of('sub_status'), buckets: of('bucket') }
 }
