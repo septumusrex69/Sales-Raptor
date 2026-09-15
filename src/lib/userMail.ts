@@ -277,7 +277,19 @@ function scope<Q>(q: Q, input: MailScope): Q {
   // Matched means ON A RECORD, and only that. No-record mail has its own tab: putting it here
   // would have the Matched list claiming a supplier is on somebody's file.
   else if (input.filter === 'filed') out = out.eq('is_filed', true)
-  else if (input.filter === 'no-record') out = out.not('no_record_at', 'is', null)
+  /*
+   * Suppliers, the accountant, the telephone provider — and NOT what you sent.
+   *
+   * no_record_at carries two different meanings, and reading it alone conflated them. On an
+   * incoming message it is a decision somebody made: this belongs on nobody's file. On a SENT
+   * message the sync sets it only to keep the Sent folder out of the matching queue (see
+   * fileUserEmail), and that is not the same statement at all.
+   *
+   * Without the is_sent clause this tab showed every message the agent had ever sent, mixed in
+   * among the suppliers it exists for. On the firm's own mailbox that was 24 of the 53 rows —
+   * and it is what "I have many unread emails at No record needed" turned out to mean.
+   */
+  else if (input.filter === 'no-record') out = out.not('no_record_at', 'is', null).eq('is_sent', false)
   else if (input.filter === 'junk') out = out.eq('is_junk', true)
   /*
    * "All" means the whole mailbox EXCEPT junk, at the firm's instruction: "normal mailbox goes
@@ -314,20 +326,47 @@ function scope<Q>(q: Q, input: MailScope): Q {
   return out as Q
 }
 
+/** Unread, per tab — one number for each place a person can look. */
+export type MailUnreadCounts = Record<MailFilter, number>
+
+/** Nothing unread anywhere. Used while the first count is in flight, and when it fails. */
+export const NO_UNREAD: MailUnreadCounts = {
+  all: 0, 'needs-filing': 0, filed: 0, 'no-record': 0, junk: 0, sent: 0,
+}
+
 /**
- * How many messages in this view are unread.
+ * How much unread mail is sitting behind each tab.
  *
- * Scoped to the same tab and search the list is showing, so the number on the toggle is the
- * number of rows the toggle would leave behind. Counted in the database — the page is 50 rows
- * and the answer is routinely larger.
+ * The firm's complaint that this answers: "I have many unread emails at No record needed and
+ * there is no indication that there is an unread email." There was one count on the page, it was
+ * shown on two tabs, and every other tab could be full of unread mail and say nothing.
+ *
+ * ONE ROUND TRIP for all six, through mail_unread_counts(). Six separate head-counts would be
+ * six requests on every load and after every action, and they would arrive at different moments
+ * — so the strip could show a set of numbers that were never all true at once.
+ *
+ * NOT scoped to the search box, deliberately. A tab badge answers "what is in this tab", which
+ * is a fact about the mailbox; narrowing it as somebody types would make the numbers flicker
+ * while they hunt for one message, and the list itself already shows what the search found.
+ *
+ * The SQL mirrors scope() above clause for clause. They are the same question in two languages,
+ * and scripts/qa/check-mail-counts.mjs fails when they drift.
  */
-export async function countUnread(userId: string, input: MailScope): Promise<number> {
-  const { count, error } = await scope(
-    supabase.from('user_emails').select('id', { count: 'exact', head: true }).eq('user_id', userId),
-    { ...input, unreadOnly: true },
-  )
+export async function fetchMailUnreadCounts(): Promise<MailUnreadCounts> {
+  const { data, error } = await supabase.rpc('mail_unread_counts')
   if (error) throw new Error(error.message)
-  return count ?? 0
+  const row = (Array.isArray(data) ? data[0] : data) as {
+    all_mail: number; needs_matching: number; matched: number
+    no_record: number; junk: number; sent: number
+  } | undefined
+  return {
+    all: Number(row?.all_mail ?? 0),
+    'needs-filing': Number(row?.needs_matching ?? 0),
+    filed: Number(row?.matched ?? 0),
+    'no-record': Number(row?.no_record ?? 0),
+    junk: Number(row?.junk ?? 0),
+    sent: Number(row?.sent ?? 0),
+  }
 }
 
 export async function fetchMail(input: MailScope & {
@@ -354,20 +393,16 @@ export async function fetchMail(input: MailScope & {
   return { items: rows.slice(0, limit).map(toItem), more: rows.length > limit }
 }
 
-/** How many messages are waiting to be filed. Counted in the database, not fetched and counted here. */
-export async function countNeedsFiling(userId: string): Promise<number> {
-  const { count, error } = await supabase
-    .from('user_emails')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    // is_settled: a supplier's invoice somebody has marked as needing no record has been dealt
-    // with, and a badge that keeps counting it is a badge that never reaches nought.
-    .eq('is_settled', false)
-    .eq('is_junk', false)
-    .is('read_at', null)
-  if (error) throw new Error(error.message)
-  return count ?? 0
-}
+/*
+ * countNeedsFiling is gone, and its absence is the point.
+ *
+ * It counted unsettled AND UNREAD mail, while the Needs matching tab listed unsettled mail
+ * whatever its read state — so reading five unmatched messages took the badge to nought over a
+ * list of five. That is the "badge saying 3 over a list of 5" this file warns about in scope(),
+ * and it had grown a third variant: the sidebar counted something different again.
+ *
+ * There is now ONE answer per tab, from one query, in fetchMailUnreadCounts above.
+ */
 
 /**
  * This belongs on nobody's file.

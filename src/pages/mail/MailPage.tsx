@@ -20,14 +20,14 @@ import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
 import { ZoomableImage } from '../../components/ui/ZoomableImage'
 import {
-  addSenderRule, blockedBy, blockSender, blockSenders, clearNoRecordNeeded, countNeedsFiling,
-  countUnread, debtorFileFor, deleteMail, fetchSenderRules, markNoRecordNeeded, removeSenderRule,
-  ruledBy,
+  addSenderRule, blockedBy, blockSender, blockSenders, clearNoRecordNeeded,
+  debtorFileFor, deleteMail, fetchMailUnreadCounts, fetchSenderRules, markNoRecordNeeded,
+  removeSenderRule, ruledBy, NO_UNREAD,
   domainBlockProblem, domainOf, downloadAttachment, emptyJunk, fetchBlockedSenders, fetchMail,
   fetchMailBody, linkMailToAccount, linkMailToRecord, markMailRead, markMailUnread, moveFiledMail,
   saveAccountContacts, setJunk, unblockSender, unmatchMail,
   type BlockedSender, type BlockOutcome, type DebtorFile, type InlineImage, type LinkedRecord,
-  type MailFilter, type MailItem, type SenderRule,
+  type MailFilter, type MailItem, type MailUnreadCounts, type SenderRule,
 } from '../../lib/userMail'
 import { useAppStore } from '../../store/AppStore'
 import {
@@ -79,7 +79,13 @@ const TABS: { id: Pane; label: string; hint: string }[] = [
    * matched and is not part of the incoming working list.
    */
   { id: 'sent', label: 'Sent', hint: 'What you have sent, from anywhere' },
-  { id: 'blocked', label: 'Senders', hint: 'Blocked, and senders that never need matching' },
+  /*
+   * "Blocked", at the firm's instruction — they looked at the tab called Senders and said "that
+   * one is actually should be blocked". Blocking is what people come here to do and what they
+   * look for by name; the standing "never needs matching" rules live here too and the hint says
+   * so, because they are the same question about a sender asked more gently.
+   */
+  { id: 'blocked', label: 'Blocked', hint: 'Blocked senders, and senders that never need matching' },
 ]
 
 const PAGE = 50
@@ -94,14 +100,19 @@ export function MailPage() {
   const { currentUser, session } = useAuth()
   const [filter, setFilter] = useState<Pane>('all')
   /*
-   * Unread, and whether the list is narrowed to it.
+   * Unread, per tab, and whether the list is narrowed to it.
    *
-   * A toggle rather than a sixth tab: "unread junk" and "unread that still needs filing" are
-   * both real questions, and a tab could only ever answer one of them. The count is scoped to
-   * whichever tab and search are active, so the number on the button is the number of rows
-   * pressing it leaves behind.
+   * A toggle rather than an eighth tab: "unread junk" and "unread that still needs matching" are
+   * both real questions, and a tab could only ever answer one of them.
+   *
+   * The COUNTS live on the tabs themselves now, one each. There used to be a single number shown
+   * on two tabs, which meant unread mail could be sitting behind any of the other five with
+   * nothing on screen saying so — the firm hit exactly that, with a full No record needed tab
+   * and no indication anywhere. The toggle carries no number of its own any more: the tab it
+   * narrows is already showing the one that matters, and two numbers for one fact is how they
+   * start disagreeing.
    */
-  const [unread, setUnread] = useState(0)
+  const [unreadCounts, setUnreadCounts] = useState<MailUnreadCounts>(NO_UNREAD)
   const [unreadOnly, setUnreadOnly] = useState(false)
 
   /*
@@ -187,9 +198,9 @@ export function MailPage() {
       setPage(at)
       setChosen(new Set())
       setLoadFailed(false)
-      // Alongside the page, so the badges track whatever the last action did.
-      void countNeedsFiling(currentUser.id).then(setOutstanding).catch(() => {})
-      void countUnread(currentUser.id, { filter, search }).then(setUnread).catch(() => {})
+      // Alongside the page, so every tab's badge tracks whatever the last action did. One call
+      // for all six — see fetchMailUnreadCounts.
+      void fetchMailUnreadCounts().then(setUnreadCounts).catch(() => {})
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       /*
@@ -218,20 +229,6 @@ export function MailPage() {
    * mail is shown. It is one small query per agent — their own patterns, nothing else — and it
    * reloads only when a block is added or removed, not on every page of mail.
    */
-  /*
-   * How many messages are still waiting, shown on the All tab.
-   *
-   * The firm asked for "a small thing by the All if there is a message outstanding that needs to
-   * be attended to" — and it is needed precisely BECAUSE All is the landing view: a list that
-   * mixes filed mail into unfiled gives no sense of how much is left, and the answer is the one
-   * number somebody works down to zero.
-   *
-   * Counted in the database, not by filtering the page in hand: the page is 50 rows and the
-   * answer is usually larger than that.
-   */
-  const [outstanding, setOutstanding] = useState(0)
-
-
   const [blocksVersion, setBlocksVersion] = useState(0)
   useEffect(() => {
     if (!currentUser) return
@@ -583,67 +580,94 @@ export function MailPage() {
   return (
     <div className="space-y-4">
       <Card padded={false}>
-        <div className="px-5 py-4 flex flex-wrap items-center gap-3 border-b border-slate-100">
-          <div className="mr-auto min-w-0">
+        {/*
+          The heading, then a toolbar of its own. One row for both put the compose button
+          somewhere in the middle, wherever the heading happened to end.
+
+          The firm's own layout, in their words: new mail "on the very left", the search box and
+          the two panes "in the corner" on the right. It is the arrangement every mail client
+          they already use has, and the reason it is worth copying is that writing a message is
+          the one thing here somebody arrives intending to do — so it sits where the eye starts,
+          not among the things that act on mail already in front of them.
+        */}
+        <div className="px-5 py-4 border-b border-slate-100 space-y-3">
+          <div className="min-w-0">
             <h2 className="text-sm font-semibold text-slate-800">My mailbox</h2>
             <p className="text-xs text-slate-400 mt-0.5">
               Everything stays until you match it or block the sender. Nothing is deleted on a
               timer, and nothing here is ever removed from your real mailbox.
             </p>
           </div>
-          <label className={`relative ${filter === 'blocked' ? 'hidden' : ''}`}>
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Sender or subject"
-              aria-label="Search your mailbox"
-              className="text-sm rounded-lg border border-slate-200 pl-8 pr-3 py-2 w-52 focus:outline-none focus:ring-2 focus:ring-brand-100"
-            />
-          </label>
-          <button onClick={() => void syncMine()} disabled={syncing}
-            className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50">
-            {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            {syncing ? 'Checking…' : 'Check now'}
-          </button>
-          {/*
-            A message to anybody, from here. Every other compose in Raptor hangs off a record —
-            a debtor, a lead, a deal — which covers replying and covers nothing else. Writing to
-            an attorney, a client's accountant or a bureau had to be done in Outlook, which is
-            how a mailbox managed in one place stops being managed in one place.
-          */}
-          <button onClick={() => setComposing(true)}
-            className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
-            <PenLine size={14} />
-            New email
-          </button>
-          {/* Junk earns its own one-tap answer: it is where the volume is and where nobody
-              wants to read anything. */}
-          {filter === 'junk' && items.length > 0 && (
-            <button onClick={() => setEmptying(true)}
-              className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-negative-700 hover:border-negative-100 hover:bg-negative-50">
-              <Trash2 size={14} /> Empty junk
-            </button>
-          )}
-          {/*
-            Select, which is the only way the tick boxes appear.
 
-            Off by default so the gutter can carry the unread mark instead — see `selecting`.
-            It reads as pressed while it is on, because a mode you cannot see you are in is a
-            mode that surprises you.
-          */}
-          {filter !== 'blocked' && items.length > 0 && (
-            <button onClick={toggleSelecting} aria-pressed={selecting}
-              className={`shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border transition-colors ${
-                selecting
-                  ? 'border-gold-500 bg-gold-400 text-navy-950'
-                  : 'border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50'}`}>
-              {selecting ? <X size={14} /> : <CheckSquare size={14} />}
-              {selecting ? 'Done' : 'Select'}
+          <div className="flex flex-wrap items-center gap-3">
+            {/*
+              A message to anybody, from here, and first in the row. Every other compose in
+              Raptor hangs off a record — a debtor, a lead, a deal — which covers replying and
+              covers nothing else. Writing to an attorney, a client's accountant or a bureau had
+              to be done in Outlook, which is how a mailbox managed in one place stops being
+              managed in one place.
+
+              Filled rather than outlined, unlike its neighbours: it is the only button here that
+              starts something rather than acting on what is already on screen.
+            */}
+            <button onClick={() => setComposing(true)}
+              className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+              <PenLine size={14} />
+              New email
             </button>
-          )}
-          {/* Not on the blocklist, which is a list of senders rather than of mail. */}
-          {filter !== 'blocked' && <EmailViewSwitcher view={view} onChange={setView} />}
+            <button onClick={() => void syncMine()} disabled={syncing}
+              className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50">
+              {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              {syncing ? 'Checking…' : 'Check now'}
+            </button>
+            {/* Junk earns its own one-tap answer: it is where the volume is and where nobody
+                wants to read anything. */}
+            {filter === 'junk' && items.length > 0 && (
+              <button onClick={() => setEmptying(true)}
+                className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-negative-700 hover:border-negative-100 hover:bg-negative-50">
+                <Trash2 size={14} /> Empty junk
+              </button>
+            )}
+            {/*
+              Select, which is the only way the tick boxes appear.
+
+              Off by default so the gutter can carry the unread mark instead — see `selecting`.
+              It reads as pressed while it is on, because a mode you cannot see you are in is a
+              mode that surprises you.
+            */}
+            {filter !== 'blocked' && items.length > 0 && (
+              <button onClick={toggleSelecting} aria-pressed={selecting}
+                className={`shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border transition-colors ${
+                  selecting
+                    ? 'border-gold-500 bg-gold-400 text-navy-950'
+                    : 'border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50'}`}>
+                {selecting ? <X size={14} /> : <CheckSquare size={14} />}
+                {selecting ? 'Done' : 'Select'}
+              </button>
+            )}
+
+            {/*
+              The right-hand corner: find a message, and choose how to read it.
+
+              Both are about looking rather than doing, which is why they are together and away
+              from the buttons that change something. `ml-auto` on the group rather than on one
+              of them keeps the pair together when the row wraps on a narrow screen.
+            */}
+            <div className="ml-auto flex items-center gap-3">
+              <label className={`relative ${filter === 'blocked' ? 'hidden' : ''}`}>
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Sender or subject"
+                  aria-label="Search your mailbox"
+                  className="text-sm rounded-lg border border-slate-200 pl-8 pr-3 py-2 w-52 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                />
+              </label>
+              {/* Not on the blocklist, which is a list of senders rather than of mail. */}
+              {filter !== 'blocked' && <EmailViewSwitcher view={view} onChange={setView} />}
+            </div>
+          </div>
         </div>
 
         {/*
@@ -660,14 +684,21 @@ export function MailPage() {
                   filter === t.id ? 'border-gold-500 text-navy-950' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
                 {t.label}
                 {/*
-                  On All and on Needs filing, because they are the same number and it belongs
-                  wherever somebody is looking for work. Nothing at zero — a badge showing 0 is
-                  furniture, and it is what teaches people to stop reading the others.
+                  EVERY tab carries its own unread count, which is the whole of the fix.
+
+                  There used to be one number, shown on All and on Needs matching, so unread mail
+                  behind any of the other five said nothing at all — the firm found a No record
+                  needed tab full of unread messages with no indication anywhere on the page.
+
+                  Nothing at zero: a badge showing 0 is furniture, and furniture is what teaches
+                  people to stop reading the ones that matter. The blocklist is a list of senders
+                  rather than of mail, so it has nothing to count.
                 */}
-                {(t.id === 'all' || t.id === 'needs-filing') && outstanding > 0 && (
-                  <span className="min-w-4 h-4 px-1 rounded-full text-[10px] font-semibold
-                    inline-flex items-center justify-center tabular-nums bg-gold-500 text-navy-950">
-                    {outstanding > 99 ? '99+' : outstanding}
+                {t.id !== 'blocked' && unreadCounts[t.id] > 0 && (
+                  <span className={`min-w-4 h-4 px-1 rounded-full text-[10px] font-semibold
+                    inline-flex items-center justify-center tabular-nums ${
+                      filter === t.id ? 'bg-gold-500 text-navy-950' : 'bg-brand-500 text-white'}`}>
+                    {unreadCounts[t.id] > 99 ? '99+' : unreadCounts[t.id]}
                   </span>
                 )}
               </button>
@@ -676,12 +707,14 @@ export function MailPage() {
 
           {/*
             Unread, at the right end of the tab row — "at the top where there's All and stuff",
-            as the firm put it, so the fact that something is unread is visible without reading
-            a single row.
+            as the firm put it.
 
             A toggle, not a tab: it narrows whichever tab you are on, so "unread junk" and
-            "unread that still needs filing" are both askable. The count is scoped to that same
-            tab and search, so it is exactly what pressing it leaves behind.
+            "unread that still needs matching" are both askable.
+
+            It carries NO NUMBER of its own any more. The tab it narrows is showing that number a
+            few pixels to the left, and the same fact in two places is the drift this page has
+            already been bitten by once.
           */}
           {filter !== 'blocked' && (
             <button
@@ -691,13 +724,13 @@ export function MailPage() {
               className={`shrink-0 my-1 inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium transition-colors ${
                 unreadOnly
                   ? 'border-brand-500 bg-brand-500 text-white'
-                  : unread > 0
+                  : unreadCounts[filter] > 0
                     ? 'border-brand-100 bg-brand-50 text-brand-700 hover:border-brand-500'
                     : 'border-slate-200 text-slate-400 hover:border-slate-300'}`}
             >
               <span className={`w-1.5 h-1.5 rounded-full ${
-                unreadOnly ? 'bg-white' : unread > 0 ? 'bg-brand-500' : 'bg-slate-300'}`} />
-              {unread > 0 ? `${unread > 99 ? '99+' : unread} unread` : 'No unread'}
+                unreadOnly ? 'bg-white' : unreadCounts[filter] > 0 ? 'bg-brand-500' : 'bg-slate-300'}`} />
+              Unread only
             </button>
           )}
         </div>
@@ -1605,8 +1638,15 @@ function MailRow({
       selection — the two must not be mistakable for each other, since a row can be both.
       Read rows keep a transparent bar of the same width so nothing shifts sideways as mail is
       read, which would make the whole list twitch.
+
+      The bar is new. This comment described it for a while and only the tint was ever built,
+      which is why the firm asked for "a colour or something" on new mail — a pale wash behind a
+      row is not something you can pick out while scanning, and on a screen in an office with a
+      window it is very nearly nothing at all. An edge is: it lands on one axis, at one x, so the
+      eye finds every unread row down the list in a single sweep rather than reading each one.
     */
-    <li className={unread ? 'bg-brand-50/60' : undefined}>
+    <li className={`border-l-[3px] ${
+      unread ? 'border-brand-500 bg-brand-50/60' : 'border-transparent'}`}>
       <div className="px-5 py-3 flex items-start gap-3">
         {/*
           The gutter sits OUTSIDE the button that opens the message. Nesting a checkbox inside

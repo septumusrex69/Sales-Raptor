@@ -194,8 +194,23 @@ async function fileUserEmail(
          * Sent mail arrives settled. It is not waiting to be matched to anything — we wrote it,
          * we know where it went — and a Sent folder dropping 2 000 messages into the queue an
          * agent works is a queue nobody works.
+         *
+         * Note that no_record_at is doing two jobs here, which is why the No record needed tab
+         * has to ask about is_sent as well: on a supplier's message it means "somebody decided
+         * this belongs on nobody's file", and on a sent message it means only "this was never
+         * in the queue". Reading the column alone put every message the agent had ever sent in
+         * among the suppliers. See scope() in src/lib/userMail.ts.
          */
         no_record_at: (message.noRecordNeeded || message.isSent) ? new Date().toISOString() : null,
+        /*
+         * SENT MAIL IS READ. You wrote it.
+         *
+         * Without this every message an agent sends counts as unread work on the sidebar for
+         * ever, and no amount of reading mail clears it — the firm's badge said 17 when all 17
+         * were their own sent messages and their actual unread count was nought. Dated when the
+         * message was sent rather than now(), because that is the honest moment it was "read".
+         */
+        read_at: message.isSent ? message.at : null,
         occurred_at: message.at,
       },
       { onConflict: 'user_id,message_id', ignoreDuplicates: true },

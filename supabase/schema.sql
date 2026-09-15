@@ -2747,3 +2747,131 @@ as $$
 $$;
 
 grant execute on function public.diary_day_load(date, date) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Mail: one definition of "unread", and sent mail stops pretending to be work
+-- ---------------------------------------------------------------------------
+-- THE BUG, as the firm found it: the sidebar said 17 unread, the Mail page showed no unread
+-- anywhere, and "No record needed" was full of messages nobody had put there. All three were the
+-- same fault seen from three angles, and on the firm's own mailbox all 17 were their own sent
+-- messages.
+--
+-- The sync stamps no_record_at on a message pulled from the Sent folder so it does not join the
+-- matching queue -- correct, and the reason is in api/_lib/emailSync.ts. But the No record needed
+-- tab asked ONLY "is no_record_at set", so every message the agent had ever sent appeared there,
+-- beside the suppliers and the accountant that tab exists for. And nothing ever marked sent mail
+-- read, so it counted as unread work on the sidebar for ever.
+--
+-- Fixed in two places because there are two separate untruths:
+--   1. Sent mail is READ. You wrote it. Backfilled below and stamped by the sync from now on.
+--   2. Sent mail is not part of the incoming working list, so neither the sidebar nor the No
+--      record needed tab counts it. See scope() in src/lib/userMail.ts for the matching clause.
+
+-- Your own sent mail was never unread. occurred_at rather than now(), because the honest moment
+-- it was "read" is the moment it was written, and dating it today would put a year of sent mail
+-- at the top of anything ordered by when it was dealt with.
+update public.user_emails
+  set read_at = occurred_at
+  where is_sent = true and read_at is null;
+
+-- The sidebar's mail badge must be the SAME NUMBER as the All tab's unread count, because the
+-- two sit on screen together and a person reads them as one fact. All excludes junk and sent, so
+-- this does too.
+--
+-- Replaced whole rather than patched: `create or replace` cannot change a return type, and this
+-- signature carries the diary count added by the diary work. That clause is reproduced here
+-- VERBATIM -- if it has moved on since, keep theirs and change only the mail clause.
+create or replace function public.nav_counts()
+returns table (mail integer, tasks integer, disputes integer, diary integer)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    -- UNREAD mail, whether or not it has been matched. Junk excluded: it is not work.
+    --
+    -- This used to count only mail that still needed matching, on the theory that a matched
+    -- message is already dealt with. In practice almost everything matches itself on arrival --
+    -- every message in the book did -- so the badge sat at nought for ever and a new email
+    -- arrived with nothing on the sidebar to say so. Unread is the thing a person actually
+    -- clears, by reading it, and it is what somebody means when they ask whether mail has come.
+    --
+    -- AND SENT EXCLUDED, which is the fix above: a badge counting the mail you sent is a badge
+    -- counting your own work back at you, and it can never be cleared by doing anything.
+    (select count(*)::integer from public.user_emails
+      where user_id = auth.uid()
+        and is_junk = false
+        and is_sent = false
+        and read_at is null),
+    -- Mine, still open, and due by the end of today. Not "all my tasks", which would be a
+    -- permanent number nobody could ever clear.
+    (select count(*)::integer from public.tasks
+      where owner_id = auth.uid()
+        and status not in ('Completed', 'Cancelled')
+        and due_date < date_trunc('day', now()) + interval '1 day'),
+    -- Disputes waiting on ME, not every dispute the firm has open. The difference between a
+    -- number somebody works and a number that sits at 20 forever.
+    (select count(*)::integer from public.account_queries
+      where owner_id = auth.uid()
+        and status <> 'closed'),
+    -- My diary: what is due today, plus what I am already behind on.
+    --
+    -- The arrears are INCLUDED on purpose, even though including them risks exactly the failure
+    -- this file warns about -- a badge that never reaches zero stops being read. The alternative
+    -- is worse: a book arrived here with 279 overdue entries, and a badge that showed only
+    -- today's work would read "4" to somebody three months behind. The number has to be able to
+    -- frighten, or it is not telling the truth. It reaches zero when the diary is genuinely
+    -- clear, which is the condition the firm actually wants to manage towards.
+    (select count(*)::integer from public.diary_entries
+      where owner_id = auth.uid()
+        and state = 'open'
+        and due_on <= current_date);
+$$;
+
+grant execute on function public.nav_counts() to authenticated;
+
+-- Unread, per tab, in one round trip.
+--
+-- The firm's complaint that started this: "I have many unread emails at No record needed and
+-- there is no indication that there is an unread email." There was one number on the page and it
+-- sat on two tabs, so every other tab could hold unread mail and say nothing about it.
+--
+-- One query rather than six, for the reason nav_counts gives: a tab strip that fired a count per
+-- tab would run six requests on every load, on every action, for numbers nobody asked for.
+--
+-- EVERY CLAUSE HERE MIRRORS scope() IN src/lib/userMail.ts. They are the same question asked in
+-- two languages, and if they drift the symptom is the one this file exists to prevent: a badge
+-- saying 3 over a list of 5. scripts/qa/check-mail-counts.mjs fails when they do.
+create or replace function public.mail_unread_counts()
+returns table (
+  all_mail integer,
+  needs_matching integer,
+  matched integer,
+  no_record integer,
+  junk integer,
+  sent integer
+)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    -- All: the whole mailbox except junk and except what you sent. The working list.
+    count(*) filter (where is_junk = false and is_sent = false)::integer,
+    -- Needs matching: not settled, so neither on a record nor marked as needing none.
+    count(*) filter (where is_settled = false and is_junk = false and is_sent = false)::integer,
+    -- Matched: on a record, and only that.
+    count(*) filter (where is_filed)::integer,
+    -- No record needed: suppliers, the accountant, the telephone provider -- and NOT sent mail,
+    -- which carries no_record_at only so it stays out of the matching queue.
+    count(*) filter (where no_record_at is not null and is_sent = false)::integer,
+    count(*) filter (where is_junk)::integer,
+    count(*) filter (where is_sent)::integer
+  from public.user_emails
+  where user_id = auth.uid()
+    and read_at is null;
+$$;
+
+grant execute on function public.mail_unread_counts() to authenticated;
