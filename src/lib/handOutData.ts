@@ -7,7 +7,7 @@
  */
 import { supabase } from './supabase'
 import { applyAccountFilters, type AccountQuery, type DebtorAccount } from './accountBook'
-import { accountBand } from './collectorGrade.ts'
+import { COLLECTING_ROLES, UNGRADED_EQUIVALENT, accountBand } from './collectorGrade.ts'
 import { clientPosition } from './clientPosition.ts'
 import { DEFAULT_DIARY_CAPACITY } from './diaryPriority.ts'
 import type { DiaryKind } from './diaryPriority.ts'
@@ -122,13 +122,20 @@ export async function loadHandOutContext(input: {
   /* eslint-enable @typescript-eslint/no-explicit-any */
 
   const collectors: PlannableCollector[] = input.users
-    // A grade is what makes somebody a collector. A liaison or a sales rep has none, and putting
-    // accounts on their desk would be work nobody is going to do.
-    .filter((u) => u.status === 'Active' && !!u.collectorGrade)
+    /*
+     * ROLE ADMITS, GRADE WIDENS. Anyone whose job is working a book is offered; the grade only
+     * decides which accounts they may be given. Requiring a grade first meant a firm with thirty
+     * pre-legal clerks saw an empty hand-out screen until somebody graded all thirty by hand.
+     *
+     * Anyone already graded is included whatever their role, so a manager who carries a book
+     * does not disappear from the list.
+     */
+    .filter((u) => u.status === 'Active' && (COLLECTING_ROLES.includes(u.role) || !!u.collectorGrade))
     .map((u) => ({
       userId: u.id,
       name: u.name,
-      grade: u.collectorGrade as CollectorGrade,
+      grade: (u.collectorGrade as CollectorGrade | undefined) ?? UNGRADED_EQUIVALENT,
+      ungraded: !u.collectorGrade,
       bookCeiling: u.bookCeiling ?? null,
       inPlayNow: bookLoad.get(u.id) ?? 0,
       capacity: u.diaryCapacity && u.diaryCapacity > 0 ? u.diaryCapacity : DEFAULT_DIARY_CAPACITY,

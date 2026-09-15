@@ -14,7 +14,8 @@ import {
   OUT, PORT, chromium, makeRunner, signedInPage, startServer, stopServer,
 } from './harness.mjs'
 import {
-  BOOK_SUMMARY, COMPANY, FACETS, PROFILE, COLLEAGUE, TEAM, USER_ID, VIEW_COUNTS, accountsPage,
+  BOOK_SUMMARY, COMPANY, FACETS, PROFILE, COLLEAGUE, TEAM, UNGRADED, USER_ID, VIEW_COUNTS,
+  accountsPage,
 } from './fixtures.mjs'
 
 const t = makeRunner('accounts')
@@ -34,8 +35,8 @@ const handlers = [
        * three screens later, nowhere near the cause. So an id-scoped request gets exactly one row.
        */
       const one = /id=eq\.([0-9a-f-]+)/.exec(u)?.[1]
-      if (one) return { body: [PROFILE, COLLEAGUE].filter((p) => p.id === one) }
-      return { body: [PROFILE, COLLEAGUE] }
+      if (one) return { body: [PROFILE, COLLEAGUE, UNGRADED].filter((p) => p.id === one) }
+      return { body: [PROFILE, COLLEAGUE, UNGRADED] }
     },
   ],
   [(u) => u.includes('/rest/v1/companies'), () => ({ body: [COMPANY] })],
@@ -232,6 +233,14 @@ try {
   t.ok('it offers the graded people', modal.includes('Test Leader') && modal.includes('Thandi Junior'))
   t.ok('...with their grade and book', /Senior · 120\/500 on the book · 40 a day/.test(modal))
   t.ok('...and the junior’s real ceiling', /Junior · 470\/150 on the book/.test(modal))
+  /*
+   * THE CASE THE FIRM CAUGHT. A pre-legal clerk with no grade used to be filtered out entirely,
+   * so a firm whose clerks were all ungraded saw a hand-out screen offering nobody. The role
+   * admits them; the grade only widens which accounts they may be given.
+   */
+  t.ok('an ungraded clerk is still offered', modal.includes('Itumeleng Agent'))
+  t.ok('...marked as ungraded', /Not graded/.test(modal))
+  t.ok('...and told what that limits them to', /generic accounts only until graded/.test(modal))
 
   /*
    * THE GATE THAT MATTERS. Every eighth fixture account is R180 000 — Major — and only the

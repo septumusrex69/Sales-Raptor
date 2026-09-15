@@ -11,9 +11,11 @@
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-hand-out.mjs
  */
+import { readFileSync } from 'node:fs'
 import {
-  ACCOUNT_BANDS, COLLECTOR_GRADES, DEFAULT_BOOK_CEILING, DEFAULT_DIARY_RESERVE,
-  accountBand, bookCeilingOf, diaryReserveOf, gradeRank, mayTake, selfBookingLimit,
+  ACCOUNT_BANDS, COLLECTING_ROLES, COLLECTOR_GRADES, DEFAULT_BOOK_CEILING, DEFAULT_DIARY_RESERVE,
+  UNGRADED_EQUIVALENT, accountBand, bookCeilingOf, diaryReserveOf, gradeRank, mayTake,
+  selfBookingLimit,
 } from '../../src/lib/collectorGrade.ts'
 import { planHandOut, planSummary } from '../../src/lib/handOut.ts'
 import { DIARY_PRIORITY } from '../../src/lib/diaryPriority.ts'
@@ -420,6 +422,56 @@ check('the firm standard', selfBookingLimit(40, DEFAULT_DIARY_RESERVE), 30)
 /* A reserve bigger than the day would otherwise say "book nothing", which nobody meant. */
 check('a reserve cannot close the day', selfBookingLimit(10, 50), 1)
 check('no reserve means the whole day', selfBookingLimit(40, 0), 40)
+
+/* ================= role admits, grade widens ================= */
+
+/*
+ * REQUIRING A GRADE BEFORE SOMEBODY COULD BE HANDED WORK WAS A MISTAKE I MADE, and the firm
+ * caught it: they have pre-legal clerks doing the job, none of them graded, and the hand-out
+ * screen offered nobody. A grade is not an admission ticket — it WIDENS which accounts a person
+ * may be given. Ungraded means Junior: generic accounts, which is the bulk of any book and where
+ * a new collector proves themselves anyway.
+ */
+ok('the collecting roles are named in one place', COLLECTING_ROLES.includes('Pre-legal Agent'))
+ok('...including the team leader', COLLECTING_ROLES.includes('Pre-legal Team Leader'))
+ok('...and a liaison, who also carries a book', COLLECTING_ROLES.includes('Liaison'))
+ok('...but not a sales rep', !COLLECTING_ROLES.includes('Sales Representative'))
+check('ungraded means the lowest rung, never nothing', UNGRADED_EQUIVALENT, 'Junior')
+ok('...which can take generic work', mayTake(UNGRADED_EQUIVALENT, band('generic')))
+ok('...and cannot take high value', !mayTake(UNGRADED_EQUIVALENT, band('high_value')))
+
+const data = readFileSync(new URL('../../src/lib/handOutData.ts', import.meta.url), 'utf8')
+ok('the role admits somebody to the list',
+  /COLLECTING_ROLES\.includes\(u\.role\) \|\| !!u\.collectorGrade/.test(data))
+ok('...and an ungraded person is treated as Junior',
+  /\?\? UNGRADED_EQUIVALENT/.test(data))
+ok('...and flagged, so a leader knows to grade them', /ungraded: !u\.collectorGrade/.test(data))
+
+/* ================= an account already in a diary still moves ================= */
+
+/*
+ * THE FIRM'S INSTRUCTION, and they are right: handing an account to somebody IS moving the work,
+ * so refusing to move a date a previous holder set defeats the point. I had it skipping them out
+ * of a caution that turned out to be unfounded — diarise() supersedes the old entry, which keeps
+ * its original date and records who moved it and when. Nothing was ever silent.
+ *
+ * The planner still SUPPORTS skipping, because the option costs nothing and a future caller may
+ * want it. What matters is that the screen does not ask for it.
+ */
+{
+  const p = plan(
+    [acc('a', 1000), acc('b', 1000, { alreadyBooked: true })],
+    [col('Solo', 'Senior')],
+    { skipAlreadyBooked: false },
+  )
+  check('an account already in a diary is handed out too', p.placements.length, 2)
+  check('...and nothing is left behind', p.unplaced.length, 0)
+}
+
+const handOutModal = readFileSync(new URL('../../src/pages/accounts/HandOutModal.tsx', import.meta.url), 'utf8')
+ok('the screen hands out everything', /skipAlreadyBooked: false/.test(handOutModal))
+ok('...and says the old date is kept', /the old entry keeps its date and records who moved it/.test(handOutModal))
+ok('...rather than claiming they were left alone', !/are left alone/.test(handOutModal))
 
 /* ================= the standards ================= */
 

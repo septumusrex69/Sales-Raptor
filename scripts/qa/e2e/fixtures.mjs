@@ -37,6 +37,19 @@ export const PROFILE = {
   diary_reserve: 10,
 }
 
+/** A real pre-legal clerk with no grade — the case that used to vanish from the hand-out list. */
+export const UNGRADED = {
+  ...PROFILE,
+  id: '55555555-5555-4555-8555-555555555555',
+  name: 'Itumeleng Agent',
+  email: 'itumeleng@raptor.test',
+  role: 'Pre-legal Agent',
+  collector_grade: null,
+  book_ceiling: null,
+  diary_capacity: null,
+  diary_reserve: null,
+}
+
 export const COLLEAGUE = {
   ...PROFILE,
   id: '44444444-4444-4444-8444-444444444444',
