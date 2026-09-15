@@ -1,9 +1,9 @@
 import { useCallback, useState } from 'react'
-import { AlarmClock, AlertTriangle, CalendarClock, ChevronDown, Loader2 } from 'lucide-react'
+import { AlarmClock, AlertTriangle, CalendarClock, Loader2 } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
-import { DiaryDatePicker, longDate, shortDate } from './DiaryDatePicker'
+import { DiaryDatePicker, longDate } from './DiaryDatePicker'
 import {
   DIARY_KINDS, DIARY_KIND_ORDER, atCapacity, daysBetween, shiftDate,
   type DayLoad, type DiaryKind,
@@ -64,14 +64,6 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
   const [custom, setCustom] = useState('')
   /** Which day the reminder is on. Today unless somebody picks otherwise. */
   const [remindOn, setRemindOn] = useState(today)
-  /**
-   * Is the calendar unfolded?
-   *
-   * Shut, because a reminder is almost always for today — that is what "ring me back in an
-   * hour" means. A three-week grid standing open under the presets to be ignored was the bulk
-   * of this box, so it now waits behind the day it already shows.
-   */
-  const [pickingDay, setPickingDay] = useState(false)
   /*
    * How full the chosen diary day already is, reported up by the calendar.
    *
@@ -210,36 +202,38 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
               at pressing them.
             */}
             {remindingToday && (
-              <div>
-                <span className="block text-xs font-medium text-slate-500 mb-1.5">Remind me in</span>
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1.5">
+                <span className="text-xs font-medium text-slate-500">Remind me in</span>
                 {/*
-                  Five across, one row, no wrapping. Wrapped they left a single orphan button on
-                  a second line, which reads as a sixth option somebody forgot to line up.
+                  PILLS, ONE LINE EACH. They were boxes two lines tall — the interval above the
+                  clock time it worked out to — five of them in a grid, and against the calendar
+                  underneath they read as the heavy half of the box when they are the throwaway
+                  half. This is the control somebody hits without thinking while a debtor is
+                  still on the line.
                 */}
-                <div className="grid grid-cols-5 gap-1.5">
-                  {REMINDER_PRESETS.map((p) => (
-                    <button key={p.minutes} type="button"
-                      onClick={() => { setMinutes(p.minutes); setCustom('') }}
-                      className={`rounded-lg border px-1 py-1.5 text-center leading-tight transition-colors ${
-                        !custom && minutes === p.minutes
-                          ? 'border-gold-500 bg-gold-400 text-navy-950 font-medium'
-                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-                      <span className="block text-xs">{p.label}</span>
-                      <span className="block text-[10px] opacity-70 tabular-nums">{clockTime(dueAt(p.minutes))}</span>
-                    </button>
-                  ))}
-                </div>
+                {REMINDER_PRESETS.map((p) => (
+                  <button key={p.minutes} type="button"
+                    onClick={() => { setMinutes(p.minutes); setCustom('') }}
+                    /*
+                      The clock time each one works out to has left the pill. It is said once, in
+                      the footer, for the one actually chosen: "Pops up at 15:40". Printed on all
+                      five it was four speculative times and one real one, and it cost a second
+                      line on every pill to show them.
+                    */
+                    title={`Pops up at ${clockTime(dueAt(p.minutes))}`}
+                    className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                      !custom && minutes === p.minutes
+                        ? 'border-gold-500 bg-gold-400 text-navy-950 font-medium'
+                        : 'border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700'}`}>
+                    {p.label}
+                  </button>
+                ))}
               </div>
             )}
 
             {/*
-              The time and the day on one line, as a sentence: "or at 15:40 on today". They were
-              two stacked blocks with their own headings, and between them they said what this
-              one row says.
-
-              The calendar lives behind the day button and closes again the moment a day is
-              picked — choosing the day IS the reason it was opened, so there is nothing left to
-              do in it afterwards.
+              One line, as a sentence: "or at 15:40". It was a labelled field of its own, which
+              is a heading and a full-width box to say what four words say.
             */}
             <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
               <span>{remindingToday ? 'or at' : 'At'}</span>
@@ -248,45 +242,40 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
                 <input className={`${inputClass} py-1.5 px-2 text-center tabular-nums`} placeholder="15:40"
                   value={custom} onChange={(e) => setCustom(e.target.value)} />
               </span>
-              <span>on</span>
-              <button type="button" onClick={() => setPickingDay((v) => !v)}
-                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-slate-700 hover:bg-slate-50">
-                {remindingToday ? 'today' : shortDate(remindOn)}
-                <ChevronDown size={13} className={`text-slate-400 transition-transform ${pickingDay ? 'rotate-180' : ''}`} />
-              </button>
+              {customBad && (
+                // A moment already gone would pop the instant it saved, which reads as a fault.
+                <span className="text-[11px] text-[var(--c-rust-deep)]">
+                  {remindingToday
+                    ? 'Not a time later today. Use 24-hour, like 15:40.'
+                    : 'Use 24-hour, like 15:40.'}
+                </span>
+              )}
             </div>
 
-            {customBad && (
-              // A moment already gone would pop the instant it saved, which reads as a fault.
-              <p className="text-[11px] text-[var(--c-rust-deep)] -mt-2">
-                {remindingToday
-                  ? 'Not a time later today. Use 24-hour, like 15:40.'
-                  : 'Use 24-hour, like 15:40.'}
-              </p>
-            )}
-
             {/*
+              OPEN, NOT BEHIND A BUTTON. It was folded away for a while on the reasoning that a
+              reminder is almost always for today — true, and beside the point. The calendar is
+              the part of this box that reads well; it was the row of preset boxes above it that
+              was heavy, and folding the good half away to make room was the wrong cut.
+
               The same calendar the diary uses, with the per-day counts turned off — a reminder
-              books nothing, and a number under the date would say it did. Two weeks rather than
-              three: a nudge that is a fortnight out is a diary entry, and the diary is one tap
-              away at the top of this box.
+              books nothing, and a number under the date would say it did.
             */}
-            {pickingDay && (
+            <div>
+              <span className="block text-xs font-medium text-slate-500 mb-1.5">Which day</span>
               <DiaryDatePicker
                 ownerId={ownerId}
                 capacity={null}
                 showLoad={false}
-                weeks={2}
                 value={remindOn}
                 onChange={(d) => {
                   setRemindOn(d)
                   // Presets are relative to now, so another day has no preset to fall back on.
                   if (d !== today && !custom) setCustom('09:00')
-                  setPickingDay(false)
                 }}
                 today={today}
               />
-            )}
+            </div>
           </>
         ) : (
           <>
