@@ -54,6 +54,8 @@ export interface PlannableCollector {
   capacity: number
   /** due_on (ISO date) → open entries already booked on it. */
   bookedByDay: Record<string, number>
+  /** No grade set: treated as Junior, and the screen says so. */
+  ungraded?: boolean
 }
 
 export type UnplacedReason =

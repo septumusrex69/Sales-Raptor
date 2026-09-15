@@ -73,7 +73,14 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
       collectors,
       startOn,
       windowDays,
-      skipAlreadyBooked: true,
+      /*
+       * EVERYTHING GOES OUT, including accounts already sitting in a diary — at the firm's
+       * instruction, and they are right. Handing an account to somebody IS moving the work, so
+       * refusing to move a date that a previous holder set defeats the point. It is not silent
+       * either: diarise() supersedes the old entry, which keeps its original date and records
+       * who moved it and when. That audit trail is exactly what made skipping unnecessary.
+       */
+      skipAlreadyBooked: false,
     })
   }, [context, chosen, startOn, windowDays])
 
@@ -121,8 +128,9 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
               {' '}{context.accounts.length === 1 ? 'account' : 'accounts'} to hand out.
               {context.alreadyBookedCount > 0 && (
                 <>
-                  {' '}<span className="text-amber-700">
-                    {context.alreadyBookedCount} already sit in somebody’s diary and are left alone.
+                  {' '}<span className="text-slate-500">
+                    {context.alreadyBookedCount} already sit in a diary and will be moved to the
+                    new date — the old entry keeps its date and records who moved it.
                   </span>
                 </>
               )}
@@ -140,8 +148,10 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                * hand work to — and saying where the grades are set beats an empty list.
                */
               <p className="text-sm text-slate-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                Nobody has a collector grade yet, so there is no one to hand these to.
-                Set grades on each person in <span className="font-medium">Settings → People</span>.
+                Nobody here works a collections book, so there is no one to hand these to. Give
+                somebody the Pre-legal Agent or Pre-legal Team Leader role in{' '}
+                <span className="font-medium">Settings → Users</span>; a grade is optional and
+                only widens which accounts they may be given.
               </p>
             ) : (
               <>
@@ -196,8 +206,13 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                           <span className="min-w-0 flex-1">
                             <span className="block text-sm text-slate-800 leading-tight">{c.name}</span>
                             <span className="block text-[11px] text-slate-500 tabular-nums">
-                              {c.grade} · {c.inPlayNow}/{ceiling} on the book · {c.capacity} a day
+                              {c.ungraded ? 'Not graded' : c.grade} · {c.inPlayNow}/{ceiling} on the book · {c.capacity} a day
                             </span>
+                            {c.ungraded && (
+                              <span className="block text-[11px] text-slate-400">
+                                generic accounts only until graded
+                              </span>
+                            )}
                             {/*
                               Said plainly, because it is the reason this person is getting
                               little or nothing and the plan would otherwise look arbitrary.

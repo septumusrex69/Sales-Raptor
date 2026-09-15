@@ -116,6 +116,24 @@ export function mayTake(grade: CollectorGrade, band: AccountBand): boolean {
   return gradeRank(grade) >= gradeRank(band.minGrade)
 }
 
+/**
+ * Roles that work a collections book.
+ *
+ * A GRADE IS NOT A PREREQUISITE FOR RECEIVING WORK, and treating it as one was a mistake. It
+ * meant nobody could be handed an account until an administrator had graded them one by one --
+ * so a firm with thirty pre-legal clerks had thirty ungraded people and a hand-out screen that
+ * offered nobody. The grade WIDENS what somebody may be given; it does not admit them.
+ *
+ * Ungraded therefore means Junior: generic accounts, which is the bulk of any book and where a
+ * new collector proves themselves anyway. A team leader raises it when they have seen the work.
+ */
+export const COLLECTING_ROLES = [
+  'Pre-legal Agent', 'Pre-legal Team Leader', 'Liaison', 'Liaison Manager',
+]
+
+/** What an ungraded collector may be given. The lowest rung, never nothing. */
+export const UNGRADED_EQUIVALENT: CollectorGrade = 'Junior'
+
 /* ---------- the company standards ---------- */
 
 /**
