@@ -241,7 +241,29 @@ try {
   t.ok('the day grid shows what lands when', /\+\d+ \/\d+/.test(modal))
   t.ok('...and warns when somebody goes over their ceiling',
     /over their book ceiling|\d+ over/.test(modal))
-  t.ok('booking is on by default', await page.getByRole('button', { name: /Hand out and book/ }).isVisible())
+  /*
+   * ALLOCATION IMPLIES REFERRAL, and the screen has to make that unavailable rather than merely
+   * discouraged. Both modes are offered, "allocate and refer" is the default, and there is no
+   * third option that would put an account on a desk with nobody booked to ring it.
+   */
+  t.ok('both modes are offered',
+    modal.includes('Allocate and refer') && modal.includes('Refer only'))
+  t.ok('...and allocating is the default',
+    await page.getByRole('button', { name: 'Allocate and refer', exact: true }).last().isVisible())
+  t.ok('...with no allocate-without-booking', !/Allocate only/.test(modal))
+
+  /* Several ways to choose who, over one list rather than as separate modes. */
+  t.ok('everyone can be picked at once', await page.getByRole('button', { name: 'Everyone' }).isVisible())
+  t.ok('...or by grade', await page.getByRole('button', { name: 'Senior', exact: true }).isVisible())
+  t.ok('...or cleared', await page.getByRole('button', { name: 'None', exact: true }).isVisible())
+
+  /* Picking nobody is reachable now, so it must read as a state rather than an empty panel. */
+  await page.getByRole('button', { name: 'None', exact: true }).click()
+  await page.waitForTimeout(300)
+  t.ok('picking nobody says so',
+    /Nobody chosen, so there is nothing to plan/.test(await page.locator('body').innerText()))
+  await page.getByRole('button', { name: 'Everyone' }).click()
+  await page.waitForTimeout(300)
 
   /* ---------- nothing broke on the way ---------- */
 

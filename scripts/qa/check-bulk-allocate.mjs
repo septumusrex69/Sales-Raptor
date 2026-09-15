@@ -147,12 +147,62 @@ ok('select-all-matching is offered, not assumed',
   /allOnPageTicked && !allMatching && total > accounts\.length/.test(list))
 ok('...and says what it means', /not just this page/.test(list))
 
+/* ---------- allocation and referral are not two switches ---------- */
+
+const write = readFileSync(new URL('../../src/lib/handOutWrite.ts', import.meta.url), 'utf8')
+const handOutModal = readFileSync(new URL('../../src/pages/accounts/HandOutModal.tsx', import.meta.url), 'utf8')
+
+/*
+ * THE FIRM'S RULE: an allocation cannot happen without a referral, though a referral can happen
+ * on its own. Putting an account on somebody's desk and booking nobody to ring it is precisely
+ * how 355 accounts arrived belonging to a person and diarised by nobody — so that combination is
+ * not offered at all, rather than being a checkbox somebody can clear by accident. It WAS a
+ * checkbox until the firm corrected it.
+ */
+ok('there are two modes, not two flags', /export type HandOutMode = 'refer' \| 'allocate_and_refer'/.test(write))
+ok('the old independent flags are gone', !/alsoAllocate|alsoBook/.test(write))
+ok('...in the modal too', !/alsoAllocate|alsoBook/.test(handOutModal))
+/*
+ * No branch may skip the booking. An early return on "not booking" is exactly the shape that
+ * would let an allocation stand alone again, so its absence is the thing to assert.
+ */
+ok('both modes book', !/if \(!input\.(alsoBook|mode)\) return/.test(write))
+ok('only allocation is conditional', /if \(input\.mode === 'allocate_and_refer'\)/.test(write))
+ok('the modal offers exactly the two', /Allocate and refer/.test(handOutModal) && /Refer only/.test(handOutModal))
+ok('...and never offers allocate-without-booking', !/Allocate only|allocate_only/.test(handOutModal))
+
+/* ---------- and several ways to choose who ---------- */
+
+/*
+ * Everyone, a grade, a team, or ticked by hand — but as quick SELECTIONS over one list, not four
+ * modes. Modes would leave "I chose Elite, then unticked one" with nowhere to live.
+ */
+ok('everyone can be chosen at once', /setChosen\(new Set\(context\.collectors\.map/.test(handOutModal))
+ok('...by grade', /context\.collectors\.filter\(\(c\) => c\.grade === g\)/.test(handOutModal))
+ok('...by team', /teamOf\(users, c\.userId\) === t\.id/.test(handOutModal))
+ok('...and cleared', /onClick=\{\(\) => setChosen\(new Set\(\)\)\}/.test(handOutModal))
+/*
+ * A grade nobody holds, or a team with no collectors, is a button that appears to do nothing.
+ * Offered only where it would narrow something.
+ */
+ok('an empty grade is not offered',
+  /COLLECTOR_GRADES\.filter\(\(g\) => context\.collectors\.some\(\(c\) => c\.grade === g\)\)/.test(handOutModal))
+ok('a team with no collectors is not offered',
+  /teams\s*\n?\s*\.filter\(\(t\) => context\.collectors\.some/.test(handOutModal))
+/* Choosing nobody is now reachable, so it must read as a state rather than an empty panel. */
+ok('choosing nobody says so', /Nobody chosen, so there is nothing to plan/.test(handOutModal))
+
 /* ---------- unallocated is a destination, not an absence ---------- */
 
 /*
  * An agent leaves and their book has to go somewhere before it is shared out. Collapsing "choose
  * a person" and "take it off every desk" into one empty option would make the second unreachable
  * and the first destructive by accident.
+ */
+/*
+ * AllocateModal is the earlier, simpler screen and is no longer what the bulk bar opens —
+ * HandOutModal replaced it. Kept and still checked because it remains the plain "move these to
+ * one desk" path, and an unused file that silently rots is worse than one nobody opens.
  */
 ok('the empty option does nothing', /disabled=\{busy \|\| !toUserId/.test(modal))
 ok('unallocated is its own choice', /value="nobody"/.test(modal))

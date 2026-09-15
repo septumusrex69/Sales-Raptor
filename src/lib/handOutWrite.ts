@@ -15,6 +15,20 @@ import { supabase } from './supabase'
 import { diarise } from './diary.ts'
 import type { HandOutPlan } from './handOut.ts'
 
+/**
+ * The two things you can do with a stack of accounts, and they are not independent switches.
+ *
+ * THE FIRM'S RULE: an allocation cannot happen without a referral, but a referral can happen
+ * without an allocation. Putting an account on somebody's desk and booking nobody to ring it is
+ * exactly how 355 accounts arrived from Swordfish belonging to a person and diarised by nobody —
+ * so that combination is not offered here at all, rather than being a checkbox somebody can
+ * clear by accident.
+ *
+ *   refer              book them into a diary. Whose accounts they are does not change.
+ *   allocate_and_refer put them on the person's desk, and book them in. Both, always.
+ */
+export type HandOutMode = 'refer' | 'allocate_and_refer'
+
 export interface HandOutResult {
   allocated: number
   booked: number
@@ -29,10 +43,14 @@ export interface Actor {
 
 export async function commitHandOut(input: {
   plan: HandOutPlan
-  /** Put each account on the desk of whoever it was planned for. */
-  alsoAllocate: boolean
-  /** Create the diary entries. Off makes this a pure allocation. */
-  alsoBook: boolean
+  /**
+   * Refer only, or allocate and refer.
+   *
+   * There is deliberately no "allocate only". See HandOutMode: an account on a desk with nobody
+   * booked to ring it is the state this whole feature exists to end, and a mode that produced it
+   * would be a hole in the rule rather than a choice.
+   */
+  mode: HandOutMode
   actor: Actor
   reason?: string | null
   /** Called after each account so a long hand-out can show progress rather than appear hung. */
@@ -42,7 +60,7 @@ export async function commitHandOut(input: {
   const result: HandOutResult = { allocated: 0, booked: 0, failed: [] }
   if (placements.length === 0) return result
 
-  if (input.alsoAllocate) {
+  if (input.mode === 'allocate_and_refer') {
     /*
      * Grouped by person so this is one update per desk rather than one per account — five
      * requests for five hundred accounts. Keyed by id, never by re-running the filter.
@@ -61,8 +79,10 @@ export async function commitHandOut(input: {
     }
   }
 
-  if (!input.alsoBook) return result
-
+  /*
+   * No early return on the way past. BOTH modes book — that is the rule — so there is no branch
+   * here that could skip the diary and leave an allocation standing on its own.
+   */
   /*
    * One at a time, because diarise() does more than an insert: it supersedes whatever open entry
    * the account already has, writes the note, and respects the one-open-entry index. Batching the

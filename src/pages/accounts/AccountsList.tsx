@@ -514,6 +514,7 @@ export function AccountsList() {
           selection={allocating}
           selectedCount={selectedCount}
           users={users}
+          teams={teams}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
           onClose={() => setAllocating(null)}
           onDone={async (message) => { setDone(message); await reload() }}
