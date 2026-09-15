@@ -12,6 +12,7 @@
  * boundary moved on purpose rather than eroding one call site at a time.
  */
 import { supabase } from './supabase'
+import type { FrozenBy } from './clientPosition.ts'
 
 export interface DebtorAccount {
   id: string
@@ -35,6 +36,13 @@ export interface DebtorAccount {
   prescriptionDate: string | null
   status: string
   subStatus: string | null
+  /*
+   * A freeze is three facts, not a label. Carried on the account because "why has this not
+   * moved" is asked of a single account far more often than it is reported in bulk.
+   */
+  frozenBy: FrozenBy | null
+  frozenReason: string | null
+  frozenAt: string | null
   bucket: string | null
   writeOffReason: string | null
   handoverDate: string | null
@@ -83,6 +91,15 @@ const toAccount = (r: any): DebtorAccount => ({
   prescriptionDate: r.prescription_date,
   status: r.status ?? '',
   subStatus: r.sub_status,
+  /*
+   * THIS MAPPER IS HAND-WRITTEN, so a column added to debtor_accounts does not arrive here on
+   * its own — it has to be listed. A field present in the database, in the type and in the
+   * select, and missing from this list, reads as undefined forever and nothing fails. See the
+   * same note in AuthContext, where diary_capacity sat in exactly that state for months.
+   */
+  frozenBy: (r.frozen_by as FrozenBy | null) ?? null,
+  frozenReason: r.frozen_reason ?? null,
+  frozenAt: r.frozen_at ?? null,
   bucket: r.bucket,
   writeOffReason: r.write_off_reason,
   handoverDate: r.handover_date,
