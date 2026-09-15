@@ -227,6 +227,46 @@ ok('the thresholds are in one place, because they are guesses',
   check('and the scored total divides correctly', scoreCollector(t).averagePayment, 42555 / 17)
 }
 
+/* ---------- the screen ---------- */
+
+const page = readFileSync(new URL('../../src/pages/CollectorDashboard.tsx', import.meta.url), 'utf8')
+
+/*
+ * THE FIRM'S OWN MONTH, the 11th to the 10th, because that is what the client statements and the
+ * remittance run against. A dashboard on the calendar month would give two true answers to "how
+ * much did we collect in September".
+ */
+ok('the period is the sales month', /getCurrentSalesMonth|SalesMonthPicker/.test(page))
+ok('...and the previous one is fetched to compare', /getPreviousSalesMonth\(period\)/.test(page))
+
+/*
+ * pctDelta, not arithmetic of its own. StatTile prints the number it is given verbatim, so a raw
+ * ratio rendered as "0.6666666666666666%" on the first screenshot — and the shared helper
+ * already returns null for a zero prior period, which the tile says in words rather than as a
+ * fabricated 100% rise.
+ */
+ok('the change uses the shared helper', /import \{ pctDelta \}/.test(page))
+ok('...and does no percentage arithmetic of its own', !/\(now - before\) \/ before/.test(page))
+
+/*
+ * THE LEADERBOARD IS NOT ORDERED BY RAND. Whoever holds the biggest book would be permanently
+ * top and nothing would be learnt — and the collector on small accounts could never show a number
+ * that earns them bigger ones.
+ */
+ok('everyone is ordered by payments per hundred', /b\.paymentsPerHundred \?\? -1\) - \(a\.paymentsPerHundred \?\? -1\)/.test(page))
+ok('...and says why', /not by rand/.test(page))
+ok('the fair figures are separated from the money', /These compare fairly across unlike books/.test(page))
+
+/*
+ * The over-book notice belongs where a collector will see it. It also sits on the Collectors
+ * table in Settings, which a collector never opens — so said only there it is said to nobody.
+ */
+ok('the over-book notice is on the collector’s own screen', /Your book is \{over/.test(page))
+ok('...and says nothing is blocked', /nothing is blocked/.test(page))
+
+/* A null is "no figure", not a bad one: a red 0% in somebody's first week is a lie about them. */
+ok('a missing figure shows a dash, not a nought', /value === null\s*\n\s*\? '—'/.test(page))
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')

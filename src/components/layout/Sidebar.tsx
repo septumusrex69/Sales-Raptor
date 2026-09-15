@@ -2,23 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useNavCounts, type NavCounts } from '../../lib/navCounts'
 import {
-  LayoutDashboard,
-  Target,
-  Handshake,
-  Users,
-  Building2,
-  BookOpen,
-  MessageCircleQuestion,
-  CheckSquare,
-  Calendar,
-  Activity,
-  BarChart3,
-  Settings,
-  ChevronDown,
-  LogOut,
-  Inbox,
-  CalendarClock,
-  type LucideIcon,
+  Activity, BarChart3, BookOpen, Building2, Calendar, CalendarClock, CheckSquare, ChevronDown, Handshake, Inbox, LayoutDashboard, LogOut, MessageCircleQuestion, Settings, Target, TrendingUp, Users, type LucideIcon,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../store/AuthContext'
@@ -50,6 +34,9 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean; badge?:
   // The collections work queue: which accounts this person is due to work today, and what they
   // are behind on. Badged, because it is the definition of something one person clears in a day.
   { to: '/diary', label: 'Diary', icon: CalendarClock, badge: 'diary' },
+  // How the collections work is actually going. Beside the diary, because the diary is today's
+  // work and this is whether the month's is landing.
+  { to: '/performance', label: 'Performance', icon: TrendingUp },
   { to: '/queries', label: 'Disputes', icon: MessageCircleQuestion, badge: 'disputes' },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare, badge: 'tasks' },
   { to: '/calendar', label: 'Calendar', icon: Calendar },

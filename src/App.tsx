@@ -21,6 +21,7 @@ import { CompanyDetail } from './pages/companies/CompanyDetail'
 import { AccountsList } from './pages/accounts/AccountsList'
 import { AccountDetail } from './pages/accounts/AccountDetail'
 import { DisputesBoard } from './pages/accounts/DisputesBoard'
+import { CollectorDashboard } from './pages/CollectorDashboard'
 import { DiaryPage } from './pages/diary/DiaryPage'
 import { MailPage } from './pages/mail/MailPage'
 import { TasksPage } from './pages/tasks/TasksPage'
@@ -72,6 +73,7 @@ function App() {
               <Route path="/accounts" element={<AccountsList />} handle={{ title: 'Accounts' }} />
               <Route path="/accounts/:id" element={<AccountDetail />} handle={{ title: 'Account' }} />
               <Route path="/diary" element={<DiaryPage />} handle={{ title: 'Diary' }} />
+              <Route path="/performance" element={<CollectorDashboard />} handle={{ title: 'Performance' }} />
               <Route path="/queries" element={<DisputesBoard />} handle={{ title: 'Disputes' }} />
               <Route path="/tasks" element={<TasksPage />} handle={{ title: 'Tasks' }} />
               <Route path="/calendar" element={<CalendarPage />} handle={{ title: 'Calendar' }} />

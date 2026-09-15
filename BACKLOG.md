@@ -32,29 +32,15 @@ day, but an unpaid debit order can take two days to report back. If the firm run
 arrangements, a +1 rule flags brokens that are not broken — the grace would then have to follow
 the payment method rather than the calendar. Ask before building.
 
-### 2. The collector's own dashboard
+### 2. The collector's own dashboard — BUILT
 
-Asked for in these words: how many accounts they have, book value, collected this month and
-last, how many payments, how many calls, how many actions, actions per account, average payment.
+At `/performance`. The firm's month (11th to the 10th) with a period picker, the money tiles, the
+book-independent measures kept visibly apart from them, and the over-ceiling notice where a
+collector will actually see it.
 
-Plus the two the firm liked when they were raised: **PTP-kept rate** (`ptp_success_ratio` is
-already on every account and unused) and **recovery rate** (collected ÷ book value).
-
-Two reasons it matters beyond being nice to have:
-
-- **It is where the over-ceiling notice belongs.** Right now "your book is 320 over" appears only
-  on the Collectors row in Settings, which a collector never opens.
-- **It is the evidence for a promotion.** Grade is set by a person and must stay that way, but a
-  team leader deciding it should be looking at numbers rather than an impression.
-
-**Settled:** a payment belongs to whoever held the account ON THE DATE THE MONEY CAME IN, not to
-whoever holds it today. `account_desk_history` records every change of desk, the trigger is the
-only writer, and `collector_performance` reads the holder per payment. The engine and its checks
-are built; what remains is the screen.
-
-Rank on the book-independent figures. Raw rand collected measures the book somebody was handed,
-not the collector — give a junior a book of R1 800 gym memberships and they cannot produce an
-elite's number however good they are.
+Left to do on it: a per-collector drill-down (clicking a row on Everyone), and thresholds for the
+traffic lights that are the firm's rather than my guesses — they live in one constant,
+`THRESHOLDS` in `collectorScore.ts`, for exactly that reason. Ask after a season of real figures.
 
 ### 3. A sales diary, on the main `diary_entries`
 
