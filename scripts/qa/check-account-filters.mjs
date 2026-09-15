@@ -130,7 +130,8 @@ ok('...while the filters do not', clearedFilters(new URLSearchParams('client=abc
  * produces a list that is narrowed with nothing on screen saying so — the exact failure the
  * chips exist to prevent.
  */
-const everyFilterSet = 'status=active&sub=Tracing&bucket=Diary&who=nobody&from=2026-01-01&to=2026-06-30'
+const everyFilterSet = 'status=active&sub=Tracing&bucket=Diary&who=nobody&team=t1'
+  + '&from=2026-01-01&to=2026-06-30'
   + '&adrift=1&never=1&quiet=30&presc=90&duplum=1&waiting=1&min=1000&drift=1'
 const allChips = filterChips(new URLSearchParams(everyFilterSet))
 ok('every filter produces a chip', allChips.length === FILTER_PARAMS.length - 1) // from+to share one chip

@@ -110,7 +110,13 @@ ok('...and the count reaches the person', /could not be noted on the timeline/.t
  * one — the bar says eleven and eleven accounts move.
  */
 ok('changing the filters clears the selection',
-  /useEffect\(\(\) => \{ setTicked\(new Set\(\)\); setAllMatching\(false\) \}, \[key, page\]\)/.test(list))
+  /useEffect\(\(\) => \{ setTicked\(new Set\(\)\); setAllMatching\(false\) \}, \[key\]\)/.test(list))
+/*
+ * Keyed on the QUESTION, not on the page. Pages are appended now, so clearing on `page` as well
+ * would drop the ticks the moment somebody loaded more rows to tick — which reads as the app
+ * losing the selection at random.
+ */
+ok('...but survives loading another page', !/setAllMatching\(false\) \}, \[key, page\]\)/.test(list))
 
 /*
  * Unticking one row while "all matching" is on must not silently cancel six hundred. It drops to

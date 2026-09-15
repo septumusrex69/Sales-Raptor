@@ -2625,3 +2625,54 @@ as $$
 $$;
 
 grant execute on function public.book_summary(uuid) to authenticated;
+
+-- How much work each view on the account list holds, in one round trip.
+--
+-- The views row is only worth having if it says how many. "No diary date" with no number beside
+-- it is a link somebody clicks once and stops clicking; "No diary date 355" is a queue. But seven
+-- separate head-counts on every page open is seven requests before the first account appears, so
+-- they are counted together.
+--
+-- security invoker, so the numbers describe the accounts the caller may actually see.
+create or replace function public.account_view_counts(
+  p_user uuid default null,
+  p_company uuid default null,
+  p_quiet_days integer default 30
+)
+returns table (
+  whole_book integer,
+  my_desk integer,
+  unallocated integer,
+  adrift integer,
+  broken_promises integer,
+  promises_due integer,
+  gone_quiet integer
+)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    count(*)::integer,
+    count(*) filter (where p_user is not null and assigned_to = p_user)::integer,
+    count(*) filter (where assigned_to is null)::integer,
+    -- The firm's own hole, not the debtor's: live, and nobody booked to ring it.
+    count(*) filter (where diary_date is null and status ilike 'Active%')::integer,
+    /*
+     * BUCKET, not sub-status, and deliberately. Swordfish files 40 accounts under 'Failed PTPs'
+     * while only 3 carry sub-status 'Payment Default' -- 13 of them still say 'Promise To Pay',
+     * which is a live promise that the old system had already flagged as broken. The bucket is
+     * the more truthful of the two signals, so the view reads it.
+     */
+    count(*) filter (where bucket = 'Failed PTPs')::integer,
+    count(*) filter (where sub_status = 'Promise To Pay')::integer,
+    -- A null counts: an account never worked at all is the quietest in the book.
+    count(*) filter (
+      where last_action_at < (current_date - p_quiet_days) or last_action_at is null
+    )::integer
+  from public.debtor_accounts
+  where p_company is null or company_id = p_company;
+$$;
+
+grant execute on function public.account_view_counts(uuid, uuid, integer) to authenticated;

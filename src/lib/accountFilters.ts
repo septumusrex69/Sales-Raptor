@@ -36,8 +36,16 @@ export const STATUS_GROUPS = [
 ] as const
 
 /** Every key this screen owns. Clearing the filters clears exactly these and leaves the rest. */
+/*
+ * Every key this screen owns. Clearing the filters clears exactly these and leaves the rest.
+ *
+ * `bucket` and `drift` have no control in the panel any more — the firm does not use the word
+ * "bucket" and did not want mandate drift as a filter — but they stay here, because a view and a
+ * summary tile still set them. A param that can be set and cannot be cleared is a filter nobody
+ * can turn off.
+ */
 export const FILTER_PARAMS = [
-  'status', 'sub', 'bucket', 'who', 'from', 'to',
+  'status', 'sub', 'bucket', 'who', 'team', 'from', 'to',
   'adrift', 'never', 'quiet', 'presc', 'duplum', 'waiting', 'min', 'drift',
 ] as const
 export type FilterParam = (typeof FILTER_PARAMS)[number]
@@ -69,7 +77,16 @@ const num = (v: string | null): number | undefined => {
  * is the safe failure. A filter that silently hides accounts because somebody mistyped a query
  * string is how a book goes unworked.
  */
-export function queryFromParams(params: URLSearchParams, today = new Date()): AccountQuery {
+export interface QueryContext {
+  /** Team id → the ids of its members. Supplied by the app, which already holds the people. */
+  teamMembers?: (teamId: string) => string[]
+}
+
+export function queryFromParams(
+  params: URLSearchParams,
+  today = new Date(),
+  ctx: QueryContext = {},
+): AccountQuery {
   const q: AccountQuery = {}
 
   const search = params.get('q')?.trim()
@@ -89,6 +106,14 @@ export function queryFromParams(params: URLSearchParams, today = new Date()): Ac
   if (bucket) q.bucket = bucket
   const who = params.get('who')
   if (who) q.assignedTo = who
+
+  /*
+   * A team is a set of desks. Resolved here rather than in SQL because membership lives on
+   * profiles, which the app already holds — and an unresolvable team narrows to nothing rather
+   * than to the whole book, which is the failure that would matter.
+   */
+  const team = params.get('team')
+  if (team) q.assignedToAny = ctx.teamMembers?.(team) ?? []
 
   const from = params.get('from')
   if (from) q.handedOverFrom = from
@@ -123,7 +148,8 @@ export function queryFromParams(params: URLSearchParams, today = new Date()): Ac
  * is a function that drifts.
  */
 export function hasAccountFilters(q: AccountQuery): boolean {
-  return !!(q.search?.trim() || q.status || q.statusGroup || q.subStatus || q.bucket || q.assignedTo
+  return !!(q.search?.trim() || q.status || q.statusGroup || q.subStatus || q.bucket
+    || q.assignedTo || q.assignedToAny
     || q.handedOverFrom || q.handedOverTo || q.adrift || q.neverWorked || q.quietSince
     || q.prescribingBefore || q.inDuplum || q.waitingOnClient || q.minOutstanding
     || q.commissionDriftOnly)
@@ -138,6 +164,8 @@ export interface FilterChip {
 export interface ChipNames {
   /** profiles.id → the person's name, for the desk chip. */
   userName?: (id: string) => string | undefined
+  /** teams.id → the team's name. */
+  teamName?: (id: string) => string | undefined
 }
 
 const money = (n: number) => `R${n.toLocaleString('en-ZA')}`
@@ -161,8 +189,17 @@ export function filterChips(params: URLSearchParams, names: ChipNames = {}): Fil
   const sub = params.get('sub')
   if (sub) out.push({ param: 'sub', label: sub })
 
+  /*
+   * The bucket has no control in the panel — "bucket" is Swordfish's word, not the firm's — but
+   * a view sets it, so it still has to read back as something. 'Failed PTPs' is the one that
+   * matters and it gets the firm's name for it.
+   */
   const bucket = params.get('bucket')
-  if (bucket) out.push({ param: 'bucket', label: bucket })
+  if (bucket === 'Failed PTPs') out.push({ param: 'bucket', label: 'Broken promises' })
+  else if (bucket) out.push({ param: 'bucket', label: bucket })
+
+  const team = params.get('team')
+  if (team) out.push({ param: 'team', label: names.teamName?.(team) ?? 'One team' })
 
   const who = params.get('who')
   if (who === 'nobody') out.push({ param: 'who', label: 'On nobody’s desk' })
