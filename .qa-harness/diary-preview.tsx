@@ -18,6 +18,7 @@ import { DashboardHero } from '../src/components/dashboard/DashboardHero'
 import { ReminderWatcher } from '../src/components/reminders/ReminderWatcher'
 import { DiariseModal } from '../src/components/diary/DiariseModal'
 import { DiaryCapacity } from '../src/components/diary/DiaryCapacity'
+import { ClientLinePreview } from '../src/components/diary/ClientLinePreview'
 import { DiaryOrderMenu } from '../src/components/diary/DiaryOrderMenu'
 
 const workAccount = {
@@ -120,6 +121,22 @@ function App() {
           <Row key={'ord' + w} label="order" width={w}>
             <div className="flex justify-end bg-white rounded-xl p-3 pb-2">
               <DiaryOrderMenu value="urgent" onChange={() => {}} />
+            </div>
+          </Row>
+        ))}
+        {[420, 900].map((w) => (
+          <Row key={'cl' + w} label="client line" width={w}>
+            <div className="bg-white rounded-xl p-3 space-y-2">
+              <ClientLinePreview
+                account={{ status: 'Active: Activated', subStatus: 'Section 129', clientActionAsk: null }}
+                nextOn="2026-09-22" />
+              <ClientLinePreview
+                account={{ status: 'Active: Activated', subStatus: 'Defended Matter',
+                  clientActionAsk: 'Please provide the signed agreement and the invoice the debtor is disputing.' }}
+                nextOn="2026-09-22" />
+              <ClientLinePreview
+                account={{ status: 'Active: Activated', subStatus: 'Delinquent Payer', clientActionAsk: null }}
+                nextOn={null} />
             </div>
           </Row>
         ))}

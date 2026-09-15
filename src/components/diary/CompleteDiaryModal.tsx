@@ -8,6 +8,7 @@ import { workEntry, debtorName, type DiaryRow } from '../../lib/diary.ts'
 import { DIARY_KINDS } from '../../lib/diaryPriority.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
 import { DictateButton } from '../ui/Dictate'
+import { ClientLinePreview } from './ClientLinePreview'
 
 /**
  * Mark one diary entry worked, and say what happens to the account next.
@@ -77,6 +78,9 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
             </span>
           </div>
         </FormField>
+
+        {/* The client's own line, before the date is committed. See ClientLinePreview. */}
+        <ClientLinePreview account={entry.account} nextOn={plan.comesBack ? plan.dueOn : null} />
 
         <NextDiaryFields
           plan={plan}

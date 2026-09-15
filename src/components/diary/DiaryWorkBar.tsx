@@ -13,6 +13,7 @@ import { DIARY_KINDS } from '../../lib/diaryPriority.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
 import { refreshNavCounts } from '../../lib/navCounts'
 import { DictateButton } from '../ui/Dictate'
+import { ClientLinePreview } from './ClientLinePreview'
 
 /**
  * The accounts finished in this run of the diary.
@@ -426,6 +427,9 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
         </FormField>
 
         {/* Same question, same rules, same component as the day list's Done — see NextDiaryFields. */}
+        {/* The client's own line, before the date is committed. See ClientLinePreview. */}
+        <ClientLinePreview account={entry.account} nextOn={plan.comesBack ? plan.dueOn : null} />
+
         <NextDiaryFields
           plan={plan}
           onChange={setPlan}

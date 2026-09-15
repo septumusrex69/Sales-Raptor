@@ -37,7 +37,14 @@ check('...on a re-opened account too', at('Active: Re-opened', 'Promise To Pay')
 check('...and an unfrozen one', at('Active: Unfrozen', 'Promise To Pay'), 'arranged')
 check('a defended matter is disputed', at('Active: Activated', 'Defended Matter'), 'disputed')
 check('tracing is tracing', at('Active: Activated', 'Tracing'), 'tracing')
-check('section 129 is legal', at('Active: Activated', 'Section 129'), 'legal')
+/*
+ * A section 129 letter of demand is the statutory step required BEFORE going to court, not legal
+ * action itself — the firm telephones the debtor the day it goes out. 279 accounts carry it, 38%
+ * of the book, and reporting them as Legal would tell clients a third of their book was in court.
+ */
+check('section 129 is ordinary collection, not legal', at('Active: Activated', 'Section 129'), 'in_progress')
+check('summons is legal', at('Active: Activated', 'Summons issued'), 'legal')
+check('with attorneys is legal', at('Active: Activated', 'Attorney instructed'), 'legal')
 check('a payment default is a broken arrangement', at('Active: Activated', 'Payment Default'), 'broken_arrangement')
 /*
  * NOT THE SAME FACT, and they were briefly reported as one. A payment default is an arrangement
@@ -93,7 +100,7 @@ check('...and beats a promise still to fall due',
  * "14 accounts, R38 000 collected" and says both things at once.
  */
 check('legal is reported even when it paid',
-  at('Active: Activated', 'Section 129', { paidInPeriod: true }), 'legal')
+  at('Active: Activated', 'Summons issued', { paidInPeriod: true }), 'legal')
 check('a dispute is reported even when it paid',
   at('Active: Activated', 'Defended Matter', { paidInPeriod: true }), 'disputed')
 check('a frozen account that paid is still frozen',
@@ -155,9 +162,9 @@ for (const sub of ['Debt review', 'Business rescue', 'Liquidation', 'Sequestrati
  * taking action on a matter where it is in fact being held back.
  */
 check('a debtor under administration outranks our own legal step',
-  at('Active: Activated', 'Section 129', { underAdministration: true }), 'under_administration')
+  at('Active: Activated', 'Summons issued', { underAdministration: true }), 'under_administration')
 ok('the two are opposite facts and must not merge',
-  at('Active: Activated', 'Debt review') !== at('Active: Activated', 'Section 129'))
+  at('Active: Activated', 'Debt review') !== at('Active: Activated', 'Summons issued'))
 ok('it is not counted as in play', !CLIENT_POSITIONS.under_administration.inPlay)
 
 /* ---------- needs you ---------- */
@@ -307,6 +314,23 @@ ok('...composed, not taken from the main comment', /accountNarrative\(\{/.test(d
 {
   const panel = detail.slice(detail.indexOf('function ClientLinePanel'), detail.indexOf('/* ---------- right: the figures'))
   ok('...and it cannot be typed into', !/<textarea|<input|contentEditable/.test(panel))
+}
+
+/*
+ * THE PREVIEW AT THE MOMENT THE DATE IS BOOKED. Asked for directly: the clerk should confirm
+ * what the client will see. It must appear wherever a diary date is set — both finish flows —
+ * and it must be a mirror, never a second place to type.
+ */
+for (const file of ['CompleteDiaryModal', 'DiaryWorkBar']) {
+  const src = readFileSync(new URL(`../../src/components/diary/${file}.tsx`, import.meta.url), 'utf8')
+  ok(`${file} previews the client line`, /<ClientLinePreview/.test(src))
+  ok(`${file} follows the date being chosen`, /nextOn=\{plan\./.test(src))
+}
+{
+  const preview = readFileSync(new URL('../../src/components/diary/ClientLinePreview.tsx', import.meta.url), 'utf8')
+  ok('the preview cannot be typed into', !/<textarea|<input|contentEditable/.test(preview))
+  // The one clause that must never be faked: nothing here knows whether the debtor answered.
+  ok('...and never claims the debtor failed to reply', !/reached:\s*false/.test(preview))
 }
 
 /*
