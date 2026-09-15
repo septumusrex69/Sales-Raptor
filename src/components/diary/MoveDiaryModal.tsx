@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react'
-import { CalendarClock, Loader2 } from 'lucide-react'
+import { useCallback, useMemo, useState } from 'react'
+import { AlertTriangle, CalendarClock, Loader2 } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { DiaryDatePicker, longDate, shortDate } from './DiaryDatePicker'
 import { bulkMove, moveEntry, debtorName, type DiaryRow } from '../../lib/diary.ts'
-import { DEFAULT_DIARY_CAPACITY, planSpread } from '../../lib/diaryPriority.ts'
+import { DEFAULT_DIARY_CAPACITY, planSpread, type DayLoad } from '../../lib/diaryPriority.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
 import { DictateButton } from '../ui/Dictate'
 
@@ -48,11 +48,38 @@ export function MoveDiaryModal({ entries, ownerId, capacity, onClose, onDone }: 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<{ moved: number; failed: number } | null>(null)
+  /** How full the first day of the spread already is. Reported up by the calendar. */
+  const [startLoad, setStartLoad] = useState<DayLoad | null>(null)
+  const onStartLoad = useCallback((l: DayLoad) => setStartLoad(l), [])
 
   const plan = useMemo(
     () => planSpread(entries.length, startOn, perDay),
     [entries.length, startOn, perDay],
   )
+
+  /*
+   * The working rate of whoever these are landing on — their own number, set on the diary page.
+   *
+   * "How many a day" is the rate this MOVE lays work down at, which is a different thing, and
+   * the two being different is exactly what needs saying: type 50 into the box and fifty a day
+   * is what happens, whatever the agent said their day was.
+   */
+  const toCapacity = toOwner === ownerId
+    ? capacity
+    : users.find((u) => u.id === toOwner)?.diaryCapacity ?? null
+  const rate = toCapacity && toCapacity > 0 ? toCapacity : DEFAULT_DIARY_CAPACITY
+  const overRate = bulk && perDay > rate
+  /*
+   * What is ALREADY on the first day of the spread.
+   *
+   * planSpread counts the accounts being moved and nothing else, so a day that already holds
+   * eight gets the full helping on top of them. That is the honest behaviour for a spread — it
+   * is a rate, not a target — but it is not what "30 a day" reads like, so the day that can be
+   * checked cheaply says what it really comes to.
+   */
+  const firstDayTotal = startLoad && startLoad.date === plan.days[0]
+    ? startLoad.booked + Math.min(entries.length, plan.perDay)
+    : null
 
   async function save() {
     setBusy(true); setError(null)
@@ -112,10 +139,11 @@ export function MoveDiaryModal({ entries, ownerId, capacity, onClose, onDone }: 
           </span>
           <DiaryDatePicker
             ownerId={toOwner}
-            capacity={toOwner === ownerId ? capacity : users.find((u) => u.id === toOwner)?.diaryCapacity ?? null}
+            capacity={toCapacity}
             value={startOn}
             onChange={setStartOn}
             today={today}
+            onLoad={onStartLoad}
           />
         </div>
 
@@ -125,7 +153,26 @@ export function MoveDiaryModal({ entries, ownerId, capacity, onClose, onDone }: 
               <input type="number" min={1} max={200} value={perDay}
                 onChange={(e) => setPerDay(Math.max(1, Number(e.target.value) || 1))}
                 className={inputClass} />
+              {/*
+                The rate the box starts on is the agent's own, so the common case is that this
+                line simply confirms it. It earns its place on the day somebody types 50.
+              */}
+              <span className="block text-[11px] text-slate-400 mt-1.5">
+                {toOwner === ownerId ? 'You work' : 'They work'} {rate} a day
+                {toCapacity ? '' : ' — nobody has set a rate, so this is the firm default'}.
+              </span>
             </FormField>
+
+            {overRate && (
+              <p className="flex items-start gap-2 text-xs text-[var(--c-gold-dark)] bg-[var(--tint-gold)] rounded-lg px-3 py-2">
+                <AlertTriangle size={14} className="shrink-0 mt-px" />
+                <span>
+                  {perDay} a day is more than the {rate} {toOwner === ownerId ? 'you work' : 'they work'}.
+                  {' '}Every day in this run gets more than {toOwner === ownerId ? 'you' : 'they'} can
+                  {' '}work, which moves the backlog rather than clearing it.
+                </span>
+              </p>
+            )}
 
             {/*
               The plan, in a sentence, before anything happens. Two hundred records is too many
@@ -137,6 +184,15 @@ export function MoveDiaryModal({ entries, ownerId, capacity, onClose, onDone }: 
               {' '}— {shortDate(plan.days[0])} to {shortDate(plan.days[plan.days.length - 1])}, {plan.perDay} a day
               {plan.onLastDay !== plan.perDay && plan.days.length > 1 && <> and {plan.onLastDay} on the last</>}.
               {' '}Weekends and public holidays are skipped.
+              {firstDayTotal !== null && firstDayTotal > rate && (
+                <>
+                  {' '}
+                  <span className="text-[var(--c-gold-dark)]">
+                    {shortDate(plan.days[0])} already has {startLoad?.booked}, so it comes
+                    to {firstDayTotal}.
+                  </span>
+                </>
+              )}
             </p>
           </>
         )}

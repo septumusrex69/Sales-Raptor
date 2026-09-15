@@ -1,12 +1,12 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { AlarmClock, AlertTriangle, CalendarClock, ChevronDown, Loader2 } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { DiaryDatePicker, longDate, shortDate } from './DiaryDatePicker'
 import {
-  DIARY_KINDS, DIARY_KIND_ORDER, daysBetween, shiftDate,
-  type DiaryKind,
+  DIARY_KINDS, DIARY_KIND_ORDER, atCapacity, daysBetween, shiftDate,
+  type DayLoad, type DiaryKind,
 } from '../../lib/diaryPriority.ts'
 import { diarise } from '../../lib/diary.ts'
 import { setReminder } from '../../lib/reminders.ts'
@@ -72,11 +72,41 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
    * of this box, so it now waits behind the day it already shows.
    */
   const [pickingDay, setPickingDay] = useState(false)
+  /*
+   * How full the chosen diary day already is, reported up by the calendar.
+   *
+   * Null until the counts land. The warning below is deliberately silent in that gap: a box that
+   * says nothing and then says "already full" is better than one that says "there is room" and
+   * then contradicts itself while somebody is reading it.
+   */
+  const [dayFull, setDayFull] = useState<DayLoad | null>(null)
+  /** Has the agent read the over-capacity warning and gone ahead anyway? */
+  const [acceptedOver, setAcceptedOver] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const owner = users.find((u) => u.id === ownerId)
   const capacity = owner?.diaryCapacity ?? null
+
+  /*
+   * A day at or past the agent's own working rate.
+   *
+   * WARNED, NEVER REFUSED, at the firm's instruction. An agent who told the debtor "the 25th"
+   * gets the 25th however full it is — they made a promise on a call and the app does not get to
+   * overrule it. What the app can do is make sure nobody fills a day to forty by accident, one
+   * account at a time, each booking looking reasonable on its own.
+   *
+   * The rate is the agent's own number, set on the diary page. See DiaryCapacity.
+   */
+  const overCapacity = mode === 'day' && dayFull !== null && dayFull.date === dueOn
+    && atCapacity(dayFull)
+  const onDayLoad = useCallback((l: DayLoad) => setDayFull(l), [])
+  const chooseDay = useCallback((d: string) => {
+    setDueOn(d)
+    // A fresh day is a fresh decision — an acceptance carried over from the last one would let
+    // the second booking through without the warning ever being read.
+    setAcceptedOver(false)
+  }, [])
 
   /*
    * Prescription is the one deadline that cannot be argued with: after it the debt cannot be
@@ -266,10 +296,26 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
             ownerId={ownerId}
             capacity={capacity}
             value={dueOn}
-            onChange={setDueOn}
+            onChange={chooseDay}
             today={today}
+            onLoad={onDayLoad}
           />
         </div>
+
+        {/*
+          Said in accounts, not in percentages, and it names the agent's own number back to them
+          so the sentence is arguable-with: if 30 is wrong, the place to fix it is the diary page,
+          not this booking.
+        */}
+        {overCapacity && dayFull && (
+          <p className="flex items-start gap-2 text-xs text-[var(--c-gold-dark)] bg-[var(--tint-gold)] rounded-lg px-3 py-2">
+            <AlertTriangle size={14} className="shrink-0 mt-px" />
+            <span>
+              {longDate(dueOn)} already has {dayFull.booked} account{dayFull.booked === 1 ? '' : 's'} on
+              it, and you work {dayFull.capacity} a day. This one makes {dayFull.booked + 1}.
+            </span>
+          </p>
+        )}
 
         {prescriptionWarning && (
           <p className="flex items-start gap-2 text-xs text-[var(--c-rust-deep)] bg-[var(--tint-rust-deep)] rounded-lg px-3 py-2">
@@ -341,13 +387,25 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
             <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-2">
               Cancel
             </button>
-            <button type="button" onClick={() => void save()}
+            {/*
+              The confirmation IS the button. A second modal on top of this one to ask "are you
+              sure" is a box somebody dismisses without reading; a button that has changed its
+              own words to "Book it anyway", next to a warning saying why, cannot be pressed by
+              habit — the thing you were about to press is no longer there.
+            */}
+            <button type="button"
+              onClick={() => { if (overCapacity && !acceptedOver) setAcceptedOver(true); else void save() }}
               disabled={busy || (mode === 'today' && !remindAt)}
-              className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-950 text-white hover:bg-navy-900 disabled:opacity-50">
+              className={`inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg disabled:opacity-50 ${
+                overCapacity && !acceptedOver
+                  ? 'bg-[var(--c-gold-dark)] text-white hover:opacity-90'
+                  : 'bg-navy-950 text-white hover:bg-navy-900'}`}>
               {busy
                 ? <Loader2 size={14} className="animate-spin" />
-                : mode === 'today' ? <AlarmClock size={14} /> : <CalendarClock size={14} />}
-              {mode === 'today' ? 'Remind me' : 'Diarise'}
+                : mode === 'today' ? <AlarmClock size={14} />
+                  : overCapacity && !acceptedOver ? <AlertTriangle size={14} /> : <CalendarClock size={14} />}
+              {mode === 'today' ? 'Remind me'
+                : overCapacity && !acceptedOver ? 'Book it anyway' : 'Diarise'}
             </button>
           </div>
         </div>

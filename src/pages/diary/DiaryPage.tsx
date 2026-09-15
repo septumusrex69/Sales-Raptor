@@ -9,6 +9,7 @@ import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { canViewClients } from '../../lib/permissions'
 import { longDate, shortDate } from '../../components/diary/DiaryDatePicker'
+import { DiaryCapacity } from '../../components/diary/DiaryCapacity'
 import { MoveDiaryModal } from '../../components/diary/MoveDiaryModal'
 import { CompleteDiaryModal } from '../../components/diary/CompleteDiaryModal'
 import {
@@ -219,6 +220,14 @@ export function DiaryPage() {
             Back to today
           </button>
         )}
+        {/*
+          The working rate, set here rather than buried in Settings — it is the denominator of
+          every count on this page, so it belongs on the page those counts are on, and the
+          person who knows what it should be is the one reading them.
+        */}
+        <span className="ml-auto">
+          <DiaryCapacity userId={viewing} value={owner?.diaryCapacity} editable={isMine} />
+        </span>
       </div>
 
       {/* The four numbers that decide what the day looks like. */}
