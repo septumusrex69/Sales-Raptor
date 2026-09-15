@@ -14,6 +14,9 @@ import { addWorkingDays } from '../../lib/workingDays.ts'
 import { refreshNavCounts } from '../../lib/navCounts'
 import { DictateButton } from '../ui/Dictate'
 import { ClientLinePreview } from './ClientLinePreview'
+import { OutcomePicker, EMPTY_OUTCOME, outcomeReady, type OutcomeChoice } from './OutcomePicker'
+import { CALL_OUTCOMES, type CallOutcome } from '../../lib/callOutcome.ts'
+import { recordOutcome } from '../../lib/recordOutcome.ts'
 
 /**
  * The accounts finished in this run of the diary.
@@ -325,6 +328,7 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
   const { currentUser } = useAuth()
   const { users } = useAppStore()
   const [outcome, setOutcome] = useState('')
+  const [came, setCame] = useState<OutcomeChoice>(EMPTY_OUTCOME)
   /*
    * OFF. Always, whatever state the main comment is in.
    *
@@ -348,6 +352,24 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
   async function save() {
     setBusy(true); setError(null)
     try {
+      /*
+        THE RECORDS FIRST, THE DIARY SECOND. If the promise cannot be written there is nothing
+        to check on the date, so booking the check anyway would leave a diary entry pointing at
+        a commitment that does not exist. Failing here stops the whole save and says why.
+      */
+      if (came.outcome) {
+        const r = await recordOutcome({
+          accountId: entry.accountId,
+          outcome: came.outcome,
+          promise: came.outcome === 'promised'
+            ? { amount: Number(came.amount.replace(/[^\d.]/g, '')), dueOn: came.dueOn }
+            : null,
+          words: came.words,
+          actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
+        })
+        if (r.failed.length) throw new Error(`Could not record ${r.failed.join(' or ')}.`)
+      }
+
       await workEntry({
         entry,
         outcome,
@@ -427,6 +449,20 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
         </FormField>
 
         {/* Same question, same rules, same component as the day list's Done — see NextDiaryFields. */}
+        {/*
+          WHAT CAME OF IT, as a choice rather than only as prose. The typed note stays — it is
+          where the detail lives — but the choice is what writes the promise, raises the dispute
+          and moves the status, so the client's report can say something a machine derived rather
+          than something nobody recorded.
+        */}
+        <OutcomePicker value={came} onChange={(next) => {
+          setCame(next)
+          // The diary's own suggestion follows the answer: a promise wants checking on its date.
+          if (next.outcome && next.outcome !== came.outcome) {
+            setPlan((p) => ({ ...p, kind: CALL_OUTCOMES[next.outcome as CallOutcome].suggests }))
+          }
+        }} />
+
         {/* The client's own line, before the date is committed. See ClientLinePreview. */}
         <ClientLinePreview account={entry.account} next={plan.comesBack ? { kind: plan.kind, dueOn: plan.dueOn } : null} />
 
@@ -449,7 +485,7 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
             <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-2">
               Cancel
             </button>
-            <button type="button" onClick={() => void save()} disabled={busy}
+            <button type="button" onClick={() => void save()} disabled={busy || !outcomeReady(came)}
               className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-950 text-white hover:bg-navy-900 disabled:opacity-50">
               {busy ? <Loader2 size={14} className="animate-spin" /> : <CalendarClock size={14} />}
               {remaining > 0 ? 'Done, next account' : 'Done, back to diary'}

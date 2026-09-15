@@ -247,16 +247,17 @@ check('nothing owed leaves the tone alone',
     next: { kind: 'promise_due', dueOn: '2026-09-30' },
   })
   check('the promise says who promised, what, when they said it and when it falls due',
-    l.happened, 'On 15 September 2026 the debtor promised to pay R2\u00a0000 by 30 September 2026.')
+    l.happened, 'On 15 September 2026, the debtor promised to pay R2\u00a0000 by 30 September 2026.')
   check('...and the next action names the work, not just a date',
     l.next, 'We will confirm the promised payment on 30 September 2026.')
 }
-check('a recurring promise says so',
+// A parenthesis reads as a single payment with a note stapled on; this is what was agreed.
+check('a recurring promise reads as an arrangement, not a parenthesis',
   clientLine({ promise: { amount: 750, dueOn: '2026-09-30', takenOn: '2026-09-15', arrangement: 'monthly' } }).happened,
-  'On 15 September 2026 the debtor promised to pay R750 (monthly instalment) by 30 September 2026.')
-check('a broken promise is reported as broken',
+  'On 15 September 2026, the debtor agreed to pay monthly instalments of R750, beginning on 30 September 2026.')
+check('a broken promise names the debtor as the one who did not pay',
   clientLine({ promise: { amount: 2000, dueOn: '2026-08-30', status: 'broken' } }).happened,
-  'The promise to pay R2\u00a0000 by 30 August 2026 was not kept.')
+  'The debtor did not make the promised payment of R2\u00a0000 due on 30 August 2026.')
 
 /*
  * EVERY DIARY KIND HAS ITS OWN NEXT ACTION, and none of them may fall back to a bare date. The
@@ -272,7 +273,7 @@ for (const kind of DIARY_KIND_ORDER) {
 ok('no two kinds produce the same next action',
   new Set(DIARY_KIND_ORDER.map((k) => clientLine({ next: { kind: k, dueOn: '2026-09-30' } }).next)).size
     === DIARY_KIND_ORDER.length)
-check('nothing booked promises nothing', clientLine({ lastAttemptOn: '2026-09-07' }).next, '')
+
 
 /*
  * THREE STATES FOR "DID THEY ANSWER", not two. The imported book logs 8 calls across 736
@@ -283,15 +284,15 @@ check('nothing booked promises nothing', clientLine({ lastAttemptOn: '2026-09-07
 ok('a recorded non-answer says no reply',
   /no reply/.test(accountNarrative({ lastAttemptOn: '2026-09-12', reached: false })))
 ok('an unrecorded outcome says only what is known',
-  /was worked on/.test(accountNarrative({ lastAttemptOn: '2026-09-12' })))
+  /We worked the account on/.test(accountNarrative({ lastAttemptOn: '2026-09-12' })))
 ok('...and never claims the debtor failed to reply',
   !/no reply/.test(accountNarrative({ lastAttemptOn: '2026-09-12', reached: null })))
 
 // "attempted" is now in the sentence itself, so the count is what must be absent, not the word.
 ok('a single attempt does not boast about being the first',
-  !/attempt this period/.test(accountNarrative({ lastAttemptOn: '2026-09-12', reached: false, attemptsThisPeriod: 1 })))
+  !/attempt during the reporting period/.test(accountNarrative({ lastAttemptOn: '2026-09-12', reached: false, attemptsThisPeriod: 1 })))
 ok('several attempts are counted',
-  /third attempt this period/.test(accountNarrative({
+  /third attempt during the reporting period/.test(accountNarrative({
     lastAttemptOn: '2026-09-12', reached: false, attemptsThisPeriod: 3 })))
 
 /*
@@ -299,20 +300,26 @@ ok('several attempts are counted',
  * A client report that dressed the firm's own silence up as the debtor's would be the one
  * dishonest thing in the document, and it is the easiest to write by accident.
  */
-check('nothing done reads as nothing done', accountNarrative({}), 'No contact has been attempted yet.')
+check('nothing done reads as nothing done', clientLine({}).happened, 'No contact attempt has been made yet.')
 ok('...and is not hidden by a follow-up date being booked',
-  /No contact has been attempted/.test(accountNarrative({ next: { kind: 'review', dueOn: '2026-09-20' } })))
+  /No contact attempt has been made/.test(accountNarrative({ next: { kind: 'review', dueOn: '2026-09-20' } })))
+/*
+ * AN ACTIVE ACCOUNT WITH NOTHING BOOKED IS ADRIFT — the firm has stopped working it without
+ * deciding to — and the client is entitled to see that rather than a blank space.
+ */
+check('nothing scheduled says so', clientLine({ lastAttemptOn: '2026-09-07' }).next,
+  'No further action has been scheduled.')
 
 ok('a freeze is said first', /^Work was paused/.test(accountNarrative({
   frozenReason: 'Debtor in debt review.', lastAttemptOn: '2026-09-12' })))
 ok('...and a paused account promises no next action it cannot keep',
-  /stays paused/.test(clientLine({ frozenReason: 'Debtor in debt review.' }).next))
+  /remain paused until we receive further instruction/.test(clientLine({ frozenReason: 'Debtor in debt review.' }).next))
 ok('a freeze reason is not double-stopped',
   !/\.\./.test(accountNarrative({ frozenReason: 'Debtor in debt review.' })))
 ok('money received is reported',
-  /payment of R1\u00a0500 was received/.test(accountNarrative({ paidInPeriod: { amount: 1500, on: '2026-09-03' } })))
+  /received a payment of R1\u00a0500/.test(accountNarrative({ paidInPeriod: { amount: 1500, on: '2026-09-03' } })))
 check('a frozen account does not also claim nobody rang',
-  /No contact has been attempted/.test(accountNarrative({ frozenReason: 'Client asked us to hold.' })), false)
+  /No contact attempt has been made/.test(accountNarrative({ frozenReason: 'Client asked us to hold.' })), false)
 
 /* ---------- the database has to agree ---------- */
 
