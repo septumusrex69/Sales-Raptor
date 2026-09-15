@@ -578,7 +578,15 @@ export function AccountDetail() {
           layout={layout}
           details={detailsPanel}
           main={timelinePanel}
-          side={[summaryPanel, clientLinePanel, promisePanel, disputesPanel, positionPanel]}
+          /*
+            THE CLIENT'S LINE FIRST, above the figures.
+            
+            It went in second, under the Account summary, and the firm could not find it — which
+            on an iPad is the honest outcome: the summary is a dozen rows of money and this is
+            three lines under it. A panel nobody scrolls to is a panel that does not exist, and
+            this one only works if the person doing the work reads it.
+          */
+          side={[clientLinePanel, summaryPanel, promisePanel, disputesPanel, positionPanel]}
         />
       )}
 
