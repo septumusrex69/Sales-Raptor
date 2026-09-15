@@ -6,13 +6,19 @@
  * told a time, and the collector believed the app.
  */
 
-/** What somebody reaches for mid-call, in the order they reach for it. */
+/**
+ * What somebody reaches for mid-call, in the order they reach for it.
+ *
+ * The labels are the bare interval — "15 min", not "In 15 minutes". They sit in a row of five
+ * under a heading that already supplies the verb, and five buttons each carrying "In" cost a
+ * second line and bought nothing.
+ */
 export const REMINDER_PRESETS = [
-  { minutes: 15, label: 'In 15 minutes' },
-  { minutes: 30, label: 'In 30 minutes' },
-  { minutes: 60, label: 'In an hour' },
-  { minutes: 120, label: 'In 2 hours' },
-  { minutes: 240, label: 'In 4 hours' },
+  { minutes: 15, label: '15 min' },
+  { minutes: 30, label: '30 min' },
+  { minutes: 60, label: '1 hour' },
+  { minutes: 120, label: '2 hours' },
+  { minutes: 240, label: '4 hours' },
 ] as const
 
 /** How long a snooze is. One value, so the button and the write cannot disagree. */

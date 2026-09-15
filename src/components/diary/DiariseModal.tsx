@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { AlarmClock, AlertTriangle, CalendarClock, Loader2 } from 'lucide-react'
+import { AlarmClock, AlertTriangle, CalendarClock, ChevronDown, Loader2 } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
-import { DiaryDatePicker, longDate } from './DiaryDatePicker'
+import { DiaryDatePicker, longDate, shortDate } from './DiaryDatePicker'
 import {
   DIARY_KINDS, DIARY_KIND_ORDER, daysBetween, shiftDate,
   type DiaryKind,
@@ -64,6 +64,14 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
   const [custom, setCustom] = useState('')
   /** Which day the reminder is on. Today unless somebody picks otherwise. */
   const [remindOn, setRemindOn] = useState(today)
+  /**
+   * Is the calendar unfolded?
+   *
+   * Shut, because a reminder is almost always for today — that is what "ring me back in an
+   * hour" means. A three-week grid standing open under the presets to be ignored was the bulk
+   * of this box, so it now waits behind the day it already shows.
+   */
+  const [pickingDay, setPickingDay] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -134,8 +142,8 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
   }
 
   return (
-    <Modal title="When does this come back?" onClose={onClose} width={560}>
-      <div className="space-y-4">
+    <Modal title="When does this come back?" onClose={onClose} width={520}>
+      <div className="space-y-3">
         {/*
           The two horizons, side by side, because the debtor's sentence is the same either way
           and only the scale differs. Two buttons rather than a dropdown: there are exactly two,
@@ -143,25 +151,25 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
           the wrong one is a reminder that interrupts a colleague's afternoon, or a callback that
           never happens.
         */}
-        <div className="flex gap-1 p-1 rounded-xl bg-slate-100">
+        <div className="flex gap-1 p-0.5 rounded-lg bg-slate-100">
           {([
-            ['day', 'In the diary', 'A day in your queue'],
-            ['today', 'A reminder', 'Pops up on your screen'],
-          ] as const).map(([value, label, hint]) => (
+            ['day', 'In the diary'],
+            ['today', 'A reminder'],
+          ] as const).map(([value, label]) => (
             <button key={value} type="button" onClick={() => setMode(value)}
-              className={`flex-1 rounded-lg px-3 py-2 text-sm transition-colors ${
+              className={`flex-1 rounded-md px-3 py-1.5 text-sm transition-colors ${
                 mode === value ? 'bg-white shadow-sm font-medium text-navy-950' : 'text-slate-500 hover:text-slate-700'}`}>
               {label}
-              <span className="block text-[11px] font-normal text-slate-400">{hint}</span>
             </button>
           ))}
         </div>
 
-        <p className="text-sm text-slate-500">
-          {mode === 'today'
-            ? `${accountLabel} — a nudge that pops up on your screen. Not the diary; nothing is booked.`
-            : `${accountLabel} comes back on a day you choose.`}
-        </p>
+        {/*
+          The account, and nothing else. Each side used to carry a sentence explaining what it
+          did — which the footer of this same box already says, in the present tense and with the
+          actual time in it. One of the two had to go and it was not the one with the time.
+        */}
+        <p className="text-xs text-slate-400 -mt-1">{accountLabel}</p>
 
         {mode === 'today' ? (
           <>
@@ -172,50 +180,83 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
               at pressing them.
             */}
             {remindingToday && (
-              <div className="flex flex-wrap gap-2">
-                {REMINDER_PRESETS.map((p) => (
-                  <button key={p.minutes} type="button"
-                    onClick={() => { setMinutes(p.minutes); setCustom('') }}
-                    className={`text-sm px-3 py-2 rounded-lg border transition-colors ${
-                      !custom && minutes === p.minutes
-                        ? 'border-gold-500 bg-gold-400 text-navy-950 font-medium'
-                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-                    {p.label}
-                    <span className="block text-[11px] opacity-70 tabular-nums">{clockTime(dueAt(p.minutes))}</span>
-                  </button>
-                ))}
+              <div>
+                <span className="block text-xs font-medium text-slate-500 mb-1.5">Remind me in</span>
+                {/*
+                  Five across, one row, no wrapping. Wrapped they left a single orphan button on
+                  a second line, which reads as a sixth option somebody forgot to line up.
+                */}
+                <div className="grid grid-cols-5 gap-1.5">
+                  {REMINDER_PRESETS.map((p) => (
+                    <button key={p.minutes} type="button"
+                      onClick={() => { setMinutes(p.minutes); setCustom('') }}
+                      className={`rounded-lg border px-1 py-1.5 text-center leading-tight transition-colors ${
+                        !custom && minutes === p.minutes
+                          ? 'border-gold-500 bg-gold-400 text-navy-950 font-medium'
+                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                      <span className="block text-xs">{p.label}</span>
+                      <span className="block text-[10px] opacity-70 tabular-nums">{clockTime(dueAt(p.minutes))}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 
-            <FormField label={remindingToday ? 'Or at a time' : 'At what time'} required={!remindingToday}>
-              <input className={`${inputClass} max-w-[9rem]`} placeholder="15:40" value={custom}
-                onChange={(e) => setCustom(e.target.value)} />
-              {customBad && (
-                // A moment already gone would pop the instant it saved, which reads as a fault.
-                <p className="text-[11px] text-[var(--c-rust-deep)] mt-1">
-                  {remindingToday
-                    ? 'Not a time later today. Use 24-hour, like 15:40.'
-                    : 'Use 24-hour, like 15:40.'}
-                </p>
-              )}
-            </FormField>
+            {/*
+              The time and the day on one line, as a sentence: "or at 15:40 on today". They were
+              two stacked blocks with their own headings, and between them they said what this
+              one row says.
+
+              The calendar lives behind the day button and closes again the moment a day is
+              picked — choosing the day IS the reason it was opened, so there is nothing left to
+              do in it afterwards.
+            */}
+            <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+              <span>{remindingToday ? 'or at' : 'At'}</span>
+              {/* Sized by the wrapper: inputClass carries w-full, which wins over a width set here. */}
+              <span className="w-[5.25rem] shrink-0">
+                <input className={`${inputClass} py-1.5 px-2 text-center tabular-nums`} placeholder="15:40"
+                  value={custom} onChange={(e) => setCustom(e.target.value)} />
+              </span>
+              <span>on</span>
+              <button type="button" onClick={() => setPickingDay((v) => !v)}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-slate-700 hover:bg-slate-50">
+                {remindingToday ? 'today' : shortDate(remindOn)}
+                <ChevronDown size={13} className={`text-slate-400 transition-transform ${pickingDay ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+
+            {customBad && (
+              // A moment already gone would pop the instant it saved, which reads as a fault.
+              <p className="text-[11px] text-[var(--c-rust-deep)] -mt-2">
+                {remindingToday
+                  ? 'Not a time later today. Use 24-hour, like 15:40.'
+                  : 'Use 24-hour, like 15:40.'}
+              </p>
+            )}
 
             {/*
               The same calendar the diary uses, with the per-day counts turned off — a reminder
-              books nothing, and a number under the date would say it did. Today unless somebody
-              says otherwise, which is the whole point of this side of the box.
+              books nothing, and a number under the date would say it did. Two weeks rather than
+              three: a nudge that is a fortnight out is a diary entry, and the diary is one tap
+              away at the top of this box.
             */}
-            <div>
-              <span className="block text-xs font-medium text-slate-500 mb-1.5">Which day</span>
+            {pickingDay && (
               <DiaryDatePicker
                 ownerId={ownerId}
                 capacity={null}
                 showLoad={false}
+                weeks={2}
                 value={remindOn}
-                onChange={(d) => { setRemindOn(d); if (d !== today && !custom) setCustom('09:00') }}
+                onChange={(d) => {
+                  setRemindOn(d)
+                  // Presets are relative to now, so another day has no preset to fall back on.
+                  if (d !== today && !custom) setCustom('09:00')
+                  setPickingDay(false)
+                }}
                 today={today}
               />
-            </div>
+            )}
           </>
         ) : (
           <>
@@ -275,7 +316,7 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
             <DictateButton size="small" value={reason} onChange={setReason} />
             <span className="text-[11px] text-slate-400">
               {mode === 'today'
-                ? 'Optional — it is what the popup will say.'
+                ? 'Optional — it is what the popup says.'
                 : 'Goes on the account\u2019s timeline as well as the diary.'}
             </span>
           </div>
