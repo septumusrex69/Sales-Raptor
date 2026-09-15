@@ -22,7 +22,7 @@ import { ZoomableImage } from '../../components/ui/ZoomableImage'
 import {
   addSenderRule, blockedBy, blockSender, blockSenders, clearNoRecordNeeded,
   debtorFileFor, deleteMail, fetchMailUnreadCounts, fetchSenderRules, markNoRecordNeeded,
-  removeSenderRule, ruledBy, NO_UNREAD,
+  recordSentToRecord, removeSenderRule, ruledBy, NO_UNREAD,
   domainBlockProblem, domainOf, downloadAttachment, emptyJunk, fetchBlockedSenders, fetchMail,
   fetchMailBody, linkMailToAccount, linkMailToRecord, markMailRead, markMailUnread, moveFiledMail,
   saveAccountContacts, setJunk, unblockSender, unmatchMail,
@@ -1084,9 +1084,32 @@ export function MailPage() {
             const answering = replying
             setReplying(null)
             if (!answering?.linkedAccountId) {
+              /*
+               * A reply to mail on a LEAD, DEAL, CLIENT or CONTACT is written to that record's
+               * timeline — which it said it was doing all along and did not.
+               *
+               * The message went, the status line read "Reply sent and logged on Acme", and
+               * nothing was written anywhere: ComposeEmailModal sends and nothing more, and the
+               * debtor branch below was the only one that recorded anything. So the sales side
+               * lost every reply sent from the mailbox, and said it had kept them.
+               *
+               * Nothing is charged, here or in recordSentToRecord. Annexure B is the tariff for
+               * collecting a debt; a lead owes the firm nothing.
+               */
+              const on = answering?.linkedTo
+              if (on && on.kind !== 'account') {
+                void recordSentToRecord({
+                  to: { kind: on.kind, id: on.id },
+                  toAddress: answering.fromAddress,
+                  subject: rawSubject,
+                  body: bodyText,
+                  messageId: messageId ?? null,
+                  actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
+                }).then(() => load(page)).catch(() => {})
+              }
               // Said plainly rather than left to be discovered. The agent chose this path.
-              setStatus(answering?.linkedTo
-                ? `Reply sent and logged on ${answering.linkedTo.label}. No charge — Annexure B is for debtor accounts.`
+              setStatus(on
+                ? `Reply sent and logged on ${on.label}. No charge — Annexure B is for debtor accounts.`
                 : 'Reply sent. Not charged and not recorded — it was not matched to anything.')
               return
             }
@@ -1226,6 +1249,19 @@ function MailStatus({ mail, blocked, tight }: {
           <Link2 size={10} className="shrink-0" />
           <span className="truncate">{tight ? 'Matched' : `On ${mail.linkedTo.label}`}</span>
         </span>
+      ) : mail.isSent ? (
+        /*
+         * Before the no_record_at branch, and that order is the whole of it.
+         *
+         * Sent mail carries no_record_at only so the Sent folder does not pour into the matching
+         * queue — it is not a decision anybody made about it. Read in the wrong order, every
+         * message the agent had ever sent wore the grey "No record needed" chip, which says a
+         * person looked at it and ruled it belonged on nobody's file. Nobody did.
+         */
+        <span className={`${chip} bg-slate-100 text-slate-500`}
+          title="You sent this. Nothing is charged here — an email to a debtor is charged where it was sent from.">
+          <Reply size={10} className="shrink-0 -scale-x-100" /> Sent
+        </span>
       ) : mail.noRecordAt ? (
         /* Settled, but on nobody's file — so it must not wear the green "Matched" chip, which
            would have a supplier's invoice claiming to be on somebody's account. */
@@ -1263,6 +1299,17 @@ function MailSummary({ mail, tight, blocked }: {
   blocked?: BlockedSender[]
 }) {
   const unread = !mail.readAt
+  /*
+   * The person this row is about: the recipient on something we sent, the sender otherwise.
+   *
+   * Sent mail is not guaranteed to have a recipient recorded — a message with no parseable To
+   * header stores null — so `who` can be empty and the row says so rather than rendering a blank
+   * where a name belongs.
+   */
+  const name = mail.isSent ? mail.toName : mail.fromName
+  const address = mail.isSent ? mail.toAddress : mail.fromAddress
+  const who = name || address
+
   return (
     /*
       Who, then what about, then what it says.
@@ -1276,14 +1323,26 @@ function MailSummary({ mail, tight, blocked }: {
       less, the preview least. Unread deepens the sender rather than adding a fourth signal.
     */
     <span className="block min-w-0">
-      {/* 1. Who it is from, and when. */}
+      {/*
+        1. Who it is from — or on a sent message, who it went TO, and when.
+
+        "Who is this from" is the wrong question about something you sent: From is always you, so
+        the Sent tab read as a column of your own name with the one useful fact missing. The
+        columns for it (to_address, to_name) have been on the row, in the type and in the mapper
+        since the Sent folder was first synced; nothing ever rendered them, which is the failure
+        CLAUDE.md describes one level up from the mapper.
+
+        Labelled "To", because without the word a recipient in the sender's position is simply
+        read as the sender.
+      */}
       <span className="flex items-baseline gap-2">
         <span className={`text-sm truncate ${unread ? 'font-bold text-navy-950' : 'font-semibold text-slate-700'}`}>
-          {mail.fromName || mail.fromAddress}
+          {mail.isSent && <span className="font-normal text-slate-400">To </span>}
+          {who || <span className="font-normal text-slate-400 italic">no recipient recorded</span>}
           {/* The address as well as the name, but not in the reading pane's narrow column,
               where it would push the name itself out of sight. */}
-          {mail.fromName && !tight && (
-            <span className="font-normal text-slate-400"> &middot; {mail.fromAddress}</span>
+          {name && address && !tight && (
+            <span className="font-normal text-slate-400"> &middot; {address}</span>
           )}
         </span>
         <span className="ml-auto shrink-0 text-xs text-slate-400">
@@ -1661,9 +1720,22 @@ function MailRow({
         </button>
 
         <div className="shrink-0 flex items-center gap-2 pt-0.5">
-          {/* Linked mail offers nothing: it is on an account, it raised a fee, and it is not
-              anybody's to re-file or delete. The database refuses both as well. */}
-          {!mail.isFiled && (
+          {/*
+            Linked mail offers nothing: it is on an account, it raised a fee, and it is not
+            anybody's to re-file or delete. The database refuses both as well.
+
+            AND NEITHER DOES SENT MAIL, which is a charge rather than a tidiness matter. Matching
+            raises Annexure B item 6 — "correspondence received and attended to", R13 — against
+            the debtor. On a message the FIRM sent, that bills the debtor for our own letter, on
+            top of the R25 under item 1(a) it already cost them when it went out. It would also
+            write the account's copy with direction 'in' and the agent's own address as the
+            debtor's, and put "Email from <the agent>" on the debtor's timeline.
+
+            api/_lib/emailSync.ts routes sent mail away from this exact code for exactly this
+            reason. The button walked around it. linkMailToAccount now refuses a sent message
+            outright as well — this only stops it being offered.
+          */}
+          {!mail.isFiled && !mail.isSent && (
             <button onClick={onLink}
               className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950">
               <Link2 size={13} /> Match

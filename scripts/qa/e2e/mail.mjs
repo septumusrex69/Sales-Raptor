@@ -110,6 +110,36 @@ const MAIL = [
   },
 ]
 
+/**
+ * What the Sent tab is served.
+ *
+ * from_* is the agent, because on a sent message it always is — which is the whole reason the
+ * row has to show to_* instead. A fixture whose From differed from the signed-in user would let
+ * a page that still rendered the sender look correct.
+ */
+const SENT = [
+  {
+    ...MAIL[1],
+    id: 'cccccccc-3333-4333-8333-cccccccccccc',
+    folder: 'Sent',
+    is_sent: true,
+    uid: 301,
+    message_id: '<sent@example.co.za>',
+    from_address: PROFILE.email,
+    from_name: 'Test Leader',
+    to_address: 'naledi@khumalo.co.za',
+    to_name: 'Naledi Khumalo',
+    subject: 'Your account with us',
+    snippet: 'As discussed, the balance outstanding is R4 200.',
+    // Sent mail carries no_record_at so the Sent folder never pours into the matching queue, and
+    // read_at because you wrote it. Both are what the row must NOT mistake for a decision.
+    no_record_at: '2026-09-13T10:00:00Z',
+    read_at: '2026-09-13T10:00:00Z',
+    is_settled: true,
+    occurred_at: '2026-09-13T10:00:00Z',
+  },
+]
+
 const handlers = [
   [(u) => u.includes('/auth/v1/user'), () => ({ body: { id: USER_ID, email: PROFILE.email } })],
   [
@@ -136,7 +166,15 @@ const handlers = [
   })],
   [(u) => u.includes('/rest/v1/mail_blocks'), () => ({ body: [] })],
   [(u) => u.includes('/rest/v1/mail_sender_rules'), () => ({ body: [] })],
-  [(u) => u.includes('/rest/v1/user_emails'), () => ({ body: MAIL })],
+  /*
+   * The Sent tab asks for is_sent=eq.true; every other tab excludes it. Answering both from one
+   * list would put a sent message in the inbox list and hide the bug this fixture exists to
+   * catch, so the stub honours the filter the page actually sent.
+   */
+  [
+    (u) => u.includes('/rest/v1/user_emails'),
+    (u) => ({ body: decodeURIComponent(u).includes('is_sent=eq.true') ? SENT : MAIL }),
+  ],
 ]
 
 const server = await startServer()
@@ -307,6 +345,55 @@ try {
   t.check('a read row reserves the same width so nothing shifts', readBar.width, unreadBar.width)
 
   await t.shot(page, 'mail')
+
+  /* ---------- the Sent tab says who a message went to ---------- */
+
+  await page.locator('button:has-text("Sent")').first().click()
+  await page.waitForFunction(
+    () => /Your account with us/.test(document.body.innerText),
+    { timeout: 15000 },
+  ).catch(() => { /* asserted below, where the failure is readable */ })
+
+  const sentRow = page.locator('ul li').filter({ hasText: 'Your account with us' }).first()
+  t.ok('the sent message rendered', await sentRow.count() > 0)
+
+  const sentText = (await sentRow.innerText()).replace(/\s+/g, ' ').trim()
+
+  /*
+   * THE BUG. to_address and to_name have been on the row, in the type and in the mapper since the
+   * Sent folder was first synced, and nothing ever drew them — so every Sent row read as being
+   * from the agent, to nobody.
+   */
+  t.ok('the row names the recipient', sentText.includes('Naledi Khumalo'))
+  t.ok('...with their address', sentText.includes('naledi@khumalo.co.za'))
+  t.ok('...labelled To, so it does not read as the sender', /\bTo\b/.test(sentText))
+  t.check('...and does not show the agent as the correspondent',
+    sentText.includes(PROFILE.email), false)
+
+  /*
+   * And it must not claim somebody ruled it belonged on nobody's file. Sent mail carries
+   * no_record_at only to stay out of the matching queue; read in the wrong order, every message
+   * the agent had ever sent wore the grey "No record needed" chip.
+   */
+  t.ok('the row is chipped Sent', /\bSent\b/.test(sentText))
+  t.check('...not "No record needed"', sentText.includes('No record needed'), false)
+
+  /*
+   * AND NO MATCH BUTTON, which is the one that costs money.
+   *
+   * Matching runs fileOnAccount, which raises Annexure B item 6 — R13, "correspondence received
+   * and attended to" — against the debtor. On a message the firm SENT that bills them for our own
+   * letter, on top of the R25 under item 1(a) it already cost when it went out, and files it on
+   * their account as though they had written it. The sync goes out of its way to keep sent mail
+   * away from that code; the button offered it in one click.
+   *
+   * Checked in the browser as well as in the source because this is about what a person can
+   * actually press.
+   */
+  t.check('a sent message offers no Match button',
+    await sentRow.locator('button:has-text("Match")').count(), 0)
+
+  await t.shot(page, 'mail-sent')
 
   /*
    * Console errors fail the run. A page that renders and throws is a page that has stopped

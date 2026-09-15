@@ -320,7 +320,26 @@ function scope<Q>(q: Q, input: MailScope): Q {
   if (term) {
     // Commas and parentheses would be read as `or()` syntax rather than as text.
     const safe = term.replace(/[,()]/g, ' ')
-    out = out.or(`from_address.ilike.%${safe}%,subject.ilike.%${safe}%,from_name.ilike.%${safe}%`)
+    const fields = [
+      `from_address.ilike.%${safe}%`,
+      `subject.ilike.%${safe}%`,
+      `from_name.ilike.%${safe}%`,
+    ]
+    /*
+     * On the Sent tab, search the RECIPIENT as well — and only there.
+     *
+     * Searching a sent message by sender is searching for yourself, so until now the Sent tab's
+     * search could only match a subject line. The recipient is the thing anybody actually
+     * remembers about a message they sent.
+     *
+     * Deliberately not added to the other tabs. The sync records to_address on every message,
+     * incoming ones included, where it holds OUR address — so searching it everywhere would make
+     * the firm's own address match every message in the mailbox.
+     */
+    if (input.filter === 'sent') {
+      fields.push(`to_address.ilike.%${safe}%`, `to_name.ilike.%${safe}%`)
+    }
+    out = out.or(fields.join(','))
   }
 
   return out as Q
@@ -1082,10 +1101,31 @@ export async function linkMailToAccount(input: {
     })
     .eq('id', input.mail.id)
     .eq('is_filed', false)
+    /*
+     * AND NOT A MESSAGE WE SENT. This is a money guard, not a tidiness one.
+     *
+     * fileOnAccount raises item 6 — "correspondence received and attended to", R13 — against the
+     * debtor. Run on a sent message that bills them for the firm's own letter, on top of the R25
+     * under item 1(a) they were already charged when it went out; it also writes the account's
+     * copy with direction 'in' and OUR address as the debtor's, and puts "Email from <the agent>"
+     * on their timeline. api/_lib/emailSync.ts routes the Sent folder away from this code for
+     * precisely this reason, and the Match button in the mailbox walked around it.
+     *
+     * In the claim rather than an early return, so a crafted request is refused by the same
+     * conditional update that makes the fee happen once.
+     */
+    .eq('is_sent', false)
     .select('id')
     .maybeSingle<{ id: string }>()
   if (claimError) throw new Error(claimError.message)
-  if (!claimed) throw new Error('That email has already been filed.')
+  if (!claimed) {
+    // Named apart, because "already filed" would send somebody looking for a match that is not
+    // there. A sent message is not waiting to be matched and never was.
+    throw new Error(input.mail.isSent
+      ? 'That is a message you sent, so it cannot be matched to an account. It was charged under '
+        + 'item 1(a) when it went out.'
+      : 'That email has already been filed.')
+  }
 
   return fileOnAccount({ mail: input.mail, accountId: input.accountId, actor: input.actor })
 }
@@ -1256,10 +1296,17 @@ export async function linkMailToRecord(input: {
     })
     .eq('id', input.mail.id)
     .eq('is_filed', false)
+    // Nothing is charged here, but the entry would still be wrong: it files the message as
+    // "Email received" on the record, and we sent it. Same guard, cheaper consequence.
+    .eq('is_sent', false)
     .select('id')
     .maybeSingle<{ id: string }>()
   if (claimError) throw new Error(claimError.message)
-  if (!claimed) throw new Error('That email has already been filed.')
+  if (!claimed) {
+    throw new Error(input.mail.isSent
+      ? 'That is a message you sent, so it cannot be matched to a record.'
+      : 'That email has already been filed.')
+  }
 
   const { error } = await supabase.from('activities').insert({
     type: 'Email',
@@ -1286,6 +1333,64 @@ export async function linkMailToRecord(input: {
   if (error) console.error('[userMail] filed, but the timeline entry failed:', error.message)
 
   refreshNavCounts()
+}
+
+/**
+ * Record a reply we sent to a lead, a deal, a client or a contact.
+ *
+ * The counterpart to linkMailToRecord, which files an INCOMING message on the same records. This
+ * is the outgoing half, and it was missing: replying from the mailbox to mail filed on a lead
+ * told the agent "Reply sent and logged on Acme" and logged nothing anywhere. The message went,
+ * and the record it was supposedly about never heard about it.
+ *
+ * NOTHING IS CHARGED, exactly as on the way in. Annexure B is the tariff for collecting a debt,
+ * and a lead answering a quotation owes the firm nothing. A reply to a DEBTOR goes through
+ * recordSentEmail instead, which raises item 1(a) — the two must stay separate functions, since
+ * the difference between them is a charge on somebody's statement.
+ *
+ * `email_message_id` is the part that earns its keep beyond honesty. api/_lib/emailSync.ts
+ * threads an incoming reply by looking up In-Reply-To against this column, so recording the id
+ * here is what lets THEIR answer come back to this same lead or deal on its own. Without it the
+ * reply can only be matched on the sender's address, which finds the client but not which of
+ * their five open deals is being discussed.
+ *
+ * Never throws. The message has already left; failing to write a timeline entry is a thinner
+ * record, not a lost email, and an error box after a reply has demonstrably gone is worse than
+ * the gap it reports.
+ */
+export async function recordSentToRecord(input: {
+  to: { kind: 'lead' | 'deal' | 'client' | 'contact'; id: string }
+  /** Who it went to, for the timeline to name. */
+  toAddress: string
+  /** Carries the composer's own "Email sent: " framing, which is the CRM activity convention. */
+  subject: string
+  body: string
+  /**
+   * The sent message's own Message-ID, so their reply threads back onto this record.
+   *
+   * The message this one ANSWERS is deliberately not recorded: activities has no column for it
+   * (only email_message_id, email_folder and email_uid), and threading does not need one —
+   * emailSync looks an incoming reply's In-Reply-To up against this column, so the id we write
+   * here is the whole of the mechanism.
+   */
+  messageId: string | null
+  actor: { id: string | null; name: string | null }
+}): Promise<void> {
+  const { error } = await supabase.from('activities').insert({
+    type: 'Email',
+    user_id: input.actor.id,
+    lead_id: input.to.kind === 'lead' ? input.to.id : null,
+    deal_id: input.to.kind === 'deal' ? input.to.id : null,
+    company_id: input.to.kind === 'client' ? input.to.id : null,
+    contact_id: input.to.kind === 'contact' ? input.to.id : null,
+    subject: input.subject,
+    notes: input.body,
+    activity_date: new Date().toISOString(),
+    email_message_id: input.messageId,
+    // We wrote it, so there is nobody waiting to read it.
+    is_read: true,
+  })
+  if (error) console.error('[userMail] the reply went, but the timeline entry failed:', error.message)
 }
 
 /**

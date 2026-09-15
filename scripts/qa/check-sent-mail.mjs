@@ -120,6 +120,136 @@ ok('the unmatch names the tab it actually lands in', /You will find it under \$\
 ok('...and knows junk goes to Junk', /mail\.isJunk \? 'Junk'/.test(page))
 ok('...and that settled mail does not go to the queue either', /mail\.noRecordAt \? 'No record needed'/.test(page))
 
+/* ---------- a sent message says who it went to ---------- */
+
+/*
+ * to_address and to_name were on the row, in MailRow, in MailItem and in toItem from the day the
+ * Sent folder was first synced — and nothing rendered them. Every Sent row read as being from the
+ * agent, to nobody, which is the one fact a sent message is actually about.
+ *
+ * The same shape as the mapper bug CLAUDE.md describes, one level further up: present in the
+ * database, present in the type, present in the mapper, absent from the screen. Nothing failed.
+ */
+ok('the summary picks the recipient on a sent message', /mail\.isSent \? mail\.toName : mail\.fromName/.test(page))
+ok('...and their address with it', /mail\.isSent \? mail\.toAddress : mail\.fromAddress/.test(page))
+// Without the word, a recipient sitting in the sender's position is simply read as the sender.
+ok('...and labels it To, so it cannot be mistaken for the sender', /isSent && <span[^>]*>To /.test(page))
+
+/*
+ * The Sent chip is tested BEFORE the no_record_at chip, and the order is the whole point: sent
+ * mail carries no_record_at only to stay out of the matching queue, so read in the other order
+ * every message the agent ever sent claimed somebody had ruled it belonged on nobody's file.
+ */
+{
+  const status = page.slice(page.indexOf('function MailStatus('), page.indexOf('function MailSummary('))
+  const sentAt = status.indexOf('mail.isSent ?')
+  const noRecordAt = status.indexOf('mail.noRecordAt ?')
+  // Presence before order. An order-only assertion passes vacuously the moment the branch it
+  // orders is deleted, because indexOf returns -1 — the trap CLAUDE.md names.
+  ok('the row has a Sent chip', sentAt !== -1)
+  ok('...and a No record needed chip', noRecordAt !== -1)
+  ok('...and Sent is decided first', sentAt !== -1 && noRecordAt !== -1 && sentAt < noRecordAt)
+}
+
+/* ---------- and can be found by who it went to ---------- */
+
+{
+  /*
+   * Sliced to the function's own closing brace, not to whatever happened to follow it. The first
+   * version of this cut at `export async function countUnread` — a function this same change had
+   * just deleted — so indexOf returned -1, the slice came back EMPTY, and all three assertions
+   * below failed for a reason that had nothing to do with the code under test. An empty slice is
+   * just as capable of passing vacuously, which is why the length check comes first.
+   */
+  const scopeAt = mail.indexOf('function scope<Q>')
+  const scopeBody = scopeAt === -1 ? '' : mail.slice(scopeAt, mail.indexOf('\n}\n', scopeAt))
+  ok('scope() was found and has a body to read', scopeBody.length > 100)
+  ok('the Sent tab searches the recipient', /to_address\.ilike/.test(scopeBody))
+  ok('...and their name', /to_name\.ilike/.test(scopeBody))
+  /*
+   * Only on the Sent tab. The sync records to_address on EVERY message, incoming ones included,
+   * where it holds the firm's own address — searched everywhere, the firm's address would match
+   * every message in the mailbox.
+   */
+  ok('...but only there', /input\.filter === 'sent'[\s\S]{0,200}to_address\.ilike/.test(scopeBody))
+}
+
+/* ---------- a sent message can never be matched, and so never charged item 6 ---------- */
+
+/*
+ * THE MONEY BUG THIS FILE OPENS BY DESCRIBING, arriving through the other door.
+ *
+ * The sync is careful: sent mail gets a mailbox row and leaves before anything can charge it,
+ * because item 6 is "correspondence RECEIVED" and the message was already charged R25 under item
+ * 1(a) on its way out. Then the mailbox drew a gold "Match" button on every unfiled row — sent
+ * ones included — and matching goes straight to fileOnAccount, which raises item 6. One click
+ * billed the debtor R13 for the firm's own letter, filed it on their account as direction 'in'
+ * with the agent's address recorded as the debtor's, and wrote "Email from <the agent>" on their
+ * timeline.
+ *
+ * Guarded in two places, and both are checked, because the button is a courtesy and the claim is
+ * the rule.
+ */
+ok('the mailbox does not offer Match on a message you sent',
+  /!mail\.isFiled && !mail\.isSent && \(/.test(page))
+
+for (const fn of ['linkMailToAccount', 'linkMailToRecord']) {
+  const body = bodyOf(fn)
+  ok(`${fn} was found and has a body to read`, body.length > 100)
+  // In the CLAIM, so a crafted request is refused by the same conditional update that makes the
+  // fee happen once — not by an early return somebody can forget to keep.
+  ok(`${fn} refuses a sent message`, /\.eq\('is_sent', false\)/.test(body))
+}
+
+// And says which of the two it is. "Already filed" would send somebody hunting for a match that
+// was never there.
+ok('the refusal says it is a message you sent', /message you sent/.test(mail))
+
+/* ---------- a reply to a lead is actually written down ---------- */
+
+/*
+ * It said "Reply sent and logged on Acme" and logged nothing. ComposeEmailModal sends and does no
+ * more, and only the debtor branch recorded anything — so every reply the sales side sent from
+ * the mailbox was lost, by a page that said it had kept it.
+ */
+ok('there is a way to record a sent reply on a CRM record', /export async function recordSentToRecord/.test(mail))
+ok('...and the mailbox calls it', /recordSentToRecord\(\{/.test(page))
+ok('...writing it to the record\'s timeline', /from\('activities'\)\.insert/.test(mail))
+
+/*
+ * NOTHING IS CHARGED on that path, and this is the assertion worth having. Annexure B is the
+ * tariff for collecting a debt; a lead answering a quotation owes the firm nothing. A chargeItem
+ * call reaching this function would put an Annexure B fee on somebody who has no account.
+ */
+/** One function's source, from its declaration to its closing brace at column nought. */
+function bodyOf(name) {
+  const at = mail.indexOf(`export async function ${name}`)
+  if (at === -1) return ''
+  const rest = mail.slice(at)
+  const end = rest.indexOf('\n}\n')
+  return end === -1 ? '' : rest.slice(0, end)
+}
+
+/*
+ * BOTH CRM paths, not just the new one.
+ *
+ * linkMailToRecord (a message coming in) and recordSentToRecord (a reply going out) are the two
+ * halves of the same rule, and testing only the half just written would leave the other free to
+ * grow a fee. They came within one edit of being the same function, which is exactly how the
+ * rule gets lost.
+ */
+for (const fn of ['linkMailToRecord', 'recordSentToRecord']) {
+  const body = bodyOf(fn)
+  // Presence first: an empty slice would satisfy every "does not contain chargeItem" below by
+  // containing nothing whatever.
+  ok(`${fn} was found and has a body to read`, body.length > 100)
+  check(`${fn} raises no fee`, /chargeItem/.test(body), false)
+}
+
+// The id we send is what lets THEIR reply thread back onto this record. See emailSync.
+ok('a sent reply records its message id, so the answer can thread back',
+  /email_message_id/.test(bodyOf('recordSentToRecord')))
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')
