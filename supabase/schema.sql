@@ -2575,3 +2575,53 @@ create index if not exists debtor_accounts_bucket_idx
 -- them would miss exactly the accounts the filter exists to find.
 create index if not exists debtor_accounts_last_action_idx
   on public.debtor_accounts (last_action_at);
+
+-- Does the billed rate disagree with the signed mandate?
+--
+-- A stored column rather than a comparison in the browser. PostgREST cannot compare two columns
+-- to each other, so this filter used to run over the fifty rows already fetched -- which gave a
+-- list of four accounts under a pager that still read "1-50 of 736", because the count came back
+-- before the filter ran. A number that confident and that wrong is worse than no number.
+--
+-- Rounded to four decimals on both sides: the rates are numerics carried from two systems, and
+-- 0.12 against 0.120000001 is not a disagreement anybody would act on.
+--
+-- Null-safe by omission: an account with no rate, or no mandate to compare against, is not in
+-- drift. It is unpriced, which is a different problem with a different conversation attached.
+alter table public.debtor_accounts
+  add column if not exists commission_drift boolean
+  generated always as (
+    commission_rate is not null
+    and commission_rate_expected is not null
+    and round(commission_rate, 4) <> round(commission_rate_expected, 4)
+  ) stored;
+
+create index if not exists debtor_accounts_commission_drift_idx
+  on public.debtor_accounts (company_id) where commission_drift;
+
+-- The four headline figures, counted in the database.
+--
+-- These used to be computed in the browser, which meant downloading every row in the book on
+-- every open of the account list to produce four numbers. At 736 accounts that is unremarkable;
+-- at the six figures this table is built for it is several megabytes across the Atlantic before
+-- the first account appears, and then thrown away.
+--
+-- security invoker, so the figures describe the accounts the caller may actually see. A summary
+-- that counts rows its reader is not allowed to open would be a quiet disclosure.
+create or replace function public.book_summary(p_company uuid default null)
+returns table (accounts integer, capital numeric, clients integer, commission_drift integer)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    count(*)::integer,
+    coalesce(sum(capital_handed_over), 0),
+    count(distinct company_id)::integer,
+    count(*) filter (where commission_drift)::integer
+  from public.debtor_accounts
+  where p_company is null or company_id = p_company;
+$$;
+
+grant execute on function public.book_summary(uuid) to authenticated;

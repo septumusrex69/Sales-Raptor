@@ -203,12 +203,25 @@ for (const clause of [
 ]) ok(`${clause} is sent to the database`, book.includes(clause))
 
 /*
- * The one exception, and it is marked as one: PostgREST cannot compare two columns to each
- * other, so commission drift is the only filter done in the browser. Everything else being in
- * SQL is what makes that acceptable — it runs over a page, and the page is already the answer.
+ * NOTHING IS FILTERED IN THE BROWSER, including commission drift — which used to be, because
+ * PostgREST cannot compare two columns to each other. That exception produced a list of four
+ * accounts under a pager that still read "1-50 of 736": the count came back before the filter
+ * ran, and a number that confident and that wrong is worse than no number. It is a stored
+ * generated column now.
  */
-ok('commission drift is the only client-side filter',
-  /PostgREST cannot compare two columns/.test(book))
+ok('drift is a database filter', /commission_drift', true\)/.test(book))
+ok('...with no second definition in the browser',
+  !/Math\.round\(a\.commissionRate \* 10000\)/.test(book))
+ok('...read straight off the column', /return a\.commissionDrift/.test(book))
+ok('nothing is filtered after fetching', !/accounts\.filter\(hasCommissionDrift\)/.test(book))
+
+/*
+ * ONE CLAUSE BUILDER, because two things ask "which accounts": the list, and a bulk action about
+ * to change them. Written twice they drift, and the failure is not a wrong list — it is
+ * allocating accounts nobody saw.
+ */
+ok('the clauses live in one function', /export function applyAccountFilters/.test(book))
+ok('the list goes through it', /const query = applyAccountFilters\(/.test(book))
 
 /* ---------- the mapper carries the columns the filters rely on ---------- */
 

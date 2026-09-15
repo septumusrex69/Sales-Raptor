@@ -31,6 +31,8 @@ export interface DebtorAccount {
   commissionRate: number | null
   commissionRateExpected: number | null
   commissionRateSource: string | null
+  /** The billed rate disagrees with the signed mandate. Computed in the database. */
+  commissionDrift: boolean
   interestRateAnnual: number
   prescribed: boolean
   prescriptionDate: string | null
@@ -91,6 +93,7 @@ const toAccount = (r: any): DebtorAccount => ({
   commissionRate: r.commission_rate === null ? null : Number(r.commission_rate),
   commissionRateExpected: r.commission_rate_expected === null ? null : Number(r.commission_rate_expected),
   commissionRateSource: r.commission_rate_source,
+  commissionDrift: !!r.commission_drift,
   interestRateAnnual: Number(r.interest_rate_annual ?? 0),
   prescribed: !!r.prescribed,
   prescriptionDate: r.prescription_date,
@@ -199,71 +202,117 @@ export interface AccountPage {
   total: number
 }
 
-export async function fetchAccounts(q: AccountQuery = {}): Promise<AccountPage> {
-  const pageSize = q.pageSize ?? 50
-  const page = q.page ?? 0
-  let query = supabase
-    .from('debtor_accounts')
-    // count: 'exact' is what lets the list say "1 to 50 of 735" rather than "50 shown", which is
-    // the difference between a person trusting the page and wondering what is missing.
-    .select('*', { count: 'exact' })
-    .order('account_number')
-    .range(page * pageSize, page * pageSize + pageSize - 1)
+/* eslint-disable @typescript-eslint/no-explicit-any -- the builder is generic over PostgREST's
+   select and update builders, which do not share a public type. */
+/**
+ * An AccountQuery, as clauses.
+ *
+ * ONE PLACE, because two things ask this question and they must not get different answers. The
+ * list asks "which accounts", and a bulk action asks "which accounts am I about to change".
+ * Written twice, those drift, and the failure is not a wrong list — it is allocating two hundred
+ * accounts somebody never saw.
+ *
+ * Everything here is applied in the database. This table reaches six figures and a filter that
+ * loads the book to count it is a filter that stops working the month it matters.
+ */
+export function applyAccountFilters<T>(query: T, q: AccountQuery): T {
+  let out = query as any
 
-  if (q.companyId) query = query.eq('company_id', q.companyId)
-  if (q.status) query = query.eq('status', q.status)
+  if (q.companyId) out = out.eq('company_id', q.companyId)
+  if (q.status) out = out.eq('status', q.status)
   /*
    * Prefix matching, not a list of the five values seen today. The import writes whatever
    * Swordfish sends, so 'Active: Reinstated' can arrive tomorrow and would silently fall out of
    * the live book if this were an `in` against values counted this afternoon.
    */
-  if (q.statusGroup === 'active') query = query.ilike('status', 'Active%')
-  else if (q.statusGroup === 'frozen') query = query.ilike('status', 'Frozen%')
-  else if (q.statusGroup === 'closed') query = query.or('status.ilike.Written-off%,status.ilike.Closed%')
-  if (q.subStatus) query = query.eq('sub_status', q.subStatus)
-  if (q.bucket) query = query.eq('bucket', q.bucket)
-  if (q.assignedTo === 'nobody') query = query.is('assigned_to', null)
-  else if (q.assignedTo) query = query.eq('assigned_to', q.assignedTo)
+  if (q.statusGroup === 'active') out = out.ilike('status', 'Active%')
+  else if (q.statusGroup === 'frozen') out = out.ilike('status', 'Frozen%')
+  else if (q.statusGroup === 'closed') out = out.or('status.ilike.Written-off%,status.ilike.Closed%')
 
-  if (q.handedOverFrom) query = query.gte('handover_date', q.handedOverFrom)
-  if (q.handedOverTo) query = query.lte('handover_date', q.handedOverTo)
+  if (q.subStatus) out = out.eq('sub_status', q.subStatus)
+  if (q.bucket) out = out.eq('bucket', q.bucket)
+  if (q.assignedTo === 'nobody') out = out.is('assigned_to', null)
+  else if (q.assignedTo) out = out.eq('assigned_to', q.assignedTo)
+
+  if (q.handedOverFrom) out = out.gte('handover_date', q.handedOverFrom)
+  if (q.handedOverTo) out = out.lte('handover_date', q.handedOverTo)
 
   /*
    * ADRIFT. Active and nobody booked to ring it — the hole the whole diary design exists to
    * close, and the one filter here that is about the firm rather than the debtor.
    */
-  if (q.adrift) query = query.is('diary_date', null).ilike('status', 'Active%')
-  if (q.neverWorked) query = query.is('last_action_at', null)
+  if (q.adrift) out = out.is('diary_date', null).ilike('status', 'Active%')
+  if (q.neverWorked) out = out.is('last_action_at', null)
   /*
    * QUIET. Nothing logged since the date given — and an account never worked at all is the
    * quietest of the lot, so a null counts rather than being filtered out. Without the `or` it
    * would silently exclude exactly the accounts most worth finding.
    */
-  if (q.quietSince) query = query.or(`last_action_at.lt.${q.quietSince},last_action_at.is.null`)
+  if (q.quietSince) out = out.or(`last_action_at.lt.${q.quietSince},last_action_at.is.null`)
 
   // Already prescribed is not "about to": it has happened, and it is a different conversation.
-  if (q.prescribingBefore) query = query.lte('prescription_date', q.prescribingBefore).eq('prescribed', false)
-  if (q.inDuplum) query = query.eq('in_duplum', true)
-  if (q.waitingOnClient) query = query.not('client_action_ask', 'is', null)
-  if (q.minOutstanding !== undefined) query = query.gte('capital_outstanding', q.minOutstanding)
+  if (q.prescribingBefore) out = out.lte('prescription_date', q.prescribingBefore).eq('prescribed', false)
+  if (q.inDuplum) out = out.eq('in_duplum', true)
+  if (q.waitingOnClient) out = out.not('client_action_ask', 'is', null)
+  if (q.minOutstanding !== undefined) out = out.gte('capital_outstanding', q.minOutstanding)
+  /*
+   * Drift is a stored generated column now, so it narrows in SQL like everything else. It used
+   * to be a .filter() over the page already fetched, which gave a list of four accounts under a
+   * pager that still read "1–50 of 736" — the count came back before the filter ran.
+   */
+  if (q.commissionDriftOnly) out = out.eq('commission_drift', true)
 
   if (q.search?.trim()) {
+    // % and , are PostgREST's own syntax inside an `or`, so a surname containing either would
+    // otherwise be read as a pattern or a second clause rather than as a name.
     const s = q.search.trim().replace(/[%,]/g, '')
-    query = query.or(`account_number.ilike.%${s}%,client_reference.ilike.%${s}%,debtor_surname.ilike.%${s}%`)
+    out = out.or(`account_number.ilike.%${s}%,client_reference.ilike.%${s}%,debtor_surname.ilike.%${s}%`)
   }
+
+  return out as T
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+export async function fetchAccounts(q: AccountQuery = {}): Promise<AccountPage> {
+  const pageSize = q.pageSize ?? 50
+  const page = q.page ?? 0
+  const query = applyAccountFilters(
+    supabase
+      .from('debtor_accounts')
+      // count: 'exact' is what lets the list say "1 to 50 of 735" rather than "50 shown", which
+      // is the difference between a person trusting the page and wondering what is missing.
+      .select('*', { count: 'exact' })
+      .order('account_number')
+      .range(page * pageSize, page * pageSize + pageSize - 1),
+    q,
+  )
 
   const { data, error, count } = await query
   if (error) throw new Error(error.message)
-  let accounts = (data ?? []).map(toAccount)
-  // Filtered here rather than in SQL: PostgREST cannot compare two columns to each other, and a
-  // database view for one screen's filter is more machinery than the question is worth.
-  if (q.commissionDriftOnly) accounts = accounts.filter(hasCommissionDrift)
+  const accounts = (data ?? []).map(toAccount)
   return { accounts, total: count ?? accounts.length }
 }
 
+/** How many accounts a filter actually matches. What a bulk action has to name before it runs. */
+export async function countAccounts(q: AccountQuery): Promise<number> {
+  const { count, error } = await applyAccountFilters(
+    supabase.from('debtor_accounts').select('id', { count: 'exact', head: true }),
+    q,
+  )
+  if (error) throw new Error(error.message)
+  return count ?? 0
+}
+
+/**
+ * Does the billed rate disagree with the signed mandate?
+ *
+ * Reads the stored column rather than recomputing. The database rounds to four decimals on both
+ * sides and treats a missing rate as "unpriced" rather than "in drift" — a second definition
+ * here would eventually disagree with the filter and the summary, and the screen would show a
+ * warning triangle on a row the filter refuses to return.
+ */
 export function hasCommissionDrift(a: DebtorAccount): boolean {
-  if (a.commissionRate === null || a.commissionRateExpected === null) return false
-  return Math.round(a.commissionRate * 10000) !== Math.round(a.commissionRateExpected * 10000)
+  return a.commissionDrift
 }
 
 export async function fetchAccount(id: string): Promise<DebtorAccount | null> {
@@ -406,30 +455,18 @@ export interface BookSummary {
 
 /** Headline figures for a client, or for the whole book when no client is given. */
 export async function fetchBookSummary(companyId?: string): Promise<BookSummary> {
-  let q = supabase.from('debtor_accounts').select('capital_handed_over,commission_rate,commission_rate_expected,company_id')
-  if (companyId) q = q.eq('company_id', companyId)
-  const { data, error } = await q
+  const { data, error } = await supabase.rpc('book_summary', { p_company: companyId ?? null })
   if (error) throw new Error(error.message)
-  /* eslint-disable @typescript-eslint/no-explicit-any */
-  const rows = (data ?? []) as any[]
+  const row = (Array.isArray(data) ? data[0] : data) as
+    { accounts: number; capital: number; clients: number; commission_drift: number } | undefined
   return {
-    accounts: rows.length,
-    capital: rows.reduce((t, r) => t + Number(r.capital_handed_over ?? 0), 0),
-    clients: new Set(rows.map((r) => r.company_id)).size,
-    commissionDrift: rows.filter((r) =>
-      r.commission_rate !== null && r.commission_rate_expected !== null
-      && Math.round(Number(r.commission_rate) * 10000) !== Math.round(Number(r.commission_rate_expected) * 10000)).length,
+    accounts: Number(row?.accounts ?? 0),
+    capital: Number(row?.capital ?? 0),
+    clients: Number(row?.clients ?? 0),
+    commissionDrift: Number(row?.commission_drift ?? 0),
   }
 }
 
-/**
- * Open an account by hand.
- *
- * The one write in this file. Everything else here reads: the ledgers are the collections
- * engine's to fill, and the import writes the book. But an account phoned in by a client has no
- * file behind it and no import to wait for, so it is created here — and only ever created. Once
- * it exists it is worked like any other, and its ledgers fill the same way.
- */
 export async function createDebtorAccount(
   row: Record<string, unknown>,
   contacts: (accountId: string) => Record<string, unknown>[] = () => [],
