@@ -303,14 +303,6 @@ export async function diarise(input: {
   queryId?: string | null
   /** Also write the note onto the account's timeline. Off for system-generated bookings. */
   alsoNoteOnAccount?: boolean
-  /**
-   * An open entry to leave alone while superseding the rest.
-   *
-   * Passed by workEntry with the entry it is in the middle of working: that one is about to be
-   * closed properly as `done`, carrying the agent's outcome, and marking it `moved` here would
-   * both lose the outcome and put it beyond protect_closed_diary_entries' reach to fix.
-   */
-  supersedeExcept?: string | null
   actor: Actor
 }): Promise<DiaryEntry> {
   /*
@@ -325,13 +317,16 @@ export async function diarise(input: {
    * original keeps the date it was always due so "this was booked for the 7th and nobody worked
    * it" survives as a fact.
    */
-  let superseding = supabase
+  /*
+   * EVERY open entry, with nothing spared. There was once an escape hatch for the entry a caller
+   * was in the middle of closing itself — and it was the bug: the caller's entry stayed open,
+   * the insert below made a second, and the unique index refused it. Callers close first now.
+   */
+  const { error: supersedeError } = await supabase
     .from('diary_entries')
     .update({ state: 'moved', moved_at: new Date().toISOString(), moved_by: input.actor.id })
     .eq('account_id', input.accountId)
     .eq('state', 'open')
-  if (input.supersedeExcept) superseding = superseding.neq('id', input.supersedeExcept)
-  const { error: supersedeError } = await superseding
   if (supersedeError) throw new Error(supersedeError.message)
 
   const { data, error } = await supabase.from('diary_entries').insert({
@@ -425,26 +420,33 @@ export async function moveEntry(input: {
     kind: input.entry.kind,
     reason: input.entry.reason,
     source: input.entry.source,
-    // Closed just below, with where it went and why. See supersedeExcept.
-    supersedeExcept: input.entry.id,
+    /*
+     * NOTHING IS SPARED. diarise() supersedes the original on the way past, marking it `moved`
+     * with who and when — which is what makes room for the replacement, because an account may
+     * hold only one open entry. Sparing it, as this used to, left two open at once and the index
+     * refused the insert outright.
+     */
     promiseId: null,
     queryId: null,
     alsoNoteOnAccount: input.alsoNoteOnAccount,
     actor: input.actor,
   })
 
+  /*
+   * The original is already `moved`. What is left is where it went and why — and those two
+   * columns can still be written because protect_closed_diary_entries preserves account, owner,
+   * date, kind, state, source and the done/moved stamps on a closed row, and deliberately not
+   * moved_to or moved_reason. That exclusion is the only reason the audit trail can be completed
+   * after the fact; do not add them to the trigger.
+   */
   const { error } = await supabase.from('diary_entries').update({
-    state: 'moved',
-    moved_at: new Date().toISOString(),
-    moved_by: input.actor.id,
     moved_reason: input.reason?.trim() || null,
     moved_to: replacement.id,
-  }).eq('id', input.entry.id).eq('state', 'open')
+  }).eq('id', input.entry.id)
   if (error) {
-    // The replacement exists and the original does not know about it: two open entries on one
-    // account is a duplicate in somebody's day, which is visible and fixable. Saying the move
-    // failed while the new entry sits there would be worse.
-    throw new Error(`Moved to ${input.dueOn}, but the original entry could not be closed: ${error.message}`)
+    // The move HAPPENED — the old entry is closed and the new one exists. Only the link between
+    // them is missing, so say that rather than implying the work did not move.
+    throw new Error(`Moved to ${input.dueOn}, but the trail linking the old entry to the new one could not be written: ${error.message}`)
   }
   return replacement
 }
@@ -537,10 +539,22 @@ export function exitLabel(id: CirculationExit): string {
  * this whole design exists to prevent, and leaving it to two buttons in a modal means that one
  * day somebody presses the first and is interrupted.
  *
- * The next entry is written BEFORE this one closes. If the second write fails the account is
- * double-booked, which somebody sees and fixes in ten seconds. In the other order a failure
- * leaves the account in nobody's diary with nothing to say it should have been — invisible,
- * and permanent.
+ * THIS ONE CLOSES BEFORE THE NEXT IS WRITTEN, and it used to be the other way round.
+ *
+ * The old order booked the replacement first, on the reasoning that a failure would leave the
+ * account double-booked — visible, and fixed in ten seconds — where closing first risked leaving
+ * it in nobody's diary, invisible and permanent. That was right at the time. Two things have
+ * since made it wrong:
+ *
+ *   - An account may not hold two open entries. The partial unique index refuses the second, so
+ *     the old order does not merely risk a double booking, it CANNOT COMPLETE: working an entry
+ *     and booking the next threw a constraint violation at the agent every time.
+ *   - "In nobody's diary" stopped being invisible. The No diary date view counts exactly this,
+ *     on the accounts screen, live.
+ *
+ * So the risk the old order was avoiding is now the one that is caught, and the risk it accepted
+ * is now the one that is impossible. If the booking fails after the close, the work is saved,
+ * the account lands in No diary date, and the agent is told in those words.
  */
 export async function workEntry(input: {
   entry: DiaryEntry
@@ -562,21 +576,9 @@ export async function workEntry(input: {
 }): Promise<void> {
   const said = input.outcome?.trim() ?? ''
 
-  if (input.next.comesBack) {
-    await diarise({
-      accountId: input.entry.accountId,
-      // Stays with whoever holds it. One person does not move work into another person's diary.
-      ownerId: input.entry.ownerId,
-      dueOn: input.next.dueOn,
-      kind: input.next.kind,
-      reason: said || null,
-      // This one is closed as `done` below, with the agent's outcome on it. See supersedeExcept.
-      supersedeExcept: input.entry.id,
-      // Written here instead, as one sentence covering both halves — see below.
-      alsoNoteOnAccount: false,
-      actor: input.actor,
-    })
-  }
+  // Closed first, as `done`, carrying the agent's outcome. Until this lands the account still
+  // holds an open entry, and the index would refuse the replacement.
+  await completeEntry({ id: input.entry.id, outcome: said || null, actor: input.actor })
 
   /*
    * ONE note on the account's timeline, saying what happened and what happens next.
@@ -603,7 +605,31 @@ export async function workEntry(input: {
     // Deliberately swallowed — see above.
   }
 
-  await completeEntry({ id: input.entry.id, outcome: said || null, actor: input.actor })
+  if (input.next.comesBack) {
+    try {
+      await diarise({
+        accountId: input.entry.accountId,
+        // Stays with whoever holds it. One person does not move work into another person's diary.
+        ownerId: input.entry.ownerId,
+        dueOn: input.next.dueOn,
+        kind: input.next.kind,
+        reason: said || null,
+        // The note above covers both halves in one sentence; a second would read as two events.
+        alsoNoteOnAccount: false,
+        actor: input.actor,
+      })
+    } catch (e) {
+      /*
+       * The work is already saved. Say precisely what did and did not happen, and where the
+       * account has gone — "failed" on its own would have an agent redo a call they have made.
+       */
+      throw new Error(
+        `The work was saved, but ${input.next.dueOn} could not be booked: `
+        + `${e instanceof Error ? e.message : String(e)}. `
+        + 'The account is now under No diary date on the accounts screen.',
+      )
+    }
+  }
 }
 
 /**
