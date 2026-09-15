@@ -93,6 +93,51 @@ export function replySubject(subject: string | null): string {
 }
 
 /**
+ * The subject of a forwarded message.
+ *
+ * Idempotent like replySubject, and for the same reason: a message passed along twice should not
+ * arrive as "Fwd: Fwd:". "Re:" is deliberately left alone — forwarding a reply is still a
+ * forward of that reply, and stripping it would lose which turn of the thread was passed on.
+ */
+export function forwardSubject(subject: string | null): string {
+  const clean = (subject ?? '').trim()
+  if (!clean) return 'Fwd:'
+  return /^fwd:/i.test(clean) ? clean : `Fwd: ${clean}`
+}
+
+/**
+ * The original, quoted under a forward.
+ *
+ * Headers first, because a forward without them is a wall of text nobody can place — who sent
+ * it, when, and what it said it was about are the whole reason it is being passed on.
+ *
+ * Plain text and plainly marked. The mailbox holds a snippet rather than the full body, so where
+ * only the snippet is available this says so instead of quietly sending a truncated message and
+ * letting the recipient assume that was all of it.
+ */
+export function forwardBody(
+  original: { fromName: string | null; fromAddress: string; subject: string | null; occurredAt: string },
+  body: string,
+  /** False where only the stored snippet was available. */
+  complete = true,
+): string {
+  const who = original.fromName?.trim() || original.fromAddress
+  const when = new Intl.DateTimeFormat('en-ZA', {
+    day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  }).format(new Date(original.occurredAt))
+  return [
+    '',
+    '---------- Forwarded message ----------',
+    `From: ${who} <${original.fromAddress}>`,
+    `Date: ${when}`,
+    `Subject: ${(original.subject ?? '').trim() || '(no subject)'}`,
+    '',
+    body.trim(),
+    complete ? '' : '\n[Only the stored preview of this message was available.]',
+  ].join('\n')
+}
+
+/**
  * Every Message-ID a reply names, newest first.
  *
  * In-Reply-To is the direct parent and is checked first. References is checked as well because

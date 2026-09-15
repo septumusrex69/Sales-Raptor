@@ -38,6 +38,11 @@ import {
 export interface MailItem {
   id: string
   folder: string
+  /** Pulled from the Sent folder. Never filed on a record and never charged. */
+  isSent: boolean
+  /** Who it went to. The useful address on a sent message, where From is always us. */
+  toAddress: string | null
+  toName: string | null
   uid: number
   messageId: string | null
   fromAddress: string
@@ -84,6 +89,9 @@ export interface LinkedRecord {
 interface MailRow {
   id: string
   folder: string
+  is_sent: boolean | null
+  to_address: string | null
+  to_name: string | null
   uid: number
   message_id: string | null
   from_address: string
@@ -129,7 +137,7 @@ interface MailRow {
  * be spelled out the same way.
  */
 const COLUMNS = `
-  id, folder, uid, message_id, from_address, from_name, subject, snippet,
+  id, folder, is_sent, to_address, to_name, uid, message_id, from_address, from_name, subject, snippet,
   attachment_names, is_junk, occurred_at, read_at, is_filed, is_settled, no_record_at,
   linked_account_id, linked_lead_id, linked_deal_id, linked_company_id, linked_contact_id,
   debtor_accounts!user_emails_linked_account_id_fkey ( account_number, debtor_first_name, debtor_surname ),
@@ -190,6 +198,9 @@ function toItem(r: MailRow): MailItem {
   return {
     id: r.id,
     folder: r.folder,
+    isSent: !!r.is_sent,
+    toAddress: r.to_address ?? null,
+    toName: r.to_name ?? null,
     uid: r.uid,
     messageId: r.message_id,
     fromAddress: r.from_address,
@@ -208,7 +219,7 @@ function toItem(r: MailRow): MailItem {
   }
 }
 
-export type MailFilter = 'needs-filing' | 'filed' | 'no-record' | 'junk' | 'all'
+export type MailFilter = 'needs-filing' | 'filed' | 'no-record' | 'junk' | 'sent' | 'all'
 
 /**
  * A page of the mailbox.
@@ -253,7 +264,16 @@ function scope<Q>(q: Q, input: MailScope): Q {
    * dealt with, and a queue that keeps showing what you have already dealt with is a queue
    * nobody reads. See the generated column in schema.sql.
    */
-  if (input.filter === 'needs-filing') out = out.eq('is_settled', false).eq('is_junk', false)
+  if (input.filter === 'needs-filing') out = out.eq('is_settled', false).eq('is_junk', false).eq('is_sent', false)
+  /*
+   * WHAT WE SENT, including from Outlook or a phone — the Sent folder is synced, so this is the
+   * whole of it rather than only what Raptor sent itself.
+   *
+   * Its own tab and in no other. Sent mail is not waiting to be matched, is not junk, and is not
+   * part of the incoming working list; a Sent folder emptied into "All" is two thousand messages
+   * nobody is looking for on top of the ones they are.
+   */
+  else if (input.filter === 'sent') out = out.eq('is_sent', true)
   // Matched means ON A RECORD, and only that. No-record mail has its own tab: putting it here
   // would have the Matched list claiming a supplier is on somebody's file.
   else if (input.filter === 'filed') out = out.eq('is_filed', true)
@@ -274,7 +294,7 @@ function scope<Q>(q: Q, input: MailScope): Q {
    * Without that, a debtor's reply the mail server misfiled as spam would be rescued onto an
    * account and then vanish from All anyway.
    */
-  else if (input.filter === 'all') out = out.eq('is_junk', false)
+  else if (input.filter === 'all') out = out.eq('is_junk', false).eq('is_sent', false)
 
   /*
    * Unread NARROWS whichever tab you are on rather than being a sixth tab of its own.
