@@ -1,46 +1,37 @@
+import { ARRANGEMENT_LABEL, type Arrangement } from './arrangements.ts'
+import type { DiaryKind } from './diaryPriority.ts'
+
 /**
- * What is happening on this account, in a sentence a client can read.
+ * What is happening on this account, in sentences a client can read.
+ *
+ * TWO SENTENCES, NOT ONE, at the firm's instruction. What HAPPENED and what we will DO next are
+ * different facts and a client reads them differently: the first is the firm showing its work,
+ * the second is the firm making a commitment. Run together they blur, and the commitment — the
+ * half a client actually checks you against — gets lost at the end of a longer sentence.
  *
  * COMPOSED FROM RECORDS, NEVER FROM AN AGENT'S NOTE. The firm asked whether the main comment
- * could go into client reporting and answered its own question in the same breath — "there's
- * going to be too many spelling mistakes". Spelling is the smaller half of the problem. An
- * agent's note is written for the next agent: "debtor avoiding, chancer, try the work number" is
- * useful internally and is not going to a client however it is spelled.
+ * could go into client reporting and answered its own question — "there's going to be too many
+ * spelling mistakes". Spelling is the smaller half: an agent's note is written for the next
+ * agent, and "debtor avoiding, chancer, try the work number" is not going to a client however it
+ * is spelled.
  *
- * So nothing here paraphrases anything. Every clause is built from a record that already exists
- * — a call, a promise, a payment, the diary — which means no spelling risk, no risk of a rewrite
- * changing what was meant, and the same shape on all four hundred accounts. It is also usually
- * more informative than the note would have been.
+ * So every clause is built from something already recorded — a promise with its own date and
+ * amount, a payment, a dispute, a trace, the diary entry that says what happens next. No
+ * spelling risk, no paraphrase risk, the same shape on four hundred accounts, and usually more
+ * informative than the note would have been.
  *
- *   "Contacted 14 Sept by phone. Debtor undertook to pay R2 000 by 25 Sept. Next follow-up 26 Sept."
- *   "Called 12 Sept — no answer. Third attempt this month. Next follow-up 18 Sept."
- *   "No contact attempted since 8 June."
+ * AND IT SAYS WHEN NOTHING HAS HAPPENED. A report that dressed the firm's own silence up as the
+ * debtor's would be the one dishonest thing in the document, and it is the easiest to write by
+ * accident.
  *
- * THAT LAST ONE IS THE POINT. When the firm has not worked an account, the sentence says so. A
- * report that dressed up its own silence as the debtor's would be the one dishonest thing in the
- * whole document, and it is the easiest to write by accident.
- *
- * Pure: every input is passed in, nothing is fetched, and `today` is an argument rather than a
- * clock — a report re-run in June must read exactly as it did in March.
+ * Pure: every input is passed in, nothing is fetched, and there is no clock. A report re-run in
+ * June must read exactly as it did in March.
  */
-/**
- * "14 Sep 2026", pinned to UTC.
- *
- * Written here rather than imported from the app's formatDate for two reasons. The report module
- * has no business dragging in the mock dataset; and formatDate parses a plain 'YYYY-MM-DD'
- * through the local clock, which puts a South African evening on the wrong day. A figure in a
- * client report has to read the same wherever it is rendered and whenever it is re-run.
- */
-function onDate(iso: string): string {
-  return new Intl.DateTimeFormat('en-ZA', {
-    day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC',
-  }).format(new Date(`${iso.slice(0, 10)}T00:00:00Z`))
-}
 
 export type ContactChannel = 'phone' | 'email' | 'sms' | 'letter' | 'whatsapp'
 
 const CHANNEL_WORD: Record<ContactChannel, string> = {
-  phone: 'by phone',
+  phone: 'by telephone',
   email: 'by email',
   sms: 'by SMS',
   letter: 'by letter',
@@ -48,83 +39,174 @@ const CHANNEL_WORD: Record<ContactChannel, string> = {
 }
 
 export interface NarrativeInput {
-  /** The last time we tried, whatever came of it. 'YYYY-MM-DD'. */
+  /** The last time the account was worked, whatever came of it. 'YYYY-MM-DD'. */
   lastAttemptOn?: string | null
   lastAttemptChannel?: ContactChannel | null
   /**
-   * Did the debtor respond to that attempt?
+   * Did the debtor respond?
    *
-   * THREE STATES, NOT TWO. true is contact made, false is a recorded non-answer, and
-   * undefined is "something was logged against this account and nobody recorded what came of
-   * it" — which is most of the imported book, where 8 calls are logged across 736 accounts and
-   * none of them records an answer. Collapsing undefined into false would put "no reply" in
-   * front of a client as a statement of fact about the debtor, when it is really a gap in ours.
+   * THREE STATES. true is contact made, false is a recorded non-answer, and undefined is
+   * "something was logged and nobody recorded what came of it" — which is most of the imported
+   * book, where 8 calls are logged across 736 accounts and none records an answer. Collapsing
+   * undefined into false puts "no reply" in front of a client as a statement about the DEBTOR,
+   * when it is really a gap in ours.
    */
   reached?: boolean | null
   /** Attempts made this period, for the "third attempt" clause. */
   attemptsThisPeriod?: number
-  /** An open promise: what they undertook to pay, and by when. */
-  promise?: { amount: number; dueOn: string } | null
+  /** The promise that matters: the open one, or the one most recently broken. */
+  promise?: {
+    amount: number
+    dueOn: string
+    /** When the debtor gave it. What turns "a promise exists" into "they promised on the 15th". */
+    takenOn?: string | null
+    status?: 'open' | 'broken' | 'kept'
+    /** Once-off, weekly or monthly. A recurring promise reads differently. */
+    arrangement?: Arrangement
+  } | null
   /** A payment received in the period. */
   paidInPeriod?: { amount: number; on: string } | null
-  /** The next date this account is booked to be worked. */
-  nextFollowUpOn?: string | null
+  /** When the debtor disputed the account. */
+  disputeRaisedOn?: string | null
+  /** When a trace went to the bureaus. */
+  traceLodgedOn?: string | null
+  /**
+   * What is booked next, from the diary entry itself.
+   *
+   * The KIND is what makes this worth saying. "We will follow up on the 22nd" is a date; "We
+   * will confirm the promised payment on 30 September" is a commitment a client can hold the
+   * firm to, and the diary already knows which of the two it is.
+   */
+  next?: { kind: DiaryKind; dueOn: string } | null
   /** Why work is stopped, where it is. */
   frozenReason?: string | null
+  frozenOn?: string | null
+}
+
+export interface ClientLine {
+  /** What took place. Empty only when nothing ever has. */
+  happened: string
+  /** What the firm will do next, and when. Empty when nothing is booked. */
+  next: string
 }
 
 const money = (v: number): string =>
   'R' + Math.round(v).toLocaleString('en-ZA').replace(/,/g, ' ')
 
 /**
- * The account's story, as sentences.
+ * "30 September 2026", pinned to UTC.
  *
- * Returns an empty string rather than a placeholder when there is genuinely nothing to say. A
- * report can then leave the cell blank, which reads as "nothing here" — where "No information
- * available" reads as a system that has lost something.
+ * Spelled out rather than "30 Sep": these sentences are prose in a formal document, and the year
+ * is carried because a client reading a March report about a promise "due 30 September" should
+ * not have to work out which September.
+ *
+ * Written here rather than imported from the app's formatDate, which parses a plain date through
+ * the local clock and puts a South African evening on the wrong day. A figure in a client report
+ * must read the same wherever it is rendered and whenever it is re-run.
  */
-export function accountNarrative(input: NarrativeInput): string {
-  const parts: string[] = []
+function onDate(iso: string): string {
+  return new Intl.DateTimeFormat('en-ZA', {
+    day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
+  }).format(new Date(`${iso.slice(0, 10)}T00:00:00Z`))
+}
 
+/* ---------- what happened ---------- */
+
+function whatHappened(input: NarrativeInput): string {
+  /*
+   * ONE SENTENCE, THE MOST MEANINGFUL ONE, in a deliberate order. A client reading four hundred
+   * of these wants the single thing that most describes where the account stands, not a diary
+   * transcript — and money outranks words, a broken promise outranks an intact one, and anything
+   * the debtor did outranks anything we merely attempted.
+   */
   if (input.frozenReason) {
-    // Said first and on its own: everything else is about work that is not happening.
-    parts.push(`Work is on hold — ${trimStop(input.frozenReason)}.`)
+    const when = input.frozenOn ? ` on ${onDate(input.frozenOn)}` : ''
+    return `Work was paused${when} — ${trimStop(input.frozenReason)}.`
   }
 
   if (input.paidInPeriod) {
-    parts.push(`Payment of ${money(input.paidInPeriod.amount)} received ${onDate(input.paidInPeriod.on)}.`)
+    return `A payment of ${money(input.paidInPeriod.amount)} was received on ${onDate(input.paidInPeriod.on)}.`
+  }
+
+  const p = input.promise
+  if (p) {
+    const recurring = p.arrangement && p.arrangement !== 'once_off'
+      ? ` (${ARRANGEMENT_LABEL[p.arrangement].toLowerCase()})`
+      : ''
+    if (p.status === 'broken') {
+      return `The promise to pay ${money(p.amount)} by ${onDate(p.dueOn)} was not kept.`
+    }
+    const taken = p.takenOn ? `On ${onDate(p.takenOn)} the debtor promised` : 'The debtor has promised'
+    return `${taken} to pay ${money(p.amount)}${recurring} by ${onDate(p.dueOn)}.`
+  }
+
+  if (input.disputeRaisedOn) {
+    return `The debtor disputed the account on ${onDate(input.disputeRaisedOn)}.`
+  }
+  if (input.traceLodgedOn) {
+    return `A trace was lodged with the credit bureaus on ${onDate(input.traceLodgedOn)}.`
   }
 
   if (input.lastAttemptOn) {
     const channel = input.lastAttemptChannel ? ` ${CHANNEL_WORD[input.lastAttemptChannel]}` : ''
     if (input.reached === true) {
-      parts.push(`Contacted ${onDate(input.lastAttemptOn)}${channel}.`)
-    } else if (input.reached === false) {
+      return `The debtor was contacted on ${onDate(input.lastAttemptOn)}${channel}.`
+    }
+    if (input.reached === false) {
       /*
-       * The attempt count only earns its place once there is more than one. "First attempt this
-       * month" beside a single call reads as an excuse; "Fourth attempt this month" is the
-       * firm showing its work.
+       * The attempt count earns its place only past the first. "First attempt this period" beside
+       * a single call reads as an excuse; "Fourth attempt this period" is the firm showing work.
        */
       const n = input.attemptsThisPeriod ?? 0
-      const nth = n > 1 ? ` ${ordinal(n)} attempt this period.` : ''
-      parts.push(`Tried ${onDate(input.lastAttemptOn)}${channel} — no reply.${nth}`)
-    } else {
-      // Something was done; what came of it was never recorded. Say only what is known.
-      parts.push(`Last worked ${onDate(input.lastAttemptOn)}${channel}.`)
+      const nth = n > 1 ? ` This was the ${ordinal(n).toLowerCase()} attempt this period.` : ''
+      return `Contact was attempted on ${onDate(input.lastAttemptOn)}${channel}, with no reply.${nth}`
     }
-  } else if (!input.frozenReason && !input.paidInPeriod) {
-    parts.push('No contact attempted.')
+    // Worked, and what came of it was never recorded. Say only what is known.
+    return `The account was worked on ${onDate(input.lastAttemptOn)}${channel}.`
   }
 
-  if (input.promise) {
-    parts.push(`Debtor undertook to pay ${money(input.promise.amount)} by ${onDate(input.promise.dueOn)}.`)
-  }
+  return 'No contact has been attempted yet.'
+}
 
-  if (input.nextFollowUpOn) {
-    parts.push(`Next follow-up ${onDate(input.nextFollowUpOn)}.`)
-  }
+/* ---------- what happens next ---------- */
 
-  return parts.join(' ')
+/**
+ * What the diary says will happen, in the client's terms.
+ *
+ * Keyed on the diary kind, which is the whole reason this is worth saying: the firm already
+ * records WHY an account is coming back, so the client can be told "we will confirm the promised
+ * payment" rather than the far weaker "we will follow up".
+ */
+const NEXT_BY_KIND: Record<DiaryKind, (on: string) => string> = {
+  promise_broken: (on) => `We will chase the broken promise on ${on}.`,
+  new_account: (on) => `We will make first contact with the debtor on ${on}.`,
+  promise_due: (on) => `We will confirm the promised payment on ${on}.`,
+  callback: (on) => `We will call the debtor back on ${on}, as arranged with them.`,
+  dispute_chase: (on) => `We will follow up the written dispute on ${on}.`,
+  no_contact: (on) => `We will try to reach the debtor again on ${on}.`,
+  trace: (on) => `We will follow up the trace result on ${on}.`,
+  review: (on) => `We will follow the account up on ${on}.`,
+}
+
+function whatNext(input: NarrativeInput): string {
+  /*
+   * A paused account has no next action and must not pretend to. What it has instead is a
+   * statement of who the ball is with, which is the more useful thing to put in front of a
+   * client looking at an account that has not moved in four months.
+   */
+  if (input.frozenReason) return 'Work stays paused until it is lifted.'
+  if (!input.next) return ''
+  return NEXT_BY_KIND[input.next.kind](onDate(input.next.dueOn))
+}
+
+export function clientLine(input: NarrativeInput): ClientLine {
+  return { happened: whatHappened(input), next: whatNext(input) }
+}
+
+/** Both sentences, joined. For anywhere that has room for one line and not two. */
+export function accountNarrative(input: NarrativeInput): string {
+  const { happened, next } = clientLine(input)
+  return [happened, next].filter(Boolean).join(' ')
 }
 
 /** "Fourth", up to the point where a numeral reads better than a word. */

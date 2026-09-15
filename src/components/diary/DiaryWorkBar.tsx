@@ -428,7 +428,7 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
 
         {/* Same question, same rules, same component as the day list's Done — see NextDiaryFields. */}
         {/* The client's own line, before the date is committed. See ClientLinePreview. */}
-        <ClientLinePreview account={entry.account} nextOn={plan.comesBack ? plan.dueOn : null} />
+        <ClientLinePreview account={entry.account} next={plan.comesBack ? { kind: plan.kind, dueOn: plan.dueOn } : null} />
 
         <NextDiaryFields
           plan={plan}
