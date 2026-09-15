@@ -2747,3 +2747,146 @@ as $$
 $$;
 
 grant execute on function public.diary_day_load(date, date) to authenticated;
+
+-- ---------- How every collector is doing over a period ----------
+--
+-- One call, every figure, aggregated in the database. Pulling payments, calls, emails, notes and
+-- promises into the browser to count them is several megabytes to produce a dozen numbers, on a
+-- book built for six figures.
+--
+-- MONEY FOLLOWS THE BOOK, WORK FOLLOWS THE PERSON. A payment is credited to whoever holds the
+-- account now: an EFT that lands overnight is "created by" nobody, and a debtor who pays after
+-- three months of chasing was collected by the person chasing, not by whoever opened the bank
+-- file. A call is an act by a person and is credited to whoever made it.
+--
+-- The known imperfection: an account changing desks mid-period takes its whole period's
+-- collections with it. Fixing that needs a history of who held what and when, which the book
+-- does not carry -- so it is a stated limitation rather than a silent one.
+--
+-- A PROMISE THAT HAS NOT COME DUE IS NEITHER KEPT NOR BROKEN. Three numbers rather than two, so
+-- the kept rate can be kept / (kept + broken) -- resolved only. Dividing by promises made would
+-- score an agent nought for a promise due next week and penalise whoever takes promises
+-- furthest out.
+create or replace function public.collector_performance(p_from timestamptz, p_to timestamptz)
+returns table (
+  user_id uuid,
+  in_play_accounts integer,
+  in_play_value numeric,
+  collected numeric,
+  payments integer,
+  calls integer,
+  calls_answered integer,
+  emails_sent integer,
+  sms_sent integer,
+  notes_written integer,
+  promises_made integer,
+  promises_kept integer,
+  promises_broken integer,
+  accounts_touched integer
+)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  with book as (
+    select assigned_to as uid,
+           count(*) filter (where status ilike 'Active%')::integer as in_play,
+           coalesce(sum(capital_outstanding) filter (where status ilike 'Active%'), 0) as value
+      from public.debtor_accounts
+     where assigned_to is not null
+     group by assigned_to
+  ),
+  -- Reversed payments are not collections. A debit order that bounced was never money, and
+  -- leaving it in would make somebody's best month the one where a payment failed.
+  paid as (
+    select d.assigned_to as uid,
+           coalesce(sum(p.amount), 0) as collected,
+           count(*)::integer as payments
+      from public.account_payments p
+      join public.debtor_accounts d on d.id = p.account_id
+     where d.assigned_to is not null
+       and p.reversed_at is null
+       and p.received_at >= p_from and p.received_at < p_to
+     group by d.assigned_to
+  ),
+  rang as (
+    select placed_by as uid,
+           count(*)::integer as calls,
+           count(*) filter (where answered_at is not null)::integer as answered
+      from public.account_calls
+     where placed_by is not null and placed_at >= p_from and placed_at < p_to
+     group by placed_by
+  ),
+  mailed as (
+    select sent_by as uid, count(*)::integer as emails
+      from public.account_emails
+     where sent_by is not null and direction = 'out'
+       and occurred_at >= p_from and occurred_at < p_to
+     group by sent_by
+  ),
+  texted as (
+    select created_by as uid, count(*)::integer as sms
+      from public.sms_messages
+     where created_by is not null and account_id is not null and direction = 'outbound'
+       and created_at >= p_from and created_at < p_to
+     group by created_by
+  ),
+  -- A person's own words only. Raptor composes system notes on every trace and freeze, and
+  -- counting those rewards whoever clicked the most buttons.
+  wrote as (
+    select created_by as uid, count(*)::integer as notes
+      from public.account_notes
+     where created_by is not null and source = 'manual'
+       and created_at >= p_from and created_at < p_to
+     group by created_by
+  ),
+  promised as (
+    select created_by as uid,
+           count(*)::integer as made,
+           count(*) filter (where status = 'kept')::integer as kept,
+           count(*) filter (where status = 'broken')::integer as broken
+      from public.promises_to_pay
+     where created_by is not null
+       and created_at >= p_from and created_at < p_to
+     group by created_by
+  ),
+  -- DISTINCT ACCOUNTS, not actions. 300 actions across 40 accounts and across 300 are very
+  -- different months, and only one of them is a book being worked.
+  touched as (
+    select uid, count(distinct account_id)::integer as accounts
+      from (
+        select placed_by as uid, account_id from public.account_calls
+         where placed_by is not null and placed_at >= p_from and placed_at < p_to
+        union all
+        select sent_by, account_id from public.account_emails
+         where sent_by is not null and direction = 'out'
+           and occurred_at >= p_from and occurred_at < p_to
+        union all
+        select created_by, account_id from public.account_notes
+         where created_by is not null and source = 'manual'
+           and created_at >= p_from and created_at < p_to
+      ) t
+     group by uid
+  )
+  select
+    pr.id, coalesce(b.in_play, 0), coalesce(b.value, 0),
+    coalesce(pd.collected, 0), coalesce(pd.payments, 0),
+    coalesce(r.calls, 0), coalesce(r.answered, 0),
+    coalesce(m.emails, 0), coalesce(tx.sms, 0), coalesce(w.notes, 0),
+    coalesce(pm.made, 0), coalesce(pm.kept, 0), coalesce(pm.broken, 0),
+    coalesce(tc.accounts, 0)
+  from public.profiles pr
+  left join book b on b.uid = pr.id
+  left join paid pd on pd.uid = pr.id
+  left join rang r on r.uid = pr.id
+  left join mailed m on m.uid = pr.id
+  left join texted tx on tx.uid = pr.id
+  left join wrote w on w.uid = pr.id
+  left join promised pm on pm.uid = pr.id
+  left join touched tc on tc.uid = pr.id
+  -- Only people who collect. A liaison with no grade and no book is not a row on this screen.
+  where pr.collector_grade is not null or b.in_play > 0;
+$$;
+
+grant execute on function public.collector_performance(timestamptz, timestamptz) to authenticated;
