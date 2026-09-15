@@ -9,6 +9,9 @@ import { DIARY_KINDS } from '../../lib/diaryPriority.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
 import { DictateButton } from '../ui/Dictate'
 import { ClientLinePreview } from './ClientLinePreview'
+import { OutcomePicker, EMPTY_OUTCOME, outcomeReady, type OutcomeChoice } from './OutcomePicker'
+import { CALL_OUTCOMES, type CallOutcome } from '../../lib/callOutcome.ts'
+import { recordOutcome } from '../../lib/recordOutcome.ts'
 
 /**
  * Mark one diary entry worked, and say what happens to the account next.
@@ -32,6 +35,7 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
 
   const today = new Date().toISOString().slice(0, 10)
   const [outcome, setOutcome] = useState('')
+  const [came, setCame] = useState<OutcomeChoice>(EMPTY_OUTCOME)
   const [plan, setPlan] = useState<NextPlan>(() => initialPlan(entry.kind, addWorkingDays(today, 5)))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -41,6 +45,24 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
   async function save() {
     setBusy(true); setError(null)
     try {
+      /*
+        THE RECORDS FIRST, THE DIARY SECOND. If the promise cannot be written there is nothing
+        to check on the date, so booking the check anyway would leave a diary entry pointing at
+        a commitment that does not exist. Failing here stops the whole save and says why.
+      */
+      if (came.outcome) {
+        const r = await recordOutcome({
+          accountId: entry.accountId,
+          outcome: came.outcome,
+          promise: came.outcome === 'promised'
+            ? { amount: Number(came.amount.replace(/[^\d.]/g, '')), dueOn: came.dueOn }
+            : null,
+          words: came.words,
+          actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
+        })
+        if (r.failed.length) throw new Error(`Could not record ${r.failed.join(' or ')}.`)
+      }
+
       await workEntry({
         entry,
         outcome,
@@ -79,6 +101,20 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
           </div>
         </FormField>
 
+        {/*
+          WHAT CAME OF IT, as a choice rather than only as prose. The typed note stays — it is
+          where the detail lives — but the choice is what writes the promise, raises the dispute
+          and moves the status, so the client's report can say something a machine derived rather
+          than something nobody recorded.
+        */}
+        <OutcomePicker value={came} onChange={(next) => {
+          setCame(next)
+          // The diary's own suggestion follows the answer: a promise wants checking on its date.
+          if (next.outcome && next.outcome !== came.outcome) {
+            setPlan((p) => ({ ...p, kind: CALL_OUTCOMES[next.outcome as CallOutcome].suggests }))
+          }
+        }} />
+
         {/* The client's own line, before the date is committed. See ClientLinePreview. */}
         <ClientLinePreview account={entry.account} next={plan.comesBack ? { kind: plan.kind, dueOn: plan.dueOn } : null} />
 
@@ -97,7 +133,7 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
           <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-2">
             Cancel
           </button>
-          <button type="button" onClick={() => void save()} disabled={busy}
+          <button type="button" onClick={() => void save()} disabled={busy || !outcomeReady(came)}
             className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-950 text-white hover:bg-navy-900 disabled:opacity-50">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
             {plan.comesBack ? 'Worked, book the next' : 'Worked, close the account'}

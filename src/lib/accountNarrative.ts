@@ -1,4 +1,4 @@
-import { ARRANGEMENT_LABEL, type Arrangement } from './arrangements.ts'
+import type { Arrangement } from './arrangements.ts'
 import type { DiaryKind } from './diaryPriority.ts'
 
 /**
@@ -125,32 +125,38 @@ function whatHappened(input: NarrativeInput): string {
   }
 
   if (input.paidInPeriod) {
-    return `A payment of ${money(input.paidInPeriod.amount)} was received on ${onDate(input.paidInPeriod.on)}.`
+    return `We received a payment of ${money(input.paidInPeriod.amount)} on ${onDate(input.paidInPeriod.on)}.`
   }
 
   const p = input.promise
   if (p) {
-    const recurring = p.arrangement && p.arrangement !== 'once_off'
-      ? ` (${ARRANGEMENT_LABEL[p.arrangement].toLowerCase()})`
-      : ''
     if (p.status === 'broken') {
-      return `The promise to pay ${money(p.amount)} by ${onDate(p.dueOn)} was not kept.`
+      return `The debtor did not make the promised payment of ${money(p.amount)} due on ${onDate(p.dueOn)}.`
     }
-    const taken = p.takenOn ? `On ${onDate(p.takenOn)} the debtor promised` : 'The debtor has promised'
-    return `${taken} to pay ${money(p.amount)}${recurring} by ${onDate(p.dueOn)}.`
+    const when = p.takenOn ? `On ${onDate(p.takenOn)}, the` : 'The'
+    /*
+     * A recurring arrangement gets its own sentence shape rather than a parenthesis. "R750
+     * (monthly instalment) by 30 September" reads as a single payment with a note stapled to it;
+     * "monthly instalments of R750, beginning on 30 September" is what was actually agreed.
+     */
+    if (p.arrangement && p.arrangement !== 'once_off') {
+      const every = p.arrangement === 'weekly' ? 'weekly' : 'monthly'
+      return `${when} debtor agreed to pay ${every} instalments of ${money(p.amount)}, beginning on ${onDate(p.dueOn)}.`
+    }
+    return `${when} debtor promised to pay ${money(p.amount)} by ${onDate(p.dueOn)}.`
   }
 
   if (input.disputeRaisedOn) {
     return `The debtor disputed the account on ${onDate(input.disputeRaisedOn)}.`
   }
   if (input.traceLodgedOn) {
-    return `A trace was lodged with the credit bureaus on ${onDate(input.traceLodgedOn)}.`
+    return `We lodged a trace with the credit and information bureaus on ${onDate(input.traceLodgedOn)}.`
   }
 
   if (input.lastAttemptOn) {
     const channel = input.lastAttemptChannel ? ` ${CHANNEL_WORD[input.lastAttemptChannel]}` : ''
     if (input.reached === true) {
-      return `The debtor was contacted on ${onDate(input.lastAttemptOn)}${channel}.`
+      return `We contacted the debtor${channel} on ${onDate(input.lastAttemptOn)}.`
     }
     if (input.reached === false) {
       /*
@@ -158,14 +164,14 @@ function whatHappened(input: NarrativeInput): string {
        * a single call reads as an excuse; "Fourth attempt this period" is the firm showing work.
        */
       const n = input.attemptsThisPeriod ?? 0
-      const nth = n > 1 ? ` This was the ${ordinal(n).toLowerCase()} attempt this period.` : ''
-      return `Contact was attempted on ${onDate(input.lastAttemptOn)}${channel}, with no reply.${nth}`
+      const nth = n > 1 ? ` This was the ${ordinal(n).toLowerCase()} attempt during the reporting period.` : ''
+      return `We attempted to contact the debtor${channel} on ${onDate(input.lastAttemptOn)} but received no reply.${nth}`
     }
     // Worked, and what came of it was never recorded. Say only what is known.
-    return `The account was worked on ${onDate(input.lastAttemptOn)}${channel}.`
+    return `We worked the account on ${onDate(input.lastAttemptOn)}${channel}.`
   }
 
-  return 'No contact has been attempted yet.'
+  return 'No contact attempt has been made yet.'
 }
 
 /* ---------- what happens next ---------- */
@@ -178,13 +184,13 @@ function whatHappened(input: NarrativeInput): string {
  * payment" rather than the far weaker "we will follow up".
  */
 const NEXT_BY_KIND: Record<DiaryKind, (on: string) => string> = {
-  promise_broken: (on) => `We will chase the broken promise on ${on}.`,
+  promise_broken: (on) => `We will follow up the missed payment on ${on}.`,
   new_account: (on) => `We will make first contact with the debtor on ${on}.`,
   promise_due: (on) => `We will confirm the promised payment on ${on}.`,
-  callback: (on) => `We will call the debtor back on ${on}, as arranged with them.`,
+  callback: (on) => `We will call the debtor again on ${on}, as arranged.`,
   dispute_chase: (on) => `We will follow up the written dispute on ${on}.`,
   no_contact: (on) => `We will try to reach the debtor again on ${on}.`,
-  trace: (on) => `We will follow up the trace result on ${on}.`,
+  trace: (on) => `We will review the trace results on ${on}.`,
   review: (on) => `We will follow the account up on ${on}.`,
 }
 
@@ -194,8 +200,13 @@ function whatNext(input: NarrativeInput): string {
    * statement of who the ball is with, which is the more useful thing to put in front of a
    * client looking at an account that has not moved in four months.
    */
-  if (input.frozenReason) return 'Work stays paused until it is lifted.'
-  if (!input.next) return ''
+  if (input.frozenReason) return 'Collection will remain paused until we receive further instruction.'
+  /*
+   * NO DIARY DATE IS ITS OWN STATEMENT, and an honest one. An active account with nothing booked
+   * is adrift — the firm has stopped working it without deciding to — and a client is entitled
+   * to see that rather than a blank space.
+   */
+  if (!input.next) return 'No further action has been scheduled.'
   return NEXT_BY_KIND[input.next.kind](onDate(input.next.dueOn))
 }
 
