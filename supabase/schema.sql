@@ -2518,3 +2518,60 @@ alter table public.account_status_events enable row level security;
 drop policy if exists account_status_events_select on public.account_status_events;
 create policy account_status_events_select on public.account_status_events
   for select using (auth.uid() is not null);
+
+-- ONE DIARY DATE PER ACCOUNT, at the firm's instruction: booking a new one takes the old one
+-- away. It was never enforced, and three accounts on the imported book carried two open entries
+-- each -- invisible from the account, because debtor_accounts.diary_date shows only the soonest,
+-- while still sitting in somebody's day.
+--
+-- Partial, on OPEN entries only: an account accumulates done and moved entries for ever and those
+-- are its history rather than its queue. PostgREST cannot infer a partial index for an upsert,
+-- which is wanted here -- a second open entry must be refused loudly, so diarise() supersedes the
+-- first instead of quietly double-booking. See src/lib/diary.ts.
+create unique index if not exists diary_entries_one_open_per_account
+  on public.diary_entries (account_id)
+  where state = 'open';
+
+-- ---------- What the book actually holds ----------
+--
+-- The account list's filter panel needs to offer the sub-statuses and buckets that exist, not the
+-- ones that existed when the panel was written. The alternative -- a hardcoded list -- is wrong
+-- the first time Swordfish sends a new value: the filter silently lacks the option, and an option
+-- you cannot pick is a pile of accounts nobody can find.
+--
+-- security invoker, so a Liaison sees facets for the accounts their RLS lets them see rather than
+-- the firm's whole vocabulary. Aggregated, so it returns a dozen rows whatever the book's size.
+create or replace function public.book_facets(p_company uuid default null)
+returns table (kind text, value text, accounts integer)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select 'sub_status'::text, sub_status, count(*)::integer
+    from public.debtor_accounts
+   where sub_status is not null and sub_status <> ''
+     and (p_company is null or company_id = p_company)
+   group by 1, 2
+  union all
+  select 'bucket'::text, bucket, count(*)::integer
+    from public.debtor_accounts
+   where bucket is not null and bucket <> ''
+     and (p_company is null or company_id = p_company)
+   group by 1, 2
+  order by 1, 3 desc, 2;
+$$;
+
+grant execute on function public.book_facets(uuid) to authenticated;
+
+-- The filters the account list adds, indexed. Each is a clause fetchAccounts sends to the
+-- database rather than filtering in the browser, and a six-figure book sequentially scanned per
+-- keystroke is a screen that stops being used.
+create index if not exists debtor_accounts_sub_status_idx
+  on public.debtor_accounts (company_id, sub_status);
+create index if not exists debtor_accounts_bucket_idx
+  on public.debtor_accounts (company_id, bucket);
+-- Nulls included on purpose: "never worked" IS last_action_at is null, so an index that skipped
+-- them would miss exactly the accounts the filter exists to find.
+create index if not exists debtor_accounts_last_action_idx
+  on public.debtor_accounts (last_action_at);

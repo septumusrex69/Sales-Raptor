@@ -1,26 +1,43 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, Loader2, Search } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { inputClass } from '../../components/ui/Modal'
 import { useAppStore } from '../../store/AppStore'
-import { fetchAccounts, fetchBookSummary, hasCommissionDrift, type DebtorAccount, type BookSummary } from '../../lib/accountBook'
+import { useAuth } from '../../store/AuthContext'
+import {
+  fetchAccounts, fetchBookFacets, fetchBookSummary, hasCommissionDrift,
+  type BookFacets, type BookSummary, type DebtorAccount,
+} from '../../lib/accountBook'
+import { clearedFilters, filterChips, queryFromParams } from '../../lib/accountFilters'
+import { CLIENT_FLAGS, CLIENT_POSITIONS, clientFlag, clientPosition } from '../../lib/clientPosition'
+import { AccountFilters } from './AccountFilters'
 import { formatCurrency, formatDate } from '../../data/mockData'
 
 const PAGE_SIZE = 50
+
+/** Who may ask for somebody else's desk. An agent's book is their own. */
+const CAN_SEE_OTHER_DESKS = ['Administrator', 'Sales Manager', 'Liaison Manager', 'Pre-legal Team Leader']
 
 /**
  * The collections book.
  *
  * Paged from the database rather than held in the app: this is the table that will reach hundreds
  * of thousands of rows, and a list that loads everything to show fifty is a list that stops
- * working the month it matters.
+ * working the month it matters. Every filter goes to the database for the same reason — a
+ * `.filter()` over the fifty rows on screen gives an answer that is right about the page and
+ * wrong about the book.
+ *
+ * THE URL IS THE STATE. Narrowing the book is how somebody asks a question of it, and a question
+ * you cannot paste into a message is half a tool.
  */
 export function AccountsList() {
-  const { companies } = useAppStore()
+  const { companies, users } = useAppStore()
+  const { currentUser } = useAuth()
   const [params, setParams] = useSearchParams()
   const [accounts, setAccounts] = useState<DebtorAccount[]>([])
   const [summary, setSummary] = useState<BookSummary | null>(null)
+  const [facets, setFacets] = useState<BookFacets | null>(null)
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -28,25 +45,41 @@ export function AccountsList() {
   const [search, setSearch] = useState(params.get('q') ?? '')
 
   const companyId = params.get('client') ?? undefined
-  const driftOnly = params.get('drift') === '1'
   const companyName = companies.find((c) => c.id === companyId)?.name
+  const canSeeOthers = CAN_SEE_OTHER_DESKS.includes(currentUser?.role ?? '')
 
   const setParam = useCallback((key: string, value: string | null) => {
     const next = new URLSearchParams(params)
-    if (value === null) next.delete(key); else next.set(key, value)
+    if (value === null || value === '') next.delete(key); else next.set(key, value)
     setParams(next, { replace: true })
     setPage(0)
   }, [params, setParams])
 
+  const clearFilters = useCallback(() => {
+    setParams(clearedFilters(params), { replace: true })
+    setPage(0)
+  }, [params, setParams])
+
+  // The typed box is local so it stays responsive; the URL catches up after a pause. Writing
+  // every keystroke into history would make the back button walk the surname letter by letter.
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      if ((params.get('q') ?? '') !== search) setParam('q', search || null)
+    }, 300)
+    return () => window.clearTimeout(t)
+  }, [search, params, setParam])
+
+  const key = params.toString()
+  const query = useMemo(() => queryFromParams(new URLSearchParams(key)), [key])
+
   useEffect(() => {
     let cancelled = false
     setLoading(true); setError(null)
-    // Debounced so typing a surname doesn't fire a query per keystroke.
-    const t = window.setTimeout(async () => {
+    void (async () => {
       try {
         const [res, sum] = await Promise.all([
-          fetchAccounts({ companyId, search, commissionDriftOnly: driftOnly, page, pageSize: PAGE_SIZE }),
-          fetchBookSummary(companyId),
+          fetchAccounts({ ...query, page, pageSize: PAGE_SIZE }),
+          fetchBookSummary(query.companyId),
         ])
         if (cancelled) return
         setAccounts(res.accounts); setTotal(res.total); setSummary(sum)
@@ -55,10 +88,22 @@ export function AccountsList() {
       } finally {
         if (!cancelled) setLoading(false)
       }
-    }, search ? 300 : 0)
-    return () => { cancelled = true; window.clearTimeout(t) }
-  }, [companyId, search, driftOnly, page])
+    })()
+    return () => { cancelled = true }
+  }, [query, page])
 
+  // The dropdowns offer what the book holds, which changes with the client. Its own request, so
+  // a slow facet count never holds up the list itself.
+  useEffect(() => {
+    let cancelled = false
+    void fetchBookFacets(companyId)
+      .then((f) => { if (!cancelled) setFacets(f) })
+      .catch(() => { if (!cancelled) setFacets(null) })
+    return () => { cancelled = true }
+  }, [companyId])
+
+  const driftOnly = params.get('drift') === '1'
+  const narrowed = filterChips(params).length > 0 || !!query.search
   const from = total === 0 ? 0 : page * PAGE_SIZE + 1
   const to = Math.min(total, (page + 1) * PAGE_SIZE)
 
@@ -66,7 +111,12 @@ export function AccountsList() {
     <div className="space-y-4">
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Tile label="Accounts" value={summary.accounts.toLocaleString('en-ZA')} />
+          {/*
+            The summary is the CLIENT'S WHOLE BOOK, not the filtered list, and says so. A tile
+            that silently followed the filters would read "Accounts 3" next to a list of three
+            and there would be no number left anywhere saying how big the book really is.
+          */}
+          <Tile label={narrowed ? 'Accounts (whole book)' : 'Accounts'} value={summary.accounts.toLocaleString('en-ZA')} />
           <Tile label="Capital handed over" value={formatCurrency(summary.capital)} />
           <Tile label={companyId ? 'Client' : 'Clients'} value={companyId ? (companyName ?? '—') : String(summary.clients)} />
           <Tile
@@ -81,14 +131,14 @@ export function AccountsList() {
       )}
 
       <Card padded={false}>
-        <div className="flex flex-wrap items-center gap-3 p-4 border-b border-slate-100">
+        <div className="flex flex-wrap items-center gap-2 p-4 border-b border-slate-100">
           <div className="relative flex-1 min-w-[220px]">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               className={`${inputClass} pl-9`}
               placeholder="Account number, client reference or surname"
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(0) }}
+              onChange={(e) => setSearch(e.target.value)}
             />
           </div>
           <select
@@ -99,12 +149,10 @@ export function AccountsList() {
             <option value="">All clients</option>
             {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-          {driftOnly && (
-            <button className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5"
-              onClick={() => setParam('drift', null)}>
-              Off their mandate rate · clear
-            </button>
-          )}
+          <AccountFilters
+            params={params} setParam={setParam} onClear={clearFilters}
+            facets={facets} users={users} canSeeOthers={canSeeOthers}
+          />
         </div>
 
         {error && (
@@ -120,10 +168,21 @@ export function AccountsList() {
           </div>
         ) : accounts.length === 0 ? (
           <div className="p-10 text-center">
-            <p className="text-sm text-slate-600">No accounts here yet.</p>
-            <p className="text-xs text-slate-400 mt-1">
-              The book comes across from Swordfish in <Link className="text-brand-600 underline" to="/settings">Settings → Data Import</Link>.
-            </p>
+            {narrowed ? (
+              <>
+                <p className="text-sm text-slate-600">No accounts match these filters.</p>
+                <button className="text-xs font-medium text-brand-600 hover:underline mt-1" onClick={clearFilters}>
+                  Clear the filters
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-slate-600">No accounts here yet.</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  The book comes across from Swordfish in <Link className="text-brand-600 underline" to="/settings">Settings → Data Import</Link>.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -135,13 +194,15 @@ export function AccountsList() {
                   <th className="px-4 py-2.5 font-medium text-right">Capital</th>
                   <th className="px-4 py-2.5 font-medium text-right">Paid</th>
                   <th className="px-4 py-2.5 font-medium text-right">Rate</th>
-                  <th className="px-4 py-2.5 font-medium">Status</th>
-                  <th className="px-4 py-2.5 font-medium">Last payment</th>
+                  <th className="px-4 py-2.5 font-medium">Position</th>
+                  <th className="px-4 py-2.5 font-medium">Desk</th>
+                  <th className="px-4 py-2.5 font-medium">Last worked</th>
                 </tr>
               </thead>
               <tbody>
                 {accounts.map((a) => {
                   const drift = hasCommissionDrift(a)
+                  const desk = a.assignedTo ? users.find((u) => u.id === a.assignedTo)?.name : null
                   return (
                     <tr key={a.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
                       <td className="px-4 py-2.5">
@@ -169,9 +230,12 @@ export function AccountsList() {
                         )}
                       </td>
                       <td className="px-4 py-2.5">
-                        <StatusPill status={a.status} inDuplum={a.inDuplum} />
+                        <PositionPill account={a} />
                       </td>
-                      <td className="px-4 py-2.5 text-slate-500">{a.lastPaymentAt ? formatDate(a.lastPaymentAt) : '—'}</td>
+                      <td className="px-4 py-2.5 text-slate-500">
+                        {desk ?? <span className="text-amber-600" title="Nobody is carrying this account.">Unallocated</span>}
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-500">{a.lastActionAt ? formatDate(a.lastActionAt) : '—'}</td>
                     </tr>
                   )
                 })}
@@ -212,9 +276,48 @@ function Tile({ label, value, tone, action }: {
   )
 }
 
+/**
+ * Where the account stands, in the firm's own words.
+ *
+ * This column used to print debtor_accounts.status raw — "Active: Unfrozen", which describes how
+ * the row got into the table and not one thing about the debtor. The position is derived from the
+ * status, the sub-status and the freeze, by the same function the client's report uses, so the
+ * list and the report cannot disagree about an account.
+ *
+ * NO PAYMENT SIGNAL HERE. `paidInPeriod` needs a reporting period and this list has none, so an
+ * account that paid this month reads as whatever it was before the money — Arranged, usually.
+ * The alternative would be to infer a period the person did not choose.
+ */
+export function PositionPill({ account }: { account: DebtorAccount }) {
+  // status carries the freeze: freezeAccount() writes 'Frozen' to it, which is what
+  // clientPosition() reads. frozenBy says who asked, not whether.
+  const position = clientPosition({ status: account.status, subStatus: account.subStatus })
+  const flag = clientFlag(position, !!account.clientActionAsk)
+  const meta = CLIENT_POSITIONS[position]
+  const tone = flag === 'client_action' ? 'bg-rose-50 text-rose-700'
+    : flag === 'attention' ? 'bg-amber-50 text-amber-700'
+      : flag === 'inactive' ? 'bg-slate-100 text-slate-500'
+        : 'bg-emerald-50 text-emerald-700'
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${tone}`} title={meta.meaning}>
+        {meta.label}
+      </span>
+      {account.clientActionAsk && (
+        <span className="text-[11px] text-rose-600" title={account.clientActionAsk}>{CLIENT_FLAGS.client_action.dot}</span>
+      )}
+      {account.inDuplum && (
+        <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700"
+          title="Non-capital has reached the capital handed over; it may not grow further.">
+          in duplum
+        </span>
+      )}
+    </span>
+  )
+}
+
+/** The raw inherited status, where the raw status is what is being shown. */
 export function StatusPill({ status, inDuplum }: { status: string; inDuplum?: boolean }) {
-  // Written off and in duplum are the two states that change what may still be collected, so they
-  // are the two that get colour. Everything else is just a label.
   const written = /written.off/i.test(status)
   const tone = written ? 'bg-slate-100 text-slate-500'
     : /active/i.test(status) ? 'bg-emerald-50 text-emerald-700'

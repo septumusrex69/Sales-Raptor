@@ -303,8 +303,37 @@ export async function diarise(input: {
   queryId?: string | null
   /** Also write the note onto the account's timeline. Off for system-generated bookings. */
   alsoNoteOnAccount?: boolean
+  /**
+   * An open entry to leave alone while superseding the rest.
+   *
+   * Passed by workEntry with the entry it is in the middle of working: that one is about to be
+   * closed properly as `done`, carrying the agent's outcome, and marking it `moved` here would
+   * both lose the outcome and put it beyond protect_closed_diary_entries' reach to fix.
+   */
+  supersedeExcept?: string | null
   actor: Actor
 }): Promise<DiaryEntry> {
+  /*
+   * ONE DIARY DATE PER ACCOUNT, at the firm's instruction: booking a new one takes the old one
+   * away. Enforced by a unique index on open entries, so this is not a nicety — without it the
+   * insert below is simply refused.
+   *
+   * Done here rather than in each caller because every path that books a date goes through this
+   * function, and a rule implemented in four places is a rule that holds in three.
+   *
+   * Marked `moved` rather than cancelled: the work did not stop, it went somewhere else, and the
+   * original keeps the date it was always due so "this was booked for the 7th and nobody worked
+   * it" survives as a fact.
+   */
+  let superseding = supabase
+    .from('diary_entries')
+    .update({ state: 'moved', moved_at: new Date().toISOString(), moved_by: input.actor.id })
+    .eq('account_id', input.accountId)
+    .eq('state', 'open')
+  if (input.supersedeExcept) superseding = superseding.neq('id', input.supersedeExcept)
+  const { error: supersedeError } = await superseding
+  if (supersedeError) throw new Error(supersedeError.message)
+
   const { data, error } = await supabase.from('diary_entries').insert({
     account_id: input.accountId,
     owner_id: input.ownerId,
@@ -396,6 +425,8 @@ export async function moveEntry(input: {
     kind: input.entry.kind,
     reason: input.entry.reason,
     source: input.entry.source,
+    // Closed just below, with where it went and why. See supersedeExcept.
+    supersedeExcept: input.entry.id,
     promiseId: null,
     queryId: null,
     alsoNoteOnAccount: input.alsoNoteOnAccount,
@@ -539,6 +570,8 @@ export async function workEntry(input: {
       dueOn: input.next.dueOn,
       kind: input.next.kind,
       reason: said || null,
+      // This one is closed as `done` below, with the agent's outcome on it. See supersedeExcept.
+      supersedeExcept: input.entry.id,
       // Written here instead, as one sentence covering both halves — see below.
       alsoNoteOnAccount: false,
       actor: input.actor,
