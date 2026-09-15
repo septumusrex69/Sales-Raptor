@@ -45,17 +45,16 @@ check('a payment default is a broken arrangement', at('Active: Activated', 'Paym
  * there is no arrangement to break. 90 accounts, the largest active group on the book, and
  * collapsing them told the client the wrong thing about all of them.
  */
-check('a delinquent payer is refusing to pay',
-  at('Active: Activated', 'Delinquent Payer'), 'refusing')
-check('...on an unfrozen account too', at('Active: Unfrozen', 'Delinquent Payer'), 'refusing')
-check('...and the plainer wording maps the same way', at('Active: Activated', 'Refuses to pay'), 'refusing')
+check('a delinquent payer is not paying', at('Active: Activated', 'Delinquent Payer'), 'not_paying')
+check('...on an unfrozen account too', at('Active: Unfrozen', 'Delinquent Payer'), 'not_paying')
+check('...and an outright refusal lands in the same position', at('Active: Activated', 'Refuses to pay'), 'not_paying')
 // The two must never collapse back into one another.
-ok('a refusal is not a broken arrangement',
+ok('not paying is not a broken arrangement',
   at('Active: Activated', 'Delinquent Payer') !== at('Active: Activated', 'Payment Default'))
 // Reached and refused beats "we are still trying": contact HAS been made and the answer was no.
-check('a refusal is not softened into being worked',
-  at('Active: Activated', 'Delinquent Payer', { reachedInPeriod: false }), 'refusing')
-check('money still beats a refusal — they paid after all',
+check('not paying is not softened into being worked',
+  at('Active: Activated', 'Delinquent Payer', { reachedInPeriod: false }), 'not_paying')
+check('money still beats it — they paid after all',
   at('Active: Activated', 'Delinquent Payer', { paidInPeriod: true }), 'paying')
 check('an active account with no sub-status is being worked', at('Active: Activated', null), 'being_worked')
 check('a re-opened account with no sub-status is being worked', at('Active: Re-opened', null), 'being_worked')
@@ -118,9 +117,32 @@ ok('legal is not in play', !CLIENT_POSITIONS.legal.inPlay)
 ok('being worked is in play', CLIENT_POSITIONS.being_worked.inPlay)
 ok('a dispute is still in play', CLIENT_POSITIONS.disputed.inPlay)
 // The whole point of separating it: it is the one position that asks the CLIENT a question.
-ok('a refusal is in play', CLIENT_POSITIONS.refusing.inPlay)
-ok('...and its meaning names the decision the client has to make',
-  /legal/i.test(CLIENT_POSITIONS.refusing.meaning))
+ok('not paying is in play', CLIENT_POSITIONS.not_paying.inPlay)
+/*
+ * The position must NOT say "refusing". The firm's own document files hardship under this
+ * heading -- pensioner, unemployed, hospitalised -- and a client told 90 people are refusing to
+ * pay decides to litigate against an unemployed pensioner in hospital.
+ */
+ok('the position does not accuse anybody of refusing',
+  !/refus/i.test(CLIENT_POSITIONS.not_paying.label))
+ok('...and points at the flags for the reason',
+  /flag/i.test(CLIENT_POSITIONS.not_paying.meaning))
+
+/* ---------- somebody else is administering the debtor ---------- */
+
+for (const sub of ['Debt review', 'Business rescue', 'Liquidation', 'Sequestration', 'Deceased estate']) {
+  check(`${sub} is under administration`, at('Active: Activated', sub), 'under_administration')
+}
+/*
+ * ABOVE our own legal step, deliberately. An account we served with Section 129 that then went
+ * under debt review is governed by the debt review. Reporting it as Legal would show the firm
+ * taking action on a matter where it is in fact being held back.
+ */
+check('a debtor under administration outranks our own legal step',
+  at('Active: Activated', 'Section 129', { underAdministration: true }), 'under_administration')
+ok('the two are opposite facts and must not merge',
+  at('Active: Activated', 'Debt review') !== at('Active: Activated', 'Section 129'))
+ok('it is not counted as in play', !CLIENT_POSITIONS.under_administration.inPlay)
 
 /* ---------- needs you ---------- */
 

@@ -26,12 +26,13 @@ export type ClientPosition =
   | 'paying'
   | 'arranged'
   | 'broken_arrangement'
-  | 'refusing'
+  | 'not_paying'
   | 'negotiating'
   | 'being_worked'
   | 'tracing'
   | 'disputed'
   | 'legal'
+  | 'under_administration'
   | 'frozen'
   | 'closed'
 
@@ -66,23 +67,23 @@ export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
     meaning: 'They committed to pay and the money did not come. Being chased.',
     inPlay: true,
   },
-  refusing: {
+  not_paying: {
     /*
-     * ITS OWN POSITION, because none of the other ten described it and it is the largest active
-     * group on the book -- 88 accounts, 90 with the unfrozen ones.
+     * NOT "REFUSING TO PAY", which is what this was called for one commit and was wrong.
      *
-     * It was first read as a broken arrangement, which was wrong: a broken arrangement means
-     * they committed and then failed, and this debtor never committed to anything. Nor is it
-     * "being worked", which means contact has not been made -- contact HAS been made and the
-     * answer was no.
+     * The firm's own client documentation files five things under its "Delinquent Payer" title:
+     * Hospitalisation, Foreign debtor, Pensioner, Unemployed, Business closed. Every one is a
+     * debtor who CANNOT pay, not one who will not -- the Pensioner note says so outright
+     * ("cannot make payments mainly due to financial restraints ... we continue to attempt to
+     * procure payment"). Reporting 90 accounts as refusers would have told a client to sue an
+     * unemployed pensioner in hospital.
      *
-     * The distinction is the client's decision to make, which is why it cannot be hidden inside
-     * a softer position. Somebody who cannot be found needs tracing; somebody who broke a
-     * promise needs chasing; somebody who has refused needs the client to decide whether to go
-     * legal. Three different questions, and only this one is asked of the client.
+     * So the position says only that no money is coming, and the FLAG says why -- hardship or
+     * refusal. The distinction belongs on the flag because that is where the client's decision
+     * actually turns: you write off a pensioner and you litigate a refuser.
      */
-    label: 'Refusing to pay',
-    meaning: 'The debtor has been reached and will not pay. The next step is usually a legal decision.',
+    label: 'Not paying',
+    meaning: 'No money is coming in. The flags say why — hardship, or an outright refusal.',
     inPlay: true,
   },
   negotiating: {
@@ -110,6 +111,29 @@ export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
     meaning: 'A legal step has been taken -- Section 129, summons, or handed to attorneys.',
     inPlay: false,
   },
+  under_administration: {
+    /*
+     * ONE POSITION FOR FIVE PROCESSES, at the firm's instruction to "find one category for all
+     * of that stuff".
+     *
+     * Debt review, business rescue, liquidation, sequestration and a deceased estate look
+     * unalike until you ask what the firm actually DOES about them, and then they are the same
+     * thing: somebody else is administering the debtor's affairs, we deal with that person
+     * rather than with the debtor, ordinary collection is restricted by law, and what we can
+     * recover usually goes through a claim.
+     *
+     * Kept apart from `legal` because the two are opposites. `legal` is a step WE took --
+     * Section 129, summons, attorneys. This is a process the DEBTOR is under, which constrains
+     * what we may do. Putting them together would report the firm as taking action on accounts
+     * where it is in fact being held back.
+     *
+     * Beats `legal` in the precedence for that reason: an account we served with Section 129
+     * that then went under debt review is governed by the debt review, whatever we did first.
+     */
+    label: 'Under administration',
+    meaning: 'A practitioner, liquidator, trustee or executor is administering the debtor. We deal with them, not the debtor.',
+    inPlay: false,
+  },
   frozen: {
     label: 'Frozen',
     meaning: 'Work is stopped. See the reason and who asked for it.',
@@ -124,8 +148,8 @@ export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
 
 /** Dashboard order: money first, then the work, then the ones that are elsewhere. */
 export const CLIENT_POSITION_ORDER: ClientPosition[] = [
-  'paying', 'arranged', 'broken_arrangement', 'refusing', 'negotiating', 'being_worked',
-  'tracing', 'disputed', 'legal', 'frozen', 'closed',
+  'paying', 'arranged', 'broken_arrangement', 'not_paying', 'negotiating', 'being_worked',
+  'tracing', 'disputed', 'legal', 'under_administration', 'frozen', 'closed',
 ]
 
 export interface PositionInput {
@@ -143,8 +167,14 @@ export interface PositionInput {
   reachedInPeriod?: boolean
   /** An open dispute on the account. */
   disputed?: boolean
-  /** A legal step has been taken: Section 129, summons, attorneys. */
+  /** A legal step has been taken BY US: Section 129, summons, attorneys. */
   inLegal?: boolean
+  /**
+   * The DEBTOR is under a formal process — debt review, business rescue, liquidation,
+   * sequestration, a deceased estate. The opposite of inLegal: it restrains us rather than
+   * being something we did.
+   */
+  underAdministration?: boolean
   /** True once the account is off the book, whatever the inherited status says. */
   closed?: boolean
 }
@@ -167,6 +197,15 @@ export function clientPosition(input: PositionInput): ClientPosition {
   if (input.closed || /^written[- ]off/i.test(status) || /^closed/i.test(status)) return 'closed'
   if (/^frozen/i.test(status)) return 'frozen'
 
+  /*
+   * Somebody else is in charge of the debtor's affairs, which governs whatever we had started.
+   * Above `legal` deliberately — see the note on the position.
+   */
+  if (input.underAdministration
+      || /debt\s*review|business\s*rescue|liquidat|sequestrat|deceased|estate|curator/i.test(sub)) {
+    return 'under_administration'
+  }
+
   // A legal step is a fact about where the matter IS, not about how it is going.
   if (input.inLegal || /section\s*129|summons|attorney|litigat/i.test(sub)) return 'legal'
   if (input.disputed || /defended|dispute/i.test(sub)) return 'disputed'
@@ -185,7 +224,7 @@ export function clientPosition(input: PositionInput): ClientPosition {
    * the wrong thing about the biggest active group on their book.
    */
   if (/payment\s*default/i.test(sub)) return 'broken_arrangement'
-  if (/delinquent|refus/i.test(sub)) return 'refusing'
+  if (/delinquent|refus|non.?cooperative/i.test(sub)) return 'not_paying'
 
   if (input.reachedInPeriod) return 'negotiating'
 
