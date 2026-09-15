@@ -4,11 +4,11 @@ import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { DictateButton } from '../../components/ui/Dictate'
 import { planHandOut, planSummary, type HandOutPlan } from '../../lib/handOut.ts'
 import { loadHandOutContext, type HandOutContext } from '../../lib/handOutData.ts'
-import { commitHandOut, handOutSummary } from '../../lib/handOutWrite.ts'
+import { commitHandOut, handOutSummary, type HandOutMode } from '../../lib/handOutWrite.ts'
 import { BULK_CEILING, type Selection } from '../../lib/accountAllocation.ts'
-import { ACCOUNT_BANDS, bookCeilingOf } from '../../lib/collectorGrade.ts'
+import { ACCOUNT_BANDS, COLLECTOR_GRADES, bookCeilingOf } from '../../lib/collectorGrade.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
-import type { User } from '../../types'
+import type { Team, User } from '../../types'
 
 const DEFAULT_WINDOW = 5
 
@@ -24,11 +24,12 @@ const DEFAULT_WINDOW = 5
  * Not a summary of what will probably happen: the actual placements. A distributor that decides
  * where a billion rand of work goes and reports afterwards is one nobody can refuse.
  */
-export function HandOutModal({ selection, selectedCount, users, actor, onClose, onDone }: {
+export function HandOutModal({ selection, selectedCount, users, teams, actor, onClose, onDone }: {
   selection: Selection
   /** What the bulk bar said, so the modal can show a figure before its own load finishes. */
   selectedCount: number
   users: User[]
+  teams: Team[]
   actor: { id: string | null; name: string | null }
   onClose: () => void
   onDone: (message: string) => void | Promise<void>
@@ -37,8 +38,7 @@ export function HandOutModal({ selection, selectedCount, users, actor, onClose, 
   const [chosen, setChosen] = useState<Set<string>>(new Set())
   const [startOn, setStartOn] = useState(() => new Date().toISOString().slice(0, 10))
   const [windowDays, setWindowDays] = useState(DEFAULT_WINDOW)
-  const [alsoBook, setAlsoBook] = useState(true)
-  const [alsoAllocate, setAlsoAllocate] = useState(true)
+  const [mode, setMode] = useState<HandOutMode>('allocate_and_refer')
   const [reason, setReason] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null)
@@ -90,7 +90,7 @@ export function HandOutModal({ selection, selectedCount, users, actor, onClose, 
     setBusy({ done: 0, total: plan.placements.length }); setError(null)
     try {
       const res = await commitHandOut({
-        plan, alsoAllocate, alsoBook, actor, reason,
+        plan, mode, actor, reason,
         onProgress: (done, total) => setBusy({ done, total }),
       })
       await onDone(handOutSummary(res, (id) =>
@@ -146,7 +146,43 @@ export function HandOutModal({ selection, selectedCount, users, actor, onClose, 
             ) : (
               <>
                 <div>
-                  <span className="block text-xs font-medium text-slate-500 mb-1.5">Who</span>
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 mb-1.5">
+                    <span className="text-xs font-medium text-slate-500">Who</span>
+                    {/*
+                      QUICK WAYS TO PICK, not four separate modes. Everyone, a grade, a team --
+                      each one just sets the ticks below, which stay adjustable afterwards. Modes
+                      would mean "I chose Elite, then unticked one" had nowhere to live.
+
+                      Only offered where they would narrow anything: a grade nobody holds, or a
+                      team with no collectors in it, is a button that appears to do nothing.
+                    */}
+                    <button type="button" onClick={() => setChosen(new Set(context.collectors.map((c) => c.userId)))}
+                      className="text-[11px] font-medium text-brand-600 hover:underline">
+                      Everyone
+                    </button>
+                    {COLLECTOR_GRADES.filter((g) => context.collectors.some((c) => c.grade === g)).map((g) => (
+                      <button key={g} type="button"
+                        onClick={() => setChosen(new Set(context.collectors.filter((c) => c.grade === g).map((c) => c.userId)))}
+                        className="text-[11px] text-slate-500 hover:text-brand-600 hover:underline">
+                        {g}
+                      </button>
+                    ))}
+                    {teams
+                      .filter((t) => context.collectors.some((c) => teamOf(users, c.userId) === t.id))
+                      .map((t) => (
+                        <button key={t.id} type="button"
+                          onClick={() => setChosen(new Set(
+                            context.collectors.filter((c) => teamOf(users, c.userId) === t.id).map((c) => c.userId),
+                          ))}
+                          className="text-[11px] text-slate-500 hover:text-brand-600 hover:underline">
+                          {t.name}
+                        </button>
+                      ))}
+                    <button type="button" onClick={() => setChosen(new Set())}
+                      className="text-[11px] text-slate-400 hover:text-slate-600 hover:underline ml-auto">
+                      None
+                    </button>
+                  </div>
                   <div className="grid sm:grid-cols-2 gap-1.5">
                     {context.collectors.map((c) => {
                       const ceiling = bookCeilingOf(c.bookCeiling)
@@ -196,16 +232,34 @@ export function HandOutModal({ selection, selectedCount, users, actor, onClose, 
                   </FormField>
                 </div>
 
-                <div className="flex flex-wrap gap-4">
-                  <Toggle checked={alsoBook} onChange={setAlsoBook}
-                    label="Book them into the diary"
-                    note="Off makes this a plain allocation with no dates." />
-                  <Toggle checked={alsoAllocate} onChange={setAlsoAllocate}
-                    label="Put them on that person’s desk"
-                    note="Off books the work without changing whose book it is." />
+                {/*
+                  A CHOICE OF TWO, NOT TWO SWITCHES. The firm's rule is that an allocation cannot
+                  happen without a referral, though a referral can happen on its own — so
+                  "allocate but do not book" is not offered. It was a checkbox here until now, and
+                  clearing it produced exactly the state this feature exists to end: an account on
+                  somebody's desk with nobody booked to ring it.
+                */}
+                <div>
+                  <span className="block text-xs font-medium text-slate-500 mb-1.5">What are you doing</span>
+                  <div className="grid sm:grid-cols-2 gap-1.5">
+                    <ModeCard
+                      chosen={mode === 'allocate_and_refer'} onChoose={() => setMode('allocate_and_refer')}
+                      label="Allocate and refer"
+                      note="The account becomes theirs, and they are booked to work it." />
+                    <ModeCard
+                      chosen={mode === 'refer'} onChoose={() => setMode('refer')}
+                      label="Refer only"
+                      note="They are booked to work it. Whose account it is does not change." />
+                  </div>
                 </div>
 
-                {plan && <PlanPreview plan={plan} alsoBook={alsoBook} />}
+                {chosen.size === 0
+                  ? (
+                    <p className="text-sm text-slate-500 bg-slate-50 rounded-lg px-3 py-2.5">
+                      Nobody chosen, so there is nothing to plan. Pick at least one collector above.
+                    </p>
+                  )
+                  : plan && <PlanPreview plan={plan} />}
 
                 <FormField label="Why (optional)">
                   <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2}
@@ -240,11 +294,11 @@ export function HandOutModal({ selection, selectedCount, users, actor, onClose, 
               Cancel
             </button>
             <button type="button" onClick={() => void commit()}
-              disabled={!!busy || !plan || plan.placements.length === 0 || tooMany || (!alsoBook && !alsoAllocate)}
+              disabled={!!busy || !plan || plan.placements.length === 0 || tooMany}
               className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-950 text-white hover:bg-navy-900 disabled:opacity-50">
               {busy ? <Loader2 size={14} className="animate-spin" />
-                : alsoBook ? <CalendarClock size={14} /> : <UserCheck size={14} />}
-              {alsoBook ? 'Hand out and book' : 'Allocate'}
+                : mode === 'refer' ? <CalendarClock size={14} /> : <UserCheck size={14} />}
+              {mode === 'refer' ? 'Refer' : 'Allocate and refer'}
             </button>
           </div>
         </div>
@@ -259,7 +313,7 @@ export function HandOutModal({ selection, selectedCount, users, actor, onClose, 
  * The day grid is the half that answers "is this actually going to happen". A person taking 80
  * accounts sounds fine until you see it is 80 on Monday.
  */
-function PlanPreview({ plan, alsoBook }: { plan: HandOutPlan; alsoBook: boolean }) {
+function PlanPreview({ plan }: { plan: HandOutPlan }) {
   const dates = [...new Set(plan.days.map((d) => d.date))].sort()
   const taking = plan.collectors.filter((c) => c.taking > 0)
 
@@ -269,7 +323,7 @@ function PlanPreview({ plan, alsoBook }: { plan: HandOutPlan; alsoBook: boolean 
         {planSummary(plan)}
       </p>
 
-      {alsoBook && dates.length > 0 && (
+      {dates.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
@@ -344,17 +398,20 @@ function reasonLine(plan: HandOutPlan): string {
   return [...counts].map(([reason, n]) => `${n} ${say[reason] ?? reason}`).join('; ') + '.'
 }
 
-function Toggle({ checked, onChange, label, note }: {
-  checked: boolean; onChange: (v: boolean) => void; label: string; note: string
+/** Which team somebody is in. The collector list carries no team, so it is read off the people. */
+function teamOf(users: User[], userId: string): string | undefined {
+  return users.find((u) => u.id === userId)?.teamId
+}
+
+function ModeCard({ chosen, onChoose, label, note }: {
+  chosen: boolean; onChoose: () => void; label: string; note: string
 }) {
   return (
-    <label className="flex items-start gap-2 cursor-pointer max-w-[20rem]">
-      <input type="checkbox" className="mt-0.5 shrink-0 accent-brand-600"
-        checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      <span className="min-w-0">
-        <span className="block text-sm text-slate-700 leading-tight">{label}</span>
-        <span className="block text-[11px] text-slate-400 leading-snug">{note}</span>
-      </span>
-    </label>
+    <button type="button" onClick={onChoose}
+      className={`text-left rounded-lg border px-2.5 py-2 ${
+        chosen ? 'border-navy-950 bg-navy-950 text-white' : 'border-slate-200 hover:bg-slate-50'}`}>
+      <span className={`block text-sm leading-tight ${chosen ? 'font-medium' : 'text-slate-700'}`}>{label}</span>
+      <span className={`block text-[11px] leading-snug ${chosen ? 'text-white/70' : 'text-slate-400'}`}>{note}</span>
+    </button>
   )
 }
