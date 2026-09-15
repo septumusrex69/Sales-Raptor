@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "check:selects": "node scripts/qa/check-select-columns.mjs"
+    "check:selects": "node scripts/qa/check-select-columns.mjs",
+    "qa": "node scripts/qa/run-all.mjs",
+    "qa:e2e": "node scripts/qa/e2e/accounts.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
