@@ -43,11 +43,20 @@ create table if not exists public.profiles (
   -- overbooking. Per agent rather than firm-wide, because a phone-heavy collector and one
   -- working through letters and SMS do not have the same day. Null means the firm default
   -- (DEFAULT_DIARY_CAPACITY in src/lib/diaryPriority.ts).
-  diary_capacity integer
+  diary_capacity integer,
+  -- How this person likes their diary ordered, when they have said. Null means "never chosen",
+  -- which is the firm's own order (FIRM_DIARY_ORDER in src/lib/diaryPriority.ts) rather than an
+  -- absence defaulted somewhere else.
+  --
+  -- Plain text with no CHECK on purpose: the values include 'first:<kind>', so pinning them here
+  -- would mean a migration every time the diary grows a kind of work. The app refuses anything it
+  -- no longer offers and falls back, so a retired value reads as "never chosen", not as an error.
+  diary_order text
 );
 -- Older databases were created before these columns existed.
 alter table public.profiles add column if not exists buzzbox_extension text;
 alter table public.profiles add column if not exists diary_capacity integer;
+alter table public.profiles add column if not exists diary_order text;
 
 -- Auto-create a profile the moment someone accepts a Supabase invite /
 -- signs in for the first time. The very first person ever to sign up

@@ -18,6 +18,7 @@ import { DashboardHero } from '../src/components/dashboard/DashboardHero'
 import { ReminderWatcher } from '../src/components/reminders/ReminderWatcher'
 import { DiariseModal } from '../src/components/diary/DiariseModal'
 import { DiaryCapacity } from '../src/components/diary/DiaryCapacity'
+import { DiaryOrderMenu } from '../src/components/diary/DiaryOrderMenu'
 
 const workAccount = {
   id: 'a1', mainComment: null, mainCommentAt: null, prescriptionDate: '2027-01-01',
@@ -115,6 +116,13 @@ function App() {
         */}
         <DiariseModal accountId="a1" accountLabel="Nomvula van der Westhuizen-Bekker · BF-10023"
           prescriptionDate="2026-10-01" onClose={() => {}} onDone={() => {}} />
+        {[420, 900].map((w) => (
+          <Row key={'ord' + w} label="order" width={w}>
+            <div className="flex justify-end bg-white rounded-xl p-3 pb-2">
+              <DiaryOrderMenu value="urgent" onChange={() => {}} />
+            </div>
+          </Row>
+        ))}
         {[390, 640].map((w) => (
           <Row key={'cap' + w} label="capacity" width={w}>
             <div className="flex items-center gap-3 bg-white rounded-xl p-3">

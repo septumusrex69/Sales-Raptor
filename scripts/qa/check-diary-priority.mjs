@@ -77,7 +77,9 @@ if (kindsInCheck) {
   )
   check('the firm\'s own words', labels, {
     promise_broken: 'Broken PTP',
-    payment_default: 'Arrangement default',
+    // Renamed from 'Arrangement default', which the firm read as a synonym for a broken PTP.
+    // A one-off promise and a running arrangement one instalment short are different work.
+    payment_default: 'Missed instalment',
     new_account: 'New account',
     promise_due: 'PTP due',
     callback: 'Callback requested',
