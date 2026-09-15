@@ -77,9 +77,6 @@ if (kindsInCheck) {
   )
   check('the firm\'s own words', labels, {
     promise_broken: 'Broken PTP',
-    // Renamed from 'Arrangement default', which the firm read as a synonym for a broken PTP.
-    // A one-off promise and a running arrangement one instalment short are different work.
-    payment_default: 'Missed instalment',
     new_account: 'New account',
     promise_due: 'PTP due',
     callback: 'Callback requested',
@@ -128,12 +125,22 @@ check(
 check(
   'the whole ladder orders correctly',
   sortDiary(
-    ['review', 'trace', 'dispute_chase', 'callback', 'promise_due', 'new_account', 'payment_default', 'promise_broken']
+    ['review', 'trace', 'no_contact', 'dispute_chase', 'callback', 'promise_due', 'new_account', 'promise_broken']
       .map((kind) => ({ kind, dueOn: today })),
     today,
   ).map((e) => e.kind),
-  ['promise_broken', 'payment_default', 'new_account', 'promise_due', 'callback', 'dispute_chase', 'trace', 'review'],
+  // The firm's own order, given in their words: broken PTP, new account, PTP due, callback
+  // requested, dispute follow-up, and so forth.
+  ['promise_broken', 'new_account', 'promise_due', 'callback', 'dispute_chase', 'no_contact', 'trace', 'review'],
 )
+
+// A rung the firm merged away. It must not come back by accident in either copy of the ladder:
+// a kind the database refuses but the app still offers is a save that fails at the last step.
+ok('the retired instalment rung is gone from the TypeScript', !('payment_default' in DIARY_PRIORITY))
+// As a VALUE, not as a word: the schema names the migration that retired it in a comment, and
+// a check that cannot tell a live constraint entry from a note about history is a check that
+// makes people delete the note.
+ok('...and from the SQL', !/'payment_default'/.test(schema))
 
 /* ---------- 3. prescription beats the ladder ---------- */
 
