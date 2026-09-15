@@ -25,12 +25,14 @@ import {
 } from '../../lib/accountWorkspace'
 import { buildTimeline, filterTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
 import { isWrittenOff } from '../../lib/accountStatus'
-import { canViewClients } from '../../lib/permissions'
+import { canFreezeAccounts, canViewClients } from '../../lib/permissions'
 import { timeOnDesk } from '../../lib/dateLabels'
 import { styleFor, PROMISE_CHIP } from './timelineStyle'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
 import { EscalateModal } from './EscalateModal'
+import { FreezeModal } from './FreezeModal'
+import { frozenByLabel } from '../../lib/clientPosition.ts'
 import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
 import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
@@ -113,6 +115,7 @@ export function AccountDetail() {
   const [promiseOpen, setPromiseOpen] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)
   const [disputing, setDisputing] = useState(false)
+  const [freezing, setFreezing] = useState(false)
   const [smsOpen, setSmsOpen] = useState(false)
   const [diariseOpen, setDiariseOpen] = useState(false)
 
@@ -318,7 +321,8 @@ export function AccountDetail() {
   )
   const positionPanel = (
     <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0}
-      clientLiaisonName={clientLiaison?.name ?? null} />
+      clientLiaisonName={clientLiaison?.name ?? null}
+      onFreeze={canFreezeAccounts(currentUser?.role) ? () => setFreezing(true) : null} />
   )
 
   return (
@@ -541,6 +545,19 @@ export function AccountDetail() {
         />
       )}
 
+      {freezing && (
+        <FreezeModal
+          accountId={account.id}
+          accountLabel={`${[account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ')} \u00b7 ${account.accountNumber}`}
+          frozen={account.frozenBy || /^frozen/i.test(account.status)
+            ? { by: account.frozenBy, reason: account.frozenReason }
+            : null}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setFreezing(false)}
+          onDone={reload}
+        />
+      )}
+
       {disputing && (
         <EscalateModal
           accountId={account.id}
@@ -751,14 +768,30 @@ function PanelTitle({ children, action }: { children: React.ReactNode; action?: 
   )
 }
 
-function Field({ label, value }: { label: string; value?: string | null }) {
+function Field({ label, value, note, action }: {
+  label: string
+  value?: string | null
+  /** A second line under the value — why it is what it is, rather than more of what it is. */
+  note?: string
+  /** Lets a field be changed where it is shown, instead of from a button somewhere else. */
+  action?: { label: string; onClick: () => void }
+}) {
   return (
     // flex-wrap, so a value too wide to sit beside its label drops to its own full-width line
     // instead of being squeezed and broken mid-way. A reference number split across two lines
     // with one stray digit is a number someone will read out wrong over the phone.
     <div className="flex flex-wrap justify-between gap-x-3 text-sm">
       <span className="text-slate-500 shrink-0">{label}</span>
-      <span className="text-slate-800 text-right min-w-0 break-words ml-auto">{value || '—'}</span>
+      <span className="text-slate-800 text-right min-w-0 break-words ml-auto">
+        {value || '\u2014'}
+        {note && <span className="block text-[11px] text-slate-400 font-normal">{note}</span>}
+        {action && (
+          <button type="button" onClick={action.onClick}
+            className="block ml-auto text-[11px] font-medium text-[var(--c-steel)] hover:underline">
+            {action.label}
+          </button>
+        )}
+      </span>
     </div>
   )
 }
@@ -1280,11 +1313,13 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
   )
 }
 
-function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName }: {
+function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName, onFreeze }: {
   account: DebtorAccount
   ceiling: { limit: number } | null
   chargedExclVat: number
   clientLiaisonName: string | null
+  /** Null where this person may not stop work — the field then simply has no control on it. */
+  onFreeze: (() => void) | null
 }) {
   const handedOver = account.handoverDate
     ? [formatDate(account.handoverDate), timeOnDesk(account.handoverDate)].filter(Boolean).join(' · ')
@@ -1316,7 +1351,24 @@ function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName }: 
       )}
       <div className="space-y-1.5">
         <Field label="Commission" value={account.commissionRate === null ? 'not resolved' : pct(account.commissionRate)} />
-        <Field label="Status" value={[account.status, account.subStatus].filter(Boolean).join(' · ')} />
+        {/*
+          THE STATUS IS WHERE WORK IS STOPPED, not the action row.
+
+          The row is already nine buttons and the firm has said so. More to the point, a freeze
+          IS the status — changing it anywhere else would be a control that acts on a field
+          somewhere else on the page, which is how people end up unsure whether it worked.
+        */}
+        <Field
+          label="Status"
+          value={[account.status, account.subStatus].filter(Boolean).join(' · ')}
+          note={account.frozenBy || account.frozenReason
+            ? [frozenByLabel(account.frozenBy), account.frozenReason].filter(Boolean).join(' — ')
+            : undefined}
+          action={onFreeze
+            ? { label: account.frozenBy || /^frozen/i.test(account.status) ? 'Restart' : 'Stop work',
+                onClick: onFreeze }
+            : undefined}
+        />
         <Field label="Bucket" value={account.bucket} />
         {/*
           HANDED OVER, and it belongs above the other dates because it is the one they are all

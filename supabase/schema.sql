@@ -1031,6 +1031,14 @@ alter table public.debtor_accounts
   -- Whoever works it in Swordfish. Free text, deliberately: not everyone who worked an account
   -- has a Raptor login, and an account must not lose its history over that.
   add column if not exists swordfish_assigned_to text,
+  -- A FREEZE IS THREE FACTS, NOT A LABEL. 150 of 736 accounts read "Frozen" and nothing else,
+  -- which cannot answer a client asking why theirs has not moved in four months -- and cannot
+  -- tell the firm whether it was the client who asked for the stop. Keys not labels ('firm',
+  -- not the firm's name), so a rebrand is a TypeScript change and not a data migration.
+  add column if not exists frozen_by text check (frozen_by in ('firm', 'client')),
+  add column if not exists frozen_reason text,
+  add column if not exists frozen_at timestamptz,
+  add column if not exists frozen_by_user uuid references public.profiles (id) on delete set null,
   add column if not exists current_legal_stage text,
   add column if not exists legal_stage_date date,
   add column if not exists last_action_at date,
@@ -2386,3 +2394,89 @@ create policy account_reminders_update on public.account_reminders
   for update to authenticated
   using (owner_id = auth.uid() or public.current_user_role() = 'Administrator')
   with check (owner_id = auth.uid() or public.current_user_role() = 'Administrator');
+
+
+-- ---------------------------------------------------------------------------
+-- THE TABLE THAT CANNOT BE BACKFILLED
+-- ---------------------------------------------------------------------------
+--
+-- A monthly client report answers "what moved this period" -- how many accounts went from being
+-- worked to an arrangement, how many fell out of one. An account carries only its CURRENT status
+-- and nothing remembers the one before it, so that question is unanswerable without this table.
+-- Every month it does not exist is a month of movement that can never be recovered, which is why
+-- it was built before the report that needs it rather than alongside it.
+create table if not exists public.account_status_events (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+
+  -- Null on the first event: the account did not come from anywhere, it arrived.
+  from_status text,
+  from_sub_status text,
+  to_status text,
+  to_sub_status text,
+
+  changed_at timestamptz not null default now(),
+  -- Null is a real value and means nobody: an import, a migration, a trigger. Telling "the
+  -- system did this" from "Meloney did this" is most of the value of the column.
+  changed_by uuid references public.profiles (id) on delete set null,
+  -- The freeze reason where there is one. Best-effort: the trigger fills it when it can see one.
+  note text
+);
+
+-- The report reads a period across the whole book; the account page reads one account newest
+-- first. Two indexes because those are two different scans.
+create index if not exists account_status_events_account_idx
+  on public.account_status_events (account_id, changed_at desc);
+create index if not exists account_status_events_period_idx
+  on public.account_status_events (changed_at);
+
+-- WRITTEN BY A TRIGGER, NEVER BY THE APP. If application code wrote these rows, every path that
+-- forgot to would lose history silently -- an import, a bulk action, a fix applied in SQL at half
+-- past eleven. The table's whole value is that it is complete, and the only way to be complete is
+-- to be unavoidable.
+--
+-- SECURITY DEFINER because the table is RLS-protected with no insert policy: nobody writes a
+-- status event by hand, administrators included.
+create or replace function public.record_account_status_event()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op = 'INSERT' then
+    insert into public.account_status_events
+      (account_id, to_status, to_sub_status, changed_by, note)
+    values (new.id, new.status, new.sub_status, auth.uid(), new.frozen_reason);
+    return new;
+  end if;
+
+  -- `is distinct from` rather than <>, so a change to or from NULL counts. An account whose
+  -- sub-status is cleared has moved, and <> would silently say it had not.
+  if new.status is distinct from old.status
+     or new.sub_status is distinct from old.sub_status then
+    insert into public.account_status_events
+      (account_id, from_status, from_sub_status, to_status, to_sub_status, changed_by, note)
+    values (
+      new.id, old.status, old.sub_status, new.status, new.sub_status, auth.uid(),
+      -- The reason that applies to the state being ENTERED. On an unfreeze the account's own
+      -- reason is already cleared, so the event carries the one being left behind instead.
+      coalesce(new.frozen_reason, old.frozen_reason)
+    );
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists record_account_status_event on public.debtor_accounts;
+create trigger record_account_status_event
+  after insert or update on public.debtor_accounts
+  for each row execute function public.record_account_status_event();
+
+alter table public.account_status_events enable row level security;
+
+-- Readable by anyone signed in, exactly like the accounts themselves. NO insert, update or
+-- delete policy, deliberately: the trigger is the only writer and history cannot be rewritten.
+drop policy if exists account_status_events_select on public.account_status_events;
+create policy account_status_events_select on public.account_status_events
+  for select using (auth.uid() is not null);

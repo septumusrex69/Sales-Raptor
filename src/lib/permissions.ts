@@ -52,6 +52,23 @@ export function canRefileMail(role: Pick<User, 'role'>['role'] | undefined): boo
   return role === 'Administrator'
 }
 
+/**
+ * Whether this person may stop or restart work on an account.
+ *
+ * Not a collector's decision, at the firm's instruction that removing an account from
+ * circulation sits at management level. A liaison is included because a freeze is most often
+ * something a CLIENT asked for, and the liaison is who the client asks.
+ *
+ * A freeze changes no balance and raises no fee, so it is reversible and needs no approval —
+ * what it needs is a name against it, which is what the reason and the status history give it.
+ */
+export function canFreezeAccounts(role: Pick<User, 'role'>['role'] | undefined): boolean {
+  return role === 'Administrator'
+    || role === 'Pre-legal Team Leader'
+    || role === 'Liaison Manager'
+    || role === 'Liaison'
+}
+
 /** Roles eligible to own a Lead/Deal/Task/Contact/Company — i.e. show up in "assign to" / "Client Liaison" pickers. */
 export function isAssignableOwner(role: Pick<User, 'role'>['role']): boolean {
   return role === 'Administrator' || role.includes('Sales') || role === 'Liaison' || role === 'Liaison Manager'
