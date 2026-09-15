@@ -17,6 +17,7 @@ import {
   CLIENT_POSITIONS, CLIENT_POSITION_ORDER,
   clientPosition, frozenByLabel, needsClient, positionReport,
 } from '../../src/lib/clientPosition.ts'
+import { accountNarrative } from '../../src/lib/accountNarrative.ts'
 
 let pass = 0
 const failures = []
@@ -45,26 +46,39 @@ check('a payment default is a broken arrangement', at('Active: Activated', 'Paym
  * there is no arrangement to break. 90 accounts, the largest active group on the book, and
  * collapsing them told the client the wrong thing about all of them.
  */
-check('a delinquent payer is not paying', at('Active: Activated', 'Delinquent Payer'), 'not_paying')
-check('...on an unfrozen account too', at('Active: Unfrozen', 'Delinquent Payer'), 'not_paying')
-check('...and an outright refusal lands in the same position', at('Active: Activated', 'Refuses to pay'), 'not_paying')
-// The two must never collapse back into one another.
-ok('not paying is not a broken arrangement',
+/*
+ * WILL NOT versus CANNOT, and they must never collapse.
+ *
+ * The firm's own definition of its inherited "Delinquent Payer" is a refusal -- "somebody that
+ * just doesn't pay at all, he refuses to pay" -- and avoiding contact is read the same way, on
+ * the same instruction: a debtor dodging a working number has answered, just not in words.
+ *
+ * But the firm's client documentation also files unemployed, pensioner, hospitalised and
+ * business-closed under that heading, and those are people who CANNOT pay. Reported as refusals
+ * they would appear on a list headed "consider legal action", which is how a client ends up
+ * suing an unemployed pensioner in hospital.
+ */
+check('a delinquent payer is refusing', at('Active: Activated', 'Delinquent Payer'), 'refusing')
+check('...on an unfrozen account too', at('Active: Unfrozen', 'Delinquent Payer'), 'refusing')
+check('an outright refusal is a refusal', at('Active: Activated', 'Refuses to pay'), 'refusing')
+check('avoiding contact is a refusal', at('Active: Activated', 'Debtor avoiding contact'), 'refusing')
+for (const hardship of ['Unemployed', 'Pensioner', 'Hospitalisation', 'Business closed']) {
+  check(`${hardship} is cannot pay, not a refusal`, at('Active: Activated', hardship), 'cannot_pay')
+}
+ok('the two never collapse into one another',
+  at('Active: Activated', 'Unemployed') !== at('Active: Activated', 'Delinquent Payer'))
+ok('a refusal is not a broken arrangement',
   at('Active: Activated', 'Delinquent Payer') !== at('Active: Activated', 'Payment Default'))
-// Reached and refused beats "we are still trying": contact HAS been made and the answer was no.
-check('not paying is not softened into being worked',
-  at('Active: Activated', 'Delinquent Payer', { reachedInPeriod: false }), 'not_paying')
-check('money still beats it — they paid after all',
+check('money still beats a refusal — they paid after all',
   at('Active: Activated', 'Delinquent Payer', { paidInPeriod: true }), 'paying')
-check('an active account with no sub-status is being worked', at('Active: Activated', null), 'being_worked')
-check('a re-opened account with no sub-status is being worked', at('Active: Re-opened', null), 'being_worked')
+check('...and beats a hardship', at('Active: Activated', 'Unemployed', { paidInPeriod: true }), 'paying')
 
 /* ---------- reached or not is the whole difference ---------- */
 
 check('reached in the period is negotiating',
   at('Active: Activated', null, { reachedInPeriod: true }), 'negotiating')
-check('not reached is being worked',
-  at('Active: Activated', null, { reachedInPeriod: false }), 'being_worked')
+check('not reached is simply in progress',
+  at('Active: Activated', null, { reachedInPeriod: false }), 'in_progress')
 
 /* ---------- money, and where it sits in the precedence ---------- */
 
@@ -89,10 +103,10 @@ check('a closed account that paid is still closed',
 
 /* ---------- nothing may fall through ---------- */
 
-check('an unknown status still reports something', at('Something Swordfish Invented', null), 'being_worked')
-check('a null status still reports something', at(null, null), 'being_worked')
-check('an empty status still reports something', at('', ''), 'being_worked')
-check('whitespace is not a status', at('   ', '   '), 'being_worked')
+check('an unknown status still reports something', at('Something Swordfish Invented', null), 'in_progress')
+check('a null status still reports something', at(null, null), 'in_progress')
+check('an empty status still reports something', at('', ''), 'in_progress')
+check('whitespace is not a status', at('   ', '   '), 'in_progress')
 ok('every position has a label and a meaning',
   CLIENT_POSITION_ORDER.every((p) => CLIENT_POSITIONS[p]?.label && CLIENT_POSITIONS[p]?.meaning))
 check('the order lists every position exactly once',
@@ -114,19 +128,21 @@ ok('every mapping result is a known position', [
 ok('frozen is not in play', !CLIENT_POSITIONS.frozen.inPlay)
 ok('closed is not in play', !CLIENT_POSITIONS.closed.inPlay)
 ok('legal is not in play', !CLIENT_POSITIONS.legal.inPlay)
-ok('being worked is in play', CLIENT_POSITIONS.being_worked.inPlay)
+ok('in progress is in play', CLIENT_POSITIONS.in_progress.inPlay)
+/*
+ * ONE AXIS. Every position must describe the ACCOUNT, never the firm's effort. "Being worked"
+ * described what we are doing while everything around it described what the account is -- and an
+ * account that is refusing to pay is also being worked, so they were never alternatives. A label
+ * about our own activity on this list is the fault the whole model exists to avoid.
+ */
+ok('no position describes the firm\u2019s effort rather than the account',
+  !CLIENT_POSITION_ORDER.some((p) => /\bwork(ed|ing)?\b/i.test(CLIENT_POSITIONS[p].label)))
 ok('a dispute is still in play', CLIENT_POSITIONS.disputed.inPlay)
 // The whole point of separating it: it is the one position that asks the CLIENT a question.
-ok('not paying is in play', CLIENT_POSITIONS.not_paying.inPlay)
-/*
- * The position must NOT say "refusing". The firm's own document files hardship under this
- * heading -- pensioner, unemployed, hospitalised -- and a client told 90 people are refusing to
- * pay decides to litigate against an unemployed pensioner in hospital.
- */
-ok('the position does not accuse anybody of refusing',
-  !/refus/i.test(CLIENT_POSITIONS.not_paying.label))
-ok('...and points at the flags for the reason',
-  /flag/i.test(CLIENT_POSITIONS.not_paying.meaning))
+ok('refusing is in play', CLIENT_POSITIONS.refusing.inPlay)
+ok('cannot pay is in play — it is checked back on, not abandoned', CLIENT_POSITIONS.cannot_pay.inPlay)
+ok('cannot pay does not accuse anybody of refusing', !/refus/i.test(CLIENT_POSITIONS.cannot_pay.label))
+ok('...and names the circumstances instead', /unemployed|pension/i.test(CLIENT_POSITIONS.cannot_pay.meaning))
 
 /* ---------- somebody else is administering the debtor ---------- */
 
@@ -166,6 +182,53 @@ ok('the firm name can be changed without a migration', /Acme/.test(frozenByLabel
 // The state this whole feature exists to end: 150 accounts saying "Frozen" and nothing else.
 ok('a freeze with nobody against it says so', /no reason recorded/i.test(frozenByLabel(null)))
 
+/* ---------- the sentence the client reads ---------- */
+
+check('a reached call with a promise and a date reads as one sentence',
+  accountNarrative({
+    lastAttemptOn: '2026-09-14', lastAttemptChannel: 'phone', reached: true,
+    promise: { amount: 2000, dueOn: '2026-09-25' }, nextFollowUpOn: '2026-09-26',
+  }),
+  // en-ZA renders September as "Sept", which is what the diary already shows on screen.
+  'Contacted 14 Sept 2026 by phone. Debtor undertook to pay R2\u00a0000 by 25 Sept 2026. Next follow-up 26 Sept 2026.')
+
+/*
+ * THREE STATES FOR "DID THEY ANSWER", not two. The imported book logs 8 calls across 736
+ * accounts and records an answer on none of them, so "we do not know" is the normal case.
+ * Printing "no reply" there would put a claim about the DEBTOR in front of a client when the
+ * gap is in our own records.
+ */
+ok('a recorded non-answer says no reply',
+  /no reply/.test(accountNarrative({ lastAttemptOn: '2026-09-12', reached: false })))
+ok('an unrecorded outcome says only what is known',
+  /Last worked/.test(accountNarrative({ lastAttemptOn: '2026-09-12' })))
+ok('...and never claims the debtor failed to reply',
+  !/no reply/.test(accountNarrative({ lastAttemptOn: '2026-09-12', reached: null })))
+
+ok('a single attempt does not boast about being the first',
+  !/attempt/.test(accountNarrative({ lastAttemptOn: '2026-09-12', reached: false, attemptsThisPeriod: 1 })))
+ok('several attempts are counted',
+  /Third attempt this period/.test(accountNarrative({
+    lastAttemptOn: '2026-09-12', reached: false, attemptsThisPeriod: 3 })))
+
+/*
+ * THE CLAUSE THAT MATTERS MOST. When the firm has not worked an account, the sentence says so.
+ * A client report that dressed the firm's own silence up as the debtor's would be the one
+ * dishonest thing in the document, and it is the easiest to write by accident.
+ */
+check('nothing done reads as nothing done', accountNarrative({}), 'No contact attempted.')
+ok('...and is not hidden by a follow-up date being booked',
+  /No contact attempted/.test(accountNarrative({ nextFollowUpOn: '2026-09-20' })))
+
+ok('a freeze is said first', /^Work is on hold/.test(accountNarrative({
+  frozenReason: 'Debtor in debt review.', lastAttemptOn: '2026-09-12' })))
+ok('a freeze reason is not double-stopped',
+  !/\.\./.test(accountNarrative({ frozenReason: 'Debtor in debt review.' })))
+ok('money received is reported',
+  /R1\u00a0500 received/.test(accountNarrative({ paidInPeriod: { amount: 1500, on: '2026-09-03' } })))
+check('a frozen account does not also claim nobody rang',
+  /No contact attempted/.test(accountNarrative({ frozenReason: 'Client asked us to hold.' })), false)
+
 /* ---------- the database has to agree ---------- */
 
 const schema = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8')
@@ -189,6 +252,20 @@ ok('...and has no write policy at all',
 const book = readFileSync(new URL('../../src/lib/accountBook.ts', import.meta.url), 'utf8')
 for (const [field, col] of [['frozenBy', 'frozen_by'], ['frozenReason', 'frozen_reason'], ['frozenAt', 'frozen_at']]) {
   ok(`accountBook maps ${col}`, new RegExp(`${field}:[^,]*r\\.${col}`).test(book))
+}
+
+/*
+ * The client line is shown to the clerk whose work produces it, and it must stay READ-ONLY. The
+ * moment somebody can type into it, it stops being a faithful reading of the records and becomes
+ * a second place where the truth is kept -- which is the whole problem the composed sentence was
+ * built to avoid.
+ */
+const detail = readFileSync(new URL('../../src/pages/accounts/AccountDetail.tsx', import.meta.url), 'utf8')
+ok('the account page shows the client line', /What the client sees/.test(detail))
+ok('...composed, not taken from the main comment', /accountNarrative\(\{/.test(detail))
+{
+  const panel = detail.slice(detail.indexOf('function ClientLinePanel'), detail.indexOf('/* ---------- right: the figures'))
+  ok('...and it cannot be typed into', !/<textarea|<input|contentEditable/.test(panel))
 }
 
 // A freeze without a reason is the state being fixed; it must be refused, not defaulted.

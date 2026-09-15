@@ -32,7 +32,8 @@ import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './Ac
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
 import { EscalateModal } from './EscalateModal'
 import { FreezeModal } from './FreezeModal'
-import { frozenByLabel } from '../../lib/clientPosition.ts'
+import { CLIENT_POSITIONS, clientPosition, frozenByLabel } from '../../lib/clientPosition.ts'
+import { accountNarrative } from '../../lib/accountNarrative.ts'
 import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
 import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
@@ -291,6 +292,34 @@ export function AccountDetail() {
     />
   )
   const summaryPanel = <SummaryPanel account={account} breakdown={b} note={statement?.note} />
+
+  /*
+   * WHAT THE CLIENT WILL READ, shown to the person whose work produces it.
+   *
+   * Asked for directly: "the clerk can see what will go to the client". It costs nothing to show
+   * and it changes behaviour — an agent who can see that the client's line reads "No contact
+   * attempted" is an agent who rings somebody.
+   *
+   * Composed from records, never from the main comment. See accountNarrative.
+   */
+  const clientLinePanel = (
+    <ClientLinePanel
+      text={accountNarrative({
+        lastAttemptOn: account.lastActionAt,
+        // Deliberately not passed: the book records that something was done and never what came
+        // of it, so the sentence says "last worked" rather than claiming a non-answer.
+        reached: null,
+        promise: due ? { amount: due.amount, dueOn: due.dueOn } : null,
+        nextFollowUpOn: account.diaryDate,
+        frozenReason: account.frozenReason,
+      })}
+      position={CLIENT_POSITIONS[clientPosition({
+        status: account.status,
+        subStatus: account.subStatus,
+        paidInPeriod: false,
+      })]}
+    />
+  )
   const promisePanel = (
     <PromisePanel
       accountId={account.id}
@@ -541,7 +570,7 @@ export function AccountDetail() {
           layout={layout}
           details={detailsPanel}
           main={timelinePanel}
-          side={[summaryPanel, promisePanel, disputesPanel, positionPanel]}
+          side={[summaryPanel, clientLinePanel, promisePanel, disputesPanel, positionPanel]}
         />
       )}
 
@@ -1017,6 +1046,35 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
 
 function PromiseChip({ status }: { status: string }) {
   return <span className={`text-[10px] px-1.5 py-0.5 rounded ml-1.5 align-middle ${PROMISE_CHIP[status] ?? ''}`}>{status}</span>
+}
+
+/**
+ * The one line this account contributes to the client's monthly report.
+ *
+ * Read-only here. It is not an editable note and must not become one: the moment somebody can
+ * type into it, it stops being a faithful reading of the records and becomes a second place
+ * where the truth is kept. What changes it is doing the work — ringing the debtor, taking the
+ * promise, setting the next date — which is the point of showing it.
+ */
+function ClientLinePanel({ text, position }: {
+  text: string
+  position: { label: string; meaning: string }
+}) {
+  return (
+    <Card>
+      <PanelTitle>What the client sees</PanelTitle>
+      <p className="text-xs font-medium text-[var(--c-steel)]">{position.label}</p>
+      <p className="text-[11px] text-slate-400 mb-2">{position.meaning}</p>
+      {/*
+        Quoted and set apart, because it is not this page talking — it is a preview of another
+        document. An agent should be able to tell at a glance that these are the words leaving
+        the building.
+      */}
+      <p className="text-sm text-slate-700 border-l-2 border-slate-200 pl-3">
+        {text || 'Nothing to report on this account yet.'}
+      </p>
+    </Card>
+  )
 }
 
 /* ---------- right: the figures ---------- */

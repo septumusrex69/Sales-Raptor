@@ -51,8 +51,16 @@ export interface NarrativeInput {
   /** The last time we tried, whatever came of it. 'YYYY-MM-DD'. */
   lastAttemptOn?: string | null
   lastAttemptChannel?: ContactChannel | null
-  /** Did the debtor actually respond to that attempt? */
-  reached?: boolean
+  /**
+   * Did the debtor respond to that attempt?
+   *
+   * THREE STATES, NOT TWO. true is contact made, false is a recorded non-answer, and
+   * undefined is "something was logged against this account and nobody recorded what came of
+   * it" — which is most of the imported book, where 8 calls are logged across 736 accounts and
+   * none of them records an answer. Collapsing undefined into false would put "no reply" in
+   * front of a client as a statement of fact about the debtor, when it is really a gap in ours.
+   */
+  reached?: boolean | null
   /** Attempts made this period, for the "third attempt" clause. */
   attemptsThisPeriod?: number
   /** An open promise: what they undertook to pay, and by when. */
@@ -89,9 +97,9 @@ export function accountNarrative(input: NarrativeInput): string {
 
   if (input.lastAttemptOn) {
     const channel = input.lastAttemptChannel ? ` ${CHANNEL_WORD[input.lastAttemptChannel]}` : ''
-    if (input.reached) {
+    if (input.reached === true) {
       parts.push(`Contacted ${onDate(input.lastAttemptOn)}${channel}.`)
-    } else {
+    } else if (input.reached === false) {
       /*
        * The attempt count only earns its place once there is more than one. "First attempt this
        * month" beside a single call reads as an excuse; "Fourth attempt this month" is the
@@ -100,6 +108,9 @@ export function accountNarrative(input: NarrativeInput): string {
       const n = input.attemptsThisPeriod ?? 0
       const nth = n > 1 ? ` ${ordinal(n)} attempt this period.` : ''
       parts.push(`Tried ${onDate(input.lastAttemptOn)}${channel} — no reply.${nth}`)
+    } else {
+      // Something was done; what came of it was never recorded. Say only what is known.
+      parts.push(`Last worked ${onDate(input.lastAttemptOn)}${channel}.`)
     }
   } else if (!input.frozenReason && !input.paidInPeriod) {
     parts.push('No contact attempted.')

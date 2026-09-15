@@ -18,6 +18,16 @@
  * ten positions. Rename an internal status and a client's historical reports are unaffected;
  * change this mapping and you have changed what the firm reports, deliberately, in one place.
  *
+ * THE WORDS ARE THE FIRM'S OWN, lifted from the client-facing document its legal department
+ * already maintains. They were written to be read by a client and they read better than anything
+ * invented here would.
+ *
+ * NO FLAG LAYER. A catalogue of thirty flags underneath these positions was built and then
+ * removed, at the firm's instruction to "forget about the flags, let's just keep to main
+ * sub-statuses to make it simple". One status per account, and the richer breakdown becomes the
+ * paid analysis a client subscribes to rather than a second vocabulary everybody has to maintain.
+ * The descriptions from that catalogue survive here, on the positions that absorbed them.
+ *
  * Pure on purpose: every input is passed in, nothing is fetched, no clock of its own. The report
  * that has to be reproducible three months later cannot depend on a function that reads today.
  */
@@ -26,9 +36,10 @@ export type ClientPosition =
   | 'paying'
   | 'arranged'
   | 'broken_arrangement'
-  | 'not_paying'
+  | 'refusing'
+  | 'cannot_pay'
   | 'negotiating'
-  | 'being_worked'
+  | 'in_progress'
   | 'tracing'
   | 'disputed'
   | 'legal'
@@ -59,31 +70,38 @@ export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
   },
   arranged: {
     label: 'Arranged',
-    meaning: 'The debtor has committed to an amount and a date that has not yet arrived.',
+    meaning: 'The debtor has arranged instalments, or a settlement, to clear the account.',
     inPlay: true,
   },
   broken_arrangement: {
     label: 'Broken arrangement',
-    meaning: 'They committed to pay and the money did not come. Being chased.',
+    /* The firm's own words: speed is what recovers a defaulted payment. */
+    meaning: 'An arranged instalment was not paid. We make contact immediately — speed is what recovers a defaulted payment.',
     inPlay: true,
   },
-  not_paying: {
+  refusing: {
     /*
-     * NOT "REFUSING TO PAY", which is what this was called for one commit and was wrong.
+     * WILL NOT, as against CANNOT below. Avoiding contact belongs here, at the firm's
+     * instruction -- "a guy that's avoiding contact is avoiding" -- which is the right call: a
+     * debtor dodging a working number has answered, just not in words.
      *
-     * The firm's own client documentation files five things under its "Delinquent Payer" title:
-     * Hospitalisation, Foreign debtor, Pensioner, Unemployed, Business closed. Every one is a
-     * debtor who CANNOT pay, not one who will not -- the Pensioner note says so outright
-     * ("cannot make payments mainly due to financial restraints ... we continue to attempt to
-     * procure payment"). Reporting 90 accounts as refusers would have told a client to sue an
-     * unemployed pensioner in hospital.
-     *
-     * So the position says only that no money is coming, and the FLAG says why -- hardship or
-     * refusal. The distinction belongs on the flag because that is where the client's decision
-     * actually turns: you write off a pensioner and you litigate a refuser.
+     * Kept apart from `cannot_pay` because the client's decision turns on exactly this. You
+     * litigate a refuser and you cycle back to a pensioner, and one label covering both would
+     * put an unemployed debtor in hospital on a list headed "consider legal action".
      */
-    label: 'Not paying',
-    meaning: 'No money is coming in. The flags say why — hardship, or an outright refusal.',
+    label: 'Refusing to pay',
+    meaning: 'The debtor will not pay, or is avoiding us on details that work. Usually a legal decision.',
+    inPlay: true,
+  },
+  cannot_pay: {
+    /*
+     * CANNOT, as against WILL NOT above. The firm's own client documentation is unambiguous
+     * here: unemployed, pensioner, hospitalised, business closed -- and its Pensioner note says
+     * "cannot make payments mainly due to financial restraints ... we continue to attempt to
+     * procure payment". That is not a refusal and must not be reported as one.
+     */
+    label: 'Cannot pay',
+    meaning: 'The debtor is unable to pay — unemployed, a pensioner, in hospital, or the business has closed. We check back.',
     inPlay: true,
   },
   negotiating: {
@@ -91,24 +109,38 @@ export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
     meaning: 'We have reached the debtor and are working towards an arrangement.',
     inPlay: true,
   },
-  being_worked: {
-    label: 'Being worked',
-    meaning: 'Contact is being attempted. We have not reached the debtor yet.',
+  in_progress: {
+    /*
+     * NOT "BEING WORKED", at the firm's instruction that "the word work will not work" -- and
+     * they were right for a better reason than wording.
+     *
+     * "Being worked" described what the FIRM is doing, while every other position describes
+     * what the ACCOUNT is. That is two axes on one list, which is the exact fault this model was
+     * built to avoid: an account that is refusing to pay is also being worked, so the two were
+     * never alternatives and could not sit on the same ladder.
+     *
+     * Read as the account's own state, this is simply the one with no conclusion yet. Ordinary
+     * collection is under way and nothing has come of it. The moment something does -- a
+     * promise, a refusal, a dispute, a dead number -- the account leaves for the position that
+     * says so.
+     */
+    label: 'In progress',
+    meaning: 'Ordinary collection is under way. Nothing has come of it yet.',
     inPlay: true,
   },
   tracing: {
     label: 'Tracing',
-    meaning: 'The debtor cannot be reached at the details on file. A trace is running.',
+    meaning: 'We could not reach the debtor on the details supplied. A trace is lodged with the credit and information bureaus.',
     inPlay: true,
   },
   disputed: {
     label: 'Disputed',
-    meaning: 'The debtor disputes the debt. Collection is paused while it is answered.',
+    meaning: 'The debtor disputes the account. We are establishing the dispute in writing and resolving it with our legal team.',
     inPlay: true,
   },
   legal: {
     label: 'Legal',
-    meaning: 'A legal step has been taken -- Section 129, summons, or handed to attorneys.',
+    meaning: 'A Section 129 letter of demand has been issued, or the matter is with attorneys on your instruction.',
     inPlay: false,
   },
   under_administration: {
@@ -141,14 +173,14 @@ export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
   },
   closed: {
     label: 'Closed',
-    meaning: 'Off the book -- paid up, withdrawn, written off or prescribed.',
+    meaning: 'Back with you — settled, withdrawn, prescribed, untraceable, or recommended for write-off.',
     inPlay: false,
   },
 }
 
 /** Dashboard order: money first, then the work, then the ones that are elsewhere. */
 export const CLIENT_POSITION_ORDER: ClientPosition[] = [
-  'paying', 'arranged', 'broken_arrangement', 'not_paying', 'negotiating', 'being_worked',
+  'paying', 'arranged', 'broken_arrangement', 'refusing', 'cannot_pay', 'negotiating', 'in_progress',
   'tracing', 'disputed', 'legal', 'under_administration', 'frozen', 'closed',
 ]
 
@@ -224,16 +256,28 @@ export function clientPosition(input: PositionInput): ClientPosition {
    * the wrong thing about the biggest active group on their book.
    */
   if (/payment\s*default/i.test(sub)) return 'broken_arrangement'
-  if (/delinquent|refus|non.?cooperative/i.test(sub)) return 'not_paying'
+
+  /*
+   * CANNOT is tested before WILL NOT, so that a stated hardship is never swallowed by a general
+   * "not paying" label. Only words that actually name a hardship qualify; nothing is inferred.
+   */
+  if (/unemploy|pension|hospital|business\s*closed|deceased|incapacit/i.test(sub)) return 'cannot_pay'
+  /*
+   * "Delinquent Payer" is the firm's inherited term and its own definition is a refusal --
+   * "somebody that just doesn't pay at all, he refuses to pay". Avoiding contact is read the
+   * same way, on the same instruction.
+   */
+  if (/delinquent|refus|non.?cooperative|avoid/i.test(sub)) return 'refusing'
 
   if (input.reachedInPeriod) return 'negotiating'
 
   /*
-   * The floor, and it is deliberately the honest one. An unrecognised status lands here rather
-   * than in a 'unknown' bucket, because "we are working it" is true of every active account by
-   * definition, and a position no client can interpret is worse than a modest one.
+   * The floor, and deliberately the honest one. An unrecognised status lands here rather than
+   * in an 'unknown' bucket: "collection is under way, nothing has come of it" is true of every
+   * active account by definition, and a position no client can interpret is worse than a modest
+   * one.
    */
-  return 'being_worked'
+  return 'in_progress'
 }
 
 /**
