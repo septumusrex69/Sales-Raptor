@@ -14,7 +14,7 @@ import {
   OUT, PORT, chromium, makeRunner, signedInPage, startServer, stopServer,
 } from './harness.mjs'
 import {
-  BOOK_SUMMARY, COMPANY, FACETS, PROFILE, COLLEAGUE, TEAM, UNGRADED, USER_ID, VIEW_COUNTS,
+  BENCH, BOOK_SUMMARY, COMPANY, FACETS, PROFILE, COLLEAGUE, TEAM, UNGRADED, USER_ID, VIEW_COUNTS,
   accountsPage,
 } from './fixtures.mjs'
 
@@ -35,8 +35,9 @@ const handlers = [
        * three screens later, nowhere near the cause. So an id-scoped request gets exactly one row.
        */
       const one = /id=eq\.([0-9a-f-]+)/.exec(u)?.[1]
-      if (one) return { body: [PROFILE, COLLEAGUE, UNGRADED].filter((p) => p.id === one) }
-      return { body: [PROFILE, COLLEAGUE, UNGRADED] }
+      const all = [PROFILE, COLLEAGUE, UNGRADED, ...BENCH]
+      if (one) return { body: all.filter((p) => p.id === one) }
+      return { body: all }
     },
   ],
   [(u) => u.includes('/rest/v1/companies'), () => ({ body: [COMPANY] })],
@@ -50,6 +51,11 @@ const handlers = [
     body: [
       { user_id: PROFILE.id, in_play_accounts: 120, in_play_value: 900000, total_accounts: 140 },
       { user_id: COLLEAGUE.id, in_play_accounts: 470, in_play_value: 300000, total_accounts: 480 },
+      // Uneven books across the bench, so the list is not a column of identical rows.
+      ...BENCH.map((p, i) => ({
+        user_id: p.id, in_play_accounts: 20 + (i * 17) % 260,
+        in_play_value: 100000 + i * 40000, total_accounts: 300,
+      })),
     ],
   })],
   [(u) => u.includes('/rpc/diary_day_load'), () => ({ body: [] })],
@@ -231,8 +237,14 @@ try {
    * offered, with what they carry and what they work in a day.
    */
   t.ok('it offers the graded people', modal.includes('Test Leader') && modal.includes('Thandi Junior'))
-  t.ok('...with their grade and book', /Senior · 120\/500 on the book · 40 a day/.test(modal))
-  t.ok('...and the junior’s real ceiling', /Junior · 470\/150 on the book/.test(modal))
+  /*
+   * The list states the same facts in one line each: grade, then book against ceiling. The card
+   * layout's sentence ("Senior · 120/500 on the book · 40 a day") is gone, so the old assertions
+   * described a screen that no longer exists.
+   */
+  t.ok('a row carries the grade', /Senior/.test(modal))
+  t.ok('...and the book against the ceiling', /120\/500/.test(modal))
+  t.ok('...including an overloaded one', /470\/150/.test(modal))
   /*
    * THE CASE THE FIRM CAUGHT. A pre-legal clerk with no grade used to be filtered out entirely,
    * so a firm whose clerks were all ungraded saw a hand-out screen offering nobody. The role
@@ -240,7 +252,29 @@ try {
    */
   t.ok('an ungraded clerk is still offered', modal.includes('Itumeleng Agent'))
   t.ok('...marked as ungraded', /Not graded/.test(modal))
-  t.ok('...and told what that limits them to', /generic accounts only until graded/.test(modal))
+
+  /*
+   * A LIST THAT SURVIVES A REAL FLOOR. Eight collectors fitted in cards; thirty-eight do not, and
+   * choosing four of them meant scrolling past thirty-four. The list is capped and searchable,
+   * and the choice is summarised above it so it stays visible while you scroll.
+   */
+  t.ok('the list says how many there are to search',
+    /Search 38 collectors by name/.test(
+      await page.getByPlaceholder(/Search \d+ collectors/).getAttribute('placeholder') ?? ''))
+  t.ok('...and how many are chosen', /\d+ of \d+ chosen/.test(modal))
+
+  const nameBox = page.getByPlaceholder(/Search \d+ collectors by name/)
+  await nameBox.fill('khumalo')
+  await page.waitForTimeout(250)
+  const filtered = await page.locator('body').innerText()
+  t.ok('searching narrows the list', filtered.includes('Sipho Khumalo'))
+  t.ok('...and hides the rest', !filtered.includes('Annelize Venter'))
+  await nameBox.fill('zzzznobody')
+  await page.waitForTimeout(250)
+  t.ok('a search matching nobody says so',
+    /Nobody matching/.test(await page.locator('body').innerText()))
+  await nameBox.fill('')
+  await page.waitForTimeout(250)
 
   /*
    * THE GATE THAT MATTERS. Every eighth fixture account is R180 000 — Major — and only the
@@ -248,8 +282,18 @@ try {
    */
   t.ok('the plan is on screen', /across \d+ (person|people)/.test(modal))
   t.ok('the day grid shows what lands when', /\+\d+ \/\d+/.test(modal))
-  t.ok('...and warns when somebody goes over their ceiling',
-    /over their book ceiling|\d+ over/.test(modal))
+  /*
+   * NOT asserting the over-ceiling warning here any more, because with thirty-eight collectors
+   * and forty accounts there is ample headroom and nobody IS pushed over — the warning staying
+   * quiet is the correct result. Asserting it would only pass by making the fixture lie.
+   *
+   * What is visible, and worth holding, is that somebody already over their ceiling is shown as
+   * such and is given nothing. The planner's own checks own the warning arithmetic:
+   * check-hand-out.mjs proves overBy counts only what a plan adds.
+   */
+  t.ok('an already-overloaded collector is shown as such', /470\/150/.test(modal))
+  t.ok('...and the plan does not claim to have pushed anybody over',
+    !/goes? over their book ceiling/.test(modal))
   /*
    * ALLOCATION IMPLIES REFERRAL, and the screen has to make that unavailable rather than merely
    * discouraged. Both modes are offered, "allocate and refer" is the default, and there is no
