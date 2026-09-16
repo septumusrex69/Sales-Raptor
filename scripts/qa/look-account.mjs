@@ -265,8 +265,17 @@ const serve = (route) => {
     return json({ capital: 18500, spent_on_item: 0, towards_ceiling: 0 })
   }
   if (route.request().method() === 'POST') {
-    posted.push({ table, body: route.request().postData() ?? '' })
-    const sent = JSON.parse(route.request().postData() || '{}')
+    const raw = route.request().postData() ?? ''
+    posted.push({ table, body: raw })
+    /*
+     * NOT EVERY POST IS JSON. A file going to Storage is multipart, and JSON.parse on its body
+     * throws inside the route handler -- which kills the whole run with a stack trace pointing at
+     * the stub rather than at whatever was being tested.
+     */
+    if (!/^\s*[[{]/.test(raw)) {
+      return json({ Key: `${table}/stubbed` }, 200)
+    }
+    const sent = JSON.parse(raw || '{}')
     const row = { id: `qa-${posted.length}`, created_at: new Date().toISOString(), ...(Array.isArray(sent) ? sent[0] : sent) }
     // Kept, not just echoed. A stub that forgets what was inserted cannot tell the difference
     // between a page that refetched after a write and one that did not -- which is the whole
@@ -336,6 +345,55 @@ await page.evaluate(() => {
 })
 await page.waitForTimeout(400)
 await page.screenshot({ path: `${OUT}/account-standing-panel.png` })
+
+/*
+ * Uploading a trace, when a real bureau PDF is to hand.
+ *
+ * Point RAPTOR_TRACE_PDF at one. Not committed and never will be: this repo is public and a
+ * bureau profile is somebody's ID number, their addresses and where they work.
+ */
+if (process.env.RAPTOR_TRACE_PDF) {
+  await page.goto(`${ORIGIN}/accounts/${ACC2}`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1200)
+  const opener = page.getByRole('button', { name: /Upload a trace/ })
+  if (await opener.count()) {
+    await opener.first().click()
+    await page.waitForTimeout(300)
+    await page.locator('input[type="file"]').setInputFiles(process.env.RAPTOR_TRACE_PDF)
+    try {
+      await page.waitForFunction(() => /Who is this trace for|does not look like/.test(document.body.innerText), { timeout: 30000 })
+    } catch {
+      console.log('!! the trace never finished reading')
+      console.log('   modal says:', (await page.locator('[data-modal-open]').innerText()).slice(0, 300))
+      console.log('   console:', errors.slice(-6).join(' | ') || 'no errors')
+    }
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: `${OUT}/trace-upload.png`, fullPage: true })
+    const body = await page.locator('body').innerText()
+    console.log('\n== Trace upload ==')
+    // innerText returns text as CSS transforms it, and this label is `uppercase` in the design.
+    console.log('   asks who it is for:', /Who is this trace for/i.test(body))
+    console.log('   names the subject:', /Company profile|Consumer profile/.test(body))
+    for (const section of ['Directors', 'Judgments', 'Numbers and email', 'Addresses']) {
+      console.log(`   found ${section}:`, new RegExp(section, 'i').test(body))
+    }
+    const file = page.getByRole('button', { name: /File what is ticked/ })
+    if (await file.count()) {
+      await file.first().click()
+      await page.waitForFunction(() => /Filed|error/i.test(document.body.innerText), { timeout: 20000 })
+      await page.waitForTimeout(300)
+      console.log('   filed:', /Filed[:.]/.test(await page.locator('body').innerText()))
+      const wrote = posted.filter((x) => ['account_directors', 'account_judgments', 'account_contacts', 'account_notes'].includes(x.table))
+      console.log('   wrote to:', [...new Set(wrote.map((w) => w.table))].join(', ') || '!! nothing')
+      await page.screenshot({ path: `${OUT}/trace-filed.png`, fullPage: true })
+    } else {
+      console.log('!! no file button')
+    }
+    await page.keyboard.press('Escape')
+  } else {
+    console.log('!! no "Upload a trace" button on the company account')
+  }
+}
 
 for (const tab of ['Overview', 'Transactions', 'Documents']) {
   await page.goto(`${ORIGIN}/accounts/${ACC}`, { waitUntil: 'networkidle' })

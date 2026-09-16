@@ -3110,3 +3110,39 @@ create policy account_judgments_read on public.account_judgments
 drop policy if exists account_judgments_write on public.account_judgments;
 create policy account_judgments_write on public.account_judgments
   for all to authenticated using (true) with check (true);
+
+-- A judgment against a DIRECTOR is not a judgment against the company.
+--
+-- A director's own consumer profile carries their personal judgments. Filed on the account with
+-- the company's own, they would inflate the one signal the firm has said will drive its
+-- likelihood of collection -- a company with a clean record would read as having two judgments
+-- because somebody who signed for it does.
+--
+-- They are still worth keeping: a director who has been sued personally is a different
+-- conversation, and on a suretyship it is the same debt. So they are stored, and stored against
+-- the person.
+--
+-- Null means the company (or, on an individual account, the debtor). That is the common case and
+-- the one that counts.
+alter table public.account_judgments
+  add column if not exists against_director_id uuid
+    references public.account_directors (id) on delete cascade;
+
+comment on column public.account_judgments.against_director_id is
+  'Null = against the debtor on this account. Set = against that director personally, off their '
+  'own consumer profile. Never counted as a judgment against the company.';
+
+-- The unique key has to widen with it: the same case number can appear on the company's profile
+-- and on a director's, and they are two different records of two different judgments.
+--
+-- A partial index cannot express this -- the key is "one row per case per subject", where the
+-- subject is either a director or the account itself -- so the null is folded to a fixed uuid.
+alter table public.account_judgments
+  drop constraint if exists account_judgments_account_id_case_number_key;
+
+create unique index if not exists account_judgments_unique_case
+  on public.account_judgments (account_id, case_number, coalesce(against_director_id, '00000000-0000-0000-0000-000000000000'::uuid));
+
+-- Who paid for the trace, beside when it was pulled.
+alter table public.account_directors
+  add column if not exists traced_by uuid references public.profiles (id);

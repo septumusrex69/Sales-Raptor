@@ -192,12 +192,21 @@ const side = /side=\{\[([^\]]*)\]/.exec(detail)?.[1] ?? ''
 ok('...with standing read before the promise is taken',
   side.indexOf('standingPanel') < side.indexOf('promisePanel'))
 /*
- * SILENT WHEN THERE IS NOTHING TO SAY. Nearly the whole book is individuals with no bureau
- * profile pulled: no directors, no practitioner, no judgments. An empty card on every account is
- * a card people stop seeing.
+ * SILENT WHEN THERE IS NOTHING TO SAY — for a PERSON.
+ *
+ * Nearly the whole book is individuals with no bureau profile pulled, and an empty card on
+ * several hundred thousand accounts is a card people stop seeing.
+ *
+ * A COMPANY IS THE OTHER WAY ROUND. A company with no directors on file is incomplete — there is
+ * nobody to ring — and the thing that fixes it is the upload button in this panel's header. So
+ * the empty card is the useful state there, and it says what is missing.
  */
-ok('the panel renders itself away when there is nothing in it',
-  /directors\.length === 0 && judgments\.length === 0[^\n]*\) return null/.test(detail))
+ok('the panel knows when it is empty',
+  /const bare = !hasPractitioner && directors\.length === 0 && judgments\.length === 0/.test(detail))
+ok('...and renders itself away, but only for a person',
+  /if \(bare && account\.debtorKind !== 'company'\) return null/.test(detail))
+ok('...while a company is told what is missing',
+  /No bureau profile filed yet/.test(detail))
 /*
  * A WARNING THAT ONLY FIRES WHEN SOMETHING IS ACTUALLY WRONG. The account reports as under
  * administration and there is no record of who is administering it — a claim nobody can submit.

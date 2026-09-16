@@ -42,6 +42,7 @@ import {
   judgmentSummary, practitionerLabel, practitionerMeaning, type AccountStanding,
 } from '../../lib/accountStanding.ts'
 import { fetchStanding } from '../../lib/accountStandingData.ts'
+import { TraceUploadModal } from './TraceUploadModal'
 import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
 import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
@@ -129,6 +130,7 @@ export function AccountDetail() {
   const [askingClient, setAskingClient] = useState(false)
   const [smsOpen, setSmsOpen] = useState(false)
   const [diariseOpen, setDiariseOpen] = useState(false)
+  const [tracing, setTracing] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -403,7 +405,8 @@ export function AccountDetail() {
    * and an empty card on every account is a card people stop seeing.
    */
   const standingPanel = (
-    <StandingPanel account={account} standing={standing} position={position} />
+    <StandingPanel account={account} standing={standing} position={position}
+      onUpload={() => setTracing(true)} />
   )
   const positionPanel = (
     <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0}
@@ -566,6 +569,7 @@ export function AccountDetail() {
         accountId={account.id}
         actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
         onTraced={reload}
+        onUpload={() => setTracing(true)}
       />
 
 
@@ -698,6 +702,22 @@ export function AccountDetail() {
         <SmsModal accountId={account.id} numbers={smsNumbers} onClose={() => setSmsOpen(false)} onDone={reload} />
       )}
 
+      {/*
+        Reading the PDF the firm has already paid for. Charges nothing — see TraceUploadModal; the
+        search is charged on the Trace button, where it is run.
+      */}
+      {tracing && (
+        <TraceUploadModal
+          accountId={account.id}
+          debtorKind={account.debtorKind}
+          registrationNumber={account.debtorKind === 'company' ? account.debtorIdNumber : null}
+          directors={standing.directors}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setTracing(false)}
+          onDone={reload}
+        />
+      )}
+
       {/* Choosing when it comes back. Charges nothing — it is a note about a day, not an action
           against the debtor. */}
       {diariseOpen && (
@@ -784,7 +804,7 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onDiarise, accountId, actor, onTraced }: {
+function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onDiarise, accountId, actor, onTraced, onUpload }: {
   /** The number SMS goes to, and what the row shows when there is no number at all. */
   callNumber?: string
   /** Every number that could reach this debtor, primary first. */
@@ -801,6 +821,8 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
   actor: { id: string | null; name: string | null }
   /** Reload after anything that writes a note or a fee — a trace, a call. */
   onTraced: () => Promise<void>
+  /** Offered the moment the search comes back, which is when the PDFs are on the machine. */
+  onUpload: () => void
 }) {
   const soon = 'Not built yet — needs a provider connected and a decision on whether it charges the debtor.'
   return (
@@ -842,7 +864,8 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
       */}
       <Action icon={ShieldAlert} label="Escalate" onClick={onDispute}
         title="Raise a dispute, ask a team leader, or recommend it for litigation" />
-      <TraceButton accountId={accountId} actor={actor} className={`${ACTION_BASE} ${ACTION_ENABLED}`} onDone={onTraced} />
+      <TraceButton accountId={accountId} actor={actor} className={`${ACTION_BASE} ${ACTION_ENABLED}`}
+        onDone={onTraced} onUpload={onUpload} />
       {/*
         When this account comes back, and why. Sits with the other actions rather than in a
         corner because it is the last thing done to an account before it is left alone, and an
@@ -1518,11 +1541,13 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
  *
  * Absent on nearly every account, and silent when absent.
  */
-function StandingPanel({ account, standing, position }: {
+function StandingPanel({ account, standing, position, onUpload }: {
   account: DebtorAccount
   standing: AccountStanding
   /** The rung the account sits on, so a missing practitioner can be a warning only when it is one. */
   position: DeskPosition
+  /** Read a bureau PDF onto the account. See TraceUploadModal. */
+  onUpload: () => void
 }) {
   const kindLabel = practitionerLabel(account.practitionerKind)
   const hasPractitioner = !!(kindLabel || account.practitionerName || account.practitionerFirm)
@@ -1538,11 +1563,34 @@ function StandingPanel({ account, standing, position }: {
    */
   const claimNobodyCanMake = position === 'under_administration' && !hasPractitioner
 
-  if (!hasPractitioner && directors.length === 0 && judgments.length === 0 && !claimNobodyCanMake) return null
+  /*
+   * A COMPANY ALWAYS GETS THIS PANEL, even empty, and a person only gets it when there is
+   * something in it.
+   *
+   * The difference is that a company with no directors on file is INCOMPLETE — there is nobody to
+   * ring, and the thing that fixes it is the button in this panel's header. An individual with no
+   * bureau profile is simply an ordinary account, and an empty card on all several hundred
+   * thousand of those is a card people stop seeing. Their upload sits on the Trace button, at the
+   * moment the search is run.
+   */
+  const bare = !hasPractitioner && directors.length === 0 && judgments.length === 0 && !claimNobodyCanMake
+  if (bare && account.debtorKind !== 'company') return null
 
   return (
     <Card>
-      <PanelTitle>Standing</PanelTitle>
+      <PanelTitle action={
+        <button type="button" onClick={onUpload}
+          className="text-[11px] font-medium text-[var(--c-steel)] hover:underline">
+          Upload a trace
+        </button>
+      }>Standing</PanelTitle>
+
+      {bare && (
+        <p className="text-sm text-slate-400">
+          No bureau profile filed yet. A company is reached through its directors &mdash; upload the
+          trace and they land here.
+        </p>
+      )}
 
       {claimNobodyCanMake && (
         <div className="mb-3 rounded-lg border border-gold-300 bg-gold-50 px-2.5 py-2">

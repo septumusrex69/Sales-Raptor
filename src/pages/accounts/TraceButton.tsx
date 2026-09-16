@@ -19,12 +19,21 @@ const COUNTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
  * Closing without answering charges nothing, which is the right outcome for a portal opened by
  * mistake and for a search that turned out not to be needed.
  */
-export function TraceButton({ accountId, actor, className, onDone }: {
+export function TraceButton({ accountId, actor, className, onDone, onUpload }: {
   accountId: string
   actor: { id: string | null; name: string | null }
   /** The action row's styling, so this matches the buttons beside it. */
   className: string
   onDone: () => Promise<void>
+  /**
+   * Reading the PDFs the search just produced.
+   *
+   * Offered HERE rather than as a tenth button in the action row, and the reason is timing: the
+   * only moment a collector certainly has the files on their machine is the minute after they ran
+   * the search. Asked an hour later, on a panel, it is a task to come back to — which is how the
+   * firm ended up paying for traces whose answers were never typed in.
+   */
+  onUpload: () => void
 }) {
   const [asking, setAsking] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -72,6 +81,17 @@ export function TraceButton({ accountId, actor, className, onDone }: {
       <button type="button" onClick={open} title="Open XDS and record a credit bureau search — Annexure B item 4(c)" className={className}>
         <Search size={14} /> Trace
       </button>
+
+      {/*
+        Straight after the charge, while the downloads are still in the corner of the screen. The
+        line stays for ten seconds and then clears itself, same as the charge it sits beside.
+      */}
+      {result && (
+        <button type="button" onClick={onUpload}
+          className="text-[11px] font-medium text-[var(--c-steel)] hover:underline text-left">
+          Upload what it found
+        </button>
+      )}
 
       {result && (
         <span className={`text-[11px] ${result.charge.reason === 'charged' ? 'text-[var(--c-green)]' : 'text-slate-500'}`}>
