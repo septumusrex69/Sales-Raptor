@@ -35,6 +35,8 @@ const modal = read('../../src/pages/accounts/TraceUploadModal.tsx')
 const importer = read('../../src/lib/traceImport.ts')
 const pdf = read('../../src/lib/pdfText.ts')
 const detail = read('../../src/pages/accounts/AccountDetail.tsx')
+const workspace = read('../../src/lib/accountWorkspace.ts')
+const documentsPanel = read('../../src/pages/accounts/AccountWorkspacePanels.tsx')
 
 /* ---------- dates ---------- */
 
@@ -471,6 +473,23 @@ ok('...compared normalised, or it would fire every time', /sameRegistration\(reg
 /* An account that changed and cannot say why is the complaint the timeline exists to answer. */
 ok('the import lands on the timeline', /await addNote\(/.test(importer))
 ok('the account page can open it', /<TraceUploadModal/.test(detail))
+/*
+ * AND FROM DOCUMENTS, where somebody who has just downloaded six PDFs goes to file them.
+ *
+ * A TRACE IS NOT A BLOB. Picking that kind opens the reader rather than putting the file in the
+ * bucket unread — the firm paid for the search under item 4(c), and a trace filed without being
+ * read is the waste this whole feature exists to end. It still lands as a document afterwards
+ * under the same kind, so nothing is lost.
+ */
+ok('Documents offers a trace as a kind', /TRACE_KIND = 'Trace'/.test(workspace))
+ok('...in the list people choose from', /'Court document', TRACE_KIND/.test(workspace))
+ok('...and choosing it reads the trace instead of filing it blind',
+  /kind === TRACE_KIND && onUploadTrace \? onUploadTrace\(\) : fileRef\.current\?\.click\(\)/.test(documentsPanel))
+ok('...saying so on the button', /Read the trace/.test(documentsPanel))
+ok('...wired up on the account page', /onUploadTrace=\{\(\) => setTracing\(true\)\}/.test(detail))
+/* A screen with no reader to open still offers the kind and files the PDF. */
+ok('the reader is optional, so the panel still works without one',
+  /onUploadTrace\?: \(\) => void/.test(documentsPanel))
 /*
  * ON THE PANEL ITSELF, matched inside the StandingPanel tag rather than anywhere on the page.
  * The action row carries the same prop, so a page-wide search for it goes on passing after the

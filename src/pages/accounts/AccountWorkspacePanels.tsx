@@ -9,7 +9,7 @@ import { formatDate } from '../../data/mockData'
 import type { DebtorAccount } from '../../lib/accountBook'
 import {
   addContact, deleteDocument, documentUrl, retireContact, saveDebtorIdentity, saveDebtorPreferences,
-  updateContact, uploadDocument, verifyContact, CONTACT_KINDS, DOCUMENT_KINDS,
+  updateContact, uploadDocument, verifyContact, CONTACT_KINDS, DOCUMENT_KINDS, TRACE_KIND,
   dialableNumber,
   type AccountContact, type AccountDocument, type ContactKind, type Workspace,
 } from '../../lib/accountWorkspace'
@@ -477,13 +477,21 @@ const fileSize = (n: number | null) =>
  * copy behind a permanent public address is a POPIA breach waiting to be found, so there is no
  * permanent address to copy.
  */
-export function DocumentsPanel({ accountId, documents, onChange, userId, userName, canDelete }: {
+export function DocumentsPanel({ accountId, documents, onChange, userId, userName, canDelete, onUploadTrace }: {
   accountId: string
   documents: AccountDocument[]
   onChange: () => Promise<void>
   userId: string | null
   userName: string | null
   canDelete: boolean
+  /**
+   * Opens the trace reader instead of picking a file.
+   *
+   * A trace is the one kind that should never be filed unread: the firm paid for the search, and
+   * the point is the facts inside it. Optional, so a screen that has no reader to open simply
+   * offers the kind and files the PDF.
+   */
+  onUploadTrace?: () => void
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [kind, setKind] = useState<string>(DOCUMENT_KINDS[0])
@@ -537,9 +545,12 @@ export function DocumentsPanel({ accountId, documents, onChange, userId, userNam
           </select>
           <input ref={fileRef} type="file" multiple className="hidden"
             onChange={(e) => onPick(e.target.files)} />
-          <button onClick={() => fileRef.current?.click()} disabled={uploading}
+          <button
+            onClick={() => (kind === TRACE_KIND && onUploadTrace ? onUploadTrace() : fileRef.current?.click())}
+            disabled={uploading}
             className="text-sm font-medium px-3 py-1.5 rounded-lg bg-brand-600 text-white disabled:opacity-50 inline-flex items-center gap-1.5">
-            {uploading ? <><Loader2 size={13} className="animate-spin" /> Uploading...</> : <><Upload size={13} /> Upload</>}
+            {uploading ? <><Loader2 size={13} className="animate-spin" /> Uploading...</>
+              : <><Upload size={13} /> {kind === TRACE_KIND && onUploadTrace ? 'Read the trace' : 'Upload'}</>}
           </button>
         </div>
       </div>
@@ -548,8 +559,8 @@ export function DocumentsPanel({ accountId, documents, onChange, userId, userNam
 
       {documents.length === 0 ? (
         <p className="text-sm text-slate-400 py-8 text-center">
-          Mandates, acknowledgements of debt, letters, proof of payment &mdash; anything that
-          belongs on the file. PDFs and images.
+          Mandates, acknowledgements of debt, letters, proof of payment, traces &mdash; anything
+          that belongs on the file. PDFs and images.
         </p>
       ) : (
         <div className="divide-y divide-slate-50">

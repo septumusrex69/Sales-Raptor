@@ -406,9 +406,17 @@ const toDocument = (r: any): AccountDocument => ({
 })
 
 /** What kind of paper it is. A short list, because a long one gets ignored. */
+/*
+ * 'Trace' is here and is not an ordinary kind. Choosing it opens the trace reader rather than
+ * filing the PDF unread — see DocumentsPanel. The firm pays for every search under Annexure B
+ * item 4(c), and a trace that goes into the bucket without being read is the waste that whole
+ * feature exists to end. It still lands here as a document afterwards, under this kind.
+ */
+export const TRACE_KIND = 'Trace'
+
 export const DOCUMENT_KINDS = [
   'Mandate', 'Acknowledgement of Debt', 'Letter of Demand', 'Statement',
-  'Proof of payment', 'Identity document', 'Court document', 'Correspondence', 'Other',
+  'Proof of payment', 'Identity document', 'Court document', TRACE_KIND, 'Correspondence', 'Other',
 ] as const
 
 const BUCKET = 'account-documents'

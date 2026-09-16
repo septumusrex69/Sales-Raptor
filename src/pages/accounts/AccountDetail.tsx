@@ -306,9 +306,26 @@ export function AccountDetail() {
    * trusted to stay the same page: a prop added to the promise panel cannot be added to one
    * arrangement and forgotten in the other two.
    */
+  /*
+   * WHO THEY ARE, AND THEN WHAT STANDS BEHIND AND AGAINST THEM. One column, in that order.
+   *
+   * Standing was in the right-hand column among the money panels, and the firm's word for it was
+   * "a weird place" — correctly. It is not a figure. It is the rest of the answer to "who am I
+   * ringing": the directors are how you reach a company at all, and the judgments say what you are
+   * joining a queue behind. Read next to the phone numbers it is part of one thought; read under
+   * the settlement figure it is an interruption.
+   *
+   * Wrapped, because RecordLayout's details slot is a single node and two of its three
+   * arrangements put no gap between siblings — the cards touched.
+   */
   const detailsPanel = (
-    <DebtorDetailsPanel account={account} name={name} workspace={workspace} onChange={reload}
-      userId={currentUser?.id ?? null} onEmail={setComposeTo} />
+    <div className="space-y-4">
+      <DebtorDetailsPanel account={account} name={name} workspace={workspace} onChange={reload}
+        userId={currentUser?.id ?? null} onEmail={setComposeTo} />
+      <StandingPanel account={account} standing={standing} position={position}
+        onUpload={() => setTracing(true)}
+        onPractitioner={() => setPractitioner({ suggest: null })} />
+    </div>
   )
   const timelinePanel = (
     <TimelinePanel
@@ -342,6 +359,19 @@ export function AccountDetail() {
   const clientLinePanel = (
     <ClientLinePanel
       line={clientLine({
+        /*
+         * THE RUNG GOES IN, and without it the whole point of the rewrite was missing here.
+         *
+         * accountNarrative writes a different sentence per position — "the debtor advised that
+         * they are not in a position to pay", "the matter is being dealt with through the
+         * appointed practitioner" — and every one of them is guarded on this field. Left out, the
+         * function fell through to its last resort on every account: "We worked the account on
+         * 2 September". Which is the sentence the firm called stupid, and the reason those
+         * position sentences were written in the first place.
+         *
+         * Same value the panel's own heading uses, so the line and the label cannot disagree.
+         */
+        position: clientReport.position,
         lastAttemptOn: account.lastActionAt,
         // Deliberately not passed: the book records that something was done and never what came
         // of it, so claiming a non-answer would be a statement about the debtor, not a record.
@@ -400,18 +430,6 @@ export function AccountDetail() {
       clientId={client?.id}
       clientLiaisonId={clientLiaison?.id}
     />
-  )
-  /*
-   * WHO IS BEHIND IT, AND WHAT IS ALREADY AGAINST IT.
-   *
-   * Renders itself away when there is nothing to say, which is the whole imported book — an
-   * individual with no bureau profile pulled has no directors, no practitioner and no judgments,
-   * and an empty card on every account is a card people stop seeing.
-   */
-  const standingPanel = (
-    <StandingPanel account={account} standing={standing} position={position}
-      onUpload={() => setTracing(true)}
-      onPractitioner={() => setPractitioner({ suggest: null })} />
   )
   const positionPanel = (
     <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0}
@@ -633,7 +651,14 @@ export function AccountDetail() {
 
       {tab === 'Documents' && (
         <DocumentsPanel accountId={account.id} documents={documents} onChange={reload}
-          userId={currentUser?.id ?? null} userName={currentUser?.name ?? null} canDelete={canDelete} />
+          userId={currentUser?.id ?? null} userName={currentUser?.name ?? null} canDelete={canDelete}
+          /*
+           * A TRACE IS NOT A BLOB. Choosing it here opens the reader rather than filing the PDF
+           * unread — the firm paid for the search, and a trace that goes into the bucket without
+           * being read is the exact waste this was built to end. The reader files the PDF here
+           * afterwards under the same kind, so nothing is lost either way.
+           */
+          onUploadTrace={() => setTracing(true)} />
       )}
 
       {tab === 'Overview' && (
@@ -657,12 +682,7 @@ export function AccountDetail() {
             three lines under it. A panel nobody scrolls to is a panel that does not exist, and
             this one only works if the person doing the work reads it.
           */
-          /*
-            Standing above the promise, deliberately. A liquidator being appointed is the reason
-            NOT to take a promise, and two default judgments are the reason to doubt the one you
-            are about to take — both have to be read before the box that records it, not after.
-          */
-          side={[clientLinePanel, summaryPanel, standingPanel, promisePanel, disputesPanel, positionPanel]}
+          side={[clientLinePanel, summaryPanel, promisePanel, disputesPanel, positionPanel]}
         />
       )}
 

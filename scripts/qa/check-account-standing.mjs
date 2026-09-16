@@ -267,18 +267,29 @@ ok('there is a panel for it', /function StandingPanel/.test(detail))
 ok('...fetched with the account', /fetchStanding\(id\)/.test(detail))
 ok('...and refetched after a write', /fetchStanding\(account\.id\)/.test(detail))
 /*
- * ABOVE THE PROMISE BOX. A liquidator being appointed is the reason NOT to take a promise, and
- * two default judgments are the reason to doubt the one about to be taken. Below it, both are
- * read after the decision they should have changed.
+ * WITH THE DEBTOR'S DETAILS, NOT AMONG THE FIGURES.
  *
- * Presence asserted BEFORE order: indexOf returns -1 for something missing, so an order-only
- * assertion passes vacuously the day the panel is deleted.
+ * It sat in the right-hand column with the money panels and the firm's word for that was "a weird
+ * place" — correctly. Standing is not a figure: the directors are how you reach a company at all,
+ * and the judgments say what queue you are joining. Beside the phone numbers it is part of one
+ * thought; under the settlement figure it is an interruption.
+ *
+ * PRESENCE ASSERTED BEFORE ORDER. indexOf returns -1 for something missing, so an order-only
+ * assertion passes vacuously the day the panel is deleted — and passes twice over, because -1 is
+ * less than everything.
  */
-ok('the panel is placed on the page', /side=\{\[[^\]]*standingPanel/.test(detail))
-ok('...and the promise box is too', /side=\{\[[^\]]*promisePanel/.test(detail))
-const side = /side=\{\[([^\]]*)\]/.exec(detail)?.[1] ?? ''
-ok('...with standing read before the promise is taken',
-  side.indexOf('standingPanel') < side.indexOf('promisePanel'))
+const detailsSlot = /const detailsPanel = \(([\s\S]*?)\n  \)\n/.exec(detail)?.[1] ?? ''
+ok('the panel is in the details column', detailsSlot.includes('<StandingPanel'))
+ok('...beside the debtor\'s own details', detailsSlot.includes('<DebtorDetailsPanel'))
+ok('...after them, because it answers the same question',
+  detailsSlot.indexOf('<DebtorDetailsPanel') < detailsSlot.indexOf('<StandingPanel'))
+/* And gone from the figures column, or it renders twice. */
+ok('...and not left among the figures', !/side=\{\[[^\]]*[Ss]tandingPanel/.test(detail))
+/*
+ * The details slot is ONE node and two of RecordLayout's three arrangements put no gap between
+ * siblings, so the two cards touched. The wrapper is what keeps them apart in all three.
+ */
+ok('the two cards are spaced in every layout', /const detailsPanel = \(\s*\n\s*<div className="space-y-4">/.test(detail))
 /*
  * SILENT WHEN THERE IS NOTHING TO SAY — for a PERSON.
  *
@@ -351,6 +362,23 @@ ok('...capped, with the rest counted', /const named = active\.slice\(0, NAME_AT_
 ok('...and the overflow said out loud', /\$\{unnamed\} more/.test(detail))
 ok('...and counting the rest', /has resigned from.{0,40}\{resigned\}/s.test(detail))
 ok('a director with none shows nothing', /if \(companies\.length === 0\) return null/.test(detail))
+
+/* ---------- the client's line reads from the rung, not from the fallback ---------- */
+
+/*
+ * THE SENTENCE THE FIRM CALLED STUPID, and why it was still on screen.
+ *
+ * accountNarrative writes a different sentence per position — that was the whole point of the
+ * rewrite — and every one of them is guarded on `position`. The account page computed the rung
+ * for the panel's heading and did not pass it to the sentence, so clientLine fell through to its
+ * last resort on every single account: "We worked the account on 2 September."
+ *
+ * Asserted at the call site, because the library was right and the caller was not.
+ */
+const lineCall = /line=\{clientLine\(\{([\s\S]*?)\n      \}\)\}/.exec(detail)?.[1] ?? ''
+ok('the client line is given the rung', /position: clientReport\.position/.test(lineCall))
+/* The same value the heading uses, or the label and the sentence can disagree on one account. */
+ok('...the same one the panel is headed with', /position=\{CLIENT_POSITIONS\[clientReport\.position\]\}/.test(detail))
 
 /* ---------- somebody can actually record the practitioner ---------- */
 
