@@ -498,10 +498,30 @@ try {
    * not the thing the firm reported.
    */
   const dateBox = page.locator('input[type="date"]').first()
-  const a = await dateBox.boundingBox()
-  const b = await windowBox.boundingBox()
-  t.ok('the date field and the window field do not overlap',
-    !!a && !!b && (a.x + a.width <= b.x + 1 || b.x + b.width <= a.x + 1 || a.y + a.height <= b.y + 1))
+  /*
+   * MEASURED AT AN iPAD'S WIDTH TOO, because that is the screen it was reported on three times
+   * and 1440 is not it. Still not a reproduction of the real fault — see the note above — but a
+   * field that overflows its column at 1024 would be caught here, and was not being looked for
+   * at all before.
+   */
+  for (const width of [1440, 1024]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.waitForTimeout(250)
+    const a = await dateBox.boundingBox()
+    const b = await windowBox.boundingBox()
+    t.ok(`the date and window fields do not overlap at ${width}`,
+      !!a && !!b && (a.x + a.width <= b.x + 1 || b.x + b.width <= a.x + 1
+        || a.y + a.height <= b.y + 1 || b.y + b.height <= a.y + 1))
+    /* And neither may spill out of the row that holds them. */
+    const row = await dateBox.locator('../../..').boundingBox()
+    t.ok(`...nor spill out of their row at ${width}`,
+      !!a && !!b && !!row && a.x >= row.x - 1 && b.x + b.width <= row.x + row.width + 1)
+    if (width === 1024) await t.shot(page, '06-hand-out-narrow')
+  }
+  if ((await page.viewportSize()).width !== 1440) {
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await page.waitForTimeout(250)
+  }
   /*
    * NOT asserting the over-ceiling warning here any more, because with thirty-eight collectors
    * and forty accounts there is ample headroom and nobody IS pushed over — the warning staying

@@ -65,7 +65,25 @@ ok('allocation writes no filters of its own',
 const fields = handOutModal.slice(handOutModal.indexOf('grid gap-3 sm:grid-cols-2'))
 ok('the fields stack before they are columns', /grid gap-3 sm:grid-cols-2/.test(handOutModal))
 ok('...and neither can outgrow its column',
-  (fields.slice(0, 1600).match(/min-w-0/g) ?? []).length >= 2)
+  (fields.slice(0, 2400).match(/min-w-0 overflow-hidden/g) ?? []).length >= 2)
+
+/*
+ * AND THE CAUSE IS TURNED OFF IN CSS, which is the half that actually fixes it. Safari on iOS
+ * sizes input[type="date"] from its own native widget rather than the CSS width it is given, so
+ * `w-full` is honoured everywhere else and ignored there — the box grows past its column and sits
+ * under the next field's label. Neither the grid nor min-w-0 on the wrapper touched it, because
+ * the oversized element is the INPUT.
+ *
+ * Checked in source and nowhere else: the e2e Chromium draws a narrow date input that does not
+ * overflow at any viewport, so a measured assertion there passes on the broken layout. It was
+ * written, it passed, and it is still in accounts.mjs saying so.
+ *
+ * Global rather than scoped to this modal on purpose — every date input in the app has it.
+ */
+const css = read('../../src/index.css')
+ok('native date sizing is turned off', /input\[type="date"\][\s\S]{0,200}appearance: none/.test(css))
+ok('...so the field can shrink to its column', /input\[type="date"\][\s\S]{0,240}min-width: 0/.test(css))
+ok('...and is not capped wider than it', /input\[type="date"\][\s\S]{0,280}max-width: 100%/.test(css))
 
 /*
  * A DROPDOWN, NOT A NUMBER BOX. The firm's words: "that thing doesn't work for me". A spinner is

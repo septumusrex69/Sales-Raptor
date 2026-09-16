@@ -481,3 +481,37 @@ select:autofill {
   font-weight: 600;
   white-space: nowrap;
 }
+
+/*
+ * DATE INPUTS ON iOS, which are a different control from the one every other browser draws.
+ *
+ * Safari on iOS sizes input[type="date"] from its own native widget rather than from the CSS
+ * width it is given, and that widget carries an intrinsic minimum. So `w-full` inside a grid
+ * column is honoured everywhere else and ignored there: the box grows past its column and sits
+ * under whatever label is next to it. The firm reported the same two fields overlapping three
+ * times, and neither moving from flex to grid nor min-w-0 on the grid ITEM touched it — the
+ * oversized element is the input, not its wrapper.
+ *
+ * appearance: none is what actually turns the native sizing off. min-width: 0 then lets it
+ * shrink, and the two webkit pseudo-elements stop iOS centring the value and reserving room for
+ * a spinner nobody asked for, so the field reads like every other box on the screen.
+ *
+ * Global rather than local: every date input in the app has this problem, and a fix applied only
+ * where somebody complained is a fix that waits to be reported again somewhere else.
+ */
+input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+  max-width: 100%;
+}
+
+input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+  margin: 0;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  margin-inline-start: auto;
+  cursor: pointer;
+}

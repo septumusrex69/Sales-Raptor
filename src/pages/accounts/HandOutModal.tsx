@@ -417,66 +417,77 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                   Stacked below sm as well. Two columns of a modal on a phone is two columns of
                   nothing.
                 */}
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="min-w-0">
-                    <FormField label="Starting">
+                {/*
+                  ONE PANEL FOR HOW THE HAND-OUT IS SHAPED, rather than three loose controls with
+                  three different spacings between them. The two fields, the rate they imply and
+                  the even-split box are one decision and now read as one.
+
+                  Each field is its own column with min-w-0 AND overflow-hidden. The overflow is
+                  belt and braces: index.css turns off the native sizing that makes an iOS date
+                  input outgrow its column, and this makes the column unable to be overrun even if
+                  some future browser finds another way to do it. Three reports of these two boxes
+                  sitting on top of each other is enough to stop relying on one mechanism.
+                */}
+                <div className="rounded-lg border border-slate-200 p-3 space-y-2.5">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="min-w-0 overflow-hidden">
+                      <span className="block text-xs font-medium text-slate-500 mb-1.5">Starting</span>
                       <input type="date" className={inputClass} value={startOn}
                         onChange={(e) => setStartOn(e.target.value)} />
-                    </FormField>
-                  </div>
-                  {/*
-                    A DROPDOWN, NOT A NUMBER BOX. The firm's report was that it "doesn't work for
-                    me" — a spinner is a desktop control, and on an iPad it is a small box you
-                    have to summon a keyboard for to change a number you were only ever going to
-                    pick from a handful. Every option spells out its own unit, so the label above
-                    it does not have to be the long sentence that was colliding with the date.
-                  */}
-                  <div className="min-w-0">
-                    <FormField label="Spread over">
+                    </div>
+                    {/*
+                      A DROPDOWN, NOT A NUMBER BOX. The firm's report was that it "doesn't work for
+                      me" — a spinner is a desktop control, and on an iPad it is a small box you
+                      have to summon a keyboard for to change a number you were only ever going to
+                      pick from a handful. Every option spells out its own unit, so the label above
+                      it does not have to be the long sentence that was colliding with the date.
+                    */}
+                    <div className="min-w-0 overflow-hidden">
+                      <span className="block text-xs font-medium text-slate-500 mb-1.5">Spread over</span>
                       <select className={inputClass} value={windowDays}
                         onChange={(e) => setWindowDays(Number(e.target.value))}>
                         {WINDOW_CHOICES.map((n) => (
                           <option key={n} value={n}>{n === 1 ? '1 working day' : `${n} working days`}</option>
                         ))}
                       </select>
-                    </FormField>
+                    </div>
                   </div>
-                </div>
 
-                {/*
-                  OFF BY DEFAULT, and that is a decision rather than a convenience. The ordinary
-                  hand-out gives each person a share of the room they have, which protects a book
-                  that is nearly full — right for sharing out a handover, and wrong for the job
-                  the firm does most. Sharing out a shuffle, they want the split flat: "a hundred
-                  accounts over ten users means each one should get ten. Exactly." So it is a
-                  choice on the screen rather than an argument in the planner.
-                */}
-                <label className="flex items-start gap-2 -mt-2 cursor-pointer">
-                  <input type="checkbox" className="mt-0.5 shrink-0 accent-brand-600"
-                    checked={evenSplit} onChange={(e) => setEvenSplit(e.target.checked)} />
-                  <span className="text-xs text-slate-600">
-                    Distribute the accounts equally
-                    <span className="block text-[11px] text-slate-400">
-                      Everybody chosen takes the same number, whatever they are already carrying.
-                      A book ceiling crossed is shown in red rather than avoided.
+                  {/*
+                    THE NUMBER IN ARITHMETIC THE PERSON CAN CHECK. The box used to mean "by when",
+                    so five days produced two and the firm asked why; it now means how hard the work
+                    is pushed, and the only honest way to say that is to show the rate it implies.
+                    The firm's own framing: it shows you the aggression of the allocation, and the
+                    thing being traded is room in the diary for whatever is handed out tomorrow.
+                  */}
+                  <p className="text-[11px] text-slate-500">
+                    About <span className="font-medium text-slate-700">{perDay.toLocaleString('en-ZA')} a day</span>{' '}
+                    across {windowDays} working {windowDays === 1 ? 'day' : 'days'}.{' '}
+                    {windowDays === 1
+                      ? 'Everything lands on one day, which leaves no room for tomorrow\u2019s hand-out.'
+                      : 'Fewer days fills diaries faster; more days leaves room for the next hand-out.'}
+                  </p>
+
+                  {/*
+                    OFF BY DEFAULT, and that is a decision rather than a convenience. The ordinary
+                    hand-out gives each person a share of the room they have, which protects a book
+                    that is nearly full — right for sharing out a handover, and wrong for the job
+                    the firm does most. Sharing out a shuffle, they want the split flat: "a hundred
+                    accounts over ten users means each one should get ten. Exactly." So it is a
+                    choice on the screen rather than an argument in the planner.
+                  */}
+                  <label className="flex items-start gap-2 cursor-pointer pt-0.5">
+                    <input type="checkbox" className="mt-0.5 shrink-0 accent-brand-600"
+                      checked={evenSplit} onChange={(e) => setEvenSplit(e.target.checked)} />
+                    <span className="text-xs text-slate-600">
+                      Distribute the accounts equally
+                      <span className="block text-[11px] text-slate-400">
+                        Everybody chosen takes the same number, whatever they are already carrying.
+                        A book ceiling crossed is shown in red rather than avoided.
+                      </span>
                     </span>
-                  </span>
-                </label>
-
-                {/*
-                  THE NUMBER IN ARITHMETIC THE PERSON CAN CHECK. The box used to mean "by when",
-                  so five days produced two and the firm asked why; it now means how hard the work
-                  is pushed, and the only honest way to say that is to show the rate it implies.
-                  The firm's own framing: it shows you the aggression of the allocation, and the
-                  thing being traded is room in the diary for whatever is handed out tomorrow.
-                */}
-                <p className="-mt-2 text-[11px] text-slate-500">
-                  About <span className="font-medium text-slate-700">{perDay.toLocaleString('en-ZA')} a day</span>{' '}
-                  across {windowDays} working {windowDays === 1 ? 'day' : 'days'}.{' '}
-                  {windowDays === 1
-                    ? 'Everything lands on one day, which leaves no room for tomorrow’s hand-out.'
-                    : 'Fewer days fills diaries faster; more days leaves room for the next hand-out.'}
-                </p>
+                  </label>
+                </div>
 
                 {/*
                   A CHOICE OF TWO, NOT TWO SWITCHES. The firm's rule is that an allocation cannot
