@@ -351,6 +351,22 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                     preview below, which names everybody taking work. Scoping the assertion to the
                     list is the fix; the hook is what makes scoping possible.
                   */}
+                  {/*
+                    A HEADER, because "14/500" on a row next to "+2 (9)" in the grid below is two
+                    different number pairs on one screen with nothing saying which is which — and
+                    the firm asked what it meant, which is the only evidence that matters. One is
+                    the BOOK: how many accounts they carry against their ceiling. The other is a
+                    DAY in the diary. A title attribute does not answer it; on an iPad there is
+                    nothing to hover.
+                  */}
+                  <div className="flex items-center gap-2 px-2.5 pb-1 text-[10px] uppercase tracking-wide text-slate-400">
+                    <span className="w-3.5 shrink-0" aria-hidden="true" />
+                    <span className="min-w-0 flex-1">Collector</span>
+                    <span className="shrink-0 w-20 text-right">Grade</span>
+                    <span className="shrink-0 w-20 text-right">On the book</span>
+                    <span className="shrink-0 w-14 text-right">Taking</span>
+                  </div>
+
                   <div data-qa="collector-list"
                     className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-50">
                     {visible.length === 0 ? (
@@ -368,7 +384,7 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                           <input type="checkbox" className="shrink-0 accent-brand-600"
                             checked={chosen.has(c.userId)} onChange={() => toggle(c.userId)} />
                           <span className="min-w-0 flex-1 truncate text-sm text-slate-800">{c.name}</span>
-                          <span className="shrink-0 text-[11px] text-slate-400 tabular-nums">
+                          <span className="shrink-0 w-20 text-right text-[11px] text-slate-400">
                             {c.ungraded ? 'Not graded' : c.grade}
                           </span>
                           <span className={`shrink-0 text-[11px] tabular-nums w-20 text-right ${
@@ -636,13 +652,18 @@ function PlanPreview({ plan, collectors }: {
                           + `${capacity} a day — ${total} on the day`}>
                         {added > 0 && <span className="text-brand-700 font-medium">+{added}</span>}
                         {/*
-                          The day's total only when it says something the "+N" does not. An empty
-                          Thursday taking one account reads "+1", not "+1 1" — the same number
-                          twice is the kind of noise that makes people stop reading a column.
+                          IN BRACKETS, because a bare grey number beside "+2" was read as a second
+                          quantity rather than as the result — the firm asked what the small 9 was.
+                          "(9)" is the one shape that says "and then there will be nine", and it
+                          is the same convention the caption under the table now spells out.
+
+                          Shown only where it says something the "+N" does not: an empty Thursday
+                          taking one account reads "+1", not "+1 (1)". The same number twice is
+                          the kind of noise that makes people stop reading a column.
                         */}
                         {existing > 0 && (
                           <span className={over || full ? 'font-semibold' : ''}>
-                            {added > 0 ? ' ' : ''}{total}
+                            {added > 0 ? ' ' : ''}({total})
                           </span>
                         )}
                       </td>
@@ -665,8 +686,9 @@ function PlanPreview({ plan, collectors }: {
          * plainly instead of leaving a warning shape on a screen where nothing is wrong.
          */
         <p className="px-3 py-1.5 text-[11px] text-slate-400 border-t border-slate-100">
-          Each cell is what that person will have in their diary that day, with what this hand-out
-          adds in front of it.{' '}
+          <span className="text-brand-700 font-medium">+3</span> is what this hand-out books that
+          day. <span className="text-slate-500">(9)</span> is what they will have in the diary
+          afterwards, shown where something is already booked.{' '}
           {overDays === 0
             ? 'Nobody goes past their daily limit.'
             : <span className="text-rose-700">

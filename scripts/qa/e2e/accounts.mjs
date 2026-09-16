@@ -360,7 +360,28 @@ try {
    */
   const grid = await page.locator('[data-qa="plan-rows"]').innerText()
   t.ok('...and shows what is already sitting in a diary', /\b60\b/.test(grid))
-  t.ok('...with the colours explained', /what that person will have in their diary that day/.test(modal))
+  /*
+   * BOTH NUMBER PAIRS SAY WHAT THEY ARE. "14/500" on a collector row and "+2 (9)" in the grid are
+   * two different things — a book against its ceiling, and a day in a diary — and the firm asked
+   * what each meant, which is the only evidence that counts. The list has a header now and the
+   * grid has a caption that spells out its own notation.
+   */
+  t.ok('the grid says what its numbers are',
+    /is what they will have in the diary afterwards/.test(modal))
+  t.ok('...and what the other number is', /is what this hand-out books that day/.test(modal))
+  /*
+   * Matched case-insensitively: the header is uppercased in CSS, and innerText returns what is
+   * RENDERED, not what is in the markup. Asserting the sentence case the source contains fails on
+   * a header that is on the screen and perfectly readable.
+   */
+  const listHead = await page.locator('[data-qa="collector-list"]').locator('..').innerText()
+  t.ok('the collector list says its columns are the book', /on the book/i.test(listHead))
+  t.ok('...and what this plan gives them', /taking/i.test(listHead))
+  /*
+   * And the resulting total is bracketed, not a bare number sitting next to "+2" where it reads
+   * as a second quantity. That is what was actually asked about.
+   */
+  t.ok('the day total reads as a result', /\(\d+\)/.test(grid))
   /*
    * And the count under the table has to agree with the cells above it, because they are computed
    * by two different pieces of code over the same plan. With thirty-eight collectors and forty
