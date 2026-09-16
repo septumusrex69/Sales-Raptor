@@ -6,6 +6,7 @@
  * cannot tell you about itself — its band and what kind of work it is — and hands over plain data.
  */
 import { supabase } from './supabase'
+import { idChunks } from './accountAllocation.ts'
 import { applyAccountFilters, type AccountQuery, type DebtorAccount } from './accountBook'
 import { COLLECTING_ROLES, UNGRADED_EQUIVALENT, accountBand } from './collectorGrade.ts'
 import { clientPosition } from './clientPosition.ts'
@@ -28,13 +29,30 @@ export function diaryKindFor(a: DebtorAccount): DiaryKind {
   if (a.bucket === 'Failed PTPs' || /payment\s*default/.test(sub)) return 'promise_broken'
   if (!a.lastActionAt) return 'new_account'
   if (/promise\s*to\s*pay|\bptp\b/.test(sub)) return 'promise_due'
+  if (/call\s*back|callback/.test(sub)) return 'callback'
   if (/defended|dispute/.test(sub)) return 'dispute_chase'
+  if (/no\s*contact|unreachable|voicemail/.test(sub)) return 'no_contact'
   if (/tracing|trace/.test(sub)) return 'trace'
   return 'review'
 }
 
+/*
+ * TWO RUNGS THE IMPORT CANNOT REACH, and that is the honest answer rather than a gap.
+ *
+ * 'callback' and 'no_contact' sit on the firm's ladder between the rungs above, but nothing in a
+ * handed-over book says "the debtor asked to be rung back on Thursday" or "we tried three times
+ * and got voicemail". Those are facts a collector creates by working the account, and they arrive
+ * on the diary entry that collector books at the end of the call.
+ *
+ * So they are matched HERE only if the firm has written them into a sub-status themselves. What
+ * is not done is inferring them — guessing "no contact" from a quiet account would put work on a
+ * rung above Trace on evidence that does not exist.
+ */
+
 /** An account as the planner sees it: a band, a kind, and a name a person can read. */
-export function toPlannable(a: DebtorAccount, alreadyBooked: boolean): PlannableAccount {
+export function toPlannable(
+  a: DebtorAccount, alreadyBooked: boolean, currentKind?: DiaryKind,
+): PlannableAccount {
   const position = clientPosition({ status: a.status, subStatus: a.subStatus, bucket: a.bucket })
   return {
     id: a.id,
@@ -47,6 +65,8 @@ export function toPlannable(a: DebtorAccount, alreadyBooked: boolean): Plannable
       underAdministration: position === 'under_administration',
     }),
     kind: diaryKindFor(a),
+    /* What it is filed as right now, where it is already in somebody's diary. */
+    currentKind,
     capitalOutstanding: a.capitalOutstanding,
     alreadyBooked,
   }
@@ -101,13 +121,25 @@ export async function loadHandOutContext(input: {
    * the thing the unique index actually protects. Skipping is the point: rebooking would drag an
    * account off whoever's Tuesday it is sitting on, silently.
    */
-  let booked = new Set<string>()
-  if (ids.length > 0) {
+  /*
+   * The KIND comes back too, not just the fact of a booking. A hand-out can be told to leave the
+   * existing kind alone — "keep it on the original diary status as it was" — and that is only
+   * possible if the plan knows what it currently is.
+   *
+   * Chunked, because this filters on a list of account ids and PostgREST puts filters in the
+   * query string: at the five-thousand ceiling one request would carry nearly two hundred
+   * kilobytes of URL. Same reason every other id-filtered call in this codebase is chunked.
+   */
+  const currentKinds = new Map<string, DiaryKind>()
+  for (const chunk of idChunks(ids)) {
     const { data: openRows, error } = await supabase
-      .from('diary_entries').select('account_id').eq('state', 'open').in('account_id', ids)
+      .from('diary_entries').select('account_id, kind').eq('state', 'open').in('account_id', chunk)
     if (error) throw new Error(error.message)
-    booked = new Set((openRows ?? []).map((r: any) => r.account_id as string))
+    for (const r of (openRows ?? []) as any[]) {
+      currentKinds.set(r.account_id as string, r.kind as DiaryKind)
+    }
   }
+  const booked = new Set(currentKinds.keys())
 
   const bookLoad = new Map<string, number>(
     ((loadRes.data ?? []) as any[]).map((r) => [r.user_id as string, Number(r.in_play_accounts ?? 0)]),
@@ -154,7 +186,7 @@ export async function loadHandOutContext(input: {
       bucket: r.bucket,
       lastActionAt: r.last_action_at,
     } as DebtorAccount
-    return toPlannable(a, booked.has(r.id))
+    return toPlannable(a, booked.has(r.id), currentKinds.get(r.id))
   })
 
   return { accounts, collectors, alreadyBookedCount: booked.size }

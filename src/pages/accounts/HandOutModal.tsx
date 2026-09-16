@@ -62,6 +62,7 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
   const [pickBy, setPickBy] = useState<'everyone' | 'rank' | 'team'>('everyone')
   const [onlyChosen, setOnlyChosen] = useState(false)
   const [evenSplit, setEvenSplit] = useState(false)
+  const [keepKind, setKeepKind] = useState(false)
   /*
    * Numbers a person has set by hand, userId → exactly this many. Everything else re-shares
    * around them. Kept out of `chosen` because they answer different questions — who is in this
@@ -115,6 +116,7 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
        */
       skipAlreadyBooked: false,
       evenSplit,
+      keepKind,
       /*
        * Only for people who are actually in the hand-out. A pin left behind on somebody who has
        * since been unticked would eat budget for a desk that is not on the screen.
@@ -122,7 +124,7 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
       pinned: Object.fromEntries(
         Object.entries(pinned).filter(([id]) => chosen.has(id))),
     })
-  }, [context, chosen, startOn, windowDays, evenSplit, pinned])
+  }, [context, chosen, startOn, windowDays, evenSplit, keepKind, pinned])
 
   /*
    * BY NAME, AND IT WAS BY WHO IS TAKING MOST. That ordering was added so the four people a plan
@@ -212,6 +214,9 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
   }), [])
 
   const tooMany = (context?.accounts.length ?? 0) > BULK_CEILING
+  /* How many the "keep what it is" box would actually apply to — the rest have nothing to keep. */
+  const keptCount = useMemo(
+    () => (context?.accounts ?? []).filter((a) => a.currentKind).length, [context])
   const handSet = useMemo(
     () => Object.keys(pinned).filter((id) => chosen.has(id)).length, [pinned, chosen])
   /*
@@ -578,6 +583,28 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                       <span className="block text-[11px] text-slate-400">
                         Everybody chosen takes the same number, whatever they are already carrying.
                         A book ceiling crossed is shown in red rather than avoided.
+                      </span>
+                    </span>
+                  </label>
+
+                  {/*
+                    WHAT THE WORK IS, as against whose it is. Off by default: the usual reason to
+                    hand an account out is that it needs working, and then the firm's ladder should
+                    decide where it lands — a broken promise belongs above a routine follow-up
+                    whoever is holding it. But a hand-out is sometimes only a change of desk, and
+                    re-filing every account as the import thinks it should be throws away what the
+                    last collector actually found out.
+                  */}
+                  <label className="flex items-start gap-2 cursor-pointer pt-0.5">
+                    <input type="checkbox" className="mt-0.5 shrink-0 accent-brand-600"
+                      checked={keepKind} onChange={(e) => setKeepKind(e.target.checked)} />
+                    <span className="text-xs text-slate-600">
+                      Keep the diary status they already have
+                      <span className="block text-[11px] text-slate-400">
+                        {keptCount > 0
+                          ? `${keptCount.toLocaleString('en-ZA')} of these already sit in a diary and would keep `
+                            + 'what they are filed as. The rest are worked out from the account.'
+                          : 'None of these are in a diary yet, so every one is worked out from the account.'}
                       </span>
                     </span>
                   </label>

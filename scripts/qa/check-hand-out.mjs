@@ -730,6 +730,54 @@ ok('an elite may take anything', ACCOUNT_BANDS.every((b) => mayTake('Elite', b))
     takenBy(p, 'Bongani'), takenBy(p, 'Musa'))
 }
 
+/* ================= what the work is, as against whose it is ================= */
+
+/*
+ * "THERE SHOULD ALSO BE AN OPTION TO KEEP IT ON THE ORIGINAL DIARY STATUS AS IT WAS." The firm's
+ * words. A hand-out is usually a decision that an account needs working, and then the ladder
+ * should decide where it lands. But sometimes it is only a change of desk — somebody leaves, a
+ * team is rebalanced — and re-filing everything as the import thinks it should be throws away
+ * what the last collector actually found out.
+ */
+{
+  const accounts = [
+    { ...acc('kept', 1000, { kind: 'review' }), currentKind: 'promise_broken', alreadyBooked: true },
+    { ...acc('fresh', 1000, { kind: 'trace' }) },
+  ]
+  const off = plan(accounts, [col('Solo', 'Senior', { capacity: 10 })], { windowDays: 5 })
+  const on = plan(accounts, [col('Solo', 'Senior', { capacity: 10 })], { windowDays: 5, keepKind: true })
+
+  const kindOf = (p, id) => p.placements.find((x) => x.accountId === id)?.kind ?? '(not placed)'
+  check('by default the ladder re-decides it', kindOf(off, 'kept'), 'review')
+  check('...and with the box on it keeps what it was', kindOf(on, 'kept'), 'promise_broken')
+  /*
+   * An account with nothing in a diary has nothing to keep, so it falls back to the derived kind
+   * whatever the box says. A silent 'review' for those would be the box quietly doing something
+   * other than what it claims.
+   */
+  check('an account not in a diary is still worked out', kindOf(on, 'fresh'), 'trace')
+  check('...the same either way', kindOf(off, 'fresh'), 'trace')
+}
+
+/*
+ * AND THE QUEUE IS ORDERED ON THE KIND IT WILL ACTUALLY BOOK. Sorting by the derived kind and
+ * then writing a different one would deal the work in an order that does not match the diary it
+ * produces — the broken promise would be booked as a broken promise and dealt as a review.
+ *
+ * Here the kept account is a broken promise and the derived one a routine follow-up, with one
+ * slot a day: with the box on, the broken promise has to come first.
+ */
+{
+  const accounts = [
+    { ...acc('routine', 900000, { kind: 'review' }) },
+    { ...acc('kept', 1000, { kind: 'review' }), currentKind: 'promise_broken', alreadyBooked: true },
+  ]
+  const p = plan(accounts, [col('Solo', 'Senior', { capacity: 1 })], { windowDays: 5, keepKind: true })
+  const order = [...p.placements].sort((a, b) => (a.dueOn < b.dueOn ? -1 : 1)).map((x) => x.accountId)
+  check('the kept broken promise is dealt first', order[0], 'kept')
+  check('...and the routine one after it', order[1], 'routine')
+}
+
 /* ================= arguing with the plan ================= */
 
 /*

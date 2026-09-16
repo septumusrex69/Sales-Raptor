@@ -45,6 +45,14 @@ export interface PlannableAccount {
   capitalOutstanding: number
   /** An open diary entry already exists on this account. */
   alreadyBooked?: boolean
+  /**
+   * What that open entry is filed as right now.
+   *
+   * Only set where one exists. It is what `keepKind` keeps — the firm's "keep it on the original
+   * diary status as it was", for a hand-out that is moving WHOSE work an account is without
+   * re-deciding WHAT the work is.
+   */
+  currentKind?: DiaryKind
 }
 
 export interface PlannableCollector {
@@ -189,6 +197,19 @@ export interface PlanInput {
    * the book — which is the opposite of what pinning them down was for.
    */
   pinned?: Record<string, number>
+  /**
+   * LEAVE THE KIND ALONE where the account already has one.
+   *
+   * Off by default, because the usual reason to hand an account out is that it needs working and
+   * the ladder should decide where it lands: a broken promise belongs above a routine follow-up
+   * whoever is holding it. But a hand-out is sometimes only a change of desk — somebody leaves,
+   * a team is rebalanced — and re-filing every account as the import thinks it should be would
+   * throw away what the last collector actually found out. The firm asked for the choice.
+   *
+   * Accounts with no open entry fall back to the derived kind whatever this says. There is
+   * nothing to keep.
+   */
+  keepKind?: boolean
 }
 
 const DEFAULT_MAX_WINDOW = 40
@@ -227,8 +248,16 @@ export function planHandOut(input: PlanInput): HandOutPlan {
    * decides which of two equally urgent accounts goes to the better collector, because the
    * planner deals in this order and the best desks fill first.
    */
+  /*
+   * The kind this plan will actually book, which is what the ladder must be read on. Ordering the
+   * queue by the derived kind and then writing a different one would deal the work in an order
+   * that does not match the diary it produces.
+   */
+  const kindOf = (a: PlannableAccount): DiaryKind =>
+    (input.keepKind && a.currentKind) ? a.currentKind : a.kind
+
   const queue = [...input.accounts].sort((a, b) => {
-    const p = priorityOf(a.kind) - priorityOf(b.kind)
+    const p = priorityOf(kindOf(a)) - priorityOf(kindOf(b))
     if (p !== 0) return p
     if (b.capitalOutstanding !== a.capitalOutstanding) return b.capitalOutstanding - a.capitalOutstanding
     return a.id < b.id ? -1 : 1
@@ -489,7 +518,7 @@ export function planHandOut(input: PlanInput): HandOutPlan {
       dayTotals[day] = (dayTotals[day] ?? 0) + 1
       s.taking += 1
       if (s.pin !== null) pinnedTaken += 1
-      placements.push({ accountId: account.id, userId: s.c.userId, dueOn: day, kind: account.kind })
+      placements.push({ accountId: account.id, userId: s.c.userId, dueOn: day, kind: kindOf(account) })
       placed = true
       break
     }
