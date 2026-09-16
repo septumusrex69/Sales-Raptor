@@ -5,6 +5,12 @@
  * it. That is the whole reason this file exists: a R400 000 defended matter on a junior's desk
  * is not a training opportunity, it is a client relationship and a year's commission.
  *
+ * ONE LINE, AND IT IS AT R50 000. Everything below it goes to anybody — the firm's own decision,
+ * made against the obvious objection: "yes, it is a risk to allocate bigger accounts to smaller
+ * people, but you want to take that risk to help them grow, give them confidence and give some
+ * fairness." A collector who is only ever given small accounts stays a collector who has only
+ * ever worked small accounts.
+ *
  * Four grades, and a band on every account derived from what the account already is. Nobody
  * types a difficulty in — a number that has to be maintained by hand is a number that is right
  * on the day it is set and wrong for ever afterwards.
@@ -65,8 +71,19 @@ export const ACCOUNT_BANDS: AccountBand[] = [
     id: 'high_value',
     label: 'High value',
     from: 25000,
-    minGrade: 'Skilled',
-    hint: 'Worth enough that how the call is handled changes the outcome.',
+    /*
+     * OPEN TO EVERYBODY, AT THE FIRM'S INSTRUCTION, and it was Skilled until they said otherwise.
+     *
+     * Their reasoning, and it is theirs to make: "yes, it is a risk to allocate bigger accounts to
+     * smaller people, but you want to take that risk to help them grow, give them confidence and
+     * give some fairness." A junior who is never handed anything above R25 000 never learns to,
+     * and never gets a shot at the commission on one. Only R50 000 and up is held back now.
+     *
+     * The band itself stays, because it is not only a gate: it is what the screen calls the
+     * account, and what a later rule can point at without inventing the line again.
+     */
+    minGrade: 'Junior',
+    hint: 'Worth enough that how the call is handled changes the outcome — but open to any collector.',
   },
   {
     id: 'major',
@@ -97,6 +114,12 @@ export interface BandInput {
  *
  * So a hard position lifts the account at least to High value, and the balance may lift it
  * further. Neither ever lowers it.
+ *
+ * WORTH KNOWING: since the firm opened High value to every grade, this lift no longer changes
+ * who may take the account — a disputed R2 000 account is now junior work like any other. The
+ * lift is kept because it is still what the account is CALLED, and because the day the firm
+ * wants defended matters held back the line is already here to move. It is flagged rather than
+ * quietly removed: deleting it would make restoring the rule a rewrite instead of one word.
  */
 export function accountBand(input: BandInput): AccountBand {
   let band = ACCOUNT_BANDS[0]
@@ -105,8 +128,16 @@ export function accountBand(input: BandInput): AccountBand {
   }
 
   if (input.disputed || input.inLegal || input.underAdministration) {
-    const floor = ACCOUNT_BANDS.find((b) => b.id === 'high_value')
-    if (floor && gradeRank(floor.minGrade) > gradeRank(band.minGrade)) band = floor
+    /*
+     * Compared by BAND ORDER, not by the grade each band requires. It used to compare minGrade
+     * ranks, which worked only while every band needed a different grade — the moment the firm
+     * opened High value to everybody, Junior === Junior and the lift silently stopped firing, so
+     * a disputed account was no longer even LABELLED High value. Ordering by the rung itself is
+     * what the rule always meant, and it survives the next time a grade line moves.
+     */
+    const at = ACCOUNT_BANDS.findIndex((b) => b.id === band.id)
+    const floorAt = ACCOUNT_BANDS.findIndex((b) => b.id === 'high_value')
+    if (floorAt > at) band = ACCOUNT_BANDS[floorAt]
   }
   return band
 }

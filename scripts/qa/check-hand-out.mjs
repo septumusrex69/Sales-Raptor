@@ -86,6 +86,12 @@ check('R27 million is major', accountBand({ capitalOutstanding: 27000000 }).id, 
  * A HARD POSITION LIFTS THE BAND WHATEVER THE BALANCE. A defended matter is a legal conversation
  * at R2 000 as much as at R200 000: the debtor has taken a position, somebody has to answer it in
  * writing, and getting that wrong is how a dispute becomes a counterclaim.
+ *
+ * WHAT THE LIFT DOES AND NO LONGER DOES. Since the firm opened High value to every grade it no
+ * longer changes WHO may take the account — it changes what the account is CALLED. That is worth
+ * keeping and worth checking: the lift was comparing the grades each band requires, so the moment
+ * both bands read Junior it stopped firing altogether and a disputed account quietly fell back to
+ * Generic. It compares the rungs themselves now.
  */
 check('a small disputed account is not junior work',
   accountBand({ capitalOutstanding: 2000, disputed: true }).id, 'high_value')
@@ -109,7 +115,13 @@ ok('every band names a real grade', ACCOUNT_BANDS.every((b) => COLLECTOR_GRADES.
 /* ================= who may take what ================= */
 
 ok('a junior may take generic', mayTake('Junior', band('generic')))
-ok('a junior may NOT take high value', !mayTake('Junior', band('high_value')))
+/*
+ * A JUNIOR MAY TAKE HIGH VALUE, and this check asserted the opposite until the firm changed it.
+ * Their reasoning, against the obvious objection, and it is theirs to make: "yes, it is a risk to
+ * allocate bigger accounts to smaller people, but you want to take that risk to help them grow,
+ * give them confidence and give some fairness." One line now, at R50 000.
+ */
+ok('a junior may take high value', mayTake('Junior', band('high_value')))
 ok('a junior may NOT take a major account', !mayTake('Junior', band('major')))
 ok('a skilled collector may take high value', mayTake('Skilled', band('high_value')))
 ok('a skilled collector may NOT take a major account', !mayTake('Skilled', band('major')))
@@ -714,7 +726,8 @@ ok('...and a liaison, who also carries a book', COLLECTING_ROLES.includes('Liais
 ok('...but not a sales rep', !COLLECTING_ROLES.includes('Sales Representative'))
 check('ungraded means the lowest rung, never nothing', UNGRADED_EQUIVALENT, 'Junior')
 ok('...which can take generic work', mayTake(UNGRADED_EQUIVALENT, band('generic')))
-ok('...and cannot take high value', !mayTake(UNGRADED_EQUIVALENT, band('high_value')))
+ok('...and high value too, since the firm opened it', mayTake(UNGRADED_EQUIVALENT, band('high_value')))
+ok('...but not a major account', !mayTake(UNGRADED_EQUIVALENT, band('major')))
 
 const data = readFileSync(new URL('../../src/lib/handOutData.ts', import.meta.url), 'utf8')
 ok('the role admits somebody to the list',
