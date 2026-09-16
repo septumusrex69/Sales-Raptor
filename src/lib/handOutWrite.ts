@@ -14,6 +14,7 @@
 import { supabase } from './supabase'
 import { diarise } from './diary.ts'
 import type { HandOutPlan } from './handOut.ts'
+import { ID_CHUNK, idChunks } from './accountAllocation.ts'
 
 /**
  * The two things you can do with a stack of accounts, and they are not independent switches.
@@ -29,12 +30,6 @@ import type { HandOutPlan } from './handOut.ts'
  */
 export type HandOutMode = 'refer' | 'allocate_and_refer'
 
-/*
- * Accounts per request. Small enough that the id list in an `in(...)` filter stays a sane URL —
- * PostgREST puts it in the query string, and fifty UUIDs is already two kilobytes of it — and
- * large enough that a five-hundred-account hand-out is twenty requests rather than a thousand.
- */
-const CHUNK = 50
 
 export interface HandOutResult {
   allocated: number
@@ -79,10 +74,17 @@ export async function commitHandOut(input: {
       byUser.set(p.userId, list)
     }
     for (const [userId, ids] of byUser) {
-      const { error } = await supabase
-        .from('debtor_accounts').update({ assigned_to: userId }).in('id', ids)
-      if (error) throw new Error(`Allocating failed: ${error.message}`)
-      result.allocated += ids.length
+      /*
+       * Chunked as well as grouped. Grouping alone is one request per desk, which is fine until a
+       * shuffle of three thousand accounts goes to one person and that request carries three
+       * thousand ids in its URL — see ID_CHUNK.
+       */
+      for (const chunk of idChunks(ids)) {
+        const { error } = await supabase
+          .from('debtor_accounts').update({ assigned_to: userId }).in('id', chunk)
+        if (error) throw new Error(`Allocating failed: ${error.message}`)
+        result.allocated += chunk.length
+      }
     }
   }
 
@@ -94,6 +96,8 @@ export async function commitHandOut(input: {
    * IN BATCHES, AND IN TWO PASSES: supersede every open entry on these accounts, then insert all
    * the new ones. It was one diarise() per account, which is two round trips each — a hundred
    * accounts took two hundred sequential requests and, in the firm's words, "a very long time".
+   * The batch size is ID_CHUNK because the supersede filters on a list of account ids, and that
+   * list is URL length rather than body size.
    *
    * The two passes are not an optimisation detail, they are what makes the batch legal. An
    * account may carry ONE open diary entry and a partial unique index enforces it, so inserting
@@ -119,8 +123,8 @@ export async function commitHandOut(input: {
   let done = 0
   const tick = (n: number) => { done += n; input.onProgress?.(done, placements.length) }
 
-  for (let i = 0; i < placements.length; i += CHUNK) {
-    const slice = placements.slice(i, i + CHUNK)
+  for (let i = 0; i < placements.length; i += ID_CHUNK) {
+    const slice = placements.slice(i, i + ID_CHUNK)
     try {
       const { error: supersedeError } = await supabase
         .from('diary_entries')
@@ -129,7 +133,7 @@ export async function commitHandOut(input: {
         .eq('state', 'open')
       if (supersedeError) throw new Error(supersedeError.message)
 
-      const { error } = await supabase.from('diary_entries').insert(rows.slice(i, i + CHUNK))
+      const { error } = await supabase.from('diary_entries').insert(rows.slice(i, i + ID_CHUNK))
       if (error) throw new Error(error.message)
       result.booked += slice.length
       tick(slice.length)

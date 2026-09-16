@@ -175,9 +175,33 @@ ok('...without duplicating a row', /seen = new Set\(prev\.map\(\(a\) => a\.id\)\
  * The first-page effect must not depend on `page`, or loading more refetches from the top and
  * throws away everything already on screen — a Load more button that loses your place.
  */
-ok('loading more does not reset the list', /\}, \[query\]\)\n\n  async function loadMore/.test(list))
+/*
+ * `pageSize` belongs in there and `page` does not, and the difference is the whole point:
+ * changing how many rows to show is a NEW first page, while loading the next one must append.
+ */
+ok('loading more does not reset the list', /\}, \[query, pageSize\]\)\n\n  async function loadMore/.test(list))
+ok('...but changing the page size does', /\[query, pageSize\]/.test(list))
+ok('...and the effect never depends on the page number', !/\}, \[query[^\]]*\bpage\b[^S]/.test(list))
 ok('the selection survives loading more',
   /setTicked\(new Set\(\)\); setAllMatching\(false\) \}, \[key\]\)/.test(list))
+
+/* ---------- how many rows, chosen at the top ---------- */
+
+/*
+ * A SHUFFLE IS THREE THOUSAND ACCOUNTS AT ONCE. The firm's own word for moving everything that
+ * has gone two month ends since handover without paying, and a hundred rows at a time makes that
+ * twenty-nine presses of a button at the foot of the table — which is exactly where the only
+ * control used to be, so asking for more meant scrolling past everything already on screen.
+ */
+ok('the page size is a choice', /const PAGE_SIZES = \[100, 500, 1000, 2000\] as const/.test(list))
+ok('...that the list actually uses', /pageSize \}\)/.test(list))
+ok('...offered beside the count it changes', /ml-auto flex items-center gap-1/.test(list))
+/*
+ * And only where it would do something. A "2 000" button on a client with 310 accounts does
+ * nothing when pressed, and a control that does nothing is one people stop trusting the rest of.
+ */
+ok('a size the book cannot fill is not offered', /PAGE_SIZES\.filter\(\(n, i\) => i === 0 \|\| n <= total \* 2\)/.test(list))
+ok('...but the smallest always is', /i === 0 \|\|/.test(list))
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)

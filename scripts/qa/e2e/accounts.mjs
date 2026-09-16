@@ -62,7 +62,7 @@ const handlers = [
   [(u) => u.includes('/rest/v1/diary_entries'), () => ({ body: [] })],
   [
     (u) => u.includes('/rest/v1/debtor_accounts'),
-    (u) => {
+    (u, req) => {
       /*
        * An id list is a different question from a filter: the hand-out modal asks for exactly
        * the accounts that were ticked. Answering it with a page of the whole book would make the
@@ -84,12 +84,22 @@ const handlers = [
        * omitted this would make the pager and the scope line silently say "of 0".
        */
       const total = narrowedTotal(u)
-      const offset = Number(/offset=(\d+)/.exec(u)?.[1] ?? 0)
-      const rows = accountsPage(Math.max(0, Math.min(PAGE_SIZE, total - offset)), offset)
-      const last = offset + rows.length - 1
+      /*
+       * THE PAGE SIZE IS HONOURED, or the control that sets it cannot be tested. postgrest-js
+       * asks for a page with a Range HEADER, not a query parameter, so a fixture reading only the
+       * URL hands back a hundred rows however many were asked for — and "Show 500" then looks
+       * broken on a screen that is working. Both forms are read because which one is sent is a
+       * detail of the client library, not of this app.
+       */
+      const range = /(\d+)-(\d+)/.exec(req?.headers()?.range ?? '')
+      const from = Number(/offset=(\d+)/.exec(u)?.[1] ?? range?.[1] ?? 0)
+      const limit = Number(/limit=(\d+)/.exec(u)?.[1]
+        ?? (range ? Number(range[2]) - Number(range[1]) + 1 : PAGE_SIZE))
+      const rows = accountsPage(Math.max(0, Math.min(limit, total - from)), from)
+      const last = from + rows.length - 1
       return {
         body: rows,
-        headers: { 'content-range': `${offset}-${Math.max(offset, last)}/${total}` },
+        headers: { 'content-range': `${from}-${Math.max(from, last)}/${total}` },
       }
     },
   ],
@@ -147,6 +157,38 @@ try {
   t.ok('the scope line is on screen', await scope.isVisible())
   t.ok('...and names both figures', /Showing 100 of 736/.test(await scope.innerText()))
   t.ok('...and is not claiming to be narrowed', !(await scope.innerText()).includes('narrowed'))
+
+  /*
+   * HOW MANY ROWS, AT THE TOP. This lived only at the foot of the table as "Load 100 more", so
+   * asking for more of the book meant scrolling past all of it first — and a shuffle is three
+   * thousand accounts that have to be ticked in one go.
+   *
+   * Asserted inside the scope bar, not the page: "Load 500 more" at the bottom would satisfy a
+   * body-wide search while the control was still in the wrong place, which is the whole bug.
+   */
+  const sizes = page.locator('text=/Showing .* of /').first().locator('..')
+  t.ok('the page size sits with the count it changes', /Show/.test(await sizes.innerText()))
+  /*
+   * Compared on DIGITS, not on the rendered string. This Chromium renders en-ZA thousands with a
+   * comma where Node renders the non-breaking space the house notes describe — same locale, two
+   * ICU builds — so an assertion on "1 000" fails on a screen that is perfectly correct. The
+   * separator is not what this check is about.
+   */
+  const offered = (await sizes.locator('button[aria-pressed]').allInnerTexts())
+    .map((x) => Number(x.replace(/\D/g, '')))
+  t.check('...offering the sizes this book can fill', offered.join(), '100,500,1000')
+  /*
+   * And NOT 2 000, which 736 accounts cannot fill. A control that does nothing when pressed is
+   * one people stop trusting the rest of.
+   */
+  t.ok('...and not one it cannot', !offered.includes(2000))
+  /* It has to actually change the request, not just light up. */
+  await sizes.locator('button[aria-pressed]').nth(1).click()
+  await page.waitForFunction(() => /Showing 500 of 736/.test(document.body.innerText), { timeout: 15000 })
+  t.ok('choosing a bigger page actually loads it',
+    /Showing 500 of 736/.test(await page.locator('body').innerText()))
+  await sizes.locator('button[aria-pressed]').first().click()
+  await page.waitForFunction(() => /Showing 100 of 736/.test(document.body.innerText), { timeout: 15000 })
 
   /* ---------- clicking a view narrows, visibly ---------- */
 

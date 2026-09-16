@@ -23,6 +23,7 @@ const ok = (name, actual) => {
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
 const alloc = read('../../src/lib/accountAllocation.ts')
+const write = readFileSync(new URL('../../src/lib/handOutWrite.ts', import.meta.url), 'utf8')
 const book = read('../../src/lib/accountBook.ts')
 const list = read('../../src/pages/accounts/AccountsList.tsx')
 const modal = read('../../src/pages/accounts/AllocateModal.tsx')
@@ -55,7 +56,7 @@ ok('allocation writes no filters of its own',
  * failure the confirmation exists to prevent, arriving after the confirmation.
  */
 ok('ids are resolved before the write', /async function resolveIds/.test(alloc))
-ok('the update is keyed by id', /\.update\(\{ assigned_to: input\.toUserId \}\)\s*\n?\s*\.in\('id', ids\)/.test(alloc))
+ok('the update is keyed by id', /\.update\(\{ assigned_to: input\.toUserId \}\)\s*\n?\s*\.in\('id', chunk\)/.test(alloc))
 ok('nothing updates by filter', !/applyAccountFilters\([\s\S]{0,80}\.update\(/.test(alloc))
 
 /* ---------- a ceiling, and it is about attention rather than about SQL ---------- */
@@ -76,6 +77,37 @@ ok('it is enforced before the write',
  */
 ok('the fetch can tell "at the ceiling" from "over it"', /limit\(BULK_CEILING \+ 1\)/.test(alloc))
 ok('the message says what to do instead', /a client at a time/.test(alloc))
+
+/* ---------- and the ceiling is high enough for the job the firm actually does ---------- */
+
+/*
+ * SHUFFLING THE BOOK IS THREE THOUSAND ACCOUNTS. Moving everything that has gone two month ends
+ * since handover without paying is the commonest bulk action here, and it was capped at five
+ * hundred — which did not add a review, it added six more passes to lose track of.
+ */
+ok('a shuffle fits in one action', Number(/export const BULK_CEILING = (\d+)/.exec(alloc)?.[1] ?? 0) >= 3000)
+
+/*
+ * A LIST OF IDS IS URL LENGTH, NOT BODY SIZE. PostgREST takes filters in the query string even on
+ * an UPDATE, so five thousand UUIDs in one `in(...)` is a request of nearly two hundred kilobytes
+ * against an 8 KB request line — a limit found on the day somebody shuffles a big client, not in
+ * testing. Every write that filters on a list of ids goes through the same chunking.
+ */
+ok('ids are chunked for the URL', /export const ID_CHUNK = (\d+)/.test(alloc))
+ok('...small enough to fit one', Number(/export const ID_CHUNK = (\d+)/.exec(alloc)?.[1] ?? 0) <= 150)
+ok('...and the allocation uses it', /for \(const chunk of idChunks\(ids\)\)/.test(alloc))
+ok('...the hand-out too', /for \(const chunk of idChunks\(ids\)\)/.test(write))
+ok('...and so does its diary supersede', /i \+= ID_CHUNK/.test(write))
+
+/*
+ * COUNTED AND FETCHED MUST AGREE. One request rather than paging means the ids are only the whole
+ * answer if nothing capped them, and PostgREST returns exactly its max-rows saying nothing. A
+ * shuffle that quietly moved the first thousand of three and reported success is the worst
+ * failure available here: a bulk action that looks finished and is not.
+ */
+ok('the count is taken before the ids', /const expected = await selectionCount\(selection\)/.test(alloc))
+ok('...and a short answer stops everything', /if \(ids\.length !== expected\)/.test(alloc))
+ok('...saying nothing was changed', /Nothing has been changed/.test(alloc))
 
 /* ---------- every move leaves a trail ---------- */
 
@@ -149,7 +181,6 @@ ok('...and says what it means', /not just this page/.test(list))
 
 /* ---------- allocation and referral are not two switches ---------- */
 
-const write = readFileSync(new URL('../../src/lib/handOutWrite.ts', import.meta.url), 'utf8')
 const handOutModal = readFileSync(new URL('../../src/pages/accounts/HandOutModal.tsx', import.meta.url), 'utf8')
 
 /*

@@ -20,12 +20,17 @@ import type { Selection } from '../../lib/accountAllocation'
 import { formatCurrency, formatDate } from '../../data/mockData'
 
 /*
- * A hundred, not fifty. The cost is the same request either way — the narrowing happens in the
- * database — and fifty rows of a three-thousand-account client reads as a sample rather than a
- * book. Pages are appended rather than replaced, so working down a client is one continuous
- * scroll instead of Next, Next, Next.
+ * HOW MANY ROWS COME BACK AT A TIME, and it is a choice rather than a constant because the two
+ * jobs done on this screen are not the same job. Reading a client's book is a hundred at a time
+ * and a scroll. Shuffling it — the firm's word for moving every account that has gone two month
+ * ends without paying — is three thousand accounts that have to be ticked in one go, and a
+ * hundred at a time makes that twenty-nine presses of a button at the bottom of the page.
+ *
+ * Offered at the TOP, next to the count it changes. It used to be only "Load 100 more" at the
+ * foot of the table, which meant scrolling past everything on screen to ask for more of it.
  */
-const PAGE_SIZE = 100
+const PAGE_SIZES = [100, 500, 1000, 2000] as const
+const PAGE_SIZE = PAGE_SIZES[0]
 
 /** Who may ask for somebody else's desk. An agent's book is their own. */
 const CAN_SEE_OTHER_DESKS = ['Administrator', 'Sales Manager', 'Liaison Manager', 'Pre-legal Team Leader']
@@ -54,6 +59,7 @@ export function AccountsList() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZE)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState(params.get('q') ?? '')
@@ -116,7 +122,7 @@ export function AccountsList() {
     void (async () => {
       try {
         const [res, sum] = await Promise.all([
-          fetchAccounts({ ...query, page: 0, pageSize: PAGE_SIZE }),
+          fetchAccounts({ ...query, page: 0, pageSize }),
           fetchBookSummary(query.companyId),
         ])
         if (cancelled) return
@@ -128,13 +134,13 @@ export function AccountsList() {
       }
     })()
     return () => { cancelled = true }
-  }, [query])
+  }, [query, pageSize])
 
   async function loadMore() {
     setLoadingMore(true); setError(null)
     try {
       const next = page + 1
-      const res = await fetchAccounts({ ...query, page: next, pageSize: PAGE_SIZE })
+      const res = await fetchAccounts({ ...query, page: next, pageSize })
       /*
        * Merged by id rather than concatenated. The book is ordered by account number and rows can
        * move between pages while somebody reads — an account allocated, or a new handover landing
@@ -214,7 +220,7 @@ export function AccountsList() {
     clearSelection()
     setPage(0)
     const [res, sum, counts] = await Promise.all([
-      fetchAccounts({ ...query, page: 0, pageSize: PAGE_SIZE }),
+      fetchAccounts({ ...query, page: 0, pageSize }),
       fetchBookSummary(query.companyId),
       fetchViewCounts({ userId: currentUser?.id ?? null, companyId, quietDays: QUIET_VIEW_DAYS })
         .catch(() => null),
@@ -395,6 +401,28 @@ export function AccountsList() {
                 </button>
               </>
             )}
+            {/*
+              HOW MANY ROWS, AT THE TOP, beside the count it changes. A shuffle needs every
+              account ticked in one go, and reaching for it at the foot of a hundred rows means
+              scrolling past all of them to ask for more of them.
+
+              Only sizes the book can actually fill are offered. A "2 000" button on a client with
+              310 accounts does nothing when pressed, and a control that does nothing is one
+              people stop trusting the rest of.
+            */}
+            <span className="ml-auto flex items-center gap-1">
+              <span className="text-slate-400">Show</span>
+              {PAGE_SIZES.filter((n, i) => i === 0 || n <= total * 2).map((n) => (
+                <button key={n} type="button" onClick={() => setPageSize(n)}
+                  aria-pressed={pageSize === n}
+                  className={`rounded-full border px-2 py-0.5 tabular-nums ${
+                    pageSize === n
+                      ? 'border-navy-950 bg-navy-950 text-white'
+                      : 'border-slate-200 text-slate-600 hover:border-brand-300 hover:text-brand-700'}`}>
+                  {n.toLocaleString('en-ZA')}
+                </button>
+              ))}
+            </span>
           </div>
         )}
 
@@ -503,7 +531,7 @@ export function AccountsList() {
             <button className="btn-secondary inline-flex items-center gap-1.5"
               disabled={loadingMore} onClick={() => void loadMore()}>
               {loadingMore && <Loader2 size={14} className="animate-spin" />}
-              Load {Math.min(PAGE_SIZE, total - shown).toLocaleString('en-ZA')} more
+              Load {Math.min(pageSize, total - shown).toLocaleString('en-ZA')} more
             </button>
           </div>
         )}

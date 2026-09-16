@@ -45,27 +45,72 @@ export interface BulkResult {
 /** The ids a selection covers. Resolved before the write so the note and the update agree. */
 async function resolveIds(selection: Selection): Promise<string[]> {
   if (selection.kind === 'ids') return selection.ids
+
   /*
-   * No range, so PostgREST's default page cap applies. Raised deliberately rather than paged: a
-   * bulk action over more accounts than one request returns is one nobody can verify afterwards,
-   * and "allocate the whole book" is better done per client than in a single swing.
+   * COUNTED FIRST, THEN FETCHED, AND THE TWO MUST AGREE. One request rather than paging, which
+   * means the ids that come back are only the whole answer if nothing capped them — and a cap is
+   * silent. PostgREST will return exactly its max-rows and say nothing, so a shuffle of three
+   * thousand could quietly move the first thousand and report success, which is the worst failure
+   * this module has available to it: a bulk action that looks finished and is not.
+   *
+   * So the exact count is taken separately and checked against what arrived. The two can also
+   * differ because a colleague changed something in between, which is why the message says the
+   * safe thing rather than blaming a cap it cannot see.
    */
+  const expected = await selectionCount(selection)
+  if (expected > BULK_CEILING) throw new BulkTooLarge(expected)
+
   const { data, error } = await applyAccountFilters(
     supabase.from('debtor_accounts').select('id').limit(BULK_CEILING + 1),
     selection.query,
   )
   if (error) throw new Error(error.message)
-  return (data ?? []).map((r) => (r as { id: string }).id)
+  const ids = (data ?? []).map((r) => (r as { id: string }).id)
+  if (ids.length !== expected) {
+    throw new Error(
+      `${expected.toLocaleString('en-ZA')} accounts match but the database returned `
+      + `${ids.length.toLocaleString('en-ZA')}. Nothing has been changed. Somebody may have `
+      + 'edited an account while this was being counted — check the filters and try again.',
+    )
+  }
+  return ids
 }
 
 /**
  * The most accounts one action may move.
  *
- * Not a technical limit — it is the point past which nobody is really checking. A clerk moving
- * two thousand accounts in one click has not reviewed two thousand accounts, and the undo for
- * this is another bulk action in the other direction plus a timeline full of noise.
+ * FIVE THOUSAND, AND IT WAS FIVE HUNDRED. The note here used to argue that this was not a
+ * technical limit but the point past which nobody is really checking — a clerk moving two
+ * thousand accounts in one click has not reviewed two thousand accounts. That reasoning holds
+ * for allocating, and the firm has pointed out it does not hold for the job they actually do
+ * most: SHUFFLING THE BOOK, moving every account that has gone two month ends since handover
+ * without paying, which is routinely three thousand accounts at a time. Nobody reviews those
+ * individually and nobody is meant to — the rule is the review, and the plan preview is where it
+ * is checked. A ceiling that forced it into seven passes would not add a review, only six more
+ * chances to lose track of which pass covered what.
+ *
+ * Still a ceiling rather than none, because an unbounded bulk action over a six-figure table is
+ * a request nobody can verify afterwards, and "the whole book" is better done per client.
  */
-export const BULK_CEILING = 500
+export const BULK_CEILING = 5000
+
+/**
+ * Ids per request, for any write that filters on `in(id, ...)`.
+ *
+ * PostgREST takes filters in the QUERY STRING, including on an UPDATE, so a list of ids is URL
+ * length rather than body size: a UUID plus its comma is 37 characters, so a hundred of them is
+ * about 3.7 KB and two hundred would sit on top of the 8 KB request line most proxies allow. At
+ * the old ceiling of five hundred this was one request of nearly twenty kilobytes, which is a
+ * limit waiting to be found on the day somebody shuffles a big client.
+ */
+export const ID_CHUNK = 100
+
+/** A list of ids split into URL-safe requests. */
+export function idChunks(ids: string[]): string[][] {
+  const out: string[][] = []
+  for (let i = 0; i < ids.length; i += ID_CHUNK) out.push(ids.slice(i, i + ID_CHUNK))
+  return out
+}
 
 export class BulkTooLarge extends Error {
   /** Declared and assigned separately: parameter properties are not erasable TypeScript syntax. */
@@ -99,12 +144,19 @@ export async function allocate(input: {
    * Written by id, not by re-running the filter. Between the count and the write an account can
    * be paid, frozen or reassigned by somebody else — and an update that re-matched would quietly
    * move accounts nobody counted, which is the exact failure this whole module is careful about.
+   *
+   * In chunks — see ID_CHUNK. A failure part way leaves the earlier chunks moved, which is why it
+   * throws rather than reporting a count: a half-finished move the caller was told succeeded is
+   * worse than one they are told to go and look at. The notes below name every account that did
+   * move, so the trail is there either way.
    */
-  const { error } = await supabase
-    .from('debtor_accounts')
-    .update({ assigned_to: input.toUserId })
-    .in('id', ids)
-  if (error) throw new Error(error.message)
+  for (const chunk of idChunks(ids)) {
+    const { error } = await supabase
+      .from('debtor_accounts')
+      .update({ assigned_to: input.toUserId })
+      .in('id', chunk)
+    if (error) throw new Error(error.message)
+  }
 
   const where = input.toUserName
     ? `Moved to ${input.toUserName}’s desk`

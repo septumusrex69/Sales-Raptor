@@ -73,7 +73,42 @@ already has the engine. Remittance Advice and State of Accounts generated on the
 on the 15th. Then a client login reading those snapshots rather than live data, so a report
 cannot change under a client after they have read it.
 
-### 5. Campaigns
+### 5. Shuffling the book, and the workflow engine it belongs in
+
+**The rule, in the firm's words.** A collector does not work an account for more than two month
+ends. An account handed over on 16 September runs through the end of September and the end of
+October; on **the fifth day after that second month end** — 5 November — it is shuffled to the
+next clerk. What triggers it is *no payment* in that window, not a lack of activity.
+
+**It cannot go to somebody who has already had it.** "Had it" means **allocated to them**. A clerk
+who left a note, took a call or sent a letter on the account has not had it and is still eligible.
+`account_desk_history` already records every allocation as an event row, so the exclusion list is
+a query against it rather than a new column.
+
+**Volume: about 3 000 accounts at a time.** This is the commonest bulk action in the firm, not an
+exceptional one. `BULK_CEILING` is 5 000 and every id-filtered write is chunked for that reason.
+
+**The firm's decision: do not build this as a one-off.** It belongs in a general **workflow /
+automation** engine — rules for what an account must do and when. "Shuffle after two month ends
+without payment" is one rule; "send this letter on that date" is another; the Section 129 clock
+and the dispute chase are two more that are currently hand-rolled. Their words: *"that's where we
+can build in something like that, a specific rule."*
+
+**What has to be answered before anything is built:**
+
+1. Where does a rule run? `api/` is at **12 of 12** on Hobby, so a nightly endpoint has no room —
+   it wants either `pg_cron` in the database or a rule evaluated on read, the way the overdue
+   promise in item 1 is derived rather than written.
+2. What is a "month end" for an account handed over on the 31st, and does a public holiday or a
+   weekend move the fifth day?
+3. What happens when every eligible clerk has already had the account? Back to unallocated, or
+   the rule stops and it is flagged for a team leader?
+4. Does a shuffle reset the two-month clock, or does it run from the original handover?
+5. Debit-order accounts again: a payment that reflects two days late could shuffle an account
+   that did pay. Same grace question as item 1.
+
+
+### 6. Campaigns
 
 Email campaigns for team leaders; SMS Administrator-only, because SMS costs real money per
 segment and the Annexure B cap is 10 a month per account. The firm's view: "SMSs don't really
