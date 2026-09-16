@@ -39,8 +39,8 @@ import {
 } from '../../lib/clientPosition.ts'
 import { clientLine, type ClientLine } from '../../lib/accountNarrative.ts'
 import {
-  directorshipSummary, judgmentSummary, practitionerLabel, practitionerMeaning,
-  type AccountStanding, type DirectorCompany, type PractitionerKind,
+  directorshipSummary, judgmentSummary, practitionerLabel, practitionerMeaning, splitJudgments,
+  type AccountJudgment, type AccountStanding, type DirectorCompany, type PractitionerKind,
 } from '../../lib/accountStanding.ts'
 import { fetchStanding } from '../../lib/accountStandingData.ts'
 import { TraceUploadModal } from './TraceUploadModal'
@@ -1571,7 +1571,14 @@ function StandingPanel({ account, standing, position, onUpload, onPractitioner }
   const kindLabel = practitionerLabel(account.practitionerKind)
   const hasPractitioner = !!(kindLabel || account.practitionerName || account.practitionerFirm)
   const { directors, judgments } = standing
-  const summary = judgmentSummary(judgments)
+  /*
+   * SPLIT BEFORE ANYTHING IS COUNTED. A director's own judgments are on this account because the
+   * director is, and they are real — but they are not judgments against the debtor. Counted in,
+   * a company with a clean record reads as having two because somebody who signed for it does,
+   * and that is the number the firm has said will drive what it reports to clients.
+   */
+  const { own: ownJudgments, byDirector: directorJudgments } = splitJudgments(judgments)
+  const summary = judgmentSummary(ownJudgments)
   /*
    * A WARNING THAT ONLY FIRES WHEN SOMETHING IS ACTUALLY WRONG.
    *
@@ -1666,16 +1673,22 @@ function StandingPanel({ account, standing, position, onUpload, onPractitioner }
                   {d.status ?? 'Unknown'}
                 </span>
                 <Directorships companies={d.companies} />
+                {/*
+                  THEIR OWN JUDGMENTS, under their own name and nowhere near the company's.
+                  A director who has been sued personally is a different conversation — and on a
+                  suretyship it is the same debt — but it is not a judgment against the debtor.
+                */}
+                <PersonalJudgments judgments={directorJudgments.get(d.id) ?? []} />
               </li>
             ))}
           </ul>
         </div>
       )}
 
-      {judgments.length > 0 && (
+      {ownJudgments.length > 0 && (
         <div>
           <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5 inline-flex items-center gap-1.5">
-            <Gavel size={12} /> Judgments against them
+            <Gavel size={12} /> Judgments against {account.debtorKind === 'company' ? 'the company' : 'them'}
           </p>
           {/*
             The count and the newest date first, because those are the two facts that decide
@@ -1694,7 +1707,7 @@ function StandingPanel({ account, standing, position, onUpload, onPractitioner }
             </p>
           )}
           <ul className="space-y-1.5 mt-1.5">
-            {judgments.map((j) => (
+            {ownJudgments.map((j) => (
               <li key={j.id} className="text-sm">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-2">
                   <span className="text-slate-800">{j.plaintiff ?? 'Plaintiff not recorded'}</span>
@@ -1748,6 +1761,25 @@ function StandingPanel({ account, standing, position, onUpload, onPractitioner }
  * that here are companies somebody could actually approach — is lost in the reading. The newest
  * appointments are named because those are the live concerns, and the rest are a count.
  */
+/**
+ * What a director has against them personally.
+ *
+ * One line, named by plaintiff, and deliberately quiet. It is context a collector wants before
+ * ringing somebody — and it is the thing that must never be counted as the company's, which is
+ * why it renders here rather than in the block above.
+ */
+function PersonalJudgments({ judgments }: { judgments: AccountJudgment[] }) {
+  if (judgments.length === 0) return null
+  const newest = judgments.reduce((a, b) => ((b.filedOn ?? '') > (a.filedOn ?? '') ? b : a))
+  return (
+    <span className="block w-full mt-0.5 text-[11px] text-negative-700">
+      {judgments.length === 1 ? 'A judgment against them personally' : `${judgments.length} judgments against them personally`}
+      {newest.plaintiff && <> &mdash; {newest.plaintiff}</>}
+      {newest.filedOn && <>, {formatDate(newest.filedOn)}</>}
+    </span>
+  )
+}
+
 const NAME_AT_MOST = 4
 
 function Directorships({ companies }: { companies: DirectorCompany[] }) {

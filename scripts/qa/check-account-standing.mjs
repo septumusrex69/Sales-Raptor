@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import {
   PRACTITIONER_KINDS, directorshipSummary, judgmentSummary, practitionerLabel,
-  practitionerMeaning, sortDirectors,
+  practitionerMeaning, sortDirectors, splitJudgments,
 } from '../../src/lib/accountStanding.ts'
 
 let pass = 0
@@ -115,7 +115,7 @@ ok('the table is not readable by the world',
 
 const J = (over) => ({
   id: 'x', accountId: 'a', caseNumber: 'c', caseType: null, caseReason: null, plaintiff: null,
-  filedOn: null, amount: null, sourceText: null, source: 'xds',
+  filedOn: null, amount: null, sourceText: null, source: 'xds', againstDirectorId: null,
   recordedAt: '2026-01-01T00:00:00Z', ...over,
 })
 
@@ -197,6 +197,42 @@ eq('...and is counted as unread', quoted.unread, 1)
 eq('...while a row that read cleanly is not',
   judgmentSummary([J({ plaintiff: 'SARS', sourceText: 'anything' })]).unread, 0)
 
+/* ---------- whose judgment is it ---------- */
+
+/*
+ * THE READ SIDE OF THE DISTINCTION, and it is the half that was missing.
+ *
+ * The importer files a director's own judgments against them, the column exists and the schema
+ * check passed — and the fetch then selected every judgment on the account and handed them to one
+ * list. The rows were filed correctly and displayed wrongly, which is worse than not storing them
+ * at all: the screen asserts something the database does not, and the number it shows is the one
+ * the firm has said will drive what it reports to clients.
+ */
+const mixed = [
+  J({ id: 'a', caseNumber: '1/2024', plaintiff: 'SARS' }),
+  J({ id: 'b', caseNumber: '2/2024', plaintiff: 'A supplier' }),
+  J({ id: 'c', caseNumber: '3/2024', plaintiff: 'A bank', againstDirectorId: 'dir-1' }),
+  J({ id: 'd', caseNumber: '4/2024', plaintiff: 'A retailer', againstDirectorId: 'dir-1' }),
+  J({ id: 'e', caseNumber: '5/2024', plaintiff: 'A council', againstDirectorId: 'dir-2' }),
+]
+const split = splitJudgments(mixed)
+eq('only the debtor\'s own are the debtor\'s own', split.own.map((j) => j.caseNumber), ['1/2024', '2/2024'])
+/*
+ * READ DEFENSIVELY. `.get()` on a Map returns undefined, and calling .map on that throws a
+ * TypeError two lines below the assertion that should have reported the problem — so a genuine
+ * failure came out as a stack trace with zero failed checks printed. The house has a name for
+ * this one; see CLAUDE.md.
+ */
+eq('...a director\'s go under that director',
+  (split.byDirector.get('dir-1') ?? []).map((j) => j.caseNumber), ['3/2024', '4/2024'])
+eq('...and each director keeps their own', (split.byDirector.get('dir-2') ?? []).length, 1)
+eq('...with nobody counted twice', split.own.length + [...split.byDirector.values()].flat().length, mixed.length)
+/*
+ * AND THE COUNT THE CLIENT SEES IS THE SPLIT ONE. This is the assertion that matters: a company
+ * with two judgments and three directors who have been sued must read as two, not five.
+ */
+eq('the count is of the debtor\'s judgments alone', judgmentSummary(split.own).count, 2)
+
 /* ---------- the other companies a director sits on ---------- */
 
 const K = (companyName, status, appointedOn) => ({
@@ -276,7 +312,28 @@ ok('the panel says not to deal with the debtor',
  * clients — which has to be calibrated against their own recovered outcomes, not invented here.
  * Until then the panel shows the rows and lets a collector read them. See BACKLOG.
  */
-ok('the judgments are shown as rows, not as a score', /Judgments against them/.test(detail))
+ok('the judgments are shown as rows, not as a score', /Judgments against \{account\.debtorKind/.test(detail))
+/* The panel must count and list the split ones, not the raw fetch. */
+ok('the panel splits before it counts', /splitJudgments\(judgments\)/.test(detail))
+ok('...and summarises only the debtor\'s own', /judgmentSummary\(ownJudgments\)/.test(detail))
+ok('...and lists only those', /\{ownJudgments\.map\(\(j\) =>/.test(detail))
+/* A director's own judgments still appear — under their name, where they belong. */
+ok('a director\'s own judgments show under the director',
+  /<PersonalJudgments judgments=\{directorJudgments\.get\(d\.id\)/.test(detail))
+ok('...saying plainly that they are personal', /judgments against them personally/.test(detail))
+/*
+ * AND THE COLUMN HAS TO SURVIVE THE HAND-WRITTEN MAPPER — both halves of it, asserted separately.
+ *
+ * A file-wide search for the column name passes with the mapper line deleted, because the select
+ * still names it. That is the silent-undefined trap this codebase already has a name for, dressed
+ * up as a check: the row comes back carrying who the judgment is against, the mapper throws it
+ * away, and every judgment reads as the company's.
+ */
+ok('the select asks for who it is against',
+  /select\('id,account_id,against_director_id,case_number/.test(standingData))
+ok('...and the mapper reads it off the row',
+  /againstDirectorId: r\.against_director_id/.test(standingData))
+ok('...and on the type', /againstDirectorId: string \| null/.test(read('../../src/lib/accountStanding.ts')))
 /* The quoted rows are quoted on screen too, never dressed up as a plaintiff. */
 ok('an unread judgment is shown in the bureau\'s own words', /As printed: &ldquo;\{j\.sourceText\}/.test(detail))
 ok('...only where nothing was read from it', /j\.plaintiff === null && j\.sourceText !== null/.test(detail))

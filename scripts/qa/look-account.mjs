@@ -197,6 +197,12 @@ const directors = [
 const judgments = [
   { id: 'j1', account_id: ACC2, case_number: '40021/2024', case_type: 'Judgement by default', case_reason: 'Credit agreement', plaintiff: 'Bosveld Plant Hire (Pty) Ltd', filed_on: '2024-10-04', amount: null, source: 'xds', recorded_at: '2026-09-16T14:31:00Z' },
   { id: 'j2', account_id: ACC2, case_number: '40990/2023', case_type: 'Judgement by default', case_reason: 'VAT', plaintiff: 'SARS', filed_on: '2023-11-08', amount: 412870.44, source: 'xds', recorded_at: '2026-09-16T14:31:00Z' },
+  /*
+   * AGAINST THE DIRECTOR, NOT THE COMPANY. It must show under his name and must not be counted
+   * among the company's — a clean company reading as having three because somebody who signed for
+   * it has been sued is the exact failure the column exists to prevent.
+   */
+  { id: 'j4', account_id: ACC2, against_director_id: 'dir1', case_number: '77401/2025', case_type: 'Judgement by default', case_reason: 'Credit agreement', plaintiff: 'Sandton Credit Solutions', filed_on: '2025-06-11', amount: 88300, source: 'xds', recorded_at: '2026-09-16T14:31:00Z' },
   /* One the reader could not split into columns: kept in the bureau's own words, never guessed. */
   { id: 'j3', account_id: ACC2, case_number: '31188/2022', case_type: null, case_reason: null, plaintiff: null, filed_on: '2022-05-19', amount: null, source_text: 'ORDER IN TERMS OF RULE 46A MARICO CIVILS CC', source: 'xds', recorded_at: '2026-09-16T14:31:00Z' },
 ]

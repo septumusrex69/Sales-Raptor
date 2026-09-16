@@ -114,6 +114,18 @@ export interface AccountDirector {
 export interface AccountJudgment {
   id: string
   accountId: string
+  /**
+   * Null = against the debtor on this account. Set = against that director PERSONALLY.
+   *
+   * THE READ SIDE OF THE DISTINCTION, and it has to be carried all the way to the screen or the
+   * column is decorative. The importer files a director's own judgments against them for a
+   * reason: counted as the company's they would inflate the one signal the firm has said will
+   * drive the likelihood of collection it reports to clients. A fetch that selects every judgment
+   * on the account and hands them to one list undoes that silently — the rows are filed correctly
+   * and displayed wrongly, which is worse than not storing them, because the screen now asserts
+   * something the database does not.
+   */
+  againstDirectorId: string | null
   caseNumber: string
   /** As the bureau words it: 'JUDGEMENT BY DEFAULT', 'CONSENT TO JUDGEMENT'. */
   caseType: string | null
@@ -226,6 +238,26 @@ export interface JudgmentSummary {
    * on by plaintiff or reason, and the screen says which ones those are.
    */
   unread: number
+}
+
+/**
+ * Split a list of judgments by who they are actually against.
+ *
+ * Called at the point of display, so there is one place that knows the rule and no screen has to
+ * remember it. `own` is what the client is told about; `byDirector` is context for the collector.
+ */
+export function splitJudgments(judgments: AccountJudgment[]): {
+  own: AccountJudgment[]
+  byDirector: Map<string, AccountJudgment[]>
+} {
+  const own: AccountJudgment[] = []
+  const byDirector = new Map<string, AccountJudgment[]>()
+  for (const j of judgments) {
+    if (j.againstDirectorId === null) { own.push(j); continue }
+    const list = byDirector.get(j.againstDirectorId)
+    if (list) list.push(j); else byDirector.set(j.againstDirectorId, [j])
+  }
+  return { own, byDirector }
 }
 
 export function judgmentSummary(judgments: AccountJudgment[]): JudgmentSummary {

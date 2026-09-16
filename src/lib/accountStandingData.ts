@@ -38,6 +38,7 @@ const toDirectorCompany = (r: any): DirectorCompany => ({
 const toJudgment = (r: any): AccountJudgment => ({
   id: r.id,
   accountId: r.account_id,
+  againstDirectorId: r.against_director_id ?? null,
   caseNumber: r.case_number,
   caseType: r.case_type ?? null,
   caseReason: r.case_reason ?? null,
@@ -62,7 +63,7 @@ export async function fetchStanding(accountId: string): Promise<AccountStanding>
       .select('id,account_id,id_number,full_name,status,appointed_on,source,traced_at')
       .eq('account_id', accountId),
     supabase.from('account_judgments')
-      .select('id,account_id,case_number,case_type,case_reason,plaintiff,filed_on,amount,source_text,source,recorded_at')
+      .select('id,account_id,against_director_id,case_number,case_type,case_reason,plaintiff,filed_on,amount,source_text,source,recorded_at')
       .eq('account_id', accountId)
       .order('filed_on', { ascending: false, nullsFirst: false }),
   ])
