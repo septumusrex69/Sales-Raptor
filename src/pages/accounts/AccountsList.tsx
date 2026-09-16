@@ -13,7 +13,7 @@ import { clearedFilters, filterChips, queryFromParams } from '../../lib/accountF
 import {
   QUIET_VIEW_DAYS, activeView, viewParams, viewsFor, type ViewCounts,
 } from '../../lib/accountViews'
-import { CLIENT_FLAGS, CLIENT_POSITIONS, clientFlag, clientPosition } from '../../lib/clientPosition'
+import { CLIENT_FLAGS, DESK_POSITIONS, clientFlag, deskPosition } from '../../lib/clientPosition'
 import { AccountFilters } from './AccountFilters'
 import { HandOutModal } from './HandOutModal'
 import type { Selection } from '../../lib/accountAllocation'
@@ -585,11 +585,19 @@ function Tile({ label, value, tone, action }: {
 export function PositionPill({ account }: { account: DebtorAccount }) {
   // status carries the freeze: freezeAccount() writes 'Frozen' to it, which is what
   // clientPosition() reads. frozenBy says who asked, not whether.
-  const position = clientPosition({
-    status: account.status, subStatus: account.subStatus, bucket: account.bucket,
+  /*
+   * deskPosition, not clientPosition: this is our screen, and it carries the fourteenth rung the
+   * firm keeps to itself. A never-worked account reads "New" here and "In progress" on the report
+   * a client gets — see the note on DeskPosition.
+   */
+  const position = deskPosition({
+    status: account.status,
+    subStatus: account.subStatus,
+    bucket: account.bucket,
+    everWorked: !!account.lastActionAt,
   })
-  const flag = clientFlag(position, !!account.clientActionAsk)
-  const meta = CLIENT_POSITIONS[position]
+  const flag = clientFlag(position === 'new' ? 'in_progress' : position, !!account.clientActionAsk)
+  const meta = DESK_POSITIONS[position]
   const tone = flag === 'client_action' ? 'bg-rose-50 text-rose-700'
     : flag === 'attention' ? 'bg-amber-50 text-amber-700'
       : flag === 'inactive' ? 'bg-slate-100 text-slate-500'

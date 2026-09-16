@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs'
 import {
   CLIENT_FLAGS, CLIENT_POSITIONS, CLIENT_POSITION_ORDER,
   clientFlag, clientPosition, frozenByLabel, needsClient, positionReport,
+  DESK_POSITIONS, deskPosition,
 } from '../../src/lib/clientPosition.ts'
 import { accountNarrative, clientLine } from '../../src/lib/accountNarrative.ts'
 import { DIARY_KINDS, DIARY_KIND_ORDER } from '../../src/lib/diaryPriority.ts'
@@ -458,6 +459,50 @@ check('a frozen account in the PTP bucket is still frozen',
   clientPosition({ status: 'Frozen', bucket: 'PTPs' }), 'frozen')
 check('...and a written-off one is still closed',
   clientPosition({ status: 'Written-off', bucket: 'Failed PTPs' }), 'closed')
+
+/* ---------- one more rung, and only we see it ---------- */
+
+/*
+ * THE FIRM'S DECISION: New, but internal only. A brand-new account and one worked for six months
+ * without getting anywhere both reported as "In progress", and inside the firm those are not the
+ * same thing — one needs a first call, the other needs a different approach. A client still sees
+ * thirteen rungs, because adding a word to their vocabulary changes what every historical report
+ * means.
+ */
+check('a never-worked account reads New to us',
+  deskPosition({ status: 'Active: Activated', everWorked: false }), 'new')
+check('...and In progress once somebody has touched it',
+  deskPosition({ status: 'Active: Activated', everWorked: true }), 'in_progress')
+/*
+ * Not knowing is not the same as knowing it is new. Where `everWorked` is not supplied at all the
+ * rung must not appear — a caller that has not been taught about it should not start showing it.
+ */
+check('...and nothing without being told',
+  deskPosition({ status: 'Active: Activated' }), 'in_progress')
+
+/*
+ * IT ONLY EVER DISPLACES "IN PROGRESS". An account nobody has worked yet but which is frozen, or
+ * disputed, or under administration IS those things — they are facts about the account, not about
+ * whether we have got to it.
+ */
+check('a never-worked frozen account is still frozen',
+  deskPosition({ status: 'Frozen', everWorked: false }), 'frozen')
+check('...a never-worked dispute is still disputed',
+  deskPosition({ status: 'Active: Activated', subStatus: 'Defended Matter', everWorked: false }), 'disputed')
+check('...and a never-worked promise is still arranged',
+  deskPosition({ status: 'Active: Activated', subStatus: 'Promise To Pay', everWorked: false }), 'arranged')
+
+/*
+ * AND THE CLIENT NEVER SEES IT. This is the line that keeps two vocabularies two, and the one
+ * this whole file exists to hold.
+ */
+check('the client report has no such rung',
+  positionReport({ status: 'Active: Activated', everWorked: false }).position, 'in_progress')
+ok('...and clientPosition cannot return it',
+  clientPosition({ status: 'Active: Activated', everWorked: false }) !== 'new')
+check('the client vocabulary is still thirteen', Object.keys(CLIENT_POSITIONS).length, 13)
+check('...and ours is exactly one more', Object.keys(DESK_POSITIONS).length, 14)
+ok('...which is the one we added', 'new' in DESK_POSITIONS && !('new' in CLIENT_POSITIONS))
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)

@@ -431,3 +431,50 @@ export function positionReport(
     flagLabel: CLIENT_FLAGS[flag].label,
   }
 }
+
+/* ---------------------------------------------------------------------------------------------
+ * ONE MORE RUNG, AND ONLY WE SEE IT.
+ *
+ * The firm's thirteen are the client's vocabulary and they have been stable; adding a word to
+ * that list changes what every historical report means. But a brand-new account and one that has
+ * been worked for six months without getting anywhere both report as "In progress", and inside
+ * the firm those are not the same thing at all — one needs a first call, the other needs a
+ * different approach.
+ *
+ * So the firm's decision: NEW, but internal only. A collector, a team leader and the account
+ * screen see it. positionReport() — the thing a client reads — does not, and goes on deriving
+ * exactly thirteen rungs from clientPosition(). Two vocabularies stay two, which is the rule this
+ * file exists to hold.
+ *
+ * It only ever displaces `in_progress`. An account that has never been worked but is frozen, or
+ * disputed, or under administration, is frozen, disputed or under administration — those are
+ * facts about the account, not about whether we have got to it yet.
+ * ------------------------------------------------------------------------------------------- */
+
+export type DeskPosition = ClientPosition | 'new'
+
+export const DESK_POSITIONS: Record<DeskPosition, PositionMeta> = {
+  ...CLIENT_POSITIONS,
+  new: {
+    label: 'New',
+    meaning: 'Handed over and not worked yet. Nobody has made the first call.',
+    tone: 'attention',
+    /* Very much in play — it is the most collectable thing on the book, not a dormant account. */
+    inPlay: true,
+  },
+}
+
+/**
+ * The rung a collector sees, which is the client's one plus New.
+ *
+ * `everWorked` is the whole difference and it is passed in rather than read: this file has no
+ * clock and no database, for the same reason clientPosition() has none — a report that has to be
+ * reproducible three months later cannot depend on a function that looks things up.
+ */
+export function deskPosition(
+  input: PositionInput & { everWorked?: boolean },
+): DeskPosition {
+  const position = clientPosition(input)
+  if (position === 'in_progress' && input.everWorked === false) return 'new'
+  return position
+}

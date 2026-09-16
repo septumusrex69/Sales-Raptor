@@ -38,6 +38,8 @@ export interface DiaryEntry {
   movedBy: string | null
   movedReason: string | null
   createdAt: string
+  /** Who booked it. Compared against owner_id to tell a referral from your own next date. */
+  createdBy: string | null
   createdByName: string | null
 }
 
@@ -65,6 +67,8 @@ export interface DiaryRow extends DiaryEntry {
     prescriptionDate: string | null
     mainComment: string | null
     mainCommentAt: string | null
+    /* Whether it has ever been worked, which is the whole of the internal "New" rung. */
+    lastActionAt: string | null
   }
 }
 
@@ -89,6 +93,7 @@ const toEntry = (r: any): DiaryEntry => ({
   movedBy: r.moved_by ?? null,
   movedReason: r.moved_reason ?? null,
   createdAt: r.created_at,
+  createdBy: r.created_by ?? null,
   createdByName: r.created_by_name ?? null,
 })
 
@@ -111,6 +116,7 @@ const toRow = (r: any): DiaryRow => ({
     prescriptionDate: r.debtor_accounts?.prescription_date ?? null,
     mainComment: r.debtor_accounts?.main_comment ?? null,
     mainCommentAt: r.debtor_accounts?.main_comment_at ?? null,
+    lastActionAt: r.debtor_accounts?.last_action_at ?? null,
   },
 })
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -127,7 +133,7 @@ const ROW_SELECT = `
   *,
   debtor_accounts!diary_entries_account_id_fkey (
     id, company_id, account_number, debtor_first_name, debtor_surname,
-    capital_outstanding, status, sub_status, bucket, client_action_ask,
+    capital_outstanding, status, sub_status, bucket, client_action_ask, last_action_at,
     prescription_date, main_comment, main_comment_at
   )
 `

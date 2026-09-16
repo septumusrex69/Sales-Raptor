@@ -34,7 +34,8 @@ import { EscalateModal } from './EscalateModal'
 import { FreezeModal } from './FreezeModal'
 import { ClientActionModal } from './ClientActionModal'
 import {
-  CLIENT_FLAGS, CLIENT_POSITIONS, clientPosition, frozenByLabel, positionReport, type ClientFlag,
+  CLIENT_FLAGS, CLIENT_POSITIONS, DESK_POSITIONS, deskPosition, frozenByLabel, positionReport,
+  type ClientFlag,
 } from '../../lib/clientPosition.ts'
 import { clientLine, type ClientLine } from '../../lib/accountNarrative.ts'
 import { TraceButton } from './TraceButton'
@@ -273,8 +274,11 @@ export function AccountDetail() {
    * disagree. The bucket goes in because half the inherited book has no sub-status and Swordfish's
    * own filing is the only record that a promise was made or broken.
    */
-  const position = clientPosition({
-    status: account.status, subStatus: account.subStatus, bucket: account.bucket,
+  const position = deskPosition({
+    status: account.status,
+    subStatus: account.subStatus,
+    bucket: account.bucket,
+    everWorked: !!account.lastActionAt,
   })
 
   const clientLiaison = users.find((u) => u.id === client?.accountOwnerId)
@@ -342,6 +346,13 @@ export function AccountDetail() {
         frozenReason: account.frozenReason,
         frozenOn: account.frozenAt?.slice(0, 10) ?? null,
       })}
+      /*
+        CLIENT_POSITIONS here, deliberately, where every other position on this screen reads from
+        DESK_POSITIONS. This panel is what the CLIENT is shown, and the fourteenth rung is ours: a
+        never-worked account is "New" to a collector and "In progress" on the report. Two
+        vocabularies staying two is the rule this whole mapping exists to hold, and the one place
+        it would break is a panel reaching for whichever constant happened to be imported.
+      */
       position={CLIENT_POSITIONS[clientReport.position]}
       flag={clientReport.flag}
       ask={account.clientActionAsk}
@@ -500,10 +511,10 @@ export function AccountDetail() {
         */}
         <Figure
           label="Position"
-          value={CLIENT_POSITIONS[position].label}
+          value={DESK_POSITIONS[position].label}
           note={account.clientActionAsk
             ? `${CLIENT_FLAGS.client_action.label}: ${account.clientActionAsk}`
-            : CLIENT_POSITIONS[position].meaning}
+            : DESK_POSITIONS[position].meaning}
           small
         />
         <Figure

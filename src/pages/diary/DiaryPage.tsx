@@ -23,7 +23,7 @@ import {
   type DayLoadLevel, type DiaryOrder,
 } from '../../lib/diaryPriority.ts'
 import { formatCurrency } from '../../data/mockData'
-import { CLIENT_POSITIONS, clientFlag, clientPosition } from '../../lib/clientPosition.ts'
+import { DESK_POSITIONS, clientFlag, deskPosition } from '../../lib/clientPosition.ts'
 
 /**
  * An agent's working day.
@@ -585,14 +585,18 @@ const COL_HEAD = 'text-[10px] font-semibold uppercase tracking-wide text-slate-4
  * reading and the facts to disagree.
  */
 function positionOfRow(row: DiaryRow) {
-  return clientPosition({
-    status: row.account.status, subStatus: row.account.subStatus, bucket: row.account.bucket,
+  return deskPosition({
+    status: row.account.status,
+    subStatus: row.account.subStatus,
+    bucket: row.account.bucket,
+    everWorked: !!row.account.lastActionAt,
   })
 }
 
 /* Coloured by what it asks of somebody, not by the rung — the same four tones as the book. */
 function positionTone(row: DiaryRow): string {
-  const flag = clientFlag(positionOfRow(row), !!row.account.clientActionAsk)
+  const p = positionOfRow(row)
+  const flag = clientFlag(p === 'new' ? 'in_progress' : p, !!row.account.clientActionAsk)
   return flag === 'client_action' ? 'text-rose-700'
     : flag === 'attention' ? 'text-amber-700'
       : flag === 'inactive' ? 'text-slate-400'
@@ -661,6 +665,18 @@ export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }:
             before they can pick up the phone.
           */}
           <p className="text-xs text-slate-500 mt-0.5 truncate">
+            {/*
+              WHO SENT IT, where somebody else did. A collector booking their own next date is the
+              ordinary case and needs no byline; work that arrived from a team leader is a
+              different thing to pick up, and the firm asked to see it.
+
+              Compared on the id rather than the source, so it is true of a single entry a leader
+              books for somebody as well as of a bulk hand-out. Not a rung on the ladder: the
+              ladder orders a day by urgency, and who referred the work is not urgency.
+            */}
+            {row.createdBy && row.ownerId && row.createdBy !== row.ownerId && row.createdByName && (
+              <span className="text-brand-700">Referred by {row.createdByName}. </span>
+            )}
             {row.reason || row.account.mainComment || <span className="text-slate-300">No note about why</span>}
           </p>
         </div>
@@ -683,8 +699,8 @@ export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }:
             {meta.label}
           </span>
           <span className={`block truncate text-[11px] mt-0.5 ${positionTone(row)}`}
-            title={CLIENT_POSITIONS[positionOfRow(row)].meaning}>
-            {CLIENT_POSITIONS[positionOfRow(row)].label}
+            title={DESK_POSITIONS[positionOfRow(row)].meaning}>
+            {DESK_POSITIONS[positionOfRow(row)].label}
           </span>
         </div>
 

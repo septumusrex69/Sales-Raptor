@@ -115,7 +115,14 @@ export async function commitHandOut(input: {
     due_on: p.dueOn,
     kind: p.kind,
     reason: input.reason?.trim() || null,
-    source: 'manual' as const,
+    /*
+     * 'handover', not 'manual'. The enum has had the word all along and a bulk hand-out is
+     * precisely it: work arriving on somebody's desk because a team leader sent it, not because
+     * they booked their own next date. It is what lets the diary say "Referred by" without a
+     * ninth rung on the ladder — the firm's choice, and the right one: the ladder orders a day by
+     * urgency, and who sent the work is not urgency.
+     */
+    source: 'handover' as const,
     created_by: input.actor.id,
     created_by_name: input.actor.name,
   }))
@@ -155,7 +162,7 @@ export async function commitHandOut(input: {
             dueOn: p.dueOn,
             kind: p.kind,
             reason: input.reason?.trim() || null,
-            source: 'manual',
+            source: 'handover',
             // The account's own timeline already gets the allocation note; a second line per
             // account saying the same thing in other words is noise on five hundred timelines.
             alsoNoteOnAccount: false,
