@@ -14,7 +14,8 @@
 import { readFileSync } from 'node:fs'
 import {
   administrationReading, normaliseRegistration, parseTrace, rankContacts, readDirectors,
-  readJudgments, sameRegistration, splitJudgmentRow, titleCase, traceDate, traceKind,
+  readJudgments, readLinks, readProperties, dropRepeatedTail, likelyRelatives,
+  sameRegistration, splitJudgmentRow, titleCase, traceDate, traceKind,
 } from '../../src/lib/traceProfile.ts'
 import { clientPosition } from '../../src/lib/clientPosition.ts'
 import { plainPdfTokens } from '../../src/lib/pdfPlainText.ts'
@@ -154,7 +155,7 @@ eq('...including the unpadded one in the header', traceDate('16-9-2026'), '2026-
  * the next in here, so a string that merely looks like one would silently split a row in half.
  */
 eq('the 31st of February is not a date', traceDate('31-02-2024'), null)
-eq('a number that is not a date is not a date', traceDate('0835550178'), null)
+eq('a number that is not a date is not a date', traceDate('0821110001'), null)
 eq('nothing is not a date', traceDate(undefined), null)
 
 /* ---------- the registration number, which is the join key ---------- */
@@ -273,6 +274,130 @@ eq('the wrapped table yields one judgment', pj.length, 1)
 eq('...with the case number', pj[0].caseNumber, '55140/2024')
 eq('...the filing date, not the loading date', pj[0].filedOn, '2025-02-27')
 eq('...and the plaintiff put back together', pj[0].plaintiff, 'BOSVELD PLANT HIRE (PTY) LTD')
+
+/* ---------- what they own ---------- */
+
+/*
+ * THE ONE THING ON A TRACE THAT IS AN ASSET. Everything else says where somebody is; this says
+ * there is something to attach, and it is the fact most likely to change a collector's mind about
+ * an account they were about to give up on.
+ *
+ * READ FROM THE DATE TO THE AMOUNT, because everything between them wraps. The bureau prints this
+ * table so narrow that even the word "Buyer" breaks across two lines — "Buy" then "er" on one
+ * report, "Buye" then "r" on another — so counting columns from the left is hopeless.
+ */
+const property = readProperties([
+  'TYP', 'E', 'PURCHASE', 'DATE', 'CURRENT', 'OWNER', 'ADDRESS', 'TOWNSHIP', 'PURCHASE', 'AMOUNT',
+  'Buy', 'er', '18-07-2007', 'true', '12, ALOE, STREET, BENONI', 'BENONI', '985,000.00',
+])
+eq('a property is read', property.length, 1)
+eq('...with the word the column broke in half put back together', property[0].role, 'Buyer')
+eq('...the purchase date', property[0].purchasedOn, '2007-07-18')
+eq('...the amount as a number', property[0].purchaseAmount, 985000)
+eq('...and whether they still hold it', property[0].currentOwner, true)
+/*
+ * THE CURRENT-OWNER COLUMN IS SIMPLY ABSENT ON A SOLD PROPERTY — not false, not blank, gone. Read
+ * as a missing column it would swallow the first word of the address instead.
+ */
+const sold = readProperties([
+  'Selle', 'r', '20-07-2008', '3, PROTEA, ROAD, SPRINGS', 'SPRINGS', '410,000.00',
+])
+eq('a sold property has no current-owner flag at all', sold[0].currentOwner, false)
+eq('...and its address is still read whole', sold[0].address, '3, PROTEA, ROAD, SPRINGS')
+
+/*
+ * THE TOWNSHIP COLUMN REPEATS THE TAIL OF THE ADDRESS, so one copy comes off. Splitting the two
+ * apart is not possible — both wrap — so the repeat is removed instead, which gets the same answer
+ * without pretending to know where one column ended.
+ */
+eq('the repeated township comes off', dropRepeatedTail('12, ALOE, STREET, BENONI BENONI'), '12, ALOE, STREET, BENONI')
+/*
+ * AND IT COMES OFF EVEN WHEN THE REPEAT IS BROKEN MID-WORD. The column is narrow enough to split
+ * "JOHANNESBURG" into "JOHANNESBU" and "RG", so the two copies are not the same string and do not
+ * even have the same number of words. Letters are the only thing they agree on.
+ */
+eq('...even split across the wrap',
+  dropRepeatedTail('7, MARULA, AVENUE, JOHANNESBURG JOHANNESBU RG'),
+  '7, MARULA, AVENUE, JOHANNESBURG')
+/* An address that merely ends in a word it also contains is not a repeat. */
+eq('...but a street that shares a word with its suburb is left alone',
+  dropRepeatedTail('12 PARK ROAD, PARKVIEW'), '12 PARK ROAD, PARKVIEW')
+/*
+ * AND A SINGLE LETTER IS NOT A REPEAT. Almost any address ends in some letter that appears
+ * earlier in it, so a one- or two-character tail matches by accident and takes a real part of the
+ * address off with it.
+ */
+eq('...and a stray letter is not a repeated township',
+  dropRepeatedTail('3 ELM RD D'), '3 ELM RD D')
+
+/* ---------- who they are connected to ---------- */
+
+/*
+ * ANCHORED ON THE TYPE, NOT THE DATE OF BIRTH.
+ *
+ * The obvious anchor is the date and it is wrong: a link through a shared TELEPHONE NUMBER
+ * carries no date at all, and those rows were being swallowed into the next record — one real
+ * report produced a person whose linking company was a phone number, a second person's name and
+ * that number again -- two people and a phone number mashed into one field.
+ *
+ * The type is reliable because of how this block is printed: types are Title Case and everything
+ * else in it is upper case, a number or a date.
+ */
+const links = readLinks([
+  'TYPE', 'LINK VALUE', 'DATE OF BIRTH', 'FULL NAME',
+  'Director', 'KAROO BULK', 'HAUL', '72-05-19', 'NOMSA RADEBE',
+  'Telephone', '0821110001', 'PIETER GROBLER',
+])
+eq('both links are read', links.length, 2)
+eq('...with the company the link runs through, unwrapped', links[0].linkedThrough, 'Karoo Bulk Haul')
+eq('...and the date of birth where there is one', links[0].dateOfBirth, '72-05-19')
+/* A link with no date of birth is still a link, and must not eat the row after it. */
+eq('a link with no date of birth is still read', links[1].fullName, 'Pieter Grobler')
+eq('...without swallowing anything', links[1].linkedThrough, '0821110001')
+eq('...and knows nothing it was not told', links[1].dateOfBirth, null)
+/*
+ * THE FOOTER IS NOT A PERSON. The bureau's liability disclaimer follows the last section and was
+ * being read as a relationship link — a "person" whose name was the whole copyright paragraph.
+ */
+const withFooter = readLinks([
+  'Director', 'KAROO BULK HAUL', '72-05-19', 'NOMSA RADEBE',
+  /* Three columns' worth, so it is not simply too short to be a record. */
+  'Notice', 'XDS', '(reg No: 2017653373) Inspirit Shall Not Be Liable For Any Damage Or Loss Whatsoever',
+])
+eq('the disclaimer is not filed as somebody\'s relative', withFooter.length, 1)
+
+/*
+ * NEXT OF KIN IS A SHARED SURNAME, AND "PROBABLY" IS THE FIRM'S OWN WORD FOR IT: "a next of kin
+ * is a relationship link based on this trace and it would probably have the same surname as the
+ * principal contact person."
+ *
+ * Evidence, not proof. This produces candidates for a person to judge; nothing writes a
+ * relationship down as a fact.
+ */
+const kin = likelyRelatives('Sipho Radebe', [
+  { fullName: 'Nomsa Radebe', type: 'Director', linkedThrough: null, dateOfBirth: null },
+  { fullName: 'Pieter Grobler', type: 'Telephone', linkedThrough: null, dateOfBirth: null },
+])
+eq('a shared surname is a possible relative', kin.map((k) => k.fullName), ['Nomsa Radebe'])
+/*
+ * A FIRST NAME IN COMMON IS NOT A FAMILY CONNECTION, and neither is the surname turning up
+ * somewhere else in the name. A containment test would call "Radebe Mokoena" a relative of Sipho
+ * Radebe — it is the last word, compared whole, or it is a guess.
+ */
+eq('a shared first name is not', likelyRelatives('Sipho Radebe', [
+  { fullName: 'Sipho Ndlovu', type: 'Director', linkedThrough: null, dateOfBirth: null },
+]).length, 0)
+eq('...and neither is the surname used as a first name', likelyRelatives('Sipho Radebe', [
+  { fullName: 'Radebe Mokoena', type: 'Director', linkedThrough: null, dateOfBirth: null },
+]).length, 0)
+/* Short surnames are surnames. An earlier minimum length quietly excluded everybody called Li. */
+eq('a two-letter surname still matches', likelyRelatives('Wei Li', [
+  { fullName: 'Ming Li', type: 'Director', linkedThrough: null, dateOfBirth: null },
+]).map((k) => k.fullName), ['Ming Li'])
+/* With nobody to compare against there is no such thing as a match. */
+eq('an unnamed subject has no relatives', likelyRelatives(null, [
+  { fullName: 'Nomsa Radebe', type: 'Director', linkedThrough: null, dateOfBirth: null },
+]).length, 0)
 
 /* ---------- which numbers are worth offering ---------- */
 

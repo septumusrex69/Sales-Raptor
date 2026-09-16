@@ -43,6 +43,9 @@ import {
   type AccountJudgment, type AccountStanding, type DirectorCompany, type PractitionerKind,
 } from '../../lib/accountStanding.ts'
 import { fetchStanding } from '../../lib/accountStandingData.ts'
+import { traceSummary, type FiledTrace, type TraceItem } from '../../lib/traceStore.ts'
+import { fetchTraces } from '../../lib/traceStoreData.ts'
+import { TraceWorkspaceModal } from './TraceWorkspaceModal'
 import { TraceUploadModal } from './TraceUploadModal'
 import { PractitionerModal } from './PractitionerModal'
 import { TraceButton } from './TraceButton'
@@ -100,6 +103,9 @@ export function AccountDetail() {
   const [queries, setQueries] = useState<AccountQuery[]>([])
   const [emails, setEmails] = useState<AccountEmail[]>([])
   const [standing, setStanding] = useState<AccountStanding>({ directors: [], judgments: [] })
+  const [traces, setTraces] = useState<FiledTrace[]>([])
+  /** Which filed trace is open for working. See TraceWorkspaceModal. */
+  const [openTrace, setOpenTrace] = useState<string | null>(null)
   /** Whether the signed-in agent has a mailbox connected at all. Null while we are asking. */
   const [mailbox, setMailbox] = useState<string | null>(null)
   /** Set when writing a reply, so the debtor's client threads our answer under their message. */
@@ -150,13 +156,13 @@ export function AccountDetail() {
          * information gained. From Paris that is a round trip of about 200ms, spent to learn
          * something we knew before the page rendered.
          */
-        const [a, l, w, d, q, e, st] = await Promise.all([
+        const [a, l, w, d, q, e, st, tr] = await Promise.all([
           fetchAccount(id), fetchLedgers(id), fetchWorkspace(id), fetchDocuments(id), fetchQueries(id),
-          fetchAccountEmails(id), fetchStanding(id),
+          fetchAccountEmails(id), fetchStanding(id), fetchTraces(id),
         ])
         if (cancelled) return
         setAccount(a)
-        if (a) { setLedgers(l); setWorkspace(w); setDocuments(d); setQueries(q); setEmails(e); setStanding(st) }
+        if (a) { setLedgers(l); setWorkspace(w); setDocuments(d); setQueries(q); setEmails(e); setStanding(st); setTraces(tr) }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
       } finally {
@@ -199,10 +205,10 @@ export function AccountDetail() {
 
   const reload = useCallback(async () => {
     if (!account) return
-    const [a, l, w, d, q, e, st] = await Promise.all([
+    const [a, l, w, d, q, e, st, tr] = await Promise.all([
       fetchAccount(account.id), fetchLedgers(account.id), fetchWorkspace(account.id),
       fetchDocuments(account.id), fetchQueries(account.id), fetchAccountEmails(account.id),
-      fetchStanding(account.id),
+      fetchStanding(account.id), fetchTraces(account.id),
     ])
     if (a) setAccount(a)
     setLedgers(l)
@@ -211,6 +217,7 @@ export function AccountDetail() {
     setQueries(q)
     setEmails(e)
     setStanding(st)
+    setTraces(tr)
   }, [account])
 
   const { busy: savingComment, run: runComment } = useWriter(reload)
@@ -323,7 +330,9 @@ export function AccountDetail() {
       <DebtorDetailsPanel account={account} name={name} workspace={workspace} onChange={reload}
         userId={currentUser?.id ?? null} onEmail={setComposeTo} />
       <StandingPanel account={account} standing={standing} position={position}
+        traces={traces}
         onUpload={() => setTracing(true)}
+        onOpenTrace={setOpenTrace}
         onPractitioner={() => setPractitioner({ suggest: null })} />
     </div>
   )
@@ -742,6 +751,19 @@ export function AccountDetail() {
           onClose={() => setTracing(false)}
           onDone={reload}
           onAddPractitioner={(kind) => setPractitioner({ suggest: kind })}
+        />
+      )}
+
+      {/*
+        Working inside a trace: ring a number, say what happened, put the ones that are real onto
+        the account. Opened from the panel's summary — see TraceWorkspaceModal.
+      */}
+      {openTrace !== null && traces.some((t) => t.id === openTrace) && (
+        <TraceWorkspaceModal
+          trace={traces.find((t) => t.id === openTrace) as FiledTrace}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setOpenTrace(null)}
+          onChanged={reload}
         />
       )}
 
@@ -1578,13 +1600,17 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
  *
  * Absent on nearly every account, and silent when absent.
  */
-function StandingPanel({ account, standing, position, onUpload, onPractitioner }: {
+function StandingPanel({ account, standing, position, traces, onUpload, onOpenTrace, onPractitioner }: {
   account: DebtorAccount
   standing: AccountStanding
   /** The rung the account sits on, so a missing practitioner can be a warning only when it is one. */
   position: DeskPosition
+  /** Every trace filed on this account, newest first, with everything each one found. */
+  traces: FiledTrace[]
   /** Read a bureau PDF onto the account. See TraceUploadModal. */
   onUpload: () => void
+  /** Open one for working: ring its numbers, record what happened, promote the real ones. */
+  onOpenTrace: (traceId: string) => void
   /** Record who to deal with instead of the debtor. Not on any PDF — see PractitionerModal. */
   onPractitioner: () => void
 }) {
@@ -1619,7 +1645,8 @@ function StandingPanel({ account, standing, position, onUpload, onPractitioner }
    * thousand of those is a card people stop seeing. Their upload sits on the Trace button, at the
    * moment the search is run.
    */
-  const bare = !hasPractitioner && directors.length === 0 && judgments.length === 0 && !claimNobodyCanMake
+  const bare = !hasPractitioner && directors.length === 0 && judgments.length === 0
+    && traces.length === 0 && !claimNobodyCanMake
   if (bare && account.debtorKind !== 'company') return null
 
   return (
@@ -1673,6 +1700,19 @@ function StandingPanel({ account, standing, position, onUpload, onPractitioner }
           </div>
         </div>
       )}
+
+      {/*
+        WHAT THE TRACE FOUND, in a few lines, at the firm's instruction: "a principal telephone
+        number, a principal address, property interests if they have properties, and next of kins"
+        — and where they work, which they added.
+
+        A SUMMARY, NOT THE TRACE. One real profile carries twenty-six numbers, eleven addresses
+        and thirty directorships; the whole of it belongs behind the link, not on a panel a
+        collector reads between calls.
+      */}
+      {traces.map((trace) => (
+        <TraceFound key={trace.id} trace={trace} onOpen={() => onOpenTrace(trace.id)} />
+      ))}
 
       {directors.length > 0 && (
         <div className="mb-3">
@@ -1759,6 +1799,79 @@ function StandingPanel({ account, standing, position, onUpload, onPractitioner }
         </div>
       )}
     </Card>
+  )
+}
+
+/**
+ * What one filed trace found, in the few lines that change what a collector does next.
+ *
+ * EVERY LINE HERE IS A FACT SOMEBODY CAN ACT ON. A number to ring, an address to serve at, an
+ * employer to garnishee, a property that is an asset, a relative who might know where they are.
+ * The bureau's twenty-odd other numbers are not on this panel and are not lost — they are one
+ * click away, in the trace itself, where they can be worked.
+ */
+function TraceFound({ trace, onOpen }: { trace: FiledTrace; onOpen: () => void }) {
+  const found = traceSummary(trace.items)
+  const who = trace.subjectKind === 'director' ? trace.subjectName : null
+
+  return (
+    <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50/60 px-2.5 py-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+        <p className="text-xs font-semibold text-navy-900">
+          Trace{who ? <> &middot; <span className="font-normal text-slate-600">{who}</span></> : null}
+        </p>
+        <button type="button" onClick={onOpen}
+          className="text-[11px] font-medium text-[var(--c-steel)] hover:underline shrink-0">
+          {/*
+            The count is the point of the link, not decoration: it says how much of what the firm
+            paid for nobody has tried yet.
+          */}
+          Work the trace{found.untried > 0 ? ` (${found.untried} untried)` : ''}
+        </button>
+      </div>
+
+      <div className="space-y-1 mt-1.5">
+        <TraceLine label="Phone" item={found.phone} />
+        <TraceLine label="Address" item={found.address} />
+        <TraceLine label="Works at" item={found.employer} />
+        {found.properties.map((p) => (
+          <p key={p.id} className="text-[11px]">
+            <span className="text-slate-500">Property </span>
+            <span className="text-slate-800">{p.value}</span>
+            {p.amount !== null && <span className="text-slate-500"> &middot; bought for {formatMoney(p.amount)}</span>}
+          </p>
+        ))}
+        {found.relatives.length > 0 && (
+          <p className="text-[11px]">
+            {/* "Possible" is the word the firm used, and it stays: a shared surname is evidence. */}
+            <span className="text-slate-500">Possible next of kin </span>
+            <span className="text-slate-800">{found.relatives.map((r) => r.value).join(', ')}</span>
+          </p>
+        )}
+        {found.directorships.length > 0 && (
+          <p className="text-[11px]">
+            <span className="text-slate-500">Directs </span>
+            <span className="text-slate-800">{found.directorships.slice(0, 3).map((d) => d.value).join(', ')}</span>
+            {found.directorships.length > 3 && <span className="text-slate-500"> and {found.directorships.length - 3} more</span>}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** One line of the summary, absent entirely when the trace had nothing of that kind. */
+function TraceLine({ label, item }: { label: string; item: TraceItem | null }) {
+  if (item === null) return null
+  return (
+    <p className="text-[11px]">
+      <span className="text-slate-500">{label} </span>
+      <span className="text-slate-800 break-words">{item.value}</span>
+      {item.label && <span className="text-slate-500"> &middot; {item.label}</span>}
+      {/* Whether anybody has tried it is the difference between a lead and a fact. */}
+      {item.outcome === 'verified' && <span className="text-positive-700"> &middot; confirmed</span>}
+      {item.promotedContactId !== null && <span className="text-slate-400"> &middot; on the account</span>}
+    </p>
   )
 }
 

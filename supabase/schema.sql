@@ -3198,3 +3198,86 @@ create policy account_director_companies_read on public.account_director_compani
 drop policy if exists account_director_companies_write on public.account_director_companies;
 create policy account_director_companies_write on public.account_director_companies
   for all to authenticated using (true) with check (true);
+
+-- A trace, kept as something a collector works rather than a one-time import.
+--
+-- Until now an upload picked a few numbers out of the profile, wrote them into the account's
+-- contacts and threw the rest away. The firm's instruction is the other way round: keep what the
+-- search found, work inside it -- ring a number, mark it verified or dead -- and PROMOTE the ones
+-- that turn out to be real onto the account's principal details.
+--
+-- That separation is the point. account_contacts is the curated list a collector rings; this is
+-- the bureau's raw claim, which is often stale and occasionally about somebody else entirely.
+create table if not exists public.account_traces (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  -- Who the report is about. A company account gets one for the company and one per director.
+  subject_kind text not null check (subject_kind in ('debtor', 'director')),
+  director_id uuid references public.account_directors (id) on delete set null,
+  report_kind text check (report_kind in ('commercial', 'consumer')),
+  subject_name text,
+  id_number text,
+  registration_number text,
+  company_status text,
+  -- The bureau's own two readings. Kept as its words; we do not recompute or rescale them.
+  contact_score text,
+  risk_score text,
+  enquired_on date,
+  -- The PDF itself, where it was filed. Null when the collector chose not to keep it.
+  document_id uuid references public.account_documents (id) on delete set null,
+  pulled_by uuid references public.profiles (id),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists account_traces_account_idx
+  on public.account_traces (account_id, created_at desc);
+
+-- Everything the trace said, one row at a time, with what we have since found out about it.
+create table if not exists public.account_trace_items (
+  id uuid primary key default gen_random_uuid(),
+  trace_id uuid not null references public.account_traces (id) on delete cascade,
+  -- Carried down from the trace so the account's panel reads its findings in one query. A trace
+  -- cannot move between accounts, so the two can never disagree.
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  kind text not null check (kind in
+    ('phone', 'mobile', 'work', 'email', 'address', 'employer', 'directorship', 'property', 'link')),
+  value text not null,
+  -- The second column, whatever it is for that kind: a job title, a township, how a link was made.
+  label text,
+  -- WHAT THE BUREAU PRINTED, kept as evidence and never edited.
+  people_linked integer,
+  seen_on date,
+  amount numeric(14,2),
+  status text,
+  -- WHAT WE FOUND OUT. Null until somebody has actually tried it.
+  outcome text check (outcome in ('verified', 'no_answer', 'unreachable', 'not_theirs')),
+  outcome_at timestamptz,
+  outcome_by uuid references public.profiles (id),
+  outcome_note text,
+  -- Set once this has been put on the account's principal details, so it cannot be added twice
+  -- and so the panel can show which findings have already earned their place.
+  promoted_contact_id uuid references public.account_contacts (id) on delete set null,
+  created_at timestamptz not null default now(),
+  -- One row per thing per trace: a re-read of the same PDF must update, never duplicate.
+  unique (trace_id, kind, value)
+);
+
+create index if not exists account_trace_items_account_idx
+  on public.account_trace_items (account_id, kind);
+
+alter table public.account_traces enable row level security;
+alter table public.account_trace_items enable row level security;
+
+drop policy if exists account_traces_read on public.account_traces;
+create policy account_traces_read on public.account_traces
+  for select to authenticated using (true);
+drop policy if exists account_traces_write on public.account_traces;
+create policy account_traces_write on public.account_traces
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists account_trace_items_read on public.account_trace_items;
+create policy account_trace_items_read on public.account_trace_items
+  for select to authenticated using (true);
+drop policy if exists account_trace_items_write on public.account_trace_items;
+create policy account_trace_items_write on public.account_trace_items
+  for all to authenticated using (true) with check (true);

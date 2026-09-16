@@ -221,8 +221,32 @@ const directorCompanies = [
   { id: 'dc9', director_id: 'dir1', company_name: 'Karoo Bulk Haul', status: 'Active', appointed_on: '2025-01-09', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
 ]
 
+/* A filed trace on the company account, shaped like one a real report produces. */
+const TRACE = 'trace-1'
+const traces = [{
+  id: TRACE, account_id: ACC2, subject_kind: 'director', director_id: 'dir1', report_kind: 'consumer',
+  subject_name: 'Sipho Radebe', id_number: '8506105000085', registration_number: null,
+  company_status: null, contact_score: 'Fair', risk_score: 'Medium Risk',
+  enquired_on: '2026-09-16', document_id: null, created_at: '2026-09-16T14:31:00Z',
+}]
+
+const traceItems = [
+  { id: 'ti1', trace_id: TRACE, account_id: ACC2, kind: 'mobile', value: '0821110001', label: null, people_linked: 2, seen_on: '2026-09-07', amount: null, status: null, outcome: 'verified', outcome_at: '2026-09-16T15:00:00Z', outcome_note: null, promoted_contact_id: null },
+  { id: 'ti2', trace_id: TRACE, account_id: ACC2, kind: 'mobile', value: '0821110002', label: null, people_linked: 9, seen_on: '2026-08-02', amount: null, status: null, outcome: null, outcome_at: null, outcome_note: null, promoted_contact_id: null },
+  { id: 'ti3', trace_id: TRACE, account_id: ACC2, kind: 'work', value: '0111110003', label: null, people_linked: 1, seen_on: '2026-05-19', amount: null, status: null, outcome: 'not_theirs', outcome_at: '2026-09-16T15:02:00Z', outcome_note: null, promoted_contact_id: null },
+  { id: 'ti4', trace_id: TRACE, account_id: ACC2, kind: 'address', value: '14 MOROKA AVE, KLIPTOWN, 1811', label: 'Gauteng', people_linked: null, seen_on: '2026-06-16', amount: null, status: null, outcome: null, outcome_at: null, outcome_note: null, promoted_contact_id: null },
+  { id: 'ti5', trace_id: TRACE, account_id: ACC2, kind: 'employer', value: 'Thekwini Plant Services', label: 'Operations Manager', people_linked: null, seen_on: '2026-09-07', amount: null, status: null, outcome: null, outcome_at: null, outcome_note: null, promoted_contact_id: null },
+  { id: 'ti6', trace_id: TRACE, account_id: ACC2, kind: 'property', value: '12, ALOE, STREET, BENONI', label: 'Buyer', people_linked: null, seen_on: '2014-03-11', amount: 985000, status: 'current owner', outcome: null, outcome_at: null, outcome_note: null, promoted_contact_id: null },
+  { id: 'ti7', trace_id: TRACE, account_id: ACC2, kind: 'property', value: '3, PROTEA, ROAD, SPRINGS', label: 'Seller', people_linked: null, seen_on: '2009-01-20', amount: 410000, status: 'past', outcome: null, outcome_at: null, outcome_note: null, promoted_contact_id: null },
+  { id: 'ti8', trace_id: TRACE, account_id: ACC2, kind: 'link', value: 'Nomsa Radebe', label: 'Director · Karoo Bulk Haul', people_linked: null, seen_on: null, amount: null, status: 'relative', outcome: null, outcome_at: null, outcome_note: null, promoted_contact_id: null },
+  { id: 'ti9', trace_id: TRACE, account_id: ACC2, kind: 'link', value: 'Pieter Grobler', label: 'Telephone · 0821110001', people_linked: null, seen_on: null, amount: null, status: 'link', outcome: null, outcome_at: null, outcome_note: null, promoted_contact_id: null },
+  { id: 'ti10', trace_id: TRACE, account_id: ACC2, kind: 'directorship', value: 'Karoo Bulk Haul', label: null, people_linked: null, seen_on: '2025-01-09', amount: null, status: 'Active', outcome: null, outcome_at: null, outcome_note: null, promoted_contact_id: null },
+]
+
 const TABLES = {
   debtor_accounts: [account, company],
+  account_traces: traces,
+  account_trace_items: traceItems,
   account_directors: directors,
   account_director_companies: directorCompanies,
   account_judgments: judgments,
@@ -356,6 +380,25 @@ const seed = ({ ref, user }) => {
   localStorage.setItem(`sb-${ref}-auth-token`, JSON.stringify(session))
 }
 await page.addInitScript(seed, { ref: REF, user: USER })
+
+/* Working inside a filed trace: the numbers, what came of them, and what can be promoted. */
+await page.goto(`${ORIGIN}/accounts/${ACC2}`, { waitUntil: 'networkidle' })
+await page.waitForTimeout(1200)
+{
+  const open = page.getByRole('button', { name: /Work the trace/ })
+  if (await open.count()) {
+    await open.first().click()
+    await page.waitForTimeout(500)
+    await page.screenshot({ path: `${OUT}/trace-workspace.png`, fullPage: true })
+    const body = await page.locator('[data-modal-open]').innerText()
+    console.log('\n== Trace workspace ==')
+    for (const want of ['Numbers', 'Addresses', 'Employment', 'People linked', 'Property', 'Reached them', 'Add to contact details', 'Add as next of kin']) {
+      console.log(`   ${want}:`, new RegExp(want, 'i').test(body))
+    }
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(200)
+  } else { console.log('!! no "Work the trace" link on the panel') }
+}
 
 /* The company first and on its own: it is the only one with directors, and the only one where
  * the "nobody recorded to claim from" warning can fire. */

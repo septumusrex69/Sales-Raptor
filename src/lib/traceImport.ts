@@ -18,6 +18,7 @@
 import { supabase } from './supabase'
 import { addNote } from './accountWorkspace'
 import { setSubStatus } from './accountStandingData.ts'
+import { likelyRelatives } from './traceProfile.ts'
 import type {
   AdministrationReading, TraceAddress, TraceContact, TraceDirector, TraceEmployment, TraceJudgment,
   TraceProfile,
@@ -63,11 +64,14 @@ export interface TraceImportResult {
   directorships: number
   /** The rung the account was moved to, where the reader proposed one and it was accepted. */
   movedTo: string | null
+  /** Findings kept on the trace itself, whether or not they were ticked onto the account. */
+  filed: number
 }
 
 /** Nothing ticked is not an error, it is somebody looking at a profile and deciding against it. */
 const empty: TraceImportResult = {
   directors: 0, judgments: 0, contacts: 0, directorsUpdated: 0, directorships: 0, movedTo: null,
+  filed: 0,
 }
 
 /**
@@ -256,6 +260,82 @@ export async function importTrace(input: {
       if (ins.error) throw new Error(ins.error.message)
       result.contacts = fresh.length
     }
+  }
+
+  /* ---------- the trace itself, kept whole ---------- */
+  /*
+   * EVERYTHING THE SEARCH FOUND, not only what was ticked.
+   *
+   * The ticks decide what goes onto the account's PRINCIPAL details — the curated list a
+   * collector rings. The trace keeps the rest, because a number the bureau saw in 2019 is not
+   * worth a contact row and is absolutely worth having when the two recent ones turn out to be
+   * dead. Thrown away at import, the firm pays for the same search twice.
+   *
+   * Written before the contacts, so a finding that is also promoted can be linked to the contact
+   * row it became.
+   */
+  const traceRow = await supabase.from('account_traces').insert({
+    account_id: accountId,
+    subject_kind: target.of === 'director' ? 'director' : 'debtor',
+    director_id: aboutDirector,
+    report_kind: profile.kind,
+    subject_name: profile.subjectName,
+    id_number: profile.idNumber,
+    registration_number: profile.registrationNumber,
+    company_status: profile.companyStatus,
+    contact_score: profile.contactScore,
+    risk_score: profile.riskScore,
+    enquired_on: profile.enquiredOn,
+    pulled_by: actor.id,
+  }).select('id').single()
+  if (traceRow.error) throw new Error(traceRow.error.message)
+  const traceId = (traceRow.data as any).id as string
+
+  const relatives = new Set(likelyRelatives(profile.subjectName, profile.links).map((l) => l.fullName))
+  const itemRows: any[] = [
+    ...profile.contacts.map((c) => ({
+      kind: c.kind, value: c.value, label: null,
+      people_linked: c.peopleLinked, seen_on: c.updatedOn, amount: null, status: null,
+    })),
+    ...profile.addresses.map((a) => ({
+      kind: 'address', value: a.value, label: a.province,
+      people_linked: null, seen_on: a.updatedOn, amount: null, status: null,
+    })),
+    ...profile.employment.map((e) => ({
+      kind: 'employer', value: e.employer, label: e.designation,
+      people_linked: null, seen_on: e.updatedOn, amount: null, status: null,
+    })),
+    ...profile.directorships.map((d) => ({
+      kind: 'directorship', value: d.name, label: null,
+      people_linked: null, seen_on: d.appointedOn, amount: null, status: d.status,
+    })),
+    ...profile.properties.map((pr) => ({
+      kind: 'property', value: pr.address, label: pr.role,
+      people_linked: null, seen_on: pr.purchasedOn, amount: pr.purchaseAmount,
+      /*
+       * The current-owner flag is what separates an asset from a house sold in 2008. One real
+       * report lists a property as 'Seller' AND current owner — the bureau's own contradiction,
+       * carried through rather than resolved, because guessing which column is right would put a
+       * made-up asset on a client report.
+       */
+      status: pr.currentOwner ? 'current owner' : 'past',
+    })),
+    ...profile.links.map((l) => ({
+      kind: 'link', value: l.fullName,
+      label: [l.type, l.linkedThrough].filter(Boolean).join(' · ') || null,
+      people_linked: null, seen_on: null, amount: null,
+      /*
+       * 'relative' is a JUDGEMENT AND IS MARKED AS ONE. It means the surname matched, which is
+       * evidence of a family connection and not proof of one — the screen says "possible".
+       */
+      status: relatives.has(l.fullName) ? 'relative' : 'link',
+    })),
+  ]
+  if (itemRows.length > 0) {
+    const ins = await supabase.from('account_trace_items')
+      .insert(itemRows.map((r) => ({ ...r, trace_id: traceId, account_id: accountId })))
+    if (ins.error) throw new Error(ins.error.message)
+    result.filed = itemRows.length
   }
 
   /* ---------- the other companies they sit on ---------- */

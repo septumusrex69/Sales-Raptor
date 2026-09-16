@@ -124,6 +124,41 @@ export interface TraceAddress {
   updatedOn: string | null
 }
 
+/**
+ * A property the bureau has the debtor on the deeds for.
+ *
+ * THE ONE THING ON A TRACE THAT IS AN ASSET. Everything else says where somebody is; this says
+ * there is something to attach. It is also the fact most likely to change a collector's mind
+ * about an account they were about to write off.
+ */
+export interface TraceProperty {
+  address: string
+  /** 'Buyer' or 'Seller' — a sold property is not an asset, and the column says which. */
+  role: string | null
+  purchasedOn: string | null
+  /** The bureau's own flag. False or missing means they no longer hold it. */
+  currentOwner: boolean
+  /** Rand at purchase, not a valuation. Useful as a scale, never as a figure to claim against. */
+  purchaseAmount: number | null
+}
+
+/**
+ * Somebody the bureau links to the debtor.
+ *
+ * The report gives the link as a company and a role — "Director of X" — which is how the bureau
+ * knows they are connected. A SHARED SURNAME on top of that is what makes a link worth a call:
+ * see likelyRelatives.
+ */
+export interface TraceLink {
+  fullName: string
+  /** 'Director', 'Employee', 'Member' — how the bureau came to connect them. */
+  type: string | null
+  /** The company or record the link runs through. */
+  linkedThrough: string | null
+  /** yy-mm-dd on the report. Kept as printed: a two-digit year cannot be widened safely. */
+  dateOfBirth: string | null
+}
+
 export interface TraceEmployment {
   employer: string
   designation: string | null
@@ -149,8 +184,12 @@ export interface TraceProfile {
   contacts: TraceContact[]
   addresses: TraceAddress[]
   employment: TraceEmployment[]
-  /** Consumer only: the companies this person directs. Context, not something we store. */
+  /** Consumer only: the companies this person directs. */
   directorships: { name: string; status: string | null; appointedOn: string | null }[]
+  /** Consumer only: what the deeds office has them on. */
+  properties: TraceProperty[]
+  /** Consumer only: the people the bureau connects them to. */
+  links: TraceLink[]
 }
 
 /* ---------- small readers ---------- */
@@ -243,10 +282,21 @@ const HEADINGS: { key: string; match: RegExp }[] = [
   { key: 'addresses', match: /^ADDRESSES$/i },
   { key: 'employment', match: /^EMPLOYMENT HISTORY$/i },
   { key: 'directorships', match: /^DIRECTORSHIP$/i },
+  { key: 'properties', match: /^PROPERTY OWNERSHIP$/i },
+  { key: 'links', match: /^RELATIONSHIP LINKS?$/i },
   { key: 'judgments', match: /^(CONSUMER|COMMERCIAL) JUDGE?MENTS?$/i },
   { key: 'directors', match: /^DIRECTOR INFORMATION$/i },
   { key: 'directorDetail', match: /^DIRECTOR #\d+$/i },
   { key: 'enquiries', match: /^(ENQUIRY HISTORY|PREVIOUS ENQUIRIES)$/i },
+  /*
+   * THE FOOTER CLOSES WHATEVER WAS OPEN. The bureau's liability disclaimer and copyright line
+   * come after the last section and were being read as part of it — one real report produced a
+   * "relationship link" to a person called "(reg No: ...) Powered By Xpert Decision Systems",
+   * with the whole disclaimer as the company they were linked through.
+   *
+   * Matched unanchored, because the whole paragraph arrives as one token.
+   */
+  { key: 'footer', match: /shall not be liable|powered by xpert|copyright \d{4}/i },
 ]
 
 /*
@@ -554,6 +604,197 @@ export function readEmployment(tokens: string[]): TraceEmployment[] {
 }
 
 /**
+ * Properties, off the deeds section of a consumer report.
+ *
+ * READ FROM THE DATE TO THE AMOUNT, because everything between them wraps. The bureau prints this
+ * table so narrow that even the word "Buyer" arrives split across two lines — "Buy" then "er" on
+ * one report, "Buye" then "r" on another — so counting columns from the left is hopeless. The two
+ * fixed points are the purchase date and the purchase amount, and a record is what lies between.
+ */
+export function readProperties(tokens: string[]): TraceProperty[] {
+  const out: TraceProperty[] = []
+  const AMOUNT = /^\d{1,3}(,\d{3})*\.\d{2}$/
+  for (let i = 0; i < tokens.length; i += 1) {
+    const purchasedOn = traceDate(tokens[i])
+    if (purchasedOn === null) continue
+
+    /*
+     * The type sits before the date, in as many pieces as the column needed. Joined without a
+     * separator, because the break is inside the word rather than between words.
+     */
+    let role = ''
+    for (let j = i - 1; j >= 0 && j >= i - 4; j -= 1) {
+      const t = tokens[j].trim()
+      if (isDate(t) || AMOUNT.test(t) || NOISE.test(t)) break
+      if (/^(purchase|date|current|owner|address|township|amount|type)$/i.test(t)) break
+      role = t + role
+      if (/^(buyer|seller|owner)$/i.test(role)) break
+    }
+
+    let j = i + 1
+    /* The current-owner column is a bare true/false, and on a sold property it is simply absent. */
+    let currentOwner = false
+    if (/^(true|false)$/i.test((tokens[j] ?? '').trim())) {
+      currentOwner = /^true$/i.test(tokens[j].trim())
+      j += 1
+    }
+
+    const text: string[] = []
+    let amount: number | null = null
+    while (j < tokens.length) {
+      const t = tokens[j].trim()
+      if (AMOUNT.test(t)) { amount = Number(t.replace(/,/g, '')); j += 1; break }
+      /* Running into the next record's date means this one had no amount printed. */
+      if (isDate(t)) break
+      if (!NOISE.test(t) && !/^(purchase|date|current|owner|address|township|amount|type|e)$/i.test(t)) {
+        text.push(t)
+      }
+      j += 1
+    }
+    if (text.length === 0) continue
+
+    out.push({
+      address: dropRepeatedTail(text.join(' ').replace(/\s+/g, ' ').replace(/,\s*$/, '').trim()),
+      role: /^(buyer|seller|owner)$/i.test(role) ? role.charAt(0).toUpperCase() + role.slice(1).toLowerCase() : null,
+      purchasedOn,
+      currentOwner,
+      purchaseAmount: amount,
+    })
+    i = j - 1
+  }
+  return out
+}
+
+/**
+ * The township column repeats the tail of the address column, so one copy comes off.
+ *
+ * "12, ALOE, STREET, BENONI" + "BENONI" is one address and its suburb printed twice, not an
+ * address that ends in the suburb twice. Splitting the two columns apart is not possible —
+ * both wrap — so the repeat is removed instead, which gets the same answer without pretending to
+ * know where one column ended.
+ */
+export function dropRepeatedTail(text: string): string {
+  const words = text.split(' ')
+  /*
+   * COMPARED WITH THE SPACES TAKEN OUT, because the repeat is not word for word. The column is so
+   * narrow that it breaks inside a word: "JOHANNESBURG" comes back as "JOHANNESBU" then "RG", so
+   * the tail and the text it repeats do not match as strings and do not even have the same number
+   * of words. Letters are the only thing the two versions agree on.
+   */
+  const bare = (t: string) => t.replace(/[\s,]/g, '').toUpperCase()
+  for (let n = Math.floor(words.length / 2) + 1; n >= 1; n -= 1) {
+    if (n >= words.length) continue
+    const tail = bare(words.slice(-n).join(' '))
+    if (tail.length < 3) continue
+    if (bare(words.slice(0, -n).join(' ')).endsWith(tail)) return words.slice(0, -n).join(' ')
+  }
+  return text
+}
+
+/**
+ * The people the bureau connects to this debtor.
+ *
+ * ANCHORED ON THE DATE OF BIRTH, which the report prints as yy-mm-dd and nothing else in this
+ * block looks like. The name follows it; the type and the company the link runs through come
+ * before it, and the company wraps.
+ */
+export function readLinks(tokens: string[]): TraceLink[] {
+  const out: TraceLink[] = []
+  const seen = new Set<string>()
+  const DOB = /^\d{2}-\d{2}-\d{2}$/
+  /*
+   * ANCHORED ON THE TYPE, NOT THE DATE OF BIRTH.
+   *
+   * The obvious anchor is the date, and it is wrong: a link through a shared TELEPHONE NUMBER
+   * carries no date at all, and those rows were being swallowed into the next record — one real
+   * report came back with a link whose linking company was a phone number, a second person's
+   * name and that number again -- two people and a phone number mashed into one field.
+   *
+   * The type is reliable because of how the bureau prints this block: types are Title Case
+   * ("Director", "Telephone") and everything else in it is upper case, a number or a date.
+   */
+  const isType = (t: string) => /^[A-Z][a-z]+( [A-Z][a-z]+)*$/.test(t)
+
+  /* Split into records first, so a row missing a column cannot run into the next one. */
+  const records: string[][] = []
+  for (const raw of tokens) {
+    const t = raw.trim()
+    if (!t || NOISE.test(t) || /^(type|link value|date of birth|full name)$/i.test(t)) continue
+    if (isType(t) || records.length === 0) records.push([t])
+    else records[records.length - 1].push(t)
+  }
+
+  for (const record of records) {
+    if (record.length < 3 || !isType(record[0])) continue
+    /* The name is last; a date of birth, where there is one, sits just before it. */
+    const fullName = record[record.length - 1]
+    /*
+     * IT HAS TO LOOK LIKE A PERSON. Digits, brackets or a paragraph's worth of characters mean
+     * the block ran into something that is not a link — a footer, a heading, a stray column — and
+     * filing that as somebody's next of kin is worse than missing the row entirely.
+     */
+    if (!/[A-Za-z]{2}/.test(fullName)) continue
+    if (fullName.length > 60 || /[0-9()]/.test(fullName)) continue
+    const maybeDob = record[record.length - 2]
+    const dateOfBirth = DOB.test(maybeDob) ? maybeDob : null
+    const middle = record.slice(1, dateOfBirth === null ? -1 : -2)
+
+    /*
+     * ONE PERSON PER LINK, AND THE DATE OF BIRTH IS NOT PART OF WHO THEY ARE. The bureau reprints
+     * its table headings and sometimes the row itself at a page break, once with the date and
+     * once without — keyed on the date those are two different people with the same name.
+     */
+    const key = `${fullName.toUpperCase()}|${middle.join(' ').toUpperCase()}`
+    if (seen.has(key)) {
+      /* The second copy is worth having only for a column the first one was missing. */
+      const held = out.find((l) => l.fullName.toUpperCase() === titleCase(fullName).toUpperCase())
+      if (held && held.dateOfBirth === null && dateOfBirth !== null) held.dateOfBirth = dateOfBirth
+      continue
+    }
+    seen.add(key)
+    out.push({
+      fullName: titleCase(fullName),
+      type: titleCase(record[0]),
+      linkedThrough: middle.length > 0 ? titleCase(middle.join(' ')) : null,
+      dateOfBirth,
+    })
+  }
+  return out
+}
+
+/**
+ * The links worth ringing: the ones who share the debtor's surname.
+ *
+ * THE FIRM'S OWN REASONING, in their words: "a next of kin is a relationship link based on this
+ * trace and it would probably have the same surname as the principal contact person".
+ *
+ * PROBABLY IS THE RIGHT WORD AND THE SCREEN KEEPS IT. A shared surname is evidence of a family
+ * connection, not proof of one — South Africa has a great many Ndlovus who have never met. So
+ * this returns candidates for a person to judge, and nothing here writes a relationship down.
+ *
+ * The surname is taken as the LAST word of each name, which is the convention the bureau prints
+ * in and wrong for a handful of names either way. A collector reading "possible relative" can see
+ * that for themselves; a system that filed it as fact could not be argued with.
+ */
+export function likelyRelatives(subjectName: string | null, links: TraceLink[]): TraceLink[] {
+  const surname = (subjectName ?? '').trim().split(/\s+/).pop()?.toUpperCase() ?? ''
+  /*
+   * There was a minimum length here, on the reasoning that two letters are not discriminating.
+   * It was wrong: Li, Ng, Le and Du are surnames, and it quietly excluded the people carrying
+   * them. An empty surname matches nothing on its own — the comparison below is against the last
+   * word of a name, which is never empty — so the guard was protecting against nothing and
+   * costing real matches.
+   */
+  if (surname === '') return []
+  /*
+   * THE LAST WORD, COMPARED WHOLE. A containment test would call "Radebe Mokoena" a relative of
+   * "Sipho Radebe" because the letters appear somewhere in the name — and it would match a first
+   * name, a middle name, or a surname that merely contains another.
+   */
+  return links.filter((l) => l.fullName.trim().split(/\s+/).pop()?.toUpperCase() === surname)
+}
+
+/**
  * Which numbers to offer as already ticked.
  *
  * A collector confirming twenty-six numbers ticks none of them and takes the first one on the
@@ -671,5 +912,7 @@ export function parseTrace(tokens: string[]): TraceProfile | null {
       }
       return out
     })(),
+    properties: readProperties(block.get('properties') ?? []),
+    links: readLinks(block.get('links') ?? []),
   }
 }

@@ -176,6 +176,30 @@ One thing left, and it is maintenance rather than work:
   A row using wording not on the lists is kept in the bureau's own words and shown as quoted, not
   reported. **Add to the lists as new wording turns up; do not make the split a guess.**
 
+### 6c. Working a trace — BUILT, with two things left
+
+A filed trace is now a working surface: ring a number from inside it, say what happened (reached
+them / rang, no answer / off or dead / not the debtor), undo a wrong answer, and promote the ones
+that turn out to be real onto the account's principal contacts. A relative goes on as a next of
+kin, labelled. See `TraceWorkspaceModal`, `traceStore.ts`.
+
+The panel shows a summary: principal number, principal address, employer, property still held,
+possible next of kin, and what they direct. `untried` counts what nobody has rung — the one number
+that says whether the search the firm paid for has been used.
+
+Not done:
+
+1. **A confirmed number does not verify the contact it was promoted to.** `account_contacts` has a
+   `verified_at` of its own and the two do not talk: marking a trace item "reached them" AFTER
+   promoting it leaves the contact unverified. The link exists (`promoted_contact_id`) so this is
+   a small write, but which way it should flow is a question for the firm — does confirming on the
+   trace confirm the contact, or are they two separate confirmations of two separate things?
+2. **Next of kin is a label, not a relationship.** Promoting a relative writes a contact of kind
+   `other` with "Next of kin" in its label. That is honest and it is not structured: there is no
+   way to list every next of kin across the book, or to record what the relationship actually is
+   once somebody establishes it. If the firm starts working next of kin seriously it wants its own
+   shape.
+
 ### 6b. Setting a position by hand — STILL NOT BUILT
 
 `setSubStatus` exists but takes only the wording `administrationReading` produces, so a trace can
