@@ -430,7 +430,47 @@ ok('...and replaces only that subject\'s copy',
 
 /* ---------- the upload asks, stores nothing on its own, and charges nothing ---------- */
 
-ok('the trace is read in the browser', /await import\('pdfjs-dist'\)/.test(pdf))
+ok('the trace is read in the browser', /await import\('pdfjs-dist\/legacy\/build\/pdf\.mjs'\)/.test(pdf))
+/*
+ * THE LEGACY BUILD, AND IT IS NOT A PREFERENCE.
+ *
+ * pdf.js's default build targets the newest engines and calls Promise.withResolvers,
+ * structuredClone and Array.prototype.at bare — the shipped chunk contained no polyfill for any
+ * of them. On an iPad it threw "undefined is not a function" from inside minified pdf.js, and
+ * that sentence is what the collector was shown. The firm works this app on iPads; "works in
+ * Chrome" is not a finish line here.
+ *
+ * The legacy build is the same library with core-js polyfills compiled in. Anyone tidying this
+ * import back to the shorter 'pdfjs-dist' reintroduces the bug in a browser the checks cannot
+ * run, which is why it is asserted rather than left to a comment.
+ */
+ok('...using the build that polyfills what Safari lacks', /legacy\/build\/pdf\.mjs/.test(pdf))
+/* The worker has to be the same build, or the two disagree about the API version and neither runs. */
+ok('...with a worker from the same build', /legacy\/build\/pdf\.worker\.mjs\?url/.test(pdf))
+ok('...and never the bare package, which is the modern build',
+  !/import\('pdfjs-dist'\)/.test(pdf) && !/from 'pdfjs-dist'/.test(pdf))
+
+/*
+ * AND WHEN IT STILL CANNOT BE READ, THE COLLECTOR IS NOT LEFT HOLDING A PDF.
+ *
+ * Reading can fail for reasons nothing to do with them — a browser pdf.js cannot run on, a
+ * damaged download, a scan whose words are a picture. The firm paid for that search either way
+ * and the document belongs on the account, so the failure offers to file it unread instead of
+ * ending the job.
+ */
+ok('a failed read offers to file it anyway', /File it under Documents anyway/.test(modal))
+ok('...filing it as a trace', /kind: 'Trace', uploadedBy: actor\.id/.test(modal))
+ok('...and says plainly that nothing was read out of it',
+  /Nothing was read out of it/.test(modal))
+/*
+ * The minified internals of pdf.js are no use to a collector and were the whole message. They are
+ * kept — they are the only thing that will identify the next browser that does this — and shown
+ * small, under a sentence in words.
+ */
+ok('the message is in words, not in a stack', /This browser could not read the PDF/.test(modal))
+ok('...with the technical detail demoted', /\{error\}<\/p>\s*\n?\s*<\/div>/.test(modal) || /text-\[11px\] text-slate-400 mt-2 break-words">\{error\}/.test(modal))
+/* A scan is a different failure and deserves its own sentence: there are no words in it to read. */
+ok('a scan is told apart from a broken read', /the words are a picture/.test(modal))
 /*
  * ON FIRST USE. pdf.js is the largest thing in the dependency list and almost nobody opens a
  * trace on a given day; imported statically it would be in the bundle every collector downloads

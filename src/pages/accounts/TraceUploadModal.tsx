@@ -63,6 +63,8 @@ export function TraceUploadModal({
    */
   const [moveRung, setMoveRung] = useState(true)
   const [done, setDone] = useState<string | null>(null)
+  /** Set when the PDF is on the machine but nothing could be read out of it. See fileUnread. */
+  const [unreadable, setUnreadable] = useState<string | null>(null)
   /** Offered after filing, not before: the name is not on the PDF and has to be looked up. */
   const [askPractitioner, setAskPractitioner] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -77,12 +79,13 @@ export function TraceUploadModal({
   })
 
   const read = useCallback(async (f: File) => {
-    setError(null); setProfile(null); setDone(null)
+    setError(null); setProfile(null); setDone(null); setUnreadable(null)
     setReading(true)
     try {
       const parsed = parseTrace(await pdfTokens(f))
       if (!parsed) {
-        setError('That does not look like a credit bureau profile. It should be the PDF the bureau gives you, not a scan or a printout.')
+        setFile(f)
+        setUnreadable('That does not look like a credit bureau profile — there is no report header in it. If it is a scan or a photograph of one, the words are a picture and nothing can be read out of them.')
         return
       }
       setFile(f)
@@ -126,11 +129,43 @@ export function TraceUploadModal({
       setOff(drop)
       setMoveRung(true)
     } catch (e) {
+      /*
+       * THE COLLECTOR IS NOT LEFT HOLDING A PDF.
+       *
+       * Reading it can fail for reasons that are nothing to do with them — an iPad on a Safari
+       * that pdf.js cannot run on, a damaged download, a PDF that is really a scan. Whatever the
+       * reason, the firm paid for that search and the document still belongs on the account, so
+       * the failure offers to file it unread rather than ending the job.
+       *
+       * The technical detail is kept and shown small. It is no use to a collector, and it is the
+       * only thing that will identify the next browser that does this.
+       */
+      setFile(f)
+      setUnreadable('This browser could not read the PDF.')
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setReading(false)
     }
   }, [debtorKind, directors])
+
+  /*
+   * Filing it without reading it. Charges nothing, same as filing one that was read — the search
+   * is charged on the Trace button where it is run.
+   */
+  async function fileUnread() {
+    if (!file) return
+    setBusy(true); setError(null)
+    try {
+      await uploadDocument({ accountId, file, kind: 'Trace', uploadedBy: actor.id, uploadedByName: actor.name })
+      await onDone()
+      setDone('Filed under Documents. Nothing was read out of it.')
+      setUnreadable(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const target: TraceTarget = useMemo(() => {
     if (about === 'debtor') return { of: 'debtor' }
@@ -237,7 +272,24 @@ export function TraceUploadModal({
               ? <><Loader2 size={22} className="animate-spin text-slate-400" /><span className="text-sm text-slate-500">Reading it&hellip;</span></>
               : <><FileUp size={22} className="text-slate-400" /><span className="text-sm font-medium text-slate-600">Choose the trace PDF</span></>}
           </label>
-          {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
+          {unreadable && (
+            <div className="mt-3 rounded-lg border border-gold-300 bg-gold-50 px-3 py-2.5">
+              <p className="text-sm font-medium text-navy-900 inline-flex items-center gap-1.5">
+                <AlertTriangle size={14} className="text-gold-600 shrink-0" /> {unreadable}
+              </p>
+              <p className="text-[11px] text-slate-600 mt-0.5">
+                You paid for the search, so the document still belongs on the account. File it and
+                a collector can open it by hand.
+              </p>
+              <button type="button" onClick={() => void fileUnread()} disabled={busy}
+                className="mt-2 text-sm font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
+                File it under Documents anyway
+              </button>
+              {error && <p className="text-[11px] text-slate-400 mt-2 break-words">{error}</p>}
+            </div>
+          )}
+          {done && <p className="text-sm text-[var(--c-green)] mt-3 inline-flex items-center gap-1.5"><Check size={14} /> {done}</p>}
+          {error && !unreadable && <p className="text-sm text-negative-700 mt-3">{error}</p>}
         </>
       )}
 

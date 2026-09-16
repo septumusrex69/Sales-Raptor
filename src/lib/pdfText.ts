@@ -14,6 +14,13 @@
  * pdf.js loads on FIRST USE, not with the app. It is by some distance the largest thing in the
  * dependency list and almost nobody opens a trace on any given day — a static import would put it
  * in the bundle every collector downloads every morning to make one screen a second faster.
+ *
+ * THE LEGACY BUILD, and it is not optional. pdf.js's default build targets the newest engines and
+ * uses Promise.withResolvers, structuredClone and Array.prototype.at bare. On an iPad it threw
+ * "undefined is not a function" from inside minified pdf.js and the collector saw that sentence —
+ * the firm works this app on iPads, so "works in Chrome" is not a finish line here. The legacy
+ * build is the same library compiled with core-js polyfills for those gaps. It costs about 190KB
+ * in a chunk nobody downloads until they open a trace, which is the right place to spend it.
  */
 
 /**
@@ -25,13 +32,14 @@
  * lines arrive as separate runs — traceProfile knows that and puts them back together.
  */
 export async function pdfTokens(file: File | ArrayBuffer): Promise<string[]> {
-  const pdfjs = await import('pdfjs-dist')
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
   /*
    * The worker is fetched as a URL rather than bundled, which is how pdf.js expects to be used
    * and what keeps it out of the main chunk. Without this line pdf.js falls back to parsing on
    * the main thread, which locks the tab for seconds on a thirty-page report.
    */
-  const workerUrl = (await import('pdfjs-dist/build/pdf.worker.mjs?url')).default
+  /* The worker has to match the build, or the two disagree about what the API version is. */
+  const workerUrl = (await import('pdfjs-dist/legacy/build/pdf.worker.mjs?url')).default
   pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
   const data = file instanceof ArrayBuffer ? file : await file.arrayBuffer()
