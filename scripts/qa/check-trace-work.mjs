@@ -308,8 +308,14 @@ ok('...which clears it rather than recording a fifth state',
   /outcome_at: input\.outcome === null \? null : new Date/.test(data))
 ok('a finding can be put on the account', /Add to contact details/.test(workspace))
 ok('...and a relative added as next of kin', /Add as next of kin/.test(workspace))
-ok('...labelled as one, so nobody opens the call to the wrong person',
-  /Next of kin\$\{item\.label/.test(data))
+/*
+ * FILED AS THEIR OWN PERSON, so nobody opens the call to the wrong one. The name on the row is
+ * the relative's and their role is the relationship — it used to be crammed into a free-text
+ * label, where nothing could group by it and a company's contacts were a flat run of numbers with
+ * names buried in their captions. See check-contact-people.
+ */
+ok('...filed under their own name', /personName: asNextOfKin \? item\.value : subjectName/.test(data))
+ok('...with the relationship as their role', /personRole: asNextOfKin \? 'Next of kin' : null/.test(data))
 /*
  * NEVER PRIMARY FROM HERE. Which number a collector rings first is a decision about the whole
  * account, taken on the contact list where all of them are visible — not a side effect of

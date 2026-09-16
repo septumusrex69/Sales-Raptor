@@ -166,6 +166,16 @@ const profiles = [{
   role: 'Administrator', team_id: null, avatar_url: null, is_active: true,
 }]
 
+/* A company's contacts, which belong to PEOPLE — the thing a flat list cannot say. */
+const companyContacts = [
+  { id: 'cc1', account_id: ACC2, kind: 'work', value: '011 000 0148', label: null, person_name: null, person_role: null, is_primary: false, verified_at: '2026-09-10T09:00:00Z', retired_at: null, retired_reason: null, notes: null, created_at: '2026-09-01T09:00:00Z' },
+  { id: 'cc2', account_id: ACC2, kind: 'address', value: '4 Marula Crescent, Bryanston, Sandton, 2191', label: null, person_name: null, person_role: null, is_primary: false, verified_at: null, retired_at: null, retired_reason: null, notes: null, created_at: '2026-09-01T09:01:00Z' },
+  { id: 'cc3', account_id: ACC2, kind: 'mobile', value: '083 000 0148', label: null, person_name: 'Peter Smith', person_role: 'Accounts manager', is_primary: true, verified_at: '2026-09-11T09:00:00Z', retired_at: null, retired_reason: null, notes: null, created_at: '2026-09-01T09:02:00Z' },
+  { id: 'cc4', account_id: ACC2, kind: 'email', value: 'peter@example.com', label: null, person_name: 'Peter Smith', person_role: 'Accounts manager', is_primary: false, verified_at: '2026-09-11T09:00:00Z', retired_at: null, retired_reason: null, notes: null, created_at: '2026-09-01T09:03:00Z' },
+  { id: 'cc5', account_id: ACC2, kind: 'mobile', value: '076 000 0263', label: null, person_name: 'Sipho Radebe', person_role: 'Director', is_primary: false, verified_at: null, retired_at: null, retired_reason: null, notes: null, created_at: '2026-09-01T09:04:00Z' },
+  { id: 'cc6', account_id: ACC2, kind: 'other', value: 'Nomsa Radebe', label: 'Director · Karoo Bulk Haul', person_name: 'Nomsa Radebe', person_role: 'Next of kin', is_primary: false, verified_at: null, retired_at: null, retired_reason: null, notes: null, created_at: '2026-09-01T09:05:00Z' },
+]
+
 const contacts = [
   { id: 'c1', account_id: ACC, kind: 'mobile', value: '+27 82 123 4567', label: null, is_primary: true, verified_at: '2026-08-06T09:00:00Z', retired_at: null, retired_reason: null, notes: null, created_at: '2026-08-06T09:00:00Z' },
   { id: 'c2', account_id: ACC, kind: 'work', value: '+27 11 987 6543', label: 'Build It Construction', is_primary: false, verified_at: null, retired_at: null, retired_reason: null, notes: null, created_at: '2026-08-06T09:05:00Z' },
@@ -257,7 +267,7 @@ const TABLES = {
   account_directors: directors,
   account_director_companies: directorCompanies,
   account_judgments: judgments,
-  account_contacts: contacts,
+  account_contacts: [...contacts, ...companyContacts],
   account_queries: [
     { id: 'q1', account_id: ACC, description: 'Says she already paid R3,000 of this directly to the client in March and it was never credited.', category: 'Already paid', status: 'open', stage: 'client', sent_to_client_at: '2026-08-20T09:00:00Z', owner_id: USER, raised_by_name: 'Amanda Coertze', raised_at: '2026-08-18T09:00:00Z', chase_on: '2026-09-01', outcome: null, outcome_action: null, outcome_amount: null, outcome_done: false, closed_at: null, closed_by_name: null },
     { id: 'q2', account_id: ACC, description: 'Disputed the delivery of two of the items invoiced.', category: 'Goods or service', status: 'closed', stage: 'liaison', owner_id: USER, raised_by_name: 'Amanda Coertze', raised_at: '2026-05-02T09:00:00Z', chase_on: null, outcome: 'partly_valid', outcome_action: 'Reduce the capital by the two items', outcome_amount: 1840, outcome_done: false, closed_at: '2026-06-11T09:00:00Z', closed_by_name: 'Stephan Bredell' },
@@ -420,6 +430,12 @@ await page.waitForTimeout(1200)
 await page.goto(`${ORIGIN}/accounts/${ACC2}`, { waitUntil: 'networkidle' })
 await page.waitForTimeout(1500)
 await page.screenshot({ path: `${OUT}/account-company.png`, fullPage: true })
+await page.evaluate(() => {
+  const h = [...document.querySelectorAll('p')].find((n) => /^WHO TO ASK FOR$/i.test(n.textContent ?? ''))
+  h?.scrollIntoView({ block: 'center' })
+})
+await page.waitForTimeout(300)
+await page.screenshot({ path: `${OUT}/account-people.png` })
 await page.evaluate(() => {
   const h = [...document.querySelectorAll('h3')].find((n) => /^Standing$/.test(n.textContent ?? ''))
   h?.scrollIntoView({ block: 'center' })

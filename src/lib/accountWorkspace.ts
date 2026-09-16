@@ -36,6 +36,15 @@ export interface AccountContact {
   kind: ContactKind
   value: string
   label: string | null
+  /**
+   * Whose number this is, on a company account.
+   *
+   * Null is the debtor themselves — every individual account, and a company's own switchboard.
+   * Set, it is the person a collector has to ask for, which on a company is the whole question.
+   */
+  personName: string | null
+  /** What they do there. Free text: it is what they called themselves on the phone. */
+  personRole: string | null
   isPrimary: boolean
   verifiedAt: string | null
   retiredAt: string | null
@@ -101,6 +110,8 @@ const toContact = (r: any): AccountContact => ({
   kind: r.kind,
   value: r.value,
   label: r.label,
+  personName: r.person_name ?? null,
+  personRole: r.person_role ?? null,
   isPrimary: !!r.is_primary,
   verifiedAt: r.verified_at,
   retiredAt: r.retired_at,
@@ -226,6 +237,9 @@ export async function addContact(input: {
   kind: ContactKind
   value: string
   label?: string | null
+  /** Whose it is. Null is the debtor; on a company it is who to ask for. */
+  personName?: string | null
+  personRole?: string | null
   isPrimary?: boolean
 }): Promise<AccountContact> {
   const { data, error } = await supabase
@@ -235,6 +249,8 @@ export async function addContact(input: {
       kind: input.kind,
       value: input.value.trim(),
       label: input.label?.trim() || null,
+      person_name: input.personName?.trim() || null,
+      person_role: input.personRole?.trim() || null,
       is_primary: input.isPrimary ?? false,
     })
     .select('*')

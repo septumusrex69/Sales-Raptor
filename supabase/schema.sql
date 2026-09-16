@@ -3281,3 +3281,29 @@ create policy account_trace_items_read on public.account_trace_items
 drop policy if exists account_trace_items_write on public.account_trace_items;
 create policy account_trace_items_write on public.account_trace_items
   for all to authenticated using (true) with check (true);
+
+-- A company is not reached on a number. It is reached through a PERSON who has one.
+--
+-- account_contacts was built for an individual debtor, where every number is theirs and saying so
+-- is unnecessary. On a company it is the whole question: a collector ringing a switchboard number
+-- needs to know they are asking for the accounts manager, not a director. Without that the list is
+-- four numbers and a guess, and the call opens with the wrong name.
+--
+-- TWO COLUMNS AND NOT A TABLE, deliberately. A contact person is a name and a job title; they have
+-- no history, no lifecycle and nothing else hangs off them. A table would buy referential tidiness
+-- and cost a join on the hottest read on the account screen. Directors, who DO have a lifecycle,
+-- already have their own table -- and a contact person is frequently not a director.
+alter table public.account_contacts add column if not exists person_name text;
+alter table public.account_contacts add column if not exists person_role text;
+
+comment on column public.account_contacts.person_name is
+  'Whose number or address this is, on a company account. Null means the debtor themselves, which '
+  'is every individual account and the company''s own switchboard.';
+
+comment on column public.account_contacts.person_role is
+  'What they do there: "Accounts manager", "Director". Free text -- it is what the debtor called '
+  'themselves on the phone, not a field we can offer a list for.';
+
+-- Grouping the panel by person is the only query this adds, and it is per account.
+create index if not exists account_contacts_person_idx
+  on public.account_contacts (account_id, person_name);

@@ -131,16 +131,25 @@ export async function promoteTraceItem(input: {
 }): Promise<void> {
   const { item, accountId, subjectName, asNextOfKin } = input
 
-  const label = asNextOfKin
-    ? [`Next of kin${item.label ? ` — ${item.label}` : ''}`, subjectName ? `via ${subjectName}` : null]
-      .filter(Boolean).join(' · ')
-    : [subjectName, item.label].filter(Boolean).join(' · ') || null
-
+  /*
+   * WHOSE IT IS GOES IN ITS OWN COLUMN NOW, not into the label.
+   *
+   * It was crammed into the label because there was nowhere else for it, and a label is free text
+   * that nothing can group by — so a company's contact list was a flat run of numbers with names
+   * buried in their captions. person_name is what lets the account screen show them under the
+   * person a collector has to ask for.
+   *
+   * A NEXT OF KIN IS THEIR OWN PERSON. The name on the row is the relative's, not the debtor's,
+   * and their role is the relationship — which is what stops somebody opening the call as though
+   * they were talking to the debtor.
+   */
   const contact = await addContact({
     accountId,
     kind: asNextOfKin ? 'other' : contactKindFor(item.kind),
     value: item.value,
-    label,
+    personName: asNextOfKin ? item.value : subjectName,
+    personRole: asNextOfKin ? 'Next of kin' : null,
+    label: asNextOfKin ? item.label : item.label,
     /*
      * NEVER PRIMARY FROM HERE. Which number a collector rings first is a decision about the whole
      * account, made on the contact list where all of them are visible together — not a side

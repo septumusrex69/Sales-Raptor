@@ -14,6 +14,7 @@ import {
   type AccountContact, type AccountDocument, type ContactKind, type Workspace,
 } from '../../lib/accountWorkspace'
 import { DictateButton } from '../../components/ui/Dictate'
+import { contactsByPerson } from '../../lib/contactPeople.ts'
 
 /** Surfaces a failed write instead of leaving a button that silently did nothing. */
 export function useWriter(onChange: () => Promise<void>) {
@@ -69,6 +70,9 @@ export function DebtorDetailsPanel({ account, name, workspace, onChange, userId,
   const live = (workspace?.contacts ?? []).filter((c) => !c.retiredAt)
   const retired = (workspace?.contacts ?? []).filter((c) => c.retiredAt)
 
+  const isCompany = account.debtorKind === 'company'
+  /* Only computed for a company; on an individual every contact is the debtor's by definition. */
+  const people = isCompany ? contactsByPerson(live) : []
   const phones = live.filter((c) => c.kind === 'mobile' || c.kind === 'phone' || c.kind === 'work')
   // Shared with the action bar's Call button, so both ring the same number.
   const primaryPhone = dialableNumber(live)
@@ -83,7 +87,14 @@ export function DebtorDetailsPanel({ account, name, workspace, onChange, userId,
     // a 27" monitor, and a screen-width breakpoint would happily lay three columns out inside it.
     <Card className="@container/details">
       <div className="flex items-center justify-between gap-2 mb-3">
-        <h3 className="text-[11px] uppercase tracking-wide text-slate-400">Debtor details</h3>
+        {/*
+          A COMPANY'S DETAILS ARE NOT A DEBTOR'S DETAILS. The panel said "Debtor details" over
+          "Full Name", "ID Number" and "Residential Address" on a company account, which is three
+          fields lying about what they hold. The account already knows which it is.
+        */}
+        <h3 className="text-[11px] uppercase tracking-wide text-slate-400">
+          {isCompany ? 'Company details' : 'Debtor details'}
+        </h3>
         <button onClick={() => setAddKind(addKind ? null : 'mobile')}
           className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
           {addKind ? <><X size={12} /> Cancel</> : <><Plus size={12} /> Add</>}
@@ -92,7 +103,7 @@ export function DebtorDetailsPanel({ account, name, workspace, onChange, userId,
 
       {addKind && (
         <ContactForm accountId={account.id} initialKind={addKind} busy={busy}
-          onDone={() => setAddKind(null)} run={run} />
+          forCompany={isCompany} onDone={() => setAddKind(null)} run={run} />
       )}
       {err && <p className="text-xs text-negative-700 mb-2">{err}</p>}
 
@@ -107,24 +118,38 @@ export function DebtorDetailsPanel({ account, name, workspace, onChange, userId,
       <dl className="grid gap-3 @lg/details:grid-cols-2 @4xl/details:grid-cols-3">
         <NameSlot account={account} name={name} busy={busy}
           onSave={(p) => run(() => saveDebtorIdentity(account.id, p))} />
-        <TextSlot icon="id" label="ID Number" value={account.debtorIdNumber} busy={busy}
-          placeholder="13 digits"
+        <TextSlot icon="id" label={isCompany ? 'Registration Number' : 'ID Number'}
+          value={account.debtorIdNumber} busy={busy}
+          placeholder={isCompany ? 'nnnn/nnnnnn/07' : '13 digits'}
           // Said, not enforced. Some debtors are companies, some records are foreign passports,
           // and refusing to store what a collector was actually given helps nobody.
-          warn={(v) => (v && !/^\d{13}$/.test(v.replace(/\s/g, '')) ? 'That is not 13 digits — check it against the ID.' : null)}
+          /* A registration number is not thirteen digits, so the warning is for people only. */
+          warn={(v) => (!isCompany && v && !/^\d{13}$/.test(v.replace(/\s/g, '')) ? 'That is not 13 digits — check it against the ID.' : null)}
           onSave={(v) => run(() => saveDebtorIdentity(account.id, { idNumber: v }))} />
 
-        <ContactSlot icon="mobile" label="Mobile (Primary)" contact={primaryPhone}
-          onAdd={() => setAddKind('mobile')} userId={userId} busy={busy} run={run} />
-        <ContactSlot icon="alt" label="Alternative Number" contact={altPhone}
-          onAdd={() => setAddKind('phone')} userId={userId} busy={busy} run={run} />
-        <ContactSlot icon="email" label="Email Address" contact={email}
-          onAdd={() => setAddKind('email')} userId={userId} busy={busy} run={run}
-          onOpen={email ? () => onEmail(email.value) : undefined} />
-        <ContactSlot icon="address" label="Residential Address" contact={address}
-          onAdd={() => setAddKind('address')} userId={userId} busy={busy} run={run} />
-        <ContactSlot icon="employer" label="Employer" contact={employer}
-          onAdd={() => setAddKind('employer')} userId={userId} busy={busy} run={run} />
+        {/*
+          FIXED SLOTS ARE A PERSON'S SHAPE, AND A COMPANY DOES NOT HAVE IT.
+          "Mobile (Primary)", "Alternative Number", "Residential Address", "Employer" — every one
+          of those is a fact about a human being. On a company they led the panel with a number
+          nobody could attribute: a collector saw 083 000 0148 and had no way to know whether to
+          ask for the accounts manager or a director. Everything a company is reached on belongs to
+          somebody, so on a company it all lives under them in "Who to ask for" below.
+        */}
+        {!isCompany && (
+          <>
+            <ContactSlot icon="mobile" label="Mobile (Primary)" contact={primaryPhone}
+              onAdd={() => setAddKind('mobile')} userId={userId} busy={busy} run={run} />
+            <ContactSlot icon="alt" label="Alternative Number" contact={altPhone}
+              onAdd={() => setAddKind('phone')} userId={userId} busy={busy} run={run} />
+            <ContactSlot icon="email" label="Email Address" contact={email}
+              onAdd={() => setAddKind('email')} userId={userId} busy={busy} run={run}
+              onOpen={email ? () => onEmail(email.value) : undefined} />
+            <ContactSlot icon="address" label="Residential Address" contact={address}
+              onAdd={() => setAddKind('address')} userId={userId} busy={busy} run={run} />
+            <ContactSlot icon="employer" label="Employer" contact={employer}
+              onAdd={() => setAddKind('employer')} userId={userId} busy={busy} run={run} />
+          </>
+        )}
 
         <EditableSlot icon="language" label="Preferred Language" value={account.preferredLanguage}
           options={['English', 'Afrikaans', 'isiZulu', 'isiXhosa', 'Sesotho', 'Setswana', 'Sepedi', 'Xitsonga', 'siSwati', 'Tshivenda', 'isiNdebele']}
@@ -138,8 +163,75 @@ export function DebtorDetailsPanel({ account, name, workspace, onChange, userId,
           hint="POPIA: whether they have agreed to electronic contact." />
       </dl>
 
-      {/* Numbers beyond the two slots above. An account can carry several. */}
-      {phones.length > 2 && (
+      {/*
+        WHO TO ASK FOR — a company only, and the reason is the whole difference between the two
+        kinds of account.
+
+        On an individual every number is the debtor's and saying so is noise. On a company it is
+        the question a collector has to answer before they dial: four numbers in a flat list is
+        four numbers and a guess, and the call opens with the wrong name.
+
+        Grouped by the person the number belongs to, with the company's own switchboard and
+        registered details first because they belong to nobody in particular.
+      */}
+      {isCompany && people.length === 0 && (
+        <p className="mt-3 pt-3 border-t border-slate-100 text-sm text-slate-400">
+          Nobody to ask for yet. A company is reached through a person &mdash; add one, or upload a
+          director&rsquo;s trace and promote a number off it.
+        </p>
+      )}
+
+      {isCompany && people.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400">Who to ask for</p>
+          {people.map((group) => (
+            <div key={group.person ?? 'the company'}>
+              <p className="text-sm font-medium text-slate-800">
+                {group.person ?? 'The company'}
+                {group.role && <span className="ml-1.5 text-[11px] font-normal text-slate-500">{group.role}</span>}
+              </p>
+              <div className="space-y-1 mt-0.5">
+                {group.contacts.map((c) => (
+                  <div key={c.id} className="flex items-start gap-1.5">
+                    <div className="min-w-0 flex-1">
+                      {/*
+                        A PERSON WE HAVE A NAME FOR AND NO NUMBER FOR.
+                        Promoting a relative off a trace stores their NAME as the contact — that is
+                        all the bureau gave — so the row read "Nomsa Radebe / Nomsa Radebe". Saying
+                        it once and saying what is missing is the useful version: finding the
+                        number is the next piece of work, and this is where somebody would look.
+                      */}
+                      {c.value === group.person ? (
+                        <p className="text-[11px] text-slate-400">
+                          No number yet{c.label ? ` · ${c.label}` : ''}
+                        </p>
+                      ) : (
+                        <ContactValue contact={c} userId={userId} busy={busy} run={run}
+                          onOpen={c.kind === 'email' ? () => onEmail(c.value) : undefined} />
+                      )}
+                    </div>
+                    {/*
+                      The one the Call button dials, marked where the numbers are. It is the only
+                      thing on this list that decides what happens when somebody presses Call.
+                    */}
+                    {c.isPrimary && (
+                      <span className="text-[10px] px-1.5 rounded bg-gold-50 text-[var(--c-gold-deep)] shrink-0 mt-0.5">
+                        Primary
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/*
+        Numbers beyond the two slots above. An account can carry several.
+        Not on a company: they are already listed above, under whoever they belong to.
+      */}
+      {!isCompany && phones.length > 2 && (
         <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
           <p className="text-[11px] uppercase tracking-wide text-slate-400">Other numbers</p>
           {phones.slice(2).map((c) => (
@@ -425,23 +517,38 @@ function EditableSlot({ icon, label, value, options, onSave, busy, hint }: {
   )
 }
 
-export function ContactForm({ accountId, initialKind, busy, onDone, run }: {
+export function ContactForm({ accountId, initialKind, busy, onDone, run, forCompany }: {
   accountId: string
   initialKind: ContactKind
   busy: boolean
   onDone: () => void
   run: (fn: () => Promise<unknown>) => Promise<boolean>
+  /**
+   * Whether this account is a company, which changes what the third field is asking.
+   *
+   * It used to be one free-text box captioned "Whose is it?", and on a company that is the most
+   * important thing on the form — the person to ask for — typed into a caption nothing can group
+   * by. Here it is a name and a job title, in the columns the panel reads.
+   */
+  forCompany?: boolean
 }) {
   const [kind, setKind] = useState<ContactKind>(initialKind)
   const [value, setValue] = useState('')
   const [label, setLabel] = useState('')
+  const [person, setPerson] = useState('')
+  const [role, setRole] = useState('')
   useEffect(() => setKind(initialKind), [initialKind])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!value.trim()) return
-    const ok = await run(() => addContact({ accountId, kind, value, label }))
-    if (ok) { setValue(''); setLabel(''); onDone() }
+    const ok = await run(() => addContact({
+      accountId, kind, value,
+      label: forCompany ? null : label,
+      personName: forCompany ? person : null,
+      personRole: forCompany ? role : null,
+    }))
+    if (ok) { setValue(''); setLabel(''); setPerson(''); setRole(''); onDone() }
   }
 
   return (
@@ -453,9 +560,21 @@ export function ContactForm({ accountId, initialKind, busy, onDone, run }: {
       <input value={value} onChange={(e) => setValue(e.target.value)} autoFocus
         placeholder={kind === 'email' ? 'name@example.co.za' : kind === 'address' ? 'Street, suburb, city' : '+27 ...'}
         className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
-      <input value={label} onChange={(e) => setLabel(e.target.value)}
-        placeholder="Whose is it? (optional)"
-        className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
+      {forCompany ? (
+        <>
+          {/* Left blank, it belongs to the company itself — a switchboard, the general mailbox. */}
+          <input value={person} onChange={(e) => setPerson(e.target.value)}
+            placeholder="Who do you ask for? (blank = the company)"
+            className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
+          <input value={role} onChange={(e) => setRole(e.target.value)}
+            placeholder="What do they do there? (optional)"
+            className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
+        </>
+      ) : (
+        <input value={label} onChange={(e) => setLabel(e.target.value)}
+          placeholder="Whose is it? (optional)"
+          className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
+      )}
       <button type="submit" disabled={busy || !value.trim()}
         className="w-full text-sm font-medium py-1.5 rounded-lg bg-brand-600 text-white disabled:opacity-50">
         {busy ? 'Saving...' : 'Save'}
