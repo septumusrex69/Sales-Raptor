@@ -62,6 +62,12 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
   const [pickBy, setPickBy] = useState<'everyone' | 'rank' | 'team'>('everyone')
   const [onlyChosen, setOnlyChosen] = useState(false)
   const [evenSplit, setEvenSplit] = useState(false)
+  /*
+   * Numbers a person has set by hand, userId → exactly this many. Everything else re-shares
+   * around them. Kept out of `chosen` because they answer different questions — who is in this
+   * hand-out at all, and how much of it one of them takes.
+   */
+  const [pinned, setPinned] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -109,21 +115,32 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
        */
       skipAlreadyBooked: false,
       evenSplit,
+      /*
+       * Only for people who are actually in the hand-out. A pin left behind on somebody who has
+       * since been unticked would eat budget for a desk that is not on the screen.
+       */
+      pinned: Object.fromEntries(
+        Object.entries(pinned).filter(([id]) => chosen.has(id))),
     })
-  }, [context, chosen, startOn, windowDays, evenSplit])
+  }, [context, chosen, startOn, windowDays, evenSplit, pinned])
 
   /*
-   * Ordered by who is taking most, then by name. A list of thirty-five sorted alphabetically
-   * buries the four people the plan actually used somewhere in the middle of it.
+   * BY NAME, AND IT WAS BY WHO IS TAKING MOST. That ordering was added so the four people a plan
+   * used were not buried among thirty-five, and it had to go the moment the rows became
+   * adjustable: pressing minus changed somebody's share, which changed their place in the list,
+   * which moved the row out from under the finger that pressed it. On an iPad the next press
+   * lands on a different person.
+   *
+   * Nothing is lost by it. The job this list does is choosing WHO is in the hand-out; the grid
+   * below already lists everybody taking work, in the order the plan gave it to them, and "show
+   * only chosen" narrows this one. Two views, two jobs, and the one you argue with holds still.
    */
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase()
-    const taking = new Map(plan?.collectors.map((c) => [c.userId, c.taking]) ?? [])
     return (context?.collectors ?? [])
       .filter((c) => (!onlyChosen || chosen.has(c.userId)) && (!q || c.name.toLowerCase().includes(q)))
-      .sort((a, b) => (taking.get(b.userId) ?? 0) - (taking.get(a.userId) ?? 0)
-        || a.name.localeCompare(b.name))
-  }, [context, plan, chosen, search, onlyChosen])
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [context, chosen, search, onlyChosen])
 
   const everyone = useMemo(
     () => (context?.collectors ?? []).map((c) => c.userId), [context])
@@ -172,6 +189,22 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
     return next
   }), [])
 
+  /*
+   * A NUDGE IS SET FROM WHAT IS ON SCREEN, not from the last pin. Clicking minus on a row reading
+   * 19 pins it at 18 whether or not it was already pinned, so the buttons step the number the
+   * person is looking at rather than some earlier one they have forgotten about.
+   */
+  const nudge = useCallback((id: string, by: number) => {
+    const now = plan?.collectors.find((c) => c.userId === id)?.taking ?? 0
+    setPinned((prev) => ({ ...prev, [id]: Math.max(0, now + by) }))
+  }, [plan])
+
+  const unpin = useCallback((id: string) => setPinned((prev) => {
+    const next = { ...prev }
+    delete next[id]
+    return next
+  }), [])
+
   const toggle = useCallback((id: string) => setChosen((prev) => {
     const next = new Set(prev)
     if (next.has(id)) next.delete(id); else next.add(id)
@@ -179,6 +212,15 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
   }), [])
 
   const tooMany = (context?.accounts.length ?? 0) > BULK_CEILING
+  const handSet = useMemo(
+    () => Object.keys(pinned).filter((id) => chosen.has(id)).length, [pinned, chosen])
+  /*
+   * A pin the plan could not honour — the grade gate refused every remaining account, or the
+   * diaries ran out of room. Named rather than left as a number that quietly disagrees with what
+   * somebody typed.
+   */
+  const shortPins = useMemo(
+    () => (plan?.collectors ?? []).filter((c) => c.pinShort), [plan])
 
   /*
    * The same arithmetic the planner does, so the line above the plan and the plan itself cannot
@@ -331,6 +373,19 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                         taking {plan.placements.length.toLocaleString('en-ZA')} between them
                       </span>
                     )}
+                    {/*
+                      SAID OUT LOUD, because a hand-set figure is the one thing on this screen the
+                      plan did not decide — and with thirty-nine rows the ring on a row somebody
+                      nudged an hour ago is easy to scroll past. One way back for all of them, so
+                      "start again from what the rule says" is a click rather than an audit.
+                    */}
+                    {handSet > 0 && (
+                      <span className="text-brand-700">
+                        {handSet === 1 ? '1 set by hand' : `${handSet} set by hand`}
+                        <button type="button" onClick={() => setPinned({})}
+                          className="ml-1.5 text-brand-600 hover:underline">Reset</button>
+                      </span>
+                    )}
                     {chosen.size > 0 && (
                       <button type="button" onClick={() => setOnlyChosen((v) => !v)}
                         className="text-brand-600 hover:underline ml-auto">
@@ -371,7 +426,7 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                       it is not why he takes fewer accounts. The book is.
                     */}
                     <span className="shrink-0 w-12 text-right">A day</span>
-                    <span className="shrink-0 w-14 text-right">Taking</span>
+                    <span className="shrink-0 w-[4.75rem] text-right pr-4">Taking</span>
                   </div>
 
                   <div data-qa="collector-list"
@@ -405,11 +460,39 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                             title={`Works ${c.capacity} accounts a day`}>
                             {c.capacity}
                           </span>
-                          {/* The plan's own figure, so a row shows what choosing it actually did. */}
-                          <span className={`shrink-0 text-[11px] font-medium tabular-nums w-14 text-right ${
-                            !taking || taking.taking === 0 ? 'text-slate-300'
-                              : taking.overBy > 0 ? 'text-rose-700' : 'text-brand-700'}`}>
-                            {taking && taking.taking > 0 ? `+${taking.taking}` : '·'}
+                          {/*
+                            THE PLAN'S FIGURE, AND AN ARGUMENT WITH IT. A leader knows things the
+                            distributor cannot: the training course, the disciplinary, the
+                            resignation on Friday. Their words — "if I think Ayanda shouldn't get
+                            19, rather get like 7, because I know something else is happening."
+
+                            Minus and plus set the number for that person; everybody else
+                            re-shares what is left, by whatever rule is in force. A figure set by
+                            hand is ringed so it never reads as the rule's own, and clicking it
+                            hands the row back to the rule.
+
+                            onClick with stopPropagation because the whole row is a <label> for
+                            the checkbox — without it, nudging somebody would untick them.
+                          */}
+                          <span className="shrink-0 flex items-center justify-end gap-0.5 w-[4.75rem]">
+                            <Step label={`Give ${c.name} one fewer`}
+                              disabled={(taking?.taking ?? 0) <= 0}
+                              onClick={() => nudge(c.userId, -1)}>−</Step>
+                            <button type="button"
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); unpin(c.userId) }}
+                              disabled={!taking?.pinned}
+                              title={taking?.pinned
+                                ? `Set by hand. Tap to let the plan decide ${c.name}’s share again.`
+                                : undefined}
+                              className={`text-[11px] font-medium tabular-nums px-1 rounded ${
+                                taking?.pinned ? 'ring-1 ring-brand-300 bg-brand-50' : ''} ${
+                                taking?.pinShort ? 'text-amber-700'
+                                  : !taking || taking.taking === 0 ? 'text-slate-300'
+                                    : taking.overBy > 0 ? 'text-rose-700' : 'text-brand-700'}`}>
+                              {taking && taking.taking > 0 ? `+${taking.taking}` : taking?.pinned ? '0' : '·'}
+                            </button>
+                            <Step label={`Give ${c.name} one more`}
+                              onClick={() => nudge(c.userId, 1)}>+</Step>
                           </span>
                         </label>
                       )
@@ -565,6 +648,10 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                     : null,
                   overCount > 0
                     ? `${overCount} ${overCount === 1 ? 'person goes' : 'people go'} over their book ceiling. Nothing is blocked.`
+                    : null,
+                  shortPins.length > 0
+                    ? `${shortPins.map((c) => c.name).join(', ')} could not take the number you set — `
+                      + 'there were not enough accounts they may be given.'
                     : null,
                 ].filter(Boolean).join(' ')}
           </span>
@@ -781,6 +868,21 @@ function Pick({ onClick, children, quiet, on }: {
           : on
             ? 'border-navy-950 bg-navy-950 text-white'
             : 'border-slate-200 text-slate-600 hover:border-brand-300 hover:text-brand-700'}`}>
+      {children}
+    </button>
+  )
+}
+
+/** One nudge on a collector's row. Tiny on purpose: thirty-nine rows of these sit in a modal. */
+function Step({ onClick, children, label, disabled }: {
+  onClick: () => void; children: React.ReactNode; label: string; disabled?: boolean
+}) {
+  return (
+    <button type="button" aria-label={label} title={label} disabled={disabled}
+      /* The row is a <label>, so a bare click would toggle the checkbox behind this. */
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClick() }}
+      className="w-4 h-4 leading-none rounded text-[11px] text-slate-400 hover:bg-slate-200
+        hover:text-slate-700 disabled:opacity-30 disabled:hover:bg-transparent">
       {children}
     </button>
   )

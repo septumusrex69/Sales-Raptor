@@ -730,6 +730,139 @@ ok('an elite may take anything', ACCOUNT_BANDS.every((b) => mayTake('Elite', b))
     takenBy(p, 'Bongani'), takenBy(p, 'Musa'))
 }
 
+/* ================= arguing with the plan ================= */
+
+/*
+ * A LEADER KNOWS THINGS THE DISTRIBUTOR CANNOT. The training course, the disciplinary, the
+ * resignation on Friday — none of it is in the database. The firm's case, in their words: "if I
+ * think Ayanda shouldn't get 19, rather get like 7, because I know something else is happening."
+ * A plan that cannot be argued with is one they will stop trusting and do by hand.
+ */
+const floor6 = () => [
+  col('Ayanda', 'Senior', { inPlay: 470 }), col('Lerato', 'Skilled', { inPlay: 480 }),
+  col('Shireen', 'Senior', { inPlay: 480 }), col('Kagiso', 'Senior', { inPlay: 485 }),
+  col('Ryno', 'Skilled', { inPlay: 485 }), col('Nomsa', 'Senior', { inPlay: 485 }),
+]
+const stack100 = () => Array.from({ length: 100 }, (_, i) => acc(`a${i}`, 1000 + (100 - i) * 500))
+
+{
+  const before = plan(stack100(), floor6(), { windowDays: 5 })
+  const after = plan(stack100(), floor6(), { windowDays: 5, pinned: { 'u-Ayanda': 7 } })
+
+  ok('the rule gives Ayanda more than seven to begin with', takenBy(before, 'Ayanda') > 7)
+  check('pinned, she takes exactly seven', takenBy(after, 'Ayanda'), 7)
+  check('...and nothing is dropped', after.placements.length, 100)
+  /*
+   * THE FREED WORK GOES SOMEWHERE, which is the whole point — "it automatically redistributes it
+   * to some others". Every other desk must come out at least as high as it was.
+   */
+  ok('...the rest is shared out, not lost', after.collectors
+    .filter((c) => c.name !== 'Ayanda')
+    .every((c) => c.taking >= before.collectors.find((x) => x.name === c.name).taking))
+  ok('...and the plan marks the figure as set by hand',
+    after.collectors.find((c) => c.name === 'Ayanda').pinned)
+  ok('...only that one', after.collectors.filter((c) => c.pinned).length === 1)
+}
+
+/*
+ * PINNED WORK IS DEALT THROUGH THE QUEUE, NOT OFF THE TOP. The queue is ordered
+ * broken-promises-first and then by balance, so taking the pinned share first would hand somebody
+ * pinned DOWN to seven the seven most valuable accounts on the stack — the opposite of what
+ * pinning them down was for.
+ */
+{
+  const accounts = stack100()
+  const p = planHandOut({
+    accounts, collectors: floor6(), startOn: MONDAY, windowDays: 5, pinned: { 'u-Ayanda': 7 },
+  })
+  const at = p.placements.filter((x) => x.userId === 'u-Ayanda')
+    .map((x) => accounts.findIndex((a) => a.id === x.accountId))
+  check('she gets the seven she was pinned to', at.length, 7)
+  ok('...spread through the queue rather than its head', Math.max(...at) > 50)
+  ok('...and not as the top seven', !at.every((i) => i < 7))
+}
+
+/* Both directions, and several at once. */
+{
+  const up = plan(stack100(), floor6(), { windowDays: 5, pinned: { 'u-Ryno': 40 } })
+  check('somebody can be given more, not only less', takenBy(up, 'Ryno'), 40)
+  const both = plan(stack100(), floor6(), { windowDays: 5, pinned: { 'u-Ayanda': 7, 'u-Ryno': 40 } })
+  check('two hand-set figures both hold', takenBy(both, 'Ayanda'), 7)
+  check('...both of them', takenBy(both, 'Ryno'), 40)
+  check('...and the rest still adds up', both.placements.length, 100)
+}
+
+/* Zero is a real answer: give this person nothing today, without unticking them. */
+{
+  const p = plan(stack100(), floor6(), { windowDays: 5, pinned: { 'u-Ayanda': 0 } })
+  check('nothing is a number somebody may set', takenBy(p, 'Ayanda'), 0)
+  ok('...and it is still marked as a decision', p.collectors.find((c) => c.name === 'Ayanda').pinned)
+  check('...with the work going to the others', p.placements.length, 100)
+}
+
+/*
+ * A PIN THAT CANNOT BE HONOURED IS REPORTED, never silently rounded down. Somebody typing more
+ * than the whole stack gets the whole stack and is told so — a number a person set that quietly
+ * came out different is the one thing worse than refusing it.
+ */
+{
+  const p = plan(stack100(), floor6(), { windowDays: 5, pinned: { 'u-Ayanda': 200 } })
+  check('a pin past the stack takes the stack', takenBy(p, 'Ayanda'), 100)
+  ok('...and says it fell short', p.collectors.find((c) => c.name === 'Ayanda').pinShort)
+  ok('...while a pin that fits does not',
+    !plan(stack100(), floor6(), { windowDays: 5, pinned: { 'u-Ayanda': 7 } })
+      .collectors.find((c) => c.name === 'Ayanda').pinShort)
+}
+
+/*
+ * AND THE GRADE GATE STILL WINS. A pin is an argument about HOW MANY; it was never a way to put
+ * a major account on a junior desk, which is the one thing on this screen that costs a client.
+ */
+{
+  const p = plan(
+    [acc('big', 400000), acc('s1', 1000), acc('s2', 1000)],
+    [col('Junior', 'Junior'), col('Senior', 'Senior')],
+    { windowDays: 5, pinned: { 'u-Junior': 3 } },
+  )
+  ok('the major account is still the senior\'s',
+    p.placements.find((x) => x.accountId === 'big')?.userId === 'u-Senior')
+  check('...so the pin cannot be filled', takenBy(p, 'Junior'), 2)
+  ok('...and says so rather than pretending', p.collectors.find((c) => c.name === 'Junior').pinShort)
+}
+
+/*
+ * PINS THAT DO NOT ADD UP TO THE STACK LEAVE THE REST UNPLACED, and say why in its own words.
+ *
+ * This is the case that proves the cap is a cap. With everybody pinned and the numbers totalling
+ * less than the stack, a pin that were only a floor would quietly hand out all hundred anyway —
+ * which is exactly what happened when this was broken on purpose, and the earlier checks all
+ * passed because the budget arithmetic landed on the right totals by itself.
+ *
+ * The reason matters as much as the count. "Nobody is graded for it" and "everybody is at the
+ * number you set" point at opposite fixes.
+ */
+{
+  const p = plan(
+    stack100(),
+    [col('Ayanda', 'Senior', { inPlay: 470 }), col('Ryno', 'Skilled', { inPlay: 485 })],
+    { windowDays: 5, pinned: { 'u-Ayanda': 7, 'u-Ryno': 40 } },
+  )
+  check('only what was asked for is handed out', p.placements.length, 47)
+  check('...exactly', takenBy(p, 'Ayanda') + takenBy(p, 'Ryno'), 47)
+  check('...and the remainder is reported, not lost', p.unplaced.length, 53)
+  check('...for the right reason', reasonOf(p), 'pinned_out')
+  ok('...which is not the grade one', p.unplaced.every((u) => u.reason !== 'no_one_graded'))
+}
+
+/* No pins at all must plan exactly as before. A feature nobody asked for is not allowed to
+ * change the answer for everybody who did not use it. */
+{
+  const none = plan(stack100(), floor6(), { windowDays: 5 })
+  const empty = plan(stack100(), floor6(), { windowDays: 5, pinned: {} })
+  check('an empty set of pins changes nothing',
+    JSON.stringify(none.collectors), JSON.stringify(empty.collectors))
+}
+
 /* ================= an overrun has to SAY it overran ================= */
 
 /*

@@ -67,6 +67,8 @@ export type UnplacedReason =
   | 'already_booked'
   | 'no_one_graded'
   | 'no_room'
+  /** Every desk that could take it is already at the number somebody set by hand. */
+  | 'pinned_out'
 
 export interface Placement {
   accountId: string
@@ -95,6 +97,16 @@ export interface CollectorPlan {
   overBy: number
   /** They were over their ceiling before this plan. Why they are getting little or nothing. */
   alreadyOver: boolean
+  /** A person set this figure by hand. The screen marks it so nobody reads it as the rule's. */
+  pinned: boolean
+  /**
+   * Set when a pin could not be honoured in full, with what they actually got.
+   *
+   * It happens: the grade gate can refuse every remaining account, or the diaries can run out of
+   * room. Reporting it is the difference between a number somebody typed being quietly ignored
+   * and them being told it did not fit.
+   */
+  pinShort: boolean
 }
 
 export interface DayPlan {
@@ -161,6 +173,22 @@ export interface PlanInput {
    * that it's going over".
    */
   evenSplit?: boolean
+  /**
+   * TAKE EXACTLY THIS MANY FROM THIS PERSON, whatever the rule would have said.
+   *
+   * userId → the number they are to take. Everybody else shares what is left, by whichever rule
+   * is in force. The firm's case, and it is the one a distributor cannot compute: "if I think
+   * Ayanda shouldn't get 19, rather get like 7, because I know something else is happening." A
+   * leader knows about the training course, the disciplinary, the resignation on Friday — none
+   * of which is in the database — and a plan that cannot be argued with is one they will stop
+   * trusting and do by hand.
+   *
+   * A pin is exact, not a hint: it is both a floor and a ceiling. The pinned share is dealt
+   * INTERLEAVED with the rest rather than taken off the top, so pinning somebody to seven gives
+   * them seven accounts spread through the queue instead of the seven biggest broken promises on
+   * the book — which is the opposite of what pinning them down was for.
+   */
+  pinned?: Record<string, number>
 }
 
 const DEFAULT_MAX_WINDOW = 40
@@ -213,6 +241,8 @@ export function planHandOut(input: PlanInput): HandOutPlan {
     /** Accounts of room at the moment the plan started. The share each person takes is weighted
      *  by this, and it is deliberately not recomputed as the plan fills — see gate 1. */
     room: number
+    /** Exactly this many, set by a person. Null means the rule decides. */
+    pin: number | null
     taking: number
     added: Record<string, number>
   }
@@ -221,6 +251,10 @@ export function planHandOut(input: PlanInput): HandOutPlan {
       c,
       ceiling: bookCeilingOf(c.bookCeiling),
       room: Math.max(0, bookCeilingOf(c.bookCeiling) - c.inPlayNow),
+      pin: (() => {
+        const v = input.pinned?.[c.userId]
+        return typeof v === 'number' && v >= 0 ? Math.floor(v) : null
+      })(),
       taking: 0,
       added: {} as Record<string, number>,
     }))
@@ -271,6 +305,31 @@ export function planHandOut(input: PlanInput): HandOutPlan {
   const dayTotals: Record<string, number> = {}
 
   /*
+   * TWO BUDGETS, DEALT IN STEP. Everything pinned by hand adds up to one budget; everything left
+   * is the other, shared by whoever was not pinned.
+   *
+   * Dealt in step rather than pinned-first, and that matters. Taking the pinned share off the top
+   * would hand those people the front of the queue — which is ordered broken-promises-first and
+   * then by balance — so pinning somebody DOWN to seven would give them the seven most valuable
+   * accounts on it. Comparing how far through each budget we are and feeding whichever is behind
+   * keeps both groups moving through the same queue at the same rate.
+   *
+   * Pins are clamped to what there is. Somebody typing more than the whole stack gets the whole
+   * stack, and the plan reports that it could not be honoured rather than silently promising it.
+   */
+  const pinnedBudget = Math.min(
+    placeable,
+    state.reduce((n, s) => n + (s.pin ?? 0), 0),
+  )
+  const sharedBudget = Math.max(0, placeable - pinnedBudget)
+  /*
+   * Carried as a running total rather than summed over the desks for each account. Re-reducing
+   * thirty-nine desks on every one of five thousand accounts is the kind of quadratic that never
+   * shows up on a test fixture and arrives with the first real shuffle.
+   */
+  let pinnedTaken = 0
+
+  /*
    * Within a day that is still under quota, the collector's EMPTIEST day wins — counting what is
    * already in their diary, so a Monday holding 38 of 40 is skipped rather than topped up. Ties
    * go to the earliest, which is what keeps the firm's ladder meaningful: the queue is dealt
@@ -317,11 +376,38 @@ export function planHandOut(input: PlanInput): HandOutPlan {
       continue
     }
 
-    const eligible = state.filter((s) => mayTake(s.c.grade, account.band))
-    if (eligible.length === 0) {
+    const graded = state.filter((s) => mayTake(s.c.grade, account.band))
+    if (graded.length === 0) {
       unplaced.push({ accountId: account.id, label: account.label, reason: 'no_one_graded' })
       continue
     }
+
+    /*
+     * A PIN IS A CEILING AS WELL AS A FLOOR. Somebody who has reached the number a person typed
+     * is out of the running entirely — otherwise "exactly seven" is a suggestion, and a control
+     * that does not do what it says is worse than no control.
+     *
+     * And when every eligible desk is capped out, the reason is NOT that nobody is graded for it.
+     * Reported separately because the two say opposite things to the person reading them: one
+     * means find somebody senior, the other means the numbers you set do not add up to the stack.
+     */
+    const eligible = graded.filter((s) => s.pin === null || s.taking < s.pin)
+    if (eligible.length === 0) {
+      unplaced.push({ accountId: account.id, label: account.label, reason: 'pinned_out' })
+      continue
+    }
+
+    /*
+     * Which budget is further behind. Whichever it is gets this account, unless nobody in that
+     * group can take it — a pinned junior cannot be given a major account, and the work still has
+     * to land somewhere.
+     */
+    const sharedTaken = placements.length - pinnedTaken
+    const wantPinned = pinnedBudget > 0 && (sharedBudget <= 0
+      || pinnedTaken / pinnedBudget <= sharedTaken / sharedBudget)
+    const preferPinned = wantPinned
+      ? eligible.some((s) => s.pin !== null)
+      : !eligible.some((s) => s.pin === null)
 
     /*
      * GATE 1: BOOK ROOM, and everybody with room takes a SHARE OF THE WORK PROPORTIONAL TO THE
@@ -347,6 +433,20 @@ export function planHandOut(input: PlanInput): HandOutPlan {
      * twice for the same account, and the deal stops being proportional to anything.
      */
     const byShare = [...eligible].sort((a, b) => {
+      /*
+       * The group that is behind goes first, and inside the pinned group it is whoever is
+       * furthest from their own number — so two people pinned to 7 and 30 fill together rather
+       * than one finishing before the other starts.
+       */
+      const ap = a.pin !== null
+      const bp = b.pin !== null
+      if (ap !== bp) return (ap === preferPinned) ? -1 : 1
+      if (ap && bp) {
+        const ra = a.taking / Math.max(1, a.pin as number)
+        const rb = b.taking / Math.max(1, b.pin as number)
+        if (ra !== rb) return ra - rb
+        return a.c.name < b.c.name ? -1 : 1
+      }
       /*
        * EQUAL MEANS EQUAL. With the even split on, the only thing that decides who is next is who
        * has taken least from this plan — not their ceiling, not their room, not what they are
@@ -388,6 +488,7 @@ export function planHandOut(input: PlanInput): HandOutPlan {
       s.added[day] = (s.added[day] ?? 0) + 1
       dayTotals[day] = (dayTotals[day] ?? 0) + 1
       s.taking += 1
+      if (s.pin !== null) pinnedTaken += 1
       placements.push({ accountId: account.id, userId: s.c.userId, dueOn: day, kind: account.kind })
       placed = true
       break
@@ -412,6 +513,8 @@ export function planHandOut(input: PlanInput): HandOutPlan {
       after,
       overBy: Math.max(0, excessAfter - excessBefore),
       alreadyOver: excessBefore > 0,
+      pinned: s.pin !== null,
+      pinShort: s.pin !== null && s.taking < s.pin,
     }
   })
 

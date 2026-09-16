@@ -447,6 +447,47 @@ try {
   t.ok('the window box says the rate it implies', /About [\d\s\u00a0,]+ a day across \d+ working days?/.test(modal))
 
   /*
+   * ARGUING WITH THE PLAN. A leader knows about the training course and the resignation on Friday;
+   * the distributor does not. Minus and plus set one person's number and everybody else re-shares
+   * around them — and this layer is the only one that can prove the buttons are reachable at all,
+   * because the row is a <label> for the checkbox and a nudge that ticked somebody off the
+   * hand-out instead of changing their share would look identical in source.
+   */
+  const firstRow = page.locator('[data-qa="collector-list"] label').first()
+  const takingOf = async () => Number(((await firstRow.innerText()).match(/\+(\d+)/) ?? [0, 0])[1])
+  const chosenCount = async () =>
+    Number(/(\d+) of \d+ chosen/.exec(await page.locator('body').innerText())?.[1] ?? 0)
+
+  const startTaking = await takingOf()
+  const startChosen = await chosenCount()
+  t.ok('the busiest row is taking something to argue with', startTaking > 0)
+
+  await firstRow.getByRole('button', { name: /one fewer/ }).click()
+  await page.waitForTimeout(400)
+  t.check('minus takes one off that person', await takingOf(), startTaking - 1)
+  /*
+   * The row is a <label> wrapping the checkbox, so a nudge that also toggled the tick would drop
+   * somebody out of the hand-out while appearing to adjust their share. Worth asserting and worth
+   * being honest about: Chromium does not forward label activation from a <button>, so removing
+   * the stopPropagation that guards it leaves this green — that was tried. It holds the day the
+   * row stops being a label, which is the only way this breaks.
+   */
+  t.check('...without unticking them', await chosenCount(), startChosen)
+  t.ok('...and the figure is marked as set by hand',
+    /set by hand/.test(await page.locator('body').innerText()))
+
+  await firstRow.getByRole('button', { name: /one more/ }).click()
+  await page.waitForTimeout(400)
+  t.check('plus puts it back', await takingOf(), startTaking)
+
+  /* And there is a way back to the rule for all of them at once. */
+  await page.getByRole('button', { name: 'Reset', exact: true }).click()
+  await page.waitForTimeout(400)
+  t.ok('resetting clears the hand-set figures',
+    !/set by hand/.test(await page.locator('body').innerText()))
+  t.check('...and the plan goes back to what the rule said', await takingOf(), startTaking)
+
+  /*
    * THE EVEN SPLIT, OFF BY DEFAULT. The ordinary rule gives each desk a share of the room it has,
    * which protects a nearly-full book — right for a handover and wrong for a shuffle, where the
    * firm wants it flat. So it is a box, and it starts unticked: a default that quietly ignored

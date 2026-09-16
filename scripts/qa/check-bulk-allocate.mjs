@@ -333,11 +333,18 @@ ok('...and capped rather than growing with the team', /max-h-56 overflow-y-auto/
 ok('...with the choice visible while scrolling', /of \$\{context\.collectors\.length\} chosen/.test(handOutModal))
 ok('...and a way back to just the chosen', /Show only chosen/.test(handOutModal))
 /*
- * Ordered by who is taking most. Alphabetical buries the four people the plan actually used
- * somewhere in the middle of thirty-five.
+ * BY NAME, AND IT ASSERTED THE OPPOSITE. Ordering by who is taking most was added so the four
+ * people a plan used were not buried among thirty-five, and it had to go the moment the rows
+ * became adjustable: pressing minus changes somebody's share, which changes their place in the
+ * list, which moves the row out from under the finger that pressed it. The browser check caught
+ * it by nudging a row and reading a different person's number back.
+ *
+ * Nothing is lost. This list chooses WHO is in the hand-out; the grid below already lists
+ * everybody taking work in the order the plan gave it to them.
  */
-ok('the busiest are listed first',
-  /\(taking\.get\(b\.userId\) \?\? 0\) - \(taking\.get\(a\.userId\) \?\? 0\)/.test(handOutModal))
+ok('the list holds still while it is argued with',
+  /\.sort\(\(a, b\) => a\.name\.localeCompare\(b\.name\)\)/.test(handOutModal))
+ok('...so its order cannot depend on the plan', !/taking\.get\(b\.userId\)/.test(handOutModal))
 /* Choosing nobody is now reachable, so it must read as a state rather than an empty panel. */
 ok('choosing nobody says so', /Nobody chosen, so there is nothing to plan/.test(handOutModal))
 
