@@ -289,8 +289,21 @@ export function clientPosition(input: PositionInput): ClientPosition {
    * Somebody else is in charge of the debtor's affairs, which governs whatever we had started.
    * Above `legal` deliberately — see the note on the position.
    */
+  /*
+   * TWO VOCABULARIES MATCH HERE, and the second one is the one that bit.
+   *
+   * The first half of this pattern is Swordfish's inherited wording, which is what the imported
+   * book carries. The second is the wording RAPTOR ITSELF WRITES: the finish box has an "Under
+   * administration" outcome, and recordOutcome stores that phrase as the sub-status. It matched
+   * nothing here, so an agent who ended a call by saying the debtor was in liquidation produced
+   * an account that reported to the client as "In progress" — the exact fault of showing somebody
+   * a column instead of an answer, reintroduced by our own write path.
+   *
+   * Anything this app writes into sub_status has to read back out of it. See check-call-outcome.
+   */
   if (input.underAdministration
-      || /debt\s*review|business\s*rescue|liquidat|sequestrat|deceased|estate|curator/i.test(sub)) {
+      || /debt\s*review|business\s*rescue|liquidat|sequestrat|deceased|estate|curator/i.test(sub)
+      || /under\s*administration|administration\s*order/i.test(sub)) {
     return 'under_administration'
   }
 
@@ -329,7 +342,15 @@ export function clientPosition(input: PositionInput): ClientPosition {
    * CANNOT is tested before WILL NOT, so that a stated hardship is never swallowed by a general
    * "not paying" label. Only words that actually name a hardship qualify; nothing is inferred.
    */
-  if (/unemploy|pension|hospital|business\s*closed|deceased|incapacit/i.test(sub)) return 'cannot_pay'
+  /*
+   * The second alternative is OUR OWN wording again. The finish box's "Cannot pay" outcome stores
+   * exactly that phrase, which named no hardship and so fell through to "In progress" — putting a
+   * pensioner who said they have nothing onto the same list as an account nobody has rung yet.
+   * The firm's rule is that refusing to pay and cannot pay never share a list; this was quietly
+   * breaking it from the other side.
+   */
+  if (/unemploy|pension|hospital|business\s*closed|deceased|incapacit/i.test(sub)
+      || /cannot\s*pay|can.?t\s*pay|no\s*income/i.test(sub)) return 'cannot_pay'
   /*
    * "Delinquent Payer" is the firm's inherited term and its own definition is a refusal --
    * "somebody that just doesn't pay at all, he refuses to pay". Avoiding contact is read the

@@ -1,15 +1,15 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Building2, Check, FileUp, Loader2, User } from 'lucide-react'
+import { AlertTriangle, Building2, Check, FileUp, Loader2, Scale, User } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { pdfTokens } from '../../lib/pdfText.ts'
 import {
-  parseTrace, rankContacts, sameRegistration,
-  type TraceAddress, type TraceContact, type TraceDirector, type TraceEmployment,
-  type TraceJudgment, type TraceProfile,
+  administrationReading, parseTrace, rankContacts, sameRegistration,
+  type AdministrationReading, type TraceAddress, type TraceContact, type TraceDirector,
+  type TraceEmployment, type TraceJudgment, type TraceProfile,
 } from '../../lib/traceProfile.ts'
 import { importTrace, type TraceTarget } from '../../lib/traceImport.ts'
 import { uploadDocument } from '../../lib/accountWorkspace'
-import type { AccountDirector } from '../../lib/accountStanding.ts'
+import type { AccountDirector, PractitionerKind } from '../../lib/accountStanding.ts'
 import { formatDate } from '../../data/mockData'
 
 const TODAY = new Date().toISOString().slice(0, 10)
@@ -30,16 +30,23 @@ const TODAY = new Date().toISOString().slice(0, 10)
  * already chosen. But a person on a company account can be a director, a surety or the debtor's
  * spouse, and only the collector knows which. So the question is asked, with the work done.
  */
-export function TraceUploadModal({ accountId, debtorKind, registrationNumber, directors, actor, onClose, onDone }: {
+export function TraceUploadModal({
+  accountId, debtorKind, registrationNumber, directors, hasPractitioner, actor,
+  onClose, onDone, onAddPractitioner,
+}: {
   accountId: string
   debtorKind: 'individual' | 'company'
   /** The account's own registration number, to warn when the trace is for a different company. */
   registrationNumber: string | null
   /** Who is already on the account, so a re-trace attaches to the person instead of adding them. */
   directors: AccountDirector[]
+  /** Whether somebody is already recorded, so the offer to add one is not made over the top. */
+  hasPractitioner: boolean
   actor: { id: string | null; name: string | null }
   onClose: () => void
   onDone: () => Promise<void>
+  /** Hands over to the practitioner form, carrying the office the status implies. */
+  onAddPractitioner: (kind: PractitionerKind | null) => void
 }) {
   const [busy, setBusy] = useState(false)
   const [reading, setReading] = useState(false)
@@ -49,7 +56,15 @@ export function TraceUploadModal({ accountId, debtorKind, registrationNumber, di
   const [about, setAbout] = useState<'debtor' | 'director'>('debtor')
   const [directorId, setDirectorId] = useState<string | null>(null)
   const [keepFile, setKeepFile] = useState(true)
+  /*
+   * PROPOSED, TICKED, AND STILL A TICK. The firm asked for the upload to propose the rung under a
+   * liquidation rather than to apply it — so this starts on, because the document is usually
+   * right, and stays a thing a person can turn off, because sometimes it is not.
+   */
+  const [moveRung, setMoveRung] = useState(true)
   const [done, setDone] = useState<string | null>(null)
+  /** Offered after filing, not before: the name is not on the PDF and has to be looked up. */
+  const [askPractitioner, setAskPractitioner] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   /* What is ticked. Keyed by a stable string per row so a re-render cannot shuffle the ticks. */
@@ -100,9 +115,16 @@ export function TraceUploadModal({ accountId, debtorKind, registrationNumber, di
       }
       parsed.addresses.slice(3).forEach((a) => drop.add(`a:${a.value}`))
       parsed.employment.slice(2).forEach((e) => drop.add(`e:${e.employer}:${e.designation ?? ''}`))
-      /* A row that could not be read is never ticked: nobody should store what nobody has read. */
-      parsed.judgments.filter((j) => j.unread !== null).forEach((j) => drop.add(`j:${j.caseNumber}`))
+      /*
+       * A RESIGNED DIRECTORSHIP IS NOT TICKED BUT IT IS STORED IF YOU TICK IT.
+       *
+       * The firm's instruction was to mention the active ones and let the rest be a small sign
+       * that they exist. One real profile carries thirty; ticked by default they would bury the
+       * account under somebody's CV.
+       */
+      parsed.directorships.filter((c) => c.status !== 'Active').forEach((c) => drop.add(`k:${c.name}`))
       setOff(drop)
+      setMoveRung(true)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -130,6 +152,21 @@ export function TraceUploadModal({ accountId, debtorKind, registrationNumber, di
    * so the two are compared normalised. Compared literally this would fire on every single
    * upload, which is the same as not warning at all.
    */
+  /*
+   * WHAT THE STATUS LINE MEANS, where it means anything at all.
+   *
+   * Null for "In Business", which is nearly every profile — so nearly every upload shows no
+   * proposal and costs nothing. See administrationReading.
+   */
+  const administration: AdministrationReading | null = about === 'debtor'
+    ? administrationReading(profile?.companyStatus)
+    /*
+     * NOT FROM A DIRECTOR'S PROFILE. A director being under debt review says nothing about
+     * whether the company can be collected from, and moving the account's rung on that basis
+     * would report a solvent company to its client as under administration.
+     */
+    : null
+
   const wrongCompany = profile?.kind === 'commercial'
     && registrationNumber !== null && profile.registrationNumber !== null
     && !sameRegistration(registrationNumber, profile.registrationNumber)
@@ -140,10 +177,12 @@ export function TraceUploadModal({ accountId, debtorKind, registrationNumber, di
     try {
       const chosen = {
         directors: profile.directors.filter((d) => isOn(`d:${d.idNumber ?? d.fullName}`)),
-        judgments: profile.judgments.filter((j) => isOn(`j:${j.caseNumber}`) && j.unread === null),
+        judgments: profile.judgments.filter((j) => isOn(`j:${j.caseNumber}`)),
         contacts: profile.contacts.filter((c) => isOn(`c:${c.kind}:${c.value}`)),
         addresses: profile.addresses.filter((a) => isOn(`a:${a.value}`)),
         employment: profile.employment.filter((e) => isOn(`e:${e.employer}:${e.designation ?? ''}`)),
+        directorships: profile.directorships.filter((c) => isOn(`k:${c.name}`)),
+        administration: administration !== null && moveRung ? administration : null,
       }
       const r = await importTrace({ accountId, profile, target, chosen, actor })
       /*
@@ -164,8 +203,17 @@ export function TraceUploadModal({ accountId, debtorKind, registrationNumber, di
         r.directorsUpdated > 0 ? `${r.directorsUpdated} updated` : null,
         r.judgments > 0 ? `${r.judgments} judgment${r.judgments === 1 ? '' : 's'}` : null,
         r.contacts > 0 ? `${r.contacts} contact${r.contacts === 1 ? '' : 's'}` : null,
+        r.directorships > 0 ? `${r.directorships} directorship${r.directorships === 1 ? '' : 's'}` : null,
+        r.movedTo ? `moved to ${r.movedTo}` : null,
       ].filter(Boolean)
       setDone(bits.length ? `Filed: ${bits.join(', ')}.` : 'Filed. Nothing new to add — it was all already on the account.')
+      /*
+       * AND NOW THE QUESTION THE DOCUMENT CANNOT ANSWER. A profile says a company is in final
+       * liquidation and never names the liquidator — checked end to end on a real report. So the
+       * offer to record one is made here, once the rung has moved, and only when the account does
+       * not already have somebody on file.
+       */
+      if (r.movedTo !== null && !hasPractitioner) setAskPractitioner(true)
       await onDone()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -223,6 +271,41 @@ export function TraceUploadModal({ accountId, debtorKind, registrationNumber, di
                 The account is {registrationNumber}; the profile is {profile.registrationNumber}. Check you
                 have the right PDF before you file it.
               </p>
+            </div>
+          )}
+
+          {/*
+            THE PROPOSAL. Under a liquidation the profile is saying the debt is still owed and the
+            company can no longer be collected from — the claim goes to an estate instead. That is
+            the single most consequential line on a commercial profile, and until now it was read
+            out and then thrown away.
+
+            Proposed, not applied: it changes what the client is told about this account, and the
+            person filing it is the one who can say whether the PDF is the right one.
+          */}
+          {administration !== null && (
+            <div className="rounded-xl border border-gold-300 bg-gold-50 px-3 py-2.5">
+              <p className="text-sm font-semibold text-navy-900 inline-flex items-center gap-1.5">
+                <Scale size={14} className="text-gold-600 shrink-0" />
+                This company is in {administration.status.toLowerCase()}
+              </p>
+              <p className="text-[11px] text-slate-600 mt-0.5">
+                The debt is still owed, but it can no longer be collected from the company &mdash; the
+                claim goes to the estate.
+              </p>
+              <label className="flex items-start gap-2 mt-2 text-sm text-slate-700 cursor-pointer">
+                <input type="checkbox" checked={moveRung} onChange={(e) => setMoveRung(e.target.checked)}
+                  className="mt-1 accent-[var(--c-gold-dark)] shrink-0" />
+                <span>
+                  Put the account on <strong>{administration.subStatus}</strong>
+                  <span className="block text-[11px] text-slate-500">
+                    It will report to the client as Under administration.
+                    {administration.practitionerKind && !hasPractitioner
+                      && ' You will be asked for the ' + (administration.practitionerKind === 'business_rescue'
+                        ? 'business rescue practitioner' : administration.practitionerKind) + ' afterwards.'}
+                  </span>
+                </span>
+              </label>
             </div>
           )}
 
@@ -285,19 +368,22 @@ export function TraceUploadModal({ accountId, debtorKind, registrationNumber, di
           <Found title={about === 'director' ? 'Judgments against this person' : 'Judgments'} count={profile.judgments.length}>
             {profile.judgments.map((j: TraceJudgment) => {
               const key = `j:${j.caseNumber}`
-              if (j.unread !== null) {
-                return (
-                  <p key={key} className="text-[11px] text-slate-500 py-1">
-                    <span className="text-slate-700">Case {j.caseNumber}</span> &mdash; found, but the columns
-                    could not be read cleanly, so it is not being stored. It says: &ldquo;{j.unread}&rdquo;
-                  </p>
-                )
-              }
+              /*
+                A ROW WHOSE COLUMNS COULD NOT BE SPLIT IS STILL OFFERED, in the bureau's own words.
+                It used to be shown and then dropped, which threw away the part a collector most
+                wants — who sued. The firm's view was plain: "the plaintiff is important to mention
+                as well, it's not a lot of data."
+                What is NOT done is guessing: the case type, the reason and the plaintiff stay
+                empty, and the line says it is quoting rather than reporting.
+              */
               return (
                 <Row key={key} on={isOn(key)} onToggle={() => toggle(key)}
-                  main={j.plaintiff ?? 'Plaintiff not named'}
+                  main={j.plaintiff ?? (j.unread !== null ? `As printed: “${j.unread}”` : 'Plaintiff not named')}
                   side={j.filedOn ? formatDate(j.filedOn) : '—'}
-                  note={[j.caseReason, j.caseType, `case ${j.caseNumber}`].filter(Boolean).join(' · ')} />
+                  note={[
+                    j.caseReason, j.caseType, `case ${j.caseNumber}`,
+                    j.unread !== null ? 'columns could not be read — kept as printed' : null,
+                  ].filter(Boolean).join(' · ')} />
               )
             })}
           </Found>
@@ -340,6 +426,35 @@ export function TraceUploadModal({ accountId, debtorKind, registrationNumber, di
             })}
           </Found>
 
+          {/*
+            THE OTHER COMPANIES THEY SIT ON, at the firm's instruction: "We could mention the
+            active directorships. But if there are other directorships where he's not active,
+            there can be a little sign that says there are other directors that he's not active
+            anymore."
+
+            So the active ones are ticked and the resigned ones are not — they are still here to
+            be ticked by anyone who wants them, but they do not arrive as thirty rows of somebody's
+            CV. Only stored against a person: a directorship belongs to the director, not to the
+            account.
+          */}
+          {about === 'director' && (
+            <Found title="Other companies they direct" count={profile.directorships.length}>
+              {[...profile.directorships].sort((x, y) => {
+                const xa = x.status === 'Active', ya = y.status === 'Active'
+                if (xa !== ya) return xa ? -1 : 1
+                return (y.appointedOn ?? '').localeCompare(x.appointedOn ?? '')
+              }).map((c) => {
+                const key = `k:${c.name}`
+                return (
+                  <Row key={key} on={isOn(key)} onToggle={() => toggle(key)}
+                    main={c.name}
+                    side={c.status ?? ''}
+                    note={c.appointedOn ? `appointed ${formatDate(c.appointedOn)}` : ''} />
+                )
+              })}
+            </Found>
+          )}
+
           <label className="flex items-center gap-2 text-sm text-slate-600">
             <input type="checkbox" checked={keepFile} onChange={(e) => setKeepFile(e.target.checked)}
               className="accent-[var(--c-gold-dark)]" />
@@ -348,6 +463,27 @@ export function TraceUploadModal({ accountId, debtorKind, registrationNumber, di
 
           {error && <p className="text-sm text-negative-700">{error}</p>}
           {done && <p className="text-sm text-[var(--c-green)] inline-flex items-center gap-1.5"><Check size={14} /> {done}</p>}
+
+          {/*
+            THE ONE THING THE DOCUMENT CANNOT TELL YOU. A profile that says "Final Liquidation"
+            does not name the liquidator — that is published in the Gazette and held by the
+            Master's office, and somebody has to go and look. Offered here rather than left as a
+            task, because this is the moment it is obvious that it is missing.
+          */}
+          {askPractitioner && (
+            <div className="rounded-lg border border-gold-300 bg-gold-50 px-3 py-2.5">
+              <p className="text-xs font-medium text-navy-900">Nobody is recorded to claim from</p>
+              <p className="text-[11px] text-slate-600 mt-0.5">
+                The trace does not carry the appointment &mdash; it is not on a bureau profile. Add
+                whoever was appointed, or leave it and the account will keep saying it is missing.
+              </p>
+              <button type="button"
+                onClick={() => { setAskPractitioner(false); onClose(); onAddPractitioner(administration?.practitionerKind ?? null) }}
+                className="mt-2 text-sm font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+                Add the practitioner
+              </button>
+            </div>
+          )}
 
           <div className="flex items-center justify-end gap-2 pt-1">
             {busy && <Loader2 size={15} className="animate-spin text-slate-400" />}

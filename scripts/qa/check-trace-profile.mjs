@@ -13,9 +13,10 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  normaliseRegistration, parseTrace, rankContacts, readDirectors, readJudgments,
-  sameRegistration, splitJudgmentRow, titleCase, traceDate, traceKind,
+  administrationReading, normaliseRegistration, parseTrace, rankContacts, readDirectors,
+  readJudgments, sameRegistration, splitJudgmentRow, titleCase, traceDate, traceKind,
 } from '../../src/lib/traceProfile.ts'
+import { clientPosition } from '../../src/lib/clientPosition.ts'
 
 let pass = 0
 const failures = []
@@ -96,10 +97,10 @@ eq('...even beside real words', titleCase('SARS VAT ASSESSMENT'), 'SARS VAT Asse
  */
 const directorTokens = [
   'ID NUMBER', 'FULL NAME', 'STATUS', 'APPOINTMENT DATE', 'CREATED DATE',
-  '8409205000085', 'THEMBA NKOSI', 'Resigned', '22-06-2021', '23-06-2021',
+  '8801015000084', 'THEMBA NKOSI', 'Resigned', '22-06-2021', '23-06-2021',
   'Page 1 of 12',
   'ID NUMBER', 'FULL NAME', 'STATUS', 'APPOINTMENT DATE', 'CREATED DATE',
-  '7510245000083', 'IAIN FOURIE', 'Active', '10-06-2024', '13-06-2024',
+  '7203045000082', 'IAIN FOURIE', 'Active', '10-06-2024', '13-06-2024',
 ]
 const dirs = readDirectors(directorTokens)
 eq('both directors are found across the page break', dirs.length, 2)
@@ -296,6 +297,109 @@ eq('...and the row still reads', wrapped.judgments[0].caseReason, 'Credit Agreem
 eq('a document that is not a bureau report is not one', parseTrace(['Dear Sir', 'We refer to the above']), null)
 eq('...and says so rather than guessing', traceKind(['INVOICE', 'Total due']), null)
 
+/* ---------- what a company's status means, and what the upload proposes ---------- */
+
+/*
+ * "In Business" is nearly every profile and must cost nothing — no proposal, no banner, no tick.
+ * A proposal on every upload is a proposal nobody reads.
+ */
+eq('a trading company prompts nothing', administrationReading('In Business'), null)
+eq('...and neither does a blank status', administrationReading(null), null)
+/*
+ * DEREGISTRATION IS DELIBERATELY NOT ADMINISTRATION. There is no estate and no practitioner — the
+ * company simply no longer exists — so proposing one would send a collector looking for somebody
+ * who was never appointed.
+ */
+eq('a deregistered company is not under administration', administrationReading('Deregistered'), null)
+
+const liq = administrationReading('Final Liquidation')
+ok('a liquidation is read', liq !== null)
+eq('...quoting what the bureau printed', liq.status, 'Final Liquidation')
+eq('...and naming the office that would be appointed', liq.practitionerKind, 'liquidator')
+eq('a sequestration names a trustee', administrationReading('Sequestrated').practitionerKind, 'trustee')
+eq('business rescue names its practitioner', administrationReading('Business Rescue').practitionerKind, 'business_rescue')
+
+/*
+ * THE ROUND TRIP, and it is the whole reason this cannot be free text.
+ *
+ * The proposal writes a SUB-STATUS, and the rung an account reports on is derived from that
+ * string — positions are derived, never stored. A status of 'FINLIQ' would store perfectly and
+ * report to the client as "In progress", which is the exact fault of showing somebody a column
+ * instead of an answer.
+ */
+for (const status of ['Final Liquidation', 'Provisional Liquidation', 'Business Rescue', 'Sequestrated', 'Judicial Management']) {
+  const reading = administrationReading(status)
+  ok(`'${status}' is read as administration`, reading !== null)
+  eq(`...and the sub-status it writes reports as Under administration`,
+    clientPosition({ status: 'Active', subStatus: reading.subStatus }), 'under_administration')
+}
+
+/*
+ * PROPOSED FROM THE COMPANY'S PROFILE ONLY. A director being under debt review says nothing about
+ * whether the company can be collected from; moving the account's rung on that basis would report
+ * a solvent company to its client as under administration.
+ */
+ok('the rung is never proposed off a director\'s profile',
+  /about === 'debtor'\s*\n?\s*\? administrationReading\(profile\?\.companyStatus\)/.test(modal))
+/* Proposed, not applied: it changes what the client is told. */
+ok('the proposal is a tick, not an act', /checked=\{moveRung\}/.test(modal))
+ok('...and the screen says what the client will then read',
+  /It will report to the client as Under administration/.test(modal))
+ok('the importer only moves the rung when it was accepted',
+  /administration !== null && moveRung \? administration : null/.test(modal))
+ok('...and says so on the timeline', /Account moved to \$\{r\.movedTo\}/.test(importer))
+/*
+ * AND THEN THE ONE QUESTION THE DOCUMENT CANNOT ANSWER. A profile that says "Final Liquidation"
+ * does not name the liquidator — checked end to end on a real report, where the only "Trustee Of"
+ * field was a directorship. The firm asked for exactly this: "Add the practitioner or look for
+ * the practitioner."
+ */
+ok('the upload then asks who to claim from', /Nobody is recorded to claim from/.test(modal))
+ok('...only when nobody is on file', /r\.movedTo !== null && !hasPractitioner/.test(modal))
+ok('...carrying the office the status implied',
+  /onAddPractitioner\(administration\?\.practitionerKind \?\? null\)/.test(modal))
+
+/* ---------- a judgment nobody could read is still a judgment ---------- */
+
+/*
+ * THE PLAINTIFF IS THE PART WORTH HAVING, and it used to be the part thrown away: a row whose
+ * columns could not be split was shown and then dropped. It is a handful of characters, and the
+ * firm's view was plain — "the plaintiff is important to mention as well, it's not a lot of data".
+ *
+ * So the row is kept in the bureau's own words and the columns stay null.
+ */
+ok('the row is kept as printed', /add column if not exists source_text text/.test(schema))
+ok('...and the column says it is not a plaintiff',
+  /comment on column public\.account_judgments\.source_text/.test(schema))
+ok('the importer stores it only for a row it could not read', /source_text: j\.unread/.test(importer))
+ok('the upload offers it rather than dropping it', /As printed|could not be read cleanly/.test(modal))
+
+/* ---------- the other companies a director sits on ---------- */
+
+/*
+ * THE FIRM'S OWN SHAPE: "We could mention the active directorships. But if there are other
+ * directorships where he's not active, there can be a little sign that says there are other
+ * directors that he's not active anymore."
+ */
+ok('a director\'s other companies have a table',
+  /create table if not exists public\.account_director_companies/.test(schema))
+ok('...hung off the director, not the account',
+  /director_id uuid not null references public\.account_directors/.test(schema))
+ok('...recording whether they are still there',
+  /create table if not exists public\.account_director_companies[\s\S]{0,700}status text check \(status in \('Active', 'Resigned'\)\)/.test(schema))
+ok('...and a re-import cannot duplicate one', /unique \(director_id, company_name\)/.test(schema))
+/*
+ * ONLY EVER AGAINST A PERSON. Filed against the account a directorship would read as a company
+ * the DEBTOR owns — a different and much stronger claim than the document makes.
+ */
+ok('directorships are stored against the person',
+  /chosen\.directorships\.length > 0 && aboutDirector !== null/.test(importer))
+ok('the upload offers them only on a person\'s profile',
+  /about === 'director' && \(\s*\n?\s*<Found title="Other companies they direct"/.test(modal))
+/* Resigned ones are not ticked: one real profile carries thirty, and they would bury the account. */
+ok('a resigned directorship is not ticked by default',
+  /directorships\.filter\(\(c\) => c\.status !== 'Active'\)\.forEach/.test(modal))
+
 /* ---------- a judgment against a director is not against the company ---------- */
 
 /*
@@ -342,9 +446,18 @@ ok('an existing director is matched on their ID number',
   /directors\.find\(\(d\) => d\.idNumber === parsed\.idNumber\)/.test(modal))
 /* Nothing is stored until somebody has read it: a bureau profile is a third party's record. */
 ok('nothing is filed until the button is pressed', /File what is ticked/.test(modal))
-ok('a row that could not be read is never ticked',
-  /j\.unread !== null\)\.forEach\(\(j\) => drop\.add/.test(modal))
-ok('...and is refused even if it somehow were', /isOn\(`j:\$\{j\.caseNumber\}`\) && j\.unread === null/.test(modal))
+/*
+ * A ROW THAT COULD NOT BE READ IS KEPT, NOT DROPPED — but it is quoted, never reported.
+ *
+ * It used to be shown on screen and then thrown away, and the plaintiff went with it. The row is
+ * now offered like any other; what stays empty is the three columns nobody could split, and the
+ * line says it is quoting the bureau rather than stating a fact.
+ */
+ok('an unreadable row is still offered', /As printed: /.test(modal))
+ok('...marked as quoted rather than read', /columns could not be read — kept as printed/.test(modal))
+ok('...with its columns left empty, not guessed',
+  /caseType: null, caseReason: null, plaintiff: null, unread: text/.test(
+    readFileSync(new URL('../../src/lib/traceProfile.ts', import.meta.url), 'utf8')))
 /*
  * FILING A TRACE CHARGES NOTHING. The search is Annexure B item 4(c) and is charged on the Trace
  * button where it is run; charging again for filing the PDF would put a fee on the debtor's

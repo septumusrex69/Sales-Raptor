@@ -14,7 +14,8 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  PRACTITIONER_KINDS, judgmentSummary, practitionerLabel, practitionerMeaning, sortDirectors,
+  PRACTITIONER_KINDS, directorshipSummary, judgmentSummary, practitionerLabel,
+  practitionerMeaning, sortDirectors,
 } from '../../src/lib/accountStanding.ts'
 
 let pass = 0
@@ -23,8 +24,13 @@ const ok = (name, actual) => {
   if (actual === true) { pass += 1; return }
   failures.push(`${name}\n    expected true\n    got      ${JSON.stringify(actual)}`)
 }
+/*
+ * Compared by VALUE, not by identity. Object.is on two equal arrays is false, so an assertion
+ * about a list failed while printing two identical lines — which reads as a broken check rather
+ * than a broken list, and is the fastest way to teach somebody to stop trusting the output.
+ */
 const eq = (name, actual, expected) => {
-  if (Object.is(actual, expected)) { pass += 1; return }
+  if (JSON.stringify(actual) === JSON.stringify(expected)) { pass += 1; return }
   failures.push(`${name}\n    expected ${JSON.stringify(expected)}\n    got      ${JSON.stringify(actual)}`)
 }
 
@@ -32,6 +38,8 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
 const schema = read('../../supabase/schema.sql')
 const book = read('../../src/lib/accountBook.ts')
 const detail = read('../../src/pages/accounts/AccountDetail.tsx')
+const practitionerModal = read('../../src/pages/accounts/PractitionerModal.tsx')
+const standingData = read('../../src/lib/accountStandingData.ts')
 
 /* ---------- the practitioner: who to deal with instead of the debtor ---------- */
 
@@ -107,7 +115,8 @@ ok('the table is not readable by the world',
 
 const J = (over) => ({
   id: 'x', accountId: 'a', caseNumber: 'c', caseType: null, caseReason: null, plaintiff: null,
-  filedOn: null, amount: null, source: 'xds', recordedAt: '2026-01-01T00:00:00Z', ...over,
+  filedOn: null, amount: null, sourceText: null, source: 'xds',
+  recordedAt: '2026-01-01T00:00:00Z', ...over,
 })
 
 const none = judgmentSummary([])
@@ -142,7 +151,7 @@ eq('...but still counts', undated.count, 1)
 
 const D = (fullName, status) => ({
   id: fullName, accountId: 'a', idNumber: null, fullName, status, appointedOn: null,
-  source: 'xds', tracedAt: null,
+  source: 'xds', tracedAt: null, companies: [],
 })
 /*
  * ACTIVE FIRST, THEN BY NAME. One real profile carries six directors of whom four have resigned.
@@ -172,6 +181,49 @@ eq('sorting leaves the caller\'s list alone', original[0].fullName, 'B')
  */
 eq('an unknown status does not rank as active',
   sortDirectors([D('Abel Unknown', null), D('Zanele Active', 'Active')])[0].fullName, 'Zanele Active')
+
+/*
+ * A JUDGMENT NOBODY COULD PARSE IS STILL A JUDGMENT. It counts, and it is named separately so the
+ * screen can say which ones are quoted rather than read — and so nothing ever reports on a
+ * plaintiff that was never established.
+ */
+const quoted = judgmentSummary([
+  J({ id: 'a', caseNumber: '1/2024', plaintiff: 'SARS', amount: 100, filedOn: '2024-01-01' }),
+  J({ id: 'b', caseNumber: '2/2024', plaintiff: null, sourceText: 'SOMETHING NOBODY SPLIT', filedOn: '2024-02-01' }),
+])
+eq('an unread judgment still counts', quoted.count, 2)
+eq('...and is counted as unread', quoted.unread, 1)
+/* A row that WAS read carries no quoted text, so it must never be counted among them. */
+eq('...while a row that read cleanly is not',
+  judgmentSummary([J({ plaintiff: 'SARS', sourceText: 'anything' })]).unread, 0)
+
+/* ---------- the other companies a director sits on ---------- */
+
+const K = (companyName, status, appointedOn) => ({
+  id: companyName, directorId: 'd', companyName, status, appointedOn, registrationNumber: null,
+})
+/*
+ * THE FIRM'S OWN SHAPE: "We could mention the active directorships. But if there are other
+ * directorships where he's not active, there can be a little sign that says there are other
+ * directors that he's not active anymore."
+ *
+ * So the live ones are NAMED — those are companies that could be approached — and the rest are a
+ * count. One real profile carries thirty; listed in full they bury the account under a CV.
+ */
+const held = directorshipSummary([
+  K('Marico Civils CC', 'Resigned', '2011-08-15'),
+  K('Kopano Freight Services', 'Active', '2019-04-02'),
+  K('Vaalkop Transport', 'Resigned', '2015-06-30'),
+  K('Setlogelo Holdings', 'Active', '2023-01-10'),
+])
+eq('the live directorships are named', held.active.map((c) => c.companyName),
+  ['Setlogelo Holdings', 'Kopano Freight Services'])
+eq('...newest appointment first, because that is the live one', held.active[0].companyName, 'Setlogelo Holdings')
+eq('...and the rest are a count, not a list', held.resigned, 2)
+/* An unknown status is not Active — it must not be named as a company that can be approached. */
+eq('an unknown status is counted, not named', directorshipSummary([K('Somewhere', null, null)]).active.length, 0)
+eq('...but it is still counted', directorshipSummary([K('Somewhere', null, null)]).resigned, 1)
+eq('nobody with directorships shows nothing', directorshipSummary([]), { active: [], resigned: 0 })
 
 /* ---------- and the collector can see all of it ---------- */
 
@@ -225,6 +277,41 @@ ok('the panel says not to deal with the debtor',
  * Until then the panel shows the rows and lets a collector read them. See BACKLOG.
  */
 ok('the judgments are shown as rows, not as a score', /Judgments against them/.test(detail))
+/* The quoted rows are quoted on screen too, never dressed up as a plaintiff. */
+ok('an unread judgment is shown in the bureau\'s own words', /As printed: &ldquo;\{j\.sourceText\}/.test(detail))
+ok('...only where nothing was read from it', /j\.plaintiff === null && j\.sourceText !== null/.test(detail))
+
+/* ---------- the directorships, and the little sign ---------- */
+
+ok('a director carries their other companies', /<Directorships companies=\{d\.companies\}/.test(detail))
+ok('...naming the live ones', /Also directs \{named\.map/.test(detail))
+/*
+ * BUT NOT ALL OF THEM. One real director on the firm's own book actively directs twenty-five
+ * companies; named in full they take more room than the rest of the panel and the point of naming
+ * them is lost. The newest few are named — those are the live concerns — and the rest are a count.
+ */
+ok('...capped, with the rest counted', /const named = active\.slice\(0, NAME_AT_MOST\)/.test(detail))
+ok('...and the overflow said out loud', /\$\{unnamed\} more/.test(detail))
+ok('...and counting the rest', /has resigned from.{0,40}\{resigned\}/s.test(detail))
+ok('a director with none shows nothing', /if \(companies\.length === 0\) return null/.test(detail))
+
+/* ---------- somebody can actually record the practitioner ---------- */
+
+/*
+ * IT IS NOT ON THE PDF. A profile that says "Final Liquidation" does not name the liquidator —
+ * that is published in the Gazette and held by the Master's office. So the fields exist, the
+ * warning names the gap, and this is where a person fills it.
+ */
+ok('there is a form for it', /export function PractitionerModal/.test(practitionerModal))
+ok('...offering each office by name', /PRACTITIONER_KINDS\.map/.test(practitionerModal))
+ok('...and saying where to go and look when you do not have it',
+  /Master of the[\s\S]{0,20}High Court/.test(practitionerModal))
+ok('...writing every field', /practitioner_appointed_on/.test(standingData))
+/* Clearing the kind is a correction, not an appointment ending — it must not touch the rung. */
+ok('recording a practitioner does not move the account', !/sub_status/.test(practitionerModal))
+/* A warning with no way out is a nag. The one on the panel carries the thing that clears it. */
+ok('the warning carries the fix', /Add the practitioner/.test(detail))
+ok('...and the panel can change one already on file', /action=\{\{ label: 'Change', onClick: onPractitioner \}\}/.test(detail))
 ok('...and the total says it is a floor when one has no amount',
   /summary\.withoutAmount > 0 \? 'At least ' : ''/.test(detail))
 

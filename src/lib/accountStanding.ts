@@ -97,6 +97,8 @@ export interface AccountDirector {
   source: string
   /** When their own trace was last pulled. A trace costs money under Annexure B item 4(c). */
   tracedAt: string | null
+  /** The other companies they sit on. Empty until their own consumer trace has been filed. */
+  companies: DirectorCompany[]
 }
 
 /**
@@ -120,8 +122,36 @@ export interface AccountJudgment {
   plaintiff: string | null
   filedOn: string | null
   amount: number | null
+  /**
+   * The row as the bureau printed it, kept when its columns could not be split with certainty.
+   *
+   * A consumer report wraps its judgment cells, so the case type, the reason and the plaintiff
+   * arrive as one run of words. Where the split is not certain the judgment used to be shown and
+   * then dropped — and the PLAINTIFF went with it, which is the part a collector most wants. So
+   * the row is kept in the words it was printed in and the columns stay null.
+   *
+   * NEVER A SUBSTITUTE FOR plaintiff. It is displayed as unread, not as a value.
+   */
+  sourceText: string | null
   source: string
   recordedAt: string
+}
+
+/**
+ * Another company a director sits on, off their own consumer profile.
+ *
+ * It reads in two directions. A director who ACTIVELY runs four other companies is somebody with
+ * assets to discuss. One whose other directorships have all been resigned is somebody stepping
+ * away from things, which is worth knowing before an afternoon is spent on them.
+ */
+export interface DirectorCompany {
+  id: string
+  directorId: string
+  companyName: string
+  status: 'Active' | 'Resigned' | null
+  appointedOn: string | null
+  /** Where the bureau gives one, so the company can later be traced in its own right. */
+  registrationNumber: string | null
 }
 
 export interface AccountStanding {
@@ -148,6 +178,31 @@ export function sortDirectors(directors: AccountDirector[]): AccountDirector[] {
 }
 
 /**
+ * What to show of a director's other directorships.
+ *
+ * THE FIRM'S OWN INSTRUCTION, in these words: "We could mention the active directorships. But if
+ * there are other directorships where he's not active, there can be a little sign that says there
+ * are other directors that he's not active anymore."
+ *
+ * So the active ones are named and the resigned ones are a count. One real profile carries thirty
+ * directorships; listed in full they would bury the account under somebody's CV, and the two that
+ * are live are the only ones a collector can do anything with.
+ */
+export interface DirectorshipSummary {
+  /** Named, newest appointment first. These are companies that could actually be approached. */
+  active: DirectorCompany[]
+  /** Counted, not named. A sign that there is history here, not a list to read. */
+  resigned: number
+}
+
+export function directorshipSummary(companies: DirectorCompany[]): DirectorshipSummary {
+  const active = companies
+    .filter((c) => c.status === 'Active')
+    .sort((a, b) => (b.appointedOn ?? '').localeCompare(a.appointedOn ?? ''))
+  return { active, resigned: companies.filter((c) => c.status !== 'Active').length }
+}
+
+/**
  * What the judgments add up to, as facts and nothing more.
  *
  * DELIBERATELY NOT A SCORE. The firm has said this data will feed an internal likelihood of
@@ -164,16 +219,25 @@ export interface JudgmentSummary {
   total: number
   /** How many carry no amount, so the total can say it is a floor rather than the figure. */
   withoutAmount: number
+  /**
+   * How many are on file in the bureau's own words because their columns could not be split.
+   *
+   * They COUNT — a judgment nobody could parse is still a judgment — but they cannot be reported
+   * on by plaintiff or reason, and the screen says which ones those are.
+   */
+  unread: number
 }
 
 export function judgmentSummary(judgments: AccountJudgment[]): JudgmentSummary {
   let total = 0
   let withoutAmount = 0
+  let unread = 0
   let newest: string | null = null
   for (const j of judgments) {
     if (j.amount === null) withoutAmount += 1
     else total += j.amount
+    if (j.sourceText !== null && j.plaintiff === null) unread += 1
     if (j.filedOn && (newest === null || j.filedOn > newest)) newest = j.filedOn
   }
-  return { count: judgments.length, newest, total, withoutAmount }
+  return { count: judgments.length, newest, total, withoutAmount, unread }
 }

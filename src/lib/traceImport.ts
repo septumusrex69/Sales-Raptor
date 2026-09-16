@@ -17,7 +17,11 @@
  */
 import { supabase } from './supabase'
 import { addNote } from './accountWorkspace'
-import type { TraceAddress, TraceContact, TraceDirector, TraceEmployment, TraceJudgment, TraceProfile } from './traceProfile.ts'
+import { setSubStatus } from './accountStandingData.ts'
+import type {
+  AdministrationReading, TraceAddress, TraceContact, TraceDirector, TraceEmployment, TraceJudgment,
+  TraceProfile,
+} from './traceProfile.ts'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON from PostgREST. */
 
@@ -37,6 +41,16 @@ export interface TraceSelection {
   contacts: TraceContact[]
   addresses: TraceAddress[]
   employment: TraceEmployment[]
+  /** The other companies this person sits on. Only ever off their own consumer profile. */
+  directorships: { name: string; status: string | null; appointedOn: string | null }[]
+  /**
+   * Put the account on the rung the profile says it belongs on.
+   *
+   * PROPOSED BY THE SCREEN AND CONFIRMED BY A PERSON — never read straight off the document. It
+   * changes what the client is told about this account, and "a PDF said so" is not an answer to
+   * "why does this now report as under administration".
+   */
+  administration: AdministrationReading | null
 }
 
 export interface TraceImportResult {
@@ -45,10 +59,16 @@ export interface TraceImportResult {
   contacts: number
   /** Directors already on the account whose row was refreshed rather than added. */
   directorsUpdated: number
+  /** Other companies recorded against the person the trace was for. */
+  directorships: number
+  /** The rung the account was moved to, where the reader proposed one and it was accepted. */
+  movedTo: string | null
 }
 
 /** Nothing ticked is not an error, it is somebody looking at a profile and deciding against it. */
-const empty: TraceImportResult = { directors: 0, judgments: 0, contacts: 0, directorsUpdated: 0 }
+const empty: TraceImportResult = {
+  directors: 0, judgments: 0, contacts: 0, directorsUpdated: 0, directorships: 0, movedTo: null,
+}
 
 /**
  * A director's row, found or created, so a consumer trace has something to hang off.
@@ -158,6 +178,15 @@ export async function importTrace(input: {
       case_reason: j.caseReason,
       plaintiff: j.plaintiff,
       filed_on: j.filedOn,
+      /*
+       * THE ROW IN THE BUREAU'S OWN WORDS, where the columns could not be split.
+       *
+       * Kept only in that case. Stored on every judgment it would read as a second, competing
+       * version of fields that are already right — and the screen shows it as unread, which is a
+       * true thing to say about a row nobody could parse and a false one about a row that parsed
+       * cleanly.
+       */
+      source_text: j.unread,
       source: 'xds',
     }))
     /*
@@ -229,6 +258,39 @@ export async function importTrace(input: {
     }
   }
 
+  /* ---------- the other companies they sit on ---------- */
+  if (chosen.directorships.length > 0 && aboutDirector !== null) {
+    /*
+     * ONLY EVER AGAINST A PERSON. A directorship belongs to the director, not to the account —
+     * filed against the account it would read as a company the DEBTOR owns, which is a different
+     * and much stronger claim than the one the document makes.
+     */
+    const { data: have, error } = await supabase.from('account_director_companies')
+      .select('company_name').eq('director_id', aboutDirector)
+    if (error) throw new Error(error.message)
+    const seen = new Set((have ?? []).map((r: any) => String(r.company_name).toUpperCase()))
+    const fresh = chosen.directorships
+      .filter((c) => !seen.has(c.name.toUpperCase()))
+      .map((c) => ({
+        director_id: aboutDirector,
+        company_name: c.name,
+        status: c.status === 'Active' || c.status === 'Resigned' ? c.status : null,
+        appointed_on: c.appointedOn,
+        source: 'xds',
+      }))
+    if (fresh.length > 0) {
+      const ins = await supabase.from('account_director_companies').insert(fresh)
+      if (ins.error) throw new Error(ins.error.message)
+      result.directorships = fresh.length
+    }
+  }
+
+  /* ---------- the rung, where a person accepted the proposal ---------- */
+  if (chosen.administration !== null) {
+    await setSubStatus(accountId, chosen.administration.subStatus)
+    result.movedTo = chosen.administration.subStatus
+  }
+
   /* ---------- when this person was last traced ---------- */
   if (aboutDirector !== null) {
     /*
@@ -268,7 +330,13 @@ export function traceNote(profile: TraceProfile, target: TraceTarget, r: TraceIm
   if (r.directorsUpdated > 0) bits.push(`${r.directorsUpdated} updated`)
   if (r.judgments > 0) bits.push(`${r.judgments} judgment${r.judgments === 1 ? '' : 's'}`)
   if (r.contacts > 0) bits.push(`${r.contacts} contact${r.contacts === 1 ? '' : 's'}`)
+  if (r.directorships > 0) bits.push(`${r.directorships} other directorship${r.directorships === 1 ? '' : 's'}`)
   const found = bits.length > 0 ? bits.join(', ') : 'nothing taken from it'
   const status = profile.companyStatus ? ` Status at CIPC: ${profile.companyStatus}.` : ''
-  return `Trace filed for ${who}${profile.enquiredOn ? `, pulled ${profile.enquiredOn}` : ''} — ${found}.${status}`
+  /*
+   * THE RUNG CHANGE IS NAMED, not left to be inferred from the status line. It is the one part of
+   * an import that changes what the client is told, so the timeline says it in its own sentence.
+   */
+  const moved = r.movedTo ? ` Account moved to ${r.movedTo}.` : ''
+  return `Trace filed for ${who}${profile.enquiredOn ? `, pulled ${profile.enquiredOn}` : ''} — ${found}.${status}${moved}`
 }

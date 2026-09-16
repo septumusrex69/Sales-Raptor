@@ -3146,3 +3146,55 @@ create unique index if not exists account_judgments_unique_case
 -- Who paid for the trace, beside when it was pulled.
 alter table public.account_directors
   add column if not exists traced_by uuid references public.profiles (id);
+
+-- The row as the bureau printed it, kept when its columns could not be split.
+--
+-- A consumer report prints judgments as a table whose cells wrap, so the case type, the reason and
+-- the plaintiff arrive as one run of words. Where that run cannot be split with certainty, the
+-- judgment used to be shown and then dropped -- and the PLAINTIFF went with it, which is the part
+-- a collector most wants: who sued, and are they still owed.
+--
+-- So the row is kept, with the words it was printed in, and the columns stay null rather than
+-- being guessed at. It is a handful of characters per judgment and it is the difference between
+-- "there is a judgment we could not read" and nothing at all.
+alter table public.account_judgments add column if not exists source_text text;
+
+comment on column public.account_judgments.source_text is
+  'The judgment row as the bureau printed it, kept when the columns could not be split with '
+  'certainty. Never a substitute for plaintiff -- it is shown as unread, not as a value.';
+
+-- The other companies a director sits on.
+--
+-- Off their own consumer profile, which lists every directorship they hold or held. It matters in
+-- two directions: a director who ACTIVELY runs four other companies is somebody with assets to
+-- discuss, and one whose other directorships have all been resigned is somebody stepping away
+-- from things -- which is worth knowing before an afternoon is spent on them.
+--
+-- The firm's instruction: mention the active ones, and let the rest be a small sign that they
+-- exist rather than a list nobody reads.
+create table if not exists public.account_director_companies (
+  id uuid primary key default gen_random_uuid(),
+  director_id uuid not null references public.account_directors (id) on delete cascade,
+  company_name text not null,
+  -- Active or Resigned, as the bureau reports it. Only the active ones are shown by name.
+  status text check (status in ('Active', 'Resigned')),
+  appointed_on date,
+  -- Set where the bureau gives one, so a company can later be traced in its own right.
+  registration_number text,
+  source text not null default 'xds',
+  created_at timestamptz not null default now(),
+  unique (director_id, company_name)
+);
+
+create index if not exists account_director_companies_director_idx
+  on public.account_director_companies (director_id, status);
+
+alter table public.account_director_companies enable row level security;
+
+drop policy if exists account_director_companies_read on public.account_director_companies;
+create policy account_director_companies_read on public.account_director_companies
+  for select to authenticated using (true);
+
+drop policy if exists account_director_companies_write on public.account_director_companies;
+create policy account_director_companies_write on public.account_director_companies
+  for all to authenticated using (true) with check (true);

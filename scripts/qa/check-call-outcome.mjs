@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs'
 import {
   CALL_OUTCOMES, CALL_OUTCOME_ORDER, needsPromise, needsWords,
 } from '../../src/lib/callOutcome.ts'
-import { CLIENT_POSITIONS } from '../../src/lib/clientPosition.ts'
+import { CLIENT_POSITIONS, clientPosition } from '../../src/lib/clientPosition.ts'
 import { DIARY_KINDS } from '../../src/lib/diaryPriority.ts'
 
 let pass = 0
@@ -30,6 +30,28 @@ ok('every outcome is offered', CALL_OUTCOME_ORDER.length === Object.keys(CALL_OU
 ok('no outcome is offered twice', new Set(CALL_OUTCOME_ORDER).size === CALL_OUTCOME_ORDER.length)
 ok('every outcome lands on a real position',
   CALL_OUTCOME_ORDER.every((k) => CALL_OUTCOMES[k].position in CLIENT_POSITIONS))
+
+/*
+ * THE ROUND TRIP, which is the only version of this that is worth anything.
+ *
+ * An outcome carries a `position` AND the sub-status recordOutcome writes to the account. Nothing
+ * downstream ever reads `position` again: the account screen, the client report and every count
+ * derive the rung from the SUB-STATUS. So the two can disagree, silently, for as long as nobody
+ * opens one of these accounts and reads the tile.
+ *
+ * Two of them did. "Under administration" and "Cannot pay" both derived to 'in_progress' — an
+ * agent who ended a call by saying the debtor was in liquidation, or that a pensioner had
+ * nothing, produced an account that reported to the client as though nobody had rung it yet. The
+ * second one broke the firm's own rule that refusing to pay and cannot pay never share a list.
+ *
+ * Asserting `position` against itself would have passed throughout.
+ */
+for (const key of CALL_OUTCOME_ORDER) {
+  const outcome = CALL_OUTCOMES[key]
+  check(`'${outcome.label}' reports as the rung it claims`,
+    clientPosition({ status: 'Active', subStatus: outcome.subStatus }),
+    outcome.position)
+}
 ok('every outcome suggests a real diary kind',
   CALL_OUTCOME_ORDER.every((k) => CALL_OUTCOMES[k].suggests in DIARY_KINDS))
 ok('no two outcomes read the same to an agent',

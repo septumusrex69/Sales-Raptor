@@ -39,10 +39,12 @@ import {
 } from '../../lib/clientPosition.ts'
 import { clientLine, type ClientLine } from '../../lib/accountNarrative.ts'
 import {
-  judgmentSummary, practitionerLabel, practitionerMeaning, type AccountStanding,
+  directorshipSummary, judgmentSummary, practitionerLabel, practitionerMeaning,
+  type AccountStanding, type DirectorCompany, type PractitionerKind,
 } from '../../lib/accountStanding.ts'
 import { fetchStanding } from '../../lib/accountStandingData.ts'
 import { TraceUploadModal } from './TraceUploadModal'
+import { PractitionerModal } from './PractitionerModal'
 import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
 import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
@@ -131,6 +133,8 @@ export function AccountDetail() {
   const [smsOpen, setSmsOpen] = useState(false)
   const [diariseOpen, setDiariseOpen] = useState(false)
   const [tracing, setTracing] = useState(false)
+  /** Null = closed. A kind inside it is the office the trace's status line implied. */
+  const [practitioner, setPractitioner] = useState<{ suggest: PractitionerKind | null } | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -406,7 +410,8 @@ export function AccountDetail() {
    */
   const standingPanel = (
     <StandingPanel account={account} standing={standing} position={position}
-      onUpload={() => setTracing(true)} />
+      onUpload={() => setTracing(true)}
+      onPractitioner={() => setPractitioner({ suggest: null })} />
   )
   const positionPanel = (
     <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0}
@@ -712,8 +717,20 @@ export function AccountDetail() {
           debtorKind={account.debtorKind}
           registrationNumber={account.debtorKind === 'company' ? account.debtorIdNumber : null}
           directors={standing.directors}
+          hasPractitioner={account.practitionerKind !== null || account.practitionerName !== null}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
           onClose={() => setTracing(false)}
+          onDone={reload}
+          onAddPractitioner={(kind) => setPractitioner({ suggest: kind })}
+        />
+      )}
+
+      {/* Who to deal with when it is no longer the debtor. Typed by a person — it is not on a PDF. */}
+      {practitioner && (
+        <PractitionerModal
+          account={account}
+          suggestKind={practitioner.suggest}
+          onClose={() => setPractitioner(null)}
           onDone={reload}
         />
       )}
@@ -1541,13 +1558,15 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
  *
  * Absent on nearly every account, and silent when absent.
  */
-function StandingPanel({ account, standing, position, onUpload }: {
+function StandingPanel({ account, standing, position, onUpload, onPractitioner }: {
   account: DebtorAccount
   standing: AccountStanding
   /** The rung the account sits on, so a missing practitioner can be a warning only when it is one. */
   position: DeskPosition
   /** Read a bureau PDF onto the account. See TraceUploadModal. */
   onUpload: () => void
+  /** Record who to deal with instead of the debtor. Not on any PDF — see PractitionerModal. */
+  onPractitioner: () => void
 }) {
   const kindLabel = practitionerLabel(account.practitionerKind)
   const hasPractitioner = !!(kindLabel || account.practitionerName || account.practitionerFirm)
@@ -1601,6 +1620,11 @@ function StandingPanel({ account, standing, position, onUpload }: {
             Somebody else is administering this debtor&rsquo;s affairs, and the account does not say
             who. The claim cannot be submitted until it does.
           </p>
+          {/* The warning carries the thing that clears it. A notice with no way out is a nag. */}
+          <button type="button" onClick={onPractitioner}
+            className="mt-1.5 text-[11px] font-medium text-[var(--c-steel)] hover:underline">
+            Add the practitioner
+          </button>
         </div>
       )}
 
@@ -1617,7 +1641,8 @@ function StandingPanel({ account, standing, position, onUpload }: {
             <Field label="Their reference" value={account.practitionerReference} />
             <Field label="Phone" value={account.practitionerPhone} />
             <Field label="Email" value={account.practitionerEmail} />
-            <Field label="Appointed" value={account.practitionerAppointedOn ? formatDate(account.practitionerAppointedOn) : null} />
+            <Field label="Appointed" value={account.practitionerAppointedOn ? formatDate(account.practitionerAppointedOn) : null}
+              action={{ label: 'Change', onClick: onPractitioner }} />
           </div>
         </div>
       )}
@@ -1640,6 +1665,7 @@ function StandingPanel({ account, standing, position, onUpload }: {
                 }`}>
                   {d.status ?? 'Unknown'}
                 </span>
+                <Directorships companies={d.companies} />
               </li>
             ))}
           </ul>
@@ -1684,12 +1710,66 @@ function StandingPanel({ account, standing, position, onUpload }: {
                     `case ${j.caseNumber}`,
                   ].filter(Boolean).join(' \u00b7 ')}
                 </p>
+                {/*
+                  THE ROW AS THE BUREAU PRINTED IT, where its columns could not be split. Shown
+                  as the bureau's own words rather than dressed up as a plaintiff — a judgment
+                  nobody could parse is still a judgment, and who sued is the part worth having.
+                */}
+                {j.plaintiff === null && j.sourceText !== null && (
+                  <p className="text-[11px] text-slate-500 italic">
+                    As printed: &ldquo;{j.sourceText}&rdquo;
+                  </p>
+                )}
               </li>
             ))}
           </ul>
         </div>
       )}
     </Card>
+  )
+}
+
+/**
+ * The other companies a director sits on.
+ *
+ * THE FIRM'S OWN SHAPE FOR THIS: "We could mention the active directorships. But if there are
+ * other directorships where he's not active, there can be a little sign that says there are other
+ * directors that he's not active anymore."
+ *
+ * So the live ones are named — those are companies that could actually be approached — and the
+ * resigned ones are one short line. One real profile carries thirty directorships; listed in full
+ * they bury the account under somebody's CV and the two that matter are lost in it.
+ */
+/*
+ * FOUR NAMES IS A SENTENCE; TWENTY-FIVE IS A WALL.
+ *
+ * One real director on the firm's own book actively directs twenty-five companies. Named in full
+ * they take more vertical space than the whole rest of the panel, and the point of naming them —
+ * that here are companies somebody could actually approach — is lost in the reading. The newest
+ * appointments are named because those are the live concerns, and the rest are a count.
+ */
+const NAME_AT_MOST = 4
+
+function Directorships({ companies }: { companies: DirectorCompany[] }) {
+  if (companies.length === 0) return null
+  const { active, resigned } = directorshipSummary(companies)
+  const named = active.slice(0, NAME_AT_MOST)
+  const unnamed = active.length - named.length
+  return (
+    <span className="block w-full mt-0.5">
+      {named.length > 0 && (
+        <span className="block text-[11px] text-slate-500">
+          Also directs {named.map((c) => c.companyName).join(', ')}
+          {unnamed > 0 && ` and ${unnamed} more`}
+        </span>
+      )}
+      {resigned > 0 && (
+        <span className="block text-[11px] text-slate-400">
+          {active.length > 0 ? 'and has resigned from' : 'Has resigned from'} {resigned} other
+          {resigned === 1 ? ' company' : ' companies'}
+        </span>
+      )}
+    </span>
   )
 }
 

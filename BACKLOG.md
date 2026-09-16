@@ -129,7 +129,9 @@ What is already in the data, and worth naming now so the calibration has somewhe
 | Judgments: how many, how recent, who sued | `account_judgments` — built |
 | A judgment for tax | `account_judgments.plaintiff` = SARS. Weighs more than a trade creditor |
 | The debtor is under administration | position `under_administration`, `practitioner_kind` |
-| Company status (e.g. Final Liquidation) | read off the profile and shown on upload; **not stored** |
+| Company status (e.g. Final Liquidation) | proposed on upload; moves the account to Under administration |
+| A practitioner appointed | `practitioner_kind` — collection is restrained, not merely slow |
+| Other companies a director still runs | `account_director_companies` — somewhere else to recover from |
 | Contact Score and Risk Score | read off the profile and shown on upload; **not stored** |
 | PTP success ratio and how many were taken | `debtor_accounts.ptp_success_ratio` — imported |
 | Paid anything at all, and when | `payments_to_date`, `last_payment_at` |
@@ -161,21 +163,27 @@ director, reads it in the browser (`pdfText.ts` → `traceProfile.ts`), shows wh
 files only what is ticked. Numbers are pre-ticked by how recently the bureau saw them and how many
 other people they are linked to. See `TraceUploadModal`.
 
-Not done, in order of how much they matter:
+**The firm settled the open question: the upload PROPOSES.** A profile that reads "Final
+Liquidation" now offers a tick — put the account on Liquidation/Sequestration — and once it is
+taken, asks who to claim from. Proposed rather than applied, because it changes what the client is
+told and the person filing is the one who can say whether the PDF is the right one.
 
-1. **The company's status is shown and not stored.** A profile that reads "Final Liquidation" is
-   the strongest single line on it — the debt is owed but the company cannot be collected from —
-   and the upload shows it, puts it on the timeline, and then it is gone. It should set the
-   account's position and prompt for the practitioner, which is the field right beside it. Left
-   out deliberately: changing an account's position off a document nobody has checked is the kind
-   of automatic act that is hard to explain afterwards. It wants a decision from the firm about
-   whether the upload proposes it or does it.
-2. **A wrapped judgment row that cannot be split comes back unread.** The case type and reason are
-   matched against fixed lists (`CASE_TYPES`, `CASE_REASONS` in `traceProfile.ts`); anything else
-   is shown to the collector as found-but-unread and not stored. Add to the lists as the bureau
-   throws up new wording — do NOT make the split a guess.
-3. **Directorships on a consumer report are read and thrown away.** A director of the debtor
-   company who directs six others is a trail worth following, and there is nowhere to put it.
+One thing left, and it is maintenance rather than work:
+
+- **The case-type and case-reason vocabularies are fixed lists** (`CASE_TYPES`, `CASE_REASONS` in
+  `traceProfile.ts`). A consumer report prints judgments as a wrapped table with no marker between
+  the columns, and those two lists are what make the third column — the plaintiff — safe to read.
+  A row using wording not on the lists is kept in the bureau's own words and shown as quoted, not
+  reported. **Add to the lists as new wording turns up; do not make the split a guess.**
+
+### 6b. Setting a position by hand — STILL NOT BUILT
+
+`setSubStatus` exists but takes only the wording `administrationReading` produces, so a trace can
+move an account and a person cannot. The firm asked for this directly — "you need to be able to
+change the status on the account itself" — and it wants the firm's own list of positions in front
+of whoever is choosing, plus a reason recorded on the timeline. The write path is one line; the
+decision about which of the thirteen rungs a person may set by hand, and which are only ever
+derived, is not.
 
 ### 7. Campaigns
 

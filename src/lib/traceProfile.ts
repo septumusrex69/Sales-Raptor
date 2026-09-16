@@ -25,7 +25,65 @@
  * unread would put rubbish on an account nobody could later explain.
  */
 
+import type { PractitionerKind } from './accountStanding.ts'
+
 export type TraceKind = 'commercial' | 'consumer'
+
+/**
+ * A company status that means somebody else is now in charge of the debtor.
+ *
+ * THE MOST CONSEQUENTIAL LINE ON A COMMERCIAL PROFILE. "Final Liquidation" means the debt is
+ * still owed and the company cannot be collected from: the claim is proved in the estate, and a
+ * collector who rings the company instead has wasted the call at best.
+ *
+ * Read off the document and PROPOSED, never applied on its own. The firm asked for exactly that:
+ * "I think the upload should propose it like this under liquidation. Add the practitioner or look
+ * for the practitioner." Changing what an account reports to a client off a PDF nobody has
+ * checked is the kind of automatic act that cannot be explained afterwards.
+ */
+export interface AdministrationReading {
+  /** What the bureau printed, so the proposal can quote it back rather than paraphrase. */
+  status: string
+  /**
+   * The sub-status to write, in the FIRM'S vocabulary and not the bureau's.
+   *
+   * The account's rung is derived from this string — see clientPosition — so it has to be wording
+   * that derivation already knows. 'Final Liquidation' happens to match; something like
+   * 'FINLIQ' would store cleanly and report as In progress.
+   */
+  subStatus: string
+  /** The office that would have been appointed. Null where the status does not imply one. */
+  practitionerKind: PractitionerKind | null
+}
+
+/*
+ * Ordered, because a status can match twice: "Final Liquidation" contains neither the word
+ * sequestration nor rescue, but a longer real-world status like "Business Rescue - Liquidation
+ * Pending" contains both, and the first match should be the process actually running.
+ */
+const ADMINISTRATION: { match: RegExp; subStatus: string; practitionerKind: PractitionerKind | null }[] = [
+  { match: /business\s*rescue/i, subStatus: 'Business Rescue', practitionerKind: 'business_rescue' },
+  { match: /liquidat/i, subStatus: 'Liquidation/Sequestration', practitionerKind: 'liquidator' },
+  { match: /sequestrat/i, subStatus: 'Liquidation/Sequestration', practitionerKind: 'trustee' },
+  { match: /judicial\s*management|curator/i, subStatus: 'Under administration', practitionerKind: 'curator' },
+  { match: /deceased|estate\s*late/i, subStatus: 'Deceased estate', practitionerKind: 'executor' },
+  { match: /debt\s*review|debt\s*counsell/i, subStatus: 'Debt Review', practitionerKind: 'debt_counsellor' },
+]
+
+/**
+ * Null for 'In Business', which is the overwhelming majority and must cost nothing.
+ *
+ * DEREGISTRATION IS DELIBERATELY NOT HERE. A deregistered company is a different problem — there
+ * is no estate and no practitioner, the company simply no longer exists — and proposing a
+ * practitioner for one would send a collector looking for somebody who was never appointed.
+ */
+export function administrationReading(companyStatus: string | null | undefined): AdministrationReading | null {
+  const status = (companyStatus ?? '').trim()
+  if (!status) return null
+  const hit = ADMINISTRATION.find((a) => a.match.test(status))
+  if (!hit) return null
+  return { status, subStatus: hit.subStatus, practitionerKind: hit.practitionerKind }
+}
 
 export interface TraceDirector {
   idNumber: string | null

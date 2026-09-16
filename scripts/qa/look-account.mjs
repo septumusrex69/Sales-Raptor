@@ -197,11 +197,28 @@ const directors = [
 const judgments = [
   { id: 'j1', account_id: ACC2, case_number: '40021/2024', case_type: 'Judgement by default', case_reason: 'Credit agreement', plaintiff: 'Bosveld Plant Hire (Pty) Ltd', filed_on: '2024-10-04', amount: null, source: 'xds', recorded_at: '2026-09-16T14:31:00Z' },
   { id: 'j2', account_id: ACC2, case_number: '40990/2023', case_type: 'Judgement by default', case_reason: 'VAT', plaintiff: 'SARS', filed_on: '2023-11-08', amount: 412870.44, source: 'xds', recorded_at: '2026-09-16T14:31:00Z' },
+  /* One the reader could not split into columns: kept in the bureau's own words, never guessed. */
+  { id: 'j3', account_id: ACC2, case_number: '31188/2022', case_type: null, case_reason: null, plaintiff: null, filed_on: '2022-05-19', amount: null, source_text: 'ORDER IN TERMS OF RULE 46A MARICO CIVILS CC', source: 'xds', recorded_at: '2026-09-16T14:31:00Z' },
+]
+
+/* One active directorship and three resigned: enough to show the named list and the little sign. */
+const directorCompanies = [
+  { id: 'dc1', director_id: 'dir1', company_name: 'Kopano Freight Services (Pty) Ltd', status: 'Active', appointed_on: '2019-04-02', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dc2', director_id: 'dir1', company_name: 'Marico Civils CC', status: 'Resigned', appointed_on: '2011-08-15', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dc3', director_id: 'dir1', company_name: 'Setlogelo Holdings', status: 'Resigned', appointed_on: '2013-02-01', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dc4', director_id: 'dir1', company_name: 'Vaalkop Transport', status: 'Resigned', appointed_on: '2015-06-30', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+  /* Enough live ones to run past the cap, because one real director on the book has twenty-five. */
+  { id: 'dc5', director_id: 'dir1', company_name: 'Thekwini Plant Services', status: 'Active', appointed_on: '2021-11-08', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dc6', director_id: 'dir1', company_name: 'Lebone Energy', status: 'Active', appointed_on: '2022-03-14', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dc7', director_id: 'dir1', company_name: 'Naledi Logistics', status: 'Active', appointed_on: '2023-07-01', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dc8', director_id: 'dir1', company_name: 'Umsinga Holdings', status: 'Active', appointed_on: '2024-02-20', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dc9', director_id: 'dir1', company_name: 'Karoo Bulk Haul', status: 'Active', appointed_on: '2025-01-09', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
 ]
 
 const TABLES = {
   debtor_accounts: [account, company],
   account_directors: directors,
+  account_director_companies: directorCompanies,
   account_judgments: judgments,
   account_contacts: contacts,
   account_queries: [
