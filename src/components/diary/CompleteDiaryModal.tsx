@@ -41,6 +41,13 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
   const [error, setError] = useState<string | null>(null)
 
   const owner = users.find((u) => u.id === entry.ownerId)
+  /*
+   * Only an OPEN promise stands. One already kept or already broken is history, and offering to
+   * reuse it would book a check on a commitment that is finished.
+   */
+  const livePromise = entry.promise && entry.promise.status === 'open'
+    ? { amount: entry.promise.amount, dueOn: entry.promise.dueOn }
+    : null
 
   async function save() {
     setBusy(true); setError(null)
@@ -54,7 +61,12 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
         const r = await recordOutcome({
           accountId: entry.accountId,
           outcome: came.outcome,
-          promise: came.outcome === 'promised'
+          /*
+           * NULL WHERE THE EXISTING PROMISE IS BEING KEPT. Writing one anyway would make a second
+           * row for the same commitment — two due dates on one account, and a client report that
+           * cannot say which arrangement is the arrangement.
+           */
+          promise: came.outcome === 'promised' && (!livePromise || came.repromise)
             ? { amount: Number(came.amount.replace(/[^\d.]/g, '')), dueOn: came.dueOn }
             : null,
           words: came.words,
@@ -107,7 +119,7 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
           and moves the status, so the client's report can say something a machine derived rather
           than something nobody recorded.
         */}
-        <OutcomePicker value={came} onChange={(next) => {
+        <OutcomePicker value={came} livePromise={livePromise} onChange={(next) => {
           setCame(next)
           // The diary's own suggestion follows the answer: a promise wants checking on its date.
           if (next.outcome && next.outcome !== came.outcome) {
@@ -133,7 +145,7 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
           <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-2">
             Cancel
           </button>
-          <button type="button" onClick={() => void save()} disabled={busy || !outcomeReady(came)}
+          <button type="button" onClick={() => void save()} disabled={busy || !outcomeReady(came, !!livePromise)}
             className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-950 text-white hover:bg-navy-900 disabled:opacity-50">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
             {plan.comesBack ? 'Worked, book the next' : 'Worked, close the account'}

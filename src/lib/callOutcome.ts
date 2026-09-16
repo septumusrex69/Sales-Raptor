@@ -4,11 +4,20 @@ import type { DiaryKind } from './diaryPriority.ts'
 /**
  * What came of working an account.
  *
- * THE CLERK NEVER PICKS A STATUS. They answer one question they can answer in a tap while the
- * debtor is still on the line — what happened? — and the status follows from the answer. That is
- * the whole design, and it is what stops the book filling up with statuses nothing stands behind:
- * 58 accounts on the imported book say "Promise To Pay" and only 43 have a promise, 5 say
- * "Tracing" and none has ever been charged for a trace.
+ * THE CLERK PICKS THE POSITION, AND THE RECORD IS WRITTEN ANYWAY. Both halves matter and they
+ * were once in tension.
+ *
+ * It read as eight EVENTS — "they agreed to pay", "no answer" — because a clerk can answer "what
+ * happened?" in a tap while the debtor is still on the line, and the status followed. The firm
+ * asked for the firm's own vocabulary instead: one list, the rungs an account is reported on, no
+ * second set of words to learn. So each choice now LEADS with the rung it produces and carries
+ * the event underneath it, which is the same eight choices read the way the firm reads them.
+ *
+ * What did NOT change is that choosing one writes the record. That is what stops the book filling
+ * with statuses nothing stands behind: 58 accounts on the imported book say "Promise To Pay" and
+ * only 43 have a promise, 5 say "Tracing" and none has ever been charged for a trace. Asked
+ * directly, the firm kept it — a status is still a consequence of something recorded, never a
+ * keystroke on its own.
  *
  * A status with no record behind it cannot be followed up, cannot break, and cannot be reported
  * on. So each answer here WRITES THE RECORD — a promise with its amount and date, a dispute, a
@@ -53,16 +62,16 @@ export interface OutcomeMeta {
 
 export const CALL_OUTCOMES: Record<CallOutcome, OutcomeMeta> = {
   promised: {
-    label: 'They agreed to pay',
-    hint: 'Take the amount and the date',
+    label: 'Arranged',
+    hint: 'They agreed to pay — take the amount and the date',
     reached: true,
     position: 'arranged',
     suggests: 'promise_due',
     subStatus: 'Promise To Pay',
   },
   negotiating: {
-    label: 'Spoke to them — still talking',
-    hint: 'Reached, nothing agreed yet',
+    label: 'Negotiating',
+    hint: 'Spoke to them, nothing agreed yet',
     reached: true,
     position: 'negotiating',
     suggests: 'review',
@@ -74,7 +83,7 @@ export const CALL_OUTCOMES: Record<CallOutcome, OutcomeMeta> = {
      * a person deliberately recorded after speaking to the debtor. It is never inferred from
      * silence — somebody who does not answer the telephone has not refused anything.
      */
-    label: 'They refuse to pay',
+    label: 'Refusing to pay',
     hint: 'Reached, and the answer was no',
     reached: true,
     position: 'refusing',
@@ -82,7 +91,7 @@ export const CALL_OUTCOMES: Record<CallOutcome, OutcomeMeta> = {
     subStatus: 'Refuses to pay',
   },
   cannot_pay: {
-    label: 'They say they cannot pay',
+    label: 'Cannot pay',
     hint: 'Unemployed, pensioner, in hospital, business closed',
     reached: true,
     position: 'cannot_pay',
@@ -90,32 +99,32 @@ export const CALL_OUTCOMES: Record<CallOutcome, OutcomeMeta> = {
     subStatus: 'Cannot pay',
   },
   disputed: {
-    label: 'They dispute the account',
-    hint: 'Raises a dispute and starts the clock',
+    label: 'Disputed',
+    hint: 'They dispute it — raises a dispute and starts the clock',
     reached: true,
     position: 'disputed',
     suggests: 'dispute_chase',
     subStatus: 'Defended Matter',
   },
   no_answer: {
-    label: 'No answer',
-    hint: 'Rang out, voicemail, nobody home',
+    label: 'In progress',
+    hint: 'No answer — rang out, voicemail, nobody home',
     reached: false,
     position: 'in_progress',
     suggests: 'no_contact',
     subStatus: 'In progress',
   },
   wrong_number: {
-    label: 'Number is wrong',
-    hint: 'Needs a trace',
+    label: 'Tracing',
+    hint: 'The number is wrong — raises a trace',
     reached: false,
     position: 'tracing',
     suggests: 'trace',
     subStatus: 'Tracing',
   },
   under_administration: {
-    label: 'Debt review, deceased or liquidation',
-    hint: 'We deal with the practitioner from here',
+    label: 'Under administration',
+    hint: 'Debt review, deceased or liquidation — the practitioner from here',
     reached: false,
     position: 'under_administration',
     suggests: 'review',

@@ -29,6 +29,8 @@ export interface DiaryEntry {
   state: 'open' | 'done' | 'moved' | 'cancelled'
   source: 'manual' | 'swordfish' | 'promise' | 'dispute' | 'handover' | 'system'
   promiseId: string | null
+  /** The promise itself, where the entry is checking one. See the mapper. */
+  promise: { id: string; amount: number; dueOn: string; status: string } | null
   queryId: string | null
   doneAt: string | null
   doneBy: string | null
@@ -94,6 +96,22 @@ const toEntry = (r: any): DiaryEntry => ({
   movedReason: r.moved_reason ?? null,
   createdAt: r.created_at,
   createdBy: r.created_by ?? null,
+  /*
+   * The promise this entry is here to check, where there is one.
+   *
+   * Carried so the finish box can SHOW it rather than ask for it again. The firm's objection, and
+   * it was right: "there's already a PTP in place, why do you need to redo this?" A box that
+   * demands an amount and a date somebody already gave teaches them to retype it, and then the
+   * promise on the account and the one in the box are two different promises.
+   */
+  promise: r.promises_to_pay
+    ? {
+      id: r.promises_to_pay.id as string,
+      amount: Number(r.promises_to_pay.amount ?? 0),
+      dueOn: String(r.promises_to_pay.due_on),
+      status: String(r.promises_to_pay.status),
+    }
+    : null,
   createdByName: r.created_by_name ?? null,
 })
 
@@ -131,6 +149,7 @@ const toRow = (r: any): DiaryRow => ({
  */
 const ROW_SELECT = `
   *,
+  promises_to_pay!diary_entries_promise_id_fkey ( id, amount, due_on, status ),
   debtor_accounts!diary_entries_account_id_fkey (
     id, company_id, account_number, debtor_first_name, debtor_surname,
     capital_outstanding, status, sub_status, bucket, client_action_ask, last_action_at,

@@ -41,6 +41,19 @@ export function NextDiaryFields({ plan, onChange, ownerId, capacity, today, pres
     <div className="space-y-3">
       {plan.comesBack ? (
         <>
+          {/*
+            WHAT, THEN WHEN, and it was the other way round. The firm reads the box downwards as
+            one sentence — where the account stands, what came of it, what to do next, and only
+            then which day — and the kind is mostly already decided for you by the position, so
+            it sits with the things that set it rather than after the calendar.
+          */}
+          <FormField label="What kind of work next">
+            <select value={plan.kind} onChange={(e) => set({ kind: e.target.value as DiaryKind })} className={inputClass}>
+              {DIARY_KIND_ORDER.map((k) => <option key={k} value={k}>{DIARY_KINDS[k].label}</option>)}
+            </select>
+            <span className="block text-[11px] text-slate-400 mt-1.5">{DIARY_KINDS[plan.kind].why}</span>
+          </FormField>
+
           <div>
             <span className="block text-xs font-medium text-slate-500 mb-1.5">When it comes back</span>
             <DiaryDatePicker
@@ -58,13 +71,6 @@ export function NextDiaryFields({ plan, onChange, ownerId, capacity, today, pres
               cannot be enforced.
             </p>
           )}
-
-          <FormField label="What kind of work">
-            <select value={plan.kind} onChange={(e) => set({ kind: e.target.value as DiaryKind })} className={inputClass}>
-              {DIARY_KIND_ORDER.map((k) => <option key={k} value={k}>{DIARY_KINDS[k].label}</option>)}
-            </select>
-            <span className="block text-[11px] text-slate-400 mt-1.5">{DIARY_KINDS[plan.kind].why}</span>
-          </FormField>
         </>
       ) : (
         /*

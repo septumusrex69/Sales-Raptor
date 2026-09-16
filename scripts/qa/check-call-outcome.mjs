@@ -1,9 +1,11 @@
 /**
  * What came of working an account, and what it writes.
  *
- * THE CLERK NEVER PICKS A STATUS. They answer one question — what happened? — and the status
- * follows. These checks are what stops that collapsing back into a status dropdown, which is how
- * the imported book ended up with 58 accounts claiming a promise to pay and only 43 promises.
+ * THE CLERK PICKS THE POSITION, AND THE RECORD IS WRITTEN ANYWAY. The choices read as the firm's
+ * own rungs now, at their instruction — one vocabulary, not two — but every one of them still
+ * writes the promise, the dispute or the trace that stands behind it. These checks are what stops
+ * that half collapsing into a bare status dropdown, which is how the imported book ended up with
+ * 58 accounts claiming a promise to pay and only 43 promises.
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-call-outcome.mjs
  */
@@ -93,6 +95,22 @@ ok('a dispute raised mid-call does not charge the debtor', /charge: false/.test(
 ok('the status write is guarded at all', rec.includes('failed.length === 0'))
 ok('...and the guard comes before it', rec.indexOf('failed.length === 0') < rec.indexOf('sub_status'))
 
+/* ---------- the firm's own words on the buttons ---------- */
+
+/*
+ * EACH CHOICE LEADS WITH THE RUNG IT PRODUCES. It read as eight events — "they agreed to pay",
+ * "no answer" — and the firm asked for their own vocabulary instead: one list, the rungs an
+ * account is reported on, no second set of words to learn. The event is still there, underneath,
+ * because it is what a clerk can answer in a tap with the debtor on the line.
+ *
+ * Checked against CLIENT_POSITIONS rather than a list written out here, so the two cannot drift.
+ */
+for (const [key, meta] of Object.entries(CALL_OUTCOMES)) {
+  ok(`${key} is labelled as the position it produces`,
+    meta.label === CLIENT_POSITIONS[meta.position].label)
+  ok(`...and still says what happened`, (meta.hint ?? '').length > 0)
+}
+
 /* ---------- and it is wired where the work happens ---------- */
 
 for (const file of ['CompleteDiaryModal', 'DiaryWorkBar']) {
@@ -100,7 +118,24 @@ for (const file of ['CompleteDiaryModal', 'DiaryWorkBar']) {
   ok(`${file} asks what came of it`, /<OutcomePicker/.test(src))
   ok(`${file} records it before booking the next date`,
     src.indexOf('recordOutcome({') < src.indexOf('await workEntry({'))
-  ok(`${file} will not save a half-answered outcome`, /!outcomeReady\(came\)/.test(src))
+  ok(`${file} will not save a half-answered outcome`, /!outcomeReady\(came, /.test(src))
+  /*
+   * AND IT IS TOLD WHETHER A PROMISE ALREADY STANDS. Without that argument outcomeReady goes on
+   * demanding an amount and a date the account already has — which is the firm's objection,
+   * "there's already a PTP in place, why do you need to redo this?" — and the box cannot be
+   * finished without retyping it.
+   */
+  ok(`${file} knows a promise already stands`, /outcomeReady\(came, !!livePromise\)/.test(src))
+  /*
+   * THE WRITE MUST NOT MAKE A SECOND PROMISE. Keeping the existing one and writing a new row for
+   * it anyway would leave two due dates on one account and a client report that cannot say which
+   * arrangement is the arrangement.
+   */
+  ok(`${file} does not re-record a promise it is keeping`,
+    /promise: came\.outcome === 'promised' && \(!livePromise \|\| came\.repromise\)/.test(src))
+  /* Only an OPEN promise stands: one already kept or broken is history. */
+  ok(`${file} only reuses a promise that is still open`,
+    /entry\.promise\.status === 'open'/.test(src))
   ok(`${file} lets the answer choose the next diary kind`, /CALL_OUTCOMES\[next\.outcome/.test(src))
 }
 

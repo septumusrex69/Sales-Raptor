@@ -5,6 +5,8 @@ import {
 
 export interface OutcomeChoice {
   outcome: CallOutcome | null
+  /** Set when the debtor made a NEW commitment, so the existing one is not simply reused. */
+  repromise?: boolean
   /** Only when they agreed to pay. */
   amount: string
   dueOn: string
@@ -15,8 +17,10 @@ export interface OutcomeChoice {
 export const EMPTY_OUTCOME: OutcomeChoice = { outcome: null, amount: '', dueOn: '', words: '' }
 
 /** Is there enough here to save? Null outcome is allowed — recording nothing stays possible. */
-export function outcomeReady(c: OutcomeChoice): boolean {
+export function outcomeReady(c: OutcomeChoice, hasLivePromise = false): boolean {
   if (!c.outcome) return true
+  /* A promise already on the account is the amount and the date — see OutcomePicker. */
+  if (needsPromise(c.outcome) && hasLivePromise && !c.repromise) return true
   if (needsPromise(c.outcome)) return c.amount.trim() !== '' && c.dueOn !== ''
   if (needsWords(c.outcome)) return c.words.trim().length >= 3
   return true
@@ -26,8 +30,10 @@ export function outcomeReady(c: OutcomeChoice): boolean {
  * What came of working this account.
  *
  * ONE QUESTION, ANSWERED IN A TAP, at the only moment anybody knows the answer — while the
- * debtor is still on the line. The agent never picks a status: they say what happened, and
- * everything else follows. Eight of the thirteen client statuses come from this control.
+ * debtor is still on the line. Each choice reads as the RUNG it puts the account on, with the
+ * event that gets it there underneath: the firm's own vocabulary, not a second one to learn.
+ * Eight of the thirteen positions come from this control, and every one of them writes the record
+ * that stands behind it — see callOutcome.ts.
  *
  * OPTIONAL, DELIBERATELY. An agent who did something the list does not cover must be able to
  * finish the account anyway; a required field with no honest option is how "Review" ended up
@@ -35,16 +41,29 @@ export function outcomeReady(c: OutcomeChoice): boolean {
  * Skipping it is itself recorded — the account reads "worked, no outcome recorded", which is a
  * data-quality signal for a team leader and never reaches a client.
  */
-export function OutcomePicker({ value, onChange }: {
+export function OutcomePicker({ value, onChange, livePromise }: {
   value: OutcomeChoice
   onChange: (next: OutcomeChoice) => void
+  /** A promise already on this account, where the entry is here to check one. */
+  livePromise?: { amount: number; dueOn: string } | null
 }) {
   const set = (patch: Partial<OutcomeChoice>) => onChange({ ...value, ...patch })
   const chosen = value.outcome
+  /*
+   * ALREADY PROMISED, SO DO NOT ASK AGAIN. The firm's objection and it was right: "there's
+   * already a PTP in place, why do you need to redo this?" A box that demands an amount and a
+   * date somebody has already given teaches people to retype it, and a retyped promise is a
+   * SECOND promise — two rows, two due dates, and a client told about an arrangement that is now
+   * ambiguous.
+   *
+   * So Arranged shows what stands and asks nothing. Re-promising is still reachable, behind a
+   * deliberate press, because a debtor who moves the date has genuinely made a new commitment.
+   */
+  const keepingPromise = !!livePromise && chosen === 'promised' && !value.repromise
 
   return (
     <div className="space-y-2">
-      <span className="block text-xs font-medium text-slate-500">What came of it</span>
+      <span className="block text-xs font-medium text-slate-500">Where the account stands</span>
       {/*
         Two columns of plain rows rather than a dropdown. The agent is looking for one specific
         thing they already know, and a list they can see all of is faster to hit than one they
@@ -71,7 +90,23 @@ export function OutcomePicker({ value, onChange }: {
         })}
       </div>
 
-      {needsPromise(chosen) && (
+      {keepingPromise && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 bg-slate-50 rounded-lg px-3 py-2">
+          <span>
+            Already promised:{' '}
+            <span className="font-medium text-slate-800">
+              R{livePromise.amount.toLocaleString('en-ZA')} by {livePromise.dueOn}
+            </span>
+            . Nothing to re-enter.
+          </span>
+          <button type="button" onClick={() => set({ repromise: true })}
+            className="ml-auto text-brand-600 hover:underline">
+            They promised again
+          </button>
+        </div>
+      )}
+
+      {needsPromise(chosen) && !keepingPromise && (
         /*
           THE AMOUNT AND THE DATE, REQUIRED. A promise without them is the thing the whole design
           exists to prevent: nothing to diarise, nothing that can fall due, nothing that can

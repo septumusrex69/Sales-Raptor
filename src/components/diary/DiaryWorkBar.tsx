@@ -298,7 +298,6 @@ export function DiaryWorkBar({ account, onWorked }: {
         <FinishModal
           entry={entry}
           account={account}
-          commentFresh={commentFresh}
           today={today}
           remaining={queue.length - index - 1}
           onClose={() => setFinishing(false)}
@@ -316,10 +315,9 @@ export function DiaryWorkBar({ account, onWorked }: {
 
 /* ---------- closing one and booking the next ---------- */
 
-function FinishModal({ entry, account, commentFresh, today, remaining, onClose, onDone }: {
+function FinishModal({ entry, account, today, remaining, onClose, onDone }: {
   entry: DiaryRow
   account: { id: string; prescriptionDate: string | null }
-  commentFresh: boolean
   today: string
   remaining: number
   onClose: () => void
@@ -348,6 +346,13 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
   const [error, setError] = useState<string | null>(null)
 
   const owner = users.find((u) => u.id === entry.ownerId)
+  /*
+   * Only an OPEN promise stands. One already kept or already broken is history, and offering to
+   * reuse it would book a check on a commitment that is finished.
+   */
+  const livePromise = entry.promise && entry.promise.status === 'open'
+    ? { amount: entry.promise.amount, dueOn: entry.promise.dueOn }
+    : null
 
   async function save() {
     setBusy(true); setError(null)
@@ -361,7 +366,12 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
         const r = await recordOutcome({
           accountId: entry.accountId,
           outcome: came.outcome,
-          promise: came.outcome === 'promised'
+          /*
+           * NULL WHERE THE EXISTING PROMISE IS BEING KEPT. Writing one anyway would make a second
+           * row for the same commitment — two due dates on one account, and a client report that
+           * cannot say which arrangement is the arrangement.
+           */
+          promise: came.outcome === 'promised' && (!livePromise || came.repromise)
             ? { amount: Number(came.amount.replace(/[^\d.]/g, '')), dueOn: came.dueOn }
             : null,
           words: came.words,
@@ -404,19 +414,26 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
     <Modal title="Finish this account" onClose={onClose} width={560}>
       <div className="space-y-4">
         {/*
-          The nudge, at the moment it can still be acted on. Not a block: an agent who reached
-          voicemail has nothing new to say about the account, and forcing a comment would only
-          teach them to type a full stop.
+          THE "MAIN COMMENT HAS NOT CHANGED TODAY" NAG IS GONE, at the firm's instruction, and it
+          was arguing with itself. It fired before anybody had typed anything — the box opens with
+          an empty note, so of course nothing had changed yet — and it told a person to close the
+          box to do something the box itself now does: the note underneath has "make this the main
+          comment" right on it. A warning that fires when nothing is wrong is one people stop
+          reading, and this one fired every single time.
         */}
-        {!commentFresh && (
-          <p className="flex items-start gap-2 text-sm text-[var(--c-gold-dark)] bg-[var(--tint-gold)] rounded-lg px-3 py-2.5">
-            <MessageSquareWarning size={15} className="shrink-0 mt-0.5" />
-            <span>
-              The main comment has not changed today. It is what the next person reads before
-              they ring — worth a line if anything has moved. Close this box to edit it.
-            </span>
-          </p>
-        )}
+        {/*
+          WHERE THE ACCOUNT STANDS, FIRST. The firm reads this box downwards as one sentence —
+          where it stands, what came of it, what to do next, and only then which day — and the
+          position is what decides most of the rest, so it can no longer sit underneath the thing
+          it decides.
+        */}
+        <OutcomePicker value={came} livePromise={livePromise} onChange={(next) => {
+          setCame(next)
+          // The diary's own suggestion follows the answer: a promise wants checking on its date.
+          if (next.outcome && next.outcome !== came.outcome) {
+            setPlan((p) => ({ ...p, kind: CALL_OUTCOMES[next.outcome as CallOutcome].suggests }))
+          }
+        }} />
 
         <FormField label="What came of it">
           <textarea value={outcome} onChange={(e) => setOutcome(e.target.value)} rows={2} autoFocus
@@ -449,23 +466,6 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
         </FormField>
 
         {/* Same question, same rules, same component as the day list's Done — see NextDiaryFields. */}
-        {/*
-          WHAT CAME OF IT, as a choice rather than only as prose. The typed note stays — it is
-          where the detail lives — but the choice is what writes the promise, raises the dispute
-          and moves the status, so the client's report can say something a machine derived rather
-          than something nobody recorded.
-        */}
-        <OutcomePicker value={came} onChange={(next) => {
-          setCame(next)
-          // The diary's own suggestion follows the answer: a promise wants checking on its date.
-          if (next.outcome && next.outcome !== came.outcome) {
-            setPlan((p) => ({ ...p, kind: CALL_OUTCOMES[next.outcome as CallOutcome].suggests }))
-          }
-        }} />
-
-        {/* The client's own line, before the date is committed. See ClientLinePreview. */}
-        <ClientLinePreview account={entry.account} next={plan.comesBack ? { kind: plan.kind, dueOn: plan.dueOn } : null} />
-
         <NextDiaryFields
           plan={plan}
           onChange={setPlan}
@@ -474,6 +474,14 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
           today={today}
           prescriptionDate={account.prescriptionDate}
         />
+
+        {/*
+          LAST, UNDER THE DATE IT DESCRIBES. It reads "we will follow up the dispute on the 25th",
+          so it belongs after the day has been chosen rather than above it — the firm asked for it
+          here, and a sentence that names a date the reader has not picked yet is a sentence they
+          have to read twice.
+        */}
+        <ClientLinePreview account={entry.account} next={plan.comesBack ? { kind: plan.kind, dueOn: plan.dueOn } : null} />
 
         {error && <p className="text-sm text-negative-700">{error}</p>}
 
@@ -485,7 +493,7 @@ function FinishModal({ entry, account, commentFresh, today, remaining, onClose, 
             <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-2">
               Cancel
             </button>
-            <button type="button" onClick={() => void save()} disabled={busy || !outcomeReady(came)}
+            <button type="button" onClick={() => void save()} disabled={busy || !outcomeReady(came, !!livePromise)}
               className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-950 text-white hover:bg-navy-900 disabled:opacity-50">
               {busy ? <Loader2 size={14} className="animate-spin" /> : <CalendarClock size={14} />}
               {remaining > 0 ? 'Done, next account' : 'Done, back to diary'}
