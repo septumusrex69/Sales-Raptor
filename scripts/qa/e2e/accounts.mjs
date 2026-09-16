@@ -364,7 +364,37 @@ try {
    * working days" produced two — a person who reads the label and gets something else stops
    * trusting the screen.
    */
-  t.ok('the window box says the rate it implies', /About [\d\s\u00a0]+ a day across \d+ working days?/.test(modal))
+  t.ok('the window box says the rate it implies', /About [\d\s\u00a0,]+ a day across \d+ working days?/.test(modal))
+  /*
+   * A DROPDOWN, NOT A NUMBER BOX. "That thing doesn't work for me" — a spinner is a desktop
+   * control, and on an iPad it is a small box needing a keyboard to change a number you were
+   * only ever going to pick from a handful.
+   */
+  const windowBox = page.locator('select').filter({ hasText: 'working days' }).first()
+  t.ok('the window is picked from a list', await windowBox.isVisible())
+  t.ok('...offering one day', (await windowBox.innerText()).includes('1 working day'))
+  t.check('...with the firm\'s default on it', await windowBox.inputValue(), '5')
+  await windowBox.selectOption('2')
+  await page.waitForTimeout(400)
+  t.ok('choosing fewer days repaces the work',
+    /across 2 working days/.test(await page.locator('body').innerText()))
+  await windowBox.selectOption('5')
+  await page.waitForTimeout(400)
+
+  /*
+   * AND THE TWO FIELDS DO NOT COLLIDE — but read what this does and does not cover before
+   * trusting it. The real bug is iOS-only: a grid item's min-width defaults to auto, so it will
+   * not shrink below its content's intrinsic width, and on iOS an input[type=date] has a large
+   * one. This Chromium's date input is narrow, so removing the min-w-0 that fixes it does NOT
+   * fail here — that was tried. The guard for the actual bug is the source check in
+   * check-bulk-allocate.mjs; this one catches gross layout breakage and is worth the two lines,
+   * not the thing the firm reported.
+   */
+  const dateBox = page.locator('input[type="date"]').first()
+  const a = await dateBox.boundingBox()
+  const b = await windowBox.boundingBox()
+  t.ok('the date field and the window field do not overlap',
+    !!a && !!b && (a.x + a.width <= b.x + 1 || b.x + b.width <= a.x + 1 || a.y + a.height <= b.y + 1))
   /*
    * NOT asserting the over-ceiling warning here any more, because with thirty-eight collectors
    * and forty accounts there is ample headroom and nobody IS pushed over — the warning staying

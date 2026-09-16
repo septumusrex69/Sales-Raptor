@@ -23,6 +23,7 @@ const ok = (name, actual) => {
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
 const alloc = read('../../src/lib/accountAllocation.ts')
+const handOutModal = readFileSync(new URL('../../src/pages/accounts/HandOutModal.tsx', import.meta.url), 'utf8')
 const write = readFileSync(new URL('../../src/lib/handOutWrite.ts', import.meta.url), 'utf8')
 const book = read('../../src/lib/accountBook.ts')
 const list = read('../../src/pages/accounts/AccountsList.tsx')
@@ -47,6 +48,39 @@ ok('the count goes through it too',
  */
 ok('allocation writes no filters of its own',
   !/from\('debtor_accounts'\)[\s\S]{0,200}\.(ilike|gte|lte)\(/.test(alloc))
+
+/* ---------- the two fields that kept colliding ---------- */
+
+/*
+ * min-w-0 ON BOTH, and it is the whole fix. A grid item's min-width defaults to `auto`, meaning
+ * it will not shrink below its content's INTRINSIC width — and on iOS an input[type=date] has a
+ * large one. So the date box overflowed its column and sat under the next field's label, which
+ * the firm reported twice. `w-full` sets the width and says nothing about the minimum, which is
+ * why moving from a flex row to a grid did not fix it and looked like it should have.
+ *
+ * Checked in source rather than in the browser on purpose: the e2e Chromium's date input is
+ * narrow, so it does not overflow and a measured assertion there passes on the broken layout.
+ * That was tried before this was written.
+ */
+const fields = handOutModal.slice(handOutModal.indexOf('grid gap-3 sm:grid-cols-2'))
+ok('the fields stack before they are columns', /grid gap-3 sm:grid-cols-2/.test(handOutModal))
+ok('...and neither can outgrow its column',
+  (fields.slice(0, 1600).match(/min-w-0/g) ?? []).length >= 2)
+
+/*
+ * A DROPDOWN, NOT A NUMBER BOX. The firm's words: "that thing doesn't work for me". A spinner is
+ * a desktop control; on an iPad it is a small box needing a keyboard summoned to change a number
+ * that was only ever going to come from a handful of choices.
+ */
+ok('the window is picked from a list', /<select className=\{inputClass\} value=\{windowDays\}/.test(handOutModal))
+ok('...and not typed into', !/type="number"[^>]*windowDays/.test(handOutModal))
+ok('...from the windows anybody asks for', /const WINDOW_CHOICES = \[1, 2/.test(handOutModal))
+/*
+ * Every option inside the planner's own limit. An option the planner would refuse is a choice
+ * that silently does something other than what it says.
+ */
+ok('...none of them past what the planner will do',
+  Math.max(...JSON.parse(/const WINDOW_CHOICES = (\[[^\]]*\])/.exec(handOutModal)[1])) <= 40)
 
 /* ---------- the write is by id, never by re-running the filter ---------- */
 
@@ -181,7 +215,6 @@ ok('...and says what it means', /not just this page/.test(list))
 
 /* ---------- allocation and referral are not two switches ---------- */
 
-const handOutModal = readFileSync(new URL('../../src/pages/accounts/HandOutModal.tsx', import.meta.url), 'utf8')
 
 /*
  * THE FIRM'S RULE: an allocation cannot happen without a referral, though a referral can happen

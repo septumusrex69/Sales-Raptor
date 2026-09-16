@@ -12,6 +12,13 @@ import type { Team, User } from '../../types'
 
 const DEFAULT_WINDOW = 5
 
+/*
+ * The windows anybody actually asks for. A free number box let somebody type 37, which is not a
+ * decision anybody makes — the real choice is "today", "this week", "over a fortnight" — and the
+ * planner's own limit is 40 working days, so the top of this list stays inside it.
+ */
+const WINDOW_CHOICES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 30] as const
+
 /** A chip in the second row: what it is called, and exactly who it stands for. */
 interface PickGroup { id: string; label: string; ids: string[] }
 
@@ -56,9 +63,14 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // The window decides how much of everyone's diary is worth fetching. Generous on the far end,
-  // because the planner is allowed to run past the window rather than drop accounts.
-  const to = useMemo(() => addWorkingDays(startOn, windowDays * 4), [startOn, windowDays])
+  /*
+   * How much of everyone's diary is worth fetching. Generous on the far end, because the planner
+   * is allowed to run past the window rather than drop accounts — but bounded, because the
+   * planner's own limit is 40 working days and four times a thirty-day window would ask every
+   * collector for half a year of diary to answer a question about six weeks of it.
+   */
+  const to = useMemo(
+    () => addWorkingDays(startOn, Math.min(windowDays * 4, 45)), [startOn, windowDays])
 
   useEffect(() => {
     let cancelled = false
@@ -375,21 +387,40 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                 </div>
 
                 {/*
-                  A GRID, NOT A WRAPPING FLEX ROW. Both inputs carry w-full, and as flex items
-                  with no basis that resolves against the row rather than the field — so on an
-                  iPad the date box overran its column and "Over how many working days" was
-                  printed across the top of it. Two columns that each own their width cannot do
-                  that at any screen size.
+                  min-w-0 IS THE FIX, and the grid was not. A grid item's min-width defaults to
+                  auto, meaning it will not shrink below its content's intrinsic width — and on
+                  iOS an input[type=date] has a large one. So the date box overflowed its column
+                  and sat under the next field's label, which is what the firm kept seeing and
+                  what moving from flex to grid did not touch: w-full sets the width and does
+                  nothing about the minimum.
+
+                  Stacked below sm as well. Two columns of a modal on a phone is two columns of
+                  nothing.
                 */}
-                <div className="grid grid-cols-2 gap-3">
-                  <FormField label="Starting">
-                    <input type="date" className={inputClass} value={startOn}
-                      onChange={(e) => setStartOn(e.target.value)} />
-                  </FormField>
-                  <FormField label="Over how many working days">
-                    <input type="number" min={1} max={40} className={inputClass} value={windowDays}
-                      onChange={(e) => setWindowDays(Math.max(1, Number(e.target.value) || 1))} />
-                  </FormField>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="min-w-0">
+                    <FormField label="Starting">
+                      <input type="date" className={inputClass} value={startOn}
+                        onChange={(e) => setStartOn(e.target.value)} />
+                    </FormField>
+                  </div>
+                  {/*
+                    A DROPDOWN, NOT A NUMBER BOX. The firm's report was that it "doesn't work for
+                    me" — a spinner is a desktop control, and on an iPad it is a small box you
+                    have to summon a keyboard for to change a number you were only ever going to
+                    pick from a handful. Every option spells out its own unit, so the label above
+                    it does not have to be the long sentence that was colliding with the date.
+                  */}
+                  <div className="min-w-0">
+                    <FormField label="Spread over">
+                      <select className={inputClass} value={windowDays}
+                        onChange={(e) => setWindowDays(Number(e.target.value))}>
+                        {WINDOW_CHOICES.map((n) => (
+                          <option key={n} value={n}>{n === 1 ? '1 working day' : `${n} working days`}</option>
+                        ))}
+                      </select>
+                    </FormField>
+                  </div>
                 </div>
 
                 {/*
