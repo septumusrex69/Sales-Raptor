@@ -2977,3 +2977,58 @@ as $$
 $$;
 
 grant execute on function public.collector_performance(timestamptz, timestamptz) to authenticated;
+
+-- ============================================================================================
+-- An account is a PERSON or a COMPANY, and almost everything downstream turns on which.
+--
+-- A person is chased through their own numbers. A company is chased through its directors --
+-- which is a different shape of work, a different trace, and a different set of people who can
+-- be rung. The firm's two newest accounts are both companies and neither could say so.
+--
+-- Defaulted to 'individual' because that is what the whole imported book is.
+-- ============================================================================================
+alter table public.debtor_accounts
+  add column if not exists debtor_kind text not null default 'individual'
+    check (debtor_kind in ('individual', 'company'));
+
+comment on column public.debtor_accounts.debtor_kind is
+  'individual or company. Decides how debtor_id_number reads: an ID number, or a registration number.';
+
+comment on column public.debtor_accounts.debtor_id_number is
+  'The debtor''s ID number, or for a company its registration number. See debtor_kind.';
+
+-- The people behind a company, off its bureau profile.
+--
+-- A SEPARATE TABLE, NOT account_contacts, and the distinction is the point. A director is not a
+-- way of reaching the company: they are a person with their own ID number, traceable in their
+-- own right, whose directorship can end. Truestone's profile carries six directors of whom four
+-- have resigned -- filed as contacts they would be four dead ends a collector cannot tell from
+-- the two who still matter.
+create table if not exists public.account_directors (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  -- The key that makes a director traceable on their own: their consumer report is keyed on it.
+  id_number text,
+  full_name text not null,
+  -- Active or Resigned, as the bureau reports it. Only Active ones are worth a collector's day.
+  status text check (status in ('Active', 'Resigned')),
+  appointed_on date,
+  source text not null default 'xds',
+  -- When this person's own consumer trace was last pulled, so nobody pays for it twice.
+  traced_at timestamptz,
+  created_at timestamptz not null default now(),
+  unique (account_id, id_number, full_name)
+);
+
+create index if not exists account_directors_account_idx
+  on public.account_directors (account_id, status);
+
+alter table public.account_directors enable row level security;
+
+drop policy if exists account_directors_read on public.account_directors;
+create policy account_directors_read on public.account_directors
+  for select to authenticated using (true);
+
+drop policy if exists account_directors_write on public.account_directors;
+create policy account_directors_write on public.account_directors
+  for all to authenticated using (true) with check (true);

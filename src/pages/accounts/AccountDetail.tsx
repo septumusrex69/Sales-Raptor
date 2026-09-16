@@ -406,7 +406,13 @@ export function AccountDetail() {
         whose debt this is. Hence "Debtor" on the band and the client named beneath.
       */}
       <DashboardHero
-        eyebrow="Debtor"
+        /*
+         * "Debtor" or "Company debtor", because the two are not chased the same way. A person is
+         * rung on their own numbers; a company is reached through its directors, and a collector
+         * opening one needs to know which kind of afternoon this is before they read anything
+         * else. The registration number reads as an ID number otherwise.
+         */
+        eyebrow={account.debtorKind === 'company' ? 'Company debtor' : 'Debtor'}
         title={
           <span className="inline-flex flex-wrap items-center gap-2">
             {name}

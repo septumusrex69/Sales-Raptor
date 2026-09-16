@@ -25,6 +25,14 @@ export interface DebtorAccount {
   debtorFirstName: string | null
   debtorSurname: string | null
   debtorIdNumber: string | null
+  /**
+   * A person or a company, and almost everything a collector does turns on which.
+   *
+   * It also says how to read debtorIdNumber: an ID number for a person, a registration number for
+   * a company. One field, two meanings, and this is the one that disambiguates them — which is
+   * cheaper and less error-prone than two columns of which one is always null.
+   */
+  debtorKind: 'individual' | 'company'
   capitalHandedOver: number
   capitalOutstanding: number
   inDuplum: boolean
@@ -87,6 +95,8 @@ const toAccount = (r: any): DebtorAccount => ({
   debtorFirstName: r.debtor_first_name,
   debtorSurname: r.debtor_surname,
   debtorIdNumber: r.debtor_id_number,
+  /* Defaulted here as well as in the database: an old row read before the migration is a person. */
+  debtorKind: r.debtor_kind === 'company' ? 'company' : 'individual',
   capitalHandedOver: Number(r.capital_handed_over ?? 0),
   capitalOutstanding: Number(r.capital_outstanding ?? 0),
   inDuplum: !!r.in_duplum,
