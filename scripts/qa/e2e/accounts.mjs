@@ -378,6 +378,12 @@ try {
   t.ok('the collector list says its columns are the book', /on the book/i.test(listHead))
   t.ok('...and what this plan gives them', /taking/i.test(listHead))
   /*
+   * A DAY, asked for by name. It explains why one row's diary fills more slowly than another's —
+   * Bongani works 35 a day where everybody else works 50 — and it is deliberately NOT what
+   * decides the split, which is the book. Both facts are now on the row that raised the question.
+   */
+  t.ok('...and how many they work in a day', /a day/i.test(listHead))
+  /*
    * And the resulting total is bracketed, not a bare number sitting next to "+2" where it reads
    * as a second quantity. That is what was actually asked about.
    */

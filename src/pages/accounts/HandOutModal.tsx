@@ -362,8 +362,15 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                   <div className="flex items-center gap-2 px-2.5 pb-1 text-[10px] uppercase tracking-wide text-slate-400">
                     <span className="w-3.5 shrink-0" aria-hidden="true" />
                     <span className="min-w-0 flex-1">Collector</span>
-                    <span className="shrink-0 w-20 text-right">Grade</span>
+                    <span className="shrink-0 w-16 text-right">Grade</span>
                     <span className="shrink-0 w-20 text-right">On the book</span>
+                    {/*
+                      A DAY, at the firm's request, and it belongs here for a reason they will hit
+                      again: it explains the day grid but NOT the split. Bongani works 35 a day
+                      where everybody else works 50, which is why his row fills more slowly — and
+                      it is not why he takes fewer accounts. The book is.
+                    */}
+                    <span className="shrink-0 w-12 text-right">A day</span>
                     <span className="shrink-0 w-14 text-right">Taking</span>
                   </div>
 
@@ -384,7 +391,7 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                           <input type="checkbox" className="shrink-0 accent-brand-600"
                             checked={chosen.has(c.userId)} onChange={() => toggle(c.userId)} />
                           <span className="min-w-0 flex-1 truncate text-sm text-slate-800">{c.name}</span>
-                          <span className="shrink-0 w-20 text-right text-[11px] text-slate-400">
+                          <span className="shrink-0 w-16 text-right text-[11px] text-slate-400">
                             {c.ungraded ? 'Not graded' : c.grade}
                           </span>
                           <span className={`shrink-0 text-[11px] tabular-nums w-20 text-right ${
@@ -393,6 +400,10 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                               ? `${c.inPlayNow - ceiling} over their ceiling of ${ceiling}`
                               : `${c.inPlayNow} of ${ceiling} on the book, ${c.capacity} a day`}>
                             {c.inPlayNow}/{ceiling}
+                          </span>
+                          <span className="shrink-0 w-12 text-right text-[11px] tabular-nums text-slate-400"
+                            title={`Works ${c.capacity} accounts a day`}>
+                            {c.capacity}
                           </span>
                           {/* The plan's own figure, so a row shows what choosing it actually did. */}
                           <span className={`shrink-0 text-[11px] font-medium tabular-nums w-14 text-right ${

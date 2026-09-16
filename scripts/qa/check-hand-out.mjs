@@ -689,6 +689,47 @@ ok('an elite may take anything', ACCOUNT_BANDS.every((b) => mayTake('Elite', b))
   ok('a plan that fits does not claim to have run past', !p.ranPastWindow)
 }
 
+/* ================= grade does not decide HOW MANY, room does ================= */
+
+/*
+ * THE QUESTION THE FIRM ASKED, in their words: "Bongani Zulu, she's a junior collector and she
+ * has 490 of 500 accounts. Ayanda Buthelezi, a senior collector, has 470 of 500. Why would Ayanda
+ * be distributed more and Bongani less?"
+ *
+ * Because the share is proportional to the ROOM ON THE BOOK and to nothing else. Ayanda has three
+ * times the room, so Ayanda takes about three times the work. The grades are a coincidence of who
+ * happened to be fuller, and this check is built to prove exactly that: two desks with identical
+ * room and opposite grades must take the SAME number, and two desks with identical grades and
+ * different room must not.
+ *
+ * Their real figures, off the screen they were looking at.
+ */
+{
+  const p = plan(
+    Array.from({ length: 120 }, (_, i) => acc(`a${i}`, 1000)),
+    [
+      col('Bongani', 'Junior', { inPlay: 490, capacity: 35 }),
+      col('Musa', 'Elite', { inPlay: 490, capacity: 50 }),
+      col('Ayanda', 'Senior', { inPlay: 470, capacity: 50 }),
+      col('Hanlie', 'Junior', { inPlay: 470, capacity: 50 }),
+    ],
+  )
+  /* Same room, opposite ends of the ladder: the same share. */
+  check('a junior and an elite with the same room take the same',
+    takenBy(p, 'Bongani'), takenBy(p, 'Musa'))
+  check('...and so do a junior and a senior', takenBy(p, 'Hanlie'), takenBy(p, 'Ayanda'))
+  /* Three times the room, near enough three times the work. */
+  const ratio = takenBy(p, 'Ayanda') / takenBy(p, 'Bongani')
+  ok('three times the room is about three times the work', ratio > 2.5 && ratio < 3.5)
+  /*
+   * AND A SMALLER WORKING DAY DOES NOT MEAN A SMALLER SHARE. Bongani works 35 a day where Musa
+   * works 50; that changes which days the work lands on, never how much of it there is. The two
+   * are separate rules and the firm's question is exactly what happens when they get conflated.
+   */
+  check('a shorter working day does not shrink the share',
+    takenBy(p, 'Bongani'), takenBy(p, 'Musa'))
+}
+
 /* ================= an overrun has to SAY it overran ================= */
 
 /*
