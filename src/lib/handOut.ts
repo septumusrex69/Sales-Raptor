@@ -114,6 +114,15 @@ export interface HandOutPlan {
   lastDate: string | null
   /** True when the plan ran past the window it was asked for. */
   ranPastWindow: boolean
+  /**
+   * The window it was actually asked for, clamped the way the planner clamped it.
+   *
+   * Carried out so the summary can say "past the four you asked for" rather than only naming the
+   * number of days it used. Without it the sentence reads as an answer to the question when it is
+   * really the planner reporting that it could not honour it — which is exactly how a firm ends
+   * up asking why switching from ten days to four changed nothing below.
+   */
+  windowDays: number
 }
 
 export interface PlanInput {
@@ -429,6 +438,7 @@ export function planHandOut(input: PlanInput): HandOutPlan {
     days,
     lastDate,
     ranPastWindow: lastDate !== null && lastDate > windowEnd,
+    windowDays: windowSize,
   }
 }
 
@@ -453,8 +463,17 @@ export function planSummary(plan: HandOutPlan): string {
   const days = new Set(plan.placements.map((p) => p.dueOn)).size
   const parts = [
     `${n.toLocaleString('en-ZA')} ${n === 1 ? 'account' : 'accounts'} across ${people} ${people === 1 ? 'person' : 'people'}`,
-    `over ${days} working ${days === 1 ? 'day' : 'days'}`,
   ]
+  /*
+   * WHEN IT OVERRAN, THE SENTENCE SAYS SO IN THE SAME BREATH. It used to name only the days it
+   * used, which reads as an answer rather than as the planner reporting it could not do what was
+   * asked — and that is exactly how somebody switches from ten working days to four, sees "over
+   * ten working days" underneath, and concludes the screen has not noticed. It had noticed;
+   * every diary in the window was full and it had nowhere else to put the work.
+   */
+  parts.push(plan.ranPastWindow
+    ? `over ${days} working ${days === 1 ? 'day' : 'days'} — past the ${plan.windowDays} you asked for`
+    : `over ${days} working ${days === 1 ? 'day' : 'days'}`)
   if (plan.lastDate) parts.push(`finishing ${plan.lastDate}`)
   if (over.length > 0) {
     parts.push(`${over.length} ${over.length === 1 ? 'person goes' : 'people go'} over their book ceiling`)

@@ -537,14 +537,25 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
         {error && <p className="text-sm text-negative-700">{error}</p>}
 
         <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+          {/*
+            BOTH WARNINGS, NOT WHICHEVER WON. These were a ternary chain, so the book-ceiling
+            notice suppressed the one about running past the window — and with the even split on
+            somebody is nearly always over a ceiling, which meant the overrun notice was
+            effectively never shown. That is how switching from ten working days to four looked
+            like a screen that had not noticed: it had, the diaries were full, and the only line
+            that would have said so had been crowded out by the other warning.
+          */}
           <span className="text-xs text-slate-400">
             {busy
               ? `Booking ${busy.done} of ${busy.total}…`
-              : overCount > 0
-                ? `${overCount} ${overCount === 1 ? 'person goes' : 'people go'} over their book ceiling. Nothing is blocked.`
-                : plan?.ranPastWindow
-                  ? `Runs past the ${windowDays} days you asked for, to ${plan.lastDate}.`
-                  : ''}
+              : [
+                  plan?.ranPastWindow
+                    ? `Every diary in those ${plan.windowDays} days is full, so it runs on to ${plan.lastDate}.`
+                    : null,
+                  overCount > 0
+                    ? `${overCount} ${overCount === 1 ? 'person goes' : 'people go'} over their book ceiling. Nothing is blocked.`
+                    : null,
+                ].filter(Boolean).join(' ')}
           </span>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-2">

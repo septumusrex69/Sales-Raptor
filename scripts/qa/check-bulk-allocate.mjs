@@ -90,6 +90,17 @@ ok('...and is not capped wider than it', /input\[type="date"\][\s\S]{0,280}max-w
  * a desktop control; on an iPad it is a small box needing a keyboard summoned to change a number
  * that was only ever going to come from a handful of choices.
  */
+/*
+ * BOTH WARNINGS, NOT WHICHEVER WON. The footer was a ternary chain, so the book-ceiling notice
+ * suppressed the one about running past the window — and with the even split on somebody is
+ * nearly always over a ceiling, so the overrun notice was effectively never shown. That is how
+ * switching from ten working days to four looked like a screen that had not noticed.
+ */
+ok('the footer collects its warnings rather than choosing one',
+  /\]\.filter\(Boolean\)\.join\(' '\)/.test(handOutModal))
+ok('...and still has both to collect',
+  /ranPastWindow/.test(handOutModal) && /over their book ceiling/.test(handOutModal))
+
 ok('the window is picked from a list', /<select className=\{inputClass\} value=\{windowDays\}/.test(handOutModal))
 ok('...and not typed into', !/type="number"[^>]*windowDays/.test(handOutModal))
 ok('...from the windows anybody asks for', /const WINDOW_CHOICES = \[1, 2/.test(handOutModal))

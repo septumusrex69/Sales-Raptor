@@ -689,6 +689,52 @@ ok('an elite may take anything', ACCOUNT_BANDS.every((b) => mayTake('Elite', b))
   ok('a plan that fits does not claim to have run past', !p.ranPastWindow)
 }
 
+/* ================= an overrun has to SAY it overran ================= */
+
+/*
+ * THE REPORT THIS EXISTS FOR. Somebody set ten working days, switched back to four, and the plan
+ * underneath still spanned ten — so the screen looked like it had not noticed. It had: every
+ * diary in those four days was full and the planner had nowhere else to put the work, which is
+ * the documented behaviour. What was missing is that NOTHING SAID SO. The summary named the days
+ * it used, which reads as an answer rather than as a report that the window could not be kept.
+ */
+{
+  const week = {}
+  for (const d of [MONDAY, '2026-09-22', '2026-09-23', '2026-09-25']) week[d] = 40
+  const p = plan(
+    Array.from({ length: 40 }, (_, i) => acc(`a${i}`, 1000)),
+    [col('Solo', 'Senior', { capacity: 40, booked: week })],
+    { windowDays: 4 },
+  )
+  ok('it ran past the window', p.ranPastWindow)
+  ok('...and the sentence says so', /past the 4 you asked for/.test(planSummary(p)))
+  ok('...naming the window, not the days it used', /past the 4 /.test(planSummary(p)))
+  check('...and the plan carries what was asked for', p.windowDays, 4)
+}
+
+/* And when it fits, it must NOT claim an overrun. A warning that fires on the plan that did the
+ * right thing is one people stop reading, and then it is worse than no warning at all. */
+{
+  const p = plan(
+    Array.from({ length: 4 }, (_, i) => acc(`a${i}`, 1000)),
+    [col('Solo', 'Senior', { capacity: 40 })],
+    { windowDays: 5 },
+  )
+  ok('a plan that fits does not claim to have run past', !p.ranPastWindow)
+  ok('...and says nothing about asking', !/you asked for/.test(planSummary(p)))
+  check('...but still reports the window', p.windowDays, 5)
+}
+
+/* The window the plan reports is the one it USED, clamped the way the planner clamped it —
+ * otherwise the sentence quotes a number the plan never honoured. */
+{
+  const p = plan(
+    [acc('a', 1000)], [col('Solo', 'Senior')],
+    { windowDays: 30, maxWindowDays: 5 },
+  )
+  check('a window longer than the limit is reported as the limit', p.windowDays, 5)
+}
+
 /* ================= the reserve constrains self-booking only ================= */
 
 /*
