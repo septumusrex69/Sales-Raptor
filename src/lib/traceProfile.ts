@@ -611,7 +611,20 @@ export function traceKind(tokens: string[]): TraceKind | null {
 
 /** The whole profile. Null when the document is not a bureau report at all. */
 export function parseTrace(tokens: string[]): TraceProfile | null {
-  const clean = tokens.map((t) => t.replace(/ /g, ' ').trim()).filter((t) => t.length > 0)
+  /*
+   * NORMALISED HERE, ONCE, FOR EVERY READER.
+   *
+   * The bureau pads its table cells with runs of spaces -- "MANAGER  ALL TYPES", "481  MOKABA
+   * MOKABA STREET". pdf.js collapses those and a reader that works from the file's own bytes does
+   * not, so the same document produced two slightly different tokens depending on which reader
+   * ran -- and the same job was recorded twice, because its dedupe key differed by one space.
+   *
+   * Doing it at the door means the two readers cannot drift, and it is right on its own terms: a
+   * double space inside a company name is how the PDF was laid out, not a fact about the company.
+   */
+  const clean = tokens
+    .map((t) => t.replace(/ /g, ' ').replace(/\s+/g, ' ').trim())
+    .filter((t) => t.length > 0)
   const kind = traceKind(clean)
   if (kind === null) return null
   const block = sections(clean)

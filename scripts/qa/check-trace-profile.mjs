@@ -17,6 +17,7 @@ import {
   readJudgments, sameRegistration, splitJudgmentRow, titleCase, traceDate, traceKind,
 } from '../../src/lib/traceProfile.ts'
 import { clientPosition } from '../../src/lib/clientPosition.ts'
+import { plainPdfTokens } from '../../src/lib/pdfPlainText.ts'
 
 let pass = 0
 const failures = []
@@ -33,10 +34,115 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
 const schema = read('../../supabase/schema.sql')
 const modal = read('../../src/pages/accounts/TraceUploadModal.tsx')
 const importer = read('../../src/lib/traceImport.ts')
-const pdf = read('../../src/lib/pdfText.ts')
+const reader = read('../../src/lib/pdfText.ts')
 const detail = read('../../src/pages/accounts/AccountDetail.tsx')
 const workspace = read('../../src/lib/accountWorkspace.ts')
 const documentsPanel = read('../../src/pages/accounts/AccountWorkspacePanels.tsx')
+
+/* ---------- getting the words out of the file at all ---------- */
+
+/*
+ * A READER WITH NO LIBRARY BEHIND IT, and it is the primary one.
+ *
+ * pdf.js reads these files perfectly in Chromium and threw "undefined is not a function" from
+ * inside its own minified code on the firm's iPads — twice, on the default build and again on the
+ * legacy build with the polyfills compiled in. The firm works this app on iPads.
+ *
+ * It turns out not to be needed: every trace the bureau has produced carries its content streams
+ * UNCOMPRESSED — not one FlateDecode across seven real reports — so the words are plain text in
+ * the file. Checked token for token against pdf.js on all seven: identical.
+ *
+ * Bytes, not characters. A PDF is part text and part binary and the reader works on it
+ * byte-for-byte, so the fixtures here are built the same way.
+ */
+const pdf = (body) => Uint8Array.from(`%PDF-1.4\n1 0 obj\n<< >>\nstream\n${body}\nendstream\nendobj\n`,
+  (c) => c.charCodeAt(0)).buffer
+
+eq('a drawn string is a token', plainPdfTokens(pdf('(Kopano Freight) Tj')), ['Kopano Freight'])
+/* Reading order is file order, and the whole of traceProfile depends on it: label, then value. */
+eq('...and they come back in the order the page draws them',
+  plainPdfTokens(pdf('(Registration Number) Tj (2019/445102/07) Tj')),
+  ['Registration Number', '2019/445102/07'])
+/*
+ * ONE TJ ARRAY IS ONE RUN OF TEXT. A PDF writer splits a word to nudge the kerning; split into
+ * two tokens it becomes two table cells and the reader downstream counts columns.
+ */
+eq('a kerned run is one token, not several',
+  plainPdfTokens(pdf('[(Kop) -20 (ano) -15 ( Freight)] TJ')), ['Kopano Freight'])
+/* Escapes, because a bracket in a company name is not the end of the string. */
+eq('escaped brackets survive', plainPdfTokens(pdf('(Kopano \\(Pty\\) Ltd) Tj')), ['Kopano (Pty) Ltd'])
+eq('...and an escaped backslash', plainPdfTokens(pdf('(a\\\\b) Tj')), ['a\\b'])
+/*
+ * Octal is the one that matters in practice: the bureau writes a non-breaking space as \240, and
+ * left raw that is a stray character in the middle of a name.
+ */
+eq('octal escapes become their character',
+  plainPdfTokens(pdf('(Kopano\\240Freight) Tj')), ['Kopano\u00a0Freight'])
+/*
+ * AND THE READER DOES NOT THEN TIDY IT. The non-breaking space is left exactly as the file has
+ * it; parseTrace turns it into an ordinary space along with everything else it normalises. One
+ * place does that, or the two readers hand the parser two different versions of one document.
+ */
+ok('...and are left as the file has them, for the parser to normalise',
+  plainPdfTokens(pdf('(Kopano\\240Freight) Tj'))[0].includes('\u00a0'))
+eq('a hex string is read too', plainPdfTokens(pdf('<4B6F70616E6F> Tj')), ['Kopano'])
+
+/*
+ * A FONT OR AN IMAGE YIELDS NOTHING. Its bytes can contain anything, including something shaped
+ * like a string — but a PDF string only becomes text when an operator draws it, and a font stream
+ * has no operators. Nothing is scraped out of binary just because it looks like text.
+ *
+ * The `continue` above this in the reader is a cost saving and not what makes this true; the
+ * operator regex is. Asserted on the behaviour rather than on that line, because deleting the line
+ * changes nothing here and a check that survives its own subject is worth nothing.
+ */
+eq('a font or image stream yields nothing', plainPdfTokens(pdf('\x00\x01(NOTTEXT)\x02\x03')), [])
+eq('...even with a bracketed run in the middle of it',
+  plainPdfTokens(pdf('\x00\x8f(Helvetica)\x00\x03(Bold)\xff')), [])
+/*
+ * A STRING IS ONLY TEXT WHEN AN OPERATOR DRAWS IT, and this is the case that proves the reader
+ * checks. The stream below has a real Tj in it, so it is not skipped as binary — and the second
+ * bracketed run is an operand to a positioning operator, not something drawn. A reader that
+ * scraped every pair of brackets would put it on the account as a word from the report.
+ */
+eq('a bracketed run that is not drawn is not text',
+  plainPdfTokens(pdf('(Kopano Freight) Tj (NotDrawn) 5 0 Td')), ['Kopano Freight'])
+/*
+ * AND NOTHING IS NOT A GUESS. A PDF this cannot read comes back empty, which is the caller's
+ * signal to fall back to pdf.js — never a half-read document presented as a whole one.
+ */
+eq('an unreadable file yields nothing at all', plainPdfTokens(new Uint8Array([1, 2, 3, 4]).buffer), [])
+
+/*
+ * THE READER IS FAITHFUL AND parseTrace NORMALISES. The bureau pads its cells — "MANAGER  ALL
+ * TYPES" — and pdf.js collapses those runs while a byte-level reader does not. Two readers, two
+ * slightly different tokens, and the same job recorded twice because its dedupe key differed by
+ * one space. Collapsing at the door is what stops the two drifting.
+ */
+eq('the reader reports the file as it is', plainPdfTokens(pdf('(MANAGER  ALL TYPES) Tj')), ['MANAGER  ALL TYPES'])
+/*
+ * Asserted on what comes OUT of the parser, not on the line inside it. The same collapse appears
+ * in several places in that file, so a source search for it went on passing with the one that
+ * matters deleted.
+ */
+/*
+ * THE SAME JOB, WRITTEN TWICE WITH DIFFERENT PADDING, IS ONE JOB — and that is the bug this
+ * collapse was added for. The rows are deduplicated on the raw token, not on the tidied name, so
+ * "MANAGER  ALL TYPES" and "MANAGER ALL TYPES" were two different keys and the job appeared
+ * twice: nine rows off a report that has eight.
+ *
+ * Asserting the tidied NAME would have passed either way — titleCase splits on whitespace and
+ * rejoins, so it hides the difference. This asserts the count, which is what actually moved.
+ */
+const padded = parseTrace([
+  'CONSUMER REPORT - SIPHO RADEBE, 8506105000085', 'CONSUMER REPORT',
+  'EMPLOYMENT HISTORY',
+  'COMMERCIAL NAME', 'DESIGNATION', 'UPDATED DATE', 'CREATED DATE',
+  'KOPANO FREIGHT', 'MANAGER ALL TYPES', '07-09-2026', '21-06-2009',
+  'KOPANO  FREIGHT', 'MANAGER  ALL TYPES', '07-09-2026', '21-06-2009',
+])
+eq('...and the parser collapses the padding, for every reader', padded.employment.length, 1)
+eq('...keeping the tidy version of it', padded.employment[0].designation, 'Manager All Types')
 
 /* ---------- dates ---------- */
 
@@ -430,7 +536,17 @@ ok('...and replaces only that subject\'s copy',
 
 /* ---------- the upload asks, stores nothing on its own, and charges nothing ---------- */
 
-ok('the trace is read in the browser', /await import\('pdfjs-dist\/legacy\/build\/pdf\.mjs'\)/.test(pdf))
+ok('the trace is read in the browser', /await import\('pdfjs-dist\/legacy\/build\/pdf\.mjs'\)/.test(reader))
+/*
+ * THE SMALL READER GOES FIRST. It needs no worker, no WebAssembly and no polyfill, which is the
+ * entire reason it exists — see the note above. pdf.js is the fallback for a file it returns
+ * nothing from.
+ */
+ok('...but only after the reader that needs no library', /const plain = plainPdfTokens\(data\)/.test(reader))
+ok('...and an empty result is what hands over', /if \(plain\.length > 0\) return plain/.test(reader))
+/* A reader that exists to avoid a crash must not become the crash. */
+ok('...its own failure falls through rather than throwing',
+  /try \{[\s\S]{0,200}plainPdfTokens\(data\)[\s\S]{0,120}\} catch \{/.test(reader))
 /*
  * THE LEGACY BUILD, AND IT IS NOT A PREFERENCE.
  *
@@ -444,11 +560,11 @@ ok('the trace is read in the browser', /await import\('pdfjs-dist\/legacy\/build
  * import back to the shorter 'pdfjs-dist' reintroduces the bug in a browser the checks cannot
  * run, which is why it is asserted rather than left to a comment.
  */
-ok('...using the build that polyfills what Safari lacks', /legacy\/build\/pdf\.mjs/.test(pdf))
+ok('...using the build that polyfills what Safari lacks', /legacy\/build\/pdf\.mjs/.test(reader))
 /* The worker has to be the same build, or the two disagree about the API version and neither runs. */
-ok('...with a worker from the same build', /legacy\/build\/pdf\.worker\.mjs\?url/.test(pdf))
+ok('...with a worker from the same build', /legacy\/build\/pdf\.worker\.mjs\?url/.test(reader))
 ok('...and never the bare package, which is the modern build',
-  !/import\('pdfjs-dist'\)/.test(pdf) && !/from 'pdfjs-dist'/.test(pdf))
+  !/import\('pdfjs-dist'\)/.test(pdf) && !/from 'pdfjs-dist'/.test(reader))
 
 /*
  * AND WHEN IT STILL CANNOT BE READ, THE COLLECTOR IS NOT LEFT HOLDING A PDF.
@@ -476,7 +592,7 @@ ok('a scan is told apart from a broken read', /the words are a picture/.test(mod
  * trace on a given day; imported statically it would be in the bundle every collector downloads
  * every morning.
  */
-ok('...and pdf.js is not in the bundle until it is needed', !/^import .*pdfjs-dist/m.test(pdf))
+ok('...and pdf.js is not in the bundle until it is needed', !/^import .*pdfjs-dist/m.test(reader))
 ok('the upload asks who the trace is for', /Who is this trace for\?/.test(modal))
 ok('...offering the company', /The company/.test(modal))
 ok('...and a director', /A director/.test(modal))

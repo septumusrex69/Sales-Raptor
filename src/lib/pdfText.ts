@@ -11,6 +11,24 @@
  * a server. The PDF is uploaded afterwards, as a document, because the firm keeps what it paid
  * for; but the parsing does not wait for that.
  *
+ * TWO READERS, AND THE SMALL ONE GOES FIRST.
+ *
+ * Every trace the bureau has produced carries its content streams UNCOMPRESSED — not one
+ * FlateDecode across seven real reports — so the words are plain text inside the file and
+ * pdfPlainText can lift them out with string work alone. No worker, no WebAssembly, no polyfill,
+ * nothing for a browser to disagree about. Checked token for token against pdf.js on all seven:
+ * identical.
+ *
+ * That matters because pdf.js threw "undefined is not a function" from inside its own minified
+ * code on the firm's iPads — twice, on the default build and again on the legacy build with the
+ * polyfills compiled in. The firm works this app on iPads. A reader that only runs on the machine
+ * nobody uses is not a reader.
+ *
+ * pdf.js stays as the fallback, for a PDF the small reader returns nothing from: compressed
+ * streams, or some future bureau that writes its files differently. On the machines where it
+ * works it is the better library; it is simply no longer the only thing standing between a
+ * collector and the search they paid for.
+ *
  * pdf.js loads on FIRST USE, not with the app. It is by some distance the largest thing in the
  * dependency list and almost nobody opens a trace on any given day — a static import would put it
  * in the bundle every collector downloads every morning to make one screen a second faster.
@@ -31,7 +49,28 @@
  * from x/y would be guessing at a table the parser does not need. Where a table cell WRAPS, the
  * lines arrive as separate runs — traceProfile knows that and puts them back together.
  */
+import { plainPdfTokens } from './pdfPlainText.ts'
+
 export async function pdfTokens(file: File | ArrayBuffer): Promise<string[]> {
+  const data = file instanceof ArrayBuffer ? file : await file.arrayBuffer()
+
+  /*
+   * The small reader first. It either returns the words or returns nothing; it never guesses, so
+   * an empty result is a clean signal to try the big one rather than a half-read document.
+   *
+   * Its own failure is caught rather than thrown: a reader that exists to avoid a crash must not
+   * become the crash.
+   */
+  try {
+    const plain = plainPdfTokens(data)
+    if (plain.length > 0) return plain
+  } catch { /* fall through to pdf.js, which is what it is for. */ }
+
+  return pdfJsTokens(data)
+}
+
+/** The library. Used when the file is not one the small reader can lift text out of. */
+async function pdfJsTokens(data: ArrayBuffer): Promise<string[]> {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
   /*
    * The worker is fetched as a URL rather than bundled, which is how pdf.js expects to be used
@@ -42,7 +81,6 @@ export async function pdfTokens(file: File | ArrayBuffer): Promise<string[]> {
   const workerUrl = (await import('pdfjs-dist/legacy/build/pdf.worker.mjs?url')).default
   pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
-  const data = file instanceof ArrayBuffer ? file : await file.arrayBuffer()
   /* Nothing is rendered, so the fonts are never needed and would only be fetched. */
   const task = pdfjs.getDocument({ data: new Uint8Array(data), disableFontFace: true })
   const doc = await task.promise
