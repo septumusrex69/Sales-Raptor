@@ -481,7 +481,13 @@ function FinishModal({ entry, account, today, remaining, onClose, onDone }: {
           here, and a sentence that names a date the reader has not picked yet is a sentence they
           have to read twice.
         */}
-        <ClientLinePreview account={entry.account} next={plan.comesBack ? { kind: plan.kind, dueOn: plan.dueOn } : null} />
+        <ClientLinePreview
+          account={entry.account}
+          chosen={came.outcome}
+          promise={livePromise ?? (came.outcome === 'promised' && came.amount && came.dueOn
+            ? { amount: Number(came.amount.replace(/[^\d.]/g, '')), dueOn: came.dueOn }
+            : null)}
+          next={plan.comesBack ? { kind: plan.kind, dueOn: plan.dueOn } : null} />
 
         {error && <p className="text-sm text-negative-700">{error}</p>}
 

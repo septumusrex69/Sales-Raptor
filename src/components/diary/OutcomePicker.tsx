@@ -69,26 +69,33 @@ export function OutcomePicker({ value, onChange, livePromise }: {
         thing they already know, and a list they can see all of is faster to hit than one they
         have to open — which matters when somebody is still on the telephone.
       */}
-      <div className="grid sm:grid-cols-2 gap-1.5">
+      {/*
+        SLIMMER, because eight two-line cards was most of the box before anybody had typed a word —
+        and the firm said so: "it's getting bulky". The hint is what took the room, and it is only
+        needed while you are deciding: the chosen one keeps its line, the other seven give it back.
+        A person who wants all eight explanations hovers, and one who has already chosen does not
+        need seven descriptions of the choices they did not make.
+      */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
         {CALL_OUTCOME_ORDER.map((k) => {
           const meta = CALL_OUTCOMES[k]
           const on = chosen === k
           return (
-            <button key={k} type="button"
+            <button key={k} type="button" title={meta.hint}
               // Pressing the chosen one again clears it: recording nothing must stay reachable.
               onClick={() => set({ outcome: on ? null : k })}
-              className={`text-left rounded-lg border px-2.5 py-1.5 transition-colors ${
+              className={`text-left rounded-lg border px-2 py-1.5 transition-colors ${
                 on ? 'border-gold-500 bg-gold-400 text-navy-950' : 'border-slate-200 hover:bg-slate-50'}`}>
-              <span className="block text-xs font-medium">{meta.label}</span>
-              {meta.hint && (
-                <span className={`block text-[10px] ${on ? 'text-navy-950/70' : 'text-slate-400'}`}>
-                  {meta.hint}
-                </span>
-              )}
+              <span className="block text-xs font-medium leading-tight">{meta.label}</span>
             </button>
           )
         })}
       </div>
+
+      {/* The chosen one explains itself, once, where the seven others no longer have to. */}
+      {chosen && CALL_OUTCOMES[chosen].hint && (
+        <p className="text-[11px] text-slate-400">{CALL_OUTCOMES[chosen].hint}</p>
+      )}
 
       {keepingPromise && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 bg-slate-50 rounded-lg px-3 py-2">

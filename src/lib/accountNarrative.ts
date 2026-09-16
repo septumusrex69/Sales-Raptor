@@ -1,4 +1,5 @@
 import type { Arrangement } from './arrangements.ts'
+import type { ClientPosition } from './clientPosition.ts'
 import type { DiaryKind } from './diaryPriority.ts'
 
 /**
@@ -39,6 +40,18 @@ const CHANNEL_WORD: Record<ContactChannel, string> = {
 }
 
 export interface NarrativeInput {
+  /**
+   * The rung the account is on, where it is known.
+   *
+   * WHAT THE DEBTOR SAID IS A FACT ABOUT THE DEBTOR, and it is the most informative thing a
+   * client can be told — more than any attempt we made. "The debtor advised that they are unable
+   * to pay" is the answer to the question a client is really asking; "we worked the account" is
+   * the firm talking about itself, which the firm's own verdict on was that it is stupid.
+   *
+   * Optional, because a monthly report is assembled from records rather than from a call that has
+   * just happened. Where it is absent the sentences below fall back to what was recorded.
+   */
+  position?: ClientPosition | null
   /** The last time the account was worked, whatever came of it. 'YYYY-MM-DD'. */
   lastAttemptOn?: string | null
   lastAttemptChannel?: ContactChannel | null
@@ -130,24 +143,59 @@ function whatHappened(input: NarrativeInput): string {
 
   const p = input.promise
   if (p) {
+    /*
+     * NO FIGURE ON A PROMISE, at the firm's instruction and for a good reason: "it could create
+     * confusion because of the NCA fees". What a debtor undertakes to pay is not what settles the
+     * account — interest and recoverable costs move between the promise and the payment — so a
+     * client shown "R2 000" reads it as the balance and asks why the account is not R2 000 lighter
+     * next month.
+     *
+     * The DATE stays, because that is what a client checks us against, and it comes off the
+     * promise record rather than out of anybody's typing.
+     *
+     * Money RECEIVED keeps its figure. That one is not an undertaking, it is a fact about what
+     * arrived, and it is the number a client most wants.
+     */
     if (p.status === 'broken') {
-      return `The debtor did not make the promised payment of ${money(p.amount)} due on ${onDate(p.dueOn)}.`
+      return `The debtor did not make the payment arranged for ${onDate(p.dueOn)}.`
     }
     const when = p.takenOn ? `On ${onDate(p.takenOn)}, the` : 'The'
     /*
-     * A recurring arrangement gets its own sentence shape rather than a parenthesis. "R750
-     * (monthly instalment) by 30 September" reads as a single payment with a note stapled to it;
-     * "monthly instalments of R750, beginning on 30 September" is what was actually agreed.
+     * A recurring arrangement still gets its own sentence shape. "An arrangement beginning on the
+     * 30th" reads as one payment; naming the rhythm is what tells a client to expect more.
      */
     if (p.arrangement && p.arrangement !== 'once_off') {
       const every = p.arrangement === 'weekly' ? 'weekly' : 'monthly'
-      return `${when} debtor agreed to pay ${every} instalments of ${money(p.amount)}, beginning on ${onDate(p.dueOn)}.`
+      return `${when} debtor made an arrangement to pay ${every} instalments, beginning on ${onDate(p.dueOn)}.`
     }
-    return `${when} debtor promised to pay ${money(p.amount)} by ${onDate(p.dueOn)}.`
+    return `${when} debtor made an arrangement to pay on ${onDate(p.dueOn)}.`
   }
 
   if (input.disputeRaisedOn) {
     return `The debtor disputed the account on ${onDate(input.disputeRaisedOn)}.`
+  }
+
+  /*
+   * WHAT THE DEBTOR SAID, where somebody recorded it. Above the attempt clauses because it is a
+   * fact about the DEBTOR and those are facts about us — and the firm's verdict on the latter was
+   * that telling a client "we worked the account" is stupid. It is: it says nothing happened
+   * while sounding like something did.
+   *
+   * Only the rungs that come from a conversation are here. Arranged, disputed, tracing and under
+   * administration all have their own record above and read from it, which is more precise than
+   * anything this could say.
+   */
+  if (input.lastAttemptOn && (input.position === 'negotiating' || input.position === 'cannot_pay'
+      || input.position === 'refusing')) {
+    const on = onDate(input.lastAttemptOn)
+    if (input.position === 'negotiating') return `We negotiated with the debtor on ${on}.`
+    if (input.position === 'cannot_pay') {
+      return `The debtor advised on ${on} that they are not in a position to pay the account.`
+    }
+    return `The debtor advised on ${on} that they are not willing to pay the account.`
+  }
+  if (input.position === 'under_administration') {
+    return 'The debtor is under a formal process and the matter is being dealt with through the appointed practitioner.'
   }
   if (input.traceLodgedOn) {
     return `We lodged a trace with the credit and information bureaus on ${onDate(input.traceLodgedOn)}.`
@@ -186,12 +234,26 @@ function whatHappened(input: NarrativeInput): string {
 const NEXT_BY_KIND: Record<DiaryKind, (on: string) => string> = {
   promise_broken: (on) => `We will follow up the missed payment on ${on}.`,
   new_account: (on) => `We will make first contact with the debtor on ${on}.`,
-  promise_due: (on) => `We will confirm the promised payment on ${on}.`,
+  promise_due: (on) => `We will confirm the arranged payment on ${on}.`,
   callback: (on) => `We will call the debtor again on ${on}, as arranged.`,
   dispute_chase: (on) => `We will follow up the written dispute on ${on}.`,
   no_contact: (on) => `We will try to reach the debtor again on ${on}.`,
-  trace: (on) => `We will review the trace results on ${on}.`,
+  trace: (on) => `We will follow up the trace on ${on}.`,
   review: (on) => `We will follow the account up on ${on}.`,
+}
+
+/*
+ * A FOLLOW-UP IS NOT ONE THING. Four different rungs all book a plain follow-up and a client
+ * reading "we will follow the account up" learns nothing from any of them — the firm spelled out
+ * what each one is actually going to do, and it is different work in each case. Keyed on the rung
+ * as well as the kind for that reason, and only where the plain sentence is too weak to be worth
+ * printing.
+ */
+const NEXT_BY_POSITION: Partial<Record<ClientPosition, (on: string) => string>> = {
+  negotiating: (on) => `We will continue negotiations with the debtor on ${on}.`,
+  cannot_pay: (on) => `We will follow up on ${on} to establish whether an arrangement can be made.`,
+  refusing: (on) => `We will follow up on ${on} to press for an arrangement.`,
+  under_administration: (on) => `We will take the matter up with the appointed practitioner on ${on}.`,
 }
 
 function whatNext(input: NarrativeInput): string {
@@ -207,7 +269,17 @@ function whatNext(input: NarrativeInput): string {
    * to see that rather than a blank space.
    */
   if (!input.next) return 'No further action has been scheduled.'
-  return NEXT_BY_KIND[input.next.kind](onDate(input.next.dueOn))
+  const on = onDate(input.next.dueOn)
+  /*
+   * The rung only speaks where the diary has nothing more specific to say. A dispute chase or a
+   * promise due already names the work exactly; it is the plain follow-up that needs telling
+   * apart, so the override is read only there.
+   */
+  if (input.next.kind === 'review' && input.position) {
+    const better = NEXT_BY_POSITION[input.position]
+    if (better) return better(on)
+  }
+  return NEXT_BY_KIND[input.next.kind](on)
 }
 
 export function clientLine(input: NarrativeInput): ClientLine {

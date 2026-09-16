@@ -128,7 +128,13 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
         }} />
 
         {/* The client's own line, before the date is committed. See ClientLinePreview. */}
-        <ClientLinePreview account={entry.account} next={plan.comesBack ? { kind: plan.kind, dueOn: plan.dueOn } : null} />
+        <ClientLinePreview
+          account={entry.account}
+          chosen={came.outcome}
+          promise={livePromise ?? (came.outcome === 'promised' && came.amount && came.dueOn
+            ? { amount: Number(came.amount.replace(/[^\d.]/g, '')), dueOn: came.dueOn }
+            : null)}
+          next={plan.comesBack ? { kind: plan.kind, dueOn: plan.dueOn } : null} />
 
         <NextDiaryFields
           plan={plan}

@@ -247,18 +247,43 @@ check('nothing owed leaves the tone alone',
     promise: { amount: 2000, dueOn: '2026-09-30', takenOn: '2026-09-15', status: 'open', arrangement: 'once_off' },
     next: { kind: 'promise_due', dueOn: '2026-09-30' },
   })
-  check('the promise says who promised, what, when they said it and when it falls due',
-    l.happened, 'On 15 September 2026, the debtor promised to pay R2\u00a0000 by 30 September 2026.')
+  check('the promise says who arranged it, when they said so and when it falls due',
+    l.happened, 'On 15 September 2026, the debtor made an arrangement to pay on 30 September 2026.')
   check('...and the next action names the work, not just a date',
-    l.next, 'We will confirm the promised payment on 30 September 2026.')
+    l.next, 'We will confirm the arranged payment on 30 September 2026.')
 }
 // A parenthesis reads as a single payment with a note stapled on; this is what was agreed.
 check('a recurring promise reads as an arrangement, not a parenthesis',
   clientLine({ promise: { amount: 750, dueOn: '2026-09-30', takenOn: '2026-09-15', arrangement: 'monthly' } }).happened,
-  'On 15 September 2026, the debtor agreed to pay monthly instalments of R750, beginning on 30 September 2026.')
+  'On 15 September 2026, the debtor made an arrangement to pay monthly instalments, beginning on 30 September 2026.')
 check('a broken promise names the debtor as the one who did not pay',
   clientLine({ promise: { amount: 2000, dueOn: '2026-08-30', status: 'broken' } }).happened,
-  'The debtor did not make the promised payment of R2\u00a0000 due on 30 August 2026.')
+  'The debtor did not make the payment arranged for 30 August 2026.')
+
+/*
+ * NO FIGURE ON A PROMISE, at the firm's instruction: "don't disclose the amount that is going to
+ * pay to the client — it could create confusion because of the NCA fees." What a debtor undertakes
+ * to pay is not what settles the account, because interest and recoverable costs move between the
+ * promise and the payment, so a client shown "R2 000" reads it as the balance.
+ *
+ * Asserted over every shape a promise can take, because one of the three still carrying a figure
+ * would be the one that reaches a client.
+ */
+for (const p of [
+  { amount: 2000, dueOn: '2026-09-30', takenOn: '2026-09-15', status: 'open', arrangement: 'once_off' },
+  { amount: 750, dueOn: '2026-09-30', takenOn: '2026-09-15', arrangement: 'monthly' },
+  { amount: 2000, dueOn: '2026-08-30', status: 'broken' },
+]) {
+  ok(`a ${p.status ?? 'open'} ${p.arrangement ?? 'once_off'} promise names no figure`,
+    !/R\s?\u00a0?[\d]/.test(clientLine({ promise: p }).happened))
+}
+/*
+ * BUT MONEY RECEIVED KEEPS ITS FIGURE. That is not an undertaking, it is what actually arrived,
+ * and it is the number a client most wants to see. Removing it along with the promise amounts
+ * would be over-applying the rule.
+ */
+ok('a payment received still says how much',
+  /R\s?\u00a0?2/.test(clientLine({ paidInPeriod: { amount: 2000, on: '2026-09-15' } }).happened))
 
 /*
  * EVERY DIARY KIND HAS ITS OWN NEXT ACTION, and none of them may fall back to a bare date. The
@@ -503,6 +528,64 @@ ok('...and clientPosition cannot return it',
 check('the client vocabulary is still thirteen', Object.keys(CLIENT_POSITIONS).length, 13)
 check('...and ours is exactly one more', Object.keys(DESK_POSITIONS).length, 14)
 ok('...which is the one we added', 'new' in DESK_POSITIONS && !('new' in CLIENT_POSITIONS))
+
+/* ---------- what the DEBTOR said, not what we did ---------- */
+
+/*
+ * "I DON'T LIKE THE FACT THAT YOU TELL THE CLIENT THAT WE WORKED THE ACCOUNT. IT'S STUPID." The
+ * firm's words, and they are right: it says nothing happened while sounding like something did.
+ * Where a collector has recorded what the debtor actually said, that is the sentence — it is a
+ * fact about the debtor, which is what the client is asking about.
+ */
+check('a negotiation says so',
+  clientLine({ position: 'negotiating', lastAttemptOn: '2026-09-16' }).happened,
+  'We negotiated with the debtor on 16 September 2026.')
+check('a hardship is stated as the debtor stated it',
+  clientLine({ position: 'cannot_pay', lastAttemptOn: '2026-09-16' }).happened,
+  'The debtor advised on 16 September 2026 that they are not in a position to pay the account.')
+check('a refusal is stated as the debtor stated it',
+  clientLine({ position: 'refusing', lastAttemptOn: '2026-09-16' }).happened,
+  'The debtor advised on 16 September 2026 that they are not willing to pay the account.')
+check('an administration names the practitioner as the route',
+  clientLine({ position: 'under_administration' }).happened,
+  'The debtor is under a formal process and the matter is being dealt with through the appointed practitioner.')
+/*
+ * WILL NOT AND CANNOT MUST NOT READ THE SAME. One is a legal decision and the other is a
+ * pensioner, and the firm's rule is that they never appear on one list. Two sentences that
+ * differ by a word would put them on one in a client's eyes.
+ */
+ok('cannot and will not read differently',
+  clientLine({ position: 'cannot_pay', lastAttemptOn: '2026-09-16' }).happened
+  !== clientLine({ position: 'refusing', lastAttemptOn: '2026-09-16' }).happened)
+/* And "we worked the account" survives only where genuinely nothing else is known. */
+ok('the weak sentence is gone once anything is recorded',
+  !/We worked the account/.test(clientLine({ position: 'refusing', lastAttemptOn: '2026-09-16' }).happened))
+
+/*
+ * A FOLLOW-UP IS NOT ONE THING. Four rungs book a plain follow-up and "we will follow the account
+ * up" tells a client nothing about any of them. The firm spelled out what each is actually going
+ * to do, and it is different work in each case.
+ */
+{
+  const nextFor = (position) => clientLine({ position, next: { kind: 'review', dueOn: '2026-09-23' } }).next
+  check('negotiations continue', nextFor('negotiating'),
+    'We will continue negotiations with the debtor on 23 September 2026.')
+  check('a hardship is revisited for an arrangement', nextFor('cannot_pay'),
+    'We will follow up on 23 September 2026 to establish whether an arrangement can be made.')
+  check('a refusal is pressed for one', nextFor('refusing'),
+    'We will follow up on 23 September 2026 to press for an arrangement.')
+  check('an administration goes to the practitioner', nextFor('under_administration'),
+    'We will take the matter up with the appointed practitioner on 23 September 2026.')
+  ok('...and none of them reads the same as another',
+    new Set(['negotiating', 'cannot_pay', 'refusing', 'under_administration'].map(nextFor)).size === 4)
+}
+/*
+ * The rung only speaks where the diary has nothing better. A dispute chase already names the work
+ * exactly, and letting the position override it would make the sentence vaguer, not sharper.
+ */
+check('a dispute chase keeps its own words',
+  clientLine({ position: 'negotiating', next: { kind: 'dispute_chase', dueOn: '2026-09-23' } }).next,
+  'We will follow up the written dispute on 23 September 2026.')
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)

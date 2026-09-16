@@ -116,7 +116,13 @@ export const CALL_OUTCOMES: Record<CallOutcome, OutcomeMeta> = {
   },
   wrong_number: {
     label: 'Tracing',
-    hint: 'The number is wrong — raises a trace',
+    /*
+     * NOT "the number is wrong", at the firm's correction. A trace is raised because we could not
+     * reach the debtor on the details we were given — the number may ring and never be answered,
+     * or belong to somebody else, or the person may have moved. What the trace asks for is more
+     * information, and saying "wrong number" narrows it to one cause that is often not the one.
+     */
+    hint: 'Could not reach them on the details given — raises a trace',
     reached: false,
     position: 'tracing',
     suggests: 'trace',
