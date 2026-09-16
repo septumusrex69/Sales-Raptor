@@ -174,24 +174,60 @@ ok('...and never offers allocate-without-booking', !/Allocate only|allocate_only
 /* ---------- and several ways to choose who ---------- */
 
 /*
- * Everyone, a grade, a team, or ticked by hand — but as quick SELECTIONS over one list, not four
- * modes. Modes would leave "I chose Elite, then unticked one" with nowhere to live.
+ * HOW YOU ARE CHOOSING, THEN WHO. Everyone / Rank / Team on the first row, and the ranks or the
+ * teams on the second — the firm's own shape, and the correction to what was here before: one
+ * flat row of chips where "Senior" and "Pre-legal Echo" looked like the same kind of thing and
+ * each one REPLACED the selection, so "two of the five teams" could not be expressed at all.
+ *
+ * The note this replaces argued against modes on the grounds that "I chose Elite, then unticked
+ * one" would have nowhere to live. That is still true and still handled — but by keeping `chosen`
+ * as the only selection, not by refusing to group the buttons. The mode decides which chips are
+ * shown; a chip is lit when everybody behind it is ticked, so unticking one person turns its chip
+ * off on its own and nothing is left claiming otherwise.
  */
-ok('everyone can be chosen at once', /setChosen\(new Set\(context\.collectors\.map/.test(handOutModal))
+ok('the three ways of choosing are offered', /'everyone' \| 'rank' \| 'team'/.test(handOutModal))
+ok('everyone can be chosen at once', /setChosen\(new Set\(everyone\)\)/.test(handOutModal))
 /*
  * `&& !c.ungraded` matters. An ungraded person is treated as Junior internally so they can be
- * given generic work — but clicking the "Junior" quick-pick should select the people a team
- * leader actually graded Junior, not sweep in everybody nobody has got round to grading.
+ * given generic work — but clicking the "Junior" chip should select the people a team leader
+ * actually graded Junior, not sweep in everybody nobody has got round to grading.
  */
 ok('...by grade', /c\.grade === g && !c\.ungraded/.test(handOutModal))
 ok('...by team', /teamOf\(users, c\.userId\) === t\.id/.test(handOutModal))
 ok('...and cleared', /onClick=\{\(\) => setChosen\(new Set\(\)\)\}/.test(handOutModal))
+
+/*
+ * MULTI-SELECT, which is the whole reason the row was split. "Distribute it to two of the three
+ * teams" was impossible while each chip called setChosen with its own group: picking Bravo threw
+ * Alpha away and the screen gave no hint that it had.
+ */
+ok('a chip adds its group rather than replacing the selection',
+  /else for \(const id of ids\) next\.add\(id\)/.test(handOutModal))
+ok('...and clicking a lit one takes that group back out',
+  /if \(ids\.every\(\(id\) => next\.has\(id\)\)\) for \(const id of ids\) next\.delete\(id\)/.test(handOutModal))
+/*
+ * LIT FROM THE SELECTION, never from state of its own. A second copy of "which teams are picked"
+ * is a second thing that can disagree with the checkboxes, and the one it would disagree with is
+ * the one that decides who actually gets the accounts.
+ */
+ok('a chip is lit from what is ticked', /on=\{g\.ids\.every\(\(id\) => chosen\.has\(id\)\)\}/.test(handOutModal))
+
+/*
+ * NOBODY IS UNREACHABLE. Most of this firm's floor is ungraded, and a rank picker that offered
+ * only the four grades would leave those people selectable by hand alone — the same shape as the
+ * grade gate that once filtered real pre-legal clerks out of the list entirely.
+ */
+ok('the ungraded are a group, not a gap', /label: 'Not graded'/.test(handOutModal))
+ok('...and so are the people on no team', /label: 'No team'/.test(handOutModal))
+
 /*
  * A grade nobody holds, or a team with no collectors, is a button that appears to do nothing.
- * Offered only where it would narrow something.
+ * Offered only where it would narrow something — both lists are filtered to groups with people
+ * in them, and the modes themselves are hidden when their list comes out empty.
  */
-ok('an empty grade is not offered',
-  /COLLECTOR_GRADES\.filter\(\(g\) => context\.collectors\.some\(\(c\) => c\.grade === g && !c\.ungraded\)\)/.test(handOutModal))
+ok('an empty group is not offered', /return out\.filter\(\(g\) => g\.ids\.length > 0\)/.test(handOutModal))
+ok('...nor the mode that would show none', /grades\.length > 0 && \(/.test(handOutModal))
+ok('...for teams either', /groups\.length > 0 && \(/.test(handOutModal))
 
 /*
  * THIRTY-FIVE COLLECTORS DO NOT FIT IN CARDS. Eight did; a real floor does not, and choosing four
@@ -209,8 +245,6 @@ ok('...and a way back to just the chosen', /Show only chosen/.test(handOutModal)
  */
 ok('the busiest are listed first',
   /\(taking\.get\(b\.userId\) \?\? 0\) - \(taking\.get\(a\.userId\) \?\? 0\)/.test(handOutModal))
-ok('a team with no collectors is not offered',
-  /teams\s*\n?\s*\.filter\(\(t\) => context\.collectors\.some/.test(handOutModal))
 /* Choosing nobody is now reachable, so it must read as a state rather than an empty panel. */
 ok('choosing nobody says so', /Nobody chosen, so there is nothing to plan/.test(handOutModal))
 

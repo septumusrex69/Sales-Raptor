@@ -350,6 +350,71 @@ const byDayOf = (p) => {
 }
 
 /*
+ * THE WINDOW IS THE AGGRESSION OF THE ALLOCATION, in the firm's own words. The same stack handed
+ * out over one day, two days, five and ten must arrive at four different paces — that is the
+ * whole point of the box, and it is what the person setting it is weighing: a diary filled to
+ * capacity today has no room for what they hand out tomorrow.
+ *
+ * A hundred accounts across TWENTY-FIVE collectors who each work fifty a day, so nothing here is
+ * limited by capacity and the only thing shaping the answer is the window. The floor size is part
+ * of the check, not scenery: with ten collectors these same four assertions pass even with the
+ * quota deleted, because ten people taking ten each and levelling their own diaries happens to
+ * land on the same numbers. Twenty-five people take four each, which every window from three days
+ * up has to stretch — so the assertions fail when the pacing does.
+ */
+{
+  const floor = () => Array.from({ length: 25 }, (_, i) => col(`C${String(i).padStart(2, '0')}`, 'Senior', { inPlay: 100, capacity: 50 }))
+  const stack = () => Array.from({ length: 100 }, (_, i) => acc(`a${i}`, 1000))
+  const shape = (windowDays) => {
+    const p = plan(stack(), floor(), { windowDays })
+    const byDay = byDayOf(p)
+    return { placed: p.placements.length, days: Object.keys(byDay).length, busiest: Math.max(...Object.values(byDay)) }
+  }
+  const one = shape(1)
+  const two = shape(2)
+  const five = shape(5)
+  const ten = shape(10)
+
+  check('everything is placed either way', [one.placed, two.placed, five.placed, ten.placed].join(), '100,100,100,100')
+  check('one day means one day', one.days, 1)
+  check('...all hundred of them', one.busiest, 100)
+  check('two days halves it', two.days, 2)
+  check('...fifty a day', two.busiest, 50)
+  check('five days is twenty a day', five.days, 5)
+  check('...twenty', five.busiest, 20)
+  check('ten days is ten a day', ten.days, 10)
+  check('...ten', ten.busiest, 10)
+  /*
+   * Stated as the relationship rather than four separate numbers, because THAT is the property:
+   * more days must never mean a heavier day. Four passing constants could all be wrong together
+   * in the same direction and this could not.
+   */
+  ok('more days is never a busier day',
+    one.busiest >= two.busiest && two.busiest >= five.busiest && five.busiest >= ten.busiest)
+  ok('...and never fewer days used', ten.days > five.days && five.days > two.days && two.days > one.days)
+}
+
+/*
+ * AND IT IS THE AGGREGATE THAT IS PACED, not each person's own diary. This is the case that made
+ * the last attempt look right and behave wrong: thirty-nine collectors taking two or three each
+ * spread their own two or three across days one, two and three, so a five-day window finished in
+ * three and the firm asked why. A hundred accounts over thirty-nine people is still twenty a day
+ * over five days — twenty different people booked on Monday, twenty more on Tuesday.
+ */
+{
+  const p = plan(
+    Array.from({ length: 100 }, (_, i) => acc(`a${i}`, 1000)),
+    Array.from({ length: 39 }, (_, i) => col(`C${String(i).padStart(2, '0')}`, 'Senior', { inPlay: 150, capacity: 50 })),
+    { windowDays: 5 },
+  )
+  const byDay = byDayOf(p)
+  check('everything is placed', p.placements.length, 100)
+  check('the whole window is used', Object.keys(byDay).length, 5)
+  ok('...at the pace it was asked for', Object.values(byDay).every((n) => n === 20))
+  ok('...and it does not claim to have run past', !p.ranPastWindow)
+}
+
+/*
  * Ask for ONE day and you get one day, filled to capacity, with the overflow running past — the
  * old behaviour, which was never wrong about a one-day window. This is the check that keeps the
  * spread from swallowing the ceiling: a window of one still means one.

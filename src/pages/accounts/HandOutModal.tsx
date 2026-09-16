@@ -12,6 +12,9 @@ import type { Team, User } from '../../types'
 
 const DEFAULT_WINDOW = 5
 
+/** A chip in the second row: what it is called, and exactly who it stands for. */
+interface PickGroup { id: string; label: string; ids: string[] }
+
 /**
  * Handing a stack of accounts out.
  *
@@ -41,6 +44,13 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
   const [mode, setMode] = useState<HandOutMode>('allocate_and_refer')
   const [reason, setReason] = useState('')
   const [search, setSearch] = useState('')
+  /*
+   * How you are choosing, not who you chose — the selection itself stays in `chosen`, so the
+   * checkbox list and the chips are never two sources of truth that can disagree. A chip is lit
+   * when everybody in that group is ticked, which means unticking one person turns the chip off
+   * by itself rather than leaving it lying about what is selected.
+   */
+  const [pickBy, setPickBy] = useState<'everyone' | 'rank' | 'team'>('everyone')
   const [onlyChosen, setOnlyChosen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null)
@@ -99,6 +109,53 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
         || a.name.localeCompare(b.name))
   }, [context, plan, chosen, search, onlyChosen])
 
+  const everyone = useMemo(
+    () => (context?.collectors ?? []).map((c) => c.userId), [context])
+
+  /*
+   * The two ways of grouping a floor, each with the ids behind it so the chip can both select
+   * them and know whether it is lit. Empty groups are dropped: a grade nobody holds and a team
+   * with no collectors in it are both buttons that appear to do nothing.
+   *
+   * "Not graded" and "No team" are real groups, not leftovers. Most of this firm's floor is
+   * ungraded — a rank picker that silently omitted them would make a third of the collectors
+   * unreachable by any chip, which is the same shape of bug as the grade gate that used to
+   * filter real pre-legal clerks out of the list entirely.
+   */
+  const grades = useMemo<PickGroup[]>(() => {
+    const all = context?.collectors ?? []
+    const out: PickGroup[] = COLLECTOR_GRADES.map((g) => ({
+      id: g,
+      label: g,
+      ids: all.filter((c) => c.grade === g && !c.ungraded).map((c) => c.userId),
+    }))
+    const ungraded = all.filter((c) => c.ungraded).map((c) => c.userId)
+    if (ungraded.length > 0) out.push({ id: 'ungraded', label: 'Not graded', ids: ungraded })
+    return out.filter((g) => g.ids.length > 0)
+  }, [context])
+
+  const groups = useMemo<PickGroup[]>(() => {
+    const all = context?.collectors ?? []
+    const out: PickGroup[] = teams.map((t) => ({
+      id: t.id,
+      label: t.name,
+      ids: all.filter((c) => teamOf(users, c.userId) === t.id).map((c) => c.userId),
+    }))
+    const none = all.filter((c) => !teamOf(users, c.userId)).map((c) => c.userId)
+    if (none.length > 0) out.push({ id: 'none', label: 'No team', ids: none })
+    return out.filter((g) => g.ids.length > 0)
+  }, [context, teams, users])
+
+  /* Whole group in, or whole group out. Half a team ticked means the chip is unlit and clicking
+   * it completes the team rather than clearing it — the reading a person expects from a chip
+   * that is not lit. */
+  const toggleGroup = useCallback((ids: string[]) => setChosen((prev) => {
+    const next = new Set(prev)
+    if (ids.every((id) => next.has(id))) for (const id of ids) next.delete(id)
+    else for (const id of ids) next.add(id)
+    return next
+  }), [])
+
   const toggle = useCallback((id: string) => setChosen((prev) => {
     const next = new Set(prev)
     if (next.has(id)) next.delete(id); else next.add(id)
@@ -106,6 +163,14 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
   }), [])
 
   const tooMany = (context?.accounts.length ?? 0) > BULK_CEILING
+
+  /*
+   * The same arithmetic the planner does, so the line above the plan and the plan itself cannot
+   * drift. Read off the plan once it exists — its placements are what will actually be booked,
+   * which is a smaller number than the selection whenever the grade gate turns something away.
+   */
+  const perDay = Math.max(1, Math.ceil(
+    (plan?.placements.length ?? context?.accounts.length ?? 0) / Math.max(1, windowDays)))
 
   async function commit() {
     if (!plan) return
@@ -181,29 +246,51 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                   Bravo" should not require finding six names.
                 */}
                 <div>
+                  {/*
+                    TWO ROWS, NOT ONE FLAT LIST OF CHIPS. Everything used to sit on one line:
+                    Everyone, four grades, five teams and None, wrapping onto three rows of
+                    look-alike buttons where "Senior" and "Pre-legal Echo" read as the same kind
+                    of thing. They are not — one is a rank and the other is a team, and the firm
+                    asked for exactly that distinction: pick how you are choosing, then choose.
+
+                    And the second row MULTI-SELECTS, because "two of the five teams" was the
+                    thing the flat row could not do at all: each chip replaced the selection, so
+                    picking Bravo threw Alpha away.
+                  */}
                   <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
                     <span className="text-xs font-medium text-slate-500 mr-0.5">Who</span>
-                    <Pick onClick={() => setChosen(new Set(context.collectors.map((c) => c.userId)))}>
+                    <Pick on={pickBy === 'everyone'}
+                      onClick={() => { setPickBy('everyone'); setChosen(new Set(everyone)) }}>
                       Everyone
                     </Pick>
                     {/*
-                      Only offered where they would narrow something: a grade nobody holds, or a
-                      team with no collectors in it, is a button that appears to do nothing.
+                      Only offered where they would narrow something: with one team, or with
+                      nobody graded, the mode is a button that appears to do nothing.
                     */}
-                    {COLLECTOR_GRADES.filter((g) => context.collectors.some((c) => c.grade === g && !c.ungraded)).map((g) => (
-                      <Pick key={g} onClick={() => setChosen(new Set(
-                        context.collectors.filter((c) => c.grade === g && !c.ungraded).map((c) => c.userId),
-                      ))}>{g}</Pick>
-                    ))}
-                    {teams
-                      .filter((t) => context.collectors.some((c) => teamOf(users, c.userId) === t.id))
-                      .map((t) => (
-                        <Pick key={t.id} onClick={() => setChosen(new Set(
-                          context.collectors.filter((c) => teamOf(users, c.userId) === t.id).map((c) => c.userId),
-                        ))}>{t.name}</Pick>
-                      ))}
+                    {grades.length > 0 && (
+                      <Pick on={pickBy === 'rank'} onClick={() => { setPickBy('rank'); setChosen(new Set()) }}>
+                        Rank
+                      </Pick>
+                    )}
+                    {groups.length > 0 && (
+                      <Pick on={pickBy === 'team'} onClick={() => { setPickBy('team'); setChosen(new Set()) }}>
+                        Team
+                      </Pick>
+                    )}
                     <Pick onClick={() => setChosen(new Set())} quiet>None</Pick>
                   </div>
+
+                  {pickBy !== 'everyone' && (
+                    <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                      {(pickBy === 'rank' ? grades : groups).map((g) => (
+                        <Pick key={g.id} on={g.ids.every((id) => chosen.has(id))}
+                          onClick={() => toggleGroup(g.ids)}>
+                          {g.label}
+                          <span className="text-slate-400 tabular-nums"> {g.ids.length}</span>
+                        </Pick>
+                      ))}
+                    </div>
+                  )}
 
                   <input
                     className={`${inputClass} mb-1.5`}
@@ -287,7 +374,14 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-end gap-3">
+                {/*
+                  A GRID, NOT A WRAPPING FLEX ROW. Both inputs carry w-full, and as flex items
+                  with no basis that resolves against the row rather than the field — so on an
+                  iPad the date box overran its column and "Over how many working days" was
+                  printed across the top of it. Two columns that each own their width cannot do
+                  that at any screen size.
+                */}
+                <div className="grid grid-cols-2 gap-3">
                   <FormField label="Starting">
                     <input type="date" className={inputClass} value={startOn}
                       onChange={(e) => setStartOn(e.target.value)} />
@@ -296,15 +390,22 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                     <input type="number" min={1} max={40} className={inputClass} value={windowDays}
                       onChange={(e) => setWindowDays(Math.max(1, Number(e.target.value) || 1))} />
                   </FormField>
-                  {/*
-                    Said plainly because the box used to mean the other thing. It read as a
-                    deadline — fill Monday, then Tuesday, stop by Friday — so five days produced
-                    two. It paces the work now, and a person who wants it all today types 1.
-                  */}
-                  <p className="text-[11px] text-slate-400 pb-2.5">
-                    The work is spread evenly across these days. Type 1 to put it all on one day.
-                  </p>
                 </div>
+
+                {/*
+                  THE NUMBER IN ARITHMETIC THE PERSON CAN CHECK. The box used to mean "by when",
+                  so five days produced two and the firm asked why; it now means how hard the work
+                  is pushed, and the only honest way to say that is to show the rate it implies.
+                  The firm's own framing: it shows you the aggression of the allocation, and the
+                  thing being traded is room in the diary for whatever is handed out tomorrow.
+                */}
+                <p className="-mt-2 text-[11px] text-slate-500">
+                  About <span className="font-medium text-slate-700">{perDay.toLocaleString('en-ZA')} a day</span>{' '}
+                  across {windowDays} working {windowDays === 1 ? 'day' : 'days'}.{' '}
+                  {windowDays === 1
+                    ? 'Everything lands on one day, which leaves no room for tomorrow’s hand-out.'
+                    : 'Fewer days fills diaries faster; more days leaves room for the next hand-out.'}
+                </p>
 
                 {/*
                   A CHOICE OF TWO, NOT TWO SWITCHES. The firm's rule is that an allocation cannot
@@ -484,15 +585,18 @@ function teamOf(users: User[], userId: string): string | undefined {
 }
 
 /** A quick-pick. Small and chip-shaped, because with five teams these now wrap onto a second row. */
-function Pick({ onClick, children, quiet }: {
-  onClick: () => void; children: React.ReactNode; quiet?: boolean
+function Pick({ onClick, children, quiet, on }: {
+  onClick: () => void; children: React.ReactNode; quiet?: boolean; on?: boolean
 }) {
   return (
     <button type="button" onClick={onClick}
+      aria-pressed={on}
       className={`text-[11px] rounded-full border px-2 py-0.5 ${
         quiet
           ? 'border-slate-200 text-slate-400 hover:text-slate-600 ml-auto'
-          : 'border-slate-200 text-slate-600 hover:border-brand-300 hover:text-brand-700'}`}>
+          : on
+            ? 'border-navy-950 bg-navy-950 text-white'
+            : 'border-slate-200 text-slate-600 hover:border-brand-300 hover:text-brand-700'}`}>
       {children}
     </button>
   )

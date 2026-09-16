@@ -322,7 +322,7 @@ try {
    * working days" produced two — a person who reads the label and gets something else stops
    * trusting the screen.
    */
-  t.ok('the window box says the work is spread', /spread evenly across these days/.test(modal))
+  t.ok('the window box says the rate it implies', /About [\d\s\u00a0]+ a day across \d+ working days?/.test(modal))
   /*
    * NOT asserting the over-ceiling warning here any more, because with thirty-eight collectors
    * and forty accounts there is ample headroom and nobody IS pushed over — the warning staying
@@ -346,10 +346,57 @@ try {
     await page.getByRole('button', { name: 'Allocate and refer', exact: true }).last().isVisible())
   t.ok('...with no allocate-without-booking', !/Allocate only/.test(modal))
 
-  /* Several ways to choose who, over one list rather than as separate modes. */
+  /*
+   * HOW YOU ARE CHOOSING, THEN WHO — and this is the layer that can prove the second row actually
+   * appears, because the rank and team chips only exist once a mode is picked. A source check can
+   * see the JSX; only a browser can see that clicking Rank puts Senior on the screen.
+   */
   t.ok('everyone can be picked at once', await page.getByRole('button', { name: 'Everyone' }).isVisible())
-  t.ok('...or by grade', await page.getByRole('button', { name: 'Senior', exact: true }).isVisible())
+  t.ok('...or by rank', await page.getByRole('button', { name: 'Rank', exact: true }).isVisible())
+  t.ok('...or by team', await page.getByRole('button', { name: 'Team', exact: true }).isVisible())
   t.ok('...or cleared', await page.getByRole('button', { name: 'None', exact: true }).isVisible())
+  /*
+   * NEITHER ROW IS ON SCREEN until a mode is chosen. Asserted absent first, and for a rank AND a
+   * team: a check that only looks afterwards passes on the flat row this replaced, and a check
+   * that looks for a rank alone passes while every team chip is on display, because Everyone is
+   * not Rank. Both, or it is not testing the gate.
+   */
+  const rankChips = page.getByRole('button', { name: /^(Junior|Skilled|Senior|Elite|Not graded) \d+$/ })
+  const teamChips = page.getByRole('button', { name: /^(Pre-legal|No team) \d+$/ })
+  t.check('no rank is offered before a mode is picked', await rankChips.count(), 0)
+  t.check('...and no team either', await teamChips.count(), 0)
+  await page.getByRole('button', { name: 'Rank', exact: true }).click()
+  await page.waitForTimeout(250)
+  const seniorChip = page.getByRole('button', { name: /^Senior \d+$/ })
+  t.ok('...and is offered after', await seniorChip.isVisible())
+  t.ok('...with how many people are behind it',
+    /\d+/.test(await seniorChip.innerText()))
+  /*
+   * Picking a mode clears the selection, so the count below is exactly what the chips added --
+   * which is what makes "two of the five teams" checkable at all.
+   */
+  t.ok('choosing how to pick starts from nobody',
+    /Nobody chosen/.test(await page.locator('body').innerText()))
+  await seniorChip.click()
+  await page.waitForTimeout(250)
+  const afterOne = Number(/(\d+) of \d+ chosen/.exec(await page.locator('body').innerText())?.[1] ?? 0)
+  t.ok('a rank chip selects its people', afterOne > 0)
+  const eliteChip = page.getByRole('button', { name: /^Elite \d+$/ })
+  await eliteChip.click()
+  await page.waitForTimeout(250)
+  const afterTwo = Number(/(\d+) of \d+ chosen/.exec(await page.locator('body').innerText())?.[1] ?? 0)
+  /*
+   * THE BUG THE SPLIT ROW EXISTS TO FIX. Every chip used to REPLACE the selection, so picking a
+   * second one silently threw the first away and the screen said nothing about it. Two chips must
+   * add up.
+   */
+  t.ok('a second chip adds to the first rather than replacing it', afterTwo > afterOne)
+  await eliteChip.click()
+  await page.waitForTimeout(250)
+  const afterOff = Number(/(\d+) of \d+ chosen/.exec(await page.locator('body').innerText())?.[1] ?? 0)
+  t.check('...and clicking it again takes just that group back out', afterOff, afterOne)
+  await page.getByRole('button', { name: 'Everyone' }).click()
+  await page.waitForTimeout(250)
 
   /* Picking nobody is reachable now, so it must read as a state rather than an empty panel. */
   await page.getByRole('button', { name: 'None', exact: true }).click()

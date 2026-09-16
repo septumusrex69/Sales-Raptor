@@ -152,7 +152,8 @@ ok('...and stays simple when there is none', /: `You work \$\{fullDay\} a day\.`
  * reserved from the only thing they were ever reserved for.
  */
 const plan = read('../../src/lib/handOut.ts')
-ok('the distributor measures a day against the whole capacity', /load < s\.c\.capacity/.test(plan))
+ok('the distributor measures a day against the whole capacity',
+  /const free = s\.c\.capacity - \(s\.c\.bookedByDay\[day\] \?\? 0\) - \(s\.added\[day\] \?\? 0\)/.test(plan))
 ok('...and against nothing smaller', !/capacity - .*reserve|selfBookingLimit/.test(plan))
 /*
  * And it cannot even see the reserve. The comment below says why this is deliberate, but a

@@ -20,8 +20,9 @@
  *                    quiet, and that was the first heuristic this planner had. It was wrong.
  *   2. GRADE       — is the account within their reach? The firm earns only on what it recovers
  *                    and carries its clients' reputation while doing it.
- *   3. DIARY ROOM  — and only now, which day. The window is a spread: "over five working days"
- *                    paces the work across five days, it does not merely permit five.
+ *   3. DIARY ROOM  — and only now, which day. The window sets the PACE: a hundred accounts over
+ *                    five working days is twenty a day, over ten days is ten a day, and over one
+ *                    day is all hundred today. The firm calls it the aggression of the allocation.
  *
  * Nothing here blocks. The plan says who goes over their ceiling and by how much, and a person
  * decides — the same rule the diary already follows for capacity.
@@ -216,41 +217,64 @@ export function planHandOut(input: PlanInput): HandOutPlan {
   const windowEnd = dayList[windowSize - 1]
 
   /*
-   * GATE 3: WHICH DAY — and the window is a SPREAD, not a ceiling.
+   * What the day quota is divided by. Accounts skipped for already being booked are excluded —
+   * dividing by a total that includes work the plan will not do makes every day's quota too
+   * small, and the plan then runs past a window it had room inside.
+   */
+  const placeable = input.skipAlreadyBooked
+    ? queue.filter((a) => !a.alreadyBooked).length
+    : queue.length
+
+  /*
+   * GATE 3: WHICH DAY — and the window is how HARD the work is pushed, not a deadline it must
+   * fit inside. The firm's words: "it kind of shows you the aggression of allocation."
    *
-   * The rule this replaced filled Monday to capacity, then Tuesday, and read "over five working
-   * days" as "within five working days". So a hundred accounts handed out over a week arrived as
-   * two solid days and three empty ones, which is what a screenshot caught. The firm reads the
-   * box the other way and they are right: it is an instruction about how the work is PACED, not a
-   * deadline to fit inside.
+   * A hundred accounts over five days is twenty a day. Over ten days it is ten a day. Over one
+   * day it is all hundred today, and that is a legitimate thing to ask for. The number is a dial
+   * between "get this worked now" and "leave my people room for what I hand out tomorrow" —
+   * because a diary filled to capacity today is a diary with no space for the next allocation,
+   * and that is the cost the person setting this number is actually weighing.
    *
-   * So inside the window the emptiest day takes next, counting what is ALREADY in that person's
-   * diary — which is why a Monday holding 38 of 40 gets skipped rather than topped up. Ties go to
-   * the earliest day, and that is what keeps the firm's ladder meaningful: the queue is dealt
-   * broken-promises-first, so the most urgent work still lands at the front of the window.
+   * SO THE QUOTA IS ACROSS THE WHOLE PLAN, not per collector. Levelling each person's own days
+   * separately was the previous attempt and it does not do this: thirty-nine collectors taking
+   * two or three each spread those two or three across days one, two and three, so a five-day
+   * window still finished in three. The aggregate is what the leader is pacing.
+   */
+  const perDay = Math.max(1, Math.ceil(placeable / windowSize))
+  const dayTotals: Record<string, number> = {}
+
+  /*
+   * Within a day that is still under quota, the collector's EMPTIEST day wins — counting what is
+   * already in their diary, so a Monday holding 38 of 40 is skipped rather than topped up. Ties
+   * go to the earliest, which is what keeps the firm's ladder meaningful: the queue is dealt
+   * broken-promises-first, so the most urgent work lands at the front of the window.
    *
-   * Only when every day in the window is full does it run past, earliest first — and it says so.
+   * The quota is relaxed before the window is abandoned. Somebody whose every under-quota day is
+   * full should take a day inside the window that is over quota rather than be pushed past the
+   * window entirely — the window is the instruction, the quota is how it is paced within it.
    */
   function dayFor(s: Desk): string | null {
-    let best: string | null = null
-    let bestLoad = Infinity
-    for (let i = 0; i < windowSize; i += 1) {
-      const day = dayList[i]
-      const load = (s.c.bookedByDay[day] ?? 0) + (s.added[day] ?? 0)
-      /*
-       * Fills to the FULL capacity, not to capacity minus reserve. The reserve exists to stop an
-       * agent's own bookings from eating the room a team leader needs — it constrains
-       * self-booking, not this. Subtracting it here would hold slots back from the only thing
-       * they were ever held back for, and the reserve would make hand-outs harder, not easier.
-       */
-      if (load >= s.c.capacity) continue
-      if (load < bestLoad) { bestLoad = load; best = day }
+    for (const underQuota of [true, false]) {
+      let best: string | null = null
+      let bestFree = -1
+      for (let i = 0; i < windowSize; i += 1) {
+        const day = dayList[i]
+        if (underQuota && (dayTotals[day] ?? 0) >= perDay) continue
+        /*
+         * Fills to the FULL capacity, not to capacity minus reserve. The reserve exists to stop
+         * an agent's own bookings from eating the room a team leader needs — it constrains
+         * self-booking, not this. Subtracting it here would hold slots back from the only thing
+         * they were ever held back for, and the reserve would make hand-outs harder, not easier.
+         */
+        const free = s.c.capacity - (s.c.bookedByDay[day] ?? 0) - (s.added[day] ?? 0)
+        if (free <= 0) continue
+        if (free > bestFree) { bestFree = free; best = day }
+      }
+      if (best !== null) return best
     }
-    if (best !== null) return best
     for (let i = windowSize; i < dayList.length; i += 1) {
       const day = dayList[i]
-      const load = (s.c.bookedByDay[day] ?? 0) + (s.added[day] ?? 0)
-      if (load < s.c.capacity) return day
+      if ((s.c.bookedByDay[day] ?? 0) + (s.added[day] ?? 0) < s.c.capacity) return day
     }
     return null
   }
@@ -323,6 +347,7 @@ export function planHandOut(input: PlanInput): HandOutPlan {
       const day = dayFor(s)
       if (day === null) continue
       s.added[day] = (s.added[day] ?? 0) + 1
+      dayTotals[day] = (dayTotals[day] ?? 0) + 1
       s.taking += 1
       placements.push({ accountId: account.id, userId: s.c.userId, dueOn: day, kind: account.kind })
       placed = true
