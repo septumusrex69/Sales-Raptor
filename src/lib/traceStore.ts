@@ -169,6 +169,33 @@ export function traceSummary(items: TraceItem[]): TraceSummary {
 }
 
 /**
+ * One row per thing, keeping the most recent of any repeats.
+ *
+ * A PROFILE LISTS EMPLOYMENT ONCE PER JOB TITLE, so the same company arrives three times — the
+ * same employer as "Technician" and as "Manager All Types". The trace table's key is one row per
+ * (trace, kind, value), so a batch carrying repeats was rejected WHOLE: the trace row had already
+ * been written, the findings were not, the import threw before its timeline note, and the account
+ * was left showing a trace with nothing in it and no way to tell why.
+ *
+ * Decided here rather than left to the database to complain about, and the newest wins, because a
+ * job title from 2009 is not what somebody does now.
+ *
+ * Its own function so it can be checked without a database — a source-level assertion that this
+ * exists passes just as happily on an importer that computes it and then ignores it.
+ */
+export function keepNewestPerThing<T extends { kind: string; value: string; seen_on?: string | null }>(
+  rows: T[],
+): T[] {
+  const best = new Map<string, T>()
+  for (const row of rows) {
+    const key = `${row.kind}|${row.value.toUpperCase()}`
+    const held = best.get(key)
+    if (!held || (row.seen_on ?? '') > (held.seen_on ?? '')) best.set(key, row)
+  }
+  return [...best.values()]
+}
+
+/**
  * Which contact kind a finding becomes when it is promoted.
  *
  * A LINK BECOMES 'other', NOT A PHONE. A relative is a person, and what gets stored about them is

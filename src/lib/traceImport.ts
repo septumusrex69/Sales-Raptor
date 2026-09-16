@@ -18,6 +18,7 @@
 import { supabase } from './supabase'
 import { addNote } from './accountWorkspace'
 import { setSubStatus } from './accountStandingData.ts'
+import { keepNewestPerThing } from './traceStore.ts'
 import { likelyRelatives } from './traceProfile.ts'
 import type {
   AdministrationReading, TraceAddress, TraceContact, TraceDirector, TraceEmployment, TraceJudgment,
@@ -331,11 +332,28 @@ export async function importTrace(input: {
       status: relatives.has(l.fullName) ? 'relative' : 'link',
     })),
   ]
-  if (itemRows.length > 0) {
+  /* One row per thing before it ever reaches the database — see keepNewestPerThing for why. */
+  const deduped = keepNewestPerThing(itemRows)
+
+  if (deduped.length > 0) {
+    /*
+     * Upserted rather than inserted, so a duplicate nobody anticipated cannot throw away the
+     * whole search a second time. The deduplication above is the rule; this is the seatbelt.
+     */
     const ins = await supabase.from('account_trace_items')
-      .insert(itemRows.map((r) => ({ ...r, trace_id: traceId, account_id: accountId })))
-    if (ins.error) throw new Error(ins.error.message)
-    result.filed = itemRows.length
+      .upsert(
+        deduped.map((r) => ({ ...r, trace_id: traceId, account_id: accountId })),
+        { onConflict: 'trace_id,kind,value', ignoreDuplicates: true },
+      )
+    if (ins.error) {
+      /*
+       * A TRACE WITH NO FINDINGS IS WORSE THAN NO TRACE. Without this the failed import leaves an
+       * empty trace on the account that a collector can open, read nothing from, and not explain.
+       */
+      await supabase.from('account_traces').delete().eq('id', traceId)
+      throw new Error(ins.error.message)
+    }
+    result.filed = deduped.length
   }
 
   /* ---------- the other companies they sit on ---------- */
@@ -411,6 +429,8 @@ export function traceNote(profile: TraceProfile, target: TraceTarget, r: TraceIm
   if (r.judgments > 0) bits.push(`${r.judgments} judgment${r.judgments === 1 ? '' : 's'}`)
   if (r.contacts > 0) bits.push(`${r.contacts} contact${r.contacts === 1 ? '' : 's'}`)
   if (r.directorships > 0) bits.push(`${r.directorships} other directorship${r.directorships === 1 ? '' : 's'}`)
+  /* What was kept on the trace itself, which is most of it and none of it on the contact list. */
+  if (r.filed > 0) bits.push(`${r.filed} kept on the trace`)
   const found = bits.length > 0 ? bits.join(', ') : 'nothing taken from it'
   const status = profile.companyStatus ? ` Status at CIPC: ${profile.companyStatus}.` : ''
   /*

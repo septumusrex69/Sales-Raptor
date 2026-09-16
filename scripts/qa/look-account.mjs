@@ -228,6 +228,13 @@ const traces = [{
   subject_name: 'Sipho Radebe', id_number: '8506105000085', registration_number: null,
   company_status: null, contact_score: 'Fair', risk_score: 'Medium Risk',
   enquired_on: '2026-09-16', document_id: null, created_at: '2026-09-16T14:31:00Z',
+}, {
+  /* The company's own profile. A commercial report carries no contacts at all -- it is here so
+     the switcher has two to move between and the empty state has something to explain. */
+  id: 'trace-2', account_id: ACC2, subject_kind: 'debtor', director_id: null, report_kind: 'commercial',
+  subject_name: 'Kopano Freight Services', id_number: null, registration_number: '2016/880431/07',
+  company_status: 'Final Liquidation', contact_score: null, risk_score: null,
+  enquired_on: '2026-09-16', document_id: null, created_at: '2026-09-16T14:30:00Z',
 }]
 
 const traceItems = [
@@ -385,19 +392,27 @@ await page.addInitScript(seed, { ref: REF, user: USER })
 await page.goto(`${ORIGIN}/accounts/${ACC2}`, { waitUntil: 'networkidle' })
 await page.waitForTimeout(1200)
 {
-  const open = page.getByRole('button', { name: /Work the trace/ })
+  await page.waitForFunction(() => /Open \d+ traces|Open the trace/.test(document.body.innerText), { timeout: 10000 }).catch(() => {})
+  /* Not anchored: the button carries an icon, so its text is not exactly the label. */
+  const open = page.locator('button').filter({ hasText: /Open \d+ traces|Open the trace/ })
   if (await open.count()) {
     await open.first().click()
     await page.waitForTimeout(500)
     await page.screenshot({ path: `${OUT}/trace-workspace.png`, fullPage: true })
     const body = await page.locator('[data-modal-open]').innerText()
     console.log('\n== Trace workspace ==')
-    for (const want of ['Numbers', 'Addresses', 'Employment', 'People linked', 'Property', 'Reached them', 'Add to contact details', 'Add as next of kin']) {
+    for (const want of ['Numbers', 'Addresses', 'Employment', 'People linked', 'Property', 'Reached them', 'Add to contact details', 'Add as next of kin', 'Kopano Freight Services']) {
       console.log(`   ${want}:`, new RegExp(want, 'i').test(body))
     }
     await page.keyboard.press('Escape')
     await page.waitForTimeout(200)
-  } else { console.log('!! no "Work the trace" link on the panel') }
+  } else {
+    console.log('!! no way in to the trace from the panel')
+    const panel = await page.locator('body').innerText()
+    console.log('   panel mentions Standing:', /STANDING/i.test(panel))
+    console.log('   panel mentions a trace:', /Trace/i.test(panel))
+    console.log('   buttons:', (await page.locator('button').allInnerTexts()).filter((t) => /trace|open/i.test(t)).join(' | ') || 'none')
+  }
 }
 
 /* The company first and on its own: it is the only one with directors, and the only one where

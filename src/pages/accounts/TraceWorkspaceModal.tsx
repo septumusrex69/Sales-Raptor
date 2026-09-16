@@ -35,12 +35,16 @@ const GROUPS: { kinds: TraceItemKind[]; title: string; note?: string }[] = [
   { kinds: ['property'], title: 'Property' },
 ]
 
-export function TraceWorkspaceModal({ trace, actor, onClose, onChanged }: {
-  trace: FiledTrace
+export function TraceWorkspaceModal({ traces, openId, onOpen, actor, onClose, onChanged }: {
+  /** Every trace on the account, so a collector can move between them without closing this. */
+  traces: FiledTrace[]
+  openId: string
+  onOpen: (traceId: string) => void
   actor: { id: string | null; name: string | null }
   onClose: () => void
   onChanged: () => Promise<void>
 }) {
+  const trace = traces.find((t) => t.id === openId) ?? traces[0]
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   /* Applied over the fetched rows so a click shows immediately without refetching the account. */
@@ -78,12 +82,36 @@ export function TraceWorkspaceModal({ trace, actor, onClose, onChanged }: {
     } finally { setBusy(null) }
   }
 
-  const title = trace.subjectName
-    ? `Trace — ${trace.subjectName}`
-    : 'Trace'
+  const title = trace.subjectName ? `Trace — ${trace.subjectName}` : 'Trace'
 
   return (
     <Modal title={title} onClose={onClose} width={720}>
+      {/*
+        MOVING BETWEEN THE TRACES ON AN ACCOUNT, at the firm's instruction: "I need to go, for
+        example, between the traces."
+
+        A company account collects one per director plus one for the company itself, and comparing
+        them is the work — the number that is dead on one director's profile is often live on
+        another's. Closing and reopening to switch loses whatever was half-read.
+      */}
+      {traces.length > 1 && (
+        <div className="flex flex-wrap gap-1.5 mb-3 -mt-1">
+          {traces.map((t) => (
+            <button key={t.id} type="button" onClick={() => onOpen(t.id)}
+              className={`text-xs px-2.5 py-1 rounded-lg border ${
+                t.id === trace.id
+                  ? 'border-gold-500 bg-gold-50 text-navy-900 font-medium'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+              }`}>
+              {t.subjectName ?? 'Trace'}
+              <span className="ml-1.5 text-[10px] text-slate-400">
+                {t.subjectKind === 'director' ? 'director' : 'company'}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 mb-4">
         <p className="text-[11px] text-slate-500">
           {[
@@ -98,6 +126,20 @@ export function TraceWorkspaceModal({ trace, actor, onClose, onChanged }: {
       </div>
 
       {error && <p className="text-sm text-negative-700 mb-3">{error}</p>}
+
+      {/*
+        A COMPANY PROFILE HAS NOTHING OF THIS KIND AND MUST SAY SO. Numbers, addresses and next of
+        kin come off a PERSON's report; a commercial one carries directors and judgments, which
+        live on the account itself. Without this the collector opens a working surface with nothing
+        in it and no idea whether that is a bug.
+      */}
+      {items.length === 0 && (
+        <p className="text-sm text-slate-500">
+          Nothing to work on this one. {trace.reportKind === 'commercial'
+            ? 'A company profile carries directors and judgments — both are on the account itself, under Standing. The numbers, addresses and next of kin come off a director\u2019s own trace.'
+            : 'The report had no contact details, addresses or links in it.'}
+        </p>
+      )}
 
       <div className="space-y-4">
         {GROUPS.map((group) => {

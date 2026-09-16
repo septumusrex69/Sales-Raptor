@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs'
 import {
   TRACE_OUTCOMES, canPromote, contactKindFor, currentEmployer, heldProperty, outcomeLabel,
-  principalAddress, principalPhone, traceSummary,
+  keepNewestPerThing, principalAddress, principalPhone, traceSummary,
 } from '../../src/lib/traceStore.ts'
 
 let pass = 0
@@ -212,18 +212,87 @@ ok('the account can read its findings in one query',
  * firm pays for the same search again.
  */
 ok('the import files the trace itself', /from\('account_traces'\)\.insert/.test(importer))
-ok('...and every finding on it', /from\('account_trace_items'\)\s*\n?\s*\.insert/.test(importer))
+ok('...and every finding on it', /from\('account_trace_items'\)\s*\n?\s*\.upsert/.test(importer))
 ok('...including the ones nobody ticked',
   /\.\.\.profile\.contacts\.map/.test(importer) && /\.\.\.profile\.addresses\.map/.test(importer))
 ok('...and marks which links share the surname', /relatives\.has\(l\.fullName\) \? 'relative'/.test(importer))
 /* A sold property must not read as an asset, so the bureau's flag is carried through. */
 ok('...and whether a property is still theirs', /pr\.currentOwner \? 'current owner' : 'past'/.test(importer))
 
+/* ---------- one row per thing, or the whole search is lost ---------- */
+
+/*
+ * A PROFILE LISTS EMPLOYMENT ONCE PER JOB TITLE, so the same company arrives three times. The
+ * table's key is one row per (trace, kind, value), so the batch was rejected whole — and because
+ * the trace row is written first, the account was left carrying a trace with nothing in it, no
+ * timeline note, and no way for anybody to tell what had gone wrong.
+ *
+ * That is what the firm hit, and it is why this is deduplicated in the importer rather than left
+ * to the database to complain about.
+ */
+const jobs = keepNewestPerThing([
+  { kind: 'employer', value: 'Thekwini Plant Services', seen_on: '2019-01-01', label: 'Technician' },
+  { kind: 'employer', value: 'THEKWINI PLANT SERVICES', seen_on: '2023-12-31', label: 'Manager All Types' },
+  { kind: 'employer', value: 'Kopano Freight', seen_on: '2020-01-01', label: 'Driver' },
+])
+eq('the same employer twice is one finding', jobs.length, 2)
+/* Newest wins: a job title from 2009 is not what somebody does now. */
+eq('...keeping the most recent title', jobs.find((j) => /thekwini/i.test(j.value)).label, 'Manager All Types')
+/*
+ * MATCHED HOWEVER THE BUREAU CAPITALISED IT. The same employer comes through in title case on
+ * one row and in upper case on another; compared case-sensitively those are two
+ * things, and the pair goes to the database as two rows with the same key.
+ *
+ * The value kept is the newest row exactly as it was printed — this collapses duplicates, it does
+ * not tidy what the bureau wrote.
+ */
+eq('...whatever the case it was printed in', jobs.filter((j) => /thekwini/i.test(j.value)).length, 1)
+/* Two different things that happen to share a kind are two things. */
+eq('...and different employers stay separate', jobs.filter((j) => j.kind === 'employer').length, 2)
+/* A number and an address with the same text are not the same finding. */
+eq('the kind is part of what makes a thing itself', keepNewestPerThing([
+  { kind: 'phone', value: 'x', seen_on: null }, { kind: 'address', value: 'x', seen_on: null },
+]).length, 2)
+ok('the importer actually uses it', /const deduped = keepNewestPerThing\(itemRows\)/.test(importer))
+/* The seatbelt: a duplicate nobody anticipated must not throw the whole search away a second time. */
+ok('...and a stray duplicate cannot fail the import',
+  /onConflict: 'trace_id,kind,value', ignoreDuplicates: true/.test(importer))
+/*
+ * A TRACE WITH NO FINDINGS IS WORSE THAN NO TRACE — a collector opens it, reads nothing, and
+ * cannot tell whether that is the report or a bug. A failed import takes its own trace row with
+ * it rather than leaving one behind.
+ */
+ok('a failed import leaves no empty trace behind',
+  /await supabase\.from\('account_traces'\)\.delete\(\)\.eq\('id', traceId\)/.test(importer))
+
 /* ---------- and a person can work it ---------- */
 
 ok('there is somewhere to work a trace', /export function TraceWorkspaceModal/.test(workspace))
 ok('...reachable from the account', /<TraceWorkspaceModal/.test(detail))
-ok('...from the summary of what it found', /Work the trace/.test(detail))
+/*
+ * THE WAY IN HAS TO BE A BUTTON. It was a line of small text inside a summary block and the
+ * firm's report was "I don't know how to open that area where all the information is", which is
+ * the only verdict that matters on a control nobody found.
+ */
+ok('...from a button on the panel, not a line of text', /Open \{traces\.length > 1 \? `\$\{traces\.length\} traces`/.test(detail))
+/* And the summary block is itself the target: every line of it is the beginning of a call. */
+ok('...and the whole summary opens it', /<button type="button" onClick=\{onOpen\}\s*\n\s*className="block w-full text-left/.test(detail))
+
+/*
+ * MOVING BETWEEN THE TRACES, in the firm's words: "I need to go, for example, between the traces."
+ * A company account collects one per director plus one for the company, and comparing them is the
+ * work — a number dead on one director's profile is often live on another's.
+ */
+ok('every trace on the account is reachable from inside', /traces: FiledTrace\[\]/.test(workspace))
+ok('...and switching does not close what is open', /onClick=\{\(\) => onOpen\(t\.id\)\}/.test(workspace))
+ok('...with the one you are on marked', /t\.id === trace\.id/.test(workspace))
+/*
+ * A COMPANY PROFILE HAS NOTHING OF THIS KIND AND HAS TO SAY SO. Numbers, addresses and next of
+ * kin come off a PERSON's report; a commercial one carries directors and judgments, which live on
+ * the account itself. Silent, it reads as a bug.
+ */
+ok('an empty trace says why it is empty', /Nothing to work on this one/.test(workspace))
+ok('...and where the company\'s findings actually are', /A company profile carries directors and judgments/.test(workspace))
 /* The firm's own list of what the summary must carry. */
 for (const line of ['Phone', 'Address', 'Works at', 'Property', 'Possible next of kin', 'Directs']) {
   ok(`the summary carries ${line.toLowerCase()}`, new RegExp(`"${line}"|>${line}[ <]`).test(detail))

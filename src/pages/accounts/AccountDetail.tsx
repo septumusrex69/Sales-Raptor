@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle, ArrowLeft, CalendarClock, Check, CheckCircle2, Gavel, Loader2, Mail, MessageCircle,
-  MessageSquare, Phone, Plus, Printer, ShieldAlert, StickyNote, Users, X, XCircle,
+  MessageSquare, Phone, Plus, Printer, Search, ShieldAlert, StickyNote, Users, X, XCircle,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
@@ -760,7 +760,9 @@ export function AccountDetail() {
       */}
       {openTrace !== null && traces.some((t) => t.id === openTrace) && (
         <TraceWorkspaceModal
-          trace={traces.find((t) => t.id === openTrace) as FiledTrace}
+          traces={traces}
+          openId={openTrace}
+          onOpen={setOpenTrace}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
           onClose={() => setOpenTrace(null)}
           onChanged={reload}
@@ -1651,11 +1653,25 @@ function StandingPanel({ account, standing, position, traces, onUpload, onOpenTr
 
   return (
     <Card>
+      {/*
+        THE WAY IN HAS TO BE A BUTTON. It was a line of small text inside a summary block, and the
+        firm's report was "I don't know how to open that area where all the information is" —
+        which is the only verdict that matters on a control nobody found. Uploading is the smaller
+        job once a trace exists, so it gives up the emphasis.
+      */}
       <PanelTitle action={
-        <button type="button" onClick={onUpload}
-          className="text-[11px] font-medium text-[var(--c-steel)] hover:underline">
-          Upload a trace
-        </button>
+        <span className="inline-flex items-center gap-2">
+          {traces.length > 0 && (
+            <button type="button" onClick={() => onOpenTrace(traces[0].id)}
+              className="text-[11px] font-medium px-2 py-1 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 inline-flex items-center gap-1">
+              <Search size={11} /> Open {traces.length > 1 ? `${traces.length} traces` : 'the trace'}
+            </button>
+          )}
+          <button type="button" onClick={onUpload}
+            className="text-[11px] font-medium text-[var(--c-steel)] hover:underline">
+            Upload a trace
+          </button>
+        </span>
       }>Standing</PanelTitle>
 
       {bare && (
@@ -1815,19 +1831,24 @@ function TraceFound({ trace, onOpen }: { trace: FiledTrace; onOpen: () => void }
   const who = trace.subjectKind === 'director' ? trace.subjectName : null
 
   return (
-    <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50/60 px-2.5 py-2">
+    /*
+      THE WHOLE BLOCK OPENS IT, not a word at the end of it. A summary of a trace is not something
+      anybody reads and then leaves alone — every line of it is the beginning of a call — so the
+      thing under the finger is the thing they want.
+    */
+    <button type="button" onClick={onOpen}
+      className="block w-full text-left mb-3 rounded-lg border border-slate-200 bg-slate-50/60 px-2.5 py-2 hover:border-gold-400 hover:bg-gold-50/50">
       <div className="flex flex-wrap items-baseline justify-between gap-x-2">
         <p className="text-xs font-semibold text-navy-900">
           Trace{who ? <> &middot; <span className="font-normal text-slate-600">{who}</span></> : null}
         </p>
-        <button type="button" onClick={onOpen}
-          className="text-[11px] font-medium text-[var(--c-steel)] hover:underline shrink-0">
+        <span className="text-[11px] font-medium text-[var(--c-steel)] shrink-0">
           {/*
-            The count is the point of the link, not decoration: it says how much of what the firm
-            paid for nobody has tried yet.
+            The count says how much of what the firm paid for nobody has tried yet, which is the
+            only measure of whether the search was worth buying.
           */}
-          Work the trace{found.untried > 0 ? ` (${found.untried} untried)` : ''}
-        </button>
+          Work it{found.untried > 0 ? ` · ${found.untried} untried` : ''} &rarr;
+        </span>
       </div>
 
       <div className="space-y-1 mt-1.5">
@@ -1856,7 +1877,7 @@ function TraceFound({ trace, onOpen }: { trace: FiledTrace; onOpen: () => void }
           </p>
         )}
       </div>
-    </div>
+    </button>
   )
 }
 
