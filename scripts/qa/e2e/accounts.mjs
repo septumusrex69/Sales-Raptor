@@ -389,6 +389,18 @@ try {
    */
   t.ok('the day total reads as a result', /\(\d+\)/.test(grid))
   /*
+   * EVERY CELL THAT PLACES WORK SHOWS THE TOTAL, not only the ones whose day already held
+   * something. The bracket used to be conditional on that, which made a bare "+1" ambiguous —
+   * an empty diary and a number the screen had chosen not to print looked identical, and the firm
+   * asked which it was. A column is only scannable while every cell has the same shape.
+   */
+  const cells = (await page.locator('[data-qa="plan-rows"] td').allInnerTexts())
+    .map((x) => x.replace(/\s+/g, ' ').trim())
+    .filter((x) => x.startsWith('+'))
+  t.ok('there are cells adding work', cells.length > 0)
+  t.ok('...and every one of them says the day total too',
+    cells.every((x) => /^\+\d+ \(\d+\)$/.test(x)))
+  /*
    * And the count under the table has to agree with the cells above it, because they are computed
    * by two different pieces of code over the same plan. With thirty-eight collectors and forty
    * accounts nobody is near their fifty, so the honest reading is "nobody" — and a warning that

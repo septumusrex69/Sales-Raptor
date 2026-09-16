@@ -777,15 +777,17 @@ function PlanPreview({ plan, collectors }: {
                           "(9)" is the one shape that says "and then there will be nine", and it
                           is the same convention the caption under the table now spells out.
 
-                          Shown only where it says something the "+N" does not: an empty Thursday
-                          taking one account reads "+1", not "+1 (1)". The same number twice is
-                          the kind of noise that makes people stop reading a column.
+                          ALWAYS, and it was conditional on the day already holding something. The
+                          reasoning was that "+1 (1)" prints the same number twice, which is true
+                          and was the wrong trade: it made a bare "+1" ambiguous. A leader could
+                          not tell an empty diary from a figure the screen had decided not to
+                          show, and asked which it was. A column is only scannable while every
+                          cell has the same shape; one where the second number comes and goes has
+                          to be interpreted, and reading this grid at a glance is its whole job.
                         */}
-                        {existing > 0 && (
-                          <span className={over || full ? 'font-semibold' : ''}>
-                            {added > 0 ? ' ' : ''}({total})
-                          </span>
-                        )}
+                        <span className={over || full ? 'font-semibold' : ''}>
+                          {added > 0 ? ' ' : ''}({total})
+                        </span>
                       </td>
                     )
                   })}
@@ -808,7 +810,8 @@ function PlanPreview({ plan, collectors }: {
         <p className="px-3 py-1.5 text-[11px] text-slate-400 border-t border-slate-100">
           <span className="text-brand-700 font-medium">+3</span> is what this hand-out books that
           day. <span className="text-slate-500">(9)</span> is what they will have in the diary
-          afterwards, shown where something is already booked.{' '}
+          afterwards — so <span className="text-slate-500">(1)</span> means the day was empty, and a
+          dot means nothing is booked and nothing is being added.{' '}
           {overDays === 0
             ? 'Nobody goes past their daily limit.'
             : <span className="text-rose-700">
