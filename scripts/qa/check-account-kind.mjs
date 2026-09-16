@@ -67,7 +67,7 @@ ok('the account band says which kind it is',
 /*
  * A SEPARATE TABLE, NOT account_contacts, and the distinction is the point. A director is not a
  * way of reaching the company: they are a person with their own ID number, traceable in their own
- * right, whose directorship can end. Truestone's bureau profile carries six directors of whom
+ * right, whose directorship can end. One real bureau profile carries six directors of whom
  * four have resigned — filed as contacts they would be four dead ends a collector cannot tell
  * from the two who still matter.
  */

@@ -108,7 +108,48 @@ can build in something like that, a specific rule."*
    that did pay. Same grace question as item 1.
 
 
-### 6. Campaigns
+### 6. Likelihood of collection — the firm's own risk profile
+
+**Asked for, deliberately not started.** The firm: *"We will also build our internal likelihood
+of success based on this data. If we see, for example, a debtor has judgments, it will
+significantly reduce the likelihood of collection. So this could be one of our parameters that we
+use for risk profile, for example, even when we're reporting back to the clients."*
+
+**No weights have been invented, and none should be until the firm calibrates them.** This number
+goes onto a CLIENT REPORT. A score built from a plausible-sounding formula is a number the firm
+would have to defend to a client without being able to say where it came from — and it would be
+wrong in the direction that matters, because the only thing that can settle the weights is what
+the firm has actually recovered on accounts that looked like this one. That calibration needs a
+year of closed accounts, which the book has; the scoring does not need designing first.
+
+What is already in the data, and worth naming now so the calibration has somewhere to start:
+
+| Parameter | Where it lives today |
+|---|---|
+| Judgments: how many, how recent, who sued | `account_judgments` — built |
+| A judgment for tax | `account_judgments.plaintiff` = SARS. Weighs more than a trade creditor |
+| The debtor is under administration | position `under_administration`, `practitioner_kind` |
+| Company status (e.g. Final Liquidation) | on the bureau profile; not yet stored as a field |
+| XDS Contact Score and Risk Score | on the bureau profile; not yet stored |
+| PTP success ratio and how many were taken | `debtor_accounts.ptp_success_ratio` — imported |
+| Paid anything at all, and when | `payments_to_date`, `last_payment_at` |
+| How close prescription is | `prescription_date` |
+| Whether the debtor has ever been reached | the diary and the timeline |
+
+Two things to settle with the firm before any of it is scored:
+
+1. **Is the number shown to clients, or only used internally to sort work?** They said "even when
+   we're reporting back to the clients", which reads as both — but a figure on a report and a
+   figure that orders a work queue can be wrong in very different ways, and only one of them
+   costs a client relationship.
+2. **What counts as success?** Recovered in full, recovered anything, or recovered enough to
+   cover the cost of working it. The third is the firm's real question and the hardest to
+   backfill.
+
+Until then the account screen shows the judgments as ROWS — who sued, for what, how long ago —
+and no score. See `StandingPanel` and `accountStanding.ts`.
+
+### 7. Campaigns
 
 Email campaigns for team leaders; SMS Administrator-only, because SMS costs real money per
 segment and the Annexure B cap is 10 a month per account. The firm's view: "SMSs don't really

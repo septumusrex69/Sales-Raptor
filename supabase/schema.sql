@@ -3001,7 +3001,7 @@ comment on column public.debtor_accounts.debtor_id_number is
 --
 -- A SEPARATE TABLE, NOT account_contacts, and the distinction is the point. A director is not a
 -- way of reaching the company: they are a person with their own ID number, traceable in their
--- own right, whose directorship can end. Truestone's profile carries six directors of whom four
+-- own right, whose directorship can end. One real profile carries six directors of whom four
 -- have resigned -- filed as contacts they would be four dead ends a collector cannot tell from
 -- the two who still matter.
 create table if not exists public.account_directors (
@@ -3031,4 +3031,82 @@ create policy account_directors_read on public.account_directors
 
 drop policy if exists account_directors_write on public.account_directors;
 create policy account_directors_write on public.account_directors
+  for all to authenticated using (true) with check (true);
+
+-- ---------------------------------------------------------------------------
+-- The practitioner, and the judgments already against the debtor.
+--
+-- Both came out of one real handover: a company in final liquidation carrying two default
+-- judgments on its bureau profile. Nothing in the book could hold either fact, so a collector
+-- opening it would have rung a company that legally cannot pay them.
+-- ---------------------------------------------------------------------------
+
+-- WHO TO DEAL WITH WHEN IT IS NO LONGER THE DEBTOR.
+--
+-- Once a debtor is liquidated, sequestrated, under curatorship, deceased, in business rescue or
+-- under debt review, the debt is still owed but the DEBTOR IS NO LONGER THE PERSON TO ASK. The
+-- claim goes to an appointed practitioner, and ringing the debtor instead is at best wasted time
+-- and at worst unlawful. The firm already tracks this in a sub-status ('Liquidation/Sequestration')
+-- which says the state and not the name — so the claim sat in somebody's head or in a note.
+--
+-- Six kinds, not free text, because each one is a different office with a different claim
+-- procedure and a collector has to be able to tell them apart at a glance.
+alter table public.debtor_accounts
+  add column if not exists practitioner_kind text
+    check (practitioner_kind in
+      ('liquidator', 'trustee', 'curator', 'executor', 'business_rescue', 'debt_counsellor'));
+
+alter table public.debtor_accounts add column if not exists practitioner_name text;
+alter table public.debtor_accounts add column if not exists practitioner_firm text;
+-- Their reference for the estate, which every claim submission has to quote back.
+alter table public.debtor_accounts add column if not exists practitioner_reference text;
+alter table public.debtor_accounts add column if not exists practitioner_phone text;
+alter table public.debtor_accounts add column if not exists practitioner_email text;
+-- The date of appointment. Claims run on deadlines counted from it.
+alter table public.debtor_accounts add column if not exists practitioner_appointed_on date;
+
+comment on column public.debtor_accounts.practitioner_kind is
+  'Who to deal with instead of the debtor: liquidator, trustee, curator, executor, business '
+  'rescue practitioner or debt counsellor. Null means the debtor is still the person to ask.';
+
+-- JUDGMENTS ALREADY GRANTED AGAINST THE DEBTOR, by somebody else.
+--
+-- These are NOT the firm's own legal action — an account of ours on Section 129 or at attorney
+-- has its own trail. These are other creditors' judgments, read off a bureau profile, and they
+-- are the single strongest signal in the data about whether this debt will ever be collected: a
+-- debtor with a default judgment for VAT from SARS is not a debtor who is about to settle.
+--
+-- Stored as ROWS, not a count, because the individual facts are what will be read: who sued, for
+-- what, how long ago. A count cannot tell a R2 000 retail account in 2019 from SARS last year.
+create table if not exists public.account_judgments (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  case_number text not null,
+  -- As the bureau words it: 'JUDGEMENT BY DEFAULT', 'CONSENT TO JUDGEMENT'. A defended judgment
+  -- and a default judgment say different things about the debtor.
+  case_type text,
+  -- What the debt was: 'VAT', 'CREDIT AGREEMENT', 'GOODS SOLD AND DELIVERED'.
+  case_reason text,
+  -- Who took it. SARS carries weight a trade creditor does not.
+  plaintiff text,
+  filed_on date,
+  amount numeric(14,2),
+  source text not null default 'xds',
+  recorded_at timestamptz not null default now(),
+  -- A re-pulled profile must update the judgment, never add a second copy of it.
+  unique (account_id, case_number)
+);
+
+-- Read newest-first per account, which is the only way this table is ever queried.
+create index if not exists account_judgments_account_idx
+  on public.account_judgments (account_id, filed_on desc);
+
+alter table public.account_judgments enable row level security;
+
+drop policy if exists account_judgments_read on public.account_judgments;
+create policy account_judgments_read on public.account_judgments
+  for select to authenticated using (true);
+
+drop policy if exists account_judgments_write on public.account_judgments;
+create policy account_judgments_write on public.account_judgments
   for all to authenticated using (true) with check (true);

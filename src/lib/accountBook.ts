@@ -14,6 +14,7 @@
 import { supabase } from './supabase'
 import type { FrozenBy } from './clientPosition.ts'
 import type { ViewCounts } from './accountViews.ts'
+import type { PractitionerKind } from './accountStanding.ts'
 
 export interface DebtorAccount {
   id: string
@@ -47,6 +48,26 @@ export interface DebtorAccount {
   prescriptionDate: string | null
   status: string
   subStatus: string | null
+  /**
+   * Who to deal with when it is no longer the debtor.
+   *
+   * A liquidated company, a sequestrated estate, a deceased debtor, a debtor under debt review:
+   * the debt is still owed, but the claim goes to an APPOINTED PRACTITIONER and ringing the
+   * debtor is at best wasted time. The firm's sub-status already said the state
+   * ('Liquidation/Sequestration') and never the name, so the only copy of who to write to lived
+   * in a note or in somebody's head.
+   *
+   * Null means nobody is appointed and the debtor is still the person to ask.
+   */
+  practitionerKind: PractitionerKind | null
+  practitionerName: string | null
+  practitionerFirm: string | null
+  /** Their reference for the estate. Every claim submission has to quote it back. */
+  practitionerReference: string | null
+  practitionerPhone: string | null
+  practitionerEmail: string | null
+  /** Claims run on deadlines counted from the appointment, not from our handover. */
+  practitionerAppointedOn: string | null
   /*
    * A freeze is three facts, not a label. Carried on the account because "why has this not
    * moved" is asked of a single account far more often than it is reported in bulk.
@@ -110,6 +131,13 @@ const toAccount = (r: any): DebtorAccount => ({
   prescriptionDate: r.prescription_date,
   status: r.status ?? '',
   subStatus: r.sub_status,
+  practitionerKind: (r.practitioner_kind as PractitionerKind | null) ?? null,
+  practitionerName: r.practitioner_name ?? null,
+  practitionerFirm: r.practitioner_firm ?? null,
+  practitionerReference: r.practitioner_reference ?? null,
+  practitionerPhone: r.practitioner_phone ?? null,
+  practitionerEmail: r.practitioner_email ?? null,
+  practitionerAppointedOn: r.practitioner_appointed_on ?? null,
   /*
    * THIS MAPPER IS HAND-WRITTEN, so a column added to debtor_accounts does not arrive here on
    * its own — it has to be listed. A field present in the database, in the type and in the

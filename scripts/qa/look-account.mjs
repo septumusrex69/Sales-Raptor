@@ -7,10 +7,29 @@
  * queries are right, because no query leaves the browser.
  */
 import { execSync, spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 
 const OUT = process.env.QA_OUT ?? '/tmp'
-const REF = 'kvkajxpremantdkhmjvb'
+/*
+ * THE REF COMES FROM .env.local, not from a constant here.
+ *
+ * Both the request stub and the seeded session are keyed on the project ref, and the dev server
+ * reads its URL from that file -- which the e2e harness rewrites to a placeholder project when it
+ * runs. Hardcoded, the two drifted apart silently: the session went into localStorage under a key
+ * the app never looked at, every page redirected to the login screen, and the tool reported
+ * thirty missing buttons on a screenshot of the sign-in form.
+ */
+const REF = (() => {
+  try {
+    const m = /VITE_SUPABASE_URL=https:\/\/([^.\s]+)\./.exec(readFileSync('.env.local', 'utf8'))
+    if (m) return m[1]
+  } catch { /* no .env.local: fall through to staging, which is what a developer run means. */ }
+  return 'kvkajxpremantdkhmjvb'
+})()
 const ACC = '11111111-1111-4111-8111-111111111111'
+/* A second account, a company, for the things only a company has: directors, and a liquidation
+ * with nobody appointed to claim from. */
+const ACC2 = '11111111-1111-4111-8111-111111111112'
 const COMPANY = '22222222-2222-4222-8222-222222222222'
 const USER = '33333333-3333-4333-8333-333333333333'
 
@@ -53,6 +72,25 @@ const account = {
   account_flags: 'Debtor avoiding contact; Section 129 in process',
   account_rating: 7, last_contact_method: 'Email (Outgoing)', ptp_success_ratio: 7,
   diary_date: '2026-09-22', last_action_at: '2026-09-02', last_payment_at: '2026-08-05',
+  debtor_kind: 'individual',
+  /* Under debt review: the debt is still owed, but the proposal comes through the counsellor. */
+  practitioner_kind: 'debt_counsellor', practitioner_name: 'L. Pretorius',
+  practitioner_firm: 'Pretorius Debt Counselling', practitioner_reference: 'NCRDC1882/T4471',
+  practitioner_phone: '+27 12 345 6789', practitioner_email: 'admin@pdc.example.co.za',
+  practitioner_appointed_on: '2026-02-11',
+}
+
+/* A company in final liquidation with nobody recorded to claim from -- the one state the
+ * Standing panel interrupts a collector about. */
+const company = {
+  ...account,
+  id: ACC2, account_number: 'ABS-009104', swordfish_reference: '9104', client_reference: 'KOP-0041',
+  debtor_first_name: null, debtor_surname: 'Kopano Freight Services (Pty) Ltd', debtor_id_number: '2016/2...',
+  debtor_kind: 'company', sub_status: 'Liquidation/Sequestration',
+  main_comment: 'Final liquidation confirmed on the bureau profile. No liquidator on file yet.',
+  practitioner_kind: null, practitioner_name: null, practitioner_firm: null,
+  practitioner_reference: null, practitioner_phone: null, practitioner_email: null,
+  practitioner_appointed_on: null,
 }
 
 const payments = [
@@ -148,8 +186,23 @@ const promises = [
   { id: 'pr3', account_id: ACC, amount: 1500, due_on: '2026-04-05', method: 'EFT', status: 'broken', resolved_at: '2026-04-12T10:00:00Z', notes: null, created_by: null, created_at: '2026-03-18T09:00:00Z' },
 ]
 
+const directors = [
+  { id: 'dir1', account_id: ACC2, id_number: '8506105...', full_name: 'Sipho Radebe', status: 'Active', appointed_on: '2016-05-20', source: 'xds', traced_at: '2026-09-16T14:31:00Z', created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dir2', account_id: ACC2, id_number: '7711220...', full_name: 'Elmarie du Toit', status: 'Resigned', appointed_on: '2016-05-20', source: 'xds', traced_at: null, created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dir3', account_id: ACC2, id_number: '9002145...', full_name: 'Yolanda Pillay', status: 'Resigned', appointed_on: '2016-05-20', source: 'xds', traced_at: null, created_at: '2026-09-16T14:31:00Z' },
+]
+
+/* Neither carries an amount, which is the common case off a summary profile -- and the case the
+ * total has to describe as a floor rather than as the figure. */
+const judgments = [
+  { id: 'j1', account_id: ACC2, case_number: '40021/2024', case_type: 'Judgement by default', case_reason: 'Credit agreement', plaintiff: 'Bosveld Plant Hire (Pty) Ltd', filed_on: '2024-10-04', amount: null, source: 'xds', recorded_at: '2026-09-16T14:31:00Z' },
+  { id: 'j2', account_id: ACC2, case_number: '40990/2023', case_type: 'Judgement by default', case_reason: 'VAT', plaintiff: 'SARS', filed_on: '2023-11-08', amount: 412870.44, source: 'xds', recorded_at: '2026-09-16T14:31:00Z' },
+]
+
 const TABLES = {
-  debtor_accounts: [account],
+  debtor_accounts: [account, company],
+  account_directors: directors,
+  account_judgments: judgments,
   account_contacts: contacts,
   account_queries: [
     { id: 'q1', account_id: ACC, description: 'Says she already paid R3,000 of this directly to the client in March and it was never credited.', category: 'Already paid', status: 'open', stage: 'client', sent_to_client_at: '2026-08-20T09:00:00Z', owner_id: USER, raised_by_name: 'Amanda Coertze', raised_at: '2026-08-18T09:00:00Z', chase_on: '2026-09-01', outcome: null, outcome_action: null, outcome_amount: null, outcome_done: false, closed_at: null, closed_by_name: null },
@@ -271,6 +324,18 @@ const seed = ({ ref, user }) => {
   localStorage.setItem(`sb-${ref}-auth-token`, JSON.stringify(session))
 }
 await page.addInitScript(seed, { ref: REF, user: USER })
+
+/* The company first and on its own: it is the only one with directors, and the only one where
+ * the "nobody recorded to claim from" warning can fire. */
+await page.goto(`${ORIGIN}/accounts/${ACC2}`, { waitUntil: 'networkidle' })
+await page.waitForTimeout(1500)
+await page.screenshot({ path: `${OUT}/account-company.png`, fullPage: true })
+await page.evaluate(() => {
+  const h = [...document.querySelectorAll('h3')].find((n) => /^Standing$/.test(n.textContent ?? ''))
+  h?.scrollIntoView({ block: 'center' })
+})
+await page.waitForTimeout(400)
+await page.screenshot({ path: `${OUT}/account-standing-panel.png` })
 
 for (const tab of ['Overview', 'Transactions', 'Documents']) {
   await page.goto(`${ORIGIN}/accounts/${ACC}`, { waitUntil: 'networkidle' })

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
-  AlertTriangle, ArrowLeft, CalendarClock, Check, CheckCircle2, Loader2, Mail, MessageCircle,
-  MessageSquare, Phone, Plus, Printer, ShieldAlert, StickyNote, X, XCircle,
+  AlertTriangle, ArrowLeft, CalendarClock, Check, CheckCircle2, Gavel, Loader2, Mail, MessageCircle,
+  MessageSquare, Phone, Plus, Printer, ShieldAlert, StickyNote, Users, X, XCircle,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
@@ -35,9 +35,13 @@ import { FreezeModal } from './FreezeModal'
 import { ClientActionModal } from './ClientActionModal'
 import {
   CLIENT_FLAGS, CLIENT_POSITIONS, DESK_POSITIONS, deskPosition, frozenByLabel, positionReport,
-  type ClientFlag,
+  type ClientFlag, type DeskPosition,
 } from '../../lib/clientPosition.ts'
 import { clientLine, type ClientLine } from '../../lib/accountNarrative.ts'
+import {
+  judgmentSummary, practitionerLabel, practitionerMeaning, type AccountStanding,
+} from '../../lib/accountStanding.ts'
+import { fetchStanding } from '../../lib/accountStandingData.ts'
 import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
 import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
@@ -92,6 +96,7 @@ export function AccountDetail() {
   const [documents, setDocuments] = useState<AccountDocument[]>([])
   const [queries, setQueries] = useState<AccountQuery[]>([])
   const [emails, setEmails] = useState<AccountEmail[]>([])
+  const [standing, setStanding] = useState<AccountStanding>({ directors: [], judgments: [] })
   /** Whether the signed-in agent has a mailbox connected at all. Null while we are asking. */
   const [mailbox, setMailbox] = useState<string | null>(null)
   /** Set when writing a reply, so the debtor's client threads our answer under their message. */
@@ -139,13 +144,13 @@ export function AccountDetail() {
          * information gained. From Paris that is a round trip of about 200ms, spent to learn
          * something we knew before the page rendered.
          */
-        const [a, l, w, d, q, e] = await Promise.all([
+        const [a, l, w, d, q, e, st] = await Promise.all([
           fetchAccount(id), fetchLedgers(id), fetchWorkspace(id), fetchDocuments(id), fetchQueries(id),
-          fetchAccountEmails(id),
+          fetchAccountEmails(id), fetchStanding(id),
         ])
         if (cancelled) return
         setAccount(a)
-        if (a) { setLedgers(l); setWorkspace(w); setDocuments(d); setQueries(q); setEmails(e) }
+        if (a) { setLedgers(l); setWorkspace(w); setDocuments(d); setQueries(q); setEmails(e); setStanding(st) }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
       } finally {
@@ -188,9 +193,10 @@ export function AccountDetail() {
 
   const reload = useCallback(async () => {
     if (!account) return
-    const [a, l, w, d, q, e] = await Promise.all([
+    const [a, l, w, d, q, e, st] = await Promise.all([
       fetchAccount(account.id), fetchLedgers(account.id), fetchWorkspace(account.id),
       fetchDocuments(account.id), fetchQueries(account.id), fetchAccountEmails(account.id),
+      fetchStanding(account.id),
     ])
     if (a) setAccount(a)
     setLedgers(l)
@@ -198,6 +204,7 @@ export function AccountDetail() {
     setDocuments(d)
     setQueries(q)
     setEmails(e)
+    setStanding(st)
   }, [account])
 
   const { busy: savingComment, run: runComment } = useWriter(reload)
@@ -387,6 +394,16 @@ export function AccountDetail() {
       clientId={client?.id}
       clientLiaisonId={clientLiaison?.id}
     />
+  )
+  /*
+   * WHO IS BEHIND IT, AND WHAT IS ALREADY AGAINST IT.
+   *
+   * Renders itself away when there is nothing to say, which is the whole imported book — an
+   * individual with no bureau profile pulled has no directors, no practitioner and no judgments,
+   * and an empty card on every account is a card people stop seeing.
+   */
+  const standingPanel = (
+    <StandingPanel account={account} standing={standing} position={position} />
   )
   const positionPanel = (
     <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0}
@@ -631,7 +648,12 @@ export function AccountDetail() {
             three lines under it. A panel nobody scrolls to is a panel that does not exist, and
             this one only works if the person doing the work reads it.
           */
-          side={[clientLinePanel, summaryPanel, promisePanel, disputesPanel, positionPanel]}
+          /*
+            Standing above the promise, deliberately. A liquidator being appointed is the reason
+            NOT to take a promise, and two default judgments are the reason to doubt the one you
+            are about to take — both have to be read before the box that records it, not after.
+          */
+          side={[clientLinePanel, summaryPanel, standingPanel, promisePanel, disputesPanel, positionPanel]}
         />
       )}
 
@@ -1473,6 +1495,152 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
           </div>
         )}
       </div>
+    </Card>
+  )
+}
+
+/**
+ * Who is behind this debtor, and what is already against them.
+ *
+ * Three facts that change what the call is, and none of which the book could hold until now:
+ *
+ *   - An appointed practitioner. The debt is still owed, but the DEBTOR IS NO LONGER THE PERSON
+ *     TO ASK — the claim goes to a liquidator, trustee, curator, executor, business rescue
+ *     practitioner or debt counsellor. A collector who rings the company instead has wasted the
+ *     call at best.
+ *   - The directors of a company, because a company is not rung; its people are. Active first:
+ *     one real profile carries six directors of whom four have resigned, and a list that mixes
+ *     them is four wasted calls.
+ *   - Judgments other creditors already hold. The firm has said plainly that these will drive an
+ *     internal likelihood of collection reported back to clients, so they are shown as rows — who
+ *     sued, for what, how long ago — and NOT as a score. See BACKLOG: a number that goes on a
+ *     client report has to be calibrated against the firm's own recovered outcomes first.
+ *
+ * Absent on nearly every account, and silent when absent.
+ */
+function StandingPanel({ account, standing, position }: {
+  account: DebtorAccount
+  standing: AccountStanding
+  /** The rung the account sits on, so a missing practitioner can be a warning only when it is one. */
+  position: DeskPosition
+}) {
+  const kindLabel = practitionerLabel(account.practitionerKind)
+  const hasPractitioner = !!(kindLabel || account.practitionerName || account.practitionerFirm)
+  const { directors, judgments } = standing
+  const summary = judgmentSummary(judgments)
+  /*
+   * A WARNING THAT ONLY FIRES WHEN SOMETHING IS ACTUALLY WRONG.
+   *
+   * The account reports as under administration — somebody else is running the debtor's affairs
+   * — and there is no record of who. That is a claim nobody can submit, and it is the one state
+   * worth interrupting a collector about. On every other rung a missing practitioner is simply
+   * the normal case, and saying so would train people to stop reading.
+   */
+  const claimNobodyCanMake = position === 'under_administration' && !hasPractitioner
+
+  if (!hasPractitioner && directors.length === 0 && judgments.length === 0 && !claimNobodyCanMake) return null
+
+  return (
+    <Card>
+      <PanelTitle>Standing</PanelTitle>
+
+      {claimNobodyCanMake && (
+        <div className="mb-3 rounded-lg border border-gold-300 bg-gold-50 px-2.5 py-2">
+          <p className="text-xs font-medium text-navy-900 inline-flex items-center gap-1.5">
+            <AlertTriangle size={13} className="text-gold-600 shrink-0" /> Nobody recorded to claim from
+          </p>
+          <p className="text-[11px] text-slate-600 mt-0.5">
+            Somebody else is administering this debtor&rsquo;s affairs, and the account does not say
+            who. The claim cannot be submitted until it does.
+          </p>
+        </div>
+      )}
+
+      {hasPractitioner && (
+        <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
+          <p className="text-xs font-semibold text-navy-900">
+            Deal with the {(kindLabel ?? 'practitioner').toLowerCase()}, not the debtor
+          </p>
+          {practitionerMeaning(account.practitionerKind) && (
+            <p className="text-[11px] text-slate-500 mt-0.5">{practitionerMeaning(account.practitionerKind)}</p>
+          )}
+          <div className="space-y-1.5 mt-2">
+            <Field label={kindLabel ?? 'Appointed'} value={account.practitionerName} note={account.practitionerFirm ?? undefined} />
+            <Field label="Their reference" value={account.practitionerReference} />
+            <Field label="Phone" value={account.practitionerPhone} />
+            <Field label="Email" value={account.practitionerEmail} />
+            <Field label="Appointed" value={account.practitionerAppointedOn ? formatDate(account.practitionerAppointedOn) : null} />
+          </div>
+        </div>
+      )}
+
+      {directors.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5 inline-flex items-center gap-1.5">
+            <Users size={12} /> Directors
+          </p>
+          <ul className="space-y-1.5">
+            {directors.map((d) => (
+              <li key={d.id} className="flex flex-wrap items-baseline justify-between gap-x-2 text-sm">
+                <span className={d.status === 'Resigned' ? 'text-slate-400' : 'text-slate-800'}>
+                  {d.fullName}
+                  {/* The ID number is why a director is stored at all: their own trace is keyed on it. */}
+                  {d.idNumber && <span className="block text-[11px] text-slate-400 font-mono">{d.idNumber}</span>}
+                </span>
+                <span className={`text-[11px] px-1.5 py-0.5 rounded-full shrink-0 ${
+                  d.status === 'Resigned' ? 'bg-slate-100 text-slate-500' : 'bg-positive-50 text-positive-700'
+                }`}>
+                  {d.status ?? 'Unknown'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {judgments.length > 0 && (
+        <div>
+          <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5 inline-flex items-center gap-1.5">
+            <Gavel size={12} /> Judgments against them
+          </p>
+          {/*
+            The count and the newest date first, because those are the two facts that decide
+            whether the rows below are history or a live problem. The total says "at least": a
+            judgment recorded without an amount is not nothing, and a figure that quietly left it
+            out would be read as the whole.
+          */}
+          <p className="text-sm text-slate-800">
+            {summary.count} {summary.count === 1 ? 'judgment' : 'judgments'}
+            {summary.newest && <span className="text-slate-500">, most recent {formatDate(summary.newest)}</span>}
+          </p>
+          {summary.total > 0 && (
+            <p className="text-[11px] text-slate-400 mb-1.5">
+              {summary.withoutAmount > 0 ? 'At least ' : ''}{formatMoney(summary.total)}
+              {summary.withoutAmount > 0 && ` \u2014 ${summary.withoutAmount} without a recorded amount`}
+            </p>
+          )}
+          <ul className="space-y-1.5 mt-1.5">
+            {judgments.map((j) => (
+              <li key={j.id} className="text-sm">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+                  <span className="text-slate-800">{j.plaintiff ?? 'Plaintiff not recorded'}</span>
+                  <span className="text-slate-700 tabular-nums shrink-0">
+                    {j.amount === null ? '\u2014' : formatMoney(j.amount)}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  {[
+                    j.filedOn ? formatDate(j.filedOn) : null,
+                    j.caseReason,
+                    j.caseType,
+                    `case ${j.caseNumber}`,
+                  ].filter(Boolean).join(' \u00b7 ')}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </Card>
   )
 }
