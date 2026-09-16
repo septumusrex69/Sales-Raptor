@@ -231,6 +231,20 @@ export interface PositionInput {
   status?: string | null
   /** debtor_accounts.sub_status. 'Delinquent Payer', 'Promise To Pay', 'Tracing', ... */
   subStatus?: string | null
+  /**
+   * debtor_accounts.bucket — Swordfish's own filing: 'Diary', 'PTPs', 'Failed PTPs'.
+   *
+   * READ ONLY WHERE THE SUB-STATUS IS SILENT, and that is the whole care needed here. Half the
+   * inherited book carries no sub-status at all, and for 426 of those the bucket is the firm's
+   * own record that a promise was made or broken — evidence that was being thrown away in favour
+   * of reporting them as "In progress", which tells a client nothing.
+   *
+   * It never overrides a sub-status. 'Delinquent Payer' sitting in the Failed PTPs bucket is a
+   * refusal, not a broken arrangement: one is somebody who will not pay at all, the other is
+   * somebody who committed and came up short. That distinction is already the subject of a note
+   * below and it is not going to be undone by a coarser field.
+   */
+  bucket?: string | null
   /** Money received inside the reporting period. Not "ever" -- a client report is about a month. */
   paidInPeriod?: boolean
   /**
@@ -322,6 +336,25 @@ export function clientPosition(input: PositionInput): ClientPosition {
    * same way, on the same instruction.
    */
   if (/delinquent|refus|non.?cooperative|avoid/i.test(sub)) return 'refusing'
+
+  /*
+   * THE BUCKET IS EVIDENCE, and only now — after every sub-status has had its say. Swordfish
+   * filed accounts into Diary, PTPs and Failed PTPs, and where nothing richer was ever recorded
+   * that filing is the only thing the firm knows about the arrangement. Reporting those as
+   * "In progress" threw away a fact the client cares about most: a promise was made, or broken.
+   */
+  const bucket = (input.bucket ?? '').trim()
+  if (/failed\s*ptp/i.test(bucket)) return 'broken_arrangement'
+  if (/^ptps?$/i.test(bucket)) return 'arranged'
+
+  /*
+   * THE FIRM WRITES IT DOWN, SO READ IT. `reachedInPeriod` was the only route to this rung, which
+   * is right for a report built from what happened in a month — but the inherited book also
+   * carries 'Negotiating' as a sub-status somebody typed on purpose, and ignoring it reported
+   * those accounts as "In progress". A collector who recorded that they are in talks should not
+   * have to have the conversation logged in the right period for the client to be told so.
+   */
+  if (/negotiat/i.test(sub)) return 'negotiating'
 
   if (input.reachedInPeriod) return 'negotiating'
 

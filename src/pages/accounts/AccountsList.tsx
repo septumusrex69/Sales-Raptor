@@ -585,7 +585,9 @@ function Tile({ label, value, tone, action }: {
 export function PositionPill({ account }: { account: DebtorAccount }) {
   // status carries the freeze: freezeAccount() writes 'Frozen' to it, which is what
   // clientPosition() reads. frozenBy says who asked, not whether.
-  const position = clientPosition({ status: account.status, subStatus: account.subStatus })
+  const position = clientPosition({
+    status: account.status, subStatus: account.subStatus, bucket: account.bucket,
+  })
   const flag = clientFlag(position, !!account.clientActionAsk)
   const meta = CLIENT_POSITIONS[position]
   const tone = flag === 'client_action' ? 'bg-rose-50 text-rose-700'

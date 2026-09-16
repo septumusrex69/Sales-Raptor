@@ -13,7 +13,7 @@ import {
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { StatusPill } from './AccountsList'
-import { accountFlagList, fetchAccount, fetchLedgers, hasCommissionDrift, type AccountLedgers, type DebtorAccount } from '../../lib/accountBook'
+import { fetchAccount, fetchLedgers, hasCommissionDrift, type AccountLedgers, type DebtorAccount } from '../../lib/accountBook'
 import { buildStatement, type BalanceInput, type BalanceBreakdown, type StatementLine } from '../../lib/accountBalance'
 import { chargeMessage } from '../../lib/accountCharges'
 import { promiseProblem, recordPromise, PROMISE_ITEM_ID } from '../../lib/accountPromises'
@@ -33,7 +33,9 @@ import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
 import { EscalateModal } from './EscalateModal'
 import { FreezeModal } from './FreezeModal'
 import { ClientActionModal } from './ClientActionModal'
-import { CLIENT_FLAGS, CLIENT_POSITIONS, frozenByLabel, positionReport, type ClientFlag } from '../../lib/clientPosition.ts'
+import {
+  CLIENT_FLAGS, CLIENT_POSITIONS, clientPosition, frozenByLabel, positionReport, type ClientFlag,
+} from '../../lib/clientPosition.ts'
 import { clientLine, type ClientLine } from '../../lib/accountNarrative.ts'
 import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
@@ -265,6 +267,16 @@ export function AccountDetail() {
   const smsNumbers = reachableNumbers(workspace?.contacts ?? [])
   // Who looks after this debtor's CLIENT — a different person from the pre-legal agent working
   // the debtor, and the one a query about the debt itself has to go to.
+  /*
+   * Derived here rather than read off a column, which is the rule for this vocabulary: it is a
+   * reading of several facts and storing it only creates a way for the reading and the facts to
+   * disagree. The bucket goes in because half the inherited book has no sub-status and Swordfish's
+   * own filing is the only record that a promise was made or broken.
+   */
+  const position = clientPosition({
+    status: account.status, subStatus: account.subStatus, bucket: account.bucket,
+  })
+
   const clientLiaison = users.find((u) => u.id === client?.accountOwnerId)
   const canDelete = ['Administrator', 'Sales Manager', 'Liaison Manager'].includes(currentUser?.role ?? '')
 
@@ -477,14 +489,21 @@ export function AccountDetail() {
           danger={!!due && isOverdue(due, TODAY)}
         />
         {/*
-          One block, because the band above already carries the top-level status and repeating it
-          here spent a whole tile saying "Active" twice. What is left is the part that differs
-          account to account: the sub-status and the flags.
+          THE POSITION, NOT THE COLUMN. This tile read "Active: Activated · no flags", which is
+          the firm's own definition of a screen that shows a person a column instead of an answer:
+          'Active: Activated' describes how the row got into the table and says nothing about the
+          debtor. The rung the account is reported on is what a collector opening it needs, and it
+          is the same word the client will see on their report.
+
+          The inherited status has not vanished — it is on the band at the top of the record and
+          on the Transactions tab. What it is not is the headline.
         */}
         <Figure
-          label="Status & flag"
-          value={account.subStatus || account.status || '—'}
-          note={accountFlagList(account).join(' · ') || 'no flags'}
+          label="Position"
+          value={CLIENT_POSITIONS[position].label}
+          note={account.clientActionAsk
+            ? `${CLIENT_FLAGS.client_action.label}: ${account.clientActionAsk}`
+            : CLIENT_POSITIONS[position].meaning}
           small
         />
         <Figure

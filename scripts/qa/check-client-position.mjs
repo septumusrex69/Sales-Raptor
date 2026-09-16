@@ -395,6 +395,70 @@ const freeze = readFileSync(new URL('../../src/lib/accountFreeze.ts', import.met
 ok('a freeze with no reason is refused', /if \(!reason\) throw/.test(freeze))
 ok('an unfreeze with no reason is refused too', /if \(!reason\) throw new Error\('Restarting/.test(freeze))
 
+/*
+ * NEGOTIATING IS ALSO A SUB-STATUS, not only something inferred from a conversation in the
+ * period. The firm types it, and reading it only from `reachedInPeriod` reported accounts
+ * somebody had recorded as in talks as "In progress".
+ */
+check('a recorded negotiation is a negotiation',
+  clientPosition({ status: 'Active: Activated', subStatus: 'Negotiating' }), 'negotiating')
+/*
+ * BUT BELOW THE STRUCTURAL RUNGS, and the assertion has to contain BOTH words or it proves
+ * nothing about the order. Checking a plain 'Defended Matter' passes wherever the negotiating
+ * line is put — it was written that way first, and moving the line above `legal` left it green.
+ * A sub-status that names both is the only thing that pins the precedence down.
+ */
+check('a defended matter under negotiation is still a dispute',
+  clientPosition({ status: 'Active: Activated', subStatus: 'Defended Matter — negotiating settlement' }),
+  'disputed')
+check('...and a summons under negotiation is still legal',
+  clientPosition({ status: 'Active: Activated', subStatus: 'Summons issued, negotiating' }), 'legal')
+check('...and a debtor under debt review is still theirs to run',
+  clientPosition({ status: 'Active: Activated', subStatus: 'Debt Review — negotiating' }),
+  'under_administration')
+/* And Section 129 still is NOT legal — the firm's rule, and 848 accounts ride on it. */
+check('section 129 is still not legal action',
+  clientPosition({ status: 'Active: Activated', subStatus: 'Section 129' }), 'in_progress')
+
+/* ---------- the bucket is evidence, and only where nothing better exists ---------- */
+
+/*
+ * HALF THE INHERITED BOOK HAS NO SUB-STATUS. 2 791 of the real import carry none at all, and for
+ * 426 of them Swordfish's own filing — the PTPs and Failed PTPs buckets — is the only record that
+ * a promise was ever made or broken. Reporting those as "In progress" threw that away and told
+ * the client nothing, which is exactly the mistake this whole file exists to prevent.
+ */
+check('a failed-PTP bucket with nothing else is a broken arrangement',
+  clientPosition({ status: 'Active: Activated', bucket: 'Failed PTPs' }), 'broken_arrangement')
+check('...and a PTP bucket is an arrangement',
+  clientPosition({ status: 'Active: Activated', bucket: 'PTPs' }), 'arranged')
+check('...while the diary bucket says nothing either way',
+  clientPosition({ status: 'Active: Activated', bucket: 'Diary' }), 'in_progress')
+
+/*
+ * BUT IT NEVER OVERRIDES A SUB-STATUS, and this is the case that matters. "Delinquent Payer" in
+ * the Failed PTPs bucket is a REFUSAL — somebody who does not pay at all — not an arrangement
+ * that came up short. The two are already the subject of a correction earlier in this file, and a
+ * coarser field is not allowed to undo it.
+ */
+check('a refusal in the failed bucket is still a refusal',
+  clientPosition({ status: 'Active: Activated', subStatus: 'Delinquent Payer', bucket: 'Failed PTPs' }),
+  'refusing')
+check('...and a dispute is still a dispute',
+  clientPosition({ status: 'Active: Activated', subStatus: 'Defended Matter', bucket: 'Failed PTPs' }),
+  'disputed')
+check('...and tracing is still tracing',
+  clientPosition({ status: 'Active: Activated', subStatus: 'Tracing', bucket: 'PTPs' }), 'tracing')
+
+/*
+ * And nothing structural is touched. A frozen or written-off account is off the book whatever
+ * bucket it was filed in — those two are tested before anything else for exactly this reason.
+ */
+check('a frozen account in the PTP bucket is still frozen',
+  clientPosition({ status: 'Frozen', bucket: 'PTPs' }), 'frozen')
+check('...and a written-off one is still closed',
+  clientPosition({ status: 'Written-off', bucket: 'Failed PTPs' }), 'closed')
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')

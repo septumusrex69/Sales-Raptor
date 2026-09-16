@@ -59,6 +59,8 @@ export interface DiaryRow extends DiaryEntry {
     status: string
     /* Carried so the finish box can preview the client's own line before the date is booked. */
     subStatus: string | null
+    /* Swordfish's own filing, and evidence where the sub-status is silent — see clientPosition. */
+    bucket: string | null
     clientActionAsk: string | null
     prescriptionDate: string | null
     mainComment: string | null
@@ -104,6 +106,7 @@ const toRow = (r: any): DiaryRow => ({
     capitalOutstanding: Number(r.debtor_accounts?.capital_outstanding ?? 0),
     status: r.debtor_accounts?.status ?? '',
     subStatus: r.debtor_accounts?.sub_status ?? null,
+    bucket: r.debtor_accounts?.bucket ?? null,
     clientActionAsk: r.debtor_accounts?.client_action_ask ?? null,
     prescriptionDate: r.debtor_accounts?.prescription_date ?? null,
     mainComment: r.debtor_accounts?.main_comment ?? null,
@@ -124,7 +127,7 @@ const ROW_SELECT = `
   *,
   debtor_accounts!diary_entries_account_id_fkey (
     id, company_id, account_number, debtor_first_name, debtor_surname,
-    capital_outstanding, status, sub_status, client_action_ask,
+    capital_outstanding, status, sub_status, bucket, client_action_ask,
     prescription_date, main_comment, main_comment_at
   )
 `

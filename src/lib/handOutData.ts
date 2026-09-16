@@ -35,7 +35,7 @@ export function diaryKindFor(a: DebtorAccount): DiaryKind {
 
 /** An account as the planner sees it: a band, a kind, and a name a person can read. */
 export function toPlannable(a: DebtorAccount, alreadyBooked: boolean): PlannableAccount {
-  const position = clientPosition({ status: a.status, subStatus: a.subStatus })
+  const position = clientPosition({ status: a.status, subStatus: a.subStatus, bucket: a.bucket })
   return {
     id: a.id,
     label: [a.accountNumber, [a.debtorFirstName, a.debtorSurname].filter(Boolean).join(' ')]

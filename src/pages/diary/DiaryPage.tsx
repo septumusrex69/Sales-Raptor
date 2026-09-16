@@ -23,6 +23,7 @@ import {
   type DayLoadLevel, type DiaryOrder,
 } from '../../lib/diaryPriority.ts'
 import { formatCurrency } from '../../data/mockData'
+import { CLIENT_POSITIONS, clientFlag, clientPosition } from '../../lib/clientPosition.ts'
 
 /**
  * An agent's working day.
@@ -536,7 +537,7 @@ export function DiaryList({ rows, today, empty, onComplete, onMove, picked, onPi
           )}
           Account
         </span>
-        <span className={COL_HEAD}>Status</span>
+        <span className={COL_HEAD}>Work &amp; position</span>
         <span className={COL_HEAD}>Client</span>
         <span className={`${COL_HEAD} text-right`}>Outstanding</span>
         <span />
@@ -576,6 +577,27 @@ const DIARY_GRID =
   'grid gap-x-3 gap-y-1.5 grid-cols-2 @3xl:grid-cols-[minmax(0,1fr)_9.5rem_11rem_7.5rem_10rem] @3xl:items-center'
 
 const COL_HEAD = 'text-[10px] font-semibold uppercase tracking-wide text-slate-400'
+
+/*
+ * The account's rung, derived the same way it is everywhere else — from the status, the
+ * sub-status and the bucket. Derived rather than read off a column because that is the rule for
+ * this vocabulary: it is a reading of several facts, and storing it only creates a way for the
+ * reading and the facts to disagree.
+ */
+function positionOfRow(row: DiaryRow) {
+  return clientPosition({
+    status: row.account.status, subStatus: row.account.subStatus, bucket: row.account.bucket,
+  })
+}
+
+/* Coloured by what it asks of somebody, not by the rung — the same four tones as the book. */
+function positionTone(row: DiaryRow): string {
+  const flag = clientFlag(positionOfRow(row), !!row.account.clientActionAsk)
+  return flag === 'client_action' ? 'text-rose-700'
+    : flag === 'attention' ? 'text-amber-700'
+      : flag === 'inactive' ? 'text-slate-400'
+        : 'text-emerald-700'
+}
 
 export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }: {
   row: DiaryRow
@@ -643,11 +665,26 @@ export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }:
           </p>
         </div>
 
-        {/* Status: what kind of work this is, which is also where it sits on the ladder. */}
+        {/*
+          TWO DIFFERENT FACTS, STACKED, and the firm asked for both by name.
+
+          The chip is the WORK: why this account is back today, which is also where it sits on
+          the ladder. It is self-managed — a collector picks it when they finish an account — and
+          it answers "what am I about to do".
+
+          The line under it is the ACCOUNT'S POSITION: the rung the client is told it is on. It
+          answers "what is this account", which is a different question and was not on this
+          screen at all. A list showing only "Follow-up" against seven rows says nothing about
+          whether they are disputes, promises or refusals.
+        */}
         <div className="min-w-0">
           <span className="inline-block max-w-full truncate text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-500"
             title={meta.why}>
             {meta.label}
+          </span>
+          <span className={`block truncate text-[11px] mt-0.5 ${positionTone(row)}`}
+            title={CLIENT_POSITIONS[positionOfRow(row)].meaning}>
+            {CLIENT_POSITIONS[positionOfRow(row)].label}
           </span>
         </div>
 
