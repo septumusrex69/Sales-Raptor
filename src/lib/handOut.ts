@@ -18,6 +18,9 @@
  *                    the real load; the diary is only the schedule on top of it. A collector
  *                    with 480 in play does not get 50 more because next Tuesday happens to be
  *                    quiet, and that was the first heuristic this planner had. It was wrong.
+ *                    Turned OFF by `evenSplit`, which the firm asks for by name when sharing out
+ *                    a shuffle: ten people and a hundred accounts is ten each, and a ceiling
+ *                    crossed is reported rather than avoided.
  *   2. GRADE       — is the account within their reach? The firm earns only on what it recovers
  *                    and carries its clients' reputation while doing it.
  *   3. DIARY ROOM  — and only now, which day. The window sets the PACE: a hundred accounts over
@@ -134,6 +137,21 @@ export interface PlanInput {
   extraHolidays?: Record<string, string>
   /** Accounts that already carry an open diary entry: skipped rather than moved. */
   skipAlreadyBooked?: boolean
+  /**
+   * SPLIT IT EQUALLY, and never mind the ceilings.
+   *
+   * Off by default, because the ordinary hand-out should protect a full book — but the firm asks
+   * for this one by name: a hundred accounts across ten people is ten each, exactly, whatever
+   * they are already carrying. It is how a shuffle is shared out, and arguing about headroom
+   * while doing it produces a split nobody asked for and cannot predict.
+   *
+   * It overrides gate 1 ONLY. The grade gate still holds, because that one is not about fairness
+   * — a major account on a junior desk is a client relationship, not an uneven share. And going
+   * over a ceiling is allowed rather than avoided: the plan says who, in red, and a person
+   * decides. That is the firm's own instruction: "even if it goes over, it should just indicate
+   * that it's going over".
+   */
+  evenSplit?: boolean
 }
 
 const DEFAULT_MAX_WINDOW = 40
@@ -320,6 +338,18 @@ export function planHandOut(input: PlanInput): HandOutPlan {
      * twice for the same account, and the deal stops being proportional to anything.
      */
     const byShare = [...eligible].sort((a, b) => {
+      /*
+       * EQUAL MEANS EQUAL. With the even split on, the only thing that decides who is next is who
+       * has taken least from this plan — not their ceiling, not their room, not what they are
+       * already carrying. Ten people and a hundred accounts is ten each and the ceilings are
+       * reported rather than respected, which is the whole point of asking for it.
+       */
+      if (input.evenSplit) {
+        if (a.taking !== b.taking) return a.taking - b.taking
+        const g = gradeRank(a.c.grade) - gradeRank(b.c.grade)
+        if (g !== 0) return g
+        return a.c.name < b.c.name ? -1 : 1
+      }
       /*
        * Anybody at or past their ceiling sorts behind everybody who still has room — and among
        * themselves by how far past, so the least over takes first. Nothing BLOCKS: if every

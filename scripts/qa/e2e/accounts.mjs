@@ -418,6 +418,39 @@ try {
    * trusting the screen.
    */
   t.ok('the window box says the rate it implies', /About [\d\s\u00a0,]+ a day across \d+ working days?/.test(modal))
+
+  /*
+   * THE EVEN SPLIT, OFF BY DEFAULT. The ordinary rule gives each desk a share of the room it has,
+   * which protects a nearly-full book — right for a handover and wrong for a shuffle, where the
+   * firm wants it flat. So it is a box, and it starts unticked: a default that quietly ignored
+   * ceilings would be the planner making a policy decision on its own.
+   */
+  const evenBox = page.getByRole('checkbox', { name: /Distribute the accounts equally/ })
+  t.ok('an even split is offered', await evenBox.isVisible())
+  t.ok('...and starts unticked', !(await evenBox.isChecked()))
+  /*
+   * Ticked, the spread has to actually change on screen. The bench carries uneven books, so the
+   * share-of-room rule and a flat split cannot produce the same grid — if they did, this check
+   * would be passing on a box that does nothing.
+   */
+  const beforeRows = await page.locator('[data-qa="plan-rows"] tr').count()
+  const before = await page.locator('[data-qa="plan-rows"]').innerText()
+  await evenBox.check()
+  await page.waitForTimeout(500)
+  const after = await page.locator('[data-qa="plan-rows"]').innerText()
+  t.ok('ticking it changes the plan', after !== before)
+  /*
+   * Forty accounts across thirty-eight people does not divide, so the honest test of "equal" is
+   * that nobody is more than one ahead of anybody else — which is what an exact split looks like
+   * when the number does not go round.
+   */
+  const each = (await page.locator('[data-qa="plan-rows"] tr td:last-child').allInnerTexts())
+    .map((x) => Number(x.trim()))
+  t.ok('...to one nobody can be jealous of', each.length > 0
+    && Math.max(...each) - Math.min(...each) <= 1)
+  t.ok('...across everybody chosen', each.length >= beforeRows)
+  await evenBox.uncheck()
+  await page.waitForTimeout(500)
   /*
    * A DROPDOWN, NOT A NUMBER BOX. "That thing doesn't work for me" — a spinner is a desktop
    * control, and on an iPad it is a small box needing a keyboard to change a number you were

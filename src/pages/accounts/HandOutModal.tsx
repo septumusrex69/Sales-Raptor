@@ -61,6 +61,7 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
    */
   const [pickBy, setPickBy] = useState<'everyone' | 'rank' | 'team'>('everyone')
   const [onlyChosen, setOnlyChosen] = useState(false)
+  const [evenSplit, setEvenSplit] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -107,8 +108,9 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
        * who moved it and when. That audit trail is exactly what made skipping unnecessary.
        */
       skipAlreadyBooked: false,
+      evenSplit,
     })
-  }, [context, chosen, startOn, windowDays])
+  }, [context, chosen, startOn, windowDays, evenSplit])
 
   /*
    * Ordered by who is taking most, then by name. A list of thirty-five sorted alphabetically
@@ -424,6 +426,26 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                     </FormField>
                   </div>
                 </div>
+
+                {/*
+                  OFF BY DEFAULT, and that is a decision rather than a convenience. The ordinary
+                  hand-out gives each person a share of the room they have, which protects a book
+                  that is nearly full — right for sharing out a handover, and wrong for the job
+                  the firm does most. Sharing out a shuffle, they want the split flat: "a hundred
+                  accounts over ten users means each one should get ten. Exactly." So it is a
+                  choice on the screen rather than an argument in the planner.
+                */}
+                <label className="flex items-start gap-2 -mt-2 cursor-pointer">
+                  <input type="checkbox" className="mt-0.5 shrink-0 accent-brand-600"
+                    checked={evenSplit} onChange={(e) => setEvenSplit(e.target.checked)} />
+                  <span className="text-xs text-slate-600">
+                    Distribute the accounts equally
+                    <span className="block text-[11px] text-slate-400">
+                      Everybody chosen takes the same number, whatever they are already carrying.
+                      A book ceiling crossed is shown in red rather than avoided.
+                    </span>
+                  </span>
+                </label>
 
                 {/*
                   THE NUMBER IN ARITHMETIC THE PERSON CAN CHECK. The box used to mean "by when",

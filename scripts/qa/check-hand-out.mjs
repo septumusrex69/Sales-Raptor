@@ -56,6 +56,12 @@ const plan = (accounts, collectors, opts = {}) => planHandOut({
   accounts, collectors, startOn: MONDAY, windowDays: opts.windowDays ?? 5, ...opts,
 })
 
+const byDayOf = (p) => {
+  const out = {}
+  for (const x of p.placements) out[x.dueOn] = (out[x.dueOn] ?? 0) + 1
+  return out
+}
+
 const takenBy = (p, name) => p.placements.filter((x) => x.userId === `u-${name}`).length
 
 /*
@@ -109,6 +115,102 @@ ok('a skilled collector may take high value', mayTake('Skilled', band('high_valu
 ok('a skilled collector may NOT take a major account', !mayTake('Skilled', band('major')))
 ok('a senior may take anything', ACCOUNT_BANDS.every((b) => mayTake('Senior', b)))
 ok('an elite may take anything', ACCOUNT_BANDS.every((b) => mayTake('Elite', b)))
+
+/* ================= the even split, when the firm asks for one ================= */
+
+/*
+ * THE FIRM'S OWN ARITHMETIC, verbatim: "a hundred accounts over ten users means each one should
+ * get ten. Exactly." It is how a shuffle is shared out, and the ordinary rule — a share of the
+ * room each person has — deliberately does not do this, because it is protecting books that are
+ * nearly full. When somebody ticks the box they are saying that is not what they want today.
+ */
+{
+  const p = plan(
+    Array.from({ length: 100 }, (_, i) => acc(`a${i}`, 1000)),
+    Array.from({ length: 10 }, (_, i) => col(`C${i}`, 'Senior', { inPlay: 100, capacity: 50 })),
+    { windowDays: 5, evenSplit: true },
+  )
+  check('everything is placed', p.placements.length, 100)
+  ok('a hundred across ten is ten each', p.collectors.every((c) => c.taking === 10))
+  /*
+   * Note for whoever breaks this to check it: ten identical desks get ten each under the ordinary
+   * rule too, so this block records the firm's arithmetic and does NOT discriminate between the
+   * two. The block below, with one book nearly full and one nearly empty, is the one that fails
+   * when the box stops working.
+   */
+}
+
+/* And the second of their examples: a thousand over ten people over five days. */
+{
+  const p = plan(
+    Array.from({ length: 1000 }, (_, i) => acc(`a${i}`, 1000)),
+    Array.from({ length: 10 }, (_, i) => col(`C${i}`, 'Senior', { inPlay: 0, capacity: 200 })),
+    { windowDays: 5, evenSplit: true },
+  )
+  const byDay = byDayOf(p)
+  check('everything is placed', p.placements.length, 1000)
+  ok('a thousand across ten is a hundred each', p.collectors.every((c) => c.taking === 100))
+  check('...over the five days asked for', Object.keys(byDay).length, 5)
+  ok('...at two hundred a day', Object.values(byDay).every((n) => n === 200))
+}
+
+/*
+ * THE WHOLE POINT IS THAT IT IGNORES WHAT THEY CARRY. Without the box, a desk on 480 of 500 is
+ * spared and a desk on 20 takes nearly everything — that is the ordinary rule working correctly.
+ * With it, they take fifty each, and the one who goes over is reported rather than avoided:
+ * "even if it goes over, it should just indicate that it's going over".
+ */
+{
+  const floor = () => [
+    col('Full', 'Senior', { inPlay: 480, ceiling: 500, capacity: 100 }),
+    col('Empty', 'Senior', { inPlay: 20, ceiling: 500, capacity: 100 }),
+  ]
+  const stack = () => Array.from({ length: 100 }, (_, i) => acc(`a${i}`, 1000))
+
+  const ordinary = plan(stack(), floor(), { windowDays: 5 })
+  ok('without the box the full book is spared', takenBy(ordinary, 'Full') < takenBy(ordinary, 'Empty'))
+
+  const even = plan(stack(), floor(), { windowDays: 5, evenSplit: true })
+  check('with it, the full book takes its half', takenBy(even, 'Full'), 50)
+  check('...and so does the empty one', takenBy(even, 'Empty'), 50)
+  const full = even.collectors.find((c) => c.name === 'Full')
+  check('...and the plan owns what it pushed past the ceiling', full.overBy, 30)
+  ok('...and says so', /over their book ceiling/.test(planSummary(even)))
+  ok('...while the one with room is not flagged',
+    even.collectors.find((c) => c.name === 'Empty').overBy === 0)
+}
+
+/*
+ * BUT NOT THE GRADE GATE. Equal shares are about fairness between desks; a major account on a
+ * junior desk is a client relationship and a year's commission. The firm's rule that grade
+ * decides WHICH accounts is not a preference this box may override — so an even split across a
+ * junior and a senior still sends the big ones to the senior, and evens out what it can.
+ */
+{
+  const p = plan(
+    [acc('big', 400000), acc('small1', 1000), acc('small2', 1000), acc('small3', 1000)],
+    [col('Junior', 'Junior'), col('Senior', 'Senior')],
+    { windowDays: 5, evenSplit: true },
+  )
+  check('the major account still goes to the senior', takenBy(p, 'Senior'), 2)
+  check('...and the junior takes the generic ones', takenBy(p, 'Junior'), 2)
+  ok('...and it is the big one the junior did not get',
+    p.placements.find((x) => x.accountId === 'big')?.userId === 'u-Senior')
+}
+
+/* Off unless asked for. The ordinary hand-out protects a full book, and that is the default. */
+{
+  const floor = () => [
+    col('Full', 'Senior', { inPlay: 480, ceiling: 500, capacity: 100 }),
+    col('Empty', 'Senior', { inPlay: 20, ceiling: 500, capacity: 100 }),
+  ]
+  const stack = () => Array.from({ length: 100 }, (_, i) => acc(`a${i}`, 1000))
+  const off = plan(stack(), floor(), { windowDays: 5, evenSplit: false })
+  const unset = plan(stack(), floor(), { windowDays: 5 })
+  check('unticked and absent are the same plan',
+    JSON.stringify(off.collectors), JSON.stringify(unset.collectors))
+  ok('...and neither splits it evenly', takenBy(unset, 'Full') !== takenBy(unset, 'Empty'))
+}
 
 /* ================= gate 2: grade beats convenience ================= */
 
@@ -321,11 +423,6 @@ ok('an elite may take anything', ACCOUNT_BANDS.every((b) => mayTake('Elite', b))
 
 /* ================= gate 3: which day ================= */
 
-const byDayOf = (p) => {
-  const out = {}
-  for (const x of p.placements) out[x.dueOn] = (out[x.dueOn] ?? 0) + 1
-  return out
-}
 
 /*
  * THE WINDOW IS A SPREAD, NOT A CEILING, and this check exists because it was the other way
