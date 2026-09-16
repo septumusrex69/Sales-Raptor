@@ -58,7 +58,16 @@ const handlers = [
       })),
     ],
   })],
-  [(u) => u.includes('/rpc/diary_day_load'), () => ({ body: [] })],
+  /*
+   * ONE DIARY THAT IS ALREADY OVERFULL, on purpose. With every diary empty the plan can never
+   * push anybody past their day, so the red path in the preview is never rendered and a check
+   * that "the red count agrees with the cells" passes by both sides being zero — which is exactly
+   * what happened the first time it was written. A collector holding 60 against a 50-a-day
+   * capacity makes the case real.
+   */
+  [(u) => u.includes('/rpc/diary_day_load'), () => ({
+    body: [{ owner_id: BENCH[0].id, due_on: '2026-09-16', entries: 60 }],
+  })],
   [(u) => u.includes('/rest/v1/diary_entries'), () => ({ body: [] })],
   [
     (u) => u.includes('/rest/v1/debtor_accounts'),
@@ -331,7 +340,51 @@ try {
    * Senior may take those. If the plan gave one to the Junior the screen would look identical.
    */
   t.ok('the plan is on screen', /across \d+ (person|people)/.test(modal))
-  t.ok('the day grid shows what lands when', /\+\d+ \/\d+/.test(modal))
+  /*
+   * THE GRID SHOWS THE DAY'S REAL TOTAL, not the daily limit. It used to read "+1 /50", and the
+   * firm's objection was exact: /50 is the same number in every cell of every column and tells
+   * you nothing. What a leader needs before pressing the button is what each person will actually
+   * be holding that day — one or two over is nobody's problem, a screen full of red means the
+   * window wants widening.
+   */
+  t.ok('the day grid shows what lands when', /\+\d+/.test(modal))
+  t.ok('...and no longer repeats the daily limit in every cell', !/\+\d+ \/\d+/.test(modal))
+  /*
+   * The fixture's overfull diary is 60 against a 50-a-day capacity, and the plan adds nothing to
+   * that day — so a cell reading a bare 60 is the day's REAL total being drawn, which is the
+   * change. A grid that only ever showed what it was adding could not produce that number.
+   *
+   * READ FROM THE GRID, not the page. Written against the whole modal first, it passed with the
+   * existing-load rendering deleted — because "60" is also the Off their mandate rate tile behind
+   * the modal. A number that common has to be looked for where it means something.
+   */
+  const grid = await page.locator('[data-qa="plan-rows"]').innerText()
+  t.ok('...and shows what is already sitting in a diary', /\b60\b/.test(grid))
+  t.ok('...with the colours explained', /what that person will have in their diary that day/.test(modal))
+  /*
+   * And the count under the table has to agree with the cells above it, because they are computed
+   * by two different pieces of code over the same plan. With thirty-eight collectors and forty
+   * accounts nobody is near their fifty, so the honest reading is "nobody" — and a warning that
+   * fires when nothing is wrong is worse than none.
+   */
+  t.ok('...and how much red there is', /daily limit/.test(modal))
+  /*
+   * Scoped to the grid. A page-wide count of the red class also picks up the over-ceiling figure
+   * in the collector list and the warning inside this very sentence — it was written that way
+   * first and disagreed with itself.
+   */
+  const reds = await page.locator('[data-qa="plan-rows"] .text-rose-700').count()
+  const saysNone = /Nobody goes past their daily limit/.test(modal)
+  /*
+   * The fixture puts one collector on 60 against a 50-a-day capacity, so this side is exercised
+   * rather than passing by both halves being zero. Compared as a number, not as a sign: the
+   * sentence and the cells are computed by two different pieces of code over the same plan, and
+   * "both non-zero" would let them disagree about how many.
+   */
+  const claimed = Number(/(\d+) days? goe?s? past/.exec(modal)?.[1] ?? 0)
+  t.ok('somebody is over, so the red path is actually drawn', reds > 0)
+  t.ok('...and the sentence does not claim otherwise', !saysNone)
+  t.check('...and counts exactly the red cells', claimed, reds)
   /*
    * THE BUG THE FIRM REPORTED FROM A SCREENSHOT, held at the level they saw it: thirty-eight
    * collectors ticked, and the line underneath read "100 accounts across one person" over "five

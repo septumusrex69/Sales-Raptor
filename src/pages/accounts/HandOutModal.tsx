@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CalendarClock, Loader2, UserCheck } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { DictateButton } from '../../components/ui/Dictate'
-import { planHandOut, planSummary, type HandOutPlan } from '../../lib/handOut.ts'
+import {
+  planHandOut, planSummary, type HandOutPlan, type PlannableCollector,
+} from '../../lib/handOut.ts'
 import { loadHandOutContext, type HandOutContext } from '../../lib/handOutData.ts'
 import { commitHandOut, handOutSummary, type HandOutMode } from '../../lib/handOutWrite.ts'
 import { BULK_CEILING, type Selection } from '../../lib/accountAllocation.ts'
@@ -465,7 +467,7 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                       Nobody chosen, so there is nothing to plan. Pick at least one collector above.
                     </p>
                   )
-                  : plan && <PlanPreview plan={plan} />}
+                  : plan && <PlanPreview plan={plan} collectors={context.collectors} />}
 
                 <FormField label="Why (optional)">
                   <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2}
@@ -519,9 +521,34 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
  * The day grid is the half that answers "is this actually going to happen". A person taking 80
  * accounts sounds fine until you see it is 80 on Monday.
  */
-function PlanPreview({ plan }: { plan: HandOutPlan }) {
+function PlanPreview({ plan, collectors }: {
+  plan: HandOutPlan
+  /** Read for what is ALREADY in each diary — see the cells below. */
+  collectors: PlannableCollector[]
+}) {
   const dates = [...new Set(plan.days.map((d) => d.date))].sort()
   const taking = plan.collectors.filter((c) => c.taking > 0)
+  const diaries = useMemo(
+    () => new Map(collectors.map((c) => [c.userId, c])), [collectors])
+
+  /*
+   * Counted over exactly the cells the table draws, so the sentence under it cannot disagree with
+   * what is on screen. A separate pass over plan.days would miss the days this hand-out does not
+   * touch — and somebody already over on Thursday is the case a leader most needs counted.
+   */
+  const overDays = useMemo(() => {
+    let n = 0
+    for (const c of taking) {
+      const desk = diaries.get(c.userId)
+      for (const d of dates) {
+        const cell = plan.days.find((x) => x.userId === c.userId && x.date === d)
+        const capacity = cell?.capacity ?? desk?.capacity ?? 0
+        const total = (cell?.existing ?? desk?.bookedByDay[d] ?? 0) + (cell?.added ?? 0)
+        if (capacity > 0 && total > capacity) n += 1
+      }
+    }
+    return n
+  }, [taking, dates, diaries, plan])
 
   return (
     <div className="rounded-lg border border-slate-200 overflow-hidden">
@@ -559,16 +586,43 @@ function PlanPreview({ plan }: { plan: HandOutPlan }) {
                     <span className="text-slate-400"> · {c.grade}</span>
                   </td>
                   {dates.map((d) => {
+                    /*
+                     * WHAT THEY WILL HAVE THAT DAY, not what they are allowed. The firm's point,
+                     * and they are right: "/50" is the same number on every row of every column
+                     * and tells you nothing you did not already know. The day's real total does —
+                     * one or two red cells is nobody's problem, and a screen full of them says the
+                     * pacing is wrong and the window wants widening before anything is written.
+                     *
+                     * So a cell reads "+3 47": three from this plan, forty-seven in the diary
+                     * afterwards. Days this plan does not touch still show what is sitting there,
+                     * because a Thursday already at 58 is exactly the thing a leader needs to see
+                     * before deciding how hard to push the rest.
+                     */
+                    const desk = diaries.get(c.userId)
                     const cell = plan.days.find((x) => x.userId === c.userId && x.date === d)
-                    if (!cell || cell.added === 0) return <td key={d} className="px-2 py-1.5 text-center text-slate-300">·</td>
-                    const full = cell.existing + cell.added >= cell.capacity
+                    const added = cell?.added ?? 0
+                    const existing = cell?.existing ?? desk?.bookedByDay[d] ?? 0
+                    const capacity = cell?.capacity ?? desk?.capacity ?? 0
+                    const total = existing + added
+                    if (total === 0) return <td key={d} className="px-2 py-1.5 text-center text-slate-300">·</td>
+                    const over = capacity > 0 && total > capacity
+                    const full = capacity > 0 && total === capacity
                     return (
-                      <td key={d} className="px-2 py-1.5 text-center tabular-nums"
-                        title={`${cell.existing} already booked, ${cell.added} added, ${cell.capacity} a day`}>
-                        <span className={full ? 'text-amber-700 font-medium' : 'text-slate-700'}>
-                          +{cell.added}
-                        </span>
-                        <span className="text-slate-400"> /{cell.capacity}</span>
+                      <td key={d} className={`px-2 py-1.5 text-center tabular-nums whitespace-nowrap ${
+                        over ? 'text-rose-700' : full ? 'text-amber-700' : 'text-slate-500'}`}
+                        title={`${existing} already booked, ${added} added by this hand-out, `
+                          + `${capacity} a day — ${total} on the day`}>
+                        {added > 0 && <span className="text-brand-700 font-medium">+{added}</span>}
+                        {/*
+                          The day's total only when it says something the "+N" does not. An empty
+                          Thursday taking one account reads "+1", not "+1 1" — the same number
+                          twice is the kind of noise that makes people stop reading a column.
+                        */}
+                        {existing > 0 && (
+                          <span className={over || full ? 'font-semibold' : ''}>
+                            {added > 0 ? ' ' : ''}{total}
+                          </span>
+                        )}
                       </td>
                     )
                   })}
@@ -578,6 +632,28 @@ function PlanPreview({ plan }: { plan: HandOutPlan }) {
             </tbody>
           </table>
         </div>
+      )}
+
+      {dates.length > 0 && (
+        /*
+         * WHAT THE COLOURS MEAN, AND HOW MUCH RED THERE IS. The firm's own reading of this table:
+         * one or two over is nobody's problem, but a lot of red means the pacing is wrong and the
+         * answer is a wider window, not a different set of people. So it is counted rather than
+         * left to be eyeballed across forty rows — and when there is none, the sentence says so
+         * plainly instead of leaving a warning shape on a screen where nothing is wrong.
+         */
+        <p className="px-3 py-1.5 text-[11px] text-slate-400 border-t border-slate-100">
+          Each cell is what that person will have in their diary that day, with what this hand-out
+          adds in front of it.{' '}
+          {overDays === 0
+            ? 'Nobody goes past their daily limit.'
+            : <span className="text-rose-700">
+                {overDays === 1
+                  ? '1 day goes past somebody’s daily limit'
+                  : `${overDays.toLocaleString('en-ZA')} days go past somebody’s daily limit`}
+                {' '}— a wider window spreads them out.
+              </span>}
+        </p>
       )}
 
       {plan.unplaced.length > 0 && (
