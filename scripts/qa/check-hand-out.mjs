@@ -169,8 +169,76 @@ ok('an elite may take anything', ACCOUNT_BANDS.every((b) => mayTake('Elite', b))
 }
 
 /*
- * Proportional to headroom, not equal counts. An elite on 200 of 500 has 300 of room; a junior
- * on 140 of 150 has 10. Splitting 50 accounts evenly would put the junior 15 over.
+ * NINE PEOPLE CHOSEN MUST MEAN NINE PEOPLE USED. This is the bug the firm reported from a
+ * screenshot, and it is the reason the dealing rule changed: nine collectors were ticked, a
+ * hundred accounts were handed out, and the plan said "100 accounts across one person".
+ *
+ * It was not a crash and nothing failed. Dealing went to whoever had the most headroom COUNTED
+ * IN ACCOUNTS, and Rehana's ceiling of 650 against 190 in play gave her more raw room than eight
+ * colleagues had — and still did after ninety-nine of them, because 460 of headroom does not
+ * fall below 306 in a hundred steps. So she took every one.
+ *
+ * These are the real figures off that screenshot.
+ */
+{
+  const p = plan(
+    Array.from({ length: 100 }, (_, i) => acc(`a${i}`, 1000)),
+    [
+      col('Rehana', 'Senior', { inPlay: 190, ceiling: 650, capacity: 50 }),
+      col('Aisha', 'Skilled', { inPlay: 194, capacity: 50 }),
+      col('Annelize', 'Skilled', { inPlay: 157, capacity: 50 }),
+      col('Ayanda', 'Junior', { inPlay: 160, capacity: 50 }),
+      col('Bongani', 'Junior', { inPlay: 171, capacity: 50 }),
+      col('Charmaine', 'Senior', { inPlay: 183, capacity: 50 }),
+      col('Dineo', 'Skilled', { inPlay: 166, capacity: 50 }),
+      col('Elna', 'Elite', { inPlay: 149, capacity: 50 }),
+      col('Farai', 'Junior', { inPlay: 178, capacity: 50 }),
+    ],
+    { windowDays: 5 },
+  )
+  const used = p.collectors.filter((c) => c.taking > 0)
+  check('everything is placed', p.placements.length, 100)
+  ok('the work does not land on one desk', used.length > 1)
+  ok('...it reaches most of the people chosen', used.length >= 7)
+  ok('...and nobody takes even half of it', p.collectors.every((c) => c.taking < 50))
+  /*
+   * The biggest book ceiling still takes the most — that is the point of levelling rather than
+   * splitting equally — but "the most" is a share, not the lot.
+   */
+  ok('the emptiest desk against its own ceiling takes the most',
+    takenBy(p, 'Rehana') === Math.max(...p.collectors.map((c) => c.taking)))
+  ok('...and the summary says so', /across \d+ people/.test(planSummary(p)))
+  ok('...not "one person"', !/across 1 person/.test(planSummary(p)))
+}
+
+/*
+ * Nine equal desks take an equal share, and this is the check that would catch a rule which
+ * spreads only because the numbers happened to differ. Level books, level ceilings, level
+ * diaries: 90 accounts must come out as ten each, not 90 and eight zeroes.
+ */
+{
+  const p = plan(
+    Array.from({ length: 90 }, (_, i) => acc(`a${i}`, 1000)),
+    Array.from({ length: 9 }, (_, i) => col(`C${i}`, 'Senior', { inPlay: 200, capacity: 50 })),
+    { windowDays: 5 },
+  )
+  check('everything is placed', p.placements.length, 90)
+  ok('nine level desks take ten each', p.collectors.every((c) => c.taking === 10))
+}
+
+/*
+ * A SHARE OF THE ROOM, not an equal share of the work and not all of it to one desk. An elite on
+ * 200 of 500 has 300 of room; a junior on 140 of 150 has 10. Thirty times the room, so roughly
+ * thirty times the work: 48 and 2 out of fifty.
+ *
+ * This check has now been written three ways and the history is the point. It first demanded the
+ * junior take a proportional slice by raw headroom; then it was corrected to spare the junior
+ * entirely, on the reasoning that pushing 140 of 150 up to the ceiling leaves nothing for what
+ * arrives tomorrow. That reasoning was sound about the ceiling and wrong about zero — the firm
+ * then reported the same shape at floor scale, where nine people were ticked and three of them
+ * were given nothing at all for exactly this reason. A near-full desk should be PROTECTED, which
+ * two accounts out of fifty does, not EXCLUDED, which is a different thing wearing the same
+ * argument.
  */
 {
   const p = plan(
@@ -180,14 +248,9 @@ ok('an elite may take anything', ACCOUNT_BANDS.every((b) => mayTake('Elite', b))
       col('Tight', 'Junior', { inPlay: 140, ceiling: 150, capacity: 100 }),
     ],
   )
-  /*
-   * The tight book is SPARED ENTIRELY, not topped up to its ceiling — and that is the right
-   * answer, though it was not the one this check first demanded. Roomy has space for all fifty;
-   * pushing a junior from 140 of 150 to 150 of 150 to "use the room" leaves them with no capacity
-   * for anything urgent that arrives tomorrow, for no gain today.
-   */
-  check('the person with room takes all of it', takenBy(p, 'Roomy'), 50)
-  check('...and the nearly-full book is spared', takenBy(p, 'Tight'), 0)
+  check('the desk with the room takes nearly all of it', takenBy(p, 'Roomy'), 48)
+  check('...and the near-full one takes a token share', takenBy(p, 'Tight'), 2)
+  ok('...which leaves it short of its ceiling', p.collectors.find((c) => c.name === 'Tight').after < 150)
   ok('nobody is pushed over while room exists', p.collectors.every((c) => c.overBy === 0))
 }
 
@@ -258,16 +321,49 @@ ok('an elite may take anything', ACCOUNT_BANDS.every((b) => mayTake('Elite', b))
 
 /* ================= gate 3: which day ================= */
 
+const byDayOf = (p) => {
+  const out = {}
+  for (const x of p.placements) out[x.dueOn] = (out[x.dueOn] ?? 0) + 1
+  return out
+}
+
+/*
+ * THE WINDOW IS A SPREAD, NOT A CEILING, and this check exists because it was the other way
+ * round and a screenshot caught it: a hundred accounts asked for "over five working days" were
+ * booked as two solid days and three empty ones. "Over five working days" is the firm telling
+ * the planner how to PACE the work, not the last date it may use.
+ *
+ * Five accounts, a window of five days, and a collector who could physically take two a day:
+ * the old rule gave 2/2/1 across three days, this one gives one a day across all five.
+ */
 {
   const p = plan(
     Array.from({ length: 5 }, (_, i) => acc(`a${i}`, 1000)),
     [col('Solo', 'Senior', { capacity: 2 })],
+    { windowDays: 5 },
   )
-  const byDay = {}
-  for (const x of p.placements) byDay[x.dueOn] = (byDay[x.dueOn] ?? 0) + 1
-  check('a day is filled to capacity and no further', byDay[MONDAY], 2)
-  check('...then the next day', byDay['2026-09-22'], 2)
-  check('...and the remainder rolls on', byDay['2026-09-23'], 1)
+  const byDay = byDayOf(p)
+  check('everything is placed', p.placements.length, 5)
+  check('...across the whole window the person asked for', Object.keys(byDay).length, 5)
+  ok('...evenly, rather than filling the first days', Object.values(byDay).every((n) => n === 1))
+  ok('...and it does not claim to have run past', !p.ranPastWindow)
+}
+
+/*
+ * Ask for ONE day and you get one day, filled to capacity, with the overflow running past — the
+ * old behaviour, which was never wrong about a one-day window. This is the check that keeps the
+ * spread from swallowing the ceiling: a window of one still means one.
+ */
+{
+  const p = plan(
+    Array.from({ length: 5 }, (_, i) => acc(`a${i}`, 1000)),
+    [col('Solo', 'Senior', { capacity: 2 })],
+    { windowDays: 1 },
+  )
+  const byDay = byDayOf(p)
+  check('a one-day window fills that day to capacity', byDay[MONDAY], 2)
+  check('...and the rest runs past it', p.placements.length - byDay[MONDAY], 3)
+  ok('...and says so', p.ranPastWindow)
 }
 
 /*
@@ -278,9 +374,25 @@ ok('an elite may take anything', ACCOUNT_BANDS.every((b) => mayTake('Elite', b))
   const p = plan(
     Array.from({ length: 4 }, (_, i) => acc(`a${i}`, 1000)),
     [col('Busy', 'Senior', { capacity: 40, booked: { [MONDAY]: 38 } })],
+    { windowDays: 1 },
   )
   check('only the free slots are used', p.placements.filter((x) => x.dueOn === MONDAY).length, 2)
   check('...the rest goes to the next day', p.placements.filter((x) => x.dueOn === '2026-09-22').length, 2)
+}
+
+/*
+ * And with room to choose, the emptiest day in the window takes the work rather than the
+ * earliest. A Monday already holding 38 of 40 is not where four fresh accounts belong when
+ * Tuesday is empty — the person still has to work the 38.
+ */
+{
+  const p = plan(
+    Array.from({ length: 4 }, (_, i) => acc(`a${i}`, 1000)),
+    [col('Busy', 'Senior', { capacity: 40, booked: { [MONDAY]: 38 } })],
+    { windowDays: 5 },
+  )
+  check('the busy day is left alone', p.placements.filter((x) => x.dueOn === MONDAY).length, 0)
+  check('...and the quiet days take it', new Set(p.placements.map((x) => x.dueOn)).size, 4)
 }
 
 /*
@@ -414,6 +526,8 @@ ok('an elite may take anything', ACCOUNT_BANDS.every((b) => mayTake('Elite', b))
   const p = plan(
     Array.from({ length: 45 }, (_, i) => acc(`a${i}`, 1000)),
     [col('Solo', 'Senior', { capacity: 45 })],
+    // One day, so this is about the reserve and not about how the window spreads work.
+    { windowDays: 1 },
   )
   check('the distributor fills the whole day', p.placements.filter((x) => x.dueOn === MONDAY).length, 45)
 }

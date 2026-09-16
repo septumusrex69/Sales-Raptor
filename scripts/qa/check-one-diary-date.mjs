@@ -26,6 +26,7 @@ const ok = (name, actual) => {
 const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
 const schema = read('../../supabase/schema.sql')
 const diary = read('../../src/lib/diary.ts')
+const handOutWrite = read('../../src/lib/handOutWrite.ts')
 
 /* ---------- the rule ---------- */
 
@@ -125,6 +126,40 @@ ok('...and does not filter on a state the row has left', !/\.eq\('state', 'open'
 const schemaTrigger = schema.slice(schema.indexOf('function public.protect_closed_diary_entries'))
 ok('the trigger still leaves moved_to writable', !/new\.moved_to\s*:=/.test(schemaTrigger.slice(0, 900)))
 ok('...and moved_reason', !/new\.moved_reason\s*:=/.test(schemaTrigger.slice(0, 900)))
+
+/* ---------- the one place that books in bulk ---------- */
+
+/*
+ * A HAND-OUT WRITES DIARY ENTRIES WITHOUT GOING THROUGH diarise(), and that is allowed for one
+ * reason only: it does the same two things in the same order, for fifty accounts at a time. The
+ * firm reported a hundred-account hand-out taking "a very long time" — it was two sequential
+ * round trips per account — so the writer now supersedes a chunk and inserts a chunk.
+ *
+ * The batch is only legal because of the rule at the top of this file. Insert fifty rows while
+ * fifty old ones are still open and the partial unique index refuses the first collision, which
+ * is exactly what it is there for. So these checks hold the ORDER, and they are here rather than
+ * in the hand-out's own file because what they are really guarding is this rule.
+ */
+const bulkSupersede = /\.in\('account_id', slice\.map\(\(p\) => p\.accountId\)\)\s*\n\s*\.eq\('state', 'open'\)/
+ok('the bulk writer supersedes a whole chunk', bulkSupersede.test(handOutWrite))
+ok('...and inserts a whole chunk', /\.from\('diary_entries'\)\.insert\(rows\.slice\(/.test(handOutWrite))
+/*
+ * Presence asserted first, on purpose. indexOf returns -1 for something that is not there, so an
+ * order-only assertion passes vacuously the moment the supersede is deleted — which is the exact
+ * failure this check exists to catch, and it has caught itself once already elsewhere.
+ */
+ok('...in that order, never the other way round',
+  handOutWrite.search(bulkSupersede) < handOutWrite.indexOf(".from('diary_entries').insert(rows.slice("))
+ok('a failed bulk supersede stops the insert',
+  /supersedeError\) throw new Error\(supersedeError\.message\)/.test(handOutWrite))
+ok('nothing upserts in bulk either', !/from\('diary_entries'\)[\s\S]{0,80}\.upsert\(/.test(handOutWrite))
+/*
+ * ONE REFUSAL MUST NOT COST THE CHUNK. A batch fails whole, so a chunk that is rejected is walked
+ * the slow way per account and each account that still refuses is named. Without this a hand-out
+ * of five hundred could report fifty failures and leave the operator no idea which fifty.
+ */
+ok('a refused chunk falls back to one at a time', /for \(const p of slice\)[\s\S]{0,400}await diarise\(/.test(handOutWrite))
+ok('...and names what it could not book', /result\.failed\.push\(/.test(handOutWrite))
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)

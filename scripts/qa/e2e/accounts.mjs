@@ -266,7 +266,15 @@ try {
   const nameBox = page.getByPlaceholder(/Search \d+ collectors by name/)
   await nameBox.fill('khumalo')
   await page.waitForTimeout(250)
-  const filtered = await page.locator('body').innerText()
+  /*
+   * READ THE LIST, NOT THE PAGE. This read the whole body and passed for the wrong reason: the
+   * name it asserted was gone was gone from the LIST, and at the time the plan below happened not
+   * to mention it either. The moment the planner started spreading work across everybody chosen,
+   * the plan preview named all of them and the check failed — on working code. A check that
+   * depends on what a neighbouring panel happens to contain is not checking the search box.
+   */
+  const list = page.locator('[data-qa="collector-list"]')
+  const filtered = await list.innerText()
   t.ok('searching narrows the list', filtered.includes('Sipho Khumalo'))
   t.ok('...and hides the rest', !filtered.includes('Annelize Venter'))
   await nameBox.fill('zzzznobody')
@@ -282,6 +290,39 @@ try {
    */
   t.ok('the plan is on screen', /across \d+ (person|people)/.test(modal))
   t.ok('the day grid shows what lands when', /\+\d+ \/\d+/.test(modal))
+  /*
+   * THE BUG THE FIRM REPORTED FROM A SCREENSHOT, held at the level they saw it: thirty-eight
+   * collectors ticked, and the line underneath read "100 accounts across one person" over "five
+   * working days" that turned out to be two. Both halves were the planner dealing to whoever had
+   * the most raw headroom and filling each day to capacity before moving on.
+   *
+   * check-hand-out.mjs owns the arithmetic. What is held here is the SENTENCE, because that is
+   * what the person handing out the work actually reads, and it is what was wrong on the screen.
+   */
+  t.ok('the work does not all land on one desk', !/across 1 person/.test(modal))
+  /*
+   * THE SENTENCE AND THE GRID MUST AGREE. They are computed from the same plan by two different
+   * pieces of code — planSummary counts distinct users, the grid renders a row per collector
+   * taking — so "40 accounts across 9 people" over a grid of three rows is a disagreement only a
+   * rendered page can show. That is what this layer is for.
+   *
+   * NOT asserted here: that the work spreads at all. It cannot be. Forty accounts across
+   * thirty-eight collectors goes one each whatever the dealing rule is, so an "across more than
+   * one person" assertion passes on the broken rule too — it was written, it passed on code
+   * deliberately reverted to the bug, and it came out again. check-hand-out.mjs holds the
+   * distribution against the firm's own figures and fails when the rule is reverted.
+   */
+  const acrossN = Number(/across (\d+) (?:person|people)/.exec(modal)?.[1] ?? 0)
+  t.ok('the summary names how many people are taking work', acrossN > 0)
+  t.check('...and the grid shows exactly that many',
+    await page.locator('[data-qa="plan-rows"] tr').count(), acrossN)
+  t.ok('...and says how many days it spans', /over \d+ working days?/.test(modal))
+  /*
+   * And the box says what it now means. It used to read as a deadline, which is how "over five
+   * working days" produced two — a person who reads the label and gets something else stops
+   * trusting the screen.
+   */
+  t.ok('the window box says the work is spread', /spread evenly across these days/.test(modal))
   /*
    * NOT asserting the over-ceiling warning here any more, because with thirty-eight collectors
    * and forty accounts there is ample headroom and nobody IS pushed over — the warning staying

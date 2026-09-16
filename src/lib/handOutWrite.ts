@@ -29,6 +29,13 @@ import type { HandOutPlan } from './handOut.ts'
  */
 export type HandOutMode = 'refer' | 'allocate_and_refer'
 
+/*
+ * Accounts per request. Small enough that the id list in an `in(...)` filter stays a sane URL —
+ * PostgREST puts it in the query string, and fifty UUIDs is already two kilobytes of it — and
+ * large enough that a five-hundred-account hand-out is twenty requests rather than a thousand.
+ */
+const CHUNK = 50
+
 export interface HandOutResult {
   allocated: number
   booked: number
@@ -84,38 +91,82 @@ export async function commitHandOut(input: {
    * here that could skip the diary and leave an allocation standing on its own.
    */
   /*
-   * One at a time, because diarise() does more than an insert: it supersedes whatever open entry
-   * the account already has, writes the note, and respects the one-open-entry index. Batching the
-   * insert would skip all of that and hit the unique constraint on the first account that was
-   * already booked.
+   * IN BATCHES, AND IN TWO PASSES: supersede every open entry on these accounts, then insert all
+   * the new ones. It was one diarise() per account, which is two round trips each — a hundred
+   * accounts took two hundred sequential requests and, in the firm's words, "a very long time".
    *
-   * A refusal does NOT stop the run. Five hundred accounts and one failure should leave 499
-   * booked and one named, not 200 booked and 300 silently skipped.
+   * The two passes are not an optimisation detail, they are what makes the batch legal. An
+   * account may carry ONE open diary entry and a partial unique index enforces it, so inserting
+   * a hundred rows while a hundred old ones are still open is refused on the first collision.
+   * Closing them all first is exactly what diarise() does per account; doing it for the whole
+   * stack at once is the same rule at a different grain.
+   *
+   * What is deliberately NOT batched: the account timeline note. commitHandOut never wrote one
+   * anyway (a second line per account saying what the allocation note already says is noise on
+   * five hundred timelines), so there is nothing lost here that diarise() was giving us.
    */
+  const rows = placements.map((p) => ({
+    account_id: p.accountId,
+    owner_id: p.userId,
+    due_on: p.dueOn,
+    kind: p.kind,
+    reason: input.reason?.trim() || null,
+    source: 'manual' as const,
+    created_by: input.actor.id,
+    created_by_name: input.actor.name,
+  }))
+
   let done = 0
-  for (const p of placements) {
+  const tick = (n: number) => { done += n; input.onProgress?.(done, placements.length) }
+
+  for (let i = 0; i < placements.length; i += CHUNK) {
+    const slice = placements.slice(i, i + CHUNK)
     try {
-      await diarise({
-        accountId: p.accountId,
-        ownerId: p.userId,
-        dueOn: p.dueOn,
-        kind: p.kind,
-        reason: input.reason?.trim() || null,
-        source: 'manual',
-        // The account's own timeline already gets the allocation note; a second line per account
-        // saying the same thing in other words is noise on five hundred timelines.
-        alsoNoteOnAccount: false,
-        actor: input.actor,
-      })
-      result.booked += 1
-    } catch (e) {
-      result.failed.push({
-        accountId: p.accountId,
-        message: e instanceof Error ? e.message : String(e),
-      })
+      const { error: supersedeError } = await supabase
+        .from('diary_entries')
+        .update({ state: 'moved', moved_at: new Date().toISOString(), moved_by: input.actor.id })
+        .in('account_id', slice.map((p) => p.accountId))
+        .eq('state', 'open')
+      if (supersedeError) throw new Error(supersedeError.message)
+
+      const { error } = await supabase.from('diary_entries').insert(rows.slice(i, i + CHUNK))
+      if (error) throw new Error(error.message)
+      result.booked += slice.length
+      tick(slice.length)
+    } catch {
+      /*
+       * ONE BAD ROW MUST NOT COST THE OTHER NINETY-NINE. A batch fails whole, so the fallback
+       * walks this chunk the slow way — the same diarise() per account as before — and each
+       * account that still refuses is named. Five hundred accounts and one failure leaves 499
+       * booked and one on a list, not 200 booked and 300 silently gone.
+       *
+       * Re-superseding inside diarise() is harmless: the entries this chunk's first pass already
+       * closed are no longer open, so the update matches nothing.
+       */
+      for (const p of slice) {
+        try {
+          await diarise({
+            accountId: p.accountId,
+            ownerId: p.userId,
+            dueOn: p.dueOn,
+            kind: p.kind,
+            reason: input.reason?.trim() || null,
+            source: 'manual',
+            // The account's own timeline already gets the allocation note; a second line per
+            // account saying the same thing in other words is noise on five hundred timelines.
+            alsoNoteOnAccount: false,
+            actor: input.actor,
+          })
+          result.booked += 1
+        } catch (e) {
+          result.failed.push({
+            accountId: p.accountId,
+            message: e instanceof Error ? e.message : String(e),
+          })
+        }
+        tick(1)
+      }
     }
-    done += 1
-    input.onProgress?.(done, placements.length)
   }
 
   return result

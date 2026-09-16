@@ -152,7 +152,14 @@ ok('...and stays simple when there is none', /: `You work \$\{fullDay\} a day\.`
  * reserved from the only thing they were ever reserved for.
  */
 const plan = read('../../src/lib/handOut.ts')
-ok('the distributor ignores the reserve', /existing \+ added < s\.c\.capacity\)/.test(plan))
+ok('the distributor measures a day against the whole capacity', /load < s\.c\.capacity/.test(plan))
+ok('...and against nothing smaller', !/capacity - .*reserve|selfBookingLimit/.test(plan))
+/*
+ * And it cannot even see the reserve. The comment below says why this is deliberate, but a
+ * comment is not a guard — the import is. Wire diaryReserveOf into the planner and this fails
+ * before anybody has to notice that hand-outs got 10 slots a day smaller.
+ */
+ok('...because it never looks the reserve up', !/diaryReserveOf|diaryReserve\b|selfBookingLimit/.test(plan))
 // Matched on one line of the comment: the reasoning wraps, and a regex spanning the wrap would
 // break the next time somebody reflows the paragraph.
 ok('...deliberately', /Fills to the FULL capacity, not to capacity minus reserve/.test(plan))

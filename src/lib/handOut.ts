@@ -20,7 +20,8 @@
  *                    quiet, and that was the first heuristic this planner had. It was wrong.
  *   2. GRADE       — is the account within their reach? The firm earns only on what it recovers
  *                    and carries its clients' reputation while doing it.
- *   3. DIARY ROOM  — and only now, which day.
+ *   3. DIARY ROOM  — and only now, which day. The window is a spread: "over five working days"
+ *                    paces the work across five days, it does not merely permit five.
  *
  * Nothing here blocks. The plan says who goes over their ceiling and by how much, and a person
  * decides — the same rule the diary already follows for capacity.
@@ -178,10 +179,20 @@ export function planHandOut(input: PlanInput): HandOutPlan {
   })
 
   // Working state per collector, so the plan can be built without mutating the caller's data.
-  const state = input.collectors
+  interface Desk {
+    c: PlannableCollector
+    ceiling: number
+    /** Accounts of room at the moment the plan started. The share each person takes is weighted
+     *  by this, and it is deliberately not recomputed as the plan fills — see gate 1. */
+    room: number
+    taking: number
+    added: Record<string, number>
+  }
+  const state: Desk[] = input.collectors
     .map((c) => ({
       c,
       ceiling: bookCeilingOf(c.bookCeiling),
+      room: Math.max(0, bookCeilingOf(c.bookCeiling) - c.inPlayNow),
       taking: 0,
       added: {} as Record<string, number>,
     }))
@@ -190,6 +201,59 @@ export function planHandOut(input: PlanInput): HandOutPlan {
   const placements: Placement[] = []
   const unplaced: HandOutPlan['unplaced'] = []
   const firstDay = nextWorkingDay(input.startOn, extra)
+
+  /*
+   * Every working day the plan may reach, in order: the window first, then the days it is
+   * allowed to run past it onto. Built once — the days do not depend on who is taking what, and
+   * walking the calendar again for every account is how a five-hundred-account plan gets slow.
+   */
+  const dayList: string[] = []
+  for (let i = 0, d = firstDay; i < maxDays; i += 1) {
+    dayList.push(d)
+    d = nextWorkingDay(addDay(d), extra)
+  }
+  const windowSize = Math.min(Math.max(1, input.windowDays), dayList.length)
+  const windowEnd = dayList[windowSize - 1]
+
+  /*
+   * GATE 3: WHICH DAY — and the window is a SPREAD, not a ceiling.
+   *
+   * The rule this replaced filled Monday to capacity, then Tuesday, and read "over five working
+   * days" as "within five working days". So a hundred accounts handed out over a week arrived as
+   * two solid days and three empty ones, which is what a screenshot caught. The firm reads the
+   * box the other way and they are right: it is an instruction about how the work is PACED, not a
+   * deadline to fit inside.
+   *
+   * So inside the window the emptiest day takes next, counting what is ALREADY in that person's
+   * diary — which is why a Monday holding 38 of 40 gets skipped rather than topped up. Ties go to
+   * the earliest day, and that is what keeps the firm's ladder meaningful: the queue is dealt
+   * broken-promises-first, so the most urgent work still lands at the front of the window.
+   *
+   * Only when every day in the window is full does it run past, earliest first — and it says so.
+   */
+  function dayFor(s: Desk): string | null {
+    let best: string | null = null
+    let bestLoad = Infinity
+    for (let i = 0; i < windowSize; i += 1) {
+      const day = dayList[i]
+      const load = (s.c.bookedByDay[day] ?? 0) + (s.added[day] ?? 0)
+      /*
+       * Fills to the FULL capacity, not to capacity minus reserve. The reserve exists to stop an
+       * agent's own bookings from eating the room a team leader needs — it constrains
+       * self-booking, not this. Subtracting it here would hold slots back from the only thing
+       * they were ever held back for, and the reserve would make hand-outs harder, not easier.
+       */
+      if (load >= s.c.capacity) continue
+      if (load < bestLoad) { bestLoad = load; best = day }
+    }
+    if (best !== null) return best
+    for (let i = windowSize; i < dayList.length; i += 1) {
+      const day = dayList[i]
+      const load = (s.c.bookedByDay[day] ?? 0) + (s.added[day] ?? 0)
+      if (load < s.c.capacity) return day
+    }
+    return null
+  }
 
   for (const account of queue) {
     if (input.skipAlreadyBooked && account.alreadyBooked) {
@@ -209,20 +273,45 @@ export function planHandOut(input: PlanInput): HandOutPlan {
     }
 
     /*
-     * GATE 1: BOOK ROOM, and dealt by HEADROOM rather than by free diary slots.
+     * GATE 1: BOOK ROOM, and everybody with room takes a SHARE OF THE WORK PROPORTIONAL TO THE
+     * ROOM THEY HAVE. Dealt one account at a time to whoever is furthest behind their share.
      *
-     * Headroom is ceiling minus what they carry minus what this plan has already given them, so
-     * the work lands in proportion to what each person can actually hold: an Elite on 200 of 500
-     * takes more than a Junior on 140 of 150, without anybody choosing a ratio.
+     * This is the rule the firm reported against, twice over. It first dealt to whoever had the
+     * most headroom counted in accounts: Rehana, on 190 of a ceiling of 650, had more raw room
+     * than eight colleagues and still did after ninety-nine accounts — so nine people were ticked
+     * and the plan read "100 accounts across one person". Levelling everybody's occupancy fixed
+     * that but overcorrected: three of the nine still got nothing, because their books were
+     * merely fuller than the rest, not full. A leader who ticks nine names is telling the planner
+     * those nine should work this stack, and a rule that quietly drops three of them is the same
+     * complaint in smaller print.
      *
-     * Nobody is over their ceiling YET is preferred; if every eligible desk is full the least
-     * over one still takes it, because refusing would leave the account adrift and the plan says
-     * plainly who it pushed over.
+     * So: share, weighted by room. Somebody with 300 of room takes thirty times what somebody
+     * with 10 of room takes — the near-full desk is protected without being excluded, and nine
+     * level desks take an equal ninth each because equal room is an equal share. `taking` over
+     * starting headroom is the whole rule; the person with the lowest ratio is next, which drives
+     * everyone towards the same fraction of their own capacity to absorb work.
+     *
+     * Room is measured ONCE, against what they were carrying before this plan, not re-measured as
+     * the plan fills. A denominator that shrinks as somebody takes work is a ratio that rises
+     * twice for the same account, and the deal stops being proportional to anything.
      */
-    const byHeadroom = [...eligible].sort((a, b) => {
-      const ha = a.ceiling - a.c.inPlayNow - a.taking
-      const hb = b.ceiling - b.c.inPlayNow - b.taking
-      if (ha !== hb) return hb - ha
+    const byShare = [...eligible].sort((a, b) => {
+      /*
+       * Anybody at or past their ceiling sorts behind everybody who still has room — and among
+       * themselves by how far past, so the least over takes first. Nothing BLOCKS: if every
+       * eligible desk is full the work still lands, because refusing would leave the account
+       * adrift, and the plan says plainly who it pushed over and by how much.
+       */
+      if ((a.room > 0) !== (b.room > 0)) return a.room > 0 ? -1 : 1
+      if (a.room > 0) {
+        const sa = a.taking / a.room
+        const sb = b.taking / b.room
+        if (sa !== sb) return sa - sb
+      } else {
+        const oa = (a.c.inPlayNow + a.taking) / Math.max(1, a.ceiling)
+        const ob = (b.c.inPlayNow + b.taking) / Math.max(1, b.ceiling)
+        if (oa !== ob) return oa - ob
+      }
       // Then the less experienced of two equals, so elite desks stay free for what needs them.
       const g = gradeRank(a.c.grade) - gradeRank(b.c.grade)
       if (g !== 0) return g
@@ -230,29 +319,14 @@ export function planHandOut(input: PlanInput): HandOutPlan {
     })
 
     let placed = false
-    for (const s of byHeadroom) {
-      // GATE 3: which day. The earliest with room in this person's diary.
-      let day = firstDay
-      for (let i = 0; i < maxDays; i += 1) {
-        if (!isWorkingDay(day, extra)) { day = addDay(day); i -= 1; continue }
-        const existing = s.c.bookedByDay[day] ?? 0
-        const added = s.added[day] ?? 0
-        /*
-         * Fills to the FULL capacity, not to capacity minus reserve. The reserve exists to stop
-         * an agent's own bookings from eating the room a team leader needs — it constrains
-         * self-booking, not this. Subtracting it here would hold slots back from the only thing
-         * they were ever held back for.
-         */
-        if (existing + added < s.c.capacity) {
-          s.added[day] = added + 1
-          s.taking += 1
-          placements.push({ accountId: account.id, userId: s.c.userId, dueOn: day, kind: account.kind })
-          placed = true
-          break
-        }
-        day = addDay(day)
-      }
-      if (placed) break
+    for (const s of byShare) {
+      const day = dayFor(s)
+      if (day === null) continue
+      s.added[day] = (s.added[day] ?? 0) + 1
+      s.taking += 1
+      placements.push({ accountId: account.id, userId: s.c.userId, dueOn: day, kind: account.kind })
+      placed = true
+      break
     }
 
     if (!placed) unplaced.push({ accountId: account.id, label: account.label, reason: 'no_room' })
@@ -293,12 +367,6 @@ export function planHandOut(input: PlanInput): HandOutPlan {
   const dates = placements.map((p) => p.dueOn).sort()
   const lastDate = dates.length > 0 ? dates[dates.length - 1] : null
 
-  // The last day the window asked for, so "ran past it" is a fact rather than an impression.
-  let windowEnd = firstDay
-  for (let i = 1; i < input.windowDays; i += 1) {
-    windowEnd = nextWorkingDay(addDay(windowEnd), extra)
-  }
-
   return {
     placements,
     unplaced,
@@ -321,8 +389,16 @@ export function planSummary(plan: HandOutPlan): string {
    * second rule that can disagree, and this one is the tested half.
    */
   const over = plan.collectors.filter((c) => c.overBy > 0)
+  /*
+   * THE NUMBER OF DAYS IS SAID OUT LOUD, because "over five working days" is what the person
+   * typed into the box and they need to see whether the plan honoured it. It used to give only
+   * the finishing date, which meant a plan asked for over five days and delivered in two read as
+   * a success. Distinct dates, not the span, so a gap is not counted as work.
+   */
+  const days = new Set(plan.placements.map((p) => p.dueOn)).size
   const parts = [
     `${n.toLocaleString('en-ZA')} ${n === 1 ? 'account' : 'accounts'} across ${people} ${people === 1 ? 'person' : 'people'}`,
+    `over ${days} working ${days === 1 ? 'day' : 'days'}`,
   ]
   if (plan.lastDate) parts.push(`finishing ${plan.lastDate}`)
   if (over.length > 0) {

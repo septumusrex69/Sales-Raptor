@@ -241,7 +241,15 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                     than the screen hides its own Done button, which is how somebody ends up
                     unable to finish a hand-out they have already set up.
                   */}
-                  <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-50">
+                  {/*
+                    data-qa, and the only one in the app so far. The e2e check for "searching
+                    narrows the list" read the whole page and passed by accident: it asserted a
+                    name was absent, and the name was absent from the list but present in the plan
+                    preview below, which names everybody taking work. Scoping the assertion to the
+                    list is the fix; the hook is what makes scoping possible.
+                  */}
+                  <div data-qa="collector-list"
+                    className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-50">
                     {visible.length === 0 ? (
                       <p className="px-2.5 py-3 text-xs text-slate-400">
                         {search.trim() ? `Nobody matching “${search.trim()}”.` : 'Nobody to show.'}
@@ -288,6 +296,14 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
                     <input type="number" min={1} max={40} className={inputClass} value={windowDays}
                       onChange={(e) => setWindowDays(Math.max(1, Number(e.target.value) || 1))} />
                   </FormField>
+                  {/*
+                    Said plainly because the box used to mean the other thing. It read as a
+                    deadline — fill Monday, then Tuesday, stop by Friday — so five days produced
+                    two. It paces the work now, and a person who wants it all today types 1.
+                  */}
+                  <p className="text-[11px] text-slate-400 pb-2.5">
+                    The work is spread evenly across these days. Type 1 to put it all on one day.
+                  </p>
                 </div>
 
                 {/*
@@ -397,7 +413,13 @@ function PlanPreview({ plan }: { plan: HandOutPlan }) {
                 <th className="px-3 py-1.5 font-medium text-right">New</th>
               </tr>
             </thead>
-            <tbody>
+            {/*
+              Hooked so the browser check can count these rows against the sentence above them.
+              The summary and the grid are computed from the same plan by two different bits of
+              code, and "40 accounts across 9 people" sitting over a grid of three rows is the
+              kind of disagreement only a rendered page shows.
+            */}
+            <tbody data-qa="plan-rows">
               {taking.map((c) => (
                 <tr key={c.userId} className="border-b border-slate-50 last:border-0">
                   <td className="px-3 py-1.5 text-slate-700 whitespace-nowrap">
