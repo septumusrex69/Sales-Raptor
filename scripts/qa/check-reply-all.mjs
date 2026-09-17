@@ -143,8 +143,9 @@ const lines = slice(page, 'function RecipientLines', 'function InviteCard', 'Rec
  */
 ok('nobody to name means no lines at all',
   /if \(mail\.toRecipients\.length === 0 && mail\.ccRecipients\.length === 0\) return null/.test(lines))
-ok('To is labelled', />To</.test(lines))
-ok('Cc is labelled', />Cc</.test(lines))
+/* With the colon a mail client writes, which is also how the firm reads them on paper. */
+ok('To is labelled', />To:</.test(lines))
+ok('Cc is labelled', />Cc:</.test(lines))
 ok('each line goes through recipientLine', (lines.match(/recipientLine\(/g) ?? []).length === 2)
 /* A Cc of eight people is a long line, and a line that cannot wrap pushes the pane sideways. */
 ok('a long list wraps rather than widening the pane', /break-words/.test(lines))

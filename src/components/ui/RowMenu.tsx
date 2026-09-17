@@ -8,7 +8,7 @@ export interface RowMenuItem {
   danger?: boolean
 }
 
-export function RowMenu({ items, width = 'w-48', label }: {
+export function RowMenu({ items, width = 'w-48', label, bordered = false }: {
   items: RowMenuItem[]
   /**
    * How wide the panel is. Defaults to the width every row menu in the app has always been.
@@ -20,6 +20,14 @@ export function RowMenu({ items, width = 'w-48', label }: {
   width?: string
   /** Named where the icon alone would not say whose menu this is -- e.g. two on one row. */
   label?: string
+  /**
+   * Draw it as a button rather than as a bare icon.
+   *
+   * On a table row the dots sit alone in a column and read as a control from their position. On a
+   * toolbar they sit at the end of a line of bordered buttons, and an unbordered icon there reads
+   * as decoration -- so it takes the same shape as its neighbours.
+   */
+  bordered?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -35,7 +43,9 @@ export function RowMenu({ items, width = 'w-48', label }: {
   return (
     <div ref={ref} className="relative" onClick={(e) => e.stopPropagation()}>
       <button onClick={() => setOpen((o) => !o)} aria-label={label ?? 'More actions'} aria-expanded={open}
-        className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400">
+        className={bordered
+          ? `px-3 py-2 rounded-lg border text-slate-500 hover:bg-slate-50 ${open ? 'border-slate-300 bg-slate-50' : 'border-slate-200'}`
+          : 'p-1.5 rounded-lg hover:bg-slate-100 text-slate-400'}>
         <MoreHorizontal size={16} />
       </button>
       {open && (

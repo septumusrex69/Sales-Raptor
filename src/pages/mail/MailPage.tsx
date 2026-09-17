@@ -4,20 +4,24 @@ import {
   AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, CircleCheck, ExternalLink,
   Inbox, Link2, Download, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
   Forward as ForwardIcon,
-  Search, ShieldAlert, Trash2, Undo2, X, CalendarDays, CalendarPlus, ReplyAll
+  Search, ShieldAlert, Trash2, Undo2, X, CalendarDays, CalendarPlus, ReplyAll,
+  Filter, Info, UserPlus,
 } from 'lucide-react'
+import { Avatar } from '../../components/ui/Avatar'
 import { Card } from '../../components/ui/Card'
 import { RowMenu, type RowMenuItem } from '../../components/ui/RowMenu'
-import { Modal } from '../../components/ui/Modal'
+import { FormField, inputClass, Modal } from '../../components/ui/Modal'
 import { inviteHeadline, inviteWhen, parseInvite, type CalendarInvite } from '../../lib/calendarInvite.ts'
 import {
   acceptInvite, eventForInvite, fetchCalendarEvents, removeCalendarEvent, type CalendarEvent,
 } from '../../lib/calendarEvents.ts'
 import { useAuth } from '../../store/AuthContext'
-import { relativeDayLabel } from '../../lib/dateLabels'
+import { relativeDayLabel, timeOfDay } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
 import { recordSentEmail, replySubject } from '../../lib/accountEmails'
-import { forwardBody, forwardSubject, recipientLine, replyAllTo } from '../../lib/emailRules'
+import {
+  companyFromDomain, forwardBody, forwardSubject, recipientLine, replyAllTo, splitPersonName,
+} from '../../lib/emailRules'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import { useEmailView } from '../../lib/emailView'
@@ -29,12 +33,15 @@ import {
   countUnread, debtorFileFor, deleteMail, fetchSenderRules, markNoRecordNeeded, removeSenderRule,
   ruledBy,
   domainBlockProblem, domainOf, downloadAttachment, emptyJunk, fetchBlockedSenders, fetchMail,
+  isSharedDomain,
   fetchMailBody, linkMailToAccount, linkMailToRecord, markMailRead, markMailUnread, moveFiledMail,
   saveAccountContacts, setJunk, unblockSender, unmatchMail,
   type BlockedSender, type BlockOutcome, type DebtorFile, type InlineImage, type LinkedRecord,
   type MailFilter, type MailItem, type SenderRule,
 } from '../../lib/userMail'
 import { useAppStore } from '../../store/AppStore'
+import { leadSources } from '../../data/mockData'
+import type { LeadSource } from '../../types'
 import {
   findContactDetails, mergeCandidates, type ContactCandidate,
 } from '../../lib/signature'
@@ -94,6 +101,26 @@ const TABS: { id: Pane; label: string; hint: string }[] = [
 
 const PAGE = 50
 
+/*
+ * A colour per sender, the same one every time.
+ *
+ * The point of an avatar in a mail list is not decoration -- it is that the eye finds a
+ * correspondent before it reads a word, which is how anybody actually scans a mailbox. That only
+ * works if the colour is STABLE: derived from the address, so today's message from this debtor is
+ * the same colour as last week's, and a random or index-based colour would be worse than none.
+ *
+ * Deep enough to carry white initials at every one of them; the palette was picked for that and
+ * not for variety.
+ */
+const SENDER_COLOURS = [
+  '#1f3a5f', '#7a5230', '#3f5c3a', '#5a3a5c', '#2f5d5f', '#6b3b3b', '#3b4a6b', '#6b5a2f',
+]
+function senderColour(address: string): string {
+  let hash = 0
+  for (let i = 0; i < address.length; i += 1) hash = (hash * 31 + address.charCodeAt(i)) >>> 0
+  return SENDER_COLOURS[hash % SENDER_COLOURS.length]
+}
+
 /** A debtor by name, falling back to whatever else identifies the account. */
 const debtorLabel = (a: DebtorAccount) =>
   [a.debtorFirstName, a.debtorSurname].filter(Boolean).join(' ')
@@ -142,6 +169,8 @@ export function MailPage() {
   const [error, setError] = useState<string | null>(null)
   const [chosen, setChosen] = useState<Set<string>>(new Set())
   const [linking, setLinking] = useState<MailItem | null>(null)
+  /** The message a new lead is being made out of. See CreateLeadFromMailModal. */
+  const [creatingLead, setCreatingLead] = useState<MailItem | null>(null)
   /*
    * Set when the link modal was opened by Reply rather than by the Link button, so that filing
    * the message hands straight over to the composer instead of dropping you back on the list to
@@ -672,92 +701,80 @@ export function MailPage() {
     }
   }
 
+  /*
+   * Whether the reading pane is on screen, which decides where the search bar is drawn.
+   *
+   * The pane carries it in its own left column; every other state of this page -- loading, the
+   * blocklist, a failed load, an empty result -- has no pane, so the bar is drawn above the list
+   * instead. Worked out once, here, because two copies of this condition would eventually
+   * disagree and put two search boxes on the screen.
+   */
+  const paneShowing = !loading && !loadFailed && filter !== 'blocked'
+    && items.length > 0 && view === 'reading'
+
   return (
     <div className="space-y-4">
       <Card padded={false}>
-        <div className="px-5 py-4 border-b border-slate-100 space-y-3">
+        {/*
+          THE MAILBOX, NAMED, AND THE ONE BUTTON THAT WRITES SOMETHING.
+
+          The firm, on a layout they preferred: "New email at the right top. So cool." It used to
+          sit at the left of a bar it shared with Check now, Select and the search box -- five
+          controls of equal weight, only one of which starts anything. Up here with the mailbox
+          address it has the row to itself, and everything that SORTS mail lives below with the
+          tabs, where sorting belongs.
+
+          (It was moved to the left once before, for the opposite reason: the heading's
+          description made the row wrap after the button, so on an iPad the bar began with "Check
+          now". Giving the title its own block fixes that properly -- the buttons cannot be
+          carried anywhere by text they no longer share a row with.)
+        */}
+        <div className="px-5 py-4 border-b border-slate-100 flex flex-wrap items-start gap-x-4 gap-y-3">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-slate-800">My mailbox</h2>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <div className="flex items-baseline gap-2.5 min-w-0">
+              <h2 className="text-lg font-semibold text-navy-950 shrink-0">Mail</h2>
+              {/*
+                WHICH MAILBOX, said out loud. Raptor reads a connected mailbox that is not always
+                the address somebody signs in with -- a shared info@ is the ordinary case -- and an
+                agent who cannot see which one they are reading cannot tell whether a message is
+                missing or was simply never sent here.
+              */}
+              <span className="text-sm text-slate-400 truncate">{mailbox ?? currentUser?.email ?? ''}</span>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">
               Everything stays until you match it or block the sender. Nothing is deleted on a
               timer, and nothing here is ever removed from your real mailbox.
             </p>
           </div>
-          {/*
-            THE ORDER IS THE FIRM'S: write, then sync, then select, and searching and choosing
-            how the mail is laid out hard right, away from the buttons that change mail.
 
-            THE CONTROLS GET THEIR OWN ROW, which is the whole reason this is a second div. They
-            shared one wrapping row with the heading, and the heading's description is long
-            enough that on an iPad the row broke AFTER the compose button -- so "New email" was
-            carried up beside "My mailbox" and the bar began with "Check now". Order that
-            depends on how wide somebody's screen is is not order at all, and it read as the
-            button having gone missing.
-          */}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="ml-auto shrink-0 flex items-center gap-2">
             {/*
-              A message to anybody, from here. Every other compose in Raptor hangs off a record —
-              a debtor, a lead, a deal — which covers replying and covers nothing else. Writing to
+              A message to anybody, from here. Every other compose in Raptor hangs off a record --
+              a debtor, a lead, a deal -- which covers replying and covers nothing else. Writing to
               an attorney, a client's accountant or a bureau had to be done in Outlook, which is
               how a mailbox managed in one place stops being managed in one place.
 
-              FILLED, and in brand rather than gold. It is the one button on this bar that starts
-              something instead of sorting what is already here, which is the same job the "+ Add"
-              button does in the top bar -- so it wears the same treatment, and somebody looking
-              for "where do I write one" finds the shape they already know.
-
-              NOT gold, though gold is the accent everywhere else here. Select turns gold-400
-              while selecting is on, and that is the only thing on this bar that says which mode
-              you are in. A permanently gold button beside it would spend the one signal that has
-              to keep meaning something.
+              GOLD, which it was argued out of once: Select turns gold-400 while selecting is on,
+              and two gold buttons on one bar would have spent the only signal saying which mode
+              you are in. They are no longer on one bar. Select sits with the tabs, this sits with
+              the mailbox name, and gold can go back to meaning "the thing to press".
             */}
             <button onClick={() => setComposing(true)}
-              className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg bg-brand-600 text-white shadow-sm hover:bg-brand-700">
+              className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 shadow-sm hover:bg-gold-500">
               <PenLine size={14} />
               New email
             </button>
-            <button onClick={() => void syncMine()} disabled={syncing}
-              className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50">
-              {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-              {syncing ? 'Checking…' : 'Check now'}
-            </button>
-            {/* Junk earns its own one-tap answer: it is where the volume is and where nobody
-                wants to read anything. */}
-            {filter === 'junk' && items.length > 0 && (
-              <button onClick={() => setEmptying(true)}
-                className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-negative-700 hover:border-negative-100 hover:bg-negative-50">
-                <Trash2 size={14} /> Empty junk
-              </button>
-            )}
             {/*
-              Select, which is the only way the tick boxes appear.
-
-              Off by default so the gutter can carry the unread mark instead — see `selecting`.
-              It reads as pressed while it is on, because a mode you cannot see you are in is a
-              mode that surprises you.
+              Check now, as an icon. The word was carrying no weight beside a circular arrow that
+              every mail client on earth uses for the same thing, and spelling it out made the pair
+              read as two equal choices rather than one action and one refresh.
             */}
-            {filter !== 'blocked' && items.length > 0 && (
-              <button onClick={toggleSelecting} aria-pressed={selecting}
-                className={`shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border transition-colors ${
-                  selecting
-                    ? 'border-gold-500 bg-gold-400 text-navy-950'
-                    : 'border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50'}`}>
-                {selecting ? <X size={14} /> : <CheckSquare size={14} />}
-                {selecting ? 'Done' : 'Select'}
-              </button>
-            )}
-            <label className={`relative ml-auto ${filter === 'blocked' ? 'hidden' : ''}`}>
-              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Sender or subject"
-                aria-label="Search your mailbox"
-                className="text-sm rounded-lg border border-slate-200 pl-8 pr-3 py-2 w-52 focus:outline-none focus:ring-2 focus:ring-brand-100"
-              />
-            </label>
-            {/* Not on the blocklist, which is a list of senders rather than of mail. */}
-            {filter !== 'blocked' && <EmailViewSwitcher view={view} onChange={setView} />}
+            <button onClick={() => void syncMine()} disabled={syncing}
+              aria-label="Check for new mail now"
+              title={syncing ? 'Checking your mailbox\u2026' : 'Check for new mail now'}
+              className="shrink-0 inline-flex items-center justify-center px-3 py-2 rounded-lg border border-slate-200 text-slate-500 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50">
+              {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+            </button>
           </div>
         </div>
 
@@ -790,31 +807,44 @@ export function MailPage() {
           </div>
 
           {/*
-            Unread, at the right end of the tab row — "at the top where there's All and stuff",
-            as the firm put it, so the fact that something is unread is visible without reading
-            a single row.
+            HOW THE MAIL IS LAID OUT, at the right end of the tab row.
 
-            A toggle, not a tab: it narrows whichever tab you are on, so "unread junk" and
-            "unread that still needs filing" are both askable. The count is scoped to that same
-            tab and search, so it is exactly what pressing it leaves behind.
+            Which tab you are on and how it is displayed are one question asked twice, so they
+            share a line -- and it keeps these away from New email, which is the only control on
+            this page that starts something rather than sorting what is already here.
+
+            Searching and narrowing to unread are NOT here. They belong over the list itself; see
+            MailSearchBar.
           */}
-          {filter !== 'blocked' && (
-            <button
-              onClick={() => setUnreadOnly((on) => !on)}
-              aria-pressed={unreadOnly}
-              title={unreadOnly ? 'Show read messages as well' : 'Show only what you have not read'}
-              className={`shrink-0 my-1 inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium transition-colors ${
-                unreadOnly
-                  ? 'border-brand-500 bg-brand-500 text-white'
-                  : unread > 0
-                    ? 'border-brand-100 bg-brand-50 text-brand-700 hover:border-brand-500'
-                    : 'border-slate-200 text-slate-400 hover:border-slate-300'}`}
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${
-                unreadOnly ? 'bg-white' : unread > 0 ? 'bg-brand-500' : 'bg-slate-300'}`} />
-              {unread > 0 ? `${unread > 99 ? '99+' : unread} unread` : 'No unread'}
-            </button>
-          )}
+          <div className="shrink-0 flex items-center gap-2 py-1.5">
+            {/* Junk earns its own one-tap answer: it is where the volume is and where nobody
+                wants to read anything. */}
+            {filter === 'junk' && items.length > 0 && (
+              <button onClick={() => setEmptying(true)}
+                className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-negative-700 hover:border-negative-100 hover:bg-negative-50">
+                <Trash2 size={14} /> Empty junk
+              </button>
+            )}
+            {/*
+              Select, which is the only way the tick boxes appear.
+
+              Off by default so the gutter can carry the unread mark instead — see `selecting`.
+              It reads as pressed while it is on, because a mode you cannot see you are in is a
+              mode that surprises you.
+            */}
+            {filter !== 'blocked' && items.length > 0 && (
+              <button onClick={toggleSelecting} aria-pressed={selecting}
+                className={`shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border transition-colors ${
+                  selecting
+                    ? 'border-gold-500 bg-gold-400 text-navy-950'
+                    : 'border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50'}`}>
+                {selecting ? <X size={14} /> : <CheckSquare size={14} />}
+                {selecting ? 'Done' : 'Select'}
+              </button>
+            )}
+            {/* Not on the blocklist, which is a list of senders rather than of mail. */}
+            {filter !== 'blocked' && <EmailViewSwitcher view={view} onChange={setView} />}
+          </div>
         </div>
 
         {/* The bulk bar only exists once something is selected — an always-visible row of
@@ -880,6 +910,23 @@ export function MailPage() {
         {status && <p className="px-5 py-2 text-[13px] text-[var(--c-green)] border-b border-slate-100">{status}</p>}
         {error && <p className="px-5 py-2 text-[13px] text-negative-700 border-b border-slate-100">{error}</p>}
 
+        {/*
+          SEARCHING AND NARROWING SIT OVER THE LIST, at the firm's instruction: "the search mail in
+          the left with the unread only ... you can filter that stuff there."
+
+          They used to be a box at the right end of the page's top bar and a pill at the end of the
+          tab row -- two controls that do one job, in two places, neither of them near the thing
+          they act on. In the reading pane they go inside the left column and stay put while it
+          scrolls (see ReadingPane's listHeader); everywhere else the same bar sits directly above
+          the list. Rendered here only when the pane is not, so there is never a second one.
+        */}
+        {filter !== 'blocked' && !paneShowing && (
+          <div className="border-b border-slate-100">
+            <MailSearchBar search={search} onSearch={setSearch}
+              unreadOnly={unreadOnly} onUnreadOnly={setUnreadOnly} unread={unread} />
+          </div>
+        )}
+
         {loading ? (
           <div className="py-14 grid place-items-center text-slate-400">
             <Loader2 size={18} className="animate-spin" />
@@ -920,6 +967,10 @@ export function MailPage() {
             selectedId={open}
             onSelect={(m) => void toggleTo(m)}
             emptyDetail="Pick a message on the left to read it."
+            listHeader={
+              <MailSearchBar search={search} onSearch={setSearch}
+                unreadOnly={unreadOnly} onUnreadOnly={setUnreadOnly} unread={unread} />
+            }
             renderLead={(m) => (
               <span className="pl-4 pt-2.5 shrink-0">
                 <RowGutter mail={m} selecting={selecting} chosen={chosen.has(m.id)}
@@ -941,13 +992,43 @@ export function MailPage() {
             )}
             renderDetail={(m) => (
               <div className="px-5 py-4">
-                <div className="flex flex-wrap items-start gap-3 pb-3 mb-3 border-b border-slate-100">
+                {/*
+                  THE MESSAGE'S OWN HEADING: what it is about, when it came, who it is from and
+                  who else was on it -- in that order, and each on its own line.
+
+                  It used to be one truncated grey line carrying the name, the address and the day
+                  together, under a subject set at the same size as a row in the list. The firm, on
+                  a layout that gave the sender an avatar and a line of their own: "the name of the
+                  person that's displayed at the top ... it looks much better than yours."
+
+                  The time as well as the day, because "Today" stops being an answer the moment you
+                  have two messages from the same debtor open -- see timeOfDay.
+                */}
+                <div className="flex items-start gap-3">
+                  <h3 className="text-base font-semibold text-navy-950 min-w-0 flex-1 text-balance">
+                    {m.subject || '(no subject)'}
+                  </h3>
+                  <span className="shrink-0 pt-1 text-xs text-slate-400 whitespace-nowrap">
+                    {relativeDayLabel(m.occurredAt)}{' '}
+                    <span className="tabular-nums">{timeOfDay(m.occurredAt)}</span>
+                  </span>
+                </div>
+
+                <div className="flex items-start gap-3 mt-3 pb-3 mb-3 border-b border-slate-100">
+                  <Avatar name={m.fromName || m.fromAddress} color={senderColour(m.fromAddress)}
+                    size={40} />
                   <div className="min-w-0 flex-1">
-                    <h3 className="text-sm font-semibold text-navy-950">{m.subject || '(no subject)'}</h3>
-                    <p className="text-xs text-slate-400 mt-0.5 truncate">
-                      {m.fromName || m.fromAddress}
-                      {m.fromName && <span className="text-slate-300"> &middot; {m.fromAddress}</span>}
-                      {' · '}{relativeDayLabel(m.occurredAt)}
+                    <p className="text-sm min-w-0">
+                      <span className="font-semibold text-navy-950">{m.fromName || m.fromAddress}</span>
+                      {/*
+                        The address in angle brackets after the name, which is how every mail client
+                        writes it and how anybody checking that a message really is from their client
+                        expects to read it. Breaking rather than truncating: a half-shown address is
+                        worse than a wrapped one, because it looks like the whole of a shorter one.
+                      */}
+                      {m.fromName && (
+                        <span className="text-slate-400 break-words"> &lt;{m.fromAddress}&gt;</span>
+                      )}
                     </p>
                     {/*
                       WHO ELSE WAS ON IT, at the firm's instruction: "I can't see all the other
@@ -957,20 +1038,21 @@ export function MailPage() {
                     */}
                     <RecipientLines mail={m} />
                   </div>
-                  {m.linkedTo ? (
-                    // Said here rather than on every row in the list — one place, where somebody
-                    // is actually looking at the message. The kind matters: "On a lead" and "On a
-                    // debtor account" are different enough that leaving it off would mislead.
+                  {/*
+                    Where it is filed, said here rather than on every row in the list -- one place,
+                    where somebody is actually looking at the message. The kind matters: "On a lead"
+                    and "On a debtor account" are different enough that leaving it off would mislead.
+
+                    Nothing here when it is filed nowhere. That case is no longer a small button in
+                    the corner: it is a bar under the actions that says so and offers both ways out.
+                    See NotMatchedBar.
+                  */}
+                  {m.linkedTo && (
                     <span className="shrink-0 text-xs text-[var(--c-green)] inline-flex items-center gap-1 pt-1">
                       <Link2 size={12} />
                       On {m.linkedTo.label}
                       <span className="text-slate-400">&middot; {CRM_OR_ACCOUNT[m.linkedTo.kind]}</span>
                     </span>
-                  ) : (
-                    <button onClick={() => startLink(m)}
-                      className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950">
-                      <Link2 size={13} /> Match
-                    </button>
                   )}
                 </div>
                 <MailBody mail={m} body={bodies[m.id]} images={bodyImages[m.id]}
@@ -985,6 +1067,8 @@ export function MailPage() {
                   onUnread={() => void unreadOne(m)}
                   onNoRecord={() => setSettling(m)}
                   onUndoNoRecord={() => void undoNoRecord(m)}
+                  onLink={() => startLink(m)}
+                  onCreateLead={() => setCreatingLead(m)}
                   onDownload={(f) => void download(m, f)}
                   downloading={downloading} downloadError={downloadError} />
               </div>
@@ -1034,6 +1118,7 @@ export function MailPage() {
                   onUnread={() => void unreadOne(m)}
                   onNoRecord={() => setSettling(m)}
                   onUndoNoRecord={() => void undoNoRecord(m)}
+                  onCreateLead={() => setCreatingLead(m)}
                   onDownload={(f) => void download(m, f)}
                   downloading={downloading} downloadError={downloadError} />
               ))}
@@ -1117,6 +1202,16 @@ export function MailPage() {
             setLinkThenReply(false)
             if (mail) setReplying(mail)
           }}
+        />
+      )}
+
+      {creatingLead && (
+        <CreateLeadFromMailModal
+          mail={creatingLead}
+          body={bodies[creatingLead.id]}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setCreatingLead(null)}
+          onDone={(message) => { setCreatingLead(null); setStatus(message); void load(page) }}
         />
       )}
 
@@ -1304,6 +1399,70 @@ function Empty({ filter, searching }: { filter: Exclude<Pane, 'blocked'>; search
  * The dot is the unread signal the firm asked for — "a little colourful show about it" — in the
  * space the tick boxes used to occupy every day for the sake of a rare bulk action.
  */
+/**
+ * Searching this mailbox, and narrowing it to what has not been read.
+ *
+ * One component with two homes -- inside the reading pane's list column, or above the plain list
+ * -- because they are the same control over the same list and drifting into two would be two
+ * places to fix a search that stopped working.
+ *
+ * UNREAD IS A DROPDOWN, not a tab and not a toggle. It narrows whichever tab you are standing on,
+ * so "unread junk" and "unread that still needs matching" are both askable; a tab could only ever
+ * have answered one of them. The count rides in the option itself, which is the honest place for
+ * it -- it is the number of rows choosing that option leaves behind.
+ */
+function MailSearchBar({ search, onSearch, unreadOnly, onUnreadOnly, unread }: {
+  search: string
+  onSearch: (value: string) => void
+  unreadOnly: boolean
+  onUnreadOnly: (on: boolean) => void
+  /** Unread within the tab and search already applied, so the number matches what you would get. */
+  unread: number
+}) {
+  return (
+    <div className="px-4 py-3 flex items-center gap-2">
+      <label className="relative min-w-0 flex-1">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input
+          value={search}
+          onChange={(e) => onSearch(e.target.value)}
+          placeholder="Search mail&hellip;"
+          aria-label="Search your mailbox"
+          className="w-full text-sm rounded-lg border border-slate-200 bg-white pl-9 pr-3 py-2 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+        />
+      </label>
+
+      {/*
+        A real <select>: the keyboard, the screen reader and an iPad's own picker all come free,
+        and the firm works on iPads. Styled rather than rebuilt, so what is on screen is still the
+        control the browser knows about.
+      */}
+      <div className="relative shrink-0">
+        <Filter size={13} aria-hidden
+          className={`absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none ${
+            unreadOnly ? 'text-brand-700' : 'text-slate-400'}`} />
+        <select
+          value={unreadOnly ? 'unread' : 'all'}
+          onChange={(e) => onUnreadOnly(e.target.value === 'unread')}
+          aria-label="Narrow this list"
+          className={`appearance-none text-sm font-medium rounded-lg border pl-7 pr-7 py-2 cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-100 ${
+            /* Tinted while it is narrowing, because a filter you cannot see is on is a mailbox
+               with mail missing from it. */
+            unreadOnly
+              ? 'border-brand-500 bg-brand-50 text-brand-700'
+              : 'border-slate-200 bg-white text-slate-600'}`}
+        >
+          <option value="all">All mail</option>
+          <option value="unread">{unread > 0 ? `Unread only \u00b7 ${unread}` : 'Unread only'}</option>
+        </select>
+        <ChevronDown size={13} aria-hidden
+          className={`absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none ${
+            unreadOnly ? 'text-brand-700' : 'text-slate-400'}`} />
+      </div>
+    </div>
+  )
+}
+
 function RowGutter({ mail, selecting, chosen, onChoose }: {
   mail: MailItem
   selecting: boolean
@@ -1403,7 +1562,18 @@ function MailSummary({ mail, tight, blocked }: {
       Three tiers of weight follow the same order: the sender carries the most, the subject
       less, the preview least. Unread deepens the sender rather than adding a fourth signal.
     */
-    <span className="block min-w-0">
+    <span className="flex items-start gap-3 min-w-0">
+      {/*
+        The sender, as a face before it is a name. See senderColour -- the colour is the whole
+        point, and it is why this is worth the width: a mailbox is scanned by correspondent, and
+        recognising one takes a glance where reading a name takes a beat.
+
+        A span, because this whole summary renders inside a button and a div there is invalid.
+      */}
+      <Avatar name={mail.fromName || mail.fromAddress} color={senderColour(mail.fromAddress)}
+        size={tight ? 32 : 36} />
+
+      <span className="block min-w-0 flex-1">
       {/* 1. Who it is from, and when. */}
       <span className="flex items-baseline gap-2">
         <span className={`text-sm truncate ${unread ? 'font-bold text-navy-950' : 'font-semibold text-slate-700'}`}>
@@ -1455,6 +1625,7 @@ function MailSummary({ mail, tight, blocked }: {
           {mail.snippet}
         </span>
       )}
+      </span>
     </span>
   )
 }
@@ -1463,7 +1634,7 @@ function MailSummary({ mail, tight, blocked }: {
 function MailBody({
   mail, body, images, calendar, events, onAccept, onRemoveEvent, skippedImages, loadingBody,
   bodyError, onBlock, onReply, onReplyAll, onForward, onJunk, onMove, onUnread, onNoRecord,
-  onUndoNoRecord, onDownload, downloading, downloadError,
+  onUndoNoRecord, onLink, onCreateLead, onDownload, downloading, downloadError,
 }: {
   mail: MailItem
   body?: string
@@ -1500,6 +1671,16 @@ function MailBody({
   onNoRecord: () => void
   /** Undo that, and put it back in the queue. */
   onUndoNoRecord: () => void
+  /** Put it on a record -- the picker, which searches leads, deals, clients and the book. */
+  onLink: () => void
+  /**
+   * Make a NEW lead out of the sender and file the message on it.
+   *
+   * The half the picker could never cover: an enquiry from somebody the firm has never dealt with
+   * matches nothing, and the honest answer was to leave the mailbox, add a lead, come back and
+   * find the message again. Three screens for the most valuable email of the day.
+   */
+  onCreateLead: () => void
   /** Pull one attachment out of the mailbox. */
   onDownload: (filename: string) => void
   /** The file currently being fetched, so its own button shows the wait. */
@@ -1584,8 +1765,8 @@ function MailBody({
       {/* No top margin: this is the first thing in the card now, not a footer under a message. */}
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={onReply}
-          className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
-          <Reply size={13} /> Reply
+          className="inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 shadow-sm hover:bg-gold-500">
+          <Reply size={15} /> Reply
         </button>
 
         {/*
@@ -1597,8 +1778,8 @@ function MailBody({
         */}
         {(mail.toRecipients.length + mail.ccRecipients.length) > 1 && (
           <button onClick={onReplyAll}
-            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-            <ReplyAll size={13} /> Reply all
+            className="inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50">
+            <ReplyAll size={15} /> Reply all
           </button>
         )}
 
@@ -1608,8 +1789,8 @@ function MailBody({
           opening Outlook — and mail managed in two places is mail managed in neither.
         */}
         <button onClick={onForward}
-          className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-          <ForwardIcon size={13} /> Forward
+          className="inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50">
+          <ForwardIcon size={15} /> Forward
         </button>
 
         {/*
@@ -1623,8 +1804,8 @@ function MailBody({
         */}
         {mail.linkedTo && (
           <Link to={mail.linkedTo.path}
-            className="inline-flex items-center gap-1.5 max-w-full text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50">
-            <ExternalLink size={13} className="shrink-0" />
+            className="inline-flex items-center gap-1.5 max-w-full text-sm font-medium px-4 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50">
+            <ExternalLink size={15} className="shrink-0" />
             {/* Truncated: a double-barrelled name or a long deal name would otherwise make this
                 button wider than a phone, and the row wraps rather than scrolls. */}
             <span className="truncate">Open {mail.linkedTo.label}</span>
@@ -1640,8 +1821,26 @@ function MailBody({
           Wider than the default menu because "Put back in the queue" is the firm's wording and
           wrapping it across two lines would read as a mistake.
         */}
-        <RowMenu width="w-56" label="More things to do with this message" items={moreActions} />
+        {/*
+          HARD RIGHT, away from the three. The dots are not a fourth answer to "what do I do with
+          this?" -- they are where the rest of them live, and sitting shoulder to shoulder with
+          Forward is exactly what would make them read as one.
+        */}
+        <div className="ml-auto">
+          <RowMenu width="w-56" bordered
+            label="More things to do with this message" items={moreActions} />
+        </div>
       </div>
+
+      {/*
+        WHERE THIS MESSAGE IS FILED, and both ways of fixing it when the answer is nowhere.
+
+        A "Match" button in the corner of the header said what to press and never said why, so an
+        unmatched message looked exactly like a matched one to anybody not already looking for the
+        difference. It is the state that costs money -- a reply sent from an unmatched message goes
+        out earning nothing -- so it states itself.
+      */}
+      <NotMatchedBar mail={mail} onLink={onLink} onCreateLead={onCreateLead} />
       {mail.attachmentNames.length > 0 && (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           {/*
@@ -1778,6 +1977,57 @@ function MailBody({
  * calendar they actually use. That is the honest answer until Raptor has one of its own.
  */
 /**
+ * Where this message is filed, when the answer is nowhere.
+ *
+ * SAID, not implied. An unmatched message used to look exactly like a matched one apart from a
+ * small "Match" button in the corner of the header, and that is the state that costs money: item
+ * 1(a) is R25 on every message we send and a fee can only be raised against an account, so a reply
+ * typed on an unmatched message goes out earning nothing and leaves no trace on any statement.
+ *
+ * TWO WAYS OUT, because there are two reasons a message matches nothing:
+ *
+ *  - It belongs to somebody already on the system and just has not been joined up yet. That is the
+ *    picker, which searches leads, deals, clients and the whole book.
+ *  - It is from somebody the firm has never dealt with. That is a new lead -- and it is the most
+ *    valuable email of the day, so it should not be the one that sends you to another screen.
+ *
+ * Nothing is charged either way. Annexure B is for debtor accounts; the sales side raises nothing.
+ */
+function NotMatchedBar({ mail, onLink, onCreateLead }: {
+  mail: MailItem
+  onLink: () => void
+  onCreateLead: () => void
+}) {
+  /* Filed mail has its answer, and free mail has been given one deliberately -- neither is a
+     loose end, and a bar over both would be a warning that fires when nothing is wrong. */
+  if (mail.isFiled || mail.noRecordAt) return null
+
+  return (
+    <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-3
+      flex flex-wrap items-center gap-x-3 gap-y-2.5">
+      <Info size={16} className="shrink-0 text-slate-400" />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-slate-800">Not matched yet</p>
+        <p className="text-xs text-slate-400 mt-0.5">
+          This email is not on a lead, a deal or a debtor account. Replying from here will not
+          appear on any record.
+        </p>
+      </div>
+      <div className="shrink-0 flex items-center gap-2">
+        <button onClick={onLink}
+          className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+          <Link2 size={15} /> Match to a record
+        </button>
+        <button onClick={onCreateLead}
+          className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-white">
+          <UserPlus size={15} /> Create lead
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
  * To and Cc, under the sender.
  *
  * Absent entirely where there is nobody to name: a message addressed to one person, which is most
@@ -1791,12 +2041,12 @@ function RecipientLines({ mail }: { mail: MailItem }) {
     <div className="mt-0.5 space-y-0.5">
       {mail.toRecipients.length > 0 && (
         <p className="text-xs text-slate-400 break-words">
-          <span className="text-slate-500">To</span> {recipientLine(mail.toRecipients)}
+          <span className="text-slate-500">To:</span> {recipientLine(mail.toRecipients)}
         </p>
       )}
       {mail.ccRecipients.length > 0 && (
         <p className="text-xs text-slate-400 break-words">
-          <span className="text-slate-500">Cc</span> {recipientLine(mail.ccRecipients)}
+          <span className="text-slate-500">Cc:</span> {recipientLine(mail.ccRecipients)}
         </p>
       )}
     </div>
@@ -1929,7 +2179,8 @@ function InviteLine({ label, value, note }: { label: string; value: string; note
 function MailRow({
   mail, chosen, expanded, selecting, blocked, body, images, calendar, events, onAccept,
   onRemoveEvent, skippedImages, loadingBody,
-  bodyError, onToggle, onChoose, onLink, onBlock, onReply, onReplyAll, onForward, onJunk, onMove,
+  bodyError, onToggle, onChoose, onLink, onCreateLead, onBlock, onReply, onReplyAll, onForward,
+  onJunk, onMove,
   onUnread, onNoRecord, onUndoNoRecord, onDownload, downloading, downloadError,
 }: {
   mail: MailItem
@@ -1964,6 +2215,7 @@ function MailRow({
   onUnread: () => void
   onNoRecord: () => void
   onUndoNoRecord: () => void
+  onCreateLead: () => void
   onDownload: (filename: string) => void
   downloading: string | null
   downloadError: string | null
@@ -2024,7 +2276,8 @@ function MailRow({
             bodyError={bodyError} onBlock={onBlock} onReply={onReply} onReplyAll={onReplyAll}
             onForward={onForward} onJunk={onJunk}
             onMove={onMove} onUnread={onUnread}
-            onNoRecord={onNoRecord} onUndoNoRecord={onUndoNoRecord} onDownload={onDownload}
+            onNoRecord={onNoRecord} onUndoNoRecord={onUndoNoRecord}
+            onLink={onLink} onCreateLead={onCreateLead} onDownload={onDownload}
             downloading={downloading} downloadError={downloadError} />
         </div>
       )}
@@ -2495,6 +2748,166 @@ function BlockModal({ mail, userId, onClose, onDone }: {
  * A search rather than a list: there are 100 000 accounts, and the agent already has the name or
  * the number in front of them on the email.
  */
+/**
+ * A NEW LEAD, OUT OF AN EMAIL FROM SOMEBODY NOBODY KNOWS YET.
+ *
+ * The picker answers "which of our records is this?" and has nothing to say when the answer is
+ * "none of them, yet" — which is the case for the single most valuable email the firm gets. Before
+ * this, the honest route was: read the enquiry, leave the mailbox, add a lead, come back, find the
+ * message again, match it. Three screens, and the step people skipped was the last one, so the
+ * enquiry that started the relationship was not on the lead that came out of it.
+ *
+ * WHAT IS FILLED IN IS A GUESS, AND EVERY BOX IS EDITABLE. The name is split out of one header
+ * field (see splitPersonName), the company is read off the domain and only when the domain belongs
+ * to a company at all — "Gmail" in the Company box would be worse than an empty one. Numbers found
+ * in the message are OFFERED and never filled in: a number lifted off a signature looks
+ * authoritative and is still a guess, and a wrong one here is one a salesperson later phones.
+ *
+ * NOTHING IS CHARGED. Annexure B prices work on debtor accounts; the sales side raises no fees at
+ * all, and the modal says so because the rest of this page talks about money constantly.
+ */
+function CreateLeadFromMailModal({ mail, body, actor, onClose, onDone }: {
+  mail: MailItem
+  /** The message text, where it has been fetched — where the suggested numbers come from. */
+  body?: string
+  actor: { id: string | null; name: string | null }
+  onClose: () => void
+  onDone: (message: string) => void
+}) {
+  const { addLead } = useAppStore()
+  const split = splitPersonName(mail.fromName)
+  const domain = domainOf(mail.fromAddress)
+
+  const [firstName, setFirstName] = useState(split.firstName)
+  const [lastName, setLastName] = useState(split.lastName)
+  const [companyName, setCompanyName] = useState(
+    /* Only where the domain says something. See companyFromDomain. */
+    isSharedDomain(mail.fromAddress) ? '' : companyFromDomain(domain),
+  )
+  const [phone, setPhone] = useState('')
+  /* Email, because that is literally where this one came from. Changeable: an enquiry that
+     arrives by email often started as a referral, and the salesperson reading it knows. */
+  const [source, setSource] = useState<LeadSource>('Email')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  /* Read out of what they wrote and out of their signature's links — the same scan the picker
+     runs, and offered the same way: as chips to press, never as a filled-in field. */
+  const numbers = useMemo(
+    () => findContactDetails(body ?? mail.snippet ?? '')
+      .filter((c) => c.kind === 'mobile' || c.kind === 'phone')
+      .slice(0, 3),
+    [body, mail.snippet],
+  )
+
+  async function save() {
+    if (!firstName.trim() || !companyName.trim()) return
+    setBusy(true)
+    setError(null)
+    try {
+      const lead = addLead({
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        companyName: companyName.trim(),
+        email: mail.fromAddress,
+        source,
+        ...(phone.trim() ? { phone: phone.trim() } : {}),
+        ...(actor.id ? { ownerId: actor.id } : {}),
+      })
+      /*
+       * FILED ON THE NEW LEAD IN THE SAME BREATH, which is the whole point of doing this here. A
+       * lead created from an email that is not then carrying that email is the same three-screen
+       * problem with one screen removed.
+       */
+      await linkMailToRecord({
+        mail,
+        to: { kind: 'lead', id: lead.id, label: [lead.firstName, lead.lastName].filter(Boolean).join(' ') || lead.companyName },
+        actor,
+      })
+      onDone(`Lead created and this email matched to it. Nothing was charged \u2014 Annexure B is for debtor accounts.`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="Create a lead from this email" onClose={onClose} width={520}>
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 mb-4">
+        <p className="text-sm font-medium text-slate-800 truncate">{mail.subject || '(no subject)'}</p>
+        <p className="text-xs text-slate-400 mt-0.5 truncate">From {mail.fromAddress}</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <FormField label="First name" required>
+          <input className={inputClass} value={firstName} autoFocus
+            onChange={(e) => setFirstName(e.target.value)} required />
+        </FormField>
+        <FormField label="Surname">
+          <input className={inputClass} value={lastName}
+            onChange={(e) => setLastName(e.target.value)} />
+        </FormField>
+      </div>
+
+      <FormField label="Company" required>
+        <input className={inputClass} value={companyName}
+          onChange={(e) => setCompanyName(e.target.value)}
+          placeholder="Who they write on behalf of" required />
+      </FormField>
+
+      <div className="grid grid-cols-2 gap-3">
+        <FormField label="Phone">
+          <input className={inputClass} value={phone}
+            onChange={(e) => setPhone(e.target.value)} placeholder="Not given" />
+        </FormField>
+        <FormField label="Where they came from">
+          <select className={inputClass} value={source}
+            onChange={(e) => setSource(e.target.value as LeadSource)}>
+            {leadSources.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </FormField>
+      </div>
+
+      {numbers.length > 0 && (
+        <div className="-mt-1 mb-3">
+          <p className="text-xs text-slate-400">
+            In the message &mdash; press one to use it, and check it against what they wrote.
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {numbers.map((c) => (
+              <button key={c.value} type="button" onClick={() => setPhone(c.value)}
+                title={c.context}
+                className="text-xs px-2 py-1 rounded-md border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+                {c.value}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="text-xs text-slate-400">
+        Their address <strong className="font-medium text-slate-500">{mail.fromAddress}</strong> is
+        saved on the lead, and this email is filed on it. Nothing is charged &mdash; Annexure B
+        prices work on debtor accounts, and the sales side raises no fees.
+      </p>
+
+      {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
+
+      <div className="flex items-center justify-end gap-2 mt-5">
+        {busy && <Loader2 size={15} className="animate-spin text-slate-400" />}
+        <button onClick={onClose} disabled={busy}
+          className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50">
+          Cancel
+        </button>
+        <button onClick={() => void save()} disabled={busy || !firstName.trim() || !companyName.trim()}
+          className="text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
+          Create lead
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 /** A CRM record the search box turned up. Not a debtor account — those page separately. */
 interface CrmHit {
   kind: 'lead' | 'deal' | 'client' | 'contact'

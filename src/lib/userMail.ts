@@ -737,6 +737,18 @@ const SHARED_DOMAINS = new Set([
   'iafrica.com', 'polka.co.za', 'lantic.net',
 ])
 
+/**
+ * Whether this address belongs to a shared provider rather than to a company.
+ *
+ * Asked by two different features for opposite reasons. Blocking wants to know because blocking
+ * gmail.com would silence debtors; creating a lead wants to know because a gmail.com address says
+ * nothing about who somebody works for, and "Gmail" in the Company box is worse than a blank one.
+ */
+export function isSharedDomain(address: string): boolean {
+  const domain = domainOf(address)
+  return !!domain && SHARED_DOMAINS.has(domain)
+}
+
 export function domainOf(address: string): string | null {
   const at = address.lastIndexOf('@')
   return at > -1 ? address.slice(at + 1).toLowerCase() : null

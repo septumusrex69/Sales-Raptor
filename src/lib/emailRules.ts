@@ -310,3 +310,68 @@ export function recipientLine(people: Recipient[]): string {
     .map((p) => (p.name ? `${p.name} <${p.address}>` : p.address))
     .join(', ')
 }
+
+/**
+ * A person's name, split into the two boxes a lead needs.
+ *
+ * Mail carries ONE name -- "Ernest Mohlalisi", or "Mohlalisi, Ernest", or nothing at all -- and a
+ * lead wants a first name and a surname. Split here rather than in the modal so the awkward
+ * cases are somewhere they can be argued with:
+ *
+ *  - "Mohlalisi, Ernest" is a surname-first form Outlook writes on its own, and reversing it is
+ *    the difference between phoning "Mr Ernest" and phoning Mr Mohlalisi.
+ *  - "Ernest van der Merwe" has a three-word surname. Everything after the first word is the
+ *    surname, which is right far more often than taking the last word alone.
+ *  - "info@" has no name behind it, and a blank is better than inventing one -- the person
+ *    creating the lead is looking at the message and can type what it says.
+ *
+ * Nothing here is certain, which is why both halves land in editable boxes and not in the record.
+ */
+export function splitPersonName(name: string | null | undefined): { firstName: string; lastName: string } {
+  const clean = (name ?? '').replace(/\s+/g, ' ').trim()
+  if (clean === '') return { firstName: '', lastName: '' }
+
+  /* Outlook's own ordering. The comma is the whole signal, and it is unambiguous. */
+  const comma = clean.indexOf(',')
+  if (comma > -1) {
+    const surname = clean.slice(0, comma).trim()
+    const rest = clean.slice(comma + 1).trim()
+    if (surname && rest) return { firstName: rest, lastName: surname }
+  }
+
+  /*
+   * A comma that was NOT an ordering -- "Mohlalisi," with nothing after it -- is punctuation left
+   * behind by whatever wrote the header, and carrying it into the record puts it on the lead, on
+   * every letter and on the invoice.
+   */
+  const parts = clean.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().split(' ')
+  if (parts.length === 1) return { firstName: parts[0], lastName: '' }
+  return { firstName: parts[0], lastName: parts.slice(1).join(' ') }
+}
+
+/**
+ * A company name to START from, read off the sender's domain.
+ *
+ * A GUESS, and offered as one: it lands in an editable box that the person creating the lead is
+ * looking at while they read the message. "sasolburg-motors.co.za" becomes "Sasolburg Motors",
+ * which is nearly always right and is always quicker to correct than to type.
+ *
+ * The caller decides whether to ask at all -- a gmail.com address says nothing about who somebody
+ * works for, and "Gmail" as a company name would be worse than an empty box.
+ */
+export function companyFromDomain(domain: string | null | undefined): string {
+  if (!domain) return ''
+  /*
+   * The South African suffixes as well as the international ones. Without co.za, every lead from
+   * a local company would be called "Co" -- and nearly every company the firm deals with is local.
+   */
+  const bare = domain.toLowerCase()
+    .replace(/^(www|mail|smtp|email)\./, '')
+    .replace(/\.(co|com|net|org|gov|ac|web|edu)\.[a-z]{2}$/, '')
+    .replace(/\.[a-z]{2,}$/, '')
+  return bare
+    .split(/[-_.]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}

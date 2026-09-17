@@ -129,50 +129,106 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
  */
 {
   /*
-   * THE CONTROLS' OWN ROW. This shipped once with the heading and the controls in a single
+   * THE BUTTONS' OWN BLOCK. This shipped once with the heading and the controls in a single
    * wrapping flex row, and on an iPad the row broke after the compose button: "New email" was
-   * carried up beside "My mailbox" and the bar began with "Check now". Every assertion below
-   * passed the whole time, because the SOURCE order was right and the RENDERED order was not.
-   * So the first thing checked is that the two are not in one row to begin with.
+   * carried up beside the heading and the bar began with "Check now". Every assertion on the
+   * SOURCE order passed the whole time, because the source order was right and the RENDERED order
+   * was not. So the first thing checked is still that the two are not in one row to begin with.
+   *
+   * The shape has since changed at the firm's request -- "New email at the right top. So cool." --
+   * so the two buttons that act on the mailbox sit in the page's header beside the mailbox
+   * address, and everything that SORTS mail lives below with the tabs. What is checked is the same
+   * property: text and buttons cannot share a wrapping row.
    */
-  const rowStart = page.indexOf('<div className="flex flex-wrap items-center gap-3">')
-  ok('the controls have a row of their own', rowStart > -1)
-  const bar = page.slice(rowStart, page.indexOf('The tabs scroll if they must'))
-  ok('...which the heading is not in, so it cannot wrap the order apart',
-    !bar.includes('My mailbox'))
-  const compose = bar.indexOf('setComposing(true)')
-  const search = bar.indexOf('aria-label="Search your mailbox"')
-  const switcher = bar.indexOf('<EmailViewSwitcher')
-  ok('the bar has a compose button', compose > -1)
-  ok('...a search box', search > -1)
-  ok('...and the pane switcher', switcher > -1)
-  ok('writing a new message comes first', compose < search)
-  ok('searching sits to the right of it', search < switcher)
-  ok('and how the mail is laid out is last', switcher === Math.max(compose, search, switcher))
-  // Pushed right by the search box's own auto margin, which is what puts a gap between the
-  // buttons that change mail and the two controls that only change how you look at it.
-  ok('the right-hand group is pushed there', /relative ml-auto \$\{filter === 'blocked'/.test(bar))
-  // Named in the order the firm drew them on the screenshot: write, sync, select.
-  const sync = bar.indexOf('void syncMine()')
-  const select = bar.indexOf('aria-pressed={selecting}')
-  ok('the sync button is on the bar', sync > -1)
-  ok('...and Select', select > -1)
-  ok('writing comes before syncing', compose < sync)
-  ok('...and syncing before selecting', sync < select)
+  const headStart = page.indexOf('<div className="px-5 py-4 border-b border-slate-100 flex flex-wrap items-start gap-x-4 gap-y-3">')
+  ok('the mailbox has a header', headStart > -1)
+  const head = page.slice(headStart, page.indexOf('The tabs scroll if they must'))
+
+  const buttonsAt = head.indexOf('<div className="ml-auto shrink-0 flex items-center gap-2">')
+  ok('the buttons have a block of their own', buttonsAt > -1)
+  const buttons = head.slice(buttonsAt)
+  ok('...which the heading\u2019s description is not in, so it cannot wrap the order apart',
+    !buttons.includes('Everything stays until you match it'))
+
+  /* Which mailbox is being read, which is not always the address somebody signs in with. */
+  ok('the header names the mailbox', /\{mailbox \?\? currentUser\?\.email \?\? ''\}/.test(head))
+
+  const compose = buttons.indexOf('setComposing(true)')
+  const sync = buttons.indexOf('void syncMine()')
+  ok('the header has a compose button', compose > -1)
+  ok('...and the sync button', sync > -1)
+  ok('writing a new message comes first', compose < sync)
 
   /*
    * And it is the one that is filled. Three identical outline buttons in a row gave the firm
-   * nothing to aim at -- "how do I create a new mail" was asked of a bar that had the answer on
-   * it. Brand, not gold: Select wears gold-400 while selecting is on, and that is the only
-   * thing on this bar that says which mode you are in.
+   * nothing to aim at -- "how do I create a new mail" was asked of a bar that had the answer on it.
+   *
+   * GOLD, which it was argued out of once: Select wears gold-400 while selecting is on, and two
+   * gold buttons on one bar would have spent the only signal saying which mode you are in. That
+   * argument only holds while they share a bar, so it is checked rather than assumed.
    */
-  const composeButton = bar.slice(compose, bar.indexOf('</button>', compose))
-  ok('the compose button is filled, not another outline', /bg-brand-600/.test(composeButton))
-  ok('...with text that reads on it', /text-white/.test(composeButton))
-  ok('...and it does not take gold, which means "this mode is on"',
-    !/bg-gold-400/.test(composeButton))
-  // The other two stay outlines, or filling one stops meaning anything.
-  ok('sync stays an outline', /border-slate-200/.test(bar.slice(sync, bar.indexOf('</button>', sync))))
+  const composeButton = buttons.slice(compose, buttons.indexOf('</button>', compose))
+  ok('the compose button is filled, not another outline', /bg-gold-400/.test(composeButton))
+  ok('...with text that reads on it', /text-navy-950/.test(composeButton))
+  ok('...and Select is not on the same bar to be confused with it',
+    !buttons.includes('aria-pressed={selecting}'))
+  /* The other one stays an outline, or filling one stops meaning anything. */
+  ok('sync stays an outline', /border-slate-200/.test(buttons.slice(sync, buttons.indexOf('</button>', sync))))
+  /* An icon with no word needs to say what it is to anybody who cannot see it. */
+  ok('...and the icon says what it does', /aria-label="Check for new mail now"/.test(buttons))
+
+  /*
+   * HOW THE MAIL IS LAID OUT lives at the right end of the tab row. Which tab you are on and how
+   * it is displayed are one question asked twice.
+   */
+  const toolsAt = page.indexOf('<div className="shrink-0 flex items-center gap-2 py-1.5">')
+  ok('the tab row carries the layout controls', toolsAt > -1)
+  const tools = page.slice(toolsAt, page.indexOf('</div>\n        </div>', toolsAt))
+  ok('...Select among them', tools.includes('aria-pressed={selecting}'))
+  ok('...and the pane switcher', tools.includes('<EmailViewSwitcher'))
+
+  /*
+   * SEARCHING AND NARROWING SIT OVER THE LIST, at the firm's instruction: "the search mail in the
+   * left with the unread only ... you can filter that stuff there." Neither may be back on the
+   * page's own bar, which is where they both used to be and is what made them read as controls
+   * over the whole page rather than over the column they narrow.
+   */
+  const barStart = page.indexOf('function MailSearchBar(')
+  ok('searching and narrowing are one control', barStart > -1)
+  const searchBar = page.slice(barStart, page.indexOf('\nfunction ', barStart + 10))
+  ok('...with the search box in it', /aria-label="Search your mailbox"/.test(searchBar))
+  ok('...and the unread filter', /aria-label="Narrow this list"/.test(searchBar))
+  ok('the search box is not on the page header', !head.includes('aria-label="Search your mailbox"'))
+  ok('...nor is the unread filter', !head.includes('aria-label="Narrow this list"'))
+
+  /*
+   * A REAL <select>, not a rebuilt one: the keyboard, the screen reader and an iPad's own picker
+   * all come free, and the firm works on iPads.
+   */
+  /*
+   * Anchored to the markup and not to the word: the comment above it explains why this is a real
+   * <select>, and a bare /<select/ over the function passed with the element itself replaced -- the
+   * exact trap this codebase keeps walking into.
+   */
+  ok('the unread filter is a real select',
+    /<select\s*\n\s*value=\{unreadOnly \? 'unread' : 'all'\}/.test(searchBar))
+  ok('...offering the whole mailbox as well', />All mail</.test(searchBar))
+  /* The count rides in the option, which is the honest place for it -- it is the number of rows
+     choosing that option leaves behind. */
+  ok('...and the unread count with the option that applies it', /Unread only \\u00b7 \$\{unread\}/.test(searchBar))
+  /* Tinted while it narrows, because a filter you cannot see is on is a mailbox with mail
+     missing from it. */
+  ok('...and it shows that it is narrowing', /unreadOnly\s*\n?\s*\? 'border-brand-500/.test(searchBar))
+
+  /*
+   * ONE BAR ON THE SCREEN, EVER. It is drawn inside the reading pane's own column when the pane
+   * is up and above the list when it is not, and the condition that decides is worked out once --
+   * two copies of it would eventually disagree and put two search boxes on the page.
+   */
+  ok('where the bar is drawn is decided once', /const paneShowing = /.test(page))
+  ok('...and the pane carries it in its own column', /listHeader=\{/.test(page))
+  ok('...and the standalone copy stands down when the pane is up',
+    /\{filter !== 'blocked' && !paneShowing && \(/.test(page))
 }
 
 /* ---------- 3. replying ---------- */

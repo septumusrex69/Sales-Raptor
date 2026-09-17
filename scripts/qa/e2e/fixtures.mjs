@@ -186,3 +186,104 @@ export function accountsPage(n, offset = 0) {
     }
   })
 }
+
+/* ---------- the mailbox ---------- */
+
+/**
+ * A morning's mail, as PostgREST would hand it back.
+ *
+ * Five messages chosen so that each thing the screen has to say about a message is said by at
+ * least one row and NOT by its neighbour -- an unmatched enquiry from a stranger, a matched one on
+ * a debtor account, one that has been read, one with an attachment, one with three people on it.
+ * A fixture where every row looks the same cannot tell a working list from a broken one.
+ */
+const MAIL_AT = (minutes) => new Date(Date.now() - minutes * 60000).toISOString()
+
+export const MAIL = [
+  {
+    id: 'aaaaaaa1-0000-4000-8000-000000000001',
+    folder: 'INBOX', is_sent: false, uid: 101,
+    message_id: '<enquiry-1@example.co.za>',
+    from_address: 'ernest@example.co.za', from_name: 'Ernest Mohlalisi',
+    subject: 'Debt collection enquiry',
+    snippet: 'I would like assistance recovering money owed to me. Please let me know what '
+      + 'information you need to assess the matter.',
+    /* Three people on it, so Reply all has something to do and the To/Cc lines have something
+       to say. Everything else in this fixture has one recipient, so the two cases are visibly
+       different rather than accidentally identical. */
+    to_address: 'stephan@bredellferreira.co.za', to_name: 'Stephan',
+    to_recipients: [{ name: 'Stephan', address: 'stephan@bredellferreira.co.za' }],
+    cc_recipients: [{ name: 'Camille', address: 'camille@bredellferreira.co.za' }],
+    attachment_names: [], is_junk: false, occurred_at: MAIL_AT(12),
+    read_at: null, is_filed: false, is_settled: false, no_record_at: null,
+    linked_account_id: null, linked_lead_id: null, linked_deal_id: null,
+    linked_company_id: null, linked_contact_id: null,
+    debtor_accounts: null, leads: null, deals: null, companies: null, contacts: null,
+  },
+  {
+    id: 'aaaaaaa1-0000-4000-8000-000000000002',
+    folder: 'INBOX', is_sent: false, uid: 102,
+    message_id: '<mandate-2@example.co.za>',
+    from_address: 'danielle@louwrens-attorneys.co.za', from_name: 'Danielle Louwrens',
+    subject: 'Agreement and next steps',
+    snippet: 'Please find the signed mandate and supporting documents attached.',
+    to_address: 'stephan@bredellferreira.co.za', to_name: 'Stephan',
+    to_recipients: [{ name: 'Stephan', address: 'stephan@bredellferreira.co.za' }],
+    cc_recipients: [],
+    attachment_names: ['mandate.pdf'], is_junk: false, occurred_at: MAIL_AT(150),
+    read_at: MAIL_AT(140), is_filed: true, is_settled: true, no_record_at: null,
+    linked_account_id: '44444444-4444-4444-8444-444444444444',
+    linked_lead_id: null, linked_deal_id: null, linked_company_id: null, linked_contact_id: null,
+    debtor_accounts: {
+      account_number: 'BF10231', debtor_first_name: 'Willem', debtor_surname: 'Bezuidenhout',
+    },
+    leads: null, deals: null, companies: null, contacts: null,
+  },
+  {
+    id: 'aaaaaaa1-0000-4000-8000-000000000003',
+    folder: 'INBOX', is_sent: false, uid: 103,
+    message_id: '<followup-3@example.co.za>',
+    from_address: 'felicia@example.co.za', from_name: null,
+    subject: 'Follow up on outstanding account',
+    snippet: 'Just checking if there are any updates regarding the account we discussed.',
+    to_address: 'stephan@bredellferreira.co.za', to_name: 'Stephan',
+    to_recipients: [], cc_recipients: [],
+    attachment_names: [], is_junk: false, occurred_at: MAIL_AT(320),
+    /* Read, and settled as free mail -- so the "Not matched yet" bar must stay off it. */
+    read_at: MAIL_AT(300), is_filed: false, is_settled: true, no_record_at: MAIL_AT(295),
+    linked_account_id: null, linked_lead_id: null, linked_deal_id: null,
+    linked_company_id: null, linked_contact_id: null,
+    debtor_accounts: null, leads: null, deals: null, companies: null, contacts: null,
+  },
+  {
+    id: 'aaaaaaa1-0000-4000-8000-000000000004',
+    folder: 'INBOX', is_sent: false, uid: 104,
+    message_id: '<documents-4@example.co.za>',
+    from_address: 'gail.trout@example.co.za', from_name: 'Gail Trout',
+    subject: 'Request for information',
+    snippet: 'I would like to know what documents you need from me to proceed.',
+    to_address: 'stephan@bredellferreira.co.za', to_name: 'Stephan',
+    to_recipients: [{ name: 'Stephan', address: 'stephan@bredellferreira.co.za' }],
+    cc_recipients: [],
+    attachment_names: [], is_junk: false, occurred_at: MAIL_AT(480),
+    read_at: null, is_filed: false, is_settled: false, no_record_at: null,
+    linked_account_id: null, linked_lead_id: null, linked_deal_id: null,
+    linked_company_id: null, linked_contact_id: null,
+    debtor_accounts: null, leads: null, deals: null, companies: null, contacts: null,
+  },
+  {
+    id: 'aaaaaaa1-0000-4000-8000-000000000005',
+    folder: 'INBOX', is_sent: false, uid: 105,
+    message_id: '<console-5@example.co.za>',
+    from_address: 'noreply@search-console.example.com', from_name: 'Search Console',
+    subject: 'New reasons prevent pages from being indexed',
+    snippet: 'A new issue was detected on your site.',
+    to_address: 'stephan@bredellferreira.co.za', to_name: 'Stephan',
+    to_recipients: [], cc_recipients: [],
+    attachment_names: [], is_junk: false, occurred_at: MAIL_AT(1500),
+    read_at: MAIL_AT(1400), is_filed: false, is_settled: false, no_record_at: null,
+    linked_account_id: null, linked_lead_id: null, linked_deal_id: null,
+    linked_company_id: null, linked_contact_id: null,
+    debtor_accounts: null, leads: null, deals: null, companies: null, contacts: null,
+  },
+]

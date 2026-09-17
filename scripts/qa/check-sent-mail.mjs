@@ -10,7 +10,10 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-sent-mail.mjs
  */
 import { readFileSync } from 'node:fs'
-import { forwardBody, forwardSubject, recipientLine, replyAllTo, replySubject } from '../../src/lib/emailRules.ts'
+import {
+  companyFromDomain, forwardBody, forwardSubject, recipientLine, replyAllTo, replySubject,
+  splitPersonName,
+} from '../../src/lib/emailRules.ts'
 
 let pass = 0
 const failures = []
@@ -203,6 +206,46 @@ eq('a named recipient reads as a name and an address',
 eq('...and an unnamed one as the address alone', recipientLine([P('bob@y.co.za')]), 'bob@y.co.za')
 eq('several are one line', recipientLine([P('a@x.co'), P('b@x.co')]), 'a@x.co, b@x.co')
 eq('nobody is nothing', recipientLine([]), '')
+
+/* ---------- a lead, out of the sender ---------- */
+
+/*
+ * ONE NAME FIELD, TWO BOXES. Mail carries "Ernest Mohlalisi" and a lead wants a first name and a
+ * surname, so the split happens somewhere it can be argued with rather than inside a modal.
+ * Everything here lands in an EDITABLE box -- these are guesses, and the person creating the lead
+ * is reading the message while they look at them.
+ */
+eq('an ordinary name splits at the space',
+  splitPersonName('Ernest Mohlalisi'), { firstName: 'Ernest', lastName: 'Mohlalisi' })
+/*
+ * Outlook writes surname-first on its own, and the comma is the whole signal. Read straight
+ * through, it is the difference between phoning "Mr Ernest" and phoning Mr Mohlalisi.
+ */
+eq('a surname-first name is turned round',
+  splitPersonName('Mohlalisi, Ernest'), { firstName: 'Ernest', lastName: 'Mohlalisi' })
+/* Everything after the first word is the surname, which beats taking the last word alone --
+   "van der Merwe" and "du Plessis" are ordinary South African surnames, not middle names. */
+eq('a three-word surname stays whole',
+  splitPersonName('Johan van der Merwe'), { firstName: 'Johan', lastName: 'van der Merwe' })
+eq('one word is a first name', splitPersonName('Felicia'), { firstName: 'Felicia', lastName: '' })
+/* info@ has no name behind it, and a blank beats inventing one. */
+eq('no name at all fills nothing in', splitPersonName(null), { firstName: '', lastName: '' })
+eq('...and neither does a blank one', splitPersonName('   '), { firstName: '', lastName: '' })
+/* A stray comma with nothing on one side is not a surname-first name. */
+eq('a trailing comma is not an ordering', splitPersonName('Mohlalisi,'), { firstName: 'Mohlalisi', lastName: '' })
+
+/*
+ * THE COMPANY, GUESSED OFF THE DOMAIN. Nearly always right and always quicker to correct than to
+ * type -- and the caller only asks when the domain belongs to a company at all, because "Gmail"
+ * in the Company box would be worse than an empty one.
+ */
+check('a domain becomes a company name', companyFromDomain('sasolburg-motors.co.za'), 'Sasolburg Motors')
+/* co.za has to be stripped as a unit, or every local company would be called "Co" -- and nearly
+   every company the firm deals with is local. */
+check('co.za is stripped as one suffix', companyFromDomain('bredellferreira.co.za'), 'Bredellferreira')
+check('a plain .com works too', companyFromDomain('acme.com'), 'Acme')
+check('a mail subdomain is not the company', companyFromDomain('mail.acme.co.za'), 'Acme')
+check('nothing in, nothing out', companyFromDomain(null), '')
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)

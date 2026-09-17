@@ -36,7 +36,7 @@ function readSplit(): number {
 }
 
 export function ReadingPane<T extends { id: string }>({
-  items, selectedId, onSelect, renderRow, renderDetail, renderLead, emptyDetail,
+  items, selectedId, onSelect, renderRow, renderDetail, renderLead, emptyDetail, listHeader,
 }: {
   items: T[]
   selectedId: string | null
@@ -55,6 +55,15 @@ export function ReadingPane<T extends { id: string }>({
   renderLead?: (item: T) => ReactNode
   /** Shown before anything is picked. */
   emptyDetail?: ReactNode
+  /**
+   * Fixed above the list, inside the left column -- searching and filtering, in practice.
+   *
+   * It belongs to the list and not to the page: what a search narrows is the column it sits over,
+   * and put across the top of the whole card it would read as though it also did something to the
+   * message open beside it. It stays put while the list scrolls under it, because a search box
+   * that scrolls away is one you have to go back up for.
+   */
+  listHeader?: ReactNode
 }) {
   const selected = items.find((i) => i.id === selectedId) ?? null
   const paneRef = useRef<HTMLDivElement>(null)
@@ -117,18 +126,25 @@ export function ReadingPane<T extends { id: string }>({
         twentieth message should not mean scrolling past nineteen to read it, and reading a long
         message should not move the list out from under you.
       */}
-      <div className="lg:overflow-y-auto divide-y divide-slate-100">
-        {items.map((item) => (
-          <div key={item.id}
-            className={`flex items-start ${item.id === selectedId ? 'bg-gold-50' : 'hover:bg-slate-50'}`}>
-            {renderLead?.(item)}
-            <button type="button" onClick={() => onSelect(item)}
-              aria-current={item.id === selectedId}
-              className="min-w-0 flex-1 text-left">
-              {renderRow(item, item.id === selectedId)}
-            </button>
-          </div>
-        ))}
+      <div className="flex flex-col min-h-0">
+        {listHeader && (
+          <div className="shrink-0 border-b border-slate-100">{listHeader}</div>
+        )}
+        {/* flex-1 min-h-0 is what lets this scroll instead of growing the column past the
+            pane: a flex child's default min-height is its content, and overflow never kicks in. */}
+        <div className="flex-1 min-h-0 lg:overflow-y-auto divide-y divide-slate-100">
+          {items.map((item) => (
+            <div key={item.id}
+              className={`flex items-start ${item.id === selectedId ? 'bg-gold-50' : 'hover:bg-slate-50'}`}>
+              {renderLead?.(item)}
+              <button type="button" onClick={() => onSelect(item)}
+                aria-current={item.id === selectedId}
+                className="min-w-0 flex-1 text-left">
+                {renderRow(item, item.id === selectedId)}
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/*

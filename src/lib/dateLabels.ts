@@ -90,3 +90,20 @@ export function timeOnDesk(iso?: string | null, now: Date = new Date()): string 
   const years = Math.floor(months / 12)
   return `${years} years on the desk`
 }
+
+/**
+ * The time of day a message arrived, beside the day it arrived on.
+ *
+ * `relativeDayLabel` answers "which day", which is the right answer in a list. Open one message
+ * and "Today" stops being enough -- two emails from the same debtor an hour apart are a different
+ * story from two a week apart, and the hour is what tells them apart.
+ *
+ * 24-hour, because that is how South Africa writes a time and because "13:42" cannot be misread
+ * the way a stray am/pm can.
+ */
+export function timeOfDay(iso?: string): string {
+  if (!iso) return ''
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false })
+}
