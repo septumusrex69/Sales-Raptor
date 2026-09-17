@@ -25,7 +25,7 @@
  * doing on a quiet day; not worth doing in the middle of a feature.
  */
 import { supabase } from './supabase'
-import { senderName } from './emailRules'
+import { senderName, type MailFilter } from './emailRules'
 import { refreshNavCounts } from './navCounts'
 import { mirrorReadToAccount, mirrorUnreadToAccount } from './mailReadState'
 import type { ContactCandidate } from './signature'
@@ -242,7 +242,9 @@ function toItem(r: MailRow): MailItem {
   }
 }
 
-export type MailFilter = 'needs-filing' | 'filed' | 'no-record' | 'junk' | 'sent' | 'all'
+/* Declared with the rules rather than here, so bumpUnread can be imported and exercised without
+   dragging a database client in with it. Re-exported because this is where callers look for it. */
+export type { MailFilter } from './emailRules'
 
 /**
  * A page of the mailbox.
@@ -351,6 +353,32 @@ export async function countUnread(userId: string, input: MailScope): Promise<num
   )
   if (error) throw new Error(error.message)
   return count ?? 0
+}
+
+/**
+ * Unread on every tab at once.
+ *
+ * The firm: "the junk email doesn't indicate to me if there's anything that's unread, the free
+ * mail also not." One number on All told you the mailbox had unread mail and nothing about WHERE
+ * -- so an unread message a spam filter had misfiled sat in Junk with nothing anywhere saying so,
+ * which is the one place it most needed saying.
+ *
+ * SIX COUNTS THROUGH scope(), NOT ONE RPC. A function in SQL would be a second definition of every
+ * tab's clauses, and this file has already been bitten by exactly that: nav_counts wrote its own
+ * and drifted, so the badge said 3 over a list of 5. These are head counts on indexed columns and
+ * they go out in parallel; the round trips are cheaper than the drift.
+ *
+ * SCOPED BY THE SEARCH TOO, so the number on a tab is the number of rows pressing it leaves
+ * behind. A badge that ignores the search box is a badge that lies the moment somebody types.
+ */
+export async function countUnreadByTab(
+  userId: string, search?: string,
+): Promise<Record<MailFilter, number>> {
+  const tabs: MailFilter[] = ['all', 'needs-filing', 'filed', 'no-record', 'junk', 'sent']
+  const counts = await Promise.all(
+    tabs.map((filter) => countUnread(userId, { filter, search }).catch(() => 0)),
+  )
+  return Object.fromEntries(tabs.map((t, i) => [t, counts[i]])) as Record<MailFilter, number>
 }
 
 export async function fetchMail(input: MailScope & {

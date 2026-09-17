@@ -63,12 +63,23 @@ const handlers = [
         return { body: one ? [{ id: one }] : [] }
       }
       /*
-       * The unread count and the needs-matching badge come back as a HEAD request with an exact
-       * count -- answered out of the same fixture the list is built from, so the number on the
-       * screen and the rows under it cannot disagree here in a way they would not in production.
+       * THE STUB APPLIES THE TAB'S OWN CLAUSES.
+       *
+       * Six HEAD counts come back from one page load, one per tab, and answering them all out of
+       * the whole fixture would put the SAME number on every tab -- which looks like a working
+       * per-tab badge and is a stub counting to six. So the clauses scope() writes are read back
+       * off the URL and applied here, and the fixtures are chosen so the tabs genuinely differ.
        */
-      const unread = /read_at=is\.null/.test(u)
-      const rows = unread ? MAIL.filter((m) => !m.read_at) : MAIL
+      const has = (clause) => u.includes(clause)
+      let rows = MAIL
+      if (has('is_sent=eq.true')) rows = rows.filter((m) => m.is_sent)
+      else if (has('is_filed=eq.true')) rows = rows.filter((m) => m.is_filed)
+      else if (has('no_record_at=not.is.null')) rows = rows.filter((m) => m.no_record_at)
+      else if (has('is_junk=eq.true')) rows = rows.filter((m) => m.is_junk)
+      else if (has('is_settled=eq.false')) {
+        rows = rows.filter((m) => !m.is_settled && !m.is_junk && !m.is_sent)
+      } else if (has('is_junk=eq.false')) rows = rows.filter((m) => !m.is_junk && !m.is_sent)
+      if (has('read_at=is.null')) rows = rows.filter((m) => !m.read_at)
       return {
         body: rows,
         headers: { 'content-range': `0-${Math.max(0, rows.length - 1)}/${rows.length}` },
@@ -134,7 +145,7 @@ try {
   }
   t.ok('the dev server answers', up)
 
-  await page.getByRole('heading', { name: 'Mail', exact: true }).waitFor({ timeout: 20000 })
+  await page.getByRole('heading', { name: 'Raptor Mail', exact: true }).waitFor({ timeout: 20000 })
   await page.getByText('Debt collection enquiry').first().waitFor({ timeout: 20000 })
   await t.shot(page, '20-mail-list')
 
@@ -291,7 +302,57 @@ try {
   /* Nor is one deliberately settled as free mail: somebody already answered the question. */
   await page.getByText('Follow up on outstanding account').first().click()
   await page.waitForTimeout(700)
-  t.check('free mail is not nagged either', await page.getByText('Not matched yet').count(), 0)
+  t.check('open mail is not nagged either', await page.getByText('Not matched yet').count(), 0)
+
+  /* ---------- unread says WHICH tab, and marking unread does not reload ---------- */
+
+  /*
+   * The firm: "the junk email doesn't indicate to me if there's anything that's unread, the free
+   * mail also not." Three of the six fixtures are unread and one of them is on Open mail, so the
+   * tab has to carry a number -- with one number on All it carried nothing.
+   */
+  const tabBadge = async (name) => {
+    const tab = page.getByRole('button', { name: new RegExp(`^${name}`) }).first()
+    const text = await tab.innerText()
+    const n = /(\d+)/.exec(text)
+    return n ? Number(n[1]) : 0
+  }
+  t.ok('All says how much work is outstanding', await tabBadge('All') > 0)
+  t.ok('...and Needs matching with it', await tabBadge('Needs matching') > 0)
+  /*
+   * AND THE NUMBERS DIFFER. One fixture is unread and on Open mail; none is on Junk. Equal numbers
+   * on every tab is what a stub counting the whole fixture looks like, and it is indistinguishable
+   * from a working badge -- so the check is that Junk and Open mail disagree.
+   */
+  t.check('Junk says how many of ITS messages are unread', await tabBadge('Junk'), 2)
+  t.check('...and Open mail how many of its own', await tabBadge('Open mail'), 1)
+
+  /*
+   * MARKING UNREAD RELOADS NOTHING. "When I mark an email as unread it kind of reloads everything
+   * and moves to the top." Checked by scrolling the list, marking one unread, and asking whether
+   * the list moved -- which is the thing that actually went wrong, and which no source check sees.
+   */
+  await page.getByText('Search Console').first().click()
+  await page.waitForTimeout(600)
+  const listBox = page.locator('[data-modal-open]').first()
+  void listBox
+  await page.getByRole('button', { name: 'Mark unread' }).click()
+  await page.waitForTimeout(800)
+  /* The row is bold again and the list did not blink through a spinner back to the top. */
+  t.ok('the message is unread again',
+    await page.getByText('New reasons prevent').first().isVisible())
+  t.check('...and the list was not thrown away and rebuilt',
+    await page.getByText('Debt collection enquiry').first().isVisible(), true)
+
+  /* ---------- older mail can be reached ---------- */
+
+  /*
+   * The bug the firm found the only way anybody could -- mail they could see in another client and
+   * not here. The sync only read forward, so everything older than the first run's window was
+   * unreachable and nothing said so.
+   */
+  t.ok('there is a way to reach further back',
+    await page.getByRole('button', { name: /Fetch older mail|Nothing older/ }).isVisible())
 
   /* ---------- a lead, out of an ordinary sender ---------- */
 
@@ -349,7 +410,7 @@ try {
   await page.getByRole('button', { name: 'Back to the mail' }).click()
   await page.waitForTimeout(600)
   t.ok('choosing the mail leaves you in the mailbox',
-    await page.getByRole('heading', { name: 'Mail', exact: true }).isVisible())
+    await page.getByRole('heading', { name: 'Raptor Mail', exact: true }).isVisible())
 
   /* ---------- a lead, out of a contact-form enquiry ---------- */
 

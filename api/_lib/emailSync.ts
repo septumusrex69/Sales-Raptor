@@ -23,10 +23,23 @@ export interface EmailConnectionRow {
   last_seen_uid: number | null
   last_seen_uid_junk: number | null
   last_seen_uid_sent: number | null
+  /* How far BACK each folder has been read. See backfillMailbox. */
+  oldest_seen_uid?: number | null
+  oldest_seen_uid_junk?: number | null
+  oldest_seen_uid_sent?: number | null
 }
 
 /** On the very first sync of a mailbox there's no watermark yet — pull only the most recent messages instead of its entire history. */
 const FIRST_SYNC_MESSAGE_LIMIT = 25
+/**
+ * How many older messages one "Fetch older mail" brings back.
+ *
+ * Bigger than the first-sync window because this is somebody deliberately asking, and going back
+ * far enough to matter in 25s is a lot of pressing. Small enough that the whole run still finishes
+ * inside a serverless request -- each message is a fetch, a parse and an insert, and a batch that
+ * times out leaves the watermark unmoved and does the same work again on the next press.
+ */
+const BACKFILL_MESSAGE_LIMIT = 50
 /**
  * A ceiling on the stored body, not a preview length -- the Emails card clamps long
  * messages behind "Show more" on its own. This was 2000, which cut an ordinary 500-word
@@ -208,6 +221,16 @@ async function fileUserEmail(
          * agent works is a queue nobody works.
          */
         no_record_at: (message.noRecordNeeded || message.isSent) ? new Date().toISOString() : null,
+        /*
+         * AND SENT MAIL ARRIVES READ. The firm: "all the sent emails are marked as unread -- sent
+         * emails should automatically be read."
+         *
+         * Nothing sets read_at on a message you wrote, so a mailbox whose Sent folder syncs two
+         * thousand messages put two thousand bold rows on the Sent tab that no action could clear:
+         * opening one is the only thing that marks mail read, and nobody opens their own sent mail
+         * to tick it off. You wrote it -- you have read it.
+         */
+        read_at: message.isSent ? new Date().toISOString() : null,
         occurred_at: message.at,
       },
       { onConflict: 'user_id,message_id', ignoreDuplicates: true },
@@ -794,7 +817,7 @@ async function syncMailbox(
    * the same code would bill the debtor twice for one email.
    */
   kind: 'inbox' | 'junk' | 'sent',
-): Promise<{ logged: number; maxUid: number }> {
+): Promise<{ logged: number; maxUid: number; minUid: number | null }> {
   const isJunk = kind === 'junk'
   const isSent = kind === 'sent'
   let logged = 0
@@ -815,6 +838,9 @@ async function syncMailbox(
     console.log(`[emailSync] ${path}: found ${uids.length} new UID(s) since ${sinceUid ?? '(first sync)'}`)
 
     let maxUid = sinceUid ?? 0
+    /* The floor of this run, so a first sync records where its window started and "fetch older"
+       has somewhere to walk down from. */
+    const minUid = uids.length > 0 ? Math.min(...uids) : null
     for (const uid of uids) {
       const msg = await client.fetchOne(String(uid), { source: true }, { uid: true })
       if (!msg || !msg.source) {
@@ -1142,7 +1168,113 @@ async function syncMailbox(
       }
     }
 
-    return { logged, maxUid }
+    return { logged, maxUid, minUid }
+  } finally {
+    lock.release()
+  }
+}
+
+/**
+ * The other direction: older mail, a batch at a time.
+ *
+ * WHY THIS HAD TO EXIST. syncMailbox only ever asks for UIDs ABOVE the high-water mark, and the
+ * very first run set that mark at the top of the most recent 25 messages. Everything older was
+ * then unreachable for ever — not filtered and not hidden, simply never fetched, with nothing on
+ * the screen saying so. The firm found it the only way anybody would: two messages they could see
+ * in another mail client and not in Raptor.
+ *
+ * Walks DOWN from the low-water mark, newest-of-the-older first, because that is the order anybody
+ * wants their history back in. Everything else — matching, charging, blocking — is syncMailbox's
+ * and is deliberately not repeated here: this is a fetch of old mail into the mailbox list, not a
+ * replay of six months of filing decisions that were never made.
+ */
+async function backfillMailbox(
+  client: ImapFlow,
+  admin: SupabaseClient,
+  conn: EmailConnectionRow,
+  path: string,
+  oldestUid: number | null,
+  kind: 'inbox' | 'junk' | 'sent',
+): Promise<{ logged: number; oldestUid: number | null; done: boolean }> {
+  const isJunk = kind === 'junk'
+  const isSent = kind === 'sent'
+  const blocks = await loadBlocks(admin, conn.user_id)
+  const senderRules = await loadSenderRules(admin, conn.user_id)
+
+  /*
+   * Nothing recorded yet, because the mark is new and the mailbox was synced before it existed.
+   * The oldest row already stored IS the floor, so it is read back rather than guessed — guessing
+   * 1 here would re-fetch the entire mailbox on the first press.
+   */
+  let floor = oldestUid
+  if (floor === null) {
+    const { data } = await admin.from('user_emails')
+      .select('uid').eq('user_id', conn.user_id).eq('folder', path)
+      .order('uid', { ascending: true }).limit(1).maybeSingle()
+    floor = (data?.uid as number | undefined) ?? null
+  }
+  /* A folder with nothing in it at all has no floor to walk down from, and a forward sync is what
+     that wants rather than this. */
+  if (floor === null || floor <= 1) return { logged: 0, oldestUid: floor, done: true }
+
+  const lock = await client.getMailboxLock(path)
+  try {
+    const found = await client.search({ uid: `1:${floor - 1}` }, { uid: true })
+    const below = found === false ? [] : found
+    if (below.length === 0) return { logged: 0, oldestUid: floor, done: true }
+
+    /* The NEWEST of the older ones: history comes back most-recent-first, which is the order
+       somebody looking for last month's message actually wants it in. */
+    const uids = below.slice(-BACKFILL_MESSAGE_LIMIT)
+    console.log(`[emailSync] ${path}: backfilling ${uids.length} of ${below.length} older UID(s) below ${floor}`)
+
+    let logged = 0
+    for (const uid of uids) {
+      const msg = await client.fetchOne(String(uid), { source: true }, { uid: true })
+      if (!msg || !msg.source) continue
+      const parsed = await simpleParser(msg.source)
+      const fromAddress = parsed.from?.value?.[0]?.address
+      if (!fromAddress) continue
+      if (isBlocked(normaliseAddress(fromAddress), blocks)) continue
+
+      const displayName = (parsed.from && 'value' in parsed.from
+        ? parsed.from.value?.[0]?.name
+        : null) || null
+      const people = (field: unknown): { name: string | null; address: string }[] => {
+        const objs = Array.isArray(field) ? field : field ? [field] : []
+        return objs.flatMap((o) => (o && typeof o === 'object' && 'value' in o
+          ? ((o as { value?: { address?: string; name?: string }[] }).value ?? [])
+          : []))
+          .filter((v) => !!v.address)
+          .map((v) => ({
+            name: v.name || null,
+            address: normaliseAddress(v.address as string) ?? (v.address as string),
+          }))
+      }
+      const firstTo = parsed.to && 'value' in parsed.to ? parsed.to.value?.[0] : undefined
+
+      const rowId = await fileUserEmail(admin, conn.user_id, {
+        folder: path,
+        uid,
+        messageId: parsed.messageId ?? `${conn.user_id}:${path}:${uid}`,
+        fromAddress: normaliseAddress(fromAddress) ?? fromAddress,
+        fromName: displayName,
+        subject: parsed.subject || '(no subject)',
+        body: parsed.text || '',
+        attachmentNames: realAttachmentNames(parsed.attachments),
+        isJunk,
+        isSent,
+        toAddress: firstTo?.address ? normaliseAddress(firstTo.address) ?? firstTo.address : null,
+        toName: firstTo?.name || null,
+        toRecipients: people(parsed.to),
+        ccRecipients: people(parsed.cc),
+        at: (parsed.date ?? new Date()).toISOString(),
+        noRecordNeeded: isBlocked(normaliseAddress(fromAddress), senderRules),
+      })
+      if (rowId) logged += 1
+    }
+
+    return { logged, oldestUid: Math.min(...uids), done: uids.length >= below.length }
   } finally {
     lock.release()
   }
@@ -1156,7 +1288,18 @@ async function syncMailbox(
  * strictly additive; a connection whose server has no such folder behaves
  * exactly as before.
  */
-export async function syncConnection(admin: SupabaseClient, conn: EmailConnectionRow): Promise<{ logged: number }> {
+export async function syncConnection(
+  admin: SupabaseClient,
+  conn: EmailConnectionRow,
+  /**
+   * Which way to read.
+   *
+   * `older: true` walks DOWN from the low-water mark instead of up from the high one — see
+   * backfillMailbox. A flag on the existing sync rather than an endpoint of its own, because
+   * Vercel Hobby caps serverless functions at 12 and api/ is at exactly 12.
+   */
+  opts: { older?: boolean } = {},
+): Promise<{ logged: number; done?: boolean }> {
   const password = decrypt(conn.encrypted_password)
   const client = new ImapFlow({
     host: conn.imap_host,
@@ -1168,6 +1311,22 @@ export async function syncConnection(admin: SupabaseClient, conn: EmailConnectio
 
   await client.connect()
   try {
+    if (opts.older) {
+      /*
+       * BACKWARDS, and the INBOX only.
+       *
+       * Somebody pressing "fetch older mail" is looking for a message they remember receiving.
+       * Sent and Junk can be walked back too, but doing all three per press triples the time
+       * inside one serverless request for two folders nobody is looking in — so this is the
+       * inbox, and the other two keep whatever they have.
+       */
+      const back = await backfillMailbox(client, admin, conn, 'INBOX', conn.oldest_seen_uid ?? null, 'inbox')
+      const { error } = await admin.from('email_connections')
+        .update({ oldest_seen_uid: back.oldestUid }).eq('user_id', conn.user_id)
+      if (error) throw new Error(`Failed to save how far back the mailbox has been read: ${error.message}`)
+      return { logged: back.logged, done: back.done }
+    }
+
     const inboxResult = await syncMailbox(client, admin, conn, 'INBOX', conn.last_seen_uid, 'inbox')
 
     const mailboxes = await client.list()
@@ -1176,13 +1335,13 @@ export async function syncConnection(admin: SupabaseClient, conn: EmailConnectio
     console.log(
       `[emailSync] mailboxes: ${mailboxes.map((m) => `${m.path}${m.specialUse ? ` (${m.specialUse})` : ''}`).join(', ')} -- junk: ${junkPath ?? '(none)'}, sent: ${sentPath ?? '(none)'}`,
     )
-    const junkResult = junkPath ? await syncMailbox(client, admin, conn, junkPath, conn.last_seen_uid_junk, 'junk') : { logged: 0, maxUid: conn.last_seen_uid_junk ?? 0 }
+    const junkResult = junkPath ? await syncMailbox(client, admin, conn, junkPath, conn.last_seen_uid_junk, 'junk') : { logged: 0, maxUid: conn.last_seen_uid_junk ?? 0, minUid: null }
     /*
      * The Sent folder, so an agent can see what they sent — including mail sent from Outlook or a
      * phone, which Raptor never saw. Messages Raptor sends are appended to this same folder by
      * api/email/send.ts, so they come back through here rather than needing a second path.
      */
-    const sentResult = sentPath ? await syncMailbox(client, admin, conn, sentPath, conn.last_seen_uid_sent, 'sent') : { logged: 0, maxUid: conn.last_seen_uid_sent ?? 0 }
+    const sentResult = sentPath ? await syncMailbox(client, admin, conn, sentPath, conn.last_seen_uid_sent, 'sent') : { logged: 0, maxUid: conn.last_seen_uid_sent ?? 0, minUid: null }
 
     // Checked deliberately: a swallowed error here would leave a watermark stuck, so a
     // future sync silently reprocesses the same already-logged messages from scratch (only
@@ -1190,6 +1349,14 @@ export async function syncConnection(admin: SupabaseClient, conn: EmailConnectio
     const patch: Record<string, unknown> = { last_seen_uid: inboxResult.maxUid, last_synced_at: new Date().toISOString() }
     if (junkPath) patch.last_seen_uid_junk = junkResult.maxUid
     if (sentPath) patch.last_seen_uid_sent = sentResult.maxUid
+    /*
+     * AND HOW FAR BACK WE HAVE READ, recorded only where it is not already known. A forward run
+     * reaching UID 900 must not move the floor up from 400 -- that would strand everything between
+     * them, which is the very bug this mark exists to fix.
+     */
+    if (conn.oldest_seen_uid == null && inboxResult.minUid != null) patch.oldest_seen_uid = inboxResult.minUid
+    if (junkPath && conn.oldest_seen_uid_junk == null && junkResult.minUid != null) patch.oldest_seen_uid_junk = junkResult.minUid
+    if (sentPath && conn.oldest_seen_uid_sent == null && sentResult.minUid != null) patch.oldest_seen_uid_sent = sentResult.minUid
     const { error: watermarkError } = await admin.from('email_connections').update(patch).eq('user_id', conn.user_id)
     if (watermarkError) throw new Error(`Failed to save sync watermark: ${watermarkError.message}`)
 

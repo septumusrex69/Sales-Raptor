@@ -249,8 +249,12 @@ export const MAIL = [
     to_address: 'stephan@bredellferreira.co.za', to_name: 'Stephan',
     to_recipients: [], cc_recipients: [],
     attachment_names: [], is_junk: false, occurred_at: MAIL_AT(320),
-    /* Read, and settled as free mail -- so the "Not matched yet" bar must stay off it. */
-    read_at: MAIL_AT(300), is_filed: false, is_settled: true, no_record_at: MAIL_AT(295),
+    /*
+     * Settled as Open mail -- so the "Not matched yet" bar must stay off it -- and UNREAD, which
+     * is the only reason the Open mail tab has a number to show. Settled and unread is an ordinary
+     * combination: somebody clears a morning of supplier mail in bulk without opening any of it.
+     */
+    read_at: null, is_filed: false, is_settled: true, no_record_at: MAIL_AT(295),
     linked_account_id: null, linked_lead_id: null, linked_deal_id: null,
     linked_company_id: null, linked_contact_id: null,
     debtor_accounts: null, leads: null, deals: null, companies: null, contacts: null,
@@ -291,6 +295,44 @@ export const MAIL = [
     to_recipients: [{ name: 'Stephan', address: 'stephan@bredellferreira.co.za' }],
     cc_recipients: [],
     attachment_names: [], is_junk: false, occurred_at: MAIL_AT(40),
+    read_at: null, is_filed: false, is_settled: false, no_record_at: null,
+    linked_account_id: null, linked_lead_id: null, linked_deal_id: null,
+    linked_company_id: null, linked_contact_id: null,
+    debtor_accounts: null, leads: null, deals: null, companies: null, contacts: null,
+  },
+  /*
+   * TWO IN JUNK, BOTH UNREAD, and they are here for one reason: with an empty Junk tab a per-tab
+   * unread badge and a badge that counts the whole mailbox are indistinguishable -- both show
+   * nothing. Two is also not one, so a count that came from the wrong tab cannot pass by luck.
+   *
+   * It is the tab that matters most, too: a client's reply a spam filter misfiled sat here with
+   * nothing anywhere saying it had arrived.
+   */
+  {
+    id: 'aaaaaaa1-0000-4000-8000-000000000007',
+    folder: 'INBOX.spambucket', is_sent: false, uid: 107,
+    message_id: '<junk-7@example.com>',
+    from_address: 'marketing@seo-boost.example', from_name: 'SEO Boost',
+    subject: 'Your website is not ranking',
+    snippet: 'We noticed your site is missing out on traffic.',
+    to_address: 'stephan@bredellferreira.co.za', to_name: 'Stephan',
+    to_recipients: [], cc_recipients: [],
+    attachment_names: [], is_junk: true, occurred_at: MAIL_AT(200),
+    read_at: null, is_filed: false, is_settled: false, no_record_at: null,
+    linked_account_id: null, linked_lead_id: null, linked_deal_id: null,
+    linked_company_id: null, linked_contact_id: null,
+    debtor_accounts: null, leads: null, deals: null, companies: null, contacts: null,
+  },
+  {
+    id: 'aaaaaaa1-0000-4000-8000-000000000008',
+    folder: 'INBOX.spambucket', is_sent: false, uid: 108,
+    message_id: '<junk-8@example.com>',
+    from_address: 'no-reply@crypto-wins.example', from_name: 'Crypto Wins',
+    subject: 'Congratulations, you have won',
+    snippet: 'Claim your prize before it expires.',
+    to_address: 'stephan@bredellferreira.co.za', to_name: 'Stephan',
+    to_recipients: [], cc_recipients: [],
+    attachment_names: [], is_junk: true, occurred_at: MAIL_AT(260),
     read_at: null, is_filed: false, is_settled: false, no_record_at: null,
     linked_account_id: null, linked_lead_id: null, linked_deal_id: null,
     linked_company_id: null, linked_contact_id: null,

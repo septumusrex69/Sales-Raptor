@@ -446,3 +446,50 @@ export function recipientSummary(
   if (labels.length <= shown) return labels.join(', ')
   return `${labels.slice(0, shown).join(', ')} +${labels.length - shown}`
 }
+
+
+/* ---------- which tab a message is on ---------- */
+
+/** The mailbox's tabs. Here rather than in userMail so the rules below can be imported alone. */
+export type MailFilter = 'needs-filing' | 'filed' | 'no-record' | 'junk' | 'sent' | 'all'
+
+/**
+ * Move one message's unread count on every tab it belongs to, without asking the database.
+ *
+ * Marking a message unread used to reload the page, which threw the reader back to the top of the
+ * list. Nothing had changed on the server except one row, and which tabs that row is on is decided
+ * by the same facts the list already holds -- so the badges are adjusted here and reconciled by
+ * the next real load.
+ *
+ * THE TABS ARE THE ONES scope() WOULD PUT IT ON, spelled out in the same order and on the same
+ * facts. They are two statements of one rule and that is a risk; the alternative is a round trip
+ * on every keystroke-speed action, and a badge one out until the next load is cheaper than a list
+ * that jumps. check-mail-queue.mjs holds the two side by side.
+ */
+/** Just the facts a tab is decided on. A whole MailItem would drag the database types in. */
+export interface TabFacts {
+  isSent: boolean
+  isJunk: boolean
+  isFiled: boolean
+  isSettled: boolean
+  noRecordAt: string | null
+}
+
+export function bumpUnread(
+  counts: Record<MailFilter, number>, mail: TabFacts, by: number,
+): Record<MailFilter, number> {
+  const on: MailFilter[] = []
+  if (mail.isSent) on.push('sent')
+  else {
+    if (mail.isJunk) on.push('junk')
+    else on.push('all')
+    if (!mail.isSettled && !mail.isJunk) on.push('needs-filing')
+  }
+  if (mail.isFiled) on.push('filed')
+  if (mail.noRecordAt) on.push('no-record')
+
+  const next = { ...counts }
+  for (const tab of on) next[tab] = Math.max(0, next[tab] + by)
+  return next
+}
+

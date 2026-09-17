@@ -5,7 +5,7 @@ import {
   Inbox, Link2, Download, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
   Forward as ForwardIcon,
   Search, ShieldAlert, Trash2, Undo2, X, CalendarDays, CalendarPlus, ReplyAll,
-  Filter, Info, UserPlus,
+  Filter, History, Info, UserPlus,
 } from 'lucide-react'
 import { Avatar } from '../../components/ui/Avatar'
 import { Card } from '../../components/ui/Card'
@@ -20,8 +20,8 @@ import { relativeDayLabel, timeOfDay } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
 import { recordSentEmail, replySubject } from '../../lib/accountEmails'
 import {
-  companyFromDomain, forwardBody, forwardSubject, recipientLine, recipientSummary, replyAllTo,
-  splitPersonName,
+  bumpUnread, companyFromDomain, forwardBody, forwardSubject, recipientLine, recipientSummary,
+  replyAllTo, splitPersonName,
 } from '../../lib/emailRules'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
@@ -31,7 +31,7 @@ import { ReadingPane } from '../../components/email/ReadingPane'
 import { ZoomableImage } from '../../components/ui/ZoomableImage'
 import {
   addSenderRule, blockedBy, blockSender, blockSenders, clearNoRecordNeeded, countNeedsFiling,
-  countUnread, debtorFileFor, deleteMail, fetchSenderRules, markNoRecordNeeded, removeSenderRule,
+  countUnreadByTab, debtorFileFor, deleteMail, fetchSenderRules, markNoRecordNeeded, removeSenderRule,
   ruledBy,
   domainBlockProblem, domainOf, downloadAttachment, emptyJunk, fetchBlockedSenders, fetchMail,
   isSharedDomain,
@@ -85,12 +85,13 @@ const TABS: { id: Pane; label: string; hint: string }[] = [
    * because you need their mail. Before this it lived in Needs matching for ever, and a work
    * queue with permanent residents is a queue nobody reads.
    *
-   * The firm's word, and it was called "No record needed" first. That name described what the
-   * database does with the row. "Free" describes the thing that actually matters to the person
-   * marking it: mail on an account raises Annexure B item 6 for receiving it, and this mail
-   * raises nothing. Free of a file and free of a fee, which is the same decision either way.
+   * THE FIRM'S WORD, THIRD TIME OF ASKING. "No record needed" described what the database does
+   * with the row. "Free mail" described what it costs -- mail on an account raises Annexure B item
+   * 6 for receiving it and this raises nothing -- which was true and was still the wrong emphasis:
+   * "free" reads as an adjective about the message rather than as a place it goes. "Open mail" is
+   * the firm's own: mail that is open on the desk, dealt with, and on nobody's file.
    */
-  { id: 'no-record', label: 'Free mail', hint: 'Suppliers and the like — dealt with, on nobody\u2019s file, and nothing charged' },
+  { id: 'no-record', label: 'Open mail', hint: 'Suppliers and the like — dealt with, on nobody\u2019s file, and nothing charged' },
   { id: 'junk', label: 'Junk', hint: 'Your mail server thought this was spam' },
   /*
    * Read off the mailbox's own Sent folder rather than only what Raptor sent, so mail sent from
@@ -98,7 +99,7 @@ const TABS: { id: Pane; label: string; hint: string }[] = [
    * matched and is not part of the incoming working list.
    */
   { id: 'sent', label: 'Sent', hint: 'What you have sent, from anywhere' },
-  { id: 'blocked', label: 'Blocked', hint: 'Senders you have blocked, and senders whose mail always arrives free' },
+  { id: 'blocked', label: 'Blocked', hint: 'Senders you have blocked, and senders whose mail always lands in Open mail' },
 ]
 
 const PAGE = 50
@@ -143,8 +144,18 @@ export function MailPage() {
    * whichever tab and search are active, so the number on the button is the number of rows
    * pressing it leaves behind.
    */
-  const [unread, setUnread] = useState(0)
+  /*
+   * Unread PER TAB, not one number for the mailbox. The firm: "the junk email doesn't indicate to
+   * me if there's anything that's unread, the open mail also not." One number on All said the
+   * mailbox had unread mail and nothing about where -- and a client's reply that a spam filter
+   * misfiled sat in Junk with nothing anywhere saying so.
+   */
+  const [unreadByTab, setUnreadByTab] = useState<Record<MailFilter, number>>(
+    { all: 0, 'needs-filing': 0, filed: 0, 'no-record': 0, junk: 0, sent: 0 },
+  )
   const [unreadOnly, setUnreadOnly] = useState(false)
+  /* The count for the tab you are standing on, which is what the Unread only option applies to. */
+  const unread = filter === 'blocked' ? 0 : unreadByTab[filter]
 
   /*
    * Selection mode, off by default.
@@ -293,7 +304,8 @@ export function MailPage() {
       setLoadFailed(false)
       // Alongside the page, so the badges track whatever the last action did.
       void countNeedsFiling(currentUser.id).then(setOutstanding).catch(() => {})
-      void countUnread(currentUser.id, { filter, search }).then(setUnread).catch(() => {})
+      /* Every tab, so each one can say whether anything on it is waiting to be read. */
+      void countUnreadByTab(currentUser.id, search).then(setUnreadByTab).catch(() => {})
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       /*
@@ -369,6 +381,47 @@ export function MailPage() {
     } finally {
       setSyncing(false)
       await load(0)
+    }
+  }, [session, load])
+
+  /**
+   * The other direction: older mail.
+   *
+   * WHAT THIS IS FOR. The sync only ever read FORWARD -- it asks the server for messages above a
+   * high-water mark, and the very first run set that mark at the top of the most recent 25. Every
+   * message older than that was then unreachable for ever: not filtered, not hidden, simply never
+   * fetched, with nothing on the screen saying so. The firm found it the only way anybody could --
+   * two messages they could see in another mail client and not here.
+   *
+   * A batch at a time, and it says how many came back and whether there are more, because the one
+   * thing worse than mail you cannot reach is a button that may or may not have done anything.
+   */
+  const [fetchingOlder, setFetchingOlder] = useState(false)
+  const [noOlder, setNoOlder] = useState(false)
+  const fetchOlder = useCallback(async () => {
+    const token = session?.access_token
+    if (!token) return
+    setFetchingOlder(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/email/sync', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ older: true }),
+      })
+      const body = (await res.json().catch(() => ({}))) as { logged?: number; done?: boolean; error?: string }
+      if (!res.ok) { setError(body.error ?? 'Could not reach further back in your mailbox.'); return }
+      const got = body.logged ?? 0
+      setNoOlder(!!body.done)
+      setStatus(got === 0
+        ? 'Nothing older to fetch \u2014 Raptor has the whole of this folder.'
+        : `${got} older ${got === 1 ? 'message' : 'messages'} fetched.${
+          body.done ? ' That is the whole folder.' : ' Press again for more.'}`)
+      await load(0)
+    } catch {
+      setError('Could not reach the server. Please try again.')
+    } finally {
+      setFetchingOlder(false)
     }
   }, [session, load])
 
@@ -644,7 +697,7 @@ export function MailPage() {
       const done = await markNoRecordNeeded(ids, currentUser?.id ?? null)
       const refused = ids.length - done
       setStatus(
-        `${done} ${done === 1 ? 'email' : 'emails'} marked as free mail.`
+        `${done} ${done === 1 ? 'email' : 'emails'} marked as open mail.`
         + (refused > 0 ? ` ${refused} left alone — already matched to a record.` : ''),
       )
       await afterBulk()
@@ -693,13 +746,26 @@ export function MailPage() {
   }
 
   async function unreadOne(mail: MailItem) {
-    // Optimistic, like marking read on open: the row goes bold at once and the write follows.
+    /*
+     * NOTHING IS RELOADED. The firm: "when I mark an email as unread it kind of reloads
+     * everything and moves to the top."
+     *
+     * It did: this ended with load(), which sets `loading`, which swaps the whole list for a
+     * spinner. The list unmounts, and a list that unmounts comes back scrolled to the top -- so
+     * marking one message unread threw you out of wherever you were reading. Nothing on the server
+     * changed except one row's read_at, and this already knows which row that is.
+     *
+     * So the row is updated in place and the badge is adjusted by one. Both are reconciled by the
+     * next real load, and a failure reloads to put the truth back.
+     */
+    const wasRead = !!mail.readAt
     setItems((list) => list.map((m) => (m.id === mail.id ? { ...m, readAt: null } : m)))
+    /* The tab badges follow the row, or the list says unread and the tab says nothing. */
+    if (wasRead) setUnreadByTab((counts) => bumpUnread(counts, mail, 1))
     setOpen(null)
     try {
       await markMailUnread([mail.id])
       setStatus('Put back as unread. It is waiting for you in the mailbox.')
-      await load(page)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       await load(page)
@@ -758,7 +824,7 @@ export function MailPage() {
         <div className="px-5 pt-4 pb-3 border-b border-slate-100">
           <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
             <div className="flex items-baseline gap-2.5 min-w-0">
-              <h2 className="text-lg font-semibold text-navy-950 shrink-0">Mail</h2>
+              <h2 className="text-lg font-semibold text-navy-950 shrink-0">Raptor Mail</h2>
               {/*
                 WHICH MAILBOX, said out loud. Raptor reads a connected mailbox that is not always
                 the address somebody signs in with -- a shared info@ is the ordinary case -- and an
@@ -798,11 +864,6 @@ export function MailPage() {
             </button>
             </div>
           </div>
-          {/* Under the row rather than in it, so it can be as long as it needs to be. */}
-          <p className="text-xs text-slate-400 mt-1.5">
-            Everything stays until you match it or block the sender. Nothing is deleted on a
-            timer, and nothing here is ever removed from your real mailbox.
-          </p>
         </div>
 
         {/*
@@ -823,12 +884,39 @@ export function MailPage() {
                   wherever somebody is looking for work. Nothing at zero — a badge showing 0 is
                   furniture, and it is what teaches people to stop reading the others.
                 */}
-                {(t.id === 'all' || t.id === 'needs-filing') && outstanding > 0 && (
-                  <span className="min-w-4 h-4 px-1 rounded-full text-[10px] font-semibold
-                    inline-flex items-center justify-center tabular-nums bg-gold-500 text-navy-950">
-                    {outstanding > 99 ? '99+' : outstanding}
-                  </span>
-                )}
+                {/*
+                  TWO DIFFERENT NUMBERS, and they answer different questions.
+
+                  All and Needs matching carry WORK OUTSTANDING -- what is still on nobody's file
+                  -- because that is what those two tabs are for and it is the number the sidebar
+                  badge agrees with.
+
+                  Every other tab carries UNREAD, at the firm's instruction: "the junk email
+                  doesn't indicate to me if there's anything that's unread, the open mail also
+                  not." Junk is the one that matters most: a client's reply a spam filter misfiled
+                  sat there with nothing anywhere saying it had arrived.
+
+                  Nothing at zero, on either. A badge showing 0 is furniture, and furniture is what
+                  teaches people to stop reading the others.
+                */}
+                {(() => {
+                  const n = t.id === 'blocked' ? 0
+                    : (t.id === 'all' || t.id === 'needs-filing')
+                      ? outstanding
+                      : unreadByTab[t.id]
+                  if (n <= 0) return null
+                  const isWork = t.id === 'all' || t.id === 'needs-filing'
+                  return (
+                    <span title={isWork ? 'Still on nobody\u2019s file' : 'Unread'}
+                      className={`min-w-4 h-4 px-1 rounded-full text-[10px] font-semibold
+                        inline-flex items-center justify-center tabular-nums ${
+                        /* Unread is brand, matching the dot on a row and the Unread only filter;
+                           work outstanding keeps gold, which is what it has always been. */
+                        isWork ? 'bg-gold-500 text-navy-950' : 'bg-brand-500 text-white'}`}>
+                      {n > 99 ? '99+' : n}
+                    </span>
+                  )
+                })()}
               </button>
             ))}
           </div>
@@ -900,7 +988,7 @@ export function MailPage() {
             {items.some((m) => chosen.has(m.id) && !m.isSettled) && (
               <button onClick={() => void noRecordChosen()}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
-                <CircleCheck size={14} /> Mark as free
+                <CircleCheck size={14} /> Mark as open
               </button>
             )}
             {/*
@@ -1163,13 +1251,32 @@ export function MailPage() {
           </>
         )}
 
-        {(page > 0 || more) && (
-          <div className="px-5 py-3 flex items-center justify-between border-t border-slate-100">
+        {filter !== 'blocked' && (
+          <div className="px-5 py-3 flex items-center justify-between gap-3 border-t border-slate-100">
             <button disabled={page === 0} onClick={() => void load(page - 1)}
               className="text-sm text-slate-500 hover:text-slate-700 disabled:opacity-30">Previous</button>
-            <span className="text-xs text-slate-400">Page {page + 1}</span>
-            <button disabled={!more} onClick={() => void load(page + 1)}
-              className="text-sm text-slate-500 hover:text-slate-700 disabled:opacity-30">Next</button>
+            <span className="text-xs text-slate-400">
+              {page > 0 || more ? `Page ${page + 1}` : ''}
+            </span>
+            <div className="flex items-center gap-3">
+              {/*
+                OLDER MAIL, which was unreachable rather than merely unlisted. See fetchOlder:
+                paging moves through what Raptor already has, and this reaches back into the
+                mailbox for what it never fetched. They belong on the same row because "where is
+                the rest of it?" is one question, and the answer used to be silence.
+              */}
+              <button onClick={() => void fetchOlder()} disabled={fetchingOlder || noOlder}
+                title={noOlder
+                  ? 'Raptor has the whole of this folder'
+                  : 'Reach further back into your mailbox for messages Raptor has not fetched'}
+                className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40">
+                {fetchingOlder
+                  ? <><Loader2 size={14} className="animate-spin" /> Fetching&hellip;</>
+                  : <><History size={14} /> {noOlder ? 'Nothing older' : 'Fetch older mail'}</>}
+              </button>
+              <button disabled={!more} onClick={() => void load(page + 1)}
+                className="text-sm text-slate-500 hover:text-slate-700 disabled:opacity-30">Next</button>
+            </div>
           </div>
         )}
       </Card>
@@ -1429,7 +1536,7 @@ function Empty({ filter, searching }: { filter: Exclude<Pane, 'blocked'>; search
   const words: Record<MailFilter, string> = {
     'needs-filing': 'Nothing waiting. Every email has been matched, settled or thrown away.',
     filed: 'Nothing matched to a record yet.',
-    'no-record': 'Nothing here yet. Mark a supplier\u2019s email as free and it lands here.',
+    'no-record': 'Nothing here yet. Mark a supplier\u2019s email as open and it lands here.',
     all: 'Your mailbox is empty. Connect it under Settings → Integrations if you have not yet.',
     // Junk is a shelf, not a bin: nothing here has been deleted, it is just kept out of All.
     junk: 'Nothing in junk.',
@@ -1579,7 +1686,7 @@ function MailStatus({ mail, blocked, tight }: {
         <span className={`${chip} bg-slate-100 text-slate-500`}
           title="Dealt with — it belongs on nobody's file and nothing was charged">
           <CircleCheck size={10} className="shrink-0" />
-          <span className="truncate">{tight ? 'Free' : 'Free mail'}</span>
+          <span className="truncate">{tight ? 'Open' : 'Open mail'}</span>
         </span>
       ) : mail.isJunk ? (
         <span className={`${chip} bg-slate-100 text-slate-500`}>
@@ -1914,9 +2021,9 @@ function MailBody({
    * it is the one of these that gets pressed in a hurry -- "not yet", said while scanning -- and
    * it was in both places for one commit, which is one place too many.
  *
-   * - FREE MAIL is the third answer to "what is this?" and the one the mailbox had no word for. A
+   * - OPEN MAIL is the third answer to "what is this?" and the one the mailbox had no word for. A
    *   telephone provider's invoice is not junk and belongs on no account. Hidden on matched mail:
-   *   that is on a record and a fee may have been raised against it, so calling it free would be a
+   *   that is on a record and a fee may have been raised against it, so calling it open would be a
    *   contradiction the database refuses anyway.
    * - JUNK sits between "file it" and "block them": this message is not work, without claiming
    *   anything about the sender. Hidden on filed mail — a message on a record is neither junk nor
@@ -1933,7 +2040,7 @@ function MailBody({
     ...(!mail.isFiled
       ? [mail.noRecordAt
         ? { label: 'Put back in the queue', icon: <Undo2 size={15} />, onClick: onUndoNoRecord }
-        : { label: 'Mark as free', icon: <CircleCheck size={15} />, onClick: onNoRecord }]
+        : { label: 'Mark as open', icon: <CircleCheck size={15} />, onClick: onNoRecord }]
       : []),
     ...(!mail.isFiled
       ? [mail.isJunk
@@ -2134,7 +2241,7 @@ function NotMatchedBar({ mail, onLink, onCreateLead }: {
   onLink: () => void
   onCreateLead: () => void
 }) {
-  /* Filed mail has its answer, and free mail has been given one deliberately -- neither is a
+  /* Filed mail has its answer, and open mail has been given one deliberately -- neither is a
      loose end, and a bar over both would be a warning that fires when nothing is wrong. */
   if (mail.isFiled || mail.noRecordAt) return null
 
@@ -2566,7 +2673,7 @@ function SenderRulesList({ rules, onRemove }: {
   return (
     <div className="border-t border-slate-100">
       <div className="px-5 py-3 bg-slate-50/70">
-        <p className="text-sm font-semibold text-slate-700">Always free</p>
+        <p className="text-sm font-semibold text-slate-700">Always open mail</p>
         <p className="text-xs text-slate-400 mt-0.5">
           Suppliers and the like. Their mail still arrives and is still searchable &mdash; it
           simply lands already dealt with instead of joining the queue.
@@ -2575,7 +2682,7 @@ function SenderRulesList({ rules, onRemove }: {
 
       {rules.length === 0 ? (
         <p className="px-5 py-6 text-center text-xs text-slate-400">
-          Nothing yet. Open a supplier&rsquo;s email, choose &ldquo;Mark as free&rdquo;, and
+          Nothing yet. Open a supplier&rsquo;s email, choose &ldquo;Mark as open&rdquo;, and
           you can settle the sender for good from there.
         </p>
       ) : (
@@ -2706,7 +2813,7 @@ function NoRecordModal({ mail, userId, rule, onClose, onDone }: {
         return
       }
       if (!scope) {
-        onDone('Marked as free mail. It is out of the queue and still in your mailbox.')
+        onDone('Marked as open mail. It is out of the queue and still in your mailbox.')
         return
       }
       const { pattern, settled } = await addSenderRule({
@@ -2724,7 +2831,7 @@ function NoRecordModal({ mail, userId, rule, onClose, onDone }: {
   }
 
   return (
-    <Modal title="Free mail" onClose={onClose} width={480}>
+    <Modal title="Open mail" onClose={onClose} width={480}>
       <p className="text-sm text-slate-500">
         For mail that is real work but belongs on nobody&rsquo;s file &mdash; a supplier, the
         accountant, a service provider. It leaves <strong className="font-medium text-slate-600">
@@ -3614,11 +3721,11 @@ function MoveModal({ mail, actor, onClose, onDone }: {
        * for an unmatch, too: matching a newsletter to a debtor by mistake is exactly the thing
        * being undone.
        *
-       * A message settled some other way (marked as free mail, or still on a lead or a
+       * A message settled some other way (marked as open mail, or still on a lead or a
        * deal) is not in Needs matching either, and saying so beats sending somebody hunting.
        */
       const landsIn = mail.isJunk ? 'Junk'
-        : mail.noRecordAt ? 'Free mail'
+        : mail.noRecordAt ? 'Open mail'
           : 'Needs matching'
       onDone(
         `Unmatched from ${was}. You will find it under ${landsIn}.`

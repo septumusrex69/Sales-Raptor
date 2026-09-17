@@ -33,6 +33,7 @@ const ok = (name, actual) => check(name, actual, true)
 const mail = readFileSync(new URL('../../src/lib/userMail.ts', import.meta.url), 'utf8')
 const page = readFileSync(new URL('../../src/pages/mail/MailPage.tsx', import.meta.url), 'utf8')
 const schema = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8')
+const sync = readFileSync(new URL('../../api/_lib/emailSync.ts', import.meta.url), 'utf8')
 
 /* ---------- 1. one definition of waiting ---------- */
 
@@ -105,13 +106,20 @@ const schema = readFileSync(new URL('../../supabase/schema.sql', import.meta.url
     .replace(/^\s*\/\/.*$/gm, '')       // line comments
   ok('nothing on screen still says "No record needed"', !/No record needed/.test(readable))
   ok('...nor "needing no record"', !/needing no record/.test(readable))
-  ok('the tab is called Free mail', /label: 'Free mail'/.test(page))
-  ok('...and its hint says what free means', /nothing charged/.test(page))
-  ok('the chip reads Free mail', /tight \? 'Free' : 'Free mail'/.test(page))
-  ok('the action says what it does', /Mark as free/.test(page))
-  ok('an unmatched message is sent to the tab it lands in', /mail\.noRecordAt \? 'Free mail'/.test(page))
+  /*
+   * THIRD NAME, AND THE LAST TWO ARE BOTH GONE FROM THE SCREEN. "No record needed" described what
+   * the database does with the row; "Free mail" described what it costs, which was true and still
+   * read as an adjective about the message rather than as a place it goes. The firm's word is
+   * "Open mail" -- open on the desk, dealt with, on nobody's file.
+   */
+  ok('...nor "Free mail"', !/Free mail/.test(readable))
+  ok('the tab is called Open mail', /label: 'Open mail'/.test(page))
+  ok('...and its hint says what it costs', /nothing charged/.test(page))
+  ok('the chip reads Open mail', /tight \? 'Open' : 'Open mail'/.test(page))
+  ok('the action says what it does', /Mark as open/.test(page))
+  ok('an unmatched message is sent to the tab it lands in', /mail\.noRecordAt \? 'Open mail'/.test(page))
   // The filter id is untouched. Renaming it would be a migration, and the label is not the key.
-  ok('the filter id is still no-record', /\{ id: 'no-record', label: 'Free mail'/.test(page))
+  ok('the filter id is still no-record', /\{ id: 'no-record', label: 'Open mail'/.test(page))
 }
 
 /* The blocklist tab. "Senders" named the rows; "Blocked" names what the tab is for. */
@@ -153,9 +161,14 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
    */
   const rowAt = head.indexOf('<div className="flex items-center gap-x-4 gap-y-2 flex-wrap">')
   ok('the name and the buttons share one row', rowAt > -1)
-  const descriptionAt = head.indexOf('Everything stays until you match it')
-  ok('...and the description exists somewhere', descriptionAt > -1)
-  const row = head.slice(rowAt, descriptionAt > -1 ? descriptionAt : head.length)
+  /*
+   * AND THE PARAGRAPH IS GONE. "Everything stays until you match it or block the sender..." --
+   * the firm: "remove that sentence completely, it's unnecessary." It was there to reassure
+   * somebody that Raptor does not delete their mail, which nobody was worried about, and it was
+   * long enough to wrap the buttons onto a line below itself twice.
+   */
+  ok('the reassurance nobody needed is gone', !head.includes('Everything stays until you match it'))
+  const row = head
 
   const buttonsAt = row.indexOf('<div className="ml-auto shrink-0 flex items-center gap-2">')
   ok('the buttons have a block of their own', buttonsAt > -1)
@@ -168,8 +181,8 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
    * wrapped them onto a line beneath the sentence anyway. So: the row's two divs must close before
    * the paragraph starts.
    */
-  ok('...while the description is outside the row, where it cannot wrap the order apart',
-    /<\/div>\s*<\/div>\s*(\{\/\*[\s\S]*?\*\/\}\s*)?<p className="text-xs text-slate-400 mt-1\.5">/.test(head))
+  /* Nothing long is left in the row to carry them anywhere. */
+  ok('...and nothing but the name shares their row', !/<p className="text-xs text-slate-400/.test(row))
 
   /* Which mailbox is being read, which is not always the address somebody signs in with. */
   ok('the header names the mailbox', /\{mailbox \?\? currentUser\?\.email \?\? ''\}/.test(head))
@@ -374,6 +387,81 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
   ok('the controls are ruled off from the message', /border-b border-slate-100 mb-3/.test(mailBody))
 }
 
+/* ---------- 4. unread, per tab, and without a reload ---------- */
+
+/*
+ * THE FIRM, ON TWO SEPARATE THINGS THAT WERE THE SAME BUG UNDERNEATH:
+ *
+ *  "The junk email doesn't indicate to me if there's anything that's unread. The free mail also
+ *   not." One number, on All, said the mailbox had unread mail and nothing about WHERE -- so a
+ *   client's reply a spam filter had misfiled sat in Junk with nothing anywhere saying so.
+ *
+ *  "When I mark an email as unread it kind of reloads everything and moves to the top." It did:
+ *   the handler ended with load(), which sets `loading`, which swaps the list for a spinner. A
+ *   list that unmounts comes back scrolled to the top, so marking one message unread threw you out
+ *   of wherever you were reading.
+ */
+{
+  ok('every tab is counted', /export async function countUnreadByTab/.test(mail))
+  /*
+   * THROUGH scope(), via countUnread. A function in SQL would be a second definition of every
+   * tab's clauses, and this file already documents what that costs: nav_counts wrote its own and
+   * drifted, so the badge said 3 over a list of 5.
+   */
+  const byTab = mail.slice(mail.indexOf('export async function countUnreadByTab'), mail.indexOf('export function bumpUnread'))
+  ok('...through the one clause builder', /countUnread\(userId, \{ filter, search \}\)/.test(byTab))
+  ok('...and scoped by the search too, so a badge cannot lie once somebody types',
+    /countUnreadByTab\(\s*\n?\s*userId: string, search\?: string,/.test(mail))
+  /* All six, or a tab quietly has no badge and nobody notices which. */
+  for (const tab of ['all', "'needs-filing'", "'filed'", "'no-record'", 'junk', 'sent']) {
+    ok(`...counting ${tab.replace(/'/g, '')}`, byTab.includes(tab.replace(/'/g, '')))
+  }
+
+  /* The page draws it, and draws the right one: work outstanding on the two work tabs, unread on
+     the rest. Two numbers answering two questions, and neither at zero. */
+  ok('the tabs carry a badge', /unreadByTab\[t\.id\]/.test(page))
+  ok('...work outstanding on All and Needs matching',
+    /\(t\.id === 'all' \|\| t\.id === 'needs-filing'\)\s*\n?\s*\? outstanding/.test(page))
+  ok('...and nothing at zero, which is what teaches people to stop reading badges',
+    /if \(n <= 0\) return null/.test(page))
+  /* Told apart by colour: unread is brand, the same as the dot on a row and the unread filter. */
+  ok('...the two are told apart', /isWork \? 'bg-gold-500 text-navy-950' : 'bg-brand-500 text-white'/.test(page))
+
+  /* AND MARKING UNREAD RELOADS NOTHING. */
+  const unreadOne = page.slice(page.indexOf('async function unreadOne'), page.indexOf('\n  /*\n   * Whether the reading pane'))
+  ok('marking unread has a handler', unreadOne.length > 0)
+  ok('...which updates the row in place', /setItems\(\(list\) => list\.map/.test(unreadOne))
+  ok('...and the badge with it', /setUnreadByTab\(\(counts\) => bumpUnread\(counts, mail, 1\)\)/.test(unreadOne))
+  /*
+   * NO load() ON THE SUCCESS PATH. This is the whole fix: load() sets `loading`, the list unmounts,
+   * and an unmounted list comes back at the top.
+   */
+  /*
+   * Read with the comments stripped. The comment above this handler explains that it USED to end
+   * with load(), so tested against the source as written the guard matches its own explanation --
+   * the same trap that has caught three checks in this suite already.
+   */
+  const success = unreadOne.slice(0, unreadOne.indexOf('} catch'))
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  ok('...and reloads nothing, which is what threw the reader to the top', !/load\(/.test(success))
+  /* A failure still reloads, because then the screen and the database really do disagree. */
+  ok('...though a failure puts the truth back', /catch \(e\) \{[\s\S]*?await load\(page\)/.test(unreadOne))
+}
+
+/* ---------- 5. sent mail arrives read ---------- */
+
+/*
+ * "All the sent emails are marked as unread. Sent emails should automatically be read."
+ *
+ * Nothing sets read_at on a message you wrote, and opening one is the only thing that marks mail
+ * read -- so a synced Sent folder put a permanent column of bold rows on the Sent tab that no
+ * action a person could take would ever clear. You wrote it; you have read it.
+ */
+ok('the sync stamps sent mail as read', /read_at: message\.isSent \? new Date\(\)\.toISOString\(\) : null,/.test(sync))
+/* And what was already stored is settled, dated to when it was sent rather than to now. */
+ok('...and what was already stored is settled too',
+  /set read_at = coalesce\(read_at, occurred_at\)\s*\nwhere is_sent = true and read_at is null;/.test(schema))
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')
@@ -382,5 +470,5 @@ if (failures.length) {
 console.log(`${pass} passed, 0 failed`)
 console.log(`
 The badge and the queue ask one question through one builder, the sidebar no longer counts our
-own sent mail, "Free mail" is the name everywhere a person can read it, and a reply is charged
+own sent mail, "Open mail" is the name everywhere a person can read it, and a reply is charged
 once on a debtor and written down on a lead.`)

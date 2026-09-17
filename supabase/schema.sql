@@ -3476,3 +3476,41 @@ comment on column public.user_emails.to_recipients is
 comment on column public.user_emails.cc_recipients is
   'Everyone on Cc. Bcc is deliberately absent: it is not in the message we received, and a list '
   'that looked complete while missing people would be worse than no list.';
+
+-- ---------------------------------------------------------------------------
+-- HOW FAR BACK THE MAILBOX HAS BEEN READ.
+--
+-- The firm, on two messages they could see in Spark and not in Raptor: "I don't see it in my
+-- message ... I don't know why it's not mentioned in my inbox."
+--
+-- Because the sync only ever looked FORWARD. last_seen_uid is a high-water mark and every run asks
+-- the server for UIDs above it; the very first run took the most recent 25 messages and set the
+-- mark at the top of them. Everything older than that window was then unreachable for ever -- not
+-- filtered, not hidden, simply never fetched, with nothing anywhere saying so.
+--
+-- These are the low-water marks. "Fetch older mail" walks down from them a batch at a time.
+-- ---------------------------------------------------------------------------
+alter table public.email_connections
+  add column if not exists oldest_seen_uid integer,
+  add column if not exists oldest_seen_uid_junk integer,
+  add column if not exists oldest_seen_uid_sent integer;
+
+comment on column public.email_connections.oldest_seen_uid is
+  'How far BACK the INBOX has been read. last_seen_uid is the high-water mark and the sync only ever asks for UIDs above it, so everything older than the first sync''s 25-message window was invisible for ever -- which is how a client''s mail from before the mailbox was connected simply never appeared. Fetch older mail walks down from here.';
+comment on column public.email_connections.oldest_seen_uid_junk is
+  'The same low-water mark for the Junk/Spam folder. See oldest_seen_uid.';
+comment on column public.email_connections.oldest_seen_uid_sent is
+  'The same low-water mark for the Sent folder. See oldest_seen_uid.';
+
+-- ---------------------------------------------------------------------------
+-- SENT MAIL ARRIVES READ.
+--
+-- The firm: "all the sent emails are marked as unread -- sent emails should automatically be
+-- read." Nothing sets read_at on a message you wrote, and opening one is the only thing that marks
+-- mail read, so a synced Sent folder put a permanent column of bold rows on the Sent tab that no
+-- action could clear. The sync now stamps read_at on the way in; this settles what is already
+-- stored, dated to when the message was sent rather than to now.
+-- ---------------------------------------------------------------------------
+update public.user_emails
+set read_at = coalesce(read_at, occurred_at)
+where is_sent = true and read_at is null;

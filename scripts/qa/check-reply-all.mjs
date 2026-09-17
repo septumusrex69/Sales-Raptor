@@ -287,7 +287,7 @@ for (const label of ['Reply', 'Reply all', 'Forward', 'Mark unread']) {
  * THE FILING DECISIONS go behind the dots. They are taken once per message and never in a hurry,
  * so they cost a click and buy back a row that reads at a glance.
  */
-for (const label of ['Mark as free', 'Put back in the queue', 'Move to junk',
+for (const label of ['Mark as open', 'Put back in the queue', 'Move to junk',
   'Not junk', 'Unmatch', 'Block sender']) {
   ok(`${label} is in the menu`, more.includes(`label: '${label}'`))
   ok(`...and ${label} is not also a button on the bar`,
