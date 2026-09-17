@@ -12,8 +12,10 @@
  */
 import {
   OUTCOME_OPTIONS, TRACE_CATEGORIES, TRACE_SORTS, categoryById, categoryCounts,
-  groupTraceRows, itemsIn, outcomeTone, pageOf, riskTone, traceRowKey, workRows,
+  groupTraceRows, itemsIn, outcomeTone, pageOf, riskTone, searchKeyProblem, traceRowKey,
+  traceSearchKey, workRows,
 } from '../../src/lib/traceStore.ts'
+import { isValidSaId } from '../../src/lib/newDebtor.ts'
 
 let pass = 0
 const failures = []
@@ -234,6 +236,80 @@ eq('a high risk grade is loud', riskTone('High'), 'red')
 eq('an average one is not', riskTone('Average'), 'amber')
 eq('a missing grade says nothing', riskTone(null), 'grey')
 ok('every sort offered has a name', TRACE_SORTS.every((s) => s.label.length > 0))
+
+/* ---------- what XDS is searched on ---------- */
+
+/*
+ * THE MONEY. The Trace button copies this so it can be pasted into the portal, and it used to
+ * copy whatever sat in the ID field. On a real account that was a TELEPHONE NUMBER -- the ID was
+ * never captured and Swordfish's export carried a phone number in the ID column. Pasted into XDS
+ * that is an enquiry the firm pays for, run against something that is not a person. 24 accounts in
+ * the staging book are in exactly that state.
+ */
+const id = (v) => traceSearchKey('individual', v, isValidSaId)
+const reg = (v) => traceSearchKey('company', v, isValidSaId)
+
+// 8001015009087 is the canonical worked example of a valid SA ID, not anybody's.
+eq('a real ID number is what a person is searched on', id('8001015009087'), { ok: true, value: '8001015009087', what: 'ID number' })
+eq('...and spacing someone typed is not part of it', id(' 800101 5009 087 ').value, '8001015009087')
+/*
+ * A TELEPHONE NUMBER IS NOT COPIED. Ten digits, not thirteen, so it cannot pass -- but the point
+ * of the check is the refusal, not the arithmetic.
+ */
+eq('a telephone number in the ID field is refused', id('0825550182').ok, false)
+eq('...and is handed back so it can be named', id('0825550182').found, '0825550182')
+eq('...with a reason that is not "missing"', id('0825550182').why, 'not-an-id')
+/*
+ * LUHN, NOT LENGTH. A transposed pair is the commonest way a number is typed wrong and it is
+ * thirteen digits either way -- so a length check passes exactly the number that traces somebody
+ * else, which is the one failure this is here to stop.
+ */
+eq('thirteen digits is not enough on its own', id('8001010509087').ok, false)
+eq('an empty field is missing, not wrong', id('').why, 'missing')
+eq('...and so is nothing at all', id(null).why, 'missing')
+eq('...which reports no value to show', id(null).found, null)
+
+eq('a company is searched on its registration number',
+  reg('2019/445102/07'), { ok: true, value: '2019/445102/07', what: 'registration number' })
+/* A bureau prefixes a letter of its own; the firm's records do not. Both are the same company. */
+eq('...and the bureau\'s letter prefix is allowed', reg('K2019/445102/07').ok, true)
+eq('an ID number in a company\'s registration field is refused', reg('8001015009087').ok, false)
+eq('...for the right reason', reg('8001015009087').why, 'not-a-registration')
+/* A person is never searched on a registration number, nor a company on an ID. */
+eq('a registration number is not an ID', id('2019/445102/07').ok, false)
+
+/* ---------- and what it says about it ---------- */
+
+eq('a usable number has no problem to report', searchKeyProblem(id('8001015009087'), 'individual'), null)
+/*
+ * READ DEFENSIVELY. searchKeyProblem returns null for a usable number, and every assertion below
+ * calls .includes() on it -- so the moment the rule is broken such that a bad number reads as
+ * usable, the null lands here and throws a TypeError two lines below the assertion that had
+ * already caught it, killing the run before the failures are ever printed. That is exactly what
+ * happened the first time this was break-tested: the check worked and reported nothing.
+ */
+const problemText = (k, kind) => searchKeyProblem(k, kind) ?? '(no problem reported)'
+{
+  const missing = problemText(id(null), 'individual')
+  ok('a missing ID says what to do', missing.includes('no ID number'))
+  ok('...and where', missing.includes('debtor'))
+  ok('a missing registration says registration, not ID',
+    problemText(reg(null), 'company').includes('no registration number'))
+}
+{
+  /*
+   * NAMED, so it gets fixed. "Not a valid ID" sends somebody hunting for a typo; saying it looks
+   * like a telephone number says which field it actually belongs in -- and all 24 of these carry
+   * that same number on their contact list already.
+   */
+  const wrong = problemText(id('0825550182'), 'individual')
+  ok('a telephone number in the ID field is quoted back', wrong.includes('0825550182'))
+  ok('...and recognised for what it is', wrong.includes('telephone number'))
+  ok('...and it says plainly that nothing was copied', wrong.includes('Nothing was copied'))
+  /* A wrong ID that is not a phone number must not be called one. */
+  ok('...but a number that is not a phone number is not called one',
+    !problemText(id('8001010509087'), 'individual').includes('telephone'))
+}
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)

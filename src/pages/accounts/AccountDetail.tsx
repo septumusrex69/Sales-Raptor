@@ -333,7 +333,7 @@ export function AccountDetail() {
         traces={traces}
         traceAction={(
           <TraceButton accountId={account.id} actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
-            idNumber={account.debtorIdNumber}
+            debtorKind={account.debtorKind} idNumber={account.debtorIdNumber}
             label="Do the trace"
             className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg bg-brand-600 text-white shadow-sm hover:bg-brand-700"
             onDone={reload} onUpload={() => setTracing(true)} />
@@ -608,6 +608,7 @@ export function AccountDetail() {
         accountId={account.id}
         actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
         idNumber={account.debtorIdNumber}
+        debtorKind={account.debtorKind}
         onTraced={reload}
         onUpload={() => setTracing(true)}
       />
@@ -879,9 +880,11 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onDiarise, accountId, actor, idNumber, onTraced, onUpload }: {
-  /** Copied to the clipboard when XDS opens — see TraceButton. */
+function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onDiarise, accountId, actor, idNumber, debtorKind, onTraced, onUpload }: {
+  /** Copied to the clipboard when XDS opens, once it is checked — see TraceButton. */
   idNumber: string | null
+  /** Which number that field is meant to hold: an ID, or a registration number. */
+  debtorKind: 'individual' | 'company'
   /** The number SMS goes to, and what the row shows when there is no number at all. */
   callNumber?: string
   /** Every number that could reach this debtor, primary first. */
@@ -941,7 +944,7 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
       */}
       <Action icon={ShieldAlert} label="Escalate" onClick={onDispute}
         title="Raise a dispute, ask a team leader, or recommend it for litigation" />
-      <TraceButton accountId={accountId} actor={actor} idNumber={idNumber}
+      <TraceButton accountId={accountId} actor={actor} debtorKind={debtorKind} idNumber={idNumber}
         className={`${ACTION_BASE} ${ACTION_ENABLED}`}
         onDone={onTraced} onUpload={onUpload} />
       {/*

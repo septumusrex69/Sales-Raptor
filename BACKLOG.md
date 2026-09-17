@@ -219,6 +219,16 @@ work that well" — email is the priority.
 
 ## Loose ends that will bite
 
+- **24 accounts have a telephone number in the ID field.** All individuals, and every one of them
+  carries that same number on its contact list as well, so nothing is lost by clearing it — the
+  ID was simply never captured and Swordfish's export put the phone number in that column. The
+  importer is not at fault and already says so in its notes ("imported as found — it is
+  Swordfish's data"), but the consequence has teeth now: a number in that field is what the Trace
+  button hands to a paid bureau search. The button refuses anything that is not a Luhn-valid ID
+  or a registration number, so the danger is contained; the rows still want fixing before the
+  production import, and the same question wants asking of the production export.
+  `select count(*) from debtor_accounts where debtor_id_number ~ '^0[1-8][0-9]{8}$'`
+
 - **`Main` is 103 commits behind** and has no supersede in `diary.ts`. Anything deployed from it
   runs pre-index code against a database that has the index — which is exactly the constraint
   violation the firm hit. Merge before relying on any deployed build.

@@ -496,3 +496,81 @@ export function pageOf<T>(rows: T[], page: number, size: number): {
   const slice = rows.slice((safe - 1) * size, safe * size)
   return { rows: slice, page: safe, pages, showing: slice.length, total: rows.length }
 }
+
+/* ------------------------------------------------------------------ *
+ * What XDS is searched on, and whether it is safe to hand over.
+ * ------------------------------------------------------------------ */
+
+/**
+ * The number a bureau search is run against, checked before it is copied anywhere.
+ *
+ * WHY THIS EXISTS. The Trace button copies the account's ID number so it can be pasted into the
+ * portal, and it copied whatever was in the field. On one account that was a TELEPHONE NUMBER --
+ * the ID was never captured and Swordfish's export carried a phone number in the ID column. It
+ * copied faithfully, and pasting it into XDS is a search the firm pays for, run against something
+ * that is not a person.
+ *
+ * So nothing is copied unless it can actually be what it claims to be. A missing number and a
+ * wrong number are told apart on purpose: one needs capturing, the other needs correcting, and a
+ * collector told only "no ID" would go and type the phone number in again.
+ *
+ * 24 accounts in the staging book are in the second state, every one of them carrying that same
+ * number on its contact list as well -- see BACKLOG.
+ */
+export type TraceSearchKey =
+  | { ok: true; value: string; what: 'ID number' | 'registration number' }
+  | { ok: false; found: string | null; why: 'missing' | 'not-an-id' | 'not-a-registration' }
+
+/**
+ * A company registration number: 2016/210735/07.
+ *
+ * A bureau prefixes a letter of its own (K2016/210735/07) and the firm's records do not, so the
+ * letter is allowed and ignored -- see normaliseRegistration, which is what strips it.
+ */
+const REGISTRATION = /^[A-Z]?\s*\d{4}\s*\/\s*\d{6}\s*\/\s*\d{2}$/i
+
+export function traceSearchKey(
+  debtorKind: 'individual' | 'company',
+  value: string | null | undefined,
+  /** Passed in rather than imported, so this file keeps importing nothing. See isValidSaId. */
+  validId: (id: string) => boolean,
+): TraceSearchKey {
+  const found = (value ?? '').trim()
+  if (found === '') return { ok: false, found: null, why: 'missing' }
+
+  if (debtorKind === 'company') {
+    return REGISTRATION.test(found)
+      ? { ok: true, value: found, what: 'registration number' }
+      : { ok: false, found, why: 'not-a-registration' }
+  }
+
+  /*
+   * Luhn-checked, not merely thirteen digits. A transposed pair is the commonest way a number gets
+   * typed wrong, and it is thirteen digits either way -- so a length check would pass exactly the
+   * number that traces somebody else.
+   */
+  const digits = found.replace(/\s/g, '')
+  return validId(digits)
+    ? { ok: true, value: digits, what: 'ID number' }
+    : { ok: false, found, why: 'not-an-id' }
+}
+
+/** What to tell somebody when there is nothing safe to search on. */
+export function searchKeyProblem(key: TraceSearchKey, debtorKind: 'individual' | 'company'): string | null {
+  if (key.ok) return null
+  if (key.why === 'missing') {
+    return debtorKind === 'company'
+      ? 'This account has no registration number on it, so there is nothing to search on. Add one under the debtor’s details.'
+      : 'This account has no ID number on it, so there is nothing to search on. Add one under the debtor’s details.'
+  }
+  /*
+   * NAMED, so it gets fixed. "Not a valid ID" sends somebody looking for a typo; saying it looks
+   * like a telephone number says which field it belongs in. The book has 24 of exactly this.
+   */
+  const looksLikeAPhone = /^0[1-8]\d{8}$/.test(key.found?.replace(/\D/g, '') ?? '')
+  return key.why === 'not-a-registration'
+    ? `The registration field holds “${key.found}”, which is not a registration number. Nothing was copied — correct it under the debtor’s details.`
+    : `The ID field holds “${key.found}”, which is not a valid ID number${
+      looksLikeAPhone ? ' — it looks like a telephone number' : ''
+    }. Nothing was copied — correct it under the debtor’s details.`
+}

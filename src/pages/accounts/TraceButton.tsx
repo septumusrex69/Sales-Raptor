@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, Loader2, Search } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { recordTrace, XDS_PORTAL_URL } from '../../lib/accountTrace'
+import { searchKeyProblem, traceSearchKey } from '../../lib/traceStore.ts'
+import { isValidSaId } from '../../lib/newDebtor'
 import { scheduleFor } from '../../lib/annexureB'
 import type { ChargeResult } from '../../lib/accountCharges'
 
@@ -19,9 +21,11 @@ const COUNTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
  * Closing without answering charges nothing, which is the right outcome for a portal opened by
  * mistake and for a search that turned out not to be needed.
  */
-export function TraceButton({ accountId, actor, idNumber, label, className, onDone, onUpload }: {
+export function TraceButton({ accountId, actor, debtorKind, idNumber, label, className, onDone, onUpload }: {
   accountId: string
   actor: { id: string | null; name: string | null }
+  /** Which number is expected: an ID for a person, a registration number for a company. */
+  debtorKind: 'individual' | 'company'
   /**
    * What XDS is searched ON: a person's ID number, or a company's registration number.
    *
@@ -59,6 +63,14 @@ export function TraceButton({ accountId, actor, idNumber, label, className, onDo
   }, [])
 
   const rate = scheduleFor(new Date()).items.find((i) => i.id === '4c')?.amount ?? 0
+  /*
+   * CHECKED BEFORE IT IS COPIED. It used to copy whatever was in the ID field, and on one account
+   * that was a telephone number -- Swordfish's export carried one in the ID column and the ID was
+   * never captured. Pasting it into XDS is a search the firm pays for, run against something that
+   * is not a person. So an unusable number is not copied at all, and is named so it gets fixed.
+   */
+  const key = traceSearchKey(debtorKind, idNumber, isValidSaId)
+  const problem = searchKeyProblem(key, debtorKind)
 
   function open() {
     /*
@@ -70,10 +82,10 @@ export function TraceButton({ accountId, actor, idNumber, label, className, onDo
      * resolves asynchronously, so what is shown in the modal waits for the real answer rather
      * than claiming success the moment it was asked for.
      */
-    setCopied(idNumber === null ? 'nothing' : 'asking')
-    if (idNumber !== null) {
+    setCopied(key.ok ? 'asking' : 'nothing')
+    if (key.ok) {
       try {
-        const write = navigator.clipboard?.writeText(idNumber)
+        const write = navigator.clipboard?.writeText(key.value)
         if (write) write.then(() => setCopied('yes')).catch(() => setCopied('no'))
         else setCopied('no')
       } catch {
@@ -144,21 +156,25 @@ export function TraceButton({ accountId, actor, idNumber, label, className, onDo
             the account behind this modal, and a digit wrong there is a search about somebody
             else that the firm still pays for.
           */}
-          {copied === 'yes' && (
+          {key.ok && copied === 'yes' && (
             <p className="text-xs text-[var(--c-green)] mt-3 inline-flex items-center gap-1.5">
-              <Check size={13} /> {idNumber} is on your clipboard — paste it into the search.
+              <Check size={13} /> The {key.what} {key.value} is on your clipboard — paste it into the search.
             </p>
           )}
-          {(copied === 'no' || copied === 'asking') && idNumber !== null && (
+          {key.ok && (copied === 'no' || copied === 'asking') && (
             <p className="text-xs text-slate-500 mt-3">
-              Search on <span className="font-medium text-slate-700 select-all">{idNumber}</span>
+              Search on <span className="font-medium text-slate-700 select-all">{key.value}</span>
               {copied === 'no' && ' — this browser would not let us copy it for you.'}
             </p>
           )}
-          {copied === 'nothing' && (
-            <p className="text-xs text-slate-500 mt-3">
-              This account has no ID or registration number on it, so there is nothing to search on
-              yet. Add one under the debtor&rsquo;s details.
+          {/*
+            A MISSING NUMBER AND A WRONG ONE ARE DIFFERENT PROBLEMS. One needs capturing and the
+            other needs correcting, and a collector told only "no ID" would go and type the
+            telephone number sitting in that field straight into the portal.
+          */}
+          {problem !== null && (
+            <p className="text-xs text-negative-700 mt-3 rounded-lg bg-negative-50 border border-negative-100 px-3 py-2">
+              {problem}
             </p>
           )}
           <div className="flex flex-wrap gap-2 mt-4">

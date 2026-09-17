@@ -355,7 +355,15 @@ ok('promoting never decides the primary number', /isPrimary: false/.test(data))
  * a different person that the firm still pays for.
  */
 const button = readFileSync(new URL('../../src/pages/accounts/TraceButton.tsx', import.meta.url), 'utf8')
-ok('the trace click copies what XDS is searched on', /navigator\.clipboard\?\.writeText\(idNumber\)/.test(button))
+ok('the trace click copies what XDS is searched on', /navigator\.clipboard\?\.writeText\(key\.value\)/.test(button))
+/*
+ * AND ONLY WHEN IT COULD BE ONE. It copied the raw ID field, and on a real account that field
+ * held a telephone number -- pasted into XDS that is an enquiry the firm pays for, run against
+ * something that is not a person.
+ */
+ok('...checked before it is copied', /const key = traceSearchKey\(debtorKind, idNumber, isValidSaId\)/.test(button))
+ok('...and an unusable number is not copied at all', /if \(key\.ok\) \{/.test(button))
+ok('...but is named, so it gets corrected', /\{problem\}/.test(button))
 /*
  * BOTH INSIDE THE TAP. Safari allows a new tab, and a clipboard write, only while it can still
  * see the tap that asked. Either moved after an await is silently refused and the button looks
@@ -373,8 +381,13 @@ ok('...with the copy started before the tab steals the gesture',
 ok('what it claims waits for the clipboard to answer',
   /write\.then\(\(\) => setCopied\('yes'\)\)\.catch\(\(\) => setCopied\('no'\)\)/.test(button))
 ok('...and a refused copy shows the number instead', /copied === 'no' \|\| copied === 'asking'/.test(button))
-ok('...and an account with no number says so rather than copying nothing',
-  /copied === 'nothing'/.test(button))
+/*
+ * A MISSING NUMBER AND A WRONG ONE ARE DIFFERENT PROBLEMS, and both are said out loud. One needs
+ * capturing, the other correcting -- and a collector told only "no ID" would go and type the
+ * telephone number sitting in that field straight into the portal.
+ */
+ok('...and an account with nothing usable says which of the two it is',
+  /problem !== null &&/.test(button) && /searchKeyProblem\(key, debtorKind\)/.test(button))
 
 /*
  * ASKED AFTERWARDS, which is the only moment the answer exists — an account can carry a company
