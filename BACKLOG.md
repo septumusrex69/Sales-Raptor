@@ -248,6 +248,12 @@ work that well" — email is the priority.
   it currently only exists two clicks inside the trace. `heldProperty()` already returns exactly
   what is wanted, filtered to what they still own; it is the placement that has to be decided,
   beside the standing panel or under the debtor's details.
+- **`rankContacts()` is no longer called by anything.** It ranked which of a bureau's numbers were
+  worth offering, and it was the rule behind which findings arrived ticked at import. With the
+  ticks gone it has no caller, though it is still exported and still checked. Its natural home is
+  the workspace — marking the bureau's best guesses so a collector knows where to start on a
+  profile carrying twenty-six numbers. Either give it that job or delete it; leaving a tested,
+  uncalled rule in the library is how a codebase grows furniture.
 - **Then the account view itself** — "we'll move on to the accounts viewing and how this would
   look." Not started, and not to be guessed at.
 

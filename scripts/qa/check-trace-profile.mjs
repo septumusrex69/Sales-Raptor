@@ -626,12 +626,53 @@ ok('...and a re-import cannot duplicate one', /unique \(director_id, company_nam
  * the DEBTOR owns — a different and much stronger claim than the document makes.
  */
 ok('directorships are stored against the person',
-  /chosen\.directorships\.length > 0 && aboutDirector !== null/.test(importer))
+  /profile\.directorships\.length > 0 && aboutDirector !== null/.test(importer))
 ok('the upload offers them only on a person\'s profile',
   /about === 'director' && \(\s*\n?\s*<Found title="Other companies they direct"/.test(modal))
-/* Resigned ones are not ticked: one real profile carries thirty, and they would bury the account. */
-ok('a resigned directorship is not ticked by default',
-  /directorships\.filter\(\(c\) => c\.status !== 'Active'\)\.forEach/.test(modal))
+/*
+ * EVERYTHING IS FILED, AND NOTHING IS TICKED. The firm's own instruction: "the moment that you
+ * upload a trace, everything should be uploaded. All of the information should be uploaded. It
+ * shouldn't be ticked."
+ *
+ * Resigned directorships used to be left unticked so thirty of them would not bury the account.
+ * That was the right worry and the wrong lever -- it threw away exactly the thing somebody wants
+ * six months later, when the question is what else this person is on. The burying is solved by
+ * sorting the active ones first, which costs nothing and loses nothing.
+ */
+/*
+ * Asserted on the MACHINERY, not on the word "checkbox": the rung proposal is still a tick and
+ * always was, so a blanket "no checkbox here" would be false for the wrong reason.
+ */
+ok('no finding on the upload screen can be ticked off', !modal.includes('isOn('))
+ok('...and nothing toggles one', !modal.includes('onToggle'))
+ok('...and there is no tick state left to shuffle', !/const \[off, setOff\]/.test(modal))
+/* The one decision that survives, because a rung is not a finding -- it changes the client report. */
+ok('the rung is still proposed rather than applied', /checked=\{moveRung\}/.test(modal))
+ok('a resigned directorship is filed like any other',
+  !/directorships\.filter\(\(c\) => c\.status !== 'Active'\)\.forEach/.test(modal))
+/* Active first, so the ones worth reading are not below thirty rows of somebody's CV. */
+ok('...with the active ones sorted above them',
+  /\[\.\.\.profile\.directorships\]\.sort/.test(modal))
+
+/*
+ * AND NOTHING REACHES THE CONTACT LIST AT IMPORT.
+ *
+ * This is what the ticks were really for: a bureau's twenty-six numbers landing on the list a
+ * collector rings. The fix is at this end rather than the door -- account_contacts is not written
+ * here at all, and a finding becomes a contact only through promoteTraceItem, called by somebody
+ * who has tried it. Asserted as the ABSENCE of the write, because that is the whole guarantee.
+ */
+ok('the import does not write to the contact list', !/from\('account_contacts'\)\.insert/.test(importer))
+ok('...and the trace itself still keeps everything',
+  /const deduped = keepNewestPerThing\(itemRows\)/.test(importer))
+{
+  /* The one door left: promoteTraceItem, called from the workspace by somebody who tried it. */
+  const store = readFileSync(new URL('../../src/lib/traceStoreData.ts', import.meta.url), 'utf8')
+  const promote = store.slice(store.indexOf('export async function promoteTraceItem'))
+  ok('promoting a finding is what creates the contact', /await addContact\(\{/.test(promote))
+  ok('...and it records which contact it became, so it cannot be done twice',
+    /promoted_contact_id: contact\.id/.test(promote))
+}
 
 /* ---------- a judgment against a director is not against the company ---------- */
 
@@ -728,7 +769,14 @@ ok('...and a director', /A director/.test(modal))
 ok('an existing director is matched on their ID number',
   /directors\.find\(\(d\) => d\.idNumber === parsed\.idNumber\)/.test(modal))
 /* Nothing is stored until somebody has read it: a bureau profile is a third party's record. */
-ok('nothing is filed until the button is pressed', /File what is ticked/.test(modal))
+ok('nothing is filed until the button is pressed', /File the whole report/.test(modal))
+/*
+ * AND THEN STRAIGHT INTO THE WORK, which is the firm's next step: "the next thing it should ask
+ * you is work the trace." Filing is the step before the job, and a collector returned to the
+ * account screen has to go and find what they just uploaded.
+ */
+ok('...and filing offers to work it', /Work the trace/.test(modal))
+ok('...on the trace that was just filed', /onWork\(filedTrace\)/.test(modal))
 /*
  * A ROW THAT COULD NOT BE READ IS KEPT, NOT DROPPED — but it is quoted, never reported.
  *

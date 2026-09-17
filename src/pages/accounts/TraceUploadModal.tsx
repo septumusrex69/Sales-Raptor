@@ -3,7 +3,7 @@ import { AlertTriangle, Building2, Check, FileUp, Loader2, Scale, User } from 'l
 import { Modal } from '../../components/ui/Modal'
 import { pdfTokens } from '../../lib/pdfText.ts'
 import {
-  administrationReading, parseTrace, rankContacts, sameRegistration,
+  administrationReading, parseTrace, sameRegistration,
   type AdministrationReading, type TraceAddress, type TraceContact, type TraceDirector,
   type TraceEmployment, type TraceJudgment, type TraceProfile,
 } from '../../lib/traceProfile.ts'
@@ -12,7 +12,6 @@ import { uploadDocument } from '../../lib/accountWorkspace'
 import type { AccountDirector, PractitionerKind } from '../../lib/accountStanding.ts'
 import { formatDate } from '../../data/mockData'
 
-const TODAY = new Date().toISOString().slice(0, 10)
 
 /**
  * Uploading a trace, and saying who it is about.
@@ -32,7 +31,7 @@ const TODAY = new Date().toISOString().slice(0, 10)
  */
 export function TraceUploadModal({
   accountId, debtorKind, registrationNumber, directors, hasPractitioner, actor,
-  onClose, onDone, onAddPractitioner,
+  onClose, onDone, onAddPractitioner, onWork,
 }: {
   accountId: string
   debtorKind: 'individual' | 'company'
@@ -47,6 +46,8 @@ export function TraceUploadModal({
   onDone: () => Promise<void>
   /** Hands over to the practitioner form, carrying the office the status implies. */
   onAddPractitioner: (kind: PractitionerKind | null) => void
+  /** Open the trace just filed, in the workspace. The firm's step after uploading. */
+  onWork: (traceId: string) => void
 }) {
   const [busy, setBusy] = useState(false)
   const [reading, setReading] = useState(false)
@@ -55,7 +56,6 @@ export function TraceUploadModal({
   const [profile, setProfile] = useState<TraceProfile | null>(null)
   const [about, setAbout] = useState<'debtor' | 'director'>('debtor')
   const [directorId, setDirectorId] = useState<string | null>(null)
-  const [keepFile, setKeepFile] = useState(true)
   /*
    * PROPOSED, TICKED, AND STILL A TICK. The firm asked for the upload to propose the rung under a
    * liquidation rather than to apply it — so this starts on, because the document is usually
@@ -63,20 +63,31 @@ export function TraceUploadModal({
    */
   const [moveRung, setMoveRung] = useState(true)
   const [done, setDone] = useState<string | null>(null)
+  /*
+   * The trace just filed, so the next thing offered is the firm's own next thing: "the next thing
+   * it should ask you is work the trace. Because once the trace is being worked, then it can be
+   * saved or added once it's verified."
+   */
+  const [filedTrace, setFiledTrace] = useState<string | null>(null)
   /** Set when the PDF is on the machine but nothing could be read out of it. See fileUnread. */
   const [unreadable, setUnreadable] = useState<string | null>(null)
   /** Offered after filing, not before: the name is not on the PDF and has to be looked up. */
   const [askPractitioner, setAskPractitioner] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  /* What is ticked. Keyed by a stable string per row so a re-render cannot shuffle the ticks. */
-  const [off, setOff] = useState<Set<string>>(new Set())
-  const isOn = (key: string) => !off.has(key)
-  const toggle = (key: string) => setOff((s) => {
-    const next = new Set(s)
-    if (next.has(key)) next.delete(key); else next.add(key)
-    return next
-  })
+  /*
+   * NOTHING IS TICKED ANY MORE.
+   *
+   * This screen used to open with a tick against every finding and file only what stayed ticked.
+   * The firm ended it: "the moment that you upload a trace, everything should be uploaded. All of
+   * the information should be uploaded. It shouldn't be ticked. The next thing it should ask you
+   * is work the trace."
+   *
+   * What the ticks were really guarding against was a bureau's twenty-six numbers landing on the
+   * account's principal contact list -- and that is now fixed at the other end: importTrace writes
+   * nothing to account_contacts at all. So the list below is a reading of the report, shown so
+   * somebody can see it was read correctly before filing it, and nothing on it is a choice.
+   */
 
   const read = useCallback(async (f: File) => {
     setError(null); setProfile(null); setDone(null); setUnreadable(null)
@@ -105,28 +116,6 @@ export function TraceUploadModal({
         ? directors.find((d) => d.idNumber === parsed.idNumber)
         : undefined
       setDirectorId(match?.id ?? null)
-      /*
-       * Everything starts ticked EXCEPT the numbers, addresses and jobs the bureau has not seen
-       * recently — see rankContacts. Directors and judgments are facts about the company that do
-       * not decay; a phone number from 2011 is not a phone number.
-       */
-      const keepContacts = new Set(rankContacts(parsed.contacts, TODAY).map((c) => `c:${c.kind}:${c.value}`))
-      const drop = new Set<string>()
-      for (const c of parsed.contacts) {
-        const key = `c:${c.kind}:${c.value}`
-        if (!keepContacts.has(key)) drop.add(key)
-      }
-      parsed.addresses.slice(3).forEach((a) => drop.add(`a:${a.value}`))
-      parsed.employment.slice(2).forEach((e) => drop.add(`e:${e.employer}:${e.designation ?? ''}`))
-      /*
-       * A RESIGNED DIRECTORSHIP IS NOT TICKED BUT IT IS STORED IF YOU TICK IT.
-       *
-       * The firm's instruction was to mention the active ones and let the rest be a small sign
-       * that they exist. One real profile carries thirty; ticked by default they would bury the
-       * account under somebody's CV.
-       */
-      parsed.directorships.filter((c) => c.status !== 'Active').forEach((c) => drop.add(`k:${c.name}`))
-      setOff(drop)
       setMoveRung(true)
     } catch (e) {
       /*
@@ -210,22 +199,25 @@ export function TraceUploadModal({
     if (!profile || !file) return
     setBusy(true); setError(null)
     try {
-      const chosen = {
-        directors: profile.directors.filter((d) => isOn(`d:${d.idNumber ?? d.fullName}`)),
-        judgments: profile.judgments.filter((j) => isOn(`j:${j.caseNumber}`)),
-        contacts: profile.contacts.filter((c) => isOn(`c:${c.kind}:${c.value}`)),
-        addresses: profile.addresses.filter((a) => isOn(`a:${a.value}`)),
-        employment: profile.employment.filter((e) => isOn(`e:${e.employer}:${e.designation ?? ''}`)),
-        directorships: profile.directorships.filter((c) => isOn(`k:${c.name}`)),
-        administration: administration !== null && moveRung ? administration : null,
-      }
-      const r = await importTrace({ accountId, profile, target, chosen, actor })
+      /*
+       * The whole profile goes in. The only thing left to decide is the rung, which is not a
+       * finding -- it changes what the client is told about this account.
+       */
+      const r = await importTrace({
+        accountId, profile, target, actor,
+        decisions: { administration: administration !== null && moveRung ? administration : null },
+      })
       /*
        * The PDF itself goes to Documents afterwards, and its failure does not undo the import.
        * The firm paid for the search; the facts are the thing worth keeping, and a storage bucket
        * that refuses a 4MB file should not lose them.
        */
-      if (keepFile) {
+      /*
+       * ALWAYS, not a tick. The firm paid for this search and the PDF is the evidence behind every
+       * row above it; "upload everything" covers the document as much as the findings. It was a
+       * choice because it was written before there was anywhere good to put it.
+       */
+      {
         try {
           await uploadDocument({
             accountId, file, kind: 'Trace',
@@ -237,11 +229,17 @@ export function TraceUploadModal({
         r.directors > 0 ? `${r.directors} director${r.directors === 1 ? '' : 's'}` : null,
         r.directorsUpdated > 0 ? `${r.directorsUpdated} updated` : null,
         r.judgments > 0 ? `${r.judgments} judgment${r.judgments === 1 ? '' : 's'}` : null,
-        r.contacts > 0 ? `${r.contacts} contact${r.contacts === 1 ? '' : 's'}` : null,
         r.directorships > 0 ? `${r.directorships} directorship${r.directorships === 1 ? '' : 's'}` : null,
+        /*
+         * WHAT WENT ONTO THE TRACE, which is now the headline rather than a footnote. There is no
+         * "contacts added" line any more because nothing is added: a finding reaches the contact
+         * list by being worked, which is the next thing this screen offers.
+         */
+        r.filed > 0 ? `${r.filed} finding${r.filed === 1 ? '' : 's'}` : null,
         r.movedTo ? `moved to ${r.movedTo}` : null,
       ].filter(Boolean)
       setDone(bits.length ? `Filed: ${bits.join(', ')}.` : 'Filed. Nothing new to add — it was all already on the account.')
+      setFiledTrace(r.traceId)
       /*
        * AND NOW THE QUESTION THE DOCUMENT CANNOT ANSWER. A profile says a company is in final
        * liquidation and never names the liquidator — checked end to end on a real report. So the
@@ -409,7 +407,7 @@ export function TraceUploadModal({
             }).map((d: TraceDirector) => {
               const key = `d:${d.idNumber ?? d.fullName}`
               return (
-                <Row key={key} on={isOn(key)} onToggle={() => toggle(key)}
+                <Row key={key}
                   main={d.fullName}
                   side={d.status ?? 'Status unknown'}
                   note={[d.idNumber, d.appointedOn ? `appointed ${formatDate(d.appointedOn)}` : null].filter(Boolean).join(' · ')} />
@@ -429,7 +427,7 @@ export function TraceUploadModal({
                 empty, and the line says it is quoting rather than reporting.
               */
               return (
-                <Row key={key} on={isOn(key)} onToggle={() => toggle(key)}
+                <Row key={key}
                   main={j.plaintiff ?? (j.unread !== null ? `As printed: “${j.unread}”` : 'Plaintiff not named')}
                   side={j.filedOn ? formatDate(j.filedOn) : '—'}
                   note={[
@@ -444,7 +442,7 @@ export function TraceUploadModal({
             {profile.contacts.map((c: TraceContact) => {
               const key = `c:${c.kind}:${c.value}`
               return (
-                <Row key={key} on={isOn(key)} onToggle={() => toggle(key)}
+                <Row key={key}
                   main={c.value}
                   side={c.kind === 'mobile' ? 'Mobile' : c.kind === 'work' ? 'Work' : c.kind === 'email' ? 'Email' : 'Home'}
                   note={[
@@ -460,7 +458,7 @@ export function TraceUploadModal({
             {profile.addresses.map((a: TraceAddress) => {
               const key = `a:${a.value}`
               return (
-                <Row key={key} on={isOn(key)} onToggle={() => toggle(key)}
+                <Row key={key}
                   main={a.value} side={a.province ?? ''}
                   note={a.updatedOn ? `last seen ${formatDate(a.updatedOn)}` : 'never dated'} />
               )
@@ -471,7 +469,7 @@ export function TraceUploadModal({
             {profile.employment.map((e: TraceEmployment) => {
               const key = `e:${e.employer}:${e.designation ?? ''}`
               return (
-                <Row key={key} on={isOn(key)} onToggle={() => toggle(key)}
+                <Row key={key}
                   main={e.employer} side={e.designation ?? ''}
                   note={e.updatedOn ? `last seen ${formatDate(e.updatedOn)}` : 'never dated'} />
               )
@@ -484,10 +482,11 @@ export function TraceUploadModal({
             there can be a little sign that says there are other directors that he's not active
             anymore."
 
-            So the active ones are ticked and the resigned ones are not — they are still here to
-            be ticked by anyone who wants them, but they do not arrive as thirty rows of somebody's
-            CV. Only stored against a person: a directorship belongs to the director, not to the
-            account.
+            All of them are filed and the ACTIVE ONES SORT FIRST, which is what keeps thirty rows
+            of somebody's CV from burying the two that matter. They used to be filed only if
+            ticked, and a resigned directorship is exactly the kind of thing nobody ticks and
+            everybody wants six months later, when the question is what else this person is on.
+            Only stored against a person: a directorship belongs to the director, not the account.
           */}
           {about === 'director' && (
             <Found title="Other companies they direct" count={profile.directorships.length}>
@@ -498,7 +497,7 @@ export function TraceUploadModal({
               }).map((c) => {
                 const key = `k:${c.name}`
                 return (
-                  <Row key={key} on={isOn(key)} onToggle={() => toggle(key)}
+                  <Row key={key}
                     main={c.name}
                     side={c.status ?? ''}
                     note={c.appointedOn ? `appointed ${formatDate(c.appointedOn)}` : ''} />
@@ -506,12 +505,6 @@ export function TraceUploadModal({
               })}
             </Found>
           )}
-
-          <label className="flex items-center gap-2 text-sm text-slate-600">
-            <input type="checkbox" checked={keepFile} onChange={(e) => setKeepFile(e.target.checked)}
-              className="accent-[var(--c-gold-dark)]" />
-            Keep the PDF on the account under Documents
-          </label>
 
           {error && <p className="text-sm text-negative-700">{error}</p>}
           {done && <p className="text-sm text-[var(--c-green)] inline-flex items-center gap-1.5"><Check size={14} /> {done}</p>}
@@ -543,13 +536,28 @@ export function TraceUploadModal({
               className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50">
               {done ? 'Close' : 'Cancel'}
             </button>
-            {!done && (
+            {!done ? (
               <button type="button" onClick={() => void save()} disabled={busy}
                 className="text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
-                File what is ticked
+                File the whole report
+              </button>
+            ) : filedTrace !== null && (
+              /*
+                AND STRAIGHT INTO THE WORK. Filing is not the job -- it is the step before the job,
+                and a collector who files a trace and is then returned to the account screen has to
+                go and find the thing they just uploaded. This is the firm's flow: everything in,
+                then work it, and the contact list fills from what turns out to be true.
+              */
+              <button type="button" onClick={() => { onClose(); onWork(filedTrace) }}
+                className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white shadow-sm hover:bg-brand-700">
+                Work the trace
               </button>
             )}
           </div>
+          <p className="text-[11px] text-slate-400">
+            Everything on the report is filed. Nothing reaches the account&rsquo;s contact details
+            until it has been worked and turns out to be right.
+          </p>
           <p className="text-[11px] text-slate-400">
             Filing a trace charges nothing. The search itself is Annexure B item 4(c) and is charged
             on the Trace button, where it is run.
@@ -590,19 +598,15 @@ function Found({ title, count, children }: { title: string; count: number; child
   )
 }
 
-function Row({ on, onToggle, main, side, note }: {
-  on: boolean; onToggle: () => void; main: string; side: string; note: string
-}) {
+/** One finding, as the report printed it. Nothing here is a choice -- see the note at the top. */
+function Row({ main, side, note }: { main: string; side: string; note: string }) {
   return (
-    <label className="flex items-start gap-2 py-1.5 cursor-pointer">
-      <input type="checkbox" checked={on} onChange={onToggle} className="mt-1 accent-[var(--c-gold-dark)] shrink-0" />
-      <span className="min-w-0 flex-1">
-        <span className="flex flex-wrap items-baseline justify-between gap-x-2">
-          <span className={`text-sm ${on ? 'text-slate-800' : 'text-slate-400'} break-words min-w-0`}>{main}</span>
-          {side && <span className="text-[11px] text-slate-500 shrink-0">{side}</span>}
-        </span>
-        {note && <span className="block text-[11px] text-slate-400">{note}</span>}
-      </span>
-    </label>
+    <div className="py-1.5">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+        <span className="text-sm text-slate-800 break-words min-w-0">{main}</span>
+        {side && <span className="text-[11px] text-slate-500 shrink-0">{side}</span>}
+      </div>
+      {note && <p className="text-[11px] text-slate-400">{note}</p>}
+    </div>
   )
 }

@@ -751,6 +751,12 @@ export function AccountDetail() {
           onClose={() => setTracing(false)}
           onDone={reload}
           onAddPractitioner={(kind) => setPractitioner({ suggest: kind })}
+          /*
+            Straight from filing into working it, which is the firm's flow. reload() first, or the
+            workspace opens against the traces this screen held BEFORE the import and cannot find
+            the one it was just handed.
+          */
+          onWork={(traceId) => { void reload().then(() => setOpenTrace(traceId)) }}
         />
       )}
 

@@ -20,10 +20,7 @@ import { addNote } from './accountWorkspace'
 import { setSubStatus } from './accountStandingData.ts'
 import { keepNewestPerThing } from './traceStore.ts'
 import { likelyRelatives } from './traceProfile.ts'
-import type {
-  AdministrationReading, TraceAddress, TraceContact, TraceDirector, TraceEmployment, TraceJudgment,
-  TraceProfile,
-} from './traceProfile.ts'
+import type { AdministrationReading, TraceProfile } from './traceProfile.ts'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON from PostgREST. */
 
@@ -37,41 +34,44 @@ export type TraceTarget =
   | { of: 'debtor' }
   | { of: 'director'; directorId: string | null; idNumber: string | null; fullName: string }
 
-export interface TraceSelection {
-  directors: TraceDirector[]
-  judgments: TraceJudgment[]
-  contacts: TraceContact[]
-  addresses: TraceAddress[]
-  employment: TraceEmployment[]
-  /** The other companies this person sits on. Only ever off their own consumer profile. */
-  directorships: { name: string; status: string | null; appointedOn: string | null }[]
-  /**
-   * Put the account on the rung the profile says it belongs on.
-   *
-   * PROPOSED BY THE SCREEN AND CONFIRMED BY A PERSON — never read straight off the document. It
-   * changes what the client is told about this account, and "a PDF said so" is not an answer to
-   * "why does this now report as under administration".
-   */
+/**
+ * The one decision the import still asks a person to make.
+ *
+ * IT USED TO ASK SIX. Every finding arrived with a tick box and only the ticked ones were kept,
+ * which the firm ended: "the moment that you upload a trace, everything should be uploaded. All
+ * of the information should be uploaded. It shouldn't be ticked."
+ *
+ * They are right, and the ticks were solving the wrong problem. What they were really guarding
+ * against was a bureau's twenty-six numbers landing on the account's principal contact list — so
+ * the fix is that nothing lands there at import, not that findings are thrown away. A number the
+ * bureau saw in 2019 costs nothing to keep and is worth having when the two recent ones turn out
+ * to be dead; thrown away at the door, the firm pays for the same search twice to get it back.
+ *
+ * What survives as a question is the rung, because that is not a finding. It changes what the
+ * client is told about this account, and "a PDF said so" is not an answer to "why does this now
+ * report as under administration".
+ */
+export interface TraceDecisions {
   administration: AdministrationReading | null
 }
 
 export interface TraceImportResult {
+  /** The trace just filed, so the screen can offer to open it and work it. */
+  traceId: string | null
   directors: number
   judgments: number
-  contacts: number
   /** Directors already on the account whose row was refreshed rather than added. */
   directorsUpdated: number
   /** Other companies recorded against the person the trace was for. */
   directorships: number
   /** The rung the account was moved to, where the reader proposed one and it was accepted. */
   movedTo: string | null
-  /** Findings kept on the trace itself, whether or not they were ticked onto the account. */
+  /** Findings kept on the trace. Everything the search found, which is now everything. */
   filed: number
 }
 
-/** Nothing ticked is not an error, it is somebody looking at a profile and deciding against it. */
 const empty: TraceImportResult = {
-  directors: 0, judgments: 0, contacts: 0, directorsUpdated: 0, directorships: 0, movedTo: null,
+  traceId: null, directors: 0, judgments: 0, directorsUpdated: 0, directorships: 0, movedTo: null,
   filed: 0,
 }
 
@@ -108,10 +108,10 @@ export async function importTrace(input: {
   accountId: string
   profile: TraceProfile
   target: TraceTarget
-  chosen: TraceSelection
+  decisions: TraceDecisions
   actor: { id: string | null; name: string | null }
 }): Promise<TraceImportResult> {
-  const { accountId, profile, target, chosen, actor } = input
+  const { accountId, profile, target, decisions, actor } = input
   const result: TraceImportResult = { ...empty }
   const tracedAt = new Date().toISOString()
 
@@ -124,7 +124,7 @@ export async function importTrace(input: {
   const aboutDirector = target.of === 'director' ? await directorRow(accountId, target) : null
 
   /* ---------- directors, off a commercial report ---------- */
-  if (chosen.directors.length > 0) {
+  if (profile.directors.length > 0) {
     /*
      * Read first, then split into inserts and updates.
      *
@@ -144,7 +144,7 @@ export async function importTrace(input: {
     }
 
     const fresh: any[] = []
-    for (const d of chosen.directors) {
+    for (const d of profile.directors) {
       const found = (d.idNumber && byId.get(d.idNumber)) || byName.get(d.fullName.toUpperCase())
       const fields = {
         id_number: d.idNumber,
@@ -169,13 +169,13 @@ export async function importTrace(input: {
   }
 
   /* ---------- judgments ---------- */
-  if (chosen.judgments.length > 0) {
+  if (profile.judgments.length > 0) {
     /*
      * against_director_id carries WHO the judgment is against, and it is the whole reason a
      * director's personal judgments can be stored at all. Filed against the account, they would
      * count as the company's — see the column's comment.
      */
-    const rows = chosen.judgments.map((j) => ({
+    const rows = profile.judgments.map((j) => ({
       account_id: accountId,
       against_director_id: aboutDirector,
       case_number: j.caseNumber,
@@ -216,52 +216,20 @@ export async function importTrace(input: {
     result.judgments = rows.length
   }
 
-  /* ---------- the ways of reaching them ---------- */
-  const contactRows: any[] = []
+  /* ---------- nothing goes on the contact list here ---------- */
   /*
-   * A DIRECTOR'S NUMBER IS LABELLED WITH THE DIRECTOR'S NAME.
+   * THE PRINCIPAL CONTACT DETAILS ARE EARNED, NOT IMPORTED.
    *
-   * On a company account it is the only thing that tells a collector whose phone they are about
-   * to ring. Unlabelled, six directors' numbers become one undifferentiated list and the call
-   * opens with the wrong name.
+   * This used to copy the ticked numbers, addresses and jobs straight onto account_contacts, so
+   * the list a collector rings was half bureau guesswork the moment a trace landed. The firm's
+   * replacement, in their words: upload everything, then "work the trace" -- "once the trace is
+   * being worked, then it can be saved or added once it's verified."
+   *
+   * So a finding becomes a contact in exactly one place now: promoteTraceItem, called from the
+   * workspace by somebody who has tried it and said what happened. The contact list is then a
+   * list of things known to work rather than a list of things a bureau printed, which is the
+   * difference between a collector trusting it and scrolling past it.
    */
-  const label = target.of === 'director' ? target.fullName : null
-  for (const c of chosen.contacts) {
-    contactRows.push({
-      account_id: accountId, kind: c.kind, value: c.value, label, is_primary: false,
-    })
-  }
-  for (const a of chosen.addresses) {
-    contactRows.push({
-      account_id: accountId, kind: 'address', value: a.value,
-      label: [label, a.province].filter(Boolean).join(' · ') || null,
-      is_primary: false,
-    })
-  }
-  for (const e of chosen.employment) {
-    contactRows.push({
-      account_id: accountId, kind: 'employer',
-      value: [e.employer, e.designation].filter(Boolean).join(' — '),
-      label, is_primary: false,
-    })
-  }
-  if (contactRows.length > 0) {
-    /*
-     * Numbers already on the account are skipped rather than added again. A second trace on the
-     * same person returns most of the same numbers, and a contact list with the same mobile four
-     * times is a list a collector stops reading.
-     */
-    const { data: have, error } = await supabase.from('account_contacts')
-      .select('kind,value').eq('account_id', accountId)
-    if (error) throw new Error(error.message)
-    const seen = new Set((have ?? []).map((r: any) => `${r.kind}|${String(r.value).replace(/\s/g, '').toUpperCase()}`))
-    const fresh = contactRows.filter((r) => !seen.has(`${r.kind}|${String(r.value).replace(/\s/g, '').toUpperCase()}`))
-    if (fresh.length > 0) {
-      const ins = await supabase.from('account_contacts').insert(fresh)
-      if (ins.error) throw new Error(ins.error.message)
-      result.contacts = fresh.length
-    }
-  }
 
   /* ---------- the trace itself, kept whole ---------- */
   /*
@@ -291,6 +259,7 @@ export async function importTrace(input: {
   }).select('id').single()
   if (traceRow.error) throw new Error(traceRow.error.message)
   const traceId = (traceRow.data as any).id as string
+  result.traceId = traceId
 
   const relatives = new Set(likelyRelatives(profile.subjectName, profile.links).map((l) => l.fullName))
   const itemRows: any[] = [
@@ -357,7 +326,7 @@ export async function importTrace(input: {
   }
 
   /* ---------- the other companies they sit on ---------- */
-  if (chosen.directorships.length > 0 && aboutDirector !== null) {
+  if (profile.directorships.length > 0 && aboutDirector !== null) {
     /*
      * ONLY EVER AGAINST A PERSON. A directorship belongs to the director, not to the account —
      * filed against the account it would read as a company the DEBTOR owns, which is a different
@@ -367,7 +336,7 @@ export async function importTrace(input: {
       .select('company_name').eq('director_id', aboutDirector)
     if (error) throw new Error(error.message)
     const seen = new Set((have ?? []).map((r: any) => String(r.company_name).toUpperCase()))
-    const fresh = chosen.directorships
+    const fresh = profile.directorships
       .filter((c) => !seen.has(c.name.toUpperCase()))
       .map((c) => ({
         director_id: aboutDirector,
@@ -384,9 +353,9 @@ export async function importTrace(input: {
   }
 
   /* ---------- the rung, where a person accepted the proposal ---------- */
-  if (chosen.administration !== null) {
-    await setSubStatus(accountId, chosen.administration.subStatus)
-    result.movedTo = chosen.administration.subStatus
+  if (decisions.administration !== null) {
+    await setSubStatus(accountId, decisions.administration.subStatus)
+    result.movedTo = decisions.administration.subStatus
   }
 
   /* ---------- when this person was last traced ---------- */
@@ -427,10 +396,13 @@ export function traceNote(profile: TraceProfile, target: TraceTarget, r: TraceIm
   if (r.directors > 0) bits.push(`${r.directors} director${r.directors === 1 ? '' : 's'} added`)
   if (r.directorsUpdated > 0) bits.push(`${r.directorsUpdated} updated`)
   if (r.judgments > 0) bits.push(`${r.judgments} judgment${r.judgments === 1 ? '' : 's'}`)
-  if (r.contacts > 0) bits.push(`${r.contacts} contact${r.contacts === 1 ? '' : 's'}`)
   if (r.directorships > 0) bits.push(`${r.directorships} other directorship${r.directorships === 1 ? '' : 's'}`)
-  /* What was kept on the trace itself, which is most of it and none of it on the contact list. */
-  if (r.filed > 0) bits.push(`${r.filed} kept on the trace`)
+  /*
+   * WHAT THE SEARCH FOUND, and none of it on the contact list. The timeline used to say how many
+   * numbers went onto the account, which is now always none: a finding reaches the contact list
+   * by being worked, and that is its own timeline entry when it happens.
+   */
+  if (r.filed > 0) bits.push(`${r.filed} finding${r.filed === 1 ? '' : 's'} kept on the trace`)
   const found = bits.length > 0 ? bits.join(', ') : 'nothing taken from it'
   const status = profile.companyStatus ? ` Status at CIPC: ${profile.companyStatus}.` : ''
   /*
