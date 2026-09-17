@@ -142,7 +142,7 @@ check('quoted-printable: =XX back to the character it stands for',
   decodeQuotedPrintable('Kan ek R600 =E2=82=AC betaal?').toString('utf8'),
   'Kan ek R600 € betaal?')
 check('quoted-printable: a soft line break is not a line break',
-  decodeQuotedPrintable('my number is 083 555 =\r\n9922').toString('utf8'),
+  decodeQuotedPrintable('my number is 083 555 =\r\n0199').toString('utf8'),
   'my number is 083 555 0199')
 check('quoted-printable: a lone = that is not an escape survives',
   decodeQuotedPrintable('total = R1 234').toString('utf8'), 'total = R1 234')
