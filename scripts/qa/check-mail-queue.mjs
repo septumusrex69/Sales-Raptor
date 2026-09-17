@@ -159,6 +159,20 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
   ok('...and Select', select > -1)
   ok('writing comes before syncing', compose < sync)
   ok('...and syncing before selecting', sync < select)
+
+  /*
+   * And it is the one that is filled. Three identical outline buttons in a row gave the firm
+   * nothing to aim at -- "how do I create a new mail" was asked of a bar that had the answer on
+   * it. Brand, not gold: Select wears gold-400 while selecting is on, and that is the only
+   * thing on this bar that says which mode you are in.
+   */
+  const composeButton = bar.slice(compose, bar.indexOf('</button>', compose))
+  ok('the compose button is filled, not another outline', /bg-brand-600/.test(composeButton))
+  ok('...with text that reads on it', /text-white/.test(composeButton))
+  ok('...and it does not take gold, which means "this mode is on"',
+    !/bg-gold-400/.test(composeButton))
+  // The other two stay outlines, or filling one stops meaning anything.
+  ok('sync stays an outline', /border-slate-200/.test(bar.slice(sync, bar.indexOf('</button>', sync))))
 }
 
 /* ---------- 3. replying ---------- */

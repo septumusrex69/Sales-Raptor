@@ -615,9 +615,19 @@ export function MailPage() {
               a debtor, a lead, a deal — which covers replying and covers nothing else. Writing to
               an attorney, a client's accountant or a bureau had to be done in Outlook, which is
               how a mailbox managed in one place stops being managed in one place.
+
+              FILLED, and in brand rather than gold. It is the one button on this bar that starts
+              something instead of sorting what is already here, which is the same job the "+ Add"
+              button does in the top bar -- so it wears the same treatment, and somebody looking
+              for "where do I write one" finds the shape they already know.
+
+              NOT gold, though gold is the accent everywhere else here. Select turns gold-400
+              while selecting is on, and that is the only thing on this bar that says which mode
+              you are in. A permanently gold button beside it would spend the one signal that has
+              to keep meaning something.
             */}
             <button onClick={() => setComposing(true)}
-              className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+              className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg bg-brand-600 text-white shadow-sm hover:bg-brand-700">
               <PenLine size={14} />
               New email
             </button>
