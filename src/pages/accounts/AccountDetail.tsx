@@ -43,7 +43,7 @@ import {
   type AccountJudgment, type AccountStanding, type DirectorCompany, type PractitionerKind,
 } from '../../lib/accountStanding.ts'
 import { fetchStanding } from '../../lib/accountStandingData.ts'
-import { traceSummary, type FiledTrace, type TraceItem } from '../../lib/traceStore.ts'
+import { heldProperty, traceSummary, type FiledTrace, type TraceItem } from '../../lib/traceStore.ts'
 import { fetchTraces } from '../../lib/traceStoreData.ts'
 import { TraceWorkspaceModal } from './TraceWorkspaceModal'
 import { TraceUploadModal } from './TraceUploadModal'
@@ -328,6 +328,9 @@ export function AccountDetail() {
   const detailsPanel = (
     <div className="space-y-4">
       <DebtorDetailsPanel account={account} name={name} workspace={workspace} onChange={reload}
+        /* Only what they still own, across every trace on the account — see heldProperty. */
+        properties={heldProperty(traces.flatMap((t) => t.items))}
+        onOpenTrace={traces.length > 0 ? () => setOpenTrace(traces[0].id) : null}
         userId={currentUser?.id ?? null} onEmail={setComposeTo} />
       <StandingPanel account={account} standing={standing} position={position}
         traces={traces}

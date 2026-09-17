@@ -7,7 +7,7 @@ import { Modal } from '../../components/ui/Modal'
 import { PhoneLink } from '../../components/PhoneLink'
 import {
   OUTCOME_OPTIONS, TRACE_CATEGORIES, TRACE_SORTS, canPromote, categoryById, categoryCounts,
-  outcomeTone, pageOf, riskTone, workRows,
+  linkedHow, linkedNumber, outcomeTone, pageOf, riskTone, workRows,
   type FiledTrace, type OutcomeFilter, type OutcomeTone, type TraceCategoryId,
   type TraceItem, type TraceItemKind, type TraceOutcome, type TraceRow, type TraceSort,
 } from '../../lib/traceStore.ts'
@@ -415,6 +415,13 @@ function Row({ row, category, worked, busy, onOutcome, onPromote }: {
   onPromote: (asNextOfKin: boolean) => void
 }) {
   const dialable = category === 'phones'
+  /*
+   * A LINKED PERSON CAN BE RUNG TOO, on the number the bureau says they share with the debtor.
+   * The links block gives a name and what the link ran through, and where that was a telephone
+   * the telephone is sitting in the label — so it was on the screen and not dialable, which is
+   * the number a collector chasing a relative most wants to press.
+   */
+  const shared = category === 'people' ? linkedNumber(row.label) : null
   const ruledOut = row.outcome === 'not_theirs' || row.outcome === 'unreachable'
   /* Ruled out or a property: there is nothing to put on the contact list. */
   const savable = row.items.some(canPromote)
@@ -434,11 +441,17 @@ function Row({ row, category, worked, busy, onOutcome, onPromote }: {
               of the bureau's. A number that is the Cell, the Home and the Work number is one
               line somebody uses for everything — worth knowing before you ring it.
             */}
+            {/* Rung from here, through the same button as everywhere else in the app. */}
+            {shared !== null && (
+              <p className="text-sm mt-0.5"><PhoneLink number={shared} /></p>
+            )}
             <p className="text-xs text-slate-400">
               {[
                 category === 'phones'
                   ? row.kinds.map((k) => KIND_WORD[k]).filter(Boolean).join(' · ')
-                  : row.label,
+                  /* The number has a line of its own above; this says how they are connected. */
+                  : category === 'people' ? linkedHow(row.label)
+                    : row.label,
                 category === 'property' && row.amount !== null ? formatMoney(row.amount) : null,
                 category === 'property' ? (/owner/i.test(row.status ?? '') ? 'still owns it' : 'no longer theirs') : null,
                 category === 'people' && row.status === 'relative' ? 'possible relative — same surname' : null,

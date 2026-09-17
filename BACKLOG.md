@@ -252,12 +252,9 @@ work that well" — email is the priority.
 
 ## Next on the trace
 
-- **Property belongs on the account's main page.** The firm's words, straight after approving the
-  workspace: "Property is also something that should basically be added to the main page." A house
-  they still own is the difference between an account worth attaching and one worth closing, and
-  it currently only exists two clicks inside the trace. `heldProperty()` already returns exactly
-  what is wanted, filtered to what they still own; it is the placement that has to be decided,
-  beside the standing panel or under the debtor's details.
+- **The judgment layout.** The firm: "I see where the judgment is, but I think we can still kind
+  of make the layout for these things a little bit better. I'll upload an image about how it could
+  look." Waiting on that image rather than guessing.
 - **`rankContacts()` is no longer called by anything.** It ranked which of a bureau's numbers were
   worth offering, and it was the rule behind which findings arrived ticked at import. With the
   ticks gone it has no caller, though it is still exported and still checked. Its natural home is

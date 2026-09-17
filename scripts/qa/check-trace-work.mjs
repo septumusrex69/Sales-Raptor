@@ -346,6 +346,18 @@ ok('...with the relationship as their role', /personRole: asNextOfKin \? 'Next o
  */
 ok('promoting never decides the primary number', /isPrimary: false/.test(data))
 
+/*
+ * A LINKED PERSON IS SOMEBODY YOU CAN RING. The firm: "the number and how they are linked should
+ * basically be shown and you should be able to call the number when you're working the trace."
+ * The number was on the screen, inside the label, and was not dialable — which is the number a
+ * collector chasing a relative most wants to press.
+ */
+ok('a linked person\'s shared number is pulled out of the label',
+  /const shared = category === 'people' \? linkedNumber\(row\.label\) : null/.test(workspace))
+ok('...and is rung through the same button as every other number',
+  /\{shared !== null && \([\s\S]{0,120}<PhoneLink number=\{shared\} \/>/.test(workspace))
+ok('...with how they are linked said beside it', /linkedHow\(row\.label\)/.test(workspace))
+
 /* ---------- starting the search ---------- */
 
 /*

@@ -49,3 +49,19 @@ export function contactsByPerson(contacts: AccountContact[]): ContactPerson[] {
     return 0
   })
 }
+
+/**
+ * The people on the account who are NOT the debtor.
+ *
+ * A next of kin promoted off a trace is stored with their own name against it, which is what
+ * stops a collector opening the call to somebody's sister as though she were the debtor. On a
+ * company those people are the whole contact list and they show under "Who to ask for"; on an
+ * INDIVIDUAL they were invisible, because that block only ran for companies and an individual's
+ * numbers are shown flat on the reasoning that they are all the debtor's.
+ *
+ * They are not all the debtor's. Anybody with a name attached is somebody else, and that is
+ * precisely the row a collector must not dial thinking it is the debtor.
+ */
+export function otherPeople(contacts: AccountContact[]): ContactPerson[] {
+  return contactsByPerson(contacts).filter((g) => g.person !== null)
+}

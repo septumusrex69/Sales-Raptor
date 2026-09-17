@@ -8,7 +8,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-contact-people.mjs
  */
 import { readFileSync } from 'node:fs'
-import { contactsByPerson } from '../../src/lib/contactPeople.ts'
+import { contactsByPerson, otherPeople } from '../../src/lib/contactPeople.ts'
 
 let pass = 0
 const failures = []
@@ -130,6 +130,67 @@ ok('...and what they do there', /What do they do there\?/.test(panels))
 /* An individual keeps the label: "daughter's phone" is a caption, not a contact person. */
 ok('an individual still gets a plain label', /Whose is it\? \(optional\)/.test(panels))
 
+/* ---------- and the people who are not the debtor ---------- */
+
+/*
+ * THE FIRM'S REPORT: "I'm not seeing a next of kin." They were stored correctly and shown
+ * nowhere. "Who to ask for" runs on a COMPANY only, because on an individual every number is
+ * taken to be the debtor's and grouping them by name would be noise — so a relative promoted off
+ * a trace, carrying somebody else's name, fell into a gap.
+ *
+ * Anybody with a name against them is not the debtor, whichever kind of account it is, and that
+ * row is precisely the one nobody must dial thinking they have the debtor on the line.
+ */
+{
+  const contacts = [
+    C({ id: 'own', value: '082 555 0101' }),
+    C({ id: 'kin', value: '083 555 0202', personName: 'Caleb Example', personRole: 'Next of kin' }),
+  ]
+  eq('somebody else\'s number is not the debtor\'s', otherPeople(contacts).map((g) => g.person), ['Caleb Example'])
+  eq('...and carries how they are related', otherPeople(contacts)[0].role, 'Next of kin')
+  /* The debtor's own numbers are not a "person" and must not be listed as one. */
+  eq('the debtor is not listed as somebody else', otherPeople([C({ id: 'own' })]).length, 0)
+  eq('an account with nobody else on it has nobody else', otherPeople([]).length, 0)
+  /* Two rows for one person are one person, or the panel lists them twice. */
+  eq('two numbers for one relative are one person', otherPeople([
+    C({ id: 'a', personName: 'Caleb Example', personRole: 'Next of kin' }),
+    C({ id: 'b', value: '084 555 0303', personName: 'Caleb Example' }),
+  ]).length, 1)
+  eq('...carrying both numbers', otherPeople([
+    C({ id: 'a', personName: 'Caleb Example', personRole: 'Next of kin' }),
+    C({ id: 'b', value: '084 555 0303', personName: 'Caleb Example' }),
+  ])[0].contacts.length, 2)
+}
+
+/* ---------- what the panel actually shows ---------- */
+
+ok('an individual\'s other people have a block of their own',
+  /Other people on this account/.test(panels))
+ok('...built from otherPeople, not from the company grouping', /const kin = isCompany \? \[\] : otherPeople\(live\)/.test(panels))
+/*
+ * A NAME WITH NO NUMBER SAYS SO. Promoting a relative stores their NAME as the contact value —
+ * that is all the bureau gave — so the row would otherwise read "Caleb Example / Caleb Example".
+ */
+ok('...and a relative with no number yet says so', /No number yet/.test(panels))
+
+/*
+ * PROPERTY, ON THE ACCOUNT SCREEN. The firm: "I would like to see more prominent on the accounts
+ * is if there is a property... almost flagged like this debtor has a property." It existed only
+ * two clicks inside the trace modal.
+ */
+ok('property is flagged on the debtor\'s details', /Owns property/.test(panels))
+ok('...with the address', /\{prop\.value\}/.test(panels))
+ok('...and what it cost', /bought for \$\{formatMoney\(prop\.amount\)\}/.test(panels))
+/*
+ * ONLY WHAT THEY STILL OWN. The deeds block lists houses sold fifteen years ago; one flagged on
+ * the account screen reads as an asset to anybody skimming, which turns a warning into a lie.
+ */
+{
+  const detail = read('../../src/pages/accounts/AccountDetail.tsx')
+  ok('...filtered to what they still own before it ever reaches the panel',
+    /properties=\{heldProperty\(traces\.flatMap\(\(t\) => t\.items\)\)\}/.test(detail))
+}
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')
@@ -138,4 +199,6 @@ if (failures.length) {
 console.log(`${pass} passed, 0 failed`)
 console.log(`
 A company's contacts belong to people, and the panel says who to ask for. An individual's belong to
-the debtor, and it does not — the two accounts are not the same shape and no longer pretend to be.`)
+the debtor — except the ones that do not, and a relative carrying somebody else's name now has a
+block of their own rather than sitting unlabelled among the debtor's numbers. Property they still
+own is flagged on the account screen instead of two clicks inside the trace.`)

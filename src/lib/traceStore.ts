@@ -574,3 +574,41 @@ export function searchKeyProblem(key: TraceSearchKey, debtorKind: 'individual' |
       looksLikeAPhone ? ' — it looks like a telephone number' : ''
     }. Nothing was copied — correct it under the debtor’s details.`
 }
+
+/**
+ * The number a link can actually be rung on.
+ *
+ * A LINKED PERSON HAS NO NUMBER OF THEIR OWN. The bureau's links block gives a name, how the link
+ * was made, and what it was made through -- and when it was made through a shared TELEPHONE, that
+ * telephone is the thing in the middle column. So the number is not the linked person's number in
+ * any strict sense; it is the number the two of them have in common, which is exactly the number
+ * somebody chasing a relative wants to ring.
+ *
+ * Where the link runs through a company instead, there is no number and this returns null rather
+ * than offering something to dial that is not a telephone at all.
+ */
+export function linkedNumber(label: string | null | undefined): string | null {
+  if (!label) return null
+  /*
+   * Found in the label rather than assumed to be the whole of it: the label is stored as
+   * "<type> · <what it ran through>", and on a telephone link the second half is the number.
+   * A local number, or one written in full with the country code.
+   */
+  const match = /(\+?27|0)\s*\d[\d\s-]{7,}\d/.exec(label)
+  if (!match) return null
+  const digits = match[0].replace(/[^\d+]/g, '')
+  /* Ten local digits, or eleven behind a 27. Anything else is a reference number, not a line. */
+  if (/^0\d{9}$/.test(digits)) return match[0].trim()
+  if (/^(\+?27)\d{9}$/.test(digits)) return match[0].trim()
+  return null
+}
+
+/** How the bureau says two people are connected, with the number taken out of it. */
+export function linkedHow(label: string | null | undefined): string | null {
+  if (!label) return null
+  const number = linkedNumber(label)
+  const words = number === null ? label : label.replace(number, '').trim()
+  /* Left with a bare separator once the number is gone, there is nothing left worth printing. */
+  const cleaned = words.replace(/^[\s··|-]+|[\s··|-]+$/g, '').trim()
+  return cleaned === '' ? null : cleaned
+}

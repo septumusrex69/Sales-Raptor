@@ -12,8 +12,8 @@
  */
 import {
   OUTCOME_OPTIONS, TRACE_CATEGORIES, TRACE_SORTS, categoryById, categoryCounts,
-  groupTraceRows, itemsIn, outcomeTone, pageOf, riskTone, searchKeyProblem, traceRowKey,
-  traceSearchKey, workRows,
+  groupTraceRows, itemsIn, linkedHow, linkedNumber, outcomeTone, pageOf, riskTone,
+  searchKeyProblem, traceRowKey, traceSearchKey, workRows,
 } from '../../src/lib/traceStore.ts'
 import { isValidSaId } from '../../src/lib/newDebtor.ts'
 
@@ -310,6 +310,39 @@ const problemText = (k, kind) => searchKeyProblem(k, kind) ?? '(no problem repor
   ok('...but a number that is not a phone number is not called one',
     !problemText(id('8001010509087'), 'individual').includes('telephone'))
 }
+
+/* ---------- a linked person, and the number they share ---------- */
+
+/*
+ * A LINKED PERSON HAS NO NUMBER OF THEIR OWN. The bureau gives a name, how the link was made and
+ * what it ran through — and where it ran through a shared TELEPHONE, that telephone is the middle
+ * column. It is not strictly the relative's number; it is the number the two of them have in
+ * common, which is exactly what somebody chasing a relative wants to ring.
+ */
+eq('a telephone link gives a number to ring', linkedNumber('Telephone · 084 555 0402'), '084 555 0402')
+eq('...however it was spaced', linkedNumber('Telephone · 0845550402'), '0845550402')
+eq('...and written with the country code', linkedNumber('Telephone · +27 84 555 0402'), '+27 84 555 0402')
+/*
+ * AND A LINK THROUGH A COMPANY HAS NO NUMBER IN IT. Offering something to dial that is not a
+ * telephone is worse than offering nothing: the collector rings it, gets nothing, and stops
+ * trusting the button.
+ */
+eq('a link through a company offers nothing to dial', linkedNumber('Director · Kopano Freight Services'), null)
+eq('...and neither does a bare relationship', linkedNumber('Relative'), null)
+eq('nothing in, nothing out', linkedNumber(null), null)
+/* A registration or case number is not a line, however many digits it carries. */
+eq('a registration number is not a telephone number', linkedNumber('Member · 2019/445102/07'), null)
+eq('...nor is a short run of digits', linkedNumber('Linked · 12345'), null)
+
+/* And what is left once the number is taken out is how they are connected. */
+eq('how they are linked reads on its own', linkedHow('Telephone · 084 555 0402'), 'Telephone')
+eq('...and a company link is unchanged', linkedHow('Director · Kopano Freight Services'), 'Director · Kopano Freight Services')
+/*
+ * A label that was ONLY a number leaves nothing to say, and must not leave a stray separator
+ * behind — "· " printed under somebody's name reads as a bug, which it would be.
+ */
+eq('a label that was only a number says nothing rather than a bullet', linkedHow('0845550402'), null)
+eq('nothing in, nothing out', linkedHow(null), null)
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)

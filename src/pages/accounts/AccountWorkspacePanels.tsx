@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   Building2, Check, Download, FileText, Globe, IdCard, Loader2, Mail, MapPin, MessageCircle,
-  Phone, Plus, ShieldCheck, Smartphone, Trash2, Upload, User, X,
+  Phone, Plus, ShieldCheck, Smartphone, Trash2, Upload, User, X, Home
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { PhoneLink } from '../../components/PhoneLink'
-import { formatDate } from '../../data/mockData'
+import { formatDate, formatMoney } from '../../data/mockData'
 import type { DebtorAccount } from '../../lib/accountBook'
 import {
   addContact, deleteDocument, documentUrl, retireContact, saveDebtorIdentity, saveDebtorPreferences,
@@ -14,7 +14,8 @@ import {
   type AccountContact, type AccountDocument, type ContactKind, type Workspace,
 } from '../../lib/accountWorkspace'
 import { DictateButton } from '../../components/ui/Dictate'
-import { contactsByPerson } from '../../lib/contactPeople.ts'
+import { contactsByPerson, otherPeople } from '../../lib/contactPeople.ts'
+import type { TraceItem } from '../../lib/traceStore.ts'
 
 /** Surfaces a failed write instead of leaving a button that silently did nothing. */
 export function useWriter(onChange: () => Promise<void>) {
@@ -56,13 +57,24 @@ const SLOT_ICON = {
   consent: ShieldCheck,
 } as const
 
-export function DebtorDetailsPanel({ account, name, workspace, onChange, userId, onEmail }: {
+export function DebtorDetailsPanel({ account, name, workspace, properties, onChange, userId, onEmail, onOpenTrace }: {
   account: DebtorAccount
   name: string
   workspace: Workspace | null
+  /**
+   * What the deeds office has them on and they still own, off every trace on the account.
+   *
+   * HERE rather than only inside the trace, at the firm's instruction: "one thing which I would
+   * like to see more prominent on the accounts is if there is a property." A house they still own
+   * is the difference between an account worth attaching and one worth closing, and it was two
+   * clicks inside a modal.
+   */
+  properties: TraceItem[]
   onChange: () => Promise<void>
   userId: string | null
   onEmail: (address: string) => void
+  /** Where the property and the next of kin came from, so the evidence is one click away. */
+  onOpenTrace: (() => void) | null
 }) {
   const [addKind, setAddKind] = useState<ContactKind | null>(null)
   const { busy, err, run } = useWriter(onChange)
@@ -71,8 +83,17 @@ export function DebtorDetailsPanel({ account, name, workspace, onChange, userId,
   const retired = (workspace?.contacts ?? []).filter((c) => c.retiredAt)
 
   const isCompany = account.debtorKind === 'company'
-  /* Only computed for a company; on an individual every contact is the debtor's by definition. */
   const people = isCompany ? contactsByPerson(live) : []
+  /*
+   * ANYBODY WITH A NAME AGAINST THEM IS NOT THE DEBTOR.
+   *
+   * On a company the whole contact list is people and it shows under "Who to ask for". On an
+   * individual the list is shown flat, on the reasoning that every number is the debtor's -- and
+   * a next of kin promoted off a trace was therefore invisible, which is the firm's report:
+   * "I'm not seeing a next of kin". They are not all the debtor's, and the one with somebody
+   * else's name on it is precisely the row nobody must dial thinking it is the debtor.
+   */
+  const kin = isCompany ? [] : otherPeople(live)
   const phones = live.filter((c) => c.kind === 'mobile' || c.kind === 'phone' || c.kind === 'work')
   // Shared with the action bar's Call button, so both ring the same number.
   const primaryPhone = dialableNumber(live)
@@ -162,6 +183,91 @@ export function DebtorDetailsPanel({ account, name, workspace, onChange, userId,
           onSave={(v) => run(() => saveDebtorPreferences(account.id, { consentStatus: v }))} busy={busy}
           hint="POPIA: whether they have agreed to electronic contact." />
       </dl>
+
+      {/*
+        PROPERTY, HERE RATHER THAN TWO CLICKS INSIDE THE TRACE.
+
+        The firm's instruction: "one thing which I would like to see more prominent on the accounts
+        is if there is a property... it can be almost flagged like this debtor has a property."
+
+        ONLY WHAT THEY STILL OWN. The deeds block lists every transaction, including houses sold
+        fifteen years ago, and a sold property flagged on the account screen reads as an asset to
+        anybody skimming — which would turn a warning into a lie. heldProperty does that filtering;
+        what arrives here is already the live ones.
+      */}
+      {properties.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-slate-100">
+          <div className="rounded-xl border border-gold-300 bg-gold-50 px-3 py-2.5">
+            <p className="text-[11px] uppercase tracking-wide text-[var(--c-gold-deep)] font-medium inline-flex items-center gap-1.5">
+              <Home size={12} />
+              {properties.length === 1 ? 'Owns property' : `Owns ${properties.length} properties`}
+            </p>
+            {properties.map((prop) => (
+              <div key={prop.id} className="mt-1.5">
+                <p className="text-sm text-navy-900 break-words">{prop.value}</p>
+                <p className="text-[11px] text-slate-500">
+                  {[
+                    prop.label,
+                    prop.amount !== null ? `bought for ${formatMoney(prop.amount)}` : null,
+                    prop.seenOn ? `registered ${formatDate(prop.seenOn)}` : null,
+                  ].filter(Boolean).join(' \u00b7 ')}
+                </p>
+              </div>
+            ))}
+            {onOpenTrace && (
+              <button type="button" onClick={onOpenTrace}
+                className="mt-1.5 text-[11px] font-medium text-[var(--c-steel)] hover:underline">
+                Where this came from
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/*
+        NEXT OF KIN AND ANYBODY ELSE WITH A NAME, on an individual.
+
+        The firm's report was "I'm not seeing a next of kin... under the debtor's details there
+        should be something that says additional contact people or next of kin". They were being
+        stored correctly and shown nowhere: the block below this runs for companies only, and an
+        individual's numbers are listed flat because they are all the debtor's.
+
+        They are not all the debtor's. A relative promoted off a trace carries their own name, and
+        that row is the one nobody must dial thinking they have the debtor on the line.
+      */}
+      {kin.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400">Other people on this account</p>
+          {kin.map((group) => (
+            <div key={group.person ?? ''}>
+              <p className="text-sm font-medium text-slate-800">
+                {group.person}
+                {group.role && <span className="ml-1.5 text-[11px] font-normal text-slate-500">{group.role}</span>}
+              </p>
+              <div className="space-y-1 mt-0.5">
+                {group.contacts.map((c) => (
+                  /*
+                    A PERSON WE HAVE A NAME FOR AND NO NUMBER FOR. Promoting a relative off a trace
+                    stores their NAME as the contact — that is all the bureau gave — so the row
+                    would read "Caleb Maistry / Caleb Maistry". Saying it once and saying what is
+                    missing is the useful version.
+                  */
+                  <div key={c.id}>
+                    {c.value === group.person ? (
+                      <p className="text-[11px] text-slate-400">
+                        No number yet{c.label ? ` \u00b7 ${c.label}` : ''}
+                      </p>
+                    ) : (
+                      <ContactValue contact={c} userId={userId} busy={busy} run={run}
+                        onOpen={c.kind === 'email' ? () => onEmail(c.value) : undefined} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/*
         WHO TO ASK FOR — a company only, and the reason is the whole difference between the two
