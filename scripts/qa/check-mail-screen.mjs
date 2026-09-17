@@ -23,6 +23,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-mail-screen.mjs
  */
 import { readFileSync } from 'node:fs'
+import { isLeadIntake, parseLeadIntake } from '../../src/lib/leadIntake.ts'
 
 let pass = 0
 const failures = []
@@ -36,6 +37,11 @@ const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8')
 const page = read('../../src/pages/mail/MailPage.tsx')
 const pane = read('../../src/components/email/ReadingPane.tsx')
 const menu = read('../../src/components/ui/RowMenu.tsx')
+const composer = read('../../src/components/ComposeEmailModal.tsx')
+const sync = read('../../api/_lib/emailSync.ts')
+const mapper = read('../../src/lib/userMail.ts')
+const send = read('../../api/email/send.ts')
+const quick = read('../../src/components/layout/QuickAdd.tsx')
 
 /* One function cut out before asserting on it -- a regex over a whole file is satisfied by any
    line in it, and this file has been bitten by exactly that before. */
@@ -95,7 +101,7 @@ ok('the sender is named in full weight', /font-semibold text-navy-950">\{m\.from
 ok('...with the address after it', /&lt;\{m\.fromAddress\}&gt;/.test(detail))
 /* Wrapped rather than truncated: a half-shown address looks like the whole of a shorter one. */
 ok('...which wraps rather than being cut off', /break-words/.test(detail))
-ok('and then who else was on it', /<RecipientLines mail=\{m\} \/>/.test(detail))
+ok('and then who else was on it', /<RecipientLines mail=\{m\} mine=/.test(detail))
 /*
  * THE MATCH BUTTON IS GONE FROM THE CORNER. It said what to press and never said why; the bar
  * under the actions says both. Left here as well, an unmatched message would offer two.
@@ -109,7 +115,15 @@ ok('...and what kind of record that is', /CRM_OR_ACCOUNT\[m\.linkedTo\.kind\]/.t
 /* ---------- 3. an unmatched message says so ---------- */
 
 const bar = slice(page, 'function NotMatchedBar', '\n/**', 'NotMatchedBar')
-ok('it names the state', />Not matched yet</.test(bar))
+ok('it names the state', /'Not matched yet'/.test(bar))
+/*
+ * AN ENQUIRY OFF THE WEBSITE IS NOT A QUESTION. Every other unmatched message asks one -- debtor,
+ * client, nobody? -- and form@bredellferreira.co.za has exactly one answer, so the buttons swap
+ * places. Offering "Match to a record" first there sends somebody hunting the book for a stranger
+ * who by definition is not in it.
+ */
+ok('...unless it came off the contact form', /isLeadIntake\(mail\.fromAddress\)/.test(bar))
+ok('...which says what it is instead', /A new enquiry off the website/.test(bar))
 /*
  * AND WHAT IT COSTS, which is the reason it exists. Item 1(a) is R25 on every message we send and
  * a fee can only be raised against an account, so a reply typed on an unmatched message goes out
@@ -131,33 +145,54 @@ ok('it hangs off the open message', /<NotMatchedBar mail=\{mail\}/.test(page))
 
 /* ---------- 4. a lead, out of the sender ---------- */
 
-const lead = slice(page, 'function CreateLeadFromMailModal', '\n/** A CRM record', 'the create-lead modal')
+const lead = slice(page, 'function CreateLeadFromMailModal', '\nfunction LeadCreatedModal', 'the create-lead modal')
 
 /*
- * EVERY PREFILL IS A GUESS IN AN EDITABLE BOX. The name comes out of one header field, the company
- * off the domain. Written straight to the record they would be wrong quietly; in a box, in front
- * of somebody reading the message, they are wrong visibly and for about two seconds.
+ * THE REAL LEAD FORM, at the firm's instruction: "it should use the same lead form as adding an
+ * actual lead -- this one is a small version, it should actually make a lead."
+ *
+ * So this is a WRAPPER. It works out the prefills and takes over what happens afterwards, and it
+ * owns no fields of its own: a second, shorter form would have drifted within a month, because
+ * what a lead needs is decided by what the sales side does with one and not by which screen
+ * somebody happened to be on.
  */
-ok('the name is split out of the header', /splitPersonName\(mail\.fromName\)/.test(lead))
-ok('...into a box that can be corrected', /onChange=\{\(e\) => setFirstName\(e\.target\.value\)\}/.test(lead))
-ok('the company is guessed off the domain', /companyFromDomain\(domain\)/.test(lead))
+ok('the mailbox uses the same form as Add Lead', /<LeadForm/.test(lead))
 /*
- * AND ONLY WHERE THE DOMAIN SAYS SOMETHING. A gmail.com address says nothing about who somebody
- * works for, and "Gmail" in the Company box is worse than a blank one.
+ * AND THE SHARED FORM ACTUALLY TAKES WHAT IT IS HANDED. Exported and then ignoring `initial` would
+ * look identical from the mailbox's side -- one form, no prefills, and nobody the wiser until
+ * somebody types a name that was already in the message.
  */
+ok('...which fills itself in from what it is given',
+  /firstName: initial\?\.firstName \?\? ''/.test(quick)
+  && /companyName: initial\?\.companyName \?\? ''/.test(quick)
+  && /email: initial\?\.email \?\? ''/.test(quick))
+/* And lets the caller decide what happens afterwards, instead of always opening the new lead. */
+ok('...and hands the new lead back rather than navigating away',
+  /if \(onCreated\) \{ onCreated\(lead\); return \}/.test(quick))
+ok('...and owns no fields of its own', !/<input/.test(lead))
+ok('...and no second Add Lead call beside it', !/addLead\(/.test(lead))
+
+/*
+ * AN ENQUIRY OFF THE WEBSITE IS READ OUT OF THE BODY, NEVER OFF THE HEADER. The From header is the
+ * firm's OWN form address; put on the lead it would then match every later enquiry to that same
+ * lead, so one afternoon's five enquiries would file themselves on one stranger.
+ */
+ok('a form enquiry is recognised', /const fromForm = isLeadIntake\(mail\.fromAddress\)/.test(lead))
+ok('...and read out of the message', /parseLeadIntake\(text\)/.test(lead))
+const formBranch = slice(lead, 'const initial = fromForm', ': {', 'the form-enquiry prefills')
+ok('...with their address taken from the body', /email: intake\.email \?\? ''/.test(formBranch))
+ok('...and never from the sender', !/mail\.fromAddress/.test(formBranch))
+/* It came off the website, and the source on the lead should say so rather than say "Email". */
+ok('...and the source says the website', /source: 'Website' as LeadSource/.test(formBranch))
+
+/*
+ * FROM ANYBODY ELSE the header IS the person, and the prefills are guesses in editable boxes.
+ */
+ok('an ordinary sender has their name split', /splitPersonName\(mail\.fromName\)/.test(lead))
+ok('...their company guessed off the domain', /companyFromDomain\(domain\)/.test(lead))
+/* But never off a shared provider: "Gmail" in the Company box is worse than a blank one. */
 ok('...but never off a shared provider', /isSharedDomain\(mail\.fromAddress\) \? ''/.test(lead))
-/*
- * NUMBERS ARE OFFERED, NEVER FILLED IN. A number lifted off a signature looks authoritative and is
- * still a guess, and a wrong one here is one a salesperson later phones. Same treatment the
- * account picker gives them.
- */
-ok('numbers found in the message are suggested', /findContactDetails\(/.test(lead))
-ok('...as something to press', /onClick=\{\(\) => setPhone\(c\.value\)\}/.test(lead))
-ok('...and the phone box starts empty', /const \[phone, setPhone\] = useState\(''\)/.test(lead))
-
-/* Email, because that is literally where this lead came from. */
-ok('the source says where it came from', /useState<LeadSource>\('Email'\)/.test(lead))
-ok('the sender’s address goes on the lead', /email: mail\.fromAddress/.test(lead))
+ok('...and Email as the source, because that is where it came from', /source: 'Email' as LeadSource/.test(lead))
 
 /*
  * FILED ON THE NEW LEAD IN THE SAME BREATH, which is the whole point of doing this from the
@@ -166,27 +201,179 @@ ok('the sender’s address goes on the lead', /email: mail\.fromAddress/.test(le
  */
 ok('the message is filed on the lead it created', /linkMailToRecord\(\{/.test(lead))
 ok('...as a lead', /kind: 'lead'/.test(lead))
+/*
+ * The lead is already saved by the time the filing runs, so a failure there is reported rather
+ * than swallowed -- and the lead is handed on regardless, because pretending nothing happened
+ * would leave a record on the system that the screen says does not exist.
+ */
+ok('a filing that fails says so', /could not be filed on it/.test(lead))
 
 /*
  * NOTHING IS CHARGED, and it says so. Annexure B prices work on DEBTOR ACCOUNTS; the sales side
- * raises no fees at all. The rest of this page talks about money constantly, so silence here
- * would read as "some fee, unstated".
- */
-/*
- * Read with the comments stripped out. Both of these words are in the comment above the modal
- * explaining WHY nothing is charged, so tested against the file as written they would pass with
- * the sentence deleted off the screen -- which is the only place it matters.
+ * raises no fees at all. Read with comments stripped: the block above the modal explains WHY, so
+ * tested against the file as written this would pass with the sentence deleted off the screen.
  */
 const leadVisible = lead.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-/* Before, in the modal -- so it is known while the decision is being made... */
 ok('the modal says nothing is charged', /Nothing is charged &mdash; Annexure B/.test(leadVisible))
-/* ...and after, in what it reports, because that line is the one that gets read. */
-ok('...and so does the line it reports back',
-  /Nothing was charged \\u2014 Annexure B is for debtor accounts/.test(leadVisible))
-/* No fee call of any kind in this path. The check is the point: it cannot be added by accident. */
-ok('and no fee is raised anywhere in it', !/chargeMessage|chargeItem|raiseFee/.test(lead))
+ok('and no fee is raised anywhere in it', !/chargeMessage|chargeItem|raiseFee/.test(leadVisible))
 
-/* ---------- 5. the plumbing the layout hangs on ---------- */
+/*
+ * AND THEN IT ASKS. The firm: "once it says lead created, it should ask you -- go back to mail, or
+ * go to the lead." Both are real answers: somebody working a morning's enquiries wants the next
+ * message, somebody who has just met their best lead of the week wants to phone them.
+ */
+const done = slice(page, 'function LeadCreatedModal', '\nfunction ', 'the lead-created box')
+ok('it says the lead exists', /title="Lead created"/.test(done))
+ok('...and offers the mail back', />\s*Back to the mail\s*</.test(done))
+ok('...and the lead itself', />\s*Open the lead\s*</.test(done))
+ok('opening the lead navigates to it', /navigate\(`\/leads\/\$\{createdLead\.id\}`\)/.test(page))
+/* Neither answer is the default one a stray Enter would take. */
+ok('...and neither is chosen for you', !/autoFocus/.test(done))
+
+/* ---------- 4b. what the contact form actually sends ---------- */
+
+/*
+ * The parser, exercised rather than read. These bodies come off a page somebody in marketing
+ * edits, so the labels move -- and the cost of getting one wrong is a lead with the firm's own
+ * switchboard on it, which somebody then phones.
+ */
+const FORM_BODY = [
+  'You have a new enquiry from the website.',
+  '',
+  'Name: Ernest Mohlalisi',
+  'Company: Urban Haus',
+  'Email: ernest@urbanhausgroup.co.za',
+  'Phone: 010 555 0142',
+  'Message: I would like assistance recovering money owed to me.',
+  '',
+  '--',
+  'Bredell Ferreira',
+  /* The firm's OWN switchboard, labelled, under the enquiry -- which is what these mails carry and
+     what makes first-match-wins load-bearing rather than decorative. */
+  'Tel: 011 555 0100',
+  'Email: info@bredellferreira.co.za',
+].join('\n')
+
+const parsed = parseLeadIntake(FORM_BODY)
+check('the name is read off the form', parsed.firstName, 'Ernest')
+check('...and the surname with it', parsed.lastName, 'Mohlalisi')
+check('the company is read off the form', parsed.companyName, 'Urban Haus')
+check('...and their real address', parsed.email, 'ernest@urbanhausgroup.co.za')
+/*
+ * THE FIRST MATCH WINS, which is what keeps the firm's own footer off the lead: these bodies carry
+ * the enquiry and then a signature with a switchboard number under it.
+ */
+check('...and THEIR number, not the footer\u2019s', parsed.phone, '010 555 0142')
+
+/* An explicit Surname field beats splitting a Name field, where the form sends both. */
+const split = parseLeadIntake('Name: Johan van der Merwe\nSurname: van der Merwe')
+check('an explicit surname wins over a split one', split.lastName, 'van der Merwe')
+
+/* The label on its own line, which is what an HTML form looks like once it has been flattened. */
+const stacked = parseLeadIntake('Name:\nFelicia Nkosi\nEmail:\nfelicia@example.co.za')
+check('a label on its own line still finds its value', stacked.firstName, 'Felicia')
+/*
+ * AND STOPS AT THE NEXT LABEL. A form that posts an empty Name followed by Email would otherwise
+ * make the lead's first name "Email:" and their surname their own address.
+ */
+const empty = parseLeadIntake('Name:\nEmail: felicia@example.co.za')
+check('an empty field does not eat the next label', empty.firstName, undefined)
+check('...and that next label is still read', empty.email, 'felicia@example.co.za')
+
+/*
+ * A SENTENCE IS NOT A FIELD, even when it contains the word. The labels are anchored ^...$ and
+ * that anchoring is the only thing standing between "we will need the company name:" and a lead
+ * whose company is "please send it through" -- which somebody would then put on a quotation.
+ */
+const prose = parseLeadIntake('We will need the company name: please send it through')
+check('prose is not mistaken for a company', prose.companyName, undefined)
+/* Nor for a name: "...the company name" contains "name", which is a label of its own. */
+check('...nor for a name', prose.firstName, undefined)
+
+/*
+ * A LAST RESORT FOR THE ADDRESS ONLY. Without one the lead is unreachable and the enquiry is
+ * wasted -- but never an address at the firm's own domain, which is the form itself.
+ */
+check('an unlabelled address is still found',
+  parseLeadIntake('Hi, please call me on my email joe@example.co.za').email, 'joe@example.co.za')
+check('...but never the firm\u2019s own',
+  parseLeadIntake('Sent via form@bredellferreira.co.za').email, undefined)
+
+/* And which addresses count as the website at all. */
+ok('the contact form is recognised', isLeadIntake('form@bredellferreira.co.za'))
+ok('...whatever case it arrives in', isLeadIntake('Form@BredellFerreira.co.za'))
+ok('...and an ordinary sender is not', !isLeadIntake('ernest@example.co.za'))
+
+/* ---------- 5. the sender's name, at both ends ---------- */
+
+/*
+ * `.text` IS THE WHOLE HEADER, NOT THE NAME. Storing it made every list row read as a truncated
+ * address, printed the address twice on the open message, and made the record button as wide as an
+ * email address -- which is where most of the bulk the firm complained about actually came from.
+ */
+ok('the sync works the display name out', /const displayName = \(parsed\.from/.test(sync))
+ok('...off the address value, not the formatted header', /parsed\.from\.value\?\.\[0\]\?\.name/.test(sync))
+/*
+ * BOTH PLACES. The mailbox row and the debtor account's own correspondence list each had their own
+ * copy of the old expression, so the bug would have been fixed once and left standing once --
+ * which is why it is worked out one line above and used twice.
+ */
+ok('neither store keeps the whole header any more', !/fromName: parsed\.from\?\.text/.test(sync))
+ok('the mailbox row takes it', /fromName: displayName,/.test(sync))
+/* The account's list has to print something, so there the fallback is the address. */
+ok('...and the account\u2019s correspondence takes it too', /fromName: displayName \?\? fromAddress,/.test(sync))
+/*
+ * AND EVERYTHING ALREADY SYNCED IS CLEANED ON THE WAY OUT. Those rows cannot be re-read: the
+ * upsert ignores duplicates on purpose, so a re-sync cannot overwrite an agent's filing.
+ */
+ok('what is already stored is cleaned when read', /fromName: senderName\(r\.from_name, r\.from_address\)/.test(mapper))
+
+/* ---------- 6. the composer ---------- */
+
+/*
+ * BIG ENOUGH TO WRITE IN. The firm: "the one you made is very small -- make it bigger like Outlook,
+ * and you could see at the bottom the previous email that it is going to reply to."
+ */
+ok('the composer is a place to write, not a dialog to answer', /width=\{760\}/.test(composer))
+ok('...with room for more than a sentence', /rows=\{12\}/.test(composer))
+
+/*
+ * THE MESSAGE BEING ANSWERED, UNDER THE BOX AND NOT IN IT. Quoting into the box was tried and
+ * removed: a debtor's reply already carries their own client's quoted chain, so it opened the
+ * composer with two layers of "> " before anybody had typed a word.
+ */
+ok('the original is shown', /quoted \?: string|quoted\?: string/.test(composer))
+ok('...below the box rather than inside it', !/setBody\(.*quoted/.test(composer))
+/* As text, because this is mail from outside the building. */
+ok('...as text, never as markup', /whitespace-pre-wrap break-words">\{quoted\.trim\(\)\}/.test(composer))
+/* In its own scroller, or a long chain pushes Send off the bottom of the screen. */
+ok('...and a long chain cannot push Send off the screen', /max-h-48 overflow-y-auto/.test(composer))
+ok('the reply is given the message it is answering', /quoted=\{bodies\[replying\.id\]/.test(page))
+
+/*
+ * FILES, which the mailbox could not send at all -- forwarding a debtor's proof of payment meant
+ * opening Outlook.
+ */
+ok('a file can be attached', /type="file" multiple/.test(composer))
+ok('...and taken off again before sending', /aria-label=\{`Remove \$\{f\.filename\}`\}/.test(composer))
+/*
+ * CAPPED IN THE BROWSER, WITH THE NUMBER SAID. Vercel's own limit arrives as an empty 413 that the
+ * client can only report as "could not reach the server" -- after the wait, and after somebody has
+ * attached a debtor's bank statements.
+ */
+ok('too much is refused before the wait',
+  /if \(already \+ adding > MAX_ATTACHMENT_BYTES\)/.test(composer))
+ok('...and says how much is too much', /much as one message can carry/.test(composer))
+/* And guarded again at the endpoint, because the browser's limit is a courtesy, not a control. */
+ok('the endpoint guards it too', /too large to send in one message/.test(send))
+/*
+ * THE SIGNATURE SURVIVES AN ATTACHMENT. It rides in the same array with a cid and is referenced
+ * from the HTML; replacing that array rather than adding to it would strip the sender's own
+ * letterhead off every message that carried a file.
+ */
+ok('the signature still travels with the files', /cid: SIGNATURE_CID \}\]\s*\n?\s*: \[\]\),/.test(send))
+
+/* ---------- 7. the plumbing the layout hangs on ---------- */
 
 /*
  * THE LIST HEADER SCROLLS NOTHING. A search box that scrolls away with the list is one you have to

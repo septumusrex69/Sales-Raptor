@@ -11,8 +11,8 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  companyFromDomain, forwardBody, forwardSubject, recipientLine, replyAllTo, replySubject,
-  splitPersonName,
+  companyFromDomain, forwardBody, forwardSubject, recipientLine, recipientNames, replyAllTo,
+  replySubject, senderName, splitPersonName,
 } from '../../src/lib/emailRules.ts'
 
 let pass = 0
@@ -206,6 +206,56 @@ eq('a named recipient reads as a name and an address',
 eq('...and an unnamed one as the address alone', recipientLine([P('bob@y.co.za')]), 'bob@y.co.za')
 eq('several are one line', recipientLine([P('a@x.co'), P('b@x.co')]), 'a@x.co, b@x.co')
 eq('nobody is nothing', recipientLine([]), '')
+
+/* ---------- whose name is on it ---------- */
+
+/*
+ * THE BUG THIS EXISTS FOR: the sync stored mailparser's `.text` for the From header, which is the
+ * whole formatted address and not the display name. Every list row read `"Urban Haus"
+ * <info@urbanhaus...` truncated, the open message printed the address twice, and a button
+ * offering to open the record was as wide as an email address. The sync now stores the name
+ * alone; this cleans up what is already synced, which cannot be re-read because the upsert
+ * ignores duplicates on purpose.
+ */
+check('a whole From header gives up its name',
+  senderName('"Urban Haus" <info@urbanhausgroup.co.za>', 'info@urbanhausgroup.co.za'), 'Urban Haus')
+check('...quoted or not',
+  senderName('Urban Haus <info@urbanhausgroup.co.za>', 'info@urbanhausgroup.co.za'), 'Urban Haus')
+check('a plain name is left alone', senderName('Ernest Mohlalisi', 'e@x.co.za'), 'Ernest Mohlalisi')
+/*
+ * NULL, NOT THE ADDRESS. An address masquerading as a name is worse than an honest address: it
+ * gets greeted in a letter. The caller decides the fallback.
+ */
+check('no name at all is nothing', senderName(null, 'e@x.co.za'), null)
+check('...and so is an empty one', senderName('  ', 'e@x.co.za'), null)
+check('a bare address is not a name', senderName('e@x.co.za', 'e@x.co.za'), null)
+check('...whatever case it is written in', senderName('E@X.co.za', 'e@x.co.za'), null)
+check('an address with no display name in front of it is nothing',
+  senderName('<e@x.co.za>', 'e@x.co.za'), null)
+
+/*
+ * ON SCREEN, RECIPIENTS ARE NAMES. recipientLine writes real header values, which is what a Cc box
+ * needs and what goes out on the wire; printed, three of them is four wrapped lines. The firm:
+ * "all of this is underneath each other, make it in a line next to each other to save space."
+ */
+check('recipients read as names', recipientNames([
+  P('stephan@bredellferreira.co.za', 'Stephan Ferreira'),
+  P('ryno@bredellferreira.co.za', 'Ryno'),
+]), 'Stephan Ferreira, Ryno')
+/* Somebody with no name is their address, which is still all there is to call them. */
+check('...and an unnamed one by their address',
+  recipientNames([P('joycem@cfdc.org.za')]), 'joycem@cfdc.org.za')
+/* You are "you", which is shorter and is what every mail client does. */
+check('you are not listed by name', recipientNames(
+  [P('stephan@bredellferreira.co.za', 'Stephan Ferreira'), P('ryno@bredellferreira.co.za', 'Ryno')],
+  ['stephan@bredellferreira.co.za'],
+), 'you, Ryno')
+check('...whatever case the header wrote it in', recipientNames(
+  [P('Stephan@BredellFerreira.co.za', 'Stephan Ferreira')], ['stephan@bredellferreira.co.za'],
+), 'you')
+/* A name that is really an address is still cleaned up on the way past. */
+check('a recipient whose "name" is their address is not printed twice',
+  recipientNames([P('e@x.co.za', 'e@x.co.za')]), 'e@x.co.za')
 
 /* ---------- a lead, out of the sender ---------- */
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Target, Users, Building2, Handshake, CheckSquare, Calendar, FileText, ChevronDown } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
@@ -7,7 +7,7 @@ import { SearchableSelect } from '../ui/SearchableSelect'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { leadSources, services } from '../../data/mockData'
-import type { LeadSource, ProductService } from '../../types'
+import type { Lead, LeadSource, ProductService } from '../../types'
 import { LeadOpportunityFields, emptyLeadOpportunityValue, leadOpportunityPatch } from '../leads/LeadOpportunityFields'
 import { isAssignableOwner } from '../../lib/permissions'
 
@@ -90,21 +90,47 @@ function QuickAddModal({ type, onClose }: { type: QuickAddType; onClose: () => v
 
 export type Store = ReturnType<typeof useAppStore>
 
-export function LeadForm({ onClose, store, navigate }: { onClose: () => void; store: Store; navigate: ReturnType<typeof useNavigate> }) {
+/**
+ * THE ONE LEAD FORM.
+ *
+ * Used by Add Lead in the top bar and by Create lead in the mailbox, at the firm's instruction:
+ * "leads should use the same lead form as adding an actual lead -- this lead form you made here is
+ * a small version, it should actually make a lead."
+ *
+ * A second, shorter form would have drifted within a month: the fields a lead needs are decided by
+ * what the sales side does with one, not by which screen somebody happened to be on, and the
+ * opportunity fields in particular turn into deals the moment the lead is saved.
+ *
+ * `initial` prefills it. `onCreated` replaces what happens afterwards -- by default, close and go
+ * to the new lead, which is what the top bar has always done; from the mailbox the email has to be
+ * filed on the lead first and the person asked where they would rather be.
+ */
+export function LeadForm({ onClose, store, navigate, initial, title = 'Add Lead', intro, onCreated }: {
+  onClose: () => void
+  store: Store
+  navigate: ReturnType<typeof useNavigate>
+  /** Prefilled values. Guesses, every one of them, which is why they land in editable boxes. */
+  initial?: Partial<{ firstName: string; lastName: string; companyName: string; phone: string; email: string; source: LeadSource }>
+  title?: string
+  /** Said above the fields where the caller has something to explain -- a fee, or where this came from. */
+  intro?: ReactNode
+  /** What to do with the new lead. Omitted: close, and open it. */
+  onCreated?: (lead: Lead) => void
+}) {
   const { currentUser } = useAuth()
   const reps = useMemo(() => store.users.filter((u) => isAssignableOwner(u.role)), [store.users])
   const [form, setForm] = useState({
-    firstName: '',
-    lastName: '',
-    companyName: '',
-    phone: '',
-    email: '',
-    source: 'Website' as LeadSource,
+    firstName: initial?.firstName ?? '',
+    lastName: initial?.lastName ?? '',
+    companyName: initial?.companyName ?? '',
+    phone: initial?.phone ?? '',
+    email: initial?.email ?? '',
+    source: initial?.source ?? ('Website' as LeadSource),
     ownerId: currentUser?.id ?? '',
   })
   const [opportunity, setOpportunity] = useState(emptyLeadOpportunityValue())
   return (
-    <Modal title="Add Lead" onClose={onClose} width={560}>
+    <Modal title={title} onClose={onClose} width={560}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
@@ -119,10 +145,12 @@ export function LeadForm({ onClose, store, navigate }: { onClose: () => void; st
             ownerId: form.ownerId || undefined,
             ...leadOpportunityPatch(opportunity),
           })
+          if (onCreated) { onCreated(lead); return }
           onClose()
           navigate(`/leads/${lead.id}`)
         }}
       >
+        {intro}
         <div className="grid grid-cols-2 gap-3">
           <FormField label="First Name" required>
             <input className={inputClass} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} required />
@@ -159,7 +187,7 @@ export function LeadForm({ onClose, store, navigate }: { onClose: () => void; st
           </select>
         </FormField>
         <LeadOpportunityFields value={opportunity} onChange={setOpportunity} />
-        <SubmitRow onClose={onClose} label="Add Lead" />
+        <SubmitRow onClose={onClose} label={title} />
       </form>
     </Modal>
   )

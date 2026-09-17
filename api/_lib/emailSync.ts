@@ -881,6 +881,22 @@ async function syncMailbox(
             address: normaliseAddress(v.address as string) ?? (v.address as string),
           }))
       }
+      /*
+       * THE DISPLAY NAME, NOT THE WHOLE HEADER.
+       *
+       * `.text` is mailparser's formatted address -- `"Urban Haus" <info@urbanhausgroup.co.za>` --
+       * and storing that made every list row read as a truncated address, printed the address
+       * twice on the open message, and made a button offering to open the record as wide as an
+       * email address. The name is in .value[0].name and is frequently absent, which is a null and
+       * not a fallback: an address masquerading as a name gets greeted in a letter.
+       *
+       * Worked out once, because BOTH the mailbox row and the debtor account's correspondence had
+       * their own copy of the old expression and would have been fixed one at a time.
+       */
+      const displayName = (parsed.from && 'value' in parsed.from
+        ? parsed.from.value?.[0]?.name
+        : null) || null
+
       const toRecipients = people(parsed.to)
       const ccRecipients = people(parsed.cc)
       const firstTo = parsed.to && 'value' in parsed.to ? parsed.to.value?.[0] : undefined
@@ -890,7 +906,13 @@ async function syncMailbox(
         uid: msg.uid,
         messageId: parsed.messageId ?? `${conn.user_id}:${path}:${uid}`,
         fromAddress: normaliseAddress(fromAddress) ?? fromAddress,
-        fromName: parsed.from?.text ?? null,
+        /*
+         * THE NAME, NOT THE WHOLE HEADER. `.text` is mailparser's formatted address --
+         * `"Urban Haus" <info@urbanhausgroup.co.za>` -- and storing that made every list row read
+         * as a truncated address and the open message print the address twice. The display name
+         * is in .value[0].name, and is frequently absent, which is a null and not a fallback.
+         */
+        fromName: displayName,
         subject: parsed.subject || '(no subject)',
         body: parsed.text || '',
         attachmentNames: realAttachmentNames(parsed.attachments),
@@ -974,7 +996,9 @@ async function syncMailbox(
       if (accountMatch) {
         const filedOnAccount = await fileAccountEmail(admin, accountMatch.accountId, {
           fromAddress,
-          fromName: parsed.from?.text ?? fromAddress,
+          /* The address where there is no name: this column is what the account's correspondence
+             list prints, and it has to say something. See displayName. */
+          fromName: displayName ?? fromAddress,
           subject: parsed.subject || '(no subject)',
           body: (parsed.text || '').slice(0, NOTES_MAX_LENGTH),
           messageId: parsed.messageId ?? `${conn.user_id}:${path}:${uid}`,

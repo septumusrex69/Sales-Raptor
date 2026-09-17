@@ -25,7 +25,7 @@
 import {
   OUT, PORT, chromium, makeRunner, signedInPage, startServer, stopServer,
 } from './harness.mjs'
-import { COMPANY, MAIL, PROFILE, TEAM, USER_ID, COLLEAGUE } from './fixtures.mjs'
+import { COMPANY, FORM_BODY, MAIL, PROFILE, TEAM, USER_ID, COLLEAGUE } from './fixtures.mjs'
 
 const t = makeRunner('mail')
 const seen = []
@@ -50,7 +50,18 @@ const handlers = [
   [(u) => u.includes('/rest/v1/calendar_events'), () => ({ body: [] })],
   [
     (u) => u.includes('/rest/v1/user_emails'),
-    (u) => {
+    (u, req) => {
+      /*
+       * FILING A MESSAGE IS A PATCH THAT READS ONE ROW BACK. linkMailToRecord claims the row with
+       * .maybeSingle(), and PostgREST fails that when more than one comes back -- so answering a
+       * PATCH out of the whole fixture makes filing report "multiple (or no) rows returned" and
+       * the lead lands without its email. Which is exactly the failure the app now surfaces
+       * honestly, so the fixture has to be right or the check would be reading a stub's mistake.
+       */
+      if (req.method() === 'PATCH') {
+        const one = /id=(?:eq|in)\.\(?"?([0-9a-f-]+)/.exec(decodeURIComponent(u))?.[1]
+        return { body: one ? [{ id: one }] : [] }
+      }
       /*
        * The unread count and the needs-matching badge come back as a HEAD request with an exact
        * count -- answered out of the same fixture the list is built from, so the number on the
@@ -82,6 +93,24 @@ try {
     status: 200, contentType: 'application/json',
     body: JSON.stringify({ connected: true, email: PROFILE.email }),
   }))
+
+  /*
+   * The message body is fetched out of the mailbox on open, by another serverless function the dev
+   * server does not run. It matters here beyond cosmetics: a contact-form enquiry's details exist
+   * ONLY in the body -- the snippet has had its newlines collapsed -- so without this the
+   * create-lead prefills would be empty and the check that they are not would be checking nothing.
+   */
+  await page.route('**/api/email/attachment*', async (route) => {
+    const sent = JSON.parse(route.request().postData() ?? '{}')
+    const message = MAIL.find((m) => m.id === sent.mailId)
+    const text = message?.from_address === 'form@bredellferreira.co.za'
+      ? FORM_BODY
+      : `${message?.snippet ?? ''}`
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ text, details: [], images: [], imagesSkipped: 0, calendar: '' }),
+    })
+  })
 
   const errors = []
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
@@ -162,11 +191,18 @@ try {
   await t.shot(page, '22a-mail-reading-pane')
 
   t.ok('the sender is named in full', await page.getByText('Ernest Mohlalisi').first().isVisible())
-  /* Who else was on it, which the firm could not see: "I can't see all the other recipients." */
-  t.ok('everyone it went to is named',
-    await page.getByText('stephan@bredellferreira.co.za').first().isVisible())
-  t.ok('...and everyone copied on it',
-    await page.getByText('camille@bredellferreira.co.za').first().isVisible())
+  /*
+   * Who else was on it, which the firm could not see: "I can't see all the other recipients."
+   *
+   * NAMES, not addresses, and on one line each -- "make it in a line next to each other to save
+   * space". Three recipients written out in full were four wrapped lines.
+   */
+  t.ok('everyone it went to is named', await page.getByText('To: Stephan').first().isVisible())
+  t.ok('...and everyone copied on it', await page.getByText('Cc: Camille').first().isVisible())
+  /* The addresses are one hover away, which is the whole trade. */
+  t.check('...with the real addresses kept in the hover',
+    await page.getByText('To: Stephan').first().getAttribute('title'),
+    'Stephan <stephan@bredellferreira.co.za>')
 
   /* Three answers in front; the filing decisions behind the dots. */
   t.ok('Reply is offered', await page.getByRole('button', { name: 'Reply', exact: true }).isVisible())
@@ -214,29 +250,88 @@ try {
   await page.waitForTimeout(700)
   t.check('free mail is not nagged either', await page.getByText('Not matched yet').count(), 0)
 
-  /* ---------- a lead, out of the enquiry ---------- */
+  /* ---------- a lead, out of an ordinary sender ---------- */
 
   await page.getByText('Debt collection enquiry').first().click()
   await page.waitForTimeout(700)
   await page.getByRole('button', { name: 'Create lead' }).first().click()
   await page.waitForTimeout(500)
-  t.ok('the lead box opens',
-    await page.getByRole('heading', { name: 'Create a lead from this email' }).isVisible())
   /*
-   * PREFILLED FROM THE MESSAGE, and prefilled as guesses in boxes somebody can correct. The name
-   * is split out of one header field; the company is read off the domain, which is the half that
-   * would otherwise be typed.
+   * THE REAL LEAD FORM, at the firm's instruction: "it should use the same lead form as adding an
+   * actual lead." Checked by a field only the full form has -- a title alone would pass over a
+   * short form wearing the same heading.
    */
+  /*
+   * SCOPED TO THE MODAL. "Email" and "Company" are words this page uses in several places at once
+   * -- a view switcher, a tab, a list chip -- and an unscoped label lookup resolves to eight
+   * things and fails for a reason that has nothing to do with the form.
+   */
+  const box = () => page.locator('[data-modal-open]')
+  /*
+   * EXACT, OR ANCHORED. getByLabel matches on substring, and "Email" is also one of the options
+   * inside the Lead Source select, so an inexact lookup resolves to two controls and fails for a
+   * reason that has nothing to do with the form. A required field's label carries its asterisk --
+   * "First Name*" -- so those are anchored at the front rather than matched whole.
+   */
+  t.ok('the real lead form opens',
+    await page.getByRole('heading', { name: 'Create lead' }).isVisible())
+  t.ok('...the whole one, with the owner on it', await box().getByLabel('Owner', { exact: true }).isVisible())
   t.check('the first name is taken off the message',
-    await page.getByLabel('First name').inputValue(), 'Ernest')
+    await box().getByLabel(/^First Name/).inputValue(), 'Ernest')
   t.check('...and the surname with it',
-    await page.getByLabel('Surname').inputValue(), 'Mohlalisi')
+    await box().getByLabel('Last Name', { exact: true }).inputValue(), 'Mohlalisi')
   t.check('the company is guessed off the domain',
-    await page.getByLabel('Company').inputValue(), 'Example')
+    await box().getByLabel(/^Company/).inputValue(), 'Example')
+  t.check('...and their own address is on it',
+    await box().getByLabel('Email', { exact: true }).inputValue(), 'ernest@example.co.za')
   /* Annexure B prices work on debtor accounts. The sales side raises nothing, and it says so. */
   t.ok('and it says nothing will be charged',
     await page.getByText(/Nothing is charged/).first().isVisible())
   await t.shot(page, '23-mail-create-lead')
+
+  /*
+   * AND IT ASKS WHERE TO GO. "Once it says lead created, it should ask you -- go back to mail, or
+   * go to the lead." Both are real answers and neither is right for everybody.
+   */
+  /* Scoped to the modal: "Create lead" is also the button on the bar behind it. */
+  await box().getByRole('button', { name: 'Create lead' }).click()
+  await page.waitForTimeout(900)
+  t.ok('it says the lead was created',
+    await page.getByRole('heading', { name: 'Lead created' }).isVisible())
+  t.ok('...and offers the mail back',
+    await page.getByRole('button', { name: 'Back to the mail' }).isVisible())
+  t.ok('...and the lead itself',
+    await page.getByRole('button', { name: 'Open the lead' }).isVisible())
+  await t.shot(page, '24-mail-lead-created')
+  await page.getByRole('button', { name: 'Back to the mail' }).click()
+  await page.waitForTimeout(600)
+  t.ok('choosing the mail leaves you in the mailbox',
+    await page.getByRole('heading', { name: 'Mail', exact: true }).isVisible())
+
+  /* ---------- a lead, out of a contact-form enquiry ---------- */
+
+  /*
+   * THE CASE THAT GOES WRONG QUIETLY. The From header is form@bredellferreira.co.za -- the firm's
+   * own address -- so a lead built off the header would carry it, and saved there it would match
+   * every later enquiry to that same lead. Everything has to come out of the body.
+   */
+  await page.getByText('New Message From Bredell Ferreira').first().click()
+  await page.waitForTimeout(900)
+  t.ok('an enquiry off the website says what it is',
+    await page.getByText('A new enquiry off the website').first().isVisible())
+  await t.shot(page, '25-mail-website-enquiry')
+  await page.getByRole('button', { name: 'Create lead' }).first().click()
+  await page.waitForTimeout(600)
+  t.check('their real address comes off the message, not the sender',
+    await box().getByLabel('Email', { exact: true }).inputValue(), 'ernest@urbanhausgroup.co.za')
+  t.check('...their company with it',
+    await box().getByLabel(/^Company/).inputValue(), 'Urban Haus')
+  /* The firm's own switchboard is in the footer of that same body. First match wins. */
+  t.check('...and THEIR number, not the footer\u2019s',
+    await box().getByLabel('Phone', { exact: true }).inputValue(), '010 555 0142')
+  await t.shot(page, '26-mail-lead-from-form')
+  await box().getByRole('button', { name: 'Cancel' }).click()
+  await page.waitForTimeout(400)
 
   /* ---------- nothing broke on the way ---------- */
 

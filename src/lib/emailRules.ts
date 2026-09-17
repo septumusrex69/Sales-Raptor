@@ -375,3 +375,53 @@ export function companyFromDomain(domain: string | null | undefined): string {
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ')
 }
+
+/**
+ * The sender's name, out of a From header that may not contain one.
+ *
+ * WHY THIS EXISTS: the sync stored mailparser's `.text` for the From header, which is the whole
+ * formatted address -- `"Urban Haus" <info@urbanhausgroup.co.za>` -- and not the display name. So
+ * every list row read `"Urban Haus" <info@urbanhaus...` truncated, the open message printed the
+ * address twice, and a button offering to open the record was as wide as an email address. The
+ * sync now stores the name alone; this cleans up everything already synced, which cannot be
+ * re-read because the upsert ignores duplicates on purpose.
+ *
+ * Returns null rather than a fallback, so the caller decides what to show when there is no name.
+ * An address masquerading as a name is worse than an honest address: it gets greeted in a letter.
+ */
+export function senderName(name: string | null | undefined, address: string): string | null {
+  const raw = (name ?? '').trim()
+  if (raw === '') return null
+
+  /* A full formatted address. Everything before the bracket is the display name, if any. */
+  const bracket = raw.indexOf('<')
+  const front = (bracket > -1 ? raw.slice(0, bracket) : raw).trim()
+    /* Quoted whenever the name contains a comma or a full stop, which surnames and "Pty Ltd" do. */
+    .replace(/^"(.*)"$/, '$1')
+    .trim()
+
+  if (front === '') return null
+  /* A "name" that is just the address again says nothing and would be printed twice. */
+  if (front.toLowerCase() === address.trim().toLowerCase()) return null
+  return front
+}
+
+/**
+ * Who a message went to, short enough to sit on one line.
+ *
+ * `recipientLine` writes real header values -- "Name <address>" -- because that is what goes into
+ * a Cc box and out on the wire. On screen that is four wrapped lines for three people, which is
+ * what the firm saw: "all of this is underneath each other, make it in a line next to each other
+ * to save space."
+ *
+ * So: names where there are names, addresses where there are not, and the mailbox owner as "you",
+ * which is both shorter and how every mail client writes it.
+ */
+export function recipientNames(people: Recipient[], mine: string[] = []): string {
+  const key = (a: string) => a.trim().toLowerCase()
+  const own = new Set(mine.map(key).filter((a) => a !== ''))
+  return people
+    .map((p) => (own.has(key(p.address)) ? 'you' : (senderName(p.name, p.address) ?? p.address)))
+    .filter((label) => label !== '')
+    .join(', ')
+}

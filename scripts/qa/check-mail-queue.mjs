@@ -140,15 +140,36 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
    * address, and everything that SORTS mail lives below with the tabs. What is checked is the same
    * property: text and buttons cannot share a wrapping row.
    */
-  const headStart = page.indexOf('<div className="px-5 py-4 border-b border-slate-100 flex flex-wrap items-start gap-x-4 gap-y-3">')
+  const headStart = page.indexOf('<div className="px-5 pt-4 pb-3 border-b border-slate-100">')
   ok('the mailbox has a header', headStart > -1)
   const head = page.slice(headStart, page.indexOf('The tabs scroll if they must'))
 
-  const buttonsAt = head.indexOf('<div className="ml-auto shrink-0 flex items-center gap-2">')
+  /*
+   * THE DESCRIPTION IS OUT OF THE WRAPPING ROW ENTIRELY, not merely ordered after the buttons in
+   * it. It wrapped them onto a line below itself a SECOND time -- the firm: "that sentence is very
+   * long and it goes over, so the new mail is moved down" -- because text and buttons cannot be
+   * asked to share a wrapping row and keep their order, however they are ordered in the source.
+   * So what is checked is the boundary, not the sequence.
+   */
+  const rowAt = head.indexOf('<div className="flex items-center gap-x-4 gap-y-2 flex-wrap">')
+  ok('the name and the buttons share one row', rowAt > -1)
+  const descriptionAt = head.indexOf('Everything stays until you match it')
+  ok('...and the description exists somewhere', descriptionAt > -1)
+  const row = head.slice(rowAt, descriptionAt > -1 ? descriptionAt : head.length)
+
+  const buttonsAt = row.indexOf('<div className="ml-auto shrink-0 flex items-center gap-2">')
   ok('the buttons have a block of their own', buttonsAt > -1)
-  const buttons = head.slice(buttonsAt)
-  ok('...which the heading\u2019s description is not in, so it cannot wrap the order apart',
-    !buttons.includes('Everything stays until you match it'))
+  const buttons = row.slice(buttonsAt)
+  ok('...and they are inside that row, where nothing long can push them out of it',
+    buttons.includes('setComposing(true)') && buttons.includes('void syncMine()'))
+  /*
+   * STRUCTURALLY BELOW IT, not merely later in the file. "After the buttons in the source" was the
+   * property this checked the first time and it is not the property that matters -- the row
+   * wrapped them onto a line beneath the sentence anyway. So: the row's two divs must close before
+   * the paragraph starts.
+   */
+  ok('...while the description is outside the row, where it cannot wrap the order apart',
+    /<\/div>\s*<\/div>\s*(\{\/\*[\s\S]*?\*\/\}\s*)?<p className="text-xs text-slate-400 mt-1\.5">/.test(head))
 
   /* Which mailbox is being read, which is not always the address somebody signs in with. */
   ok('the header names the mailbox', /\{mailbox \?\? currentUser\?\.email \?\? ''\}/.test(head))

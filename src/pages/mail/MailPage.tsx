@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, CircleCheck, ExternalLink,
   Inbox, Link2, Download, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
@@ -10,7 +10,7 @@ import {
 import { Avatar } from '../../components/ui/Avatar'
 import { Card } from '../../components/ui/Card'
 import { RowMenu, type RowMenuItem } from '../../components/ui/RowMenu'
-import { FormField, inputClass, Modal } from '../../components/ui/Modal'
+import { Modal } from '../../components/ui/Modal'
 import { inviteHeadline, inviteWhen, parseInvite, type CalendarInvite } from '../../lib/calendarInvite.ts'
 import {
   acceptInvite, eventForInvite, fetchCalendarEvents, removeCalendarEvent, type CalendarEvent,
@@ -20,7 +20,8 @@ import { relativeDayLabel, timeOfDay } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
 import { recordSentEmail, replySubject } from '../../lib/accountEmails'
 import {
-  companyFromDomain, forwardBody, forwardSubject, recipientLine, replyAllTo, splitPersonName,
+  companyFromDomain, forwardBody, forwardSubject, recipientLine, recipientNames, replyAllTo,
+  splitPersonName,
 } from '../../lib/emailRules'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
@@ -40,8 +41,9 @@ import {
   type MailFilter, type MailItem, type SenderRule,
 } from '../../lib/userMail'
 import { useAppStore } from '../../store/AppStore'
-import { leadSources } from '../../data/mockData'
-import type { LeadSource } from '../../types'
+import { LeadForm } from '../../components/layout/QuickAdd'
+import { isLeadIntake, parseLeadIntake } from '../../lib/leadIntake'
+import type { Lead, LeadSource } from '../../types'
 import {
   findContactDetails, mergeCandidates, type ContactCandidate,
 } from '../../lib/signature'
@@ -131,6 +133,7 @@ export function MailPage() {
   const { currentUser, session } = useAuth()
   // Only for logging a reply on a lead, deal, client or contact — see the reply handler.
   const { addActivity } = useAppStore()
+  const navigate = useNavigate()
   const [filter, setFilter] = useState<Pane>('all')
   /*
    * Unread, and whether the list is narrowed to it.
@@ -171,6 +174,8 @@ export function MailPage() {
   const [linking, setLinking] = useState<MailItem | null>(null)
   /** The message a new lead is being made out of. See CreateLeadFromMailModal. */
   const [creatingLead, setCreatingLead] = useState<MailItem | null>(null)
+  /** The lead that came out of it, until somebody says where they would rather be. */
+  const [createdLead, setCreatedLead] = useState<Lead | null>(null)
   /*
    * Set when the link modal was opened by Reply rather than by the Link button, so that filing
    * the message hands straight over to the composer instead of dropping you back on the list to
@@ -729,8 +734,17 @@ export function MailPage() {
           now". Giving the title its own block fixes that properly -- the buttons cannot be
           carried anywhere by text they no longer share a row with.)
         */}
-        <div className="px-5 py-4 border-b border-slate-100 flex flex-wrap items-start gap-x-4 gap-y-3">
-          <div className="min-w-0">
+        {/*
+          THE NAME AND THE BUTTONS ON ONE ROW; the explanation under it.
+
+          They shared a wrapping row with the description, and the description is long enough that
+          the buttons wrapped BELOW it -- the firm: "that sentence is very long and it goes over,
+          so the new mail is moved down." Text and buttons cannot be asked to share a wrapping row
+          and keep their order; this is the second time that has bitten this bar, so this time the
+          two are separated rather than re-ordered.
+        */}
+        <div className="px-5 pt-4 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
             <div className="flex items-baseline gap-2.5 min-w-0">
               <h2 className="text-lg font-semibold text-navy-950 shrink-0">Mail</h2>
               {/*
@@ -741,13 +755,8 @@ export function MailPage() {
               */}
               <span className="text-sm text-slate-400 truncate">{mailbox ?? currentUser?.email ?? ''}</span>
             </div>
-            <p className="text-xs text-slate-400 mt-1">
-              Everything stays until you match it or block the sender. Nothing is deleted on a
-              timer, and nothing here is ever removed from your real mailbox.
-            </p>
-          </div>
 
-          <div className="ml-auto shrink-0 flex items-center gap-2">
+            <div className="ml-auto shrink-0 flex items-center gap-2">
             {/*
               A message to anybody, from here. Every other compose in Raptor hangs off a record --
               a debtor, a lead, a deal -- which covers replying and covers nothing else. Writing to
@@ -775,7 +784,13 @@ export function MailPage() {
               className="shrink-0 inline-flex items-center justify-center px-3 py-2 rounded-lg border border-slate-200 text-slate-500 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50">
               {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
             </button>
+            </div>
           </div>
+          {/* Under the row rather than in it, so it can be as long as it needs to be. */}
+          <p className="text-xs text-slate-400 mt-1.5">
+            Everything stays until you match it or block the sender. Nothing is deleted on a
+            timer, and nothing here is ever removed from your real mailbox.
+          </p>
         </div>
 
         {/*
@@ -1036,7 +1051,7 @@ export function MailPage() {
                       copies two of their own people, read as a private message -- and somebody
                       answering it had no way to know the answer needed to reach three people.
                     */}
-                    <RecipientLines mail={m} />
+                    <RecipientLines mail={m} mine={[mailbox, currentUser?.email]} />
                   </div>
                   {/*
                     Where it is filed, said here rather than on every row in the list -- one place,
@@ -1069,6 +1084,7 @@ export function MailPage() {
                   onUndoNoRecord={() => void undoNoRecord(m)}
                   onLink={() => startLink(m)}
                   onCreateLead={() => setCreatingLead(m)}
+                  sticky
                   onDownload={(f) => void download(m, f)}
                   downloading={downloading} downloadError={downloadError} />
               </div>
@@ -1088,6 +1104,7 @@ export function MailPage() {
             <ul className="divide-y divide-slate-100">
               {items.map((m) => (
                 <MailRow key={m.id} mail={m}
+                  mine={[mailbox, currentUser?.email]}
                   chosen={chosen.has(m.id)}
                   expanded={open === m.id}
                   blocked={blocked}
@@ -1211,7 +1228,24 @@ export function MailPage() {
           body={bodies[creatingLead.id]}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
           onClose={() => setCreatingLead(null)}
-          onDone={(message) => { setCreatingLead(null); setStatus(message); void load(page) }}
+          onCreated={(lead) => {
+            setCreatingLead(null)
+            setCreatedLead(lead)
+            /* Reloaded now rather than when the box closes, so the row behind it is already
+               showing "On <the lead>" whichever way the question is answered. */
+            void load(page)
+          }}
+        />
+      )}
+
+      {createdLead && (
+        <LeadCreatedModal
+          lead={createdLead}
+          onClose={() => {
+            setCreatedLead(null)
+            setStatus('Lead created, and this email is filed on it.')
+          }}
+          onOpen={() => navigate(`/leads/${createdLead.id}`)}
         />
       )}
 
@@ -1255,6 +1289,12 @@ export function MailPage() {
           to={replying.fromAddress}
           initialCc={replyAllCc(replying)}
           initialSubject={replySubject(replying.subject)}
+          /*
+           * The message being answered, under the box. Falls back to the snippet where the body
+           * has not been fetched -- 240 characters of it is still the difference between knowing
+           * what you are answering and guessing.
+           */
+          quoted={bodies[replying.id] ?? replying.snippet ?? undefined}
           /*
            * The box starts empty, on purpose, exactly as it does on the account page. A debtor's
            * reply already carries their own client's quoted chain, so quoting it again opens the
@@ -1634,7 +1674,7 @@ function MailSummary({ mail, tight, blocked }: {
 function MailBody({
   mail, body, images, calendar, events, onAccept, onRemoveEvent, skippedImages, loadingBody,
   bodyError, onBlock, onReply, onReplyAll, onForward, onJunk, onMove, onUnread, onNoRecord,
-  onUndoNoRecord, onLink, onCreateLead, onDownload, downloading, downloadError,
+  onUndoNoRecord, onLink, onCreateLead, onDownload, downloading, downloadError, sticky,
 }: {
   mail: MailItem
   body?: string
@@ -1681,6 +1721,14 @@ function MailBody({
    * find the message again. Three screens for the most valuable email of the day.
    */
   onCreateLead: () => void
+  /**
+   * Pin the toolbar to the top of the pane it is scrolling in.
+   *
+   * Only in the reading pane, where the message has a scroll container of its own. In the list an
+   * open message scrolls with the page, and a bar stuck to the top of the window there would sit
+   * over whichever OTHER message happened to be under it.
+   */
+  sticky?: boolean
   /** Pull one attachment out of the mailbox. */
   onDownload: (filename: string) => void
   /** The file currently being fetched, so its own button shows the wait. */
@@ -1762,11 +1810,27 @@ function MailBody({
         The rest are filing decisions. They are taken once per message and never in a hurry, so
         they cost a click and buy back a row that reads at a glance.
       */}
-      {/* No top margin: this is the first thing in the card now, not a footer under a message. */}
-      <div className="flex flex-wrap items-center gap-2">
+      {/*
+        A BAR, AND IT STAYS. The firm, on the version that scrolled away: "the whole thing ... is
+        very bulky ... I kind of like the one that Spark did better -- it's smaller and it stays
+        there, so if you scroll up or down through the email it kind of stays there as a little
+        bar."
+
+        Sticky at the TOP rather than the bottom, which is the same instruction they gave before
+        ("it's sitting there at the bottom and I have to scroll down all the way to do anything")
+        with the persistence added: whatever you have scrolled to, the answer to "now what?" is on
+        screen and in one place.
+
+        Smaller too. It was set at button size for a mockup and then carried a second row -- the
+        record link, as wide as an email address -- which is where the bulk actually was. That
+        link is now the chip in the header, which was already there and already said the same
+        thing, so the toolbar is one row again.
+      */}
+      <div className={`flex flex-wrap items-center gap-1.5 bg-white ${
+        sticky ? 'sticky top-0 z-20 -mx-5 px-5 py-2 border-b border-slate-100' : 'pb-2'}`}>
         <button onClick={onReply}
-          className="inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 shadow-sm hover:bg-gold-500">
-          <Reply size={15} /> Reply
+          className="inline-flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+          <Reply size={14} /> Reply
         </button>
 
         {/*
@@ -1778,8 +1842,8 @@ function MailBody({
         */}
         {(mail.toRecipients.length + mail.ccRecipients.length) > 1 && (
           <button onClick={onReplyAll}
-            className="inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50">
-            <ReplyAll size={15} /> Reply all
+            className="inline-flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50">
+            <ReplyAll size={14} /> Reply all
           </button>
         )}
 
@@ -1789,38 +1853,28 @@ function MailBody({
           opening Outlook — and mail managed in two places is mail managed in neither.
         */}
         <button onClick={onForward}
-          className="inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50">
-          <ForwardIcon size={15} /> Forward
+          className="inline-flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50">
+          <ForwardIcon size={14} /> Forward
         </button>
 
         {/*
           Through to the debtor's file, which is the other half of managing mail from one place:
           the message is here, but the balance, the arrangement and the history are there.
 
-          It stays out in front rather than going behind the dots because it is a destination and
-          not a decision — and because it is a Link, so it behaves like one: middle-click and "open
-          in new tab" both work, which matters when you are working a message and want the account
-          beside it. Neither survives being an item in a menu.
+          A TEXT LINK NOW, NOT A BUTTON. As a bordered button carrying a record name it was the
+          widest thing on the toolbar and pushed itself onto a second row -- which is where the
+          bulk the firm complained about actually was. Still a Link, because middle-click and
+          "open in new tab" both work on one and neither survives being anything else, and that
+          matters when you are working a message and want the account beside it.
         */}
         {mail.linkedTo && (
-          <Link to={mail.linkedTo.path}
-            className="inline-flex items-center gap-1.5 max-w-full text-sm font-medium px-4 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50">
-            <ExternalLink size={15} className="shrink-0" />
-            {/* Truncated: a double-barrelled name or a long deal name would otherwise make this
-                button wider than a phone, and the row wraps rather than scrolls. */}
+          <Link to={mail.linkedTo.path} title={`Open ${mail.linkedTo.label}`}
+            className="inline-flex items-center gap-1 min-w-0 max-w-[15rem] text-[13px] font-medium px-2 py-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-50">
+            <ExternalLink size={13} className="shrink-0" />
             <span className="truncate">Open {mail.linkedTo.label}</span>
           </Link>
         )}
 
-        {/*
-          Everything else, in the firm's own words. Built as a list rather than written out as
-          markup so that what is offered and what is hidden is decided in one place — the rules are
-          conditional enough (filed, junk, free, administrator) that spread across nine blocks of
-          JSX they stopped being readable.
-
-          Wider than the default menu because "Put back in the queue" is the firm's wording and
-          wrapping it across two lines would read as a mistake.
-        */}
         {/*
           HARD RIGHT, away from the three. The dots are not a fourth answer to "what do I do with
           this?" -- they are where the rest of them live, and sitting shoulder to shoulder with
@@ -2002,51 +2056,91 @@ function NotMatchedBar({ mail, onLink, onCreateLead }: {
      loose end, and a bar over both would be a warning that fires when nothing is wrong. */
   if (mail.isFiled || mail.noRecordAt) return null
 
+  /*
+   * AN ENQUIRY OFF THE WEBSITE IS NOT A QUESTION. Every other unmatched message asks one -- debtor,
+   * client, nobody? -- and form@bredellferreira.co.za has exactly one answer, so the two buttons
+   * swap places and the wording stops hedging. Offering "Match to a record" first here would send
+   * somebody hunting the book for a stranger who by definition is not in it.
+   */
+  const fromForm = isLeadIntake(mail.fromAddress)
+
+  const primary = 'inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500'
+  const secondary = 'inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+
   return (
     <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-3
       flex flex-wrap items-center gap-x-3 gap-y-2.5">
       <Info size={16} className="shrink-0 text-slate-400" />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-slate-800">Not matched yet</p>
+        <p className="text-sm font-medium text-slate-800">
+          {fromForm ? 'A new enquiry off the website' : 'Not matched yet'}
+        </p>
         <p className="text-xs text-slate-400 mt-0.5">
-          This email is not on a lead, a deal or a debtor account. Replying from here will not
-          appear on any record.
+          {fromForm
+            ? 'It came through the contact form, so it belongs to nobody yet. Their details are in the message.'
+            : 'This email is not on a lead, a deal or a debtor account. Replying from here will not appear on any record.'}
         </p>
       </div>
       <div className="shrink-0 flex items-center gap-2">
-        <button onClick={onLink}
-          className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
-          <Link2 size={15} /> Match to a record
-        </button>
-        <button onClick={onCreateLead}
-          className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-white">
-          <UserPlus size={15} /> Create lead
-        </button>
+        {fromForm ? (
+          <>
+            <button onClick={onCreateLead} className={primary}>
+              <UserPlus size={15} /> Create lead
+            </button>
+            <button onClick={onLink} className={secondary}>
+              <Link2 size={15} /> Match instead
+            </button>
+          </>
+        ) : (
+          <>
+            <button onClick={onLink} className={primary}>
+              <Link2 size={15} /> Match to a record
+            </button>
+            <button onClick={onCreateLead} className={secondary}>
+              <UserPlus size={15} /> Create lead
+            </button>
+          </>
+        )}
       </div>
     </div>
   )
 }
 
 /**
- * To and Cc, under the sender.
+ * To and Cc, under the sender, on ONE LINE EACH.
+ *
+ * The firm, on three recipients spread down four lines: "all of this is underneath each other,
+ * make it in a line next to each other to save space, because it's becoming bulky down there."
+ *
+ * The saving is in what is printed, not in the font. `recipientLine` writes real header values --
+ * "Stephan Ferreira <stephan@bredellferreira.co.za>" -- because that is what goes into a Cc box
+ * and out on the wire; on screen the addresses are the part nobody reads and four fifths of the
+ * width. So: names, the mailbox owner as "you", and the full list in the title for the one time
+ * somebody does need to check an address.
  *
  * Absent entirely where there is nobody to name: a message addressed to one person, which is most
  * of them, gains nothing from a line saying so. Mail synced before these columns existed has
  * empty lists and is silent for the same reason -- it says nothing rather than claiming nobody
  * else was on it.
  */
-function RecipientLines({ mail }: { mail: MailItem }) {
+function RecipientLines({ mail, mine }: {
+  mail: MailItem
+  /** The addresses that are this agent's, so they read as "you" rather than as a third name. */
+  mine?: (string | null | undefined)[]
+}) {
   if (mail.toRecipients.length === 0 && mail.ccRecipients.length === 0) return null
+  const own = (mine ?? []).filter((a): a is string => !!a)
+  const line = 'text-xs text-slate-400 truncate'
   return (
-    <div className="mt-0.5 space-y-0.5">
+    <div className="mt-0.5">
       {mail.toRecipients.length > 0 && (
-        <p className="text-xs text-slate-400 break-words">
-          <span className="text-slate-500">To:</span> {recipientLine(mail.toRecipients)}
+        <p className={line} title={recipientLine(mail.toRecipients)}>
+          <span className="text-slate-500">To:</span> {recipientNames(mail.toRecipients, own)}
         </p>
       )}
       {mail.ccRecipients.length > 0 && (
-        <p className="text-xs text-slate-400 break-words">
-          <span className="text-slate-500">Cc:</span> {recipientLine(mail.ccRecipients)}
+        <p className={line} title={recipientLine(mail.ccRecipients)}>
+          <span className="text-slate-500">Cc:</span> {recipientNames(mail.ccRecipients, own)}
         </p>
       )}
     </div>
@@ -2179,8 +2273,8 @@ function InviteLine({ label, value, note }: { label: string; value: string; note
 function MailRow({
   mail, chosen, expanded, selecting, blocked, body, images, calendar, events, onAccept,
   onRemoveEvent, skippedImages, loadingBody,
-  bodyError, onToggle, onChoose, onLink, onCreateLead, onBlock, onReply, onReplyAll, onForward,
-  onJunk, onMove,
+  bodyError, mine, onToggle, onChoose, onLink, onCreateLead, onBlock, onReply, onReplyAll,
+  onForward, onJunk, onMove,
   onUnread, onNoRecord, onUndoNoRecord, onDownload, downloading, downloadError,
 }: {
   mail: MailItem
@@ -2216,6 +2310,8 @@ function MailRow({
   onNoRecord: () => void
   onUndoNoRecord: () => void
   onCreateLead: () => void
+  /** This agent's own addresses, so a recipient line can say "you" instead of naming them. */
+  mine: (string | null | undefined)[]
   onDownload: (filename: string) => void
   downloading: string | null
   downloadError: string | null
@@ -2267,7 +2363,7 @@ function MailRow({
             before pressing it is the list.
           */}
           <div className="-mt-1 mb-2.5">
-            <RecipientLines mail={mail} />
+            <RecipientLines mail={mail} mine={mine} />
           </div>
           <MailBody mail={mail} body={body} images={images} calendar={calendar}
             events={events} onAccept={onAccept} onRemoveEvent={onRemoveEvent}
@@ -2757,151 +2853,154 @@ function BlockModal({ mail, userId, onClose, onDone }: {
  * message again, match it. Three screens, and the step people skipped was the last one, so the
  * enquiry that started the relationship was not on the lead that came out of it.
  *
- * WHAT IS FILLED IN IS A GUESS, AND EVERY BOX IS EDITABLE. The name is split out of one header
- * field (see splitPersonName), the company is read off the domain and only when the domain belongs
- * to a company at all — "Gmail" in the Company box would be worse than an empty one. Numbers found
- * in the message are OFFERED and never filled in: a number lifted off a signature looks
- * authoritative and is still a guess, and a wrong one here is one a salesperson later phones.
+ * THE REAL LEAD FORM, at the firm's instruction: "it should use the same lead form as adding an
+ * actual lead -- this one is a small version, it should actually make a lead." So this is a
+ * wrapper: it works out what to prefill, hands LeadForm the values, and takes over what happens
+ * after the lead is saved. A second, shorter form would have drifted within a month.
  *
- * NOTHING IS CHARGED. Annexure B prices work on debtor accounts; the sales side raises no fees at
- * all, and the modal says so because the rest of this page talks about money constantly.
+ * WHERE THE PREFILLS COME FROM depends on who sent it, and the difference matters:
+ *
+ *  - FROM THE WEBSITE'S FORM, the From header is the firm's OWN address. Reading the lead's
+ *    details off it would put form@bredellferreira.co.za on the lead — and saved there it would
+ *    match every later enquiry to that same lead, so one afternoon's five enquiries would file
+ *    themselves on one stranger. Everything comes out of the body instead. See parseLeadIntake.
+ *  - FROM ANYBODY ELSE, the header is the person. The name is split out of one field, the company
+ *    read off the domain but never off gmail, and their address is theirs.
+ *
+ * Every one of them is a guess in an editable box, in front of somebody reading the message.
  */
-function CreateLeadFromMailModal({ mail, body, actor, onClose, onDone }: {
+function CreateLeadFromMailModal({ mail, body, actor, onClose, onCreated }: {
   mail: MailItem
-  /** The message text, where it has been fetched — where the suggested numbers come from. */
+  /** The message text, where it has been fetched — the only source for a form enquiry. */
   body?: string
   actor: { id: string | null; name: string | null }
   onClose: () => void
-  onDone: (message: string) => void
+  /** The lead exists and the email is on it. The caller asks where to go next. */
+  onCreated: (lead: Lead) => void
 }) {
-  const { addLead } = useAppStore()
+  const store = useAppStore()
+  const navigate = useNavigate()
+  const [error, setError] = useState<string | null>(null)
+
+  const text = body ?? mail.snippet ?? ''
+  const fromForm = isLeadIntake(mail.fromAddress)
+  const intake = fromForm ? parseLeadIntake(text) : {}
   const split = splitPersonName(mail.fromName)
   const domain = domainOf(mail.fromAddress)
 
-  const [firstName, setFirstName] = useState(split.firstName)
-  const [lastName, setLastName] = useState(split.lastName)
-  const [companyName, setCompanyName] = useState(
-    /* Only where the domain says something. See companyFromDomain. */
-    isSharedDomain(mail.fromAddress) ? '' : companyFromDomain(domain),
-  )
-  const [phone, setPhone] = useState('')
-  /* Email, because that is literally where this one came from. Changeable: an enquiry that
-     arrives by email often started as a referral, and the salesperson reading it knows. */
-  const [source, setSource] = useState<LeadSource>('Email')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  /* Read out of what they wrote and out of their signature's links — the same scan the picker
-     runs, and offered the same way: as chips to press, never as a filled-in field. */
-  const numbers = useMemo(
-    () => findContactDetails(body ?? mail.snippet ?? '')
-      .filter((c) => c.kind === 'mobile' || c.kind === 'phone')
-      .slice(0, 3),
-    [body, mail.snippet],
-  )
-
-  async function save() {
-    if (!firstName.trim() || !companyName.trim()) return
-    setBusy(true)
-    setError(null)
-    try {
-      const lead = addLead({
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        companyName: companyName.trim(),
-        email: mail.fromAddress,
-        source,
-        ...(phone.trim() ? { phone: phone.trim() } : {}),
-        ...(actor.id ? { ownerId: actor.id } : {}),
-      })
-      /*
-       * FILED ON THE NEW LEAD IN THE SAME BREATH, which is the whole point of doing this here. A
-       * lead created from an email that is not then carrying that email is the same three-screen
-       * problem with one screen removed.
-       */
-      await linkMailToRecord({
-        mail,
-        to: { kind: 'lead', id: lead.id, label: [lead.firstName, lead.lastName].filter(Boolean).join(' ') || lead.companyName },
-        actor,
-      })
-      onDone(`Lead created and this email matched to it. Nothing was charged \u2014 Annexure B is for debtor accounts.`)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-      setBusy(false)
+  const initial = fromForm
+    ? {
+      firstName: intake.firstName ?? '',
+      lastName: intake.lastName ?? '',
+      companyName: intake.companyName ?? '',
+      phone: intake.phone ?? '',
+      /* Never the From header here, for the reason in the block comment above. */
+      email: intake.email ?? '',
+      source: 'Website' as LeadSource,
     }
-  }
+    : {
+      firstName: split.firstName,
+      lastName: split.lastName,
+      /* Only where the domain says something: "Gmail" in the Company box is worse than a blank. */
+      companyName: isSharedDomain(mail.fromAddress) ? '' : companyFromDomain(domain),
+      phone: '',
+      email: mail.fromAddress,
+      /* Email, because that is literally where this one came from. */
+      source: 'Email' as LeadSource,
+    }
 
   return (
-    <Modal title="Create a lead from this email" onClose={onClose} width={520}>
-      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 mb-4">
-        <p className="text-sm font-medium text-slate-800 truncate">{mail.subject || '(no subject)'}</p>
-        <p className="text-xs text-slate-400 mt-0.5 truncate">From {mail.fromAddress}</p>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <FormField label="First name" required>
-          <input className={inputClass} value={firstName} autoFocus
-            onChange={(e) => setFirstName(e.target.value)} required />
-        </FormField>
-        <FormField label="Surname">
-          <input className={inputClass} value={lastName}
-            onChange={(e) => setLastName(e.target.value)} />
-        </FormField>
-      </div>
-
-      <FormField label="Company" required>
-        <input className={inputClass} value={companyName}
-          onChange={(e) => setCompanyName(e.target.value)}
-          placeholder="Who they write on behalf of" required />
-      </FormField>
-
-      <div className="grid grid-cols-2 gap-3">
-        <FormField label="Phone">
-          <input className={inputClass} value={phone}
-            onChange={(e) => setPhone(e.target.value)} placeholder="Not given" />
-        </FormField>
-        <FormField label="Where they came from">
-          <select className={inputClass} value={source}
-            onChange={(e) => setSource(e.target.value as LeadSource)}>
-            {leadSources.map((o) => <option key={o} value={o}>{o}</option>)}
-          </select>
-        </FormField>
-      </div>
-
-      {numbers.length > 0 && (
-        <div className="-mt-1 mb-3">
-          <p className="text-xs text-slate-400">
-            In the message &mdash; press one to use it, and check it against what they wrote.
-          </p>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {numbers.map((c) => (
-              <button key={c.value} type="button" onClick={() => setPhone(c.value)}
-                title={c.context}
-                className="text-xs px-2 py-1 rounded-md border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
-                {c.value}
-              </button>
-            ))}
+    <LeadForm
+      store={store}
+      navigate={navigate}
+      onClose={onClose}
+      title="Create lead"
+      initial={initial}
+      intro={(
+        <>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 mb-4">
+            <p className="text-sm font-medium text-slate-800 truncate">{mail.subject || '(no subject)'}</p>
+            <p className="text-xs text-slate-400 mt-0.5 truncate">
+              {fromForm
+                ? 'An enquiry off the website\u2019s contact form. Their details are read out of the message, not off the sender.'
+                : `From ${mail.fromAddress}`}
+            </p>
           </div>
-        </div>
+          {/*
+            NOTHING IS CHARGED, and it says so. Annexure B prices work on DEBTOR ACCOUNTS; the sales
+            side raises no fees at all. The rest of this page talks about money constantly, so
+            silence here would read as "some fee, unstated".
+          */}
+          <p className="text-xs text-slate-400 -mt-1 mb-3">
+            This email is filed on the lead once it is saved. Nothing is charged &mdash; Annexure B
+            prices work on debtor accounts, and the sales side raises no fees.
+          </p>
+          {error && <p className="text-sm text-negative-700 mb-3">{error}</p>}
+        </>
       )}
+      onCreated={(lead) => {
+        /*
+         * FILED ON THE NEW LEAD IN THE SAME BREATH, which is the whole point of doing this from the
+         * mailbox. A lead created from an email that is not then carrying that email is the same
+         * three-screen problem with one screen removed.
+         *
+         * The lead is already saved by the time this runs, so a failure here is not a reason to
+         * pretend nothing happened: it is reported and the lead is handed on regardless.
+         */
+        void linkMailToRecord({
+          mail,
+          to: {
+            kind: 'lead',
+            id: lead.id,
+            label: [lead.firstName, lead.lastName].filter(Boolean).join(' ') || lead.companyName,
+          },
+          actor,
+        })
+          .then(() => onCreated(lead))
+          .catch((e: unknown) => setError(
+            `The lead was created, but this email could not be filed on it: ${
+              e instanceof Error ? e.message : String(e)}`,
+          ))
+      }}
+    />
+  )
+}
 
-      <p className="text-xs text-slate-400">
-        Their address <strong className="font-medium text-slate-500">{mail.fromAddress}</strong> is
-        saved on the lead, and this email is filed on it. Nothing is charged &mdash; Annexure B
-        prices work on debtor accounts, and the sales side raises no fees.
+/**
+ * The lead exists. Where would you rather be?
+ *
+ * At the firm's instruction: "once it says lead created, it should ask you -- go back to mail, or
+ * go to the lead." Both are real answers and neither is right for everybody: somebody working a
+ * morning's enquiries wants the next message, and somebody who has just met their best lead of the
+ * week wants to phone them.
+ *
+ * Asked rather than assumed, because the wrong guess is expensive in one direction — thrown out of
+ * a queue you were half way through — and free in the other.
+ */
+function LeadCreatedModal({ lead, onClose, onOpen }: {
+  lead: Lead
+  onClose: () => void
+  onOpen: () => void
+}) {
+  const name = [lead.firstName, lead.lastName].filter(Boolean).join(' ') || lead.companyName
+  return (
+    <Modal title="Lead created" onClose={onClose} width={440}>
+      <p className="text-sm text-slate-600">
+        <strong className="font-semibold text-slate-800">{name}</strong> is on the leads list
+        {lead.companyName && name !== lead.companyName ? ` at ${lead.companyName}` : ''}, and this
+        email is filed on it.
       </p>
-
-      {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
-
+      <p className="text-xs text-slate-400 mt-2">
+        Nothing was charged &mdash; Annexure B is for debtor accounts.
+      </p>
       <div className="flex items-center justify-end gap-2 mt-5">
-        {busy && <Loader2 size={15} className="animate-spin text-slate-400" />}
-        <button onClick={onClose} disabled={busy}
-          className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50">
-          Cancel
+        <button onClick={onClose}
+          className="text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+          Back to the mail
         </button>
-        <button onClick={() => void save()} disabled={busy || !firstName.trim() || !companyName.trim()}
-          className="text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
-          Create lead
+        <button onClick={onOpen}
+          className="text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+          Open the lead
         </button>
       </div>
     </Modal>

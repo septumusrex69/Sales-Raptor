@@ -1,6 +1,26 @@
-import { useId, useState, type FormEvent } from 'react'
+import { useId, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { Paperclip, X } from 'lucide-react'
 import { Modal, FormField, inputClass } from './ui/Modal'
 import { useAuth } from '../store/AuthContext'
+
+/**
+ * How much may travel with one message.
+ *
+ * Vercel caps a serverless request body at 4.5 MB and base64 adds a third, so the real ceiling is
+ * around 3 MB of files. Refused HERE, with the number said out loud, because the alternative is a
+ * 413 from the platform that arrives as "Could not reach the server" after the wait -- and a
+ * collector who has just attached a debtor's bank statements deserves better than that.
+ */
+const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024
+
+interface Attached { filename: string; contentType: string; size: number; content: string }
+
+/** Bytes as somebody reads them. en-ZA groups with a non-breaking space; sizes do not need it. */
+function fileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
 
 /**
  * Sends via the current user's connected mailbox (Settings → Integrations) and, on success,
@@ -14,6 +34,7 @@ export function ComposeEmailModal({
   contextNote,
   inReplyTo,
   initialCc,
+  quoted,
   onClose,
   onSent,
 }: {
@@ -61,6 +82,18 @@ export function ComposeEmailModal({
    * sender's, and the only moment to catch it is before Send.
    */
   initialCc?: string
+  /**
+   * The message being answered, shown UNDER the box and never inside it.
+   *
+   * The firm: "make it bigger, like Outlook, and you could see at the bottom the previous email
+   * that it is going to reply to." Which is what Outlook does -- the quoted original sits below
+   * the cursor, readable, and is not something you have to scroll past to start typing.
+   *
+   * Still not pasted INTO the box, which was tried and removed: a debtor's reply already carries
+   * their own client's quoted chain, so quoting it again opened the composer with two layers of
+   * "> " before anybody had typed a word.
+   */
+  quoted?: string
   onClose: () => void
   /**
    * `emailMessageId` is the sent message's own Message-ID, so a reply can be threaded back.
@@ -76,6 +109,47 @@ export function ComposeEmailModal({
   const [body, setBody] = useState(initialBody ?? '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [files, setFiles] = useState<Attached[]>([])
+  const fileInput = useRef<HTMLInputElement>(null)
+
+  /*
+   * Read in the browser and sent as base64 in the same JSON body as the message.
+   *
+   * Not a separate upload: a file that reaches storage and then fails to send is a file nobody
+   * asked for sitting in a bucket, and the message either goes with its attachments or does not go.
+   */
+  async function attach(e: ChangeEvent<HTMLInputElement>) {
+    const chosen = Array.from(e.target.files ?? [])
+    e.target.value = ''
+    if (chosen.length === 0) return
+    setError(null)
+
+    const already = files.reduce((n, f) => n + f.size, 0)
+    const adding = chosen.reduce((n, f) => n + f.size, 0)
+    if (already + adding > MAX_ATTACHMENT_BYTES) {
+      setError(`That is more than ${fileSize(MAX_ATTACHMENT_BYTES)} of attachments, which is as `
+        + 'much as one message can carry. Send the larger files in a second email, or share a link.')
+      return
+    }
+
+    try {
+      const read = await Promise.all(chosen.map((file) => new Promise<Attached>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onerror = () => reject(new Error(`${file.name} could not be read.`))
+        reader.onload = () => resolve({
+          filename: file.name,
+          contentType: file.type || 'application/octet-stream',
+          size: file.size,
+          /* A data: URL, so everything up to and including the comma is not the file. */
+          content: String(reader.result ?? '').split(',')[1] ?? '',
+        })
+        reader.readAsDataURL(file)
+      })))
+      setFiles((list) => [...list, ...read])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'That file could not be read.')
+    }
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -94,6 +168,9 @@ export function ComposeEmailModal({
           ...(cc.trim() ? { cc: cc.trim() } : {}),
           subject: subject.trim(),
           bodyHtml: body.trim().replace(/\n/g, '<br>'),
+          ...(files.length > 0
+            ? { attachments: files.map(({ filename, contentType, content }) => ({ filename, contentType, content })) }
+            : {}),
           ...(inReplyTo ? { inReplyTo } : {}),
         }),
       })
@@ -112,7 +189,13 @@ export function ComposeEmailModal({
   }
 
   return (
-    <Modal title={initialSubject ? `Reply to ${to ?? address}` : 'New Email'} onClose={onClose} width={480}>
+    /*
+      WIDER THAN A DIALOG, because it is a place somebody writes rather than a question they
+      answer. The firm: "the one you made is very small -- make it bigger like Outlook." At 480 a
+      reply to a debtor's three paragraphs was typed through a letterbox, and the quoted original
+      below it would have been unreadable.
+    */
+    <Modal title={initialSubject ? `Reply to ${to ?? address}` : 'New Email'} onClose={onClose} width={760}>
       <form onSubmit={handleSubmit}>
         <FormField label="To" required>
           <input
@@ -154,8 +237,60 @@ export function ComposeEmailModal({
           <input className={inputClass} value={subject} onChange={(e) => setSubject(e.target.value)} required autoFocus={!initialSubject} />
         </FormField>
         <FormField label="Message" required>
-          <textarea className={inputClass} rows={7} value={body} onChange={(e) => setBody(e.target.value)} required autoFocus={!!initialSubject} />
+          <textarea className={inputClass} rows={12} value={body}
+            onChange={(e) => setBody(e.target.value)} required autoFocus={!!initialSubject} />
         </FormField>
+
+        {/*
+          FILES, which the mailbox could not send at all. Forwarding a debtor's proof of payment to
+          the client, or a mandate to the attorney, meant opening Outlook -- and mail managed in
+          two places is mail managed in neither.
+        */}
+        <div className="-mt-1 mb-3">
+          <input ref={fileInput} type="file" multiple className="hidden"
+            onChange={(e) => void attach(e)} />
+          <button type="button" onClick={() => fileInput.current?.click()}
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+            <Paperclip size={13} /> Attach a file
+          </button>
+          {files.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {files.map((f, i) => (
+                <span key={`${f.filename}-${i}`}
+                  className="inline-flex items-center gap-1.5 max-w-full text-xs px-2 py-1 rounded-md border border-slate-200 text-slate-600">
+                  <Paperclip size={11} className="shrink-0 text-slate-400" />
+                  <span className="truncate">{f.filename}</span>
+                  <span className="shrink-0 text-slate-400">{fileSize(f.size)}</span>
+                  {/* Removable, because the wrong file attached to a debtor's statement is not
+                      something to discover after Send. */}
+                  <button type="button" aria-label={`Remove ${f.filename}`}
+                    onClick={() => setFiles((list) => list.filter((_, at) => at !== i))}
+                    className="shrink-0 text-slate-400 hover:text-negative-700">
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/*
+          THE MESSAGE BEING ANSWERED, under the box. Readable without leaving the composer, which
+          is the thing a reply typed in a modal otherwise loses -- the original is behind it.
+
+          Rendered as TEXT and scrolled in its own box: this is mail from outside the building, and
+          a long chain must not push Send off the bottom of the screen.
+        */}
+        {quoted && quoted.trim() !== '' && (
+          <div className="mb-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1">
+              The message you are answering
+            </p>
+            <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <p className="text-xs text-slate-500 whitespace-pre-wrap break-words">{quoted.trim()}</p>
+            </div>
+          </div>
+        )}
         {contextNote && <p className="text-[11.5px] text-slate-400 mb-3 -mt-1">{contextNote}</p>}
         {error && <p className="text-xs text-red-600 mb-3">{error}</p>}
         <div className="flex justify-end gap-2">

@@ -146,9 +146,17 @@ ok('nobody to name means no lines at all',
 /* With the colon a mail client writes, which is also how the firm reads them on paper. */
 ok('To is labelled', />To:</.test(lines))
 ok('Cc is labelled', />Cc:</.test(lines))
-ok('each line goes through recipientLine', (lines.match(/recipientLine\(/g) ?? []).length === 2)
-/* A Cc of eight people is a long line, and a line that cannot wrap pushes the pane sideways. */
-ok('a long list wraps rather than widening the pane', /break-words/.test(lines))
+/*
+ * NAMES ON SCREEN, ADDRESSES IN THE TITLE. recipientLine writes real header values and is what
+ * goes into a Cc box; printed on screen it is four wrapped lines for three people, which is what
+ * the firm called bulky. So the visible text is names and the full list is the hover.
+ */
+ok('each line shows names rather than addresses', (lines.match(/recipientNames\(/g) ?? []).length === 2)
+ok('...with the real addresses still one hover away', (lines.match(/title=\{recipientLine\(/g) ?? []).length === 2)
+/* One line each: the saving is the whole point, so a long list must not be allowed to wrap. */
+ok('a long list is cut off rather than wrapping onto four lines', /truncate/.test(lines))
+/* Your own address reads as "you", which is shorter and is what every mail client does. */
+ok('the agent themselves is not listed by name', /recipientNames\(mail\.toRecipients, own\)/.test(lines))
 
 /*
  * ON BOTH SCREENS. The mailbox has a reading pane and a plain list, and they are separate
@@ -156,14 +164,14 @@ ok('a long list wraps rather than widening the pane', /break-words/.test(lines))
  * that never says who it would copy.
  */
 ok('the reading pane names the other recipients',
-  /<RecipientLines mail=\{m\} \/>/.test(page))
+  /<RecipientLines mail=\{m\} mine=\{\[mailbox, currentUser\?\.email\]\} \/>/.test(page))
 ok('the expanded list row names them too',
-  /<RecipientLines mail=\{mail\} \/>/.test(page))
+  /<RecipientLines mail=\{mail\} mine=\{mine\} \/>/.test(page))
 
 /* ---------- 5. reply-all ---------- */
 
 const body = slice(page, 'function MailBody', 'function RecipientLines', 'MailBody')
-const row = slice(body, '<div className="flex flex-wrap items-center gap-2">', '</div>', 'the action row')
+const row = slice(body, "<div className={`flex flex-wrap items-center gap-1.5 bg-white ", '<NotMatchedBar', 'the action row')
 
 /*
  * OFFERED ONLY WHERE THERE IS SOMEBODY TO COPY. On a message addressed to you alone, reply-all
@@ -220,7 +228,7 @@ ok('an emptied Cc box sends no Cc', /\.\.\.\(cc\.trim\(\) \? \{ cc: cc\.trim\(\)
 
 /* ---------- 7. the send, in both places ---------- */
 
-ok('the endpoint accepts a Cc', /const \{ to, cc, subject, bodyHtml, inReplyTo \}/.test(send))
+ok('the endpoint accepts a Cc', /const \{ to, cc, subject, bodyHtml, inReplyTo, attachments: sent \}/.test(send))
 
 const SPREAD = /\.\.\.\(cc && cc\.trim\(\) \? \{ cc \} : \{\}\)/
 /*
@@ -276,6 +284,8 @@ ok('Block sender is marked as the damaging one', /label: 'Block sender'[\s\S]*da
  * working a message and want the account beside it.
  */
 ok('the account is still one click away', /<Link to=\{mail\.linkedTo\.path\}/.test(row))
+/* And the bar stays put while a long message scrolls under it -- the firm liked that in Spark. */
+ok('the bar stays on screen while the message scrolls', /sticky \? 'sticky top-0/.test(row))
 ok('...and it is not in the menu instead', !/linkedTo\.path/.test(more))
 
 if (failures.length) {

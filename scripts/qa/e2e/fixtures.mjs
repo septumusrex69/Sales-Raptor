@@ -272,6 +272,31 @@ export const MAIL = [
     debtor_accounts: null, leads: null, deals: null, companies: null, contacts: null,
   },
   {
+    /*
+     * AN ENQUIRY OFF THE WEBSITE'S CONTACT FORM, which is a different kind of message: the From
+     * header is the FIRM'S OWN address, so everything about the person is in the body. A lead made
+     * off the header here would carry form@bredellferreira.co.za -- and saved there it would match
+     * every later enquiry to that same lead.
+     *
+     * The display name is the person's, which is what the form puts there and is exactly what
+     * makes this trap easy to walk into.
+     */
+    id: 'aaaaaaa1-0000-4000-8000-000000000006',
+    folder: 'INBOX', is_sent: false, uid: 106,
+    message_id: '<website-6@bredellferreira.co.za>',
+    from_address: 'form@bredellferreira.co.za', from_name: 'Ernest Mohlalisi',
+    subject: 'New Message From Bredell Ferreira',
+    snippet: 'You have a new enquiry from the website. Name: Ernest Mohlalisi Company: Urban Haus',
+    to_address: 'stephan@bredellferreira.co.za', to_name: 'Stephan',
+    to_recipients: [{ name: 'Stephan', address: 'stephan@bredellferreira.co.za' }],
+    cc_recipients: [],
+    attachment_names: [], is_junk: false, occurred_at: MAIL_AT(40),
+    read_at: null, is_filed: false, is_settled: false, no_record_at: null,
+    linked_account_id: null, linked_lead_id: null, linked_deal_id: null,
+    linked_company_id: null, linked_contact_id: null,
+    debtor_accounts: null, leads: null, deals: null, companies: null, contacts: null,
+  },
+  {
     id: 'aaaaaaa1-0000-4000-8000-000000000005',
     folder: 'INBOX', is_sent: false, uid: 105,
     message_id: '<console-5@example.co.za>',
@@ -287,3 +312,23 @@ export const MAIL = [
     debtor_accounts: null, leads: null, deals: null, companies: null, contacts: null,
   },
 ]
+
+/**
+ * What the contact form posts, as the message body.
+ *
+ * Carries the firm's own footer under the enquiry on purpose: these emails do, and taking the LAST
+ * phone number rather than the first would put the firm's own switchboard on the lead -- a number
+ * a salesperson then phones.
+ */
+export const FORM_BODY = [
+  'You have a new enquiry from the website.',
+  '',
+  'Name: Ernest Mohlalisi',
+  'Company: Urban Haus',
+  'Email: ernest@urbanhausgroup.co.za',
+  'Phone: 010 555 0142',
+  'Message: I would like assistance recovering money owed to me.',
+  '',
+  '--',
+  'Bredell Ferreira | 011 555 0100 | info@bredellferreira.co.za',
+].join('\n')

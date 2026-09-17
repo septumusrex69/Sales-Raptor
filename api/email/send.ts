@@ -30,8 +30,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const { to, cc, subject, bodyHtml, inReplyTo } = (req.body ?? {}) as {
+  const { to, cc, subject, bodyHtml, inReplyTo, attachments: sent } = (req.body ?? {}) as {
     to?: string; subject?: string; bodyHtml?: string
+    /**
+     * Files travelling with the message, base64 in this same JSON body.
+     *
+     * Not a separate upload: a file that reaches storage and then fails to send is a file nobody
+     * asked for sitting in a bucket. The browser caps the total before it gets here and says the
+     * number out loud; this is the second guard, because the platform's own limit arrives as an
+     * empty 413 that the client can only report as "could not reach the server".
+     */
+    attachments?: { filename?: string; contentType?: string; content?: string }[]
     /**
      * Everyone else who was on the message being answered.
      *
@@ -86,9 +95,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const image = signatureImageUrl ? { width: signatureImageWidth, align: signatureImageAlign } : null
   const embedded = signatureImageUrl ? await fetchSignatureImage(signatureImageUrl) : null
   const imageSrc = signatureImageUrl ? (embedded ? `cid:${SIGNATURE_CID}` : signatureImageUrl) : null
-  const attachments = embedded
-    ? [{ filename: 'signature', content: embedded.content, contentType: embedded.contentType, cid: SIGNATURE_CID }]
-    : undefined
+  /*
+   * The signature image and the sender's own files, in one list.
+   *
+   * The signature carries a cid and is referenced from the HTML, so it renders inline; the others
+   * carry none and land as attachments. Same array, different role, which is how nodemailer tells
+   * them apart -- and why the signature must not be dropped when somebody attaches something.
+   */
+  const files = (sent ?? [])
+    .filter((f) => f?.filename && f?.content)
+    .map((f) => ({
+      filename: f.filename as string,
+      content: Buffer.from(f.content as string, 'base64'),
+      contentType: f.contentType || 'application/octet-stream',
+    }))
+
+  /* Guarded again server-side: the browser's limit is a courtesy, not a control. */
+  const total = files.reduce((n, f) => n + f.content.length, 0)
+  if (total > 4 * 1024 * 1024) {
+    res.status(400).json({ error: 'Those attachments are too large to send in one message.' })
+    return
+  }
+
+  const attachments = [
+    ...(embedded
+      ? [{ filename: 'signature', content: embedded.content, contentType: embedded.contentType, cid: SIGNATURE_CID }]
+      : []),
+    ...files,
+  ]
 
   const fullHtml = composeBody(bodyHtml, signatureHtml(signatureText, image, imageSrc))
 

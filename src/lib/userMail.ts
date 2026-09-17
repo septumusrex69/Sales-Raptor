@@ -25,6 +25,7 @@
  * doing on a quiet day; not worth doing in the middle of a feature.
  */
 import { supabase } from './supabase'
+import { senderName } from './emailRules'
 import { refreshNavCounts } from './navCounts'
 import { mirrorReadToAccount, mirrorUnreadToAccount } from './mailReadState'
 import type { ContactCandidate } from './signature'
@@ -219,7 +220,14 @@ function toItem(r: MailRow): MailItem {
     uid: r.uid,
     messageId: r.message_id,
     fromAddress: r.from_address,
-    fromName: r.from_name,
+    /*
+     * CLEANED ON THE WAY OUT. Everything synced before this stored the whole From header as the
+     * name -- `"Urban Haus" <info@urbanhausgroup.co.za>` -- and those rows cannot be re-read,
+     * because fileUserEmail ignores duplicates on purpose so a re-sync cannot overwrite an
+     * agent's filing. See senderName: null where there is no real name, so the caller can fall
+     * back to the address rather than print it twice.
+     */
+    fromName: senderName(r.from_name, r.from_address),
     subject: r.subject,
     snippet: r.snippet,
     attachmentNames: r.attachment_names ?? [],
