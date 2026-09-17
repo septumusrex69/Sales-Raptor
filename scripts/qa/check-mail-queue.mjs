@@ -128,7 +128,18 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
  * everything, so an order-only assertion passes vacuously the moment its subject is deleted.
  */
 {
-  const bar = page.slice(page.indexOf('flex flex-wrap items-center gap-3 border-b'), page.indexOf('The tabs scroll if they must'))
+  /*
+   * THE CONTROLS' OWN ROW. This shipped once with the heading and the controls in a single
+   * wrapping flex row, and on an iPad the row broke after the compose button: "New email" was
+   * carried up beside "My mailbox" and the bar began with "Check now". Every assertion below
+   * passed the whole time, because the SOURCE order was right and the RENDERED order was not.
+   * So the first thing checked is that the two are not in one row to begin with.
+   */
+  const rowStart = page.indexOf('<div className="flex flex-wrap items-center gap-3">')
+  ok('the controls have a row of their own', rowStart > -1)
+  const bar = page.slice(rowStart, page.indexOf('The tabs scroll if they must'))
+  ok('...which the heading is not in, so it cannot wrap the order apart',
+    !bar.includes('My mailbox'))
   const compose = bar.indexOf('setComposing(true)')
   const search = bar.indexOf('aria-label="Search your mailbox"')
   const switcher = bar.indexOf('<EmailViewSwitcher')
@@ -138,8 +149,16 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
   ok('writing a new message comes first', compose < search)
   ok('searching sits to the right of it', search < switcher)
   ok('and how the mail is laid out is last', switcher === Math.max(compose, search, switcher))
-  // Pushed right by the search box's own auto margin: the heading has to stay free to shrink.
+  // Pushed right by the search box's own auto margin, which is what puts a gap between the
+  // buttons that change mail and the two controls that only change how you look at it.
   ok('the right-hand group is pushed there', /relative ml-auto \$\{filter === 'blocked'/.test(bar))
+  // Named in the order the firm drew them on the screenshot: write, sync, select.
+  const sync = bar.indexOf('void syncMine()')
+  const select = bar.indexOf('aria-pressed={selecting}')
+  ok('the sync button is on the bar', sync > -1)
+  ok('...and Select', select > -1)
+  ok('writing comes before syncing', compose < sync)
+  ok('...and syncing before selecting', sync < select)
 }
 
 /* ---------- 3. replying ---------- */

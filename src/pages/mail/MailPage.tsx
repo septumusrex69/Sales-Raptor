@@ -590,7 +590,7 @@ export function MailPage() {
   return (
     <div className="space-y-4">
       <Card padded={false}>
-        <div className="px-5 py-4 flex flex-wrap items-center gap-3 border-b border-slate-100">
+        <div className="px-5 py-4 border-b border-slate-100 space-y-3">
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-slate-800">My mailbox</h2>
             <p className="text-xs text-slate-400 mt-0.5">
@@ -599,66 +599,71 @@ export function MailPage() {
             </p>
           </div>
           {/*
-            THE ORDER IS THE FIRM'S. Writing a new message is the first thing on the bar because
-            it is the one thing here that starts work rather than sorting it; the actions follow;
-            and searching and choosing how the mail is laid out sit hard right, away from the
-            buttons that change mail. `ml-auto` rides on the search box rather than the heading:
-            the heading has to be free to shrink, and an auto margin on a shrinking box moves
-            with it.
-          */}
-          {/*
-            A message to anybody, from here. Every other compose in Raptor hangs off a record —
-            a debtor, a lead, a deal — which covers replying and covers nothing else. Writing to
-            an attorney, a client's accountant or a bureau had to be done in Outlook, which is
-            how a mailbox managed in one place stops being managed in one place.
-          */}
-          <button onClick={() => setComposing(true)}
-            className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
-            <PenLine size={14} />
-            New email
-          </button>
-          <button onClick={() => void syncMine()} disabled={syncing}
-            className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50">
-            {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            {syncing ? 'Checking…' : 'Check now'}
-          </button>
-          {/* Junk earns its own one-tap answer: it is where the volume is and where nobody
-              wants to read anything. */}
-          {filter === 'junk' && items.length > 0 && (
-            <button onClick={() => setEmptying(true)}
-              className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-negative-700 hover:border-negative-100 hover:bg-negative-50">
-              <Trash2 size={14} /> Empty junk
-            </button>
-          )}
-          {/*
-            Select, which is the only way the tick boxes appear.
+            THE ORDER IS THE FIRM'S: write, then sync, then select, and searching and choosing
+            how the mail is laid out hard right, away from the buttons that change mail.
 
-            Off by default so the gutter can carry the unread mark instead — see `selecting`.
-            It reads as pressed while it is on, because a mode you cannot see you are in is a
-            mode that surprises you.
+            THE CONTROLS GET THEIR OWN ROW, which is the whole reason this is a second div. They
+            shared one wrapping row with the heading, and the heading's description is long
+            enough that on an iPad the row broke AFTER the compose button -- so "New email" was
+            carried up beside "My mailbox" and the bar began with "Check now". Order that
+            depends on how wide somebody's screen is is not order at all, and it read as the
+            button having gone missing.
           */}
-          {filter !== 'blocked' && items.length > 0 && (
-            <button onClick={toggleSelecting} aria-pressed={selecting}
-              className={`shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border transition-colors ${
-                selecting
-                  ? 'border-gold-500 bg-gold-400 text-navy-950'
-                  : 'border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50'}`}>
-              {selecting ? <X size={14} /> : <CheckSquare size={14} />}
-              {selecting ? 'Done' : 'Select'}
+          <div className="flex flex-wrap items-center gap-3">
+            {/*
+              A message to anybody, from here. Every other compose in Raptor hangs off a record —
+              a debtor, a lead, a deal — which covers replying and covers nothing else. Writing to
+              an attorney, a client's accountant or a bureau had to be done in Outlook, which is
+              how a mailbox managed in one place stops being managed in one place.
+            */}
+            <button onClick={() => setComposing(true)}
+              className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+              <PenLine size={14} />
+              New email
             </button>
-          )}
-          <label className={`relative ml-auto ${filter === 'blocked' ? 'hidden' : ''}`}>
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Sender or subject"
-              aria-label="Search your mailbox"
-              className="text-sm rounded-lg border border-slate-200 pl-8 pr-3 py-2 w-52 focus:outline-none focus:ring-2 focus:ring-brand-100"
-            />
-          </label>
-          {/* Not on the blocklist, which is a list of senders rather than of mail. */}
-          {filter !== 'blocked' && <EmailViewSwitcher view={view} onChange={setView} />}
+            <button onClick={() => void syncMine()} disabled={syncing}
+              className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50">
+              {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              {syncing ? 'Checking…' : 'Check now'}
+            </button>
+            {/* Junk earns its own one-tap answer: it is where the volume is and where nobody
+                wants to read anything. */}
+            {filter === 'junk' && items.length > 0 && (
+              <button onClick={() => setEmptying(true)}
+                className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-negative-700 hover:border-negative-100 hover:bg-negative-50">
+                <Trash2 size={14} /> Empty junk
+              </button>
+            )}
+            {/*
+              Select, which is the only way the tick boxes appear.
+
+              Off by default so the gutter can carry the unread mark instead — see `selecting`.
+              It reads as pressed while it is on, because a mode you cannot see you are in is a
+              mode that surprises you.
+            */}
+            {filter !== 'blocked' && items.length > 0 && (
+              <button onClick={toggleSelecting} aria-pressed={selecting}
+                className={`shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border transition-colors ${
+                  selecting
+                    ? 'border-gold-500 bg-gold-400 text-navy-950'
+                    : 'border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50'}`}>
+                {selecting ? <X size={14} /> : <CheckSquare size={14} />}
+                {selecting ? 'Done' : 'Select'}
+              </button>
+            )}
+            <label className={`relative ml-auto ${filter === 'blocked' ? 'hidden' : ''}`}>
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Sender or subject"
+                aria-label="Search your mailbox"
+                className="text-sm rounded-lg border border-slate-200 pl-8 pr-3 py-2 w-52 focus:outline-none focus:ring-2 focus:ring-brand-100"
+              />
+            </label>
+            {/* Not on the blocklist, which is a list of senders rather than of mail. */}
+            {filter !== 'blocked' && <EmailViewSwitcher view={view} onChange={setView} />}
+          </div>
         </div>
 
         {/*
