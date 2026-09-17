@@ -404,15 +404,32 @@ try {
   await page.waitForTimeout(900)
   t.check('and back to 50', await rows2().count(), 50)
 
-  /* ---------- older mail can be reached ---------- */
+  /* ---------- select all, with the reading pane up ---------- */
 
   /*
-   * The bug the firm found the only way anybody could -- mail they could see in another client and
-   * not here. The sync only read forward, so everything older than the first run's window was
-   * unreachable and nothing said so.
+   * "There should be an option to select all and then have a specific action." Every action already
+   * existed; SELECT ALL did not, with the pane on -- the tick-all row lived inside the list branch,
+   * so the way the firm actually works gave tick boxes and no way to tick them all. Checked in the
+   * pane for exactly that reason.
    */
-  t.ok('there is a way to reach further back',
-    await page.getByRole('button', { name: /Fetch older mail|Nothing older/ }).isVisible())
+  await page.getByRole('button', { name: 'Reading pane' }).click()
+  await page.waitForTimeout(700)
+  await page.getByRole('button', { name: 'Select', exact: true }).click()
+  await page.waitForTimeout(400)
+  const tickAll = page.getByRole('checkbox', { name: /Select all \d+ on this page/ })
+  t.ok('select all is offered with the reading pane up', await tickAll.isVisible())
+  await tickAll.check()
+  await page.waitForTimeout(400)
+  /* And it really selects them: the bulk bar counts what it holds. */
+  t.ok('...and it selects the whole page',
+    await page.getByText(/^\d+ selected$/).first().isVisible())
+  for (const action of ['Mark read', 'Mark as open', 'Move to junk', 'Block senders']) {
+    t.ok(`...offering ${action}`, await page.getByRole('button', { name: action }).isVisible())
+  }
+  await page.getByRole('button', { name: 'Done' }).click()
+  await page.waitForTimeout(500)
+  await page.getByRole('button', { name: 'List' }).click()
+  await page.waitForTimeout(600)
 
   /* ---------- a lead, out of an ordinary sender ---------- */
 

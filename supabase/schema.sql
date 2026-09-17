@@ -3546,3 +3546,19 @@ comment on column public.email_connections.folder_uids is
 -- ---------------------------------------------------------------------------
 update public.email_connections
 set oldest_seen_uid = null, oldest_seen_uid_junk = null, oldest_seen_uid_sent = null;
+
+-- ---------------------------------------------------------------------------
+-- "FETCH OLDER MAIL" IS GONE, and so are its columns.
+--
+-- The firm: "just remove that, please -- it's going to be a nightmare importing thousands of
+-- messages from years ago until now." They are right, and it was also answering a question that
+-- turned out to have a different answer: the mail they could not find was in folders the sync
+-- never opened (see folder_uids above), not behind a date.
+--
+-- Dropped rather than left unused. They were added in this same session, the only value ever
+-- written to one was wrong and has since been cleared, and nothing reads them.
+-- ---------------------------------------------------------------------------
+alter table public.email_connections
+  drop column if exists oldest_seen_uid,
+  drop column if exists oldest_seen_uid_junk,
+  drop column if exists oldest_seen_uid_sent;

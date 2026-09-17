@@ -5,7 +5,7 @@ import {
   Inbox, Link2, Download, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
   Forward as ForwardIcon,
   Search, ShieldAlert, Trash2, Undo2, X, CalendarDays, CalendarPlus, ReplyAll,
-  Filter, History, Info, UserPlus,
+  Filter, Info, UserPlus,
 } from 'lucide-react'
 import { Avatar } from '../../components/ui/Avatar'
 import { Card } from '../../components/ui/Card'
@@ -396,47 +396,6 @@ export function MailPage() {
     } finally {
       setSyncing(false)
       await load(0)
-    }
-  }, [session, load])
-
-  /**
-   * The other direction: older mail.
-   *
-   * WHAT THIS IS FOR. The sync only ever read FORWARD -- it asks the server for messages above a
-   * high-water mark, and the very first run set that mark at the top of the most recent 25. Every
-   * message older than that was then unreachable for ever: not filtered, not hidden, simply never
-   * fetched, with nothing on the screen saying so. The firm found it the only way anybody could --
-   * two messages they could see in another mail client and not here.
-   *
-   * A batch at a time, and it says how many came back and whether there are more, because the one
-   * thing worse than mail you cannot reach is a button that may or may not have done anything.
-   */
-  const [fetchingOlder, setFetchingOlder] = useState(false)
-  const [noOlder, setNoOlder] = useState(false)
-  const fetchOlder = useCallback(async () => {
-    const token = session?.access_token
-    if (!token) return
-    setFetchingOlder(true)
-    setError(null)
-    try {
-      const res = await fetch('/api/email/sync', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ older: true }),
-      })
-      const body = (await res.json().catch(() => ({}))) as { logged?: number; done?: boolean; error?: string }
-      if (!res.ok) { setError(body.error ?? 'Could not reach further back in your mailbox.'); return }
-      const got = body.logged ?? 0
-      setNoOlder(!!body.done)
-      setStatus(got === 0
-        ? 'Nothing older to fetch \u2014 Raptor has the whole of this folder.'
-        : `${got} older ${got === 1 ? 'message' : 'messages'} fetched.${
-          body.done ? ' That is the whole folder.' : ' Press again for more.'}`)
-      await load(0)
-    } catch {
-      setError('Could not reach the server. Please try again.')
-    } finally {
-      setFetchingOlder(false)
     }
   }, [session, load])
 
@@ -1057,6 +1016,26 @@ export function MailPage() {
           </div>
         )}
 
+        {/*
+          SELECT ALL, IN BOTH VIEWS. It was inside the list branch, so with the reading pane up --
+          which is how the firm works -- pressing Select gave you tick boxes and no way to tick
+          them all. Rendered once here, above whichever view is showing, so the two cannot drift.
+
+          THE PAGE, AND IT SAYS SO. Not the whole mailbox: these buttons block senders and delete
+          rows, and a "select all" that silently reached messages nobody has seen -- or fetched --
+          is how somebody blocks a client they never laid eyes on. The page is what is on screen,
+          and the page size is now theirs to choose.
+        */}
+        {selecting && filter !== 'blocked' && items.length > 0 && (
+          <div className="px-5 py-2 border-b border-slate-100">
+            <label className="inline-flex items-center gap-2 text-xs text-slate-500 cursor-pointer">
+              <input type="checkbox" checked={allChosen}
+                onChange={(e) => setChosen(e.target.checked ? new Set(items.map((i) => i.id)) : new Set())} />
+              Select all {items.length} on this page
+            </label>
+          </div>
+        )}
+
         {loading ? (
           <div className="py-14 grid place-items-center text-slate-400">
             <Loader2 size={18} className="animate-spin" />
@@ -1215,15 +1194,6 @@ export function MailPage() {
           />
         ) : (
           <>
-            {selecting && (
-              <div className="px-5 py-2 border-b border-slate-100">
-                <label className="inline-flex items-center gap-2 text-xs text-slate-500">
-                  <input type="checkbox" checked={allChosen}
-                    onChange={(e) => setChosen(e.target.checked ? new Set(items.map((i) => i.id)) : new Set())} />
-                  Select all on this page
-                </label>
-              </div>
-            )}
             <ul className="divide-y divide-slate-100">
               {items.map((m) => (
                 <MailRow key={m.id} mail={m}
@@ -1301,21 +1271,6 @@ export function MailPage() {
               {page > 0 || more ? `Page ${page + 1}` : ''}
             </span>
             <div className="flex items-center gap-3">
-              {/*
-                OLDER MAIL, which was unreachable rather than merely unlisted. See fetchOlder:
-                paging moves through what Raptor already has, and this reaches back into the
-                mailbox for what it never fetched. They belong on the same row because "where is
-                the rest of it?" is one question, and the answer used to be silence.
-              */}
-              <button onClick={() => void fetchOlder()} disabled={fetchingOlder || noOlder}
-                title={noOlder
-                  ? 'Raptor has the whole of this folder'
-                  : 'Reach further back into your mailbox for messages Raptor has not fetched'}
-                className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40">
-                {fetchingOlder
-                  ? <><Loader2 size={14} className="animate-spin" /> Fetching&hellip;</>
-                  : <><History size={14} /> {noOlder ? 'Nothing older' : 'Fetch older mail'}</>}
-              </button>
               <button disabled={!more} onClick={() => void load(page + 1)}
                 className="text-sm text-slate-500 hover:text-slate-700 disabled:opacity-30">Next</button>
             </div>

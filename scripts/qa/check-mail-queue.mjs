@@ -506,6 +506,55 @@ ok('...as the same control the book uses', /aria-pressed=\{pageSize === n\}/.tes
   ok('...without doubling the space above', !/mt-3 flex flex-wrap/.test(chips))
 }
 
+/* ---------- 7. select all, and what you can do with a selection ---------- */
+
+/*
+ * "When you have a select for the emails, there should be an option to select all and then have a
+ * specific action -- move to junk or open, or mark as unread or read."
+ *
+ * Every one of those actions already existed. What did not was SELECT ALL with the reading pane
+ * up: the tick-all row lived inside the list branch, so the way the firm actually works -- pane
+ * on -- gave you tick boxes and no way to tick them all.
+ */
+{
+  const selectAll = page.slice(
+    page.indexOf('{selecting && filter !== \'blocked\' && items.length > 0 && ('),
+    page.indexOf('{loading ? ('),
+  )
+  ok('there is a select-all', selectAll.length > 0)
+  ok('...outside the two view branches, so both get it', !/view === 'reading'/.test(selectAll))
+  ok('...which ticks every row on the page', /new Set\(items\.map\(\(i\) => i\.id\)\)/.test(selectAll))
+  ok('...and untick puts it back to none', /: new Set\(\)/.test(selectAll))
+  /*
+   * AND IT SAYS HOW MANY. These buttons block senders and delete rows; "select all" that reaches
+   * messages nobody has seen is how somebody blocks a client they never laid eyes on. The page is
+   * what is on screen, the page size is theirs to choose, and the label states the number.
+   */
+  ok('...and says how many that is', /Select all \{items\.length\} on this page/.test(selectAll))
+
+  /* The actions themselves, which is the rest of what was asked for. */
+  const bulk = page.slice(page.indexOf('{chosen.size > 0 && ('), page.indexOf('{status &&'))
+  ok('the bulk bar exists', bulk.length > 0)
+  for (const [what, needle] of [
+    ['mark read', 'void readChosen()'],
+    ['mark unread', 'void unreadChosen()'],
+    ['mark as open', 'void noRecordChosen()'],
+    ['move to junk', 'void junkChosen(true)'],
+    ['rescue from junk', 'void junkChosen(false)'],
+    ['block the senders', 'void blockChosen()'],
+  ]) {
+    ok(`a selection can ${what}`, bulk.includes(needle))
+  }
+  /*
+   * READ AND UNREAD ARE OFFERED ONLY WHERE THEY WOULD DO SOMETHING. On a selection that is all
+   * read, "Mark read" is furniture -- and a button that does nothing when pressed is worse than
+   * no button, because it is the one that teaches people the rest may not work either.
+   */
+  ok('...and only the one that would change something',
+    /items\.some\(\(m\) => chosen\.has\(m\.id\) && !m\.readAt\)/.test(bulk)
+    && /items\.some\(\(m\) => chosen\.has\(m\.id\) && !!m\.readAt\)/.test(bulk))
+}
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')

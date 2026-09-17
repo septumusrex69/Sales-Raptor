@@ -1,26 +1,28 @@
 /**
- * Mail that was never fetched, and the counter that has to agree with the list.
+ * The folders the sync could not see, and the counter that has to agree with the list.
  *
- * THE BUG THE FIRM FOUND, and they found it the only way anybody could — two messages they could
- * see in another mail client and not in Raptor: "I don't see it in my message ... I don't know why
- * it's not mentioned in my inbox."
+ * THE BUG THE FIRM FOUND, and they found it the only way anybody could -- two messages that were
+ * in their mail client and not in Raptor.
  *
- * Because the sync only ever read FORWARD. `last_seen_uid` is a high-water mark and every run asks
- * the server for UIDs above it; the very first run took the most recent 25 messages and set the
- * mark at the top of them. Everything older was then unreachable for ever — not filtered, not
- * hidden, simply never fetched, and nothing on the screen said so. A mailbox that silently stops
- * at an invisible line is worse than one that is plainly empty.
+ * My first answer was wrong: I said the sync only ever read forward and those messages predated
+ * the first run. They pointed out the mail had arrived that afternoon, and they were right -- my
+ * query had run three hours before it existed. The sync's own log gave the real answer. That
+ * server has EIGHTEEN folders and the sync read three of them, so anything a server-side rule or
+ * another mail client filed into Archive, Blocked or "Spam Emails 2" was invisible here,
+ * permanently, with nothing on screen saying so. A mailbox that stops at an invisible line is
+ * worse than one that is plainly empty: the empty one looks broken, and this looked complete.
  *
- * So: a low-water mark per folder, and a way to walk down from it. This file checks that the walk
- * goes the right way, that a forward run can never move the floor UP (which would strand a band of
- * messages between the two marks — the same bug with an extra step), and that it did not cost a
- * thirteenth serverless function, which Vercel Hobby does not have.
+ * This file checks which folders are read, that reading one for the first time files history
+ * without billing anybody for it, and that one unreadable folder cannot cost the run.
+ *
+ * ("Fetch older mail" was built for my wrong answer and removed at the firm's request -- "a
+ * nightmare importing thousands of messages from years ago until now." Its checks went with it.)
  *
  * Also here: bumpUnread, which is the one place in the mailbox that states a tab's membership
- * rules outside scope(). That is a real risk and it is taken deliberately — see its own note —
+ * rules outside scope(). That is a real risk and it is taken deliberately -- see its own note --
  * so the rules are exercised rather than read.
  *
- * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-mail-backfill.mjs
+ * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-mail-folders.mjs
  */
 import { readFileSync } from 'node:fs'
 import { bumpUnread } from '../../src/lib/emailRules.ts'
@@ -48,94 +50,21 @@ function slice(src, from, to, label) {
   return src.slice(a, b)
 }
 
-/* ---------- 1. the low-water mark exists and means something ---------- */
-
-for (const col of ['oldest_seen_uid', 'oldest_seen_uid_junk', 'oldest_seen_uid_sent']) {
-  ok(`${col} is on email_connections`,
-    new RegExp(`add column if not exists ${col} integer`).test(schema))
-}
-/* Said in the database, because the next person to read this column will wonder why there are two. */
-ok('the schema says what the mark is for', /how far back/i.test(schema))
-
-/* ---------- 2. the walk goes DOWN ---------- */
-
-const backfill = slice(sync, 'async function backfillMailbox', '\n/**', 'backfillMailbox')
-
-/* Below the floor, which is the whole difference from syncMailbox. */
-ok('it searches below the floor', /uid: `1:\$\{floor - 1\}`/.test(backfill))
-/*
- * NEWEST OF THE OLDER ONES FIRST. Somebody pressing this is looking for a message they remember
- * receiving, and history is wanted most-recent-first — slice(0, n) would hand back the oldest mail
- * in the account and take several presses to reach anything they were thinking of.
- */
-ok('...and takes the newest of them', /below\.slice\(-BACKFILL_MESSAGE_LIMIT\)/.test(backfill))
-/*
- * A FLOOR IT DOES NOT KNOW IS READ BACK, NOT GUESSED. The mark is new and the mailbox was synced
- * before it existed, so the oldest row already stored IS the floor. Guessing 1 would re-fetch the
- * entire mailbox on the first press.
- */
-ok('an unknown floor comes from what is already stored', /order\('uid', \{ ascending: true \}\)/.test(backfill))
-ok('...rather than being assumed to be the bottom', !/floor = 1/.test(backfill))
-/* Nothing below 1, and a folder with nothing in it wants a forward sync, not this. */
-ok('it stops at the bottom', /if \(floor === null \|\| floor <= 1\) return/.test(backfill))
-ok('...and says when there is no more', /done: true/.test(backfill))
+/* ---------- 1. no trace of the backfill is left behind ---------- */
 
 /*
- * BLOCKED SENDERS ARE STILL BLOCKED. Reaching back through a year of mail is exactly when a
- * blocklist earns its keep, and a backfill that ignored it would hand somebody the 300 newsletters
- * they blocked last month.
+ * REMOVED, NOT HIDDEN. A button taken off the screen while its endpoint, its column and its
+ * five hundred lines of fetching stay behind is how a codebase acquires a feature nobody can
+ * find and nobody dares delete. The firm asked for it gone; it is gone.
  */
-ok('a blocked sender is still skipped', /if \(isBlocked\(normaliseAddress\(fromAddress\), blocks\)\) continue/.test(backfill))
-/* And a sender ruled to Open mail still lands there rather than in the working queue. */
-ok('...and a sender ruled to Open mail still lands there', /noRecordNeeded: isBlocked\(normaliseAddress\(fromAddress\), senderRules\)/.test(backfill))
+ok('the sync has no backfill in it', !/backfillMailbox|BACKFILL_MESSAGE_LIMIT/.test(sync))
+ok('...and no low-water marks to drive one', !/oldest_seen_uid/.test(sync))
+ok('the endpoint takes no direction', !/older/.test(endpoint))
+ok('the mailbox does not ask for older mail', !/Fetch older mail/.test(page))
+/* And the columns went with the code, rather than sitting unused for somebody to wonder about. */
+ok('the columns are dropped', /drop column if exists oldest_seen_uid,/.test(schema))
 
-/*
- * WHAT IT DELIBERATELY DOES NOT DO. syncMailbox files messages onto debtor accounts and raises
- * Annexure B item 6 for receiving them. Replaying that over a year of history would bill debtors,
- * today, for mail that arrived months ago and was dealt with on paper.
- */
-ok('it raises no fees', !/chargeItem|fileAccountEmail/.test(backfill))
-ok('...and files nothing onto an account', !/markUserEmailLinked/.test(backfill))
-
-/* ---------- 3. a forward run must never move the floor up ---------- */
-
-const forward = slice(sync, 'const patch: Record<string, unknown>', 'return { logged: inboxResult', 'the watermark patch')
-/*
- * IT IS NOT SET BY A FORWARD RUN AT ALL, and the version that tried to was the bug.
- *
- * "Record it where it is not already known" sounds right and is wrong on any mailbox that was
- * already syncing: a forward run returns the minimum of the UIDs IT fetched, which mid-flight is
- * the oldest of the four messages that happened to arrive that minute. It wrote 59528 against a
- * mailbox whose oldest stored message is 5101, and the backfill would then have spent its first
- * dozen presses re-reading mail Raptor already had.
- *
- * backfillMailbox derives the floor from the oldest row actually stored when the column is null,
- * which is right by construction and needs no watermark at all.
- */
-ok('a forward run writes no floor', !/oldest_seen_uid/.test(forward))
-ok('...and the backfill works it out instead', /floor = \(data\?\.uid as number \| undefined\) \?\? null/.test(sync))
-
-/* ---------- 4. no thirteenth serverless function ---------- */
-
-/*
- * Vercel Hobby caps serverless functions at 12 and api/ is at exactly 12, so this is a flag on the
- * sync that already exists rather than an endpoint of its own.
- */
-ok('the existing sync takes the direction', /const \{ older \} = \(req\.body \?\? \{\}\) as \{ older\?: boolean \}/.test(endpoint))
-ok('...and passes it on', /syncConnection\(admin, conn as EmailConnectionRow, \{ older: !!older \}\)/.test(endpoint))
-ok('...and reports whether there is more', /done: result\.done \?\? false/.test(endpoint))
-
-/* The screen asks for it, and says which way it is reading. */
-ok('the mailbox can ask for older mail', /body: JSON\.stringify\(\{ older: true \}\)/.test(page))
-ok('...and says how much came back', /older \$\{got === 1 \? 'message' : 'messages'\} fetched/.test(page))
-/*
- * AND SAYS WHEN THERE IS NO MORE. The one thing worse than mail you cannot reach is a button that
- * may or may not have done anything.
- */
-ok('...and when there is nothing older left', /Nothing older/.test(page))
-ok('...without leaving the button pressable for ever', /disabled=\{fetchingOlder \|\| noOlder\}/.test(page))
-
-/* ---------- 5. bumpUnread agrees with the tabs ---------- */
+/* ---------- 4. bumpUnread agrees with the tabs ---------- */
 
 /*
  * The badges are adjusted in the browser rather than re-counted, because re-counting meant a
@@ -191,7 +120,7 @@ const before = { ...zero }
 bumpUnread(before, mail({}), 1)
 check('the counts it was given are not mutated', before.all, 0)
 
-/* ---------- 6. the folders the sync could not see ---------- */
+/* ---------- 2. the folders the sync could not see ---------- */
 
 /*
  * THE BUG THE FIRM FOUND, AND MY FIRST ANSWER TO IT WAS WRONG.
@@ -255,7 +184,7 @@ ok('...and Blocked with it', looksLikeJunk('INBOX.Blocked'))
 ok('...but an archive is not junk', !looksLikeJunk('INBOX.Archive'))
 ok('...nor is "Sent Items"', !looksLikeJunk('INBOX.Sent Items'))
 
-/* ---------- 7. and reading them must not bill anybody ---------- */
+/* ---------- 3. and reading them must not bill anybody ---------- */
 
 /*
  * A FOLDER'S FIRST READ IS HISTORY, NOT POST. Fifteen folders came into view at once, and running
@@ -289,6 +218,6 @@ if (failures.length) {
 }
 console.log(`${pass} passed, 0 failed`)
 console.log(`
-Every folder on the server is read rather than three of them, a folder's first read files history
-without billing anybody for it, mail older than the first sync can be reached, and the tab badges
-move the same way the tabs themselves do.`)
+Every folder on the server is read rather than three of them, Trash and Drafts are left alone, a
+folder's first read files history without billing anybody for it, one unreadable folder cannot cost
+the run, and the tab badges move the same way the tabs themselves do.`)

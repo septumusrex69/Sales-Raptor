@@ -25,16 +25,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  /*
-   * Which way to read. `older` walks BACK into the mailbox instead of forward from the watermark
-   * -- see backfillMailbox. A flag rather than an endpoint of its own, because Vercel Hobby caps
-   * serverless functions at 12 and api/ is at exactly 12.
-   */
-  const { older } = (req.body ?? {}) as { older?: boolean }
-
   try {
-    const result = await syncConnection(admin, conn as EmailConnectionRow, { older: !!older })
-    res.status(200).json({ ok: true, logged: result.logged, done: result.done ?? false })
+    const result = await syncConnection(admin, conn as EmailConnectionRow)
+    res.status(200).json({ ok: true, logged: result.logged })
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Sync failed.' })
   }
