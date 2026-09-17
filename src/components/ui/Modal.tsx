@@ -3,7 +3,25 @@ import { X } from 'lucide-react'
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 
-export function Modal({ title, onClose, children, width = 480 }: { title: string; onClose: () => void; children: ReactNode; width?: number }) {
+/**
+ * `subtitle`, `headerRight`, `footer` and `padded` are all optional and all default to what this
+ * did before them, so every existing call site renders byte-identically. They exist for the trace
+ * workspace, which needs a header that says which trace and whose, an action beside the close
+ * button, and a footer that stays put while a long table scrolls under it.
+ */
+export function Modal({ title, subtitle, onClose, children, width = 480, headerRight, footer, padded = true }: {
+  title: string
+  subtitle?: ReactNode
+  onClose: () => void
+  children: ReactNode
+  width?: number
+  /** Sits left of the close button. An action about the whole modal, not about the form in it. */
+  headerRight?: ReactNode
+  /** Pinned to the bottom of the card, below the scrolling body. */
+  footer?: ReactNode
+  /** False where the body lays itself out to the card's edges. */
+  padded?: boolean
+}) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose()
@@ -22,13 +40,26 @@ export function Modal({ title, onClose, children, width = 480 }: { title: string
         style={{ maxWidth: width }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white rounded-t-2xl">
-          <h2 className="font-semibold text-slate-800">{title}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100">
-            <X size={18} />
-          </button>
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100 sticky top-0 z-10 bg-white rounded-t-2xl">
+          <div className="min-w-0">
+            <h2 className="font-semibold text-slate-800">{title}</h2>
+            {subtitle && <div className="text-xs text-slate-500 mt-0.5">{subtitle}</div>}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {headerRight}
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100">
+              <X size={18} />
+            </button>
+          </div>
         </div>
-        <div className="p-5">{children}</div>
+        <div className={padded ? 'p-5' : ''}>{children}</div>
+        {footer && (
+          // Sticky rather than fixed: it sits at the bottom of the card, and the card is what
+          // scrolls. Fixed would put it against the viewport and walk off a short modal.
+          <div className="sticky bottom-0 z-10 bg-white border-t border-slate-100 rounded-b-2xl px-5 py-3">
+            {footer}
+          </div>
+        )}
       </div>
     </div>,
     document.body,

@@ -25,15 +25,53 @@ export type TraceItemKind =
  */
 export type TraceOutcome = 'verified' | 'no_answer' | 'unreachable' | 'not_theirs'
 
-export const TRACE_OUTCOMES: { outcome: TraceOutcome; label: string; meaning: string }[] = [
-  { outcome: 'verified', label: 'Reached them', meaning: 'It is the debtor, and this reaches them.' },
-  { outcome: 'no_answer', label: 'Rang, no answer', meaning: 'A live number nobody picked up. Worth another hour of the day.' },
-  { outcome: 'unreachable', label: 'Off or dead', meaning: 'Switched off, unobtainable or disconnected.' },
-  { outcome: 'not_theirs', label: 'Not the debtor', meaning: 'Somebody else answered. It is not their number.' },
+/**
+ * How an outcome reads at a glance. Green worked, amber is worth another try, red is dead, and
+ * grey is "we know nothing" -- which covers both untried and somebody else's number, because
+ * neither tells you anything about reaching this person.
+ */
+export type OutcomeTone = 'grey' | 'green' | 'amber' | 'red'
+
+export const TRACE_OUTCOMES: { outcome: TraceOutcome; label: string; tone: OutcomeTone; meaning: string }[] = [
+  { outcome: 'verified', label: 'Reached them', tone: 'green', meaning: 'It is them, and this reaches them.' },
+  { outcome: 'no_answer', label: 'No answer', tone: 'amber', meaning: 'A live number nobody picked up. Worth another hour of the day.' },
+  /*
+   * "Wrong person", not "Not the debtor". On a director's profile the subject is not the debtor
+   * at all, and a collector reading "not the debtor" against a director's own number would take
+   * it to mean something it does not.
+   */
+  { outcome: 'not_theirs', label: 'Wrong person', tone: 'grey', meaning: 'Somebody else answered. It is not their number.' },
+  { outcome: 'unreachable', label: 'Disconnected', tone: 'red', meaning: 'Switched off, unobtainable or disconnected.' },
+]
+
+/**
+ * The same list with "not tested" on the front, which is what the picker offers.
+ *
+ * Untried is a REAL choice here, not the absence of one: picking it is the firm's "you can
+ * unverify it", and a picker that can only ever move forwards leaves a wrong outcome standing.
+ */
+export const OUTCOME_OPTIONS: { outcome: TraceOutcome | null; label: string; tone: OutcomeTone; meaning: string }[] = [
+  { outcome: null, label: 'Not tested', tone: 'grey', meaning: 'Nobody has tried it yet.' },
+  ...TRACE_OUTCOMES,
 ]
 
 export const outcomeLabel = (o: TraceOutcome | null | undefined): string | null =>
   TRACE_OUTCOMES.find((x) => x.outcome === o)?.label ?? null
+
+export const outcomeTone = (o: TraceOutcome | null | undefined): OutcomeTone =>
+  TRACE_OUTCOMES.find((x) => x.outcome === o)?.tone ?? 'grey'
+
+/**
+ * How loudly the bureau's risk grade should read.
+ *
+ * Only a high grade earns red. A grade shown in red whatever it says is a grade nobody reads,
+ * and most profiles come back average.
+ */
+export const riskTone = (risk: string | null | undefined): OutcomeTone =>
+  risk === null || risk === undefined ? 'grey'
+    : /high|poor|adverse/i.test(risk) ? 'red'
+      : /average|medium|fair/i.test(risk) ? 'amber'
+        : 'green'
 
 export interface TraceItem {
   id: string
@@ -220,4 +258,241 @@ export function canPromote(item: TraceItem): boolean {
   if (item.promotedContactId !== null) return false
   if (item.outcome === 'not_theirs') return false
   return item.kind !== 'property'
+}
+
+/* ------------------------------------------------------------------ *
+ * The workspace: what the sections are, and what a row in one is.
+ * ------------------------------------------------------------------ */
+
+export type TraceCategoryId =
+  | 'phones' | 'emails' | 'addresses' | 'employment' | 'people' | 'companies' | 'property'
+
+export interface TraceCategory {
+  id: TraceCategoryId
+  title: string
+  kinds: TraceItemKind[]
+  /** The line under the heading: what a person DOES with this list, not what it contains. */
+  blurb: string
+  /** What the first column actually holds, so the header is never a generic "Value". */
+  valueHeading: string
+  /**
+   * Whether a row here can be tried and given an outcome.
+   *
+   * A house cannot be rung and a directorship cannot answer. Offering a picker against them
+   * would be asking a question with no true answer, which is how a column of "Not tested"
+   * against every property teaches people the column means nothing.
+   */
+  worked: boolean
+}
+
+/**
+ * The firm's own order, off the design they drew: numbers first because that is the work, then
+ * the other ways to reach them, then who and what they are attached to.
+ *
+ * Employment sits with the addresses rather than with the companies: where somebody WORKS is a
+ * route to a garnishee, which is a collections step, while a directorship is an asset question.
+ */
+export const TRACE_CATEGORIES: TraceCategory[] = [
+  {
+    id: 'phones', title: 'Phone numbers', kinds: ['mobile', 'phone', 'work'],
+    blurb: 'Record an outcome and save useful numbers to the account.',
+    valueHeading: 'Number / type', worked: true,
+  },
+  {
+    id: 'emails', title: 'Email addresses', kinds: ['email'],
+    blurb: 'Record an outcome and save useful addresses to the account.',
+    valueHeading: 'Address', worked: true,
+  },
+  {
+    id: 'addresses', title: 'Addresses', kinds: ['address'],
+    blurb: 'Confirm where they are and save it to the account.',
+    valueHeading: 'Address', worked: true,
+  },
+  {
+    id: 'employment', title: 'Employment', kinds: ['employer'],
+    blurb: 'Where they work is the route to a garnishee.',
+    valueHeading: 'Employer / role', worked: true,
+  },
+  {
+    id: 'people', title: 'Linked people', kinds: ['link'],
+    blurb: 'A shared surname is a possible relative, not a confirmed one. Save one as a next of kin.',
+    valueHeading: 'Name', worked: false,
+  },
+  {
+    id: 'companies', title: 'Companies', kinds: ['directorship'],
+    blurb: 'What they direct. An active directorship is an asset and a place to serve.',
+    valueHeading: 'Company', worked: false,
+  },
+  {
+    id: 'property', title: 'Property', kinds: ['property'],
+    blurb: 'Deeds the bureau holds against them. Only what they still own is an asset.',
+    valueHeading: 'Property', worked: false,
+  },
+]
+
+export const categoryById = (id: TraceCategoryId): TraceCategory =>
+  TRACE_CATEGORIES.find((c) => c.id === id) ?? TRACE_CATEGORIES[0]
+
+/** How many findings sit under each section. What the rail wears, so nobody opens an empty list. */
+export function categoryCounts(items: TraceItem[]): Record<TraceCategoryId, number> {
+  const out = {} as Record<TraceCategoryId, number>
+  for (const c of TRACE_CATEGORIES) out[c.id] = groupTraceRows(itemsIn(items, c)).length
+  return out
+}
+
+export const itemsIn = (items: TraceItem[], category: TraceCategory): TraceItem[] =>
+  items.filter((i) => category.kinds.includes(i.kind))
+
+/**
+ * One row per THING, not per row the bureau printed.
+ *
+ * A profile files the same number under Cell, Home and Work -- one real one carried a single
+ * number under all three, updated within a month of each other. Listed as the bureau printed
+ * them the collector sees fifteen numbers where there are six, rings the same one three times,
+ * and marks one of the three tested while the other two still read "Not tested".
+ *
+ * So a row is a number, carrying the types it was filed under and every finding behind it. An
+ * outcome recorded on the row is recorded on all of them, which is what makes the count honest.
+ * The bureau's rows are not thrown away -- they are still what is stored, and still what a
+ * report reads back.
+ */
+export interface TraceRow {
+  /** The thing itself, normalised. Grouping key and nothing else. */
+  key: string
+  /** As the bureau printed it, which is what a person should see and dial. */
+  value: string
+  /** Every type it was filed under: Home, Work, Mobile. */
+  kinds: TraceItemKind[]
+  /** Every finding behind this row. An outcome is written to all of them. */
+  items: TraceItem[]
+  label: string | null
+  /** The most recent date any of them was seen. */
+  seenOn: string | null
+  /** The WORST of them: a number held against ten people is held against ten people. */
+  peopleLinked: number | null
+  amount: number | null
+  status: string | null
+  /** The agreed outcome, or null where they have not all been given the same one. */
+  outcome: TraceOutcome | null
+  /** True when the findings behind this row disagree, which only a merge can produce. */
+  mixed: boolean
+  /** Already on the account's contact details. */
+  promoted: boolean
+}
+
+/**
+ * What two findings have to share to be the same thing.
+ *
+ * Spacing is how a number was typed, not a fact about it, so it comes out. Case is the same for
+ * an address. Anything else -- a name, a company -- is compared as printed but case-folded.
+ */
+export const traceRowKey = (item: TraceItem): string =>
+  item.kind === 'mobile' || item.kind === 'phone' || item.kind === 'work'
+    ? item.value.replace(/[^0-9+]/g, '')
+    : item.value.trim().toUpperCase().replace(/\s+/g, ' ')
+
+const KIND_ORDER: TraceItemKind[] = ['phone', 'work', 'mobile', 'email', 'address', 'employer', 'link', 'directorship', 'property']
+
+export function groupTraceRows(items: TraceItem[]): TraceRow[] {
+  const byKey = new Map<string, TraceItem[]>()
+  for (const item of items) {
+    const key = traceRowKey(item)
+    const held = byKey.get(key)
+    if (held) held.push(item); else byKey.set(key, [item])
+  }
+
+  return [...byKey.entries()].map(([key, group]) => {
+    const outcomes = new Set(group.map((i) => i.outcome))
+    const newest = group.reduce((a, b) => ((b.seenOn ?? '') > (a.seenOn ?? '') ? b : a))
+    return {
+      key,
+      /* The newest printing of it, so a number is shown the way it was most recently filed. */
+      value: newest.value,
+      kinds: [...new Set(group.map((i) => i.kind))].sort(
+        (a, b) => KIND_ORDER.indexOf(a) - KIND_ORDER.indexOf(b),
+      ),
+      items: group,
+      label: newest.label,
+      seenOn: group.reduce<string | null>((a, i) => ((i.seenOn ?? '') > (a ?? '') ? i.seenOn : a), null),
+      peopleLinked: group.reduce<number | null>(
+        (a, i) => (i.peopleLinked === null ? a : Math.max(a ?? 0, i.peopleLinked)), null),
+      amount: newest.amount,
+      status: newest.status,
+      outcome: outcomes.size === 1 ? group[0].outcome : null,
+      mixed: outcomes.size > 1,
+      /* On the account if ANY of them made it there -- it is one number either way. */
+      promoted: group.some((i) => i.promotedContactId !== null),
+    }
+  })
+}
+
+export type TraceSort = 'recent' | 'oldest' | 'fewest_links'
+
+export const TRACE_SORTS: { sort: TraceSort; label: string }[] = [
+  { sort: 'recent', label: 'Most recently seen' },
+  { sort: 'oldest', label: 'Oldest first' },
+  { sort: 'fewest_links', label: 'Held against fewest people' },
+]
+
+/** The picker above the list. 'any' is every row; the rest narrow to one outcome. */
+export type OutcomeFilter = TraceOutcome | 'any' | 'untested'
+
+/**
+ * The list a person is looking at: grouped, narrowed, and put in an order.
+ *
+ * ONE FUNCTION, because the count under the table and the rows in it have to be the same
+ * question asked once. Written twice they drift, and the failure is a table saying "showing 6 of
+ * 15" over a list of 5.
+ */
+export function workRows(input: {
+  items: TraceItem[]
+  category: TraceCategory
+  search?: string
+  outcome?: OutcomeFilter
+  sort?: TraceSort
+}): TraceRow[] {
+  const { items, category, search = '', outcome = 'any', sort = 'recent' } = input
+  const needle = search.trim().toUpperCase()
+
+  const rows = groupTraceRows(itemsIn(items, category)).filter((r) => {
+    if (needle !== '' && !`${r.value} ${r.label ?? ''}`.toUpperCase().includes(needle)) return false
+    if (outcome === 'any') return true
+    if (outcome === 'untested') return r.outcome === null && !r.mixed
+    return r.outcome === outcome
+  })
+
+  return rows.sort((a, b) => {
+    if (sort === 'fewest_links') {
+      /* Null is not "nought other people" -- it is "the bureau did not say", so it sorts last. */
+      const av = a.peopleLinked ?? Number.MAX_SAFE_INTEGER, bv = b.peopleLinked ?? Number.MAX_SAFE_INTEGER
+      if (av !== bv) return av - bv
+    }
+    const seen = sort === 'oldest'
+      ? (a.seenOn ?? '').localeCompare(b.seenOn ?? '')
+      : (b.seenOn ?? '').localeCompare(a.seenOn ?? '')
+    if (seen !== 0) return seen
+    return a.value.localeCompare(b.value)
+  })
+}
+
+/**
+ * One page of them, and the sentence under the table.
+ *
+ * CLAMPED, because the page number outlives the list it was counted against. Somebody on page 3
+ * types into the search box, four rows come back, and an unclamped slice hands them an empty
+ * table with a working Previous button -- which reads as the search having found nothing.
+ */
+export function pageOf<T>(rows: T[], page: number, size: number): {
+  rows: T[]
+  /** The page actually shown, which is not always the one asked for. */
+  page: number
+  pages: number
+  /** For "Showing 6 of 15": how many are on screen out of how many there are. */
+  showing: number
+  total: number
+} {
+  const pages = Math.max(1, Math.ceil(rows.length / size))
+  const safe = Math.min(Math.max(1, page), pages)
+  const slice = rows.slice((safe - 1) * size, safe * size)
+  return { rows: slice, page: safe, pages, showing: slice.length, total: rows.length }
 }

@@ -53,8 +53,15 @@ ok('ringing out is told apart from being switched off',
   TRACE_OUTCOMES.some((o) => o.outcome === 'no_answer') && TRACE_OUTCOMES.some((o) => o.outcome === 'unreachable'))
 ok('...and "not the debtor" is its own answer again',
   TRACE_OUTCOMES.some((o) => o.outcome === 'not_theirs'))
-eq('an outcome reads as words', outcomeLabel('no_answer'), 'Rang, no answer')
+eq('an outcome reads as words', outcomeLabel('no_answer'), 'No answer')
 eq('...and an untried one has no label', outcomeLabel(null), null)
+/*
+ * "Wrong person", not "Not the debtor". A director's trace has a director as its subject, and a
+ * collector reading "not the debtor" against a director's own number would take it to mean the
+ * number is fine and the person is not the one who owes.
+ */
+eq('the wrong-number answer does not assume the subject is the debtor',
+  outcomeLabel('not_theirs'), 'Wrong person')
 
 /* ---------- the principal number ---------- */
 
@@ -297,17 +304,33 @@ ok('...and where the company\'s findings actually are', /A company profile carri
 for (const line of ['Phone', 'Address', 'Works at', 'Property', 'Possible next of kin', 'Directs']) {
   ok(`the summary carries ${line.toLowerCase()}`, new RegExp(`"${line}"|>${line}[ <]`).test(detail))
 }
-ok('a number can be dialled from inside the trace', /<PhoneLink number=\{item\.value\}/.test(workspace))
-ok('...and what came of it recorded', /onOutcome\(o\.outcome\)/.test(workspace))
+ok('a number can be dialled from inside the trace', /<PhoneLink number=\{row\.value\}/.test(workspace))
+ok('...and what came of it recorded', /onOutcome\(e\.target\.value === ''/.test(workspace))
 /*
- * UNDOING IT IS A BUTTON, at the firm's instruction — "you can unverify it". A wrong outcome left
- * standing is worse than none: the next collector trusts a "reached them" that was somebody else.
+ * UNDOING IT, at the firm's instruction — "you can unverify it". A wrong outcome left standing is
+ * worse than none: the next collector trusts a "reached them" that was somebody else. It is the
+ * picker's own first choice now rather than a separate button, which is why the empty option is
+ * what has to map back to null — an "unset" that recorded a fifth state would be a lie.
  */
-ok('...and undone when it was wrong', /onOutcome\(null\)/.test(workspace))
+ok('...and undone when it was wrong', /\? null : e\.target\.value as TraceOutcome/.test(workspace))
 ok('...which clears it rather than recording a fifth state',
   /outcome_at: input\.outcome === null \? null : new Date/.test(data))
-ok('a finding can be put on the account', /Add to contact details/.test(workspace))
-ok('...and a relative added as next of kin', /Add as next of kin/.test(workspace))
+/*
+ * AN OUTCOME GOES ON EVERY FINDING BEHIND THE ROW. One number printed under Cell, Home and Work
+ * is one row over three findings; writing to one of them leaves the other two reading "Not
+ * tested" against a number somebody has just rung, and the untried count then lies.
+ */
+ok('an outcome reaches every finding behind the row',
+  /for \(const item of row\.items\) await recordTraceOutcome/.test(workspace))
+/*
+ * ...and saving does NOT. Three findings promoted separately put the same number on the contact
+ * list three times, which is the list a collector then has to read.
+ */
+ok('...but saving it to the account happens once',
+  /const item = row\.items\.find\(\(i\) => i\.promotedContactId === null\)/.test(workspace))
+ok('a finding can be put on the account', /<Plus size=\{13\} \/> Save/.test(workspace))
+ok('...and a relative added as next of kin', /onPromote\(true\)/.test(workspace))
+ok('...labelled as one', /as next of kin/.test(workspace))
 /*
  * FILED AS THEIR OWN PERSON, so nobody opens the call to the wrong one. The name on the row is
  * the relative's and their role is the relationship — it used to be crammed into a free-text

@@ -4,7 +4,7 @@
  * The queries only; every rule lives in traceStore.ts, which imports nothing.
  */
 import { supabase } from './supabase'
-import { addContact } from './accountWorkspace'
+import { addContact, documentUrl } from './accountWorkspace'
 import {
   contactKindFor,
   type FiledTrace, type TraceItem, type TraceItemKind, type TraceOutcome,
@@ -161,4 +161,23 @@ export async function promoteTraceItem(input: {
   const { error } = await supabase.from('account_trace_items')
     .update({ promoted_contact_id: contact.id }).eq('id', item.id)
   if (error) throw new Error(error.message)
+}
+
+/**
+ * A URL for the report a trace was read out of.
+ *
+ * The trace stores which document it came from, and nothing else about it -- the storage path
+ * lives on the document row. Two steps rather than one join: the path is the only thing wanted,
+ * it is wanted once, on a click, and a join would put another column into a hand-written mapper
+ * for the sake of a button.
+ *
+ * Signed for sixty seconds, like every other document in the app, because the bucket is private
+ * and a permanent address to somebody's bureau profile is not a thing to hand out.
+ */
+export async function traceReportUrl(documentId: string): Promise<string> {
+  const { data, error } = await supabase.from('account_documents')
+    .select('storage_path').eq('id', documentId).maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data?.storage_path) throw new Error('That report is no longer on the account.')
+  return documentUrl(data.storage_path)
 }

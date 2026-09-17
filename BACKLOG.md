@@ -240,6 +240,19 @@ work that well" — email is the priority.
 
 ---
 
+## Next on the trace
+
+- **Property belongs on the account's main page.** The firm's words, straight after approving the
+  workspace: "Property is also something that should basically be added to the main page." A house
+  they still own is the difference between an account worth attaching and one worth closing, and
+  it currently only exists two clicks inside the trace. `heldProperty()` already returns exactly
+  what is wanted, filtered to what they still own; it is the placement that has to be decided,
+  beside the standing panel or under the debtor's details.
+- **Then the account view itself** — "we'll move on to the accounts viewing and how this would
+  look." Not started, and not to be guessed at.
+
+---
+
 ## Decided, so nobody reopens it
 
 - **Mail sent to a debtor from Outlook is not charged.** It is pulled into the Sent tab so the
