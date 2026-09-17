@@ -80,9 +80,19 @@ const handlers = [
         rows = rows.filter((m) => !m.is_settled && !m.is_junk && !m.is_sent)
       } else if (has('is_junk=eq.false')) rows = rows.filter((m) => !m.is_junk && !m.is_sent)
       if (has('read_at=is.null')) rows = rows.filter((m) => !m.read_at)
+
+      /*
+       * THE PAGE SIZE IS HONOURED, or the control that sets it cannot be tested. fetchMail asks
+       * for one row PAST the page so it can tell whether there is more without a second count --
+       * a stub that returns everything makes every page size look identical and "Show 25" look
+       * like it works.
+       */
+      const limit = Number(/limit=(\d+)/.exec(u)?.[1] ?? rows.length)
+      const offset = Number(/offset=(\d+)/.exec(u)?.[1] ?? 0)
+      const paged = rows.slice(offset, offset + limit)
       return {
-        body: rows,
-        headers: { 'content-range': `0-${Math.max(0, rows.length - 1)}/${rows.length}` },
+        body: paged,
+        headers: { 'content-range': `0-${Math.max(0, paged.length - 1)}/${rows.length}` },
       }
     },
   ],
@@ -312,6 +322,11 @@ try {
   t.ok('...and that is where blocking lives', await page.getByRole('button', { name: 'Block sender' }).isVisible())
   await page.keyboard.press('Escape')
   await page.mouse.click(5, 5)
+  await page.waitForTimeout(300)
+  /* This one carries a file, which is the message the attachment spacing was reported on. */
+  await t.shot(page, '27-mail-attachment')
+  await page.keyboard.press('Escape')
+  await page.mouse.click(5, 5)
   await page.waitForTimeout(250)
 
   /* Nor is one deliberately settled as free mail: somebody already answered the question. */
@@ -358,6 +373,36 @@ try {
     await page.getByText('New reasons prevent').first().isVisible())
   t.check('...and the list was not thrown away and rebuilt',
     await page.getByText('Debt collection enquiry').first().isVisible(), true)
+
+  /* ---------- how many per page ---------- */
+
+  /*
+   * "If there's a page one or a page two, it should give you an option about how many emails to
+   * show you." Six fixtures and a page of 25 fits on one page, so the control is not offered --
+   * which is the point of offering it only once paging is in play. Shrinking the page to something
+   * the mailbox overflows is what brings it out, and that is checked by pressing it.
+   */
+  const rows2 = () => page.locator('ul > li')
+  /* Scoped: "Next" is not a unique word on this page, and an unscoped role lookup fails for a
+     reason that has nothing to do with paging. */
+  const next = () => page.getByRole('button', { name: 'Next', exact: true }).last()
+  const atDefault = await rows2().count()
+  t.ok(`the default page holds 50 (${atDefault})`, atDefault === 50)
+  t.ok('...and there is more behind it',
+    await next().isEnabled())
+
+  /* The control is there because paging is in play, and pressing it changes the list. */
+  await page.getByRole('button', { name: '25', exact: true }).click()
+  await page.waitForTimeout(900)
+  const at25 = await rows2().count()
+  t.check('choosing 25 shows 25', at25, 25)
+  t.ok('...and still says there is more',
+    await next().isEnabled())
+
+  /* And back, so the run leaves the page as it found it. */
+  await page.getByRole('button', { name: '50', exact: true }).click()
+  await page.waitForTimeout(900)
+  t.check('and back to 50', await rows2().count(), 50)
 
   /* ---------- older mail can be reached ---------- */
 

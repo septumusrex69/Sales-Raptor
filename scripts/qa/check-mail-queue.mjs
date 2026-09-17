@@ -462,6 +462,50 @@ ok('the sync stamps sent mail as read', /read_at: message\.isSent \? new Date\(\
 ok('...and what was already stored is settled too',
   /set read_at = coalesce\(read_at, occurred_at\)\s*\nwhere is_sent = true and read_at is null;/.test(schema))
 
+/* ---------- 6. how many per page, and where the attachments sit ---------- */
+
+/*
+ * "I see page one, page two -- if there's a page one or a page two, it should give you an option
+ * about how many emails to show you."
+ */
+ok('the page size can be changed', /const PAGE_SIZES = \[25, 50, 100, 200\]/.test(page))
+ok('...and the list is fetched at that size', /offset: at \* pageSize, limit: pageSize,/.test(page))
+/*
+ * AND REFETCHED WHEN IT CHANGES. A page size that only takes effect on the next filter change is
+ * a control that does nothing when you press it, which is worse than not offering it.
+ */
+ok('...and refetched when it changes', /\[currentUser, filter, search, unreadOnly, pageSize\]/.test(page))
+/* Back to the first page, or "page 4 of 50" becomes "page 4 of 200" and skips 600 messages. */
+ok('...from the first page', /setPageSize\(n\); setPage\(0\)/.test(page))
+/*
+ * ONLY WHERE IT IS ANY USE. A control offering to resize a list that already fits on one page is
+ * furniture -- and it is what teaches people to stop reading the rest of the bar.
+ */
+ok('...offered only once paging is in play', /\(page > 0 \|\| more \|\| pageSize !== PAGE\) && \(/.test(page))
+/* The same pills the account book uses: one question asked twice should not look like two
+   mechanisms. */
+ok('...as the same control the book uses', /aria-pressed=\{pageSize === n\}/.test(page))
+
+/*
+ * THE ATTACHMENTS SIT BETWEEN THE TWO RULES. The firm: "the NDA attachment is lying on top of the
+ * line that's on top of Hi Camille and Stephan -- make it in the middle of those two little
+ * lines."
+ *
+ * It was `mt-3`: twelve pixels above the chips and NOTHING below them, so the rule separating the
+ * header from the message ran along their bottom edge. The space above comes from the header's own
+ * margin, so the row only supplies the space below -- matching it here as well would double the
+ * top and put them off-centre the other way.
+ */
+{
+  const chips = page.slice(
+    page.indexOf('{mail.attachmentNames.length > 0 && ('),
+    page.indexOf('{downloadError &&'),
+  )
+  ok('the attachment row exists', chips.length > 0)
+  ok('...and clears the rule below it', /className="pb-3 flex flex-wrap items-center gap-1\.5"/.test(chips))
+  ok('...without doubling the space above', !/mt-3 flex flex-wrap/.test(chips))
+}
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')

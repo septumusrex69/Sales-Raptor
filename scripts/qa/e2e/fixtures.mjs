@@ -356,6 +356,35 @@ export const MAIL = [
 ]
 
 /**
+ * FIFTY MORE, SO THE LIST OVERFLOWS A PAGE.
+ *
+ * Six messages fit on any page size offered, and a page-size control that is never asked to change
+ * anything is a control whose test proves nothing -- the list would look identical at 25 and at
+ * 200 because there was never a 26th row.
+ *
+ * Read and settled, so they add nothing to any badge: every unread and outstanding count in this
+ * file is asserted exactly, and filler that moved them would break those checks for a reason that
+ * has nothing to do with what they guard.
+ */
+const FILLER = Array.from({ length: 50 }, (_, i) => ({
+  id: `bbbbbbb1-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
+  folder: 'INBOX', is_sent: false, uid: 200 + i,
+  message_id: `<filler-${i}@example.co.za>`,
+  from_address: `sender${i}@example.co.za`, from_name: `Sender ${i}`,
+  subject: `Older correspondence ${i + 1}`,
+  snippet: 'Dealt with and on nobody\u2019s file.',
+  to_address: 'stephan@bredellferreira.co.za', to_name: 'Stephan',
+  to_recipients: [], cc_recipients: [],
+  attachment_names: [], is_junk: false, occurred_at: MAIL_AT(2000 + i),
+  read_at: MAIL_AT(1999 + i), is_filed: false, is_settled: true, no_record_at: MAIL_AT(1999 + i),
+  linked_account_id: null, linked_lead_id: null, linked_deal_id: null,
+  linked_company_id: null, linked_contact_id: null,
+  debtor_accounts: null, leads: null, deals: null, companies: null, contacts: null,
+}))
+
+MAIL.push(...FILLER)
+
+/**
  * What the contact form posts, as the message body.
  *
  * Carries the firm's own footer under the enquiry on purpose: these emails do, and taking the LAST

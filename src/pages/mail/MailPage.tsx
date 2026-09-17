@@ -102,6 +102,19 @@ const TABS: { id: Pane; label: string; hint: string }[] = [
   { id: 'blocked', label: 'Blocked', hint: 'Senders you have blocked, and senders whose mail always lands in Open mail' },
 ]
 
+/**
+ * How many messages a page holds, and what else is offered.
+ *
+ * The firm: "I see page one, page two -- if there's a page one or a page two, it should give you
+ * an option about how many emails to show you." The same pill control the account book uses, for
+ * the same reason and in the same shape: this is one question asked in two places and it should
+ * not look like two mechanisms.
+ *
+ * 50 is the default it has always used. 200 is the top because a page is fetched in one query and
+ * rendered in one go — beyond that the wait to see the first row stops being worth the scrolling
+ * it saves.
+ */
+const PAGE_SIZES = [25, 50, 100, 200]
 const PAGE = 50
 
 /*
@@ -176,6 +189,7 @@ export function MailPage() {
   const [items, setItems] = useState<MailItem[]>([])
   const [more, setMore] = useState(false)
   const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(PAGE)
   const [loading, setLoading] = useState(true)
   /** The last load threw. Distinct from `error`, which any action can set. */
   const [loadFailed, setLoadFailed] = useState(false)
@@ -295,7 +309,8 @@ export function MailPage() {
         return
       }
       const res = await fetchMail({
-        userId: currentUser.id, filter, search, unreadOnly, offset: at * PAGE, limit: PAGE,
+        userId: currentUser.id, filter, search, unreadOnly,
+        offset: at * pageSize, limit: pageSize,
       })
       setItems(res.items)
       setMore(res.more)
@@ -323,7 +338,7 @@ export function MailPage() {
     } finally {
       setLoading(false)
     }
-  }, [currentUser, filter, search, unreadOnly])
+  }, [currentUser, filter, search, unreadOnly, pageSize])
 
   useEffect(() => { void load(0) }, [load])
 
@@ -1252,9 +1267,36 @@ export function MailPage() {
         )}
 
         {filter !== 'blocked' && (
-          <div className="px-5 py-3 flex items-center justify-between gap-3 border-t border-slate-100">
-            <button disabled={page === 0} onClick={() => void load(page - 1)}
-              className="text-sm text-slate-500 hover:text-slate-700 disabled:opacity-30">Previous</button>
+          <div className="px-5 py-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-slate-100">
+            <div className="flex items-center gap-3">
+              <button disabled={page === 0} onClick={() => void load(page - 1)}
+                className="text-sm text-slate-500 hover:text-slate-700 disabled:opacity-30">Previous</button>
+
+              {/*
+                HOW MANY PER PAGE, at the firm's instruction: "if there's a page one or a page two,
+                it should give you an option about how many emails to show you."
+
+                Only once paging is actually in play, or once somebody has changed it — a control
+                offering to resize a list that fits on one page is furniture. The same pills the
+                account book uses: one question asked in two places should not look like two
+                mechanisms.
+              */}
+              {(page > 0 || more || pageSize !== PAGE) && (
+                <span className="flex items-center gap-1 text-xs">
+                  <span className="text-slate-400">Show</span>
+                  {PAGE_SIZES.map((n) => (
+                    <button key={n} type="button" aria-pressed={pageSize === n}
+                      onClick={() => { setPageSize(n); setPage(0) }}
+                      className={`rounded-full border px-2 py-0.5 tabular-nums ${
+                        pageSize === n
+                          ? 'border-navy-950 bg-navy-950 text-white'
+                          : 'border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50'}`}>
+                      {n}
+                    </button>
+                  ))}
+                </span>
+              )}
+            </div>
             <span className="text-xs text-slate-400">
               {page > 0 || more ? `Page ${page + 1}` : ''}
             </span>
@@ -2109,7 +2151,17 @@ function MailBody({
       <NotMatchedBar mail={mail} onLink={onLink} onCreateLead={onCreateLead}
         onNoRecord={onNoRecord} onJunk={onJunk} onBlock={onBlock} />
       {mail.attachmentNames.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        /*
+          BETWEEN THE TWO RULES, not sitting on the lower one. The firm: "the NDA attachment is
+          lying on top of the line that's on top of Hi Camille and Stephan -- make it in the middle
+          of those two little lines."
+
+          It was: `mt-3` put twelve pixels above the chips and nothing at all below them, so the
+          rule that separates the header from the message ran along their bottom edge. The space
+          above comes from the header's own margin, so this only has to supply the space below --
+          matching it here as well would double the top and put the chips off-centre the other way.
+        */
+        <div className="pb-3 flex flex-wrap items-center gap-1.5">
           {/*
             The files themselves are still not stored — each of these fetches out of the mailbox
             on demand and streams straight to the browser. Names alone were not enough: a debtor
