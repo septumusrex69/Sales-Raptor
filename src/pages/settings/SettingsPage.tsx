@@ -922,19 +922,31 @@ function TargetsTab() {
             <span>Target</span>
             <span>Minimum</span>
           </div>
-          {TARGET_METRICS.map((def) => (
-            <TargetRow
-              key={def.id}
-              metricId={def.id}
-              label={def.label}
-              description={def.description}
-              unit={def.unit}
-              existing={resolveTarget(targets, scopeType, effectiveScopeId, def.id, periodKey)}
-              disabled={!canEdit}
-              onSave={(targetValue, thresholdValue) =>
-                setTarget({ scopeType, scopeId: effectiveScopeId, metric: def.id, targetValue, thresholdValue })
-              }
-            />
+          {/*
+            Split by side, because the two halves of the firm are set by different people. A
+            team leader setting R100 000 for a collector should not have to read past seven
+            sales metrics that mean nothing on the book to find the one line they came for.
+          */}
+          {(['sales', 'collections'] as const).map((side) => (
+            <div key={side} className="space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 pt-2 px-1">
+                {side === 'sales' ? 'Sales' : 'Collections'}
+              </p>
+              {TARGET_METRICS.filter((def) => def.side === side).map((def) => (
+                <TargetRow
+                  key={def.id}
+                  metricId={def.id}
+                  label={def.label}
+                  description={def.description}
+                  unit={def.unit}
+                  existing={resolveTarget(targets, scopeType, effectiveScopeId, def.id, periodKey)}
+                  disabled={!canEdit}
+                  onSave={(targetValue, thresholdValue) =>
+                    setTarget({ scopeType, scopeId: effectiveScopeId, metric: def.id, targetValue, thresholdValue })
+                  }
+                />
+              ))}
+            </div>
           ))}
         </div>
       ) : (

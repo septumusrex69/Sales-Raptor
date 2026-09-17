@@ -3,6 +3,15 @@ import type { ID, Target, TargetMetric } from '../types'
 export interface TargetMetricDef {
   id: TargetMetric
   label: string
+  /**
+   * Which half of the firm the number belongs to.
+   *
+   * Sales and collections share one targets table because they share the scoping — a team or a
+   * person, standing or for one month — but they never share a screen. A collections target
+   * rendered on the sales dashboard reads as a rep who has collected nothing, which is true and
+   * useless; the rep is not on the book.
+   */
+  side: 'sales' | 'collections'
   /** How the number reads — money is formatted as currency, everything else as a count. */
   unit: 'count' | 'currency'
   /** What the number counts, in the words someone setting the target would use. */
@@ -19,14 +28,27 @@ export interface TargetMetricDef {
  * fail to keep.
  */
 export const TARGET_METRICS: TargetMetricDef[] = [
-  { id: 'leads', label: 'New Leads', unit: 'count', description: 'Leads created in the sales month' },
-  { id: 'mandates', label: 'Mandates Signed', unit: 'count', description: 'Debt collection deals marked Won — a signed mandate' },
-  { id: 'deals', label: 'Service Deals Won', unit: 'count', description: 'Won deals other than mandates' },
-  { id: 'revenue', label: 'Revenue Won', unit: 'currency', description: 'Fees on won service deals. Excludes handovers, which earn nothing at signature' },
-  { id: 'book', label: 'Book Signed', unit: 'currency', description: 'Handover value on mandates signed in the month' },
-  { id: 'accounts', label: 'Accounts Signed', unit: 'count', description: 'Debtor accounts handed over on mandates signed in the month' },
-  { id: 'activities', label: 'Activities Logged', unit: 'count', description: 'Calls, meetings, emails and notes that move work forward' },
+  { id: 'leads', side: 'sales', label: 'New Leads', unit: 'count', description: 'Leads created in the sales month' },
+  { id: 'mandates', side: 'sales', label: 'Mandates Signed', unit: 'count', description: 'Debt collection deals marked Won — a signed mandate' },
+  { id: 'deals', side: 'sales', label: 'Service Deals Won', unit: 'count', description: 'Won deals other than mandates' },
+  { id: 'revenue', side: 'sales', label: 'Revenue Won', unit: 'currency', description: 'Fees on won service deals. Excludes handovers, which earn nothing at signature' },
+  { id: 'book', side: 'sales', label: 'Book Signed', unit: 'currency', description: 'Handover value on mandates signed in the month' },
+  { id: 'accounts', side: 'sales', label: 'Accounts Signed', unit: 'count', description: 'Debtor accounts handed over on mandates signed in the month' },
+  { id: 'activities', side: 'sales', label: 'Activities Logged', unit: 'count', description: 'Calls, meetings, emails and notes that move work forward' },
+  /*
+   * The collections target, and the number the floor is run on.
+   *
+   * It is money RECEIVED in the sales month, not billed and not promised — the same figure the
+   * Performance screen totals and the same one the firm's own month sheets are built from. A
+   * target against promises taken would be met by a month of promises nobody kept.
+   */
+  { id: 'collected', side: 'collections', label: 'Collected', unit: 'currency', description: 'Money received on accounts in the sales month. Reversed payments do not count' },
 ]
+
+/** The sales dashboard's own metrics. Kept as a list so a new metric cannot leak onto it. */
+export type SalesTargetMetric = Exclude<TargetMetric, 'collected'>
+export const SALES_TARGET_METRICS = TARGET_METRICS.filter((m) => m.side === 'sales')
+export const COLLECTION_TARGET_METRICS = TARGET_METRICS.filter((m) => m.side === 'collections')
 
 export const TARGET_METRIC_BY_ID: Record<TargetMetric, TargetMetricDef> = Object.fromEntries(
   TARGET_METRICS.map((m) => [m.id, m]),

@@ -493,7 +493,15 @@ export interface Team {
  * Every one of these is already computed somewhere on the dashboard — a target is a line drawn
  * on a number that exists, never a new number invented to be targeted.
  */
-export type TargetMetric = 'leads' | 'mandates' | 'deals' | 'revenue' | 'book' | 'accounts' | 'activities'
+/**
+ * Two sides of the firm on one list. 'collected' is the collections side's only target and it is
+ * the one the floor is actually run on day to day; everything before it is the sales side.
+ * `TARGET_METRICS` in src/lib/targets.ts records which side each belongs to — a sales dashboard
+ * showing a collections target, or the reverse, is a screen nobody can act on.
+ */
+export type TargetMetric =
+  | 'leads' | 'mandates' | 'deals' | 'revenue' | 'book' | 'accounts' | 'activities'
+  | 'collected'
 
 export interface Target {
   id: ID

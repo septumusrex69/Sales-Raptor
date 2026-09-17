@@ -25,7 +25,10 @@ import { WinRateByKind } from '../components/dashboard/WinRateByKind'
 import { LossReasonsCard } from '../components/dashboard/LossReasonsCard'
 import { NeedsAttention, type AttentionItem } from '../components/dashboard/NeedsAttention'
 import { TargetsCard } from '../components/dashboard/TargetsCard'
-import { TARGET_METRICS, periodElapsed, resolveTarget, targetProgress, type TargetProgress } from '../lib/targets'
+import {
+  SALES_TARGET_METRICS, periodElapsed, resolveTarget, targetProgress,
+  type SalesTargetMetric, type TargetProgress,
+} from '../lib/targets'
 import type { Target, TargetMetric } from '../types'
 import { dealKind, dealSize, dealSizeLabel } from '../lib/dealKind'
 import { RepLeaderboard, type LeaderboardRow } from '../components/dashboard/RepLeaderboard'
@@ -304,7 +307,9 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
    * separately.
    */
   const targetProgressItems: TargetProgress[] = useMemo(() => {
-    const actuals: Record<TargetMetric, number> = {
+    /* Typed to the sales metrics alone, so adding a collections metric is a compile error here
+       rather than a silent nought on a rep's dashboard. */
+    const actuals: Record<SalesTargetMetric, number> = {
       leads: kpis.curr.newLeads,
       mandates: kpis.curr.mandatesWon,
       deals: kpis.curr.serviceDealsWon,
@@ -334,7 +339,7 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
       }
     }
 
-    return TARGET_METRICS.map((def) => targetProgress(actuals[def.id], forMetric(def.id))).filter(
+    return SALES_TARGET_METRICS.map((def) => targetProgress(actuals[def.id as SalesTargetMetric], forMetric(def.id))).filter(
       (p): p is TargetProgress => Boolean(p),
     )
   }, [kpis, targets, teams, scope, period])

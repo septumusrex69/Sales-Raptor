@@ -3562,3 +3562,13 @@ alter table public.email_connections
   drop column if exists oldest_seen_uid,
   drop column if exists oldest_seen_uid_junk,
   drop column if exists oldest_seen_uid_sent;
+
+-- ---------- A collections target ----------
+-- The collections side gets a target of its own: money received on accounts in the sales month.
+-- One table for both halves of the firm because the scoping is identical — a team or a person,
+-- standing or for one month — while which screen reads it is decided in src/lib/targets.ts, by
+-- the `side` on each metric. A collections target on the sales dashboard reads as a rep who has
+-- collected nothing, which is true and useless: the rep is not on the book.
+alter table public.targets drop constraint if exists targets_metric_check;
+alter table public.targets add constraint targets_metric_check
+  check (metric in ('leads', 'mandates', 'deals', 'revenue', 'book', 'accounts', 'activities', 'collected'));
