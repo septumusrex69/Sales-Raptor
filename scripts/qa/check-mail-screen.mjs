@@ -454,6 +454,30 @@ ok('the endpoint guards it too', /too large to send in one message/.test(send))
  */
 ok('the signature still travels with the files', /cid: SIGNATURE_CID \}\]\s*\n?\s*: \[\]\),/.test(send))
 
+/* ---------- 6a. dictating and spelling ---------- */
+
+/*
+ * THE SAME MICROPHONE AS THE REST OF RAPTOR. It has been on the diary and the account workspace
+ * since it was built and was never put on the one box people write most in.
+ *
+ * Free and private, which is why it is the browser's own and not a service: Chrome and Safari do
+ * the recognising themselves, nothing of ours is uploaded, and a debtor's email never leaves the
+ * building to be transcribed by somebody else.
+ */
+ok('the composer has a microphone', /<DictateButton size="small" value=\{body\} onChange=\{setBody\} \/>/.test(composer))
+/* The shared one, not a second implementation of the same thing. */
+ok('...the shared one', /from '\.\/ui\/Dictate'/.test(composer))
+
+/*
+ * AND THE SPELLING IS CHECKED IN THE LANGUAGE IT IS WRITTEN IN. The browser has always done this
+ * for nothing -- but with the page declaring lang="en" it checks an Afrikaans letter against an
+ * English dictionary and underlines every word, which teaches people to ignore the underlines.
+ */
+ok('the message box is spell-checked', /spellCheck onChange/.test(composer))
+ok('...in the language being dictated', /lang=\{lang\}/.test(composer))
+/* One source of truth for that setting: DictateButton owns the picker and remembers the choice. */
+ok('...read from the one place that owns it', /const \[lang\] = useState\(storedLanguage\)/.test(composer))
+
 /* ---------- 6b. the mailbox is a screen, not a panel on one ---------- */
 
 /*

@@ -1,6 +1,8 @@
 import { useId, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { Paperclip, Plus, X } from 'lucide-react'
 import { Modal, FormField, inputClass } from './ui/Modal'
+import { DictateButton } from './ui/Dictate'
+import { DICTATION_LANGUAGES, storedLanguage } from '../lib/dictation'
 import { useAuth } from '../store/AuthContext'
 
 /**
@@ -122,6 +124,12 @@ export function ComposeEmailModal({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [files, setFiles] = useState<Attached[]>([])
+  /*
+   * The language this person dictates in, which is also the one their spelling is checked against.
+   * Read once on open: DictateButton owns the picker and remembers the choice, so re-reading it
+   * here on every keystroke would be a second source of truth for one setting.
+   */
+  const [lang] = useState(storedLanguage)
   const fileInput = useRef<HTMLInputElement>(null)
 
   /*
@@ -256,9 +264,33 @@ export function ComposeEmailModal({
           <input className={inputClass} value={subject} onChange={(e) => setSubject(e.target.value)} required autoFocus={!initialSubject} />
         </FormField>
         <FormField label="Message" required>
-          <textarea className={inputClass} rows={12} value={body}
-            onChange={(e) => setBody(e.target.value)} required autoFocus={!!initialSubject} />
+          {/*
+            SPELL-CHECKED IN THE LANGUAGE IT IS WRITTEN IN, which is not the same as spell-checked.
+            The browser does this for nothing and has always done it here -- but with the page
+            declaring lang="en" it checks an Afrikaans letter against an English dictionary and
+            underlines every word of it, which teaches people to ignore the underlines entirely.
+            Set to the language chosen for dictation, because somebody dictating in Afrikaans is
+            writing in Afrikaans.
+          */}
+          <textarea className={inputClass} rows={12} value={body} lang={lang}
+            spellCheck onChange={(e) => setBody(e.target.value)} required autoFocus={!!initialSubject} />
         </FormField>
+
+        {/*
+          THE SAME MICROPHONE AS THE REST OF RAPTOR. It has been on the diary and the account
+          workspace since it was built and was never put on the one box people write most in.
+
+          Free and private, which is why it is this and not a service: Chrome and Safari do the
+          recognising themselves, nothing of ours is uploaded, there is no key and no bill -- and a
+          debtor's email never leaves the building to be transcribed by somebody else.
+        */}
+        <div className="-mt-1 mb-3 flex flex-wrap items-center gap-2">
+          <DictateButton size="small" value={body} onChange={setBody} />
+          <span className="text-[11px] text-slate-400">
+            Dictate in {DICTATION_LANGUAGES.find((l) => l.code === lang)?.label ?? 'English'}.
+            Spelling is checked in the same language.
+          </span>
+        </div>
 
         {/*
           FILES, which the mailbox could not send at all. Forwarding a debtor's proof of payment to
