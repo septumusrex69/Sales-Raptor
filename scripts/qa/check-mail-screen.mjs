@@ -410,6 +410,29 @@ ok('the endpoint guards it too', /too large to send in one message/.test(send))
  */
 ok('the signature still travels with the files', /cid: SIGNATURE_CID \}\]\s*\n?\s*: \[\]\),/.test(send))
 
+/* ---------- 6b. the mailbox is a screen, not a panel on one ---------- */
+
+/*
+ * THREE SCROLLBARS FOR ONE LIST was the bug. The pane was a fixed 38rem inside a page that scrolled
+ * behind it, so the foot of the message -- where the action bar lives -- sat below the fold. The
+ * firm: "you have to scroll down to the very bottom to see that ... it should pop up at the bottom
+ * of the screen and stay stagnant."
+ */
+ok('the pane can take the height it is given', /fill\?: boolean/.test(pane))
+/*
+ * flex-1, NOT h-full. A percentage height on a flex child resolves against a height the parent has
+ * not finished working out, which renders as a pane of zero height or of the wrong one.
+ */
+ok('...as a flex child rather than a percentage', /fill \? 'lg:flex-1 lg:min-h-0' : 'lg:h-\[38rem\]'/.test(pane))
+ok('the mailbox asks for it', /<ReadingPane\s*\n\s*fill/.test(page))
+ok('...and gives the page a height to divide up', /lg:h-full lg:flex lg:flex-col lg:min-h-0/.test(page))
+ok('...through the card', /paneShowing \? 'lg:flex-1 lg:min-h-0 lg:flex lg:flex-col' : undefined/.test(page))
+/*
+ * ONLY AT lg. Below it there is no reading pane -- the list IS the page -- and a page that cannot
+ * scroll is a list nobody can read past the first screen.
+ */
+ok('...and only where there are two columns to fill', !/(?<!lg:)h-full lg:flex/.test(page))
+
 /* ---------- 7. the plumbing the layout hangs on ---------- */
 
 /*

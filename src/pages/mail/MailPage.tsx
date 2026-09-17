@@ -718,8 +718,20 @@ export function MailPage() {
     && items.length > 0 && view === 'reading'
 
   return (
-    <div className="space-y-4">
-      <Card padded={false}>
+    /*
+      THE MAILBOX IS A SCREEN, NOT A PANEL ON ONE.
+      
+      At lg and up the page takes the height it is given and nothing outside the two columns
+      scrolls. Before this the card ran past the bottom of the window and the page scrolled behind
+      it, so the foot of the message pane -- where the action bar lives -- was below the fold. The
+      firm: "you have to scroll down to the very bottom to see that ... it should pop up at the
+      bottom of the screen and stay stagnant."
+      
+      Only at lg, because below it there is no reading pane: the list is the page, and a page that
+      cannot scroll is a list you cannot read past the first screen.
+    */
+    <div className="space-y-4 lg:h-full lg:flex lg:flex-col lg:min-h-0">
+      <Card padded={false} className={paneShowing ? 'lg:flex-1 lg:min-h-0 lg:flex lg:flex-col' : undefined}>
         {/*
           THE MAILBOX, NAMED, AND THE ONE BUTTON THAT WRITES SOMETHING.
 
@@ -978,6 +990,7 @@ export function MailPage() {
            * puts them too — and is why bulk select stays a list-view affair.
            */
           <ReadingPane
+            fill
             items={items}
             selectedId={open}
             onSelect={(m) => void toggleTo(m)}

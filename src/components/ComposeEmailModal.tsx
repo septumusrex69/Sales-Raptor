@@ -1,5 +1,5 @@
 import { useId, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
-import { Paperclip, X } from 'lucide-react'
+import { Paperclip, Plus, X } from 'lucide-react'
 import { Modal, FormField, inputClass } from './ui/Modal'
 import { useAuth } from '../store/AuthContext'
 
@@ -105,6 +105,18 @@ export function ComposeEmailModal({
   const listId = useId()
   const [address, setAddress] = useState(to ?? recipients?.[0]?.email ?? '')
   const [cc, setCc] = useState(initialCc ?? '')
+  /*
+   * Open on a reply-all, offered on everything else.
+   *
+   * The firm: "when you forward an email you should be able to Cc other people." It was reply-all
+   * only, which was the wrong half of the rule -- forwarding a debtor's dispute to the client is
+   * exactly the message their attorney should be copied on, and an agent who cannot do it here
+   * does it in Outlook, which is how mail managed in one place stops being managed in one place.
+   *
+   * Still not a box on every message. Collapsed it is one quiet line; open by default it is a
+   * field nobody fills in and everybody reads past, which is what it was before.
+   */
+  const [showCc, setShowCc] = useState(initialCc !== undefined)
   const [subject, setSubject] = useState(initialSubject ?? '')
   const [body, setBody] = useState(initialBody ?? '')
   const [submitting, setSubmitting] = useState(false)
@@ -219,19 +231,26 @@ export function ComposeEmailModal({
           )}
         </FormField>
         {/*
-          ONLY ON A REPLY-ALL. An empty Cc box on every new message is a field nobody fills in and
-          everybody reads past; here it is pre-filled with the people who were on the original, and
-          the point of showing it is that somebody can take one of them OUT before sending.
+          OPEN ON A REPLY-ALL, where it is pre-filled with the people who were on the original and
+          the whole point is that somebody can take one of them OUT before sending. Offered
+          everywhere else, because forwarding a debtor's dispute to the client is exactly the
+          message their attorney should be copied on.
         */}
-        {initialCc !== undefined && (
+        {showCc ? (
           <FormField label="Cc">
             <input
               className={inputClass}
               value={cc}
               onChange={(e) => setCc(e.target.value)}
               placeholder="Nobody else"
+              autoFocus={initialCc === undefined}
             />
           </FormField>
+        ) : (
+          <button type="button" onClick={() => setShowCc(true)}
+            className="-mt-2 mb-3.5 inline-flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-slate-700">
+            <Plus size={12} /> Add Cc
+          </button>
         )}
         <FormField label="Subject" required>
           <input className={inputClass} value={subject} onChange={(e) => setSubject(e.target.value)} required autoFocus={!initialSubject} />

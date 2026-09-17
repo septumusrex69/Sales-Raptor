@@ -37,6 +37,7 @@ function readSplit(): number {
 
 export function ReadingPane<T extends { id: string }>({
   items, selectedId, onSelect, renderRow, renderDetail, renderLead, emptyDetail, listHeader,
+  fill = false,
 }: {
   items: T[]
   selectedId: string | null
@@ -64,6 +65,19 @@ export function ReadingPane<T extends { id: string }>({
    * that scrolls away is one you have to go back up for.
    */
   listHeader?: ReactNode
+  /**
+   * Take the height the parent gives instead of a fixed 38rem.
+   *
+   * For the mailbox, which is a whole screen rather than a panel on one. With a fixed height the
+   * page itself scrolls as well as the two columns -- three scrollbars for one list -- and the
+   * foot of the message pane sits below the fold, which is where the action bar lives. The firm:
+   * "you have to scroll down to the very bottom to see that ... it should pop up at the bottom of
+   * the screen and stay stagnant."
+   *
+   * Off by default: the panels that embed this (an account's correspondence, a deal's emails) are
+   * one section of a longer page and have no height of their own to give.
+   */
+  fill?: boolean
 }) {
   const selected = items.find((i) => i.id === selectedId) ?? null
   const paneRef = useRef<HTMLDivElement>(null)
@@ -118,7 +132,10 @@ export function ReadingPane<T extends { id: string }>({
        * The width travels as a CSS variable so only one custom property changes while dragging
        * — React re-renders, but the browser is not re-parsing a class string 60 times a second.
        */
-      className="grid lg:grid-cols-[var(--pane-split)_6px_minmax(0,1fr)] lg:h-[38rem]"
+      className={`grid lg:grid-cols-[var(--pane-split)_6px_minmax(0,1fr)] ${
+        /* flex-1 rather than h-full: the parent is a flex column, and a percentage height on a
+           flex child resolves against a height the parent has not finished working out. */
+        fill ? 'lg:flex-1 lg:min-h-0' : 'lg:h-[38rem]'}`}
       style={{ ['--pane-split' as string]: `${split}px` }}
     >
       {/*

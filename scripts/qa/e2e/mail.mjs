@@ -103,9 +103,18 @@ try {
   await page.route('**/api/email/attachment*', async (route) => {
     const sent = JSON.parse(route.request().postData() ?? '{}')
     const message = MAIL.find((m) => m.id === sent.mailId)
+    /*
+     * ONE LONG MESSAGE, so the pane actually scrolls. Every fixture body being three lines is how a
+     * "the bar stays put while you scroll" check passes without anything ever scrolling -- the bar
+     * would have been visible because there was nowhere to scroll to.
+     */
+    const long = Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1} of a very long message.`)
+      .join('\n\n')
     const text = message?.from_address === 'form@bredellferreira.co.za'
       ? FORM_BODY
-      : `${message?.snippet ?? ''}`
+      : message?.id === MAIL[0].id
+        ? `${message?.snippet ?? ''}\n\n${long}`
+        : `${message?.snippet ?? ''}`
     return route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({ text, details: [], images: [], imagesSkipped: 0, calendar: '' }),
@@ -189,6 +198,33 @@ try {
   t.ok('the list is still beside the message',
     await page.getByText('Request for information').first().isVisible())
   await t.shot(page, '22a-mail-reading-pane')
+
+  /*
+   * AND IT STAYS PUT, which is the whole point and the thing source-reading cannot see. The firm:
+   * "the moment you open a mail you should be seeing that thing ... then as you scroll through the
+   * message that thing stays stagnant, so you can at any point select things that can be done."
+   *
+   * Measured against the WINDOW, not against the document: a bar can be perfectly positioned in
+   * the markup and still be a thousand pixels below the fold, which is exactly what it was.
+   */
+  const inView = async () => {
+    const box = await page.getByRole('button', { name: 'Reply', exact: true }).boundingBox()
+    const height = page.viewportSize()?.height ?? 0
+    return !!box && box.y >= 0 && box.y + box.height <= height
+  }
+  t.ok('the bar is on screen the moment a message opens', await inView())
+
+  /* Scroll the message itself -- not the page, which is the scrollbar this layout removed. */
+  await page.locator('[aria-current="true"]').first().waitFor()
+  await page.getByText('Paragraph 60 of a very long message.').scrollIntoViewIfNeeded()
+  await page.waitForTimeout(400)
+  t.ok('...and is still there at the end of a long one', await inView())
+  /* The end of the message really was reached, or the check above scrolled nothing. */
+  t.ok('...having actually scrolled to the end',
+    await page.getByText('Paragraph 60 of a very long message.').isVisible())
+  await t.shot(page, '22b-mail-bar-stays-put')
+  await page.getByText('Debt collection enquiry').first().click()
+  await page.waitForTimeout(500)
 
   t.ok('the sender is named in full', await page.getByText('Ernest Mohlalisi').first().isVisible())
   /*

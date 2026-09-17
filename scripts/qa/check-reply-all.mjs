@@ -231,7 +231,18 @@ ok('the connected mailbox is read from the server', /\/api\/email\/status/.test(
  * that quietly copied a debtor's attorney would be the firm's mistake, not the sender's, and the
  * only moment to catch it is before Send.
  */
-ok('the Cc box appears only on a reply-all', /\{initialCc !== undefined && \(/.test(composer))
+/*
+ * OPEN ON A REPLY-ALL, OFFERED EVERYWHERE ELSE. It was reply-all only, which was the wrong half of
+ * the rule -- the firm: "when you forward an email you should be able to Cc other people."
+ * Forwarding a debtor's dispute to the client is exactly the message their attorney should be
+ * copied on, and an agent who cannot do it here does it in Outlook.
+ */
+ok('the Cc box opens by itself on a reply-all',
+  /const \[showCc, setShowCc\] = useState\(initialCc !== undefined\)/.test(composer))
+/* Collapsed rather than absent: a box on every message is one nobody fills in and everybody
+   reads past, which is what it was before. One quiet line instead. */
+ok('...and is one line away on everything else', />\s*<Plus size=\{12\} \/> Add Cc/.test(composer))
+ok('...which opens the same field', /setShowCc\(true\)/.test(composer))
 ok('...and it opens with the people who were on the original', /useState\(initialCc \?\? ''\)/.test(composer))
 ok('...and it is a field, not a label', /onChange=\{\(e\) => setCc\(e\.target\.value\)\}/.test(composer))
 /* Cleared to nothing, the message goes to the one recipient -- not to an empty Cc header. */
