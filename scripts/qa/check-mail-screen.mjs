@@ -125,11 +125,24 @@ ok('it names the state', /'Not matched yet'/.test(bar))
 ok('...unless it came off the contact form', /isLeadIntake\(mail\.fromAddress\)/.test(bar))
 ok('...which says what it is instead', /A new enquiry off the website/.test(bar))
 /*
- * AND WHAT IT COSTS, which is the reason it exists. Item 1(a) is R25 on every message we send and
- * a fee can only be raised against an account, so a reply typed on an unmatched message goes out
- * earning nothing. Said plainly rather than left to be discovered on the statement.
+ * AND NOTHING ELSE. The firm: "remove that sentence that says this is an email, not a lead or a
+ * deal or blah blah blah -- just 'not matched yet' is perfect."
+ *
+ * The sentence explained a consequence ("replying from here will not appear on any record") to
+ * somebody looking at five buttons offering to fix it, on every unmatched message, for ever. That
+ * is how a warning stops being read -- and the label and the buttons already say it.
  */
-ok('...and what replying from it would mean', /will not\s*\n?\s*appear on any record/.test(bar))
+const barVisible = bar.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+ok('...and explains nothing further', !/appear on any record/.test(barVisible))
+ok('...nor on a website enquiry either', !/Their details are in the message/.test(barVisible))
+/* One row, which is where the height went. Five buttons and two sentences was a fifth of the pane. */
+ok('the whole bar is one row', /flex flex-wrap items-center gap-x-3 gap-y-2/.test(bar))
+/*
+ * AND THE BUTTONS ARE SMALL. Five of them at full size WERE the bulk -- the sentence was only half
+ * of it. Pinned because "make it smaller" is the one property here that nothing else protects: a
+ * later hand bumping these back to text-sm would look like tidying.
+ */
+ok('...and its buttons are the small ones', (bar.match(/text-xs font-medium px-2\.5 py-1\.5/g) ?? []).length === 3)
 /*
  * EVERY ANSWER TO "WHAT IS THIS?", ON THE MESSAGE THAT IS STILL ASKING. The firm, on a bar that
  * offered two of them: "move to junk, mark as free, block the sender -- it's down there at the
@@ -158,7 +171,7 @@ ok('...stopping the sender', /onClick=\{onBlock\}/.test(bar))
  * JUNK BOTH WAYS ROUND. A message can be unmatched AND in junk at once, and offering "Move to
  * junk" on one that is already there is a button that does nothing.
  */
-ok('a message already in junk is offered the way back', /<Undo2 size=\{15\} \/> Not junk/.test(bar))
+ok('a message already in junk is offered the way back', /<Undo2 size=\{13\} \/> Not junk/.test(bar))
 
 /* And the order swaps: an enquiry off the form has one answer, so it leads with the lead. */
 ok('the enquiry leads with the lead',
@@ -524,5 +537,5 @@ if (failures.length) {
 console.log(`${pass} passed, 0 failed`)
 console.log(`
 The mailbox says which mailbox it is, a sender has the same face every time, an open message
-reads as a message, an unmatched one says what that costs, and the enquiry from somebody nobody
+reads as a message, an unmatched one says so in one row, and the enquiry from somebody nobody
 knows yet becomes a lead without leaving the page.`)

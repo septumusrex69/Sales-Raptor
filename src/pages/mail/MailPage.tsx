@@ -2333,25 +2333,30 @@ function NotMatchedBar({ mail, onLink, onCreateLead, onNoRecord, onJunk, onBlock
    */
   const fromForm = isLeadIntake(mail.fromAddress)
 
-  const primary = 'inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500'
-  const secondary = 'inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-  const danger = 'inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-negative-100 hover:bg-negative-50 hover:text-negative-700'
+  /* Sized down with the bar: five buttons at full size WERE the bulk. */
+  const primary = 'inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500'
+  const secondary = 'inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+  const danger = 'inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-negative-100 hover:bg-negative-50 hover:text-negative-700'
 
   return (
-    <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-3">
-      <div className="flex items-start gap-3">
-        <Info size={16} className="shrink-0 text-slate-400 mt-0.5" />
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-slate-800">
-            {fromForm ? 'A new enquiry off the website' : 'Not matched yet'}
-          </p>
-          <p className="text-xs text-slate-400 mt-0.5">
-            {fromForm
-              ? 'It came through the contact form, so it belongs to nobody yet. Their details are in the message.'
-              : 'This email is not on a lead, a deal or a debtor account. Replying from here will not appear on any record.'}
-          </p>
-        </div>
-      </div>
+    /*
+      ONE ROW, AND NO EXPLANATION. The firm: "this is very bulky, please make it smaller -- remove
+      that sentence that says this is an email, not a lead or a deal or blah blah blah. Just 'not
+      matched yet' is perfect."
+
+      They are right, and the sentence was wrong twice over. It explained a consequence ("replying
+      from here will not appear on any record") to somebody who is looking at five buttons offering
+      to fix it -- and it said it on every unmatched message, for ever, which is how a warning stops
+      being read. The label and the buttons say the same thing in a fifth of the height.
+    */
+    <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2
+      flex flex-wrap items-center gap-x-3 gap-y-2">
+      <span className="inline-flex items-center gap-2 shrink-0">
+        <Info size={14} className="text-slate-400" />
+        <span className="text-[13px] font-medium text-slate-700">
+          {fromForm ? 'A new enquiry off the website' : 'Not matched yet'}
+        </span>
+      </span>
 
       {/*
         EVERY ANSWER TO "WHAT IS THIS?", ON THE MESSAGE THAT IS STILL ASKING.
@@ -2368,25 +2373,22 @@ function NotMatchedBar({ mail, onLink, onCreateLead, onNoRecord, onJunk, onBlock
 
         The firm's order, and it runs from "this is work" to "this is not": match it, file it as
         open, bin it, stop the sender. Create lead sits at the end as the other kind of yes.
-
-        Their own row, not squeezed beside the text: five buttons and a sentence in one wrapping
-        flex row is a layout that reflows differently on every message.
       */}
-      <div className="flex flex-wrap items-center gap-2 mt-2.5">
+      <span className="flex flex-wrap items-center gap-1.5">
         {fromForm ? (
           <button onClick={onCreateLead} className={primary}>
-            <UserPlus size={15} /> Create lead
+            <UserPlus size={13} /> Create lead
           </button>
         ) : (
           <button onClick={onLink} className={primary}>
-            <Link2 size={15} /> Match to a record
+            <Link2 size={13} /> Match to a record
           </button>
         )}
 
         <button onClick={fromForm ? onLink : onNoRecord} className={secondary}>
           {fromForm
-            ? <><Link2 size={15} /> Match instead</>
-            : <><CircleCheck size={15} /> Mark as open</>}
+            ? <><Link2 size={13} /> Match instead</>
+            : <><CircleCheck size={13} /> Mark as open</>}
         </button>
 
         {/*
@@ -2396,8 +2398,8 @@ function NotMatchedBar({ mail, onLink, onCreateLead, onNoRecord, onJunk, onBlock
         */}
         <button onClick={() => onJunk(!mail.isJunk)} className={secondary}>
           {mail.isJunk
-            ? <><Undo2 size={15} /> Not junk</>
-            : <><ShieldAlert size={15} /> Move to junk</>}
+            ? <><Undo2 size={13} /> Not junk</>
+            : <><ShieldAlert size={13} /> Move to junk</>}
         </button>
 
         {/*
@@ -2411,16 +2413,16 @@ function NotMatchedBar({ mail, onLink, onCreateLead, onNoRecord, onJunk, onBlock
         */}
         {!fromForm && (
           <button onClick={onBlock} className={danger}>
-            <Ban size={15} /> Block sender
+            <Ban size={13} /> Block sender
           </button>
         )}
 
         {!fromForm && (
           <button onClick={onCreateLead} className={secondary}>
-            <UserPlus size={15} /> Create lead
+            <UserPlus size={13} /> Create lead
           </button>
         )}
-      </div>
+      </span>
     </div>
   )
 }
