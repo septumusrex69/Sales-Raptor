@@ -1393,110 +1393,19 @@ function MailBody({
 }) {
   return (
     <>
-      {loadingBody && (
-        <p className="text-[13px] text-slate-400 inline-flex items-center gap-1.5">
-          <Loader2 size={13} className="animate-spin" /> Fetching the message from your mailbox&hellip;
-        </p>
-      )}
-
-      {!loadingBody && body !== undefined && (
-        /*
-         * The message as it was written. `whitespace-pre-wrap` because an email's own line breaks
-         * carry meaning — collapsing them turns a numbered arrangement into a paragraph.
-         * `break-words` because a pasted URL would otherwise push the page wide.
-         *
-         * Rendered as TEXT, never as HTML: this is mail from outside the building, and putting a
-         * stranger's markup into the page is not worth faithful formatting.
-         */
-        <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
-          {body.trim() || <span className="text-slate-400">This message has no text in it.</span>}
-        </p>
-      )}
-
       {/*
-        The pictures the message was written WITH, as opposed to files attached to it.
+        THE ACTIONS COME FIRST, at the firm's instruction: "it's sitting there at the bottom and I
+        have to scroll down all the way to do anything. Put it on the top of the message."
 
-        This is the answer to a signature that is an image. Raptor read those messages as three
-        lines and a blank space where the sender's name, firm and number should have been —
-        because the text scan finds nothing in a picture, and the picture was never sent to the
-        browser at all. Now it is, and a collector can simply read it.
+        They were under the body, which reads as the natural order -- read the thing, then decide
+        what to do about it -- and is wrong for the messages people actually get. A corporate
+        signature is a full-width letterhead and a photograph; the message above it is three
+        lines. So the decision was a screen and a half below the thing it was about, and Reply
+        was the hardest button in the mailbox to reach.
 
-        Every src here is a data: URI carrying its own bytes. Nothing is fetched from anybody
-        else's server, so a remote tracking pixel cannot report that this debtor's mail was
-        opened, by whom, or when — see fetchMessageBody, which is where the bytes are read.
+        Above the message, they are in the same place on every message whatever its length, which
+        is the property that makes a toolbar a toolbar.
       */}
-      {!loadingBody && body !== undefined && !images?.length && !!skippedImages && (
-        /* A gap with no explanation reads as a broken feature — which is exactly how the first
-           version of this was reported. If the picture is not here, the message says why. */
-        <p className="text-xs text-slate-400 mt-3">
-          {skippedImages === 1
-            ? 'One picture in this message was too large to show here.'
-            : `${skippedImages} pictures in this message were too large to show here.`}
-        </p>
-      )}
-
-      {!loadingBody && images && images.length > 0 && (
-        <div className="mt-3">
-          <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5">
-            In this message
-          </p>
-          <div className="flex flex-wrap items-start gap-2">
-            {images.map((img, i) => (
-              <ZoomableImage
-                key={img.cid || img.filename || i}
-                src={img.dataUri}
-                /* A signature picture has no useful alt text of its own; naming it as one is
-                   more honest to a screen reader than an empty string or a filename. */
-                alt={img.filename || 'Image from this message'}
-                /*
-                  Twice the height it used to be. A signature sets its own telephone number in
-                  about eight points, and at 160px the number was there but not readable — which
-                  is no better than not showing it. The width cap still stops a full-width
-                  letterhead pushing the reading pane wide, and it is the width that binds on a
-                  phone; click it for anything bigger.
-                */
-                className="max-w-full max-h-80 w-auto block"
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!loadingBody && bodyError && (
-        <>
-          {/* Fall back to what Raptor holds rather than showing nothing. */}
-          {mail.snippet && (
-            <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">{mail.snippet}</p>
-          )}
-          <p className="text-xs text-gold-600 mt-2">
-            {bodyError} Showing the first {mail.snippet?.length ?? 0} characters Raptor saved.
-          </p>
-        </>
-      )}
-
-      {mail.attachmentNames.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          {/*
-            The files themselves are still not stored — each of these fetches out of the mailbox
-            on demand and streams straight to the browser. Names alone were not enough: a debtor
-            attaching proof of income to a payment arrangement is exactly the attachment a
-            collector needs, and reading the filename then opening Outlook is not using Raptor.
-          */}
-          <Paperclip size={11} className="text-slate-400" />
-          {mail.attachmentNames.map((name) => (
-            <button key={name} onClick={() => onDownload(name)} disabled={downloading === name}
-              title={`Download ${name}`}
-              className="inline-flex items-center gap-1 max-w-full text-xs px-2 py-1 rounded-md border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50">
-              {downloading === name
-                ? <Loader2 size={11} className="shrink-0 animate-spin" />
-                : <Download size={11} className="shrink-0" />}
-              <span className="truncate">{name}</span>
-            </button>
-          ))}
-        </div>
-      )}
-      {downloadError && <p className="text-xs text-negative-700 mt-1.5">{downloadError}</p>}
-
       {/*
         Everything you can do with an open message, in one row.
 
@@ -1510,7 +1419,8 @@ function MailBody({
         already linked to an account, because blocking a sender is about future noise, not about
         the message in front of you.
       */}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      {/* No top margin: this is the first thing in the card now, not a footer under a message. */}
+      <div className="flex flex-wrap items-center gap-2">
         <button onClick={onReply}
           className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
           <Reply size={13} /> Reply
@@ -1619,6 +1529,114 @@ function MailBody({
           <Ban size={13} /> Block sender
         </button>
       </div>
+      {mail.attachmentNames.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          {/*
+            The files themselves are still not stored — each of these fetches out of the mailbox
+            on demand and streams straight to the browser. Names alone were not enough: a debtor
+            attaching proof of income to a payment arrangement is exactly the attachment a
+            collector needs, and reading the filename then opening Outlook is not using Raptor.
+          */}
+          <Paperclip size={11} className="text-slate-400" />
+          {mail.attachmentNames.map((name) => (
+            <button key={name} onClick={() => onDownload(name)} disabled={downloading === name}
+              title={`Download ${name}`}
+              className="inline-flex items-center gap-1 max-w-full text-xs px-2 py-1 rounded-md border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50">
+              {downloading === name
+                ? <Loader2 size={11} className="shrink-0 animate-spin" />
+                : <Download size={11} className="shrink-0" />}
+              <span className="truncate">{name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {downloadError && <p className="text-xs text-negative-700 mt-1.5">{downloadError}</p>}
+
+      {/* A rule under the controls, so the message reads as the message and not as more toolbar. */}
+      <div className="border-b border-slate-100 mb-3" />
+
+      {loadingBody && (
+        <p className="text-[13px] text-slate-400 inline-flex items-center gap-1.5">
+          <Loader2 size={13} className="animate-spin" /> Fetching the message from your mailbox&hellip;
+        </p>
+      )}
+
+      {!loadingBody && body !== undefined && (
+        /*
+         * The message as it was written. `whitespace-pre-wrap` because an email's own line breaks
+         * carry meaning — collapsing them turns a numbered arrangement into a paragraph.
+         * `break-words` because a pasted URL would otherwise push the page wide.
+         *
+         * Rendered as TEXT, never as HTML: this is mail from outside the building, and putting a
+         * stranger's markup into the page is not worth faithful formatting.
+         */
+        <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
+          {body.trim() || <span className="text-slate-400">This message has no text in it.</span>}
+        </p>
+      )}
+
+      {/*
+        The pictures the message was written WITH, as opposed to files attached to it.
+
+        This is the answer to a signature that is an image. Raptor read those messages as three
+        lines and a blank space where the sender's name, firm and number should have been —
+        because the text scan finds nothing in a picture, and the picture was never sent to the
+        browser at all. Now it is, and a collector can simply read it.
+
+        Every src here is a data: URI carrying its own bytes. Nothing is fetched from anybody
+        else's server, so a remote tracking pixel cannot report that this debtor's mail was
+        opened, by whom, or when — see fetchMessageBody, which is where the bytes are read.
+      */}
+      {!loadingBody && body !== undefined && !images?.length && !!skippedImages && (
+        /* A gap with no explanation reads as a broken feature — which is exactly how the first
+           version of this was reported. If the picture is not here, the message says why. */
+        <p className="text-xs text-slate-400 mt-3">
+          {skippedImages === 1
+            ? 'One picture in this message was too large to show here.'
+            : `${skippedImages} pictures in this message were too large to show here.`}
+        </p>
+      )}
+
+      {!loadingBody && images && images.length > 0 && (
+        <div className="mt-3">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5">
+            In this message
+          </p>
+          <div className="flex flex-wrap items-start gap-2">
+            {images.map((img, i) => (
+              <ZoomableImage
+                key={img.cid || img.filename || i}
+                src={img.dataUri}
+                /* A signature picture has no useful alt text of its own; naming it as one is
+                   more honest to a screen reader than an empty string or a filename. */
+                alt={img.filename || 'Image from this message'}
+                /*
+                  Twice the height it used to be. A signature sets its own telephone number in
+                  about eight points, and at 160px the number was there but not readable — which
+                  is no better than not showing it. The width cap still stops a full-width
+                  letterhead pushing the reading pane wide, and it is the width that binds on a
+                  phone; click it for anything bigger.
+                */
+                className="max-w-full max-h-80 w-auto block"
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!loadingBody && bodyError && (
+        <>
+          {/* Fall back to what Raptor holds rather than showing nothing. */}
+          {mail.snippet && (
+            <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">{mail.snippet}</p>
+          )}
+          <p className="text-xs text-gold-600 mt-2">
+            {bodyError} Showing the first {mail.snippet?.length ?? 0} characters Raptor saved.
+          </p>
+        </>
+      )}
+
+
     </>
   )
 }

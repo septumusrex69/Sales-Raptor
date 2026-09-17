@@ -220,6 +220,63 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
     ok(`nothing on the CRM branch calls ${called})`, !crm.includes(called))
 }
 
+/* ---------- the actions sit above the message ---------- */
+
+/*
+ * THE FIRM'S REPORT: "it's sitting there at the bottom and I have to scroll down all the way to
+ * do anything."
+ *
+ * They were under the body, which reads as the natural order and is wrong for the mail people
+ * actually get: a corporate signature is a full-width letterhead and a photograph, the message
+ * above it is three lines, and so Reply sat a screen and a half below the thing it was about.
+ */
+{
+  const start = page.indexOf('function MailBody(')
+  ok('the message renderer exists', start > -1)
+  const mailBody = page.slice(start, page.indexOf('function MailRow(', start))
+
+  const reply = mailBody.indexOf('<button onClick={onReply}')
+  const attachments = mailBody.indexOf('{mail.attachmentNames.length > 0 && (')
+  const body = mailBody.indexOf('whitespace-pre-wrap break-words')
+  const signature = mailBody.indexOf('In this message')
+
+  /*
+   * Presence before order, always. indexOf returns -1 for something deleted and -1 beats
+   * everything, so an order-only assertion passes vacuously the moment its subject is gone.
+   */
+  ok('there is a reply button', reply > -1)
+  ok('...an attachment row', attachments > -1)
+  ok('...the message body itself', body > -1)
+  ok('...and the pictures it was written with', signature > -1)
+
+  ok('reply comes before the message, not after it', reply < body)
+  ok('...and before the signature pictures that used to bury it', reply < signature)
+  ok('the attachments are above the message too', attachments < body)
+  /* The controls come first; the files they act on second; the message last. */
+  ok('...and below the buttons, which are the things you press most', reply < attachments)
+
+  /*
+   * Every action moved, not just Reply. Half a toolbar at the top and half at the bottom is
+   * worse than either, because now there are two places to look instead of one.
+   */
+  for (const [what, needle] of [
+    ['forward', '<button onClick={onForward}'],
+    ['mark unread', '<button onClick={onUnread}'],
+    ['block sender', '<button onClick={onBlock}'],
+    ['open the record it is filed on', '<Link to={mail.linkedTo.path}'],
+  ]) {
+    const at = mailBody.indexOf(needle)
+    ok(`there is a way to ${what}`, at > -1)
+    ok(`...and it moved with the rest`, at < body)
+  }
+
+  // A rule under the controls, so the message reads as the message and not as more toolbar.
+  ok('the controls are ruled off from the message', /border-b border-slate-100 mb-3/.test(mailBody))
+  /* It is the first thing in the card now, so a top margin would open a gap above everything. */
+  ok('...and carry no margin above them',
+    !/<div className="mt-3 flex flex-wrap items-center gap-2">\s*\n\s*<button onClick=\{onReply\}/.test(mailBody))
+}
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')
