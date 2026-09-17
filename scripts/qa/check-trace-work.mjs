@@ -282,8 +282,25 @@ ok('...reachable from the account', /<TraceWorkspaceModal/.test(detail))
  * the only verdict that matters on a control nobody found.
  */
 ok('...from a button on the panel, not a line of text', /Open \{traces\.length > 1 \? `\$\{traces\.length\} traces`/.test(detail))
-/* And the summary block is itself the target: every line of it is the beginning of a call. */
-ok('...and the whole summary opens it', /<button type="button" onClick=\{onOpen\}\s*\n\s*className="block w-full text-left/.test(detail))
+/*
+ * TWO WAYS IN, and the card is no longer one giant button.
+ *
+ * It was, on the reasoning that every line of a trace summary is the beginning of a call. The
+ * firm's own design replaced it with a card that has a number you can DIAL inside it — and a
+ * PhoneLink inside a button is a control inside a control, where pressing the number opens the
+ * modal instead of ringing. So the ways in are named: "Review trace" at the top, and the untried
+ * count at the foot.
+ */
+ok('...and the summary carries its own way in', /\{who \? `Review \$\{who\}` : 'Review trace'\}/.test(detail))
+ok('...and the number in it is dialled, not swallowed by a wrapping button',
+  /<PhoneLink number=\{found\.phone\.value\} \/>/.test(detail))
+/*
+ * The count says how much of what the firm paid for nobody has tried yet, which is the only
+ * measure of whether the search was worth buying. Silent at nought: a line reading "0 untried"
+ * has nothing to say and still takes a row.
+ */
+ok('...and what nobody has tried yet is a way in too', /\{found\.untried\} finding/.test(detail))
+ok('...shown only when there is something untried', /\{found\.untried > 0 && \(/.test(detail))
 
 /*
  * MOVING BETWEEN THE TRACES, in the firm's words: "I need to go, for example, between the traces."
@@ -301,7 +318,7 @@ ok('...with the one you are on marked', /t\.id === trace\.id/.test(workspace))
 ok('an empty trace says why it is empty', /Nothing to work on this one/.test(workspace))
 ok('...and where the company\'s findings actually are', /A company profile carries directors and judgments/.test(workspace))
 /* The firm's own list of what the summary must carry. */
-for (const line of ['Phone', 'Address', 'Works at', 'Property', 'Possible next of kin', 'Directs']) {
+for (const line of ['Phone number', 'Address', 'Employer', 'Property', 'Possible next of kin', 'Directs']) {
   ok(`the summary carries ${line.toLowerCase()}`, new RegExp(`"${line}"|>${line}[ <]`).test(detail))
 }
 ok('a number can be dialled from inside the trace', /<PhoneLink number=\{row\.value\}/.test(workspace))

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
-  AlertTriangle, ArrowLeft, CalendarClock, Check, CheckCircle2, Gavel, Loader2, Mail, MessageCircle,
-  MessageSquare, Phone, Plus, Printer, Search, ShieldAlert, StickyNote, Users, X, XCircle,
+  AlertTriangle, ArrowLeft, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2,
+  Mail, MapPin, MessageCircle, MessageSquare, Phone, Plus, Printer, Search, ShieldAlert, StickyNote,
+  Upload, User, Users, X, XCircle,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
+import { PhoneLink } from '../../components/PhoneLink'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
 import {
   ACTION_BASE, ACTION_ENABLED, RecordAction as Action, RecordActions, RecordFigure as Figure,
@@ -43,7 +45,7 @@ import {
   type AccountJudgment, type AccountStanding, type DirectorCompany, type PractitionerKind,
 } from '../../lib/accountStanding.ts'
 import { fetchStanding } from '../../lib/accountStandingData.ts'
-import { heldProperty, traceSummary, type FiledTrace, type TraceItem } from '../../lib/traceStore.ts'
+import { heldProperty, traceSummary, type FiledTrace } from '../../lib/traceStore.ts'
 import { fetchTraces } from '../../lib/traceStoreData.ts'
 import { TraceWorkspaceModal } from './TraceWorkspaceModal'
 import { TraceUploadModal } from './TraceUploadModal'
@@ -1689,20 +1691,34 @@ function StandingPanel({ account, standing, position, traces, traceAction, onUpl
         which is the only verdict that matters on a control nobody found. Uploading is the smaller
         job once a trace exists, so it gives up the emphasis.
       */}
-      <PanelTitle action={
-        <span className="inline-flex items-center gap-2">
-          {traces.length > 0 && (
-            <button type="button" onClick={() => onOpenTrace(traces[0].id)}
-              className="text-[11px] font-medium px-2 py-1 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 inline-flex items-center gap-1">
-              <Search size={11} /> Open {traces.length > 1 ? `${traces.length} traces` : 'the trace'}
+      {/*
+        THE FIRM'S OWN HEADING, off the design they drew. "TRACE" in small grey capitals named a
+        section; "Trace information" with a line under it says what is in the card, which is what
+        somebody scanning three panels needs. Upload gives up the emphasis because opening a trace
+        that exists is the commoner job by far.
+      */}
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div className="min-w-0">
+          <h3 className="text-lg font-semibold text-navy-950">Trace information</h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {traces.length > 0
+              ? 'Contact details and findings from the uploaded trace'
+              : 'Nothing filed yet \u2014 run a search or upload a report you already have'}
+          </p>
+        </div>
+        {traces.length > 0 && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button type="button" onClick={onUpload}
+              className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+              <Upload size={14} /> Upload trace
             </button>
-          )}
-          <button type="button" onClick={onUpload}
-            className="text-[11px] font-medium text-[var(--c-steel)] hover:underline">
-            Upload a trace
-          </button>
-        </span>
-      }>Trace</PanelTitle>
+            <button type="button" onClick={() => onOpenTrace(traces[0].id)}
+              className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+              <Search size={14} /> Open {traces.length > 1 ? `${traces.length} traces` : 'trace'}
+            </button>
+          </div>
+        )}
+      </div>
 
       {/*
         THE EMPTY BOX, at the firm's instruction: "put it there as an empty box where you can
@@ -1818,51 +1834,78 @@ function StandingPanel({ account, standing, position, traces, traceAction, onUpl
         </div>
       )}
 
+      {/*
+        JUDGMENTS, laid out as the firm drew them: a heading that carries the count and the newest
+        date, then each one as four labelled columns.
+
+        THE LABELS ARE THE POINT. "22 Apr 2025 · Levies · Judgement By Default · case 2334/2025"
+        is four facts run together in a grey line, and a collector reading it has to work out which
+        is which. Named columns are read at a glance, and this is the block that decides whether an
+        account is worth attaching.
+      */}
       {ownJudgments.length > 0 && (
-        <div>
-          <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5 inline-flex items-center gap-1.5">
-            <Gavel size={12} /> Judgments against {account.debtorKind === 'company' ? 'the company' : 'them'}
-          </p>
+        <div className="rounded-xl border border-slate-200 overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
+            <p className="inline-flex items-center gap-2 text-base font-semibold text-navy-950">
+              <Gavel size={16} className="text-slate-400" />
+              Judgments
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                {summary.count}
+              </span>
+            </p>
+            <p className="text-xs text-slate-500 shrink-0">
+              {summary.newest
+                ? `Most recent: ${formatDate(summary.newest)}`
+                : 'No filing date recorded'}
+            </p>
+          </div>
+
           {/*
-            The count and the newest date first, because those are the two facts that decide
-            whether the rows below are history or a live problem. The total says "at least": a
-            judgment recorded without an amount is not nothing, and a figure that quietly left it
-            out would be read as the whole.
+            The total says "at least" where an amount is missing. A judgment recorded without one
+            is not nothing, and a figure that quietly left it out would be read as the whole.
           */}
-          <p className="text-sm text-slate-800">
-            {summary.count} {summary.count === 1 ? 'judgment' : 'judgments'}
-            {summary.newest && <span className="text-slate-500">, most recent {formatDate(summary.newest)}</span>}
-          </p>
           {summary.total > 0 && (
-            <p className="text-[11px] text-slate-400 mb-1.5">
-              {summary.withoutAmount > 0 ? 'At least ' : ''}{formatMoney(summary.total)}
+            <p className="px-4 pt-2.5 text-xs text-slate-500">
+              {summary.withoutAmount > 0 ? 'At least ' : ''}
+              <span className="font-medium text-slate-700">{formatMoney(summary.total)}</span>
               {summary.withoutAmount > 0 && ` \u2014 ${summary.withoutAmount} without a recorded amount`}
             </p>
           )}
-          <ul className="space-y-1.5 mt-1.5">
+
+          <ul className="divide-y divide-slate-100">
             {ownJudgments.map((j) => (
-              <li key={j.id} className="text-sm">
-                <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-                  <span className="text-slate-800">{j.plaintiff ?? 'Plaintiff not recorded'}</span>
-                  <span className="text-slate-700 tabular-nums shrink-0">
-                    {j.amount === null ? '\u2014' : formatMoney(j.amount)}
-                  </span>
+              <li key={j.id} className="px-4 py-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-navy-950 break-words">
+                      {j.plaintiff ?? 'Plaintiff not recorded'}
+                    </p>
+                    <p className="text-xs text-slate-500">Creditor</p>
+                  </div>
+                  {j.amount !== null && (
+                    <span className="text-sm text-slate-700 tabular-nums shrink-0">{formatMoney(j.amount)}</span>
+                  )}
                 </div>
-                <p className="text-[11px] text-slate-400">
-                  {[
-                    j.filedOn ? formatDate(j.filedOn) : null,
-                    j.caseReason,
-                    j.caseType,
-                    `case ${j.caseNumber}`,
-                  ].filter(Boolean).join(' \u00b7 ')}
-                </p>
+
+                <dl className="mt-2.5 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
+                  <JudgmentCell label="Date" value={j.filedOn ? formatDate(j.filedOn) : null} />
+                  {/*
+                    WHAT THE DEBT WAS, then WHAT THE COURT DID. The bureau's two columns are
+                    caseReason ("Levies") and caseType ("Judgement By Default"), and they answer
+                    those two different questions in that order.
+                  */}
+                  <JudgmentCell label="Type" value={j.caseReason} />
+                  <JudgmentCell label="Outcome" value={j.caseType} />
+                  <JudgmentCell label="Case number" value={j.caseNumber} />
+                </dl>
+
                 {/*
-                  THE ROW AS THE BUREAU PRINTED IT, where its columns could not be split. Shown
-                  as the bureau's own words rather than dressed up as a plaintiff — a judgment
-                  nobody could parse is still a judgment, and who sued is the part worth having.
+                  THE ROW AS THE BUREAU PRINTED IT, where its columns could not be split. Shown as
+                  the bureau's own words rather than dressed up as a plaintiff — a judgment nobody
+                  could parse is still a judgment, and who sued is the part worth having.
                 */}
                 {j.plaintiff === null && j.sourceText !== null && (
-                  <p className="text-[11px] text-slate-500 italic">
+                  <p className="mt-2 text-xs text-slate-500 italic">
                     As printed: &ldquo;{j.sourceText}&rdquo;
                   </p>
                 )}
@@ -1886,70 +1929,145 @@ function StandingPanel({ account, standing, position, traces, traceAction, onUpl
 function TraceFound({ trace, onOpen }: { trace: FiledTrace; onOpen: () => void }) {
   const found = traceSummary(trace.items)
   const who = trace.subjectKind === 'director' ? trace.subjectName : null
+  const kin = found.relatives[0] ?? null
 
   return (
-    /*
-      THE WHOLE BLOCK OPENS IT, not a word at the end of it. A summary of a trace is not something
-      anybody reads and then leaves alone — every line of it is the beginning of a call — so the
-      thing under the finger is the thing they want.
-    */
-    <button type="button" onClick={onOpen}
-      className="block w-full text-left mb-3 rounded-lg border border-slate-200 bg-slate-50/60 px-2.5 py-2 hover:border-gold-400 hover:bg-gold-50/50">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-        <p className="text-xs font-semibold text-navy-900">
-          Trace{who ? <> &middot; <span className="font-normal text-slate-600">{who}</span></> : null}
-        </p>
-        <span className="text-[11px] font-medium text-[var(--c-steel)] shrink-0">
-          {/*
-            The count says how much of what the firm paid for nobody has tried yet, which is the
-            only measure of whether the search was worth buying.
-          */}
-          Work it{found.untried > 0 ? ` · ${found.untried} untried` : ''} &rarr;
-        </span>
-      </div>
+    <div className="mb-4 rounded-xl border border-slate-200 overflow-hidden">
+      {/*
+        THE NUMBER IS THE HEADLINE, at the size somebody reads across a desk. Everything else on
+        this card is context for the decision "do I ring this, and what do I say when they answer".
+      */}
+      <Finding icon={<Phone size={18} />} label="Phone number"
+        action={(
+          <button type="button" onClick={onOpen}
+            className="text-sm font-medium text-[var(--c-steel)] hover:underline inline-flex items-center gap-1 shrink-0">
+            {who ? `Review ${who}` : 'Review trace'} &rarr;
+          </button>
+        )}>
+        {found.phone === null ? (
+          <p className="text-sm text-slate-400">No number on this trace</p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-lg font-semibold text-navy-950"><PhoneLink number={found.phone.value} /></span>
+            {/* Confirmed means somebody rang it and reached them — not that a bureau printed it. */}
+            {found.phone.outcome === 'verified' && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full bg-positive-50 text-positive-700">
+                <CheckCircle2 size={12} /> Confirmed
+              </span>
+            )}
+            {found.phone.promotedContactId !== null && (
+              <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-500">On account</span>
+            )}
+          </div>
+        )}
+      </Finding>
 
-      <div className="space-y-1 mt-1.5">
-        <TraceLine label="Phone" item={found.phone} />
-        <TraceLine label="Address" item={found.address} />
-        <TraceLine label="Works at" item={found.employer} />
-        {found.properties.map((p) => (
-          <p key={p.id} className="text-[11px]">
-            <span className="text-slate-500">Property </span>
-            <span className="text-slate-800">{p.value}</span>
-            {p.amount !== null && <span className="text-slate-500"> &middot; bought for {formatMoney(p.amount)}</span>}
+      {found.address && (
+        <Finding icon={<MapPin size={18} />} label="Address" divider>
+          <p className="text-sm text-navy-950 break-words">{found.address.value}</p>
+          {found.address.label && <p className="text-sm text-slate-500">{found.address.label}</p>}
+        </Finding>
+      )}
+
+      {found.employer && (
+        <Finding icon={<Building2 size={18} />} label="Employer" divider>
+          <p className="text-sm text-navy-950 break-words">{found.employer.value}</p>
+          {found.employer.label && <p className="text-xs text-slate-500">{found.employer.label}</p>}
+        </Finding>
+      )}
+
+      {/*
+        PROPERTY AND NEXT OF KIN SIT SIDE BY SIDE, which is the firm's own layout. They are the two
+        findings that change what KIND of account this is rather than how to reach them: something
+        to attach, and somebody else who might know where they are.
+      */}
+      {(found.properties.length > 0 || kin !== null) && (
+        <div className="grid sm:grid-cols-2 border-t border-slate-100 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+          {found.properties.length > 0 && (
+            <Finding icon={<Home size={18} />} label="Property">
+              <p className="text-sm font-semibold text-navy-950 break-words">{found.properties[0].value}</p>
+              <p className="text-xs text-slate-500">
+                {[
+                  found.properties[0].amount !== null
+                    ? `Purchase price: ${formatMoney(found.properties[0].amount)}` : null,
+                  found.properties.length > 1 ? `and ${found.properties.length - 1} more` : null,
+                ].filter(Boolean).join(' \u00b7 ')}
+              </p>
+            </Finding>
+          )}
+          {kin !== null && (
+            <Finding icon={<User size={18} />} label="Possible next of kin">
+              <p className="text-sm font-semibold text-navy-950 break-words">{kin.value}</p>
+              {/*
+                "Unverified" is the whole point of the word "possible". A shared surname is evidence
+                of a family connection and not proof of one, and a collector who opens a call to
+                somebody's sister as though the relationship were established has made it worse.
+              */}
+              <p className="text-xs text-slate-500">
+                {found.relatives.length > 1
+                  ? `Unverified relationship \u00b7 and ${found.relatives.length - 1} more`
+                  : 'Unverified relationship'}
+              </p>
+            </Finding>
+          )}
+        </div>
+      )}
+
+      {found.directorships.length > 0 && (
+        <Finding icon={<Building2 size={18} />} label="Directs" divider>
+          <p className="text-sm text-navy-950 break-words">
+            {found.directorships.slice(0, 3).map((d) => d.value).join(', ')}
+            {found.directorships.length > 3 && (
+              <span className="text-slate-500"> and {found.directorships.length - 3} more</span>
+            )}
           </p>
-        ))}
-        {found.relatives.length > 0 && (
-          <p className="text-[11px]">
-            {/* "Possible" is the word the firm used, and it stays: a shared surname is evidence. */}
-            <span className="text-slate-500">Possible next of kin </span>
-            <span className="text-slate-800">{found.relatives.map((r) => r.value).join(', ')}</span>
-          </p>
-        )}
-        {found.directorships.length > 0 && (
-          <p className="text-[11px]">
-            <span className="text-slate-500">Directs </span>
-            <span className="text-slate-800">{found.directorships.slice(0, 3).map((d) => d.value).join(', ')}</span>
-            {found.directorships.length > 3 && <span className="text-slate-500"> and {found.directorships.length - 3} more</span>}
-          </p>
-        )}
-      </div>
-    </button>
+        </Finding>
+      )}
+
+      {/*
+        WHAT NOBODY HAS TRIED YET, which is the only measure of whether the search was worth
+        buying. Silent at nought, because a line saying "0 untried" is a line that has nothing to
+        say and still takes a row.
+      */}
+      {found.untried > 0 && (
+        <button type="button" onClick={onOpen}
+          className="w-full text-left px-4 py-2.5 border-t border-slate-100 bg-slate-50/70 text-xs font-medium text-[var(--c-steel)] hover:bg-gold-50">
+          {found.untried} finding{found.untried === 1 ? '' : 's'} nobody has tried yet \u2014 work the trace &rarr;
+        </button>
+      )}
+    </div>
   )
 }
 
-/** One line of the summary, absent entirely when the trace had nothing of that kind. */
-function TraceLine({ label, item }: { label: string; item: TraceItem | null }) {
-  if (item === null) return null
+/** One column of a judgment. Absent values say so rather than leaving a blank under a heading. */
+function JudgmentCell({ label, value }: { label: string; value: string | null }) {
   return (
-    <p className="text-[11px]">
-      <span className="text-slate-500">{label} </span>
-      <span className="text-slate-800 break-words">{item.value}</span>
-      {item.label && <span className="text-slate-500"> &middot; {item.label}</span>}
-      {/* Whether anybody has tried it is the difference between a lead and a fact. */}
-      {item.outcome === 'verified' && <span className="text-positive-700"> &middot; confirmed</span>}
-      {item.promotedContactId !== null && <span className="text-slate-400"> &middot; on the account</span>}
-    </p>
+    <div className="min-w-0">
+      <dt className="text-xs text-slate-500">{label}</dt>
+      <dd className={`text-sm break-words ${value ? 'text-navy-950' : 'text-slate-400'}`}>
+        {value ?? 'Not recorded'}
+      </dd>
+    </div>
+  )
+}
+
+/** One labelled finding: an icon in the gutter, a quiet label, and the fact itself. */
+function Finding({ icon, label, children, action, divider }: {
+  icon: React.ReactNode
+  label: string
+  children: React.ReactNode
+  action?: React.ReactNode
+  divider?: boolean
+}) {
+  return (
+    <div className={`flex items-start gap-3 px-4 py-3 ${divider ? 'border-t border-slate-100' : ''}`}>
+      <span className="shrink-0 text-slate-400 mt-0.5">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-slate-500">{label}</p>
+        {children}
+      </div>
+      {action}
+    </div>
   )
 }
 

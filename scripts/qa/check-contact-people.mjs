@@ -178,9 +178,15 @@ ok('...and a relative with no number yet says so', /No number yet/.test(panels))
  * is if there is a property... almost flagged like this debtor has a property." It existed only
  * two clicks inside the trace modal.
  */
-ok('property is flagged on the debtor\'s details', /Owns property/.test(panels))
+/*
+ * ONE LINE PER HOUSE. It shipped as a boxed block with its own heading, detail line and link, and
+ * the firm's verdict was "very bulky and big" — three rows of chrome around one fact. A flag has
+ * to be noticeable and small at the same time.
+ */
+ok('property is flagged on the debtor\'s details', /Owns<\/span>/.test(panels))
 ok('...with the address', /\{prop\.value\}/.test(panels))
-ok('...and what it cost', /bought for \$\{formatMoney\(prop\.amount\)\}/.test(panels))
+ok('...and what it cost', /\{formatMoney\(prop\.amount\)\}/.test(panels))
+ok('...and the flag itself opens the trace it came from', /onClick=\{onOpenTrace \?\? undefined\}/.test(panels))
 /*
  * ONLY WHAT THEY STILL OWN. The deeds block lists houses sold fifteen years ago; one flagged on
  * the account screen reads as an asset to anybody skimming, which turns a warning into a lie.

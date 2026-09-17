@@ -318,8 +318,12 @@ ok('...and the upload beside it', /Upload a trace I already have/.test(detail))
 ok('the panel does not build its own trace button',
   (detail.match(/<TraceButton/g) ?? []).length === 2 && /traceAction: React\.ReactNode/.test(detail))
 
-/* The firm's word for this panel. It is about the trace, not about an abstract "standing". */
-ok('the panel is called Trace', />Trace<\/PanelTitle>/.test(detail))
+/*
+ * The firm's own heading, off the design they drew. "TRACE" in small grey capitals named a
+ * section; "Trace information" with a line under it says what is in the card.
+ */
+ok('the panel is called Trace information', /Trace information<\/h3>/.test(detail))
+ok('...and says what is in it', /Contact details and findings from the uploaded trace/.test(detail))
 /*
  * A WARNING THAT ONLY FIRES WHEN SOMETHING IS ACTUALLY WRONG. The account reports as under
  * administration and there is no record of who is administering it — a claim nobody can submit.
@@ -337,7 +341,18 @@ ok('the panel says not to deal with the debtor',
  * clients — which has to be calibrated against their own recovered outcomes, not invented here.
  * Until then the panel shows the rows and lets a collector read them. See BACKLOG.
  */
-ok('the judgments are shown as rows, not as a score', /Judgments against \{account\.debtorKind/.test(detail))
+ok('the judgments are shown as rows, not as a score', /<JudgmentCell label="Case number"/.test(detail))
+/*
+ * FOUR NAMED COLUMNS, off the firm's design. "22 Apr 2025 · Levies · Judgement By Default · case
+ * 2334/2025" is four facts run together in one grey line and the reader has to work out which is
+ * which. What the debt WAS and what the court DID are different questions, and the bureau answers
+ * them in two different columns — caseReason then caseType.
+ */
+ok('...each under its own heading',
+  /<JudgmentCell label="Type" value=\{j\.caseReason\} \/>/.test(detail)
+  && /<JudgmentCell label="Outcome" value=\{j\.caseType\} \/>/.test(detail))
+ok('...and a column with nothing in it says so rather than sitting blank',
+  /value \?\? 'Not recorded'/.test(detail))
 /* The panel must count and list the split ones, not the raw fetch. */
 ok('the panel splits before it counts', /splitJudgments\(judgments\)/.test(detail))
 ok('...and summarises only the debtor\'s own', /judgmentSummary\(ownJudgments\)/.test(detail))

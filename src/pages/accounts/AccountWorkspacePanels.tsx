@@ -195,32 +195,30 @@ export function DebtorDetailsPanel({ account, name, workspace, properties, onCha
         anybody skimming — which would turn a warning into a lie. heldProperty does that filtering;
         what arrives here is already the live ones.
       */}
+      {/*
+        ONE LINE PER HOUSE. It was a boxed block with its own heading, its own detail line and its
+        own link, and the firm's verdict was "very bulky and big" -- which it was: three rows of
+        chrome around one fact. A flag has to be noticeable and small at the same time, so what is
+        left is the word, the address and the price on one line, in gold because that is what makes
+        it catch the eye at a glance.
+
+        The whole row opens the trace it came from, which is what the separate link was for.
+      */}
       {properties.length > 0 && (
-        <div className="mt-3 pt-3 border-t border-slate-100">
-          <div className="rounded-xl border border-gold-300 bg-gold-50 px-3 py-2.5">
-            <p className="text-[11px] uppercase tracking-wide text-[var(--c-gold-deep)] font-medium inline-flex items-center gap-1.5">
-              <Home size={12} />
-              {properties.length === 1 ? 'Owns property' : `Owns ${properties.length} properties`}
-            </p>
-            {properties.map((prop) => (
-              <div key={prop.id} className="mt-1.5">
-                <p className="text-sm text-navy-900 break-words">{prop.value}</p>
-                <p className="text-[11px] text-slate-500">
-                  {[
-                    prop.label,
-                    prop.amount !== null ? `bought for ${formatMoney(prop.amount)}` : null,
-                    prop.seenOn ? `registered ${formatDate(prop.seenOn)}` : null,
-                  ].filter(Boolean).join(' \u00b7 ')}
-                </p>
-              </div>
-            ))}
-            {onOpenTrace && (
-              <button type="button" onClick={onOpenTrace}
-                className="mt-1.5 text-[11px] font-medium text-[var(--c-steel)] hover:underline">
-                Where this came from
-              </button>
-            )}
-          </div>
+        <div className="mt-3 pt-3 border-t border-slate-100 space-y-1">
+          {properties.map((prop) => (
+            <button key={prop.id} type="button" onClick={onOpenTrace ?? undefined}
+              disabled={onOpenTrace === null}
+              className={`w-full text-left flex items-baseline gap-1.5 text-[11px] rounded-md px-1.5 py-1 -mx-1.5 ${
+                onOpenTrace ? 'hover:bg-gold-50' : ''}`}>
+              <Home size={11} className="shrink-0 translate-y-0.5 text-[var(--c-gold-deep)]" />
+              <span className="font-medium text-[var(--c-gold-deep)] shrink-0">Owns</span>
+              <span className="text-slate-800 min-w-0 truncate">{prop.value}</span>
+              {prop.amount !== null && (
+                <span className="text-slate-400 shrink-0 ml-auto tabular-nums">{formatMoney(prop.amount)}</span>
+              )}
+            </button>
+          ))}
         </div>
       )}
 
