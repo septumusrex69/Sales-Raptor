@@ -541,10 +541,26 @@ ok('...as the same control the book uses', /aria-pressed=\{pageSize === n\}/.tes
     ['mark as open', 'void noRecordChosen()'],
     ['move to junk', 'void junkChosen(true)'],
     ['rescue from junk', 'void junkChosen(false)'],
-    ['block the senders', 'void blockChosen()'],
   ]) {
     ok(`a selection can ${what}`, bulk.includes(needle))
   }
+  /*
+   * AND BLOCKING IS NOT ON IT. "Don't bulk block people. That's a very bad and dangerous idea."
+   *
+   * The firm lost thirty addresses to one press -- their own bank among them -- through the same
+   * capability offered from the Empty junk box. Leaving it on a selection puts the identical
+   * hazard one screen away.
+   *
+   * It is not like the rest of this bar. Everything else here acts on MAIL THAT IS ALREADY HERE
+   * and shows its result: junk it, read it, delete it, and you can see what happened. Blocking
+   * acts on EVERY FUTURE MESSAGE from somebody, shows nothing once done, and what it costs is a
+   * client's mail that silently never arrives. It stays on the open message, one sender at a time.
+   */
+  ok('a selection cannot block anybody', !bulk.includes('blockChosen'))
+  ok('...and there is no bulk block left to call', !/export async function blockSenders/.test(mail))
+  /* One at a time, on a message somebody has read, is still there. */
+  ok('blocking one sender is still offered', /onClick: onBlock/.test(page))
+
   /*
    * READ AND UNREAD ARE OFFERED ONLY WHERE THEY WOULD DO SOMETHING. On a selection that is all
    * read, "Mark read" is furniture -- and a button that does nothing when pressed is worse than
@@ -622,6 +638,56 @@ ok('...as the same control the book uses', /aria-pressed=\{pageSize === n\}/.tes
   ok('unread is marked on the face', /\{!mail\.readAt && \(/.test(summary))
   ok('...as a badge on it', /absolute -top-0\.5 -right-0\.5/.test(summary))
   ok('...reading as on it rather than behind it', /ring-2 ring-white/.test(summary))
+}
+
+/* ---------- 10. deleting junk deletes junk ---------- */
+
+/*
+ * THE ONE THAT COST SOMETHING. "I accidentally just said empty junk and then it said block all of
+ * these people ... that's a very bad and dangerous idea." The box offered "Block these senders
+ * too", TICKED BY DEFAULT, and thirty addresses went onto the blocklist in one press -- the firm's
+ * own bank among them, with Telkom, a supplier and four real people who had written to them.
+ *
+ * Deleting junk and blocking a sender are not one decision. One is about mail already here, is
+ * reversible in the way that matters (every message is still on the mail server) and is done in a
+ * hurry because junk is where the volume is. The other is about every future message from
+ * somebody, is invisible once done, and costs a client's mail that silently never arrives.
+ */
+{
+  const emptyJunk = mail.slice(mail.indexOf('export async function emptyJunk'), mail.indexOf('/** Let a sender back in.'))
+  ok('emptying junk exists', emptyJunk.length > 0)
+  ok('...and takes nothing but who is asking', /emptyJunk\(input: \{ userId: string \}\)/.test(emptyJunk))
+  ok('...and blocks nobody', !/block/i.test(emptyJunk.replace(/\/\*[\s\S]*?\*\//g, '')))
+  /* Junk somebody has since put on a record is on a debtor's file and a fee may have been raised
+     against it. It is not ours to delete. */
+  ok('...and leaves matched mail alone', /\.eq\('is_filed', false\)/.test(emptyJunk))
+
+  const box = page.slice(page.indexOf('function EmptyJunkModal('), page.indexOf('\n/**\n * Senders whose mail never needs matching'))
+  ok('the box has no tick box at all', !/type="checkbox"/.test(box))
+  ok('...and says so out loud', /nobody is blocked/.test(box))
+  /* Named for what it does. "Empty" is a tidy-up; this deletes. */
+  ok('...and is called what it does', /title="Delete all junk"/.test(box))
+}
+
+/* ---------- 11. moving to junk only moves to junk ---------- */
+
+/*
+ * "If you select a message and you move to junk, it just goes to junk." It always did -- setJunk
+ * touches is_junk and the settled flag and nothing else -- but after the above it is worth holding
+ * still, because the cheapest way to reintroduce that bug would be to "helpfully" block here.
+ */
+{
+  const setJunk = mail.slice(mail.indexOf('export async function setJunk'), mail.indexOf('\n/**\n * Move a message that was filed on the wrong debtor account.'))
+  ok('setJunk exists', setJunk.length > 0)
+  ok('...and only sets the junk flag', /is_junk: junk,/.test(setJunk))
+  ok('...blocking nobody', !/block/i.test(setJunk))
+  /* Junking something already settled is a change of mind, and junk is the later decision. */
+  ok('...clearing the settled flag, which is the one thing it does change',
+    /no_record_at: null, no_record_by: null/.test(setJunk))
+  /* Matched mail is on a record and is not anybody's to junk. */
+  ok('...and refusing matched mail', /\.eq\('is_filed', false\)/.test(setJunk))
+  /* And nothing is deleted: the Junk tab is where it goes, not where it ends. */
+  ok('the screen says nothing was deleted', /Nothing deleted/.test(page))
 }
 
 if (failures.length) {

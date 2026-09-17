@@ -451,9 +451,16 @@ try {
   /* And it really selects them: the bulk bar counts what it holds. */
   t.ok('...and it selects the whole page',
     await page.getByText(/^\d+ selected$/).first().isVisible())
-  for (const action of ['Mark read', 'Mark as open', 'Move to junk', 'Block senders']) {
+  for (const action of ['Mark read', 'Mark as open', 'Move to junk']) {
     t.ok(`...offering ${action}`, await page.getByRole('button', { name: action }).isVisible())
   }
+  /*
+   * AND NOT BLOCKING. "Don't bulk block people. That's a very bad and dangerous idea." Checked on
+   * the screen because that is where it was pressed: thirty addresses, the firm's own bank among
+   * them, from one button that was sitting on a bar with six harmless ones.
+   */
+  t.check('...and no way to block them all at once',
+    await page.getByRole('button', { name: /Block sender/ }).count(), 0)
   await page.getByRole('button', { name: 'Done' }).click()
   await page.waitForTimeout(500)
   await page.getByRole('button', { name: 'List' }).click()

@@ -30,14 +30,14 @@ import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
 import { ZoomableImage } from '../../components/ui/ZoomableImage'
 import {
-  addSenderRule, blockedBy, blockSender, blockSenders, clearNoRecordNeeded, countNeedsFiling,
+  addSenderRule, blockedBy, blockSender, clearNoRecordNeeded, countNeedsFiling,
   countUnreadByTab, debtorFileFor, deleteMail, fetchSenderRules, markNoRecordNeeded, removeSenderRule,
   ruledBy,
   domainBlockProblem, domainOf, downloadAttachment, emptyJunk, fetchBlockedSenders, fetchMail,
   isSharedDomain,
   fetchMailBody, linkMailToAccount, linkMailToRecord, markMailRead, markMailUnread, moveFiledMail,
   saveAccountContacts, setJunk, unblockSender, unmatchMail,
-  type BlockedSender, type BlockOutcome, type DebtorFile, type InlineImage, type LinkedRecord,
+  type BlockedSender, type DebtorFile, type InlineImage, type LinkedRecord,
   type MailFilter, type MailItem, type SenderRule,
 } from '../../lib/userMail'
 import { useAppStore } from '../../store/AppStore'
@@ -590,7 +590,7 @@ export function MailPage() {
       setStatus(
         `${moved} ${moved === 1 ? 'email' : 'emails'} ${junk ? 'moved to junk' : 'moved back to your mailbox'}.`
         + (refused > 0 ? ` ${refused} left alone — already matched to a record.` : '')
-        + (junk ? ' Nothing deleted; empty the Junk tab when you want it gone.' : ''),
+        + (junk ? ' Nothing deleted; delete all junk when you want it gone.' : ''),
       )
       await afterBulk()
     } catch (e) {
@@ -620,33 +620,6 @@ export function MailPage() {
     try {
       const gone = await deleteMail(ids)
       setStatus(`${gone} ${gone === 1 ? 'email' : 'emails'} removed from Raptor — still in your real mailbox.`)
-      await afterBulk()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }
-
-  /** What a block did, and what it refused, in one sentence. */
-  function describeBlock(outcome: BlockOutcome): string {
-    const parts: string[] = []
-    if (outcome.blocked.length > 0) {
-      parts.push(`Blocked ${outcome.blocked.length} ${outcome.blocked.length === 1 ? 'sender' : 'senders'}`)
-    }
-    if (outcome.removed > 0) {
-      parts.push(`${outcome.removed} ${outcome.removed === 1 ? 'message' : 'messages'} cleared out of Raptor`)
-    }
-    if (outcome.refused.length > 0) {
-      // Named, not counted. "One was skipped" is not something anybody can act on.
-      parts.push(`left alone: ${outcome.refused.map((r) => `${r.address} (${r.reason})`).join(', ')}`)
-    }
-    return parts.length > 0 ? `${parts.join('. ')}.` : 'Nothing to block.'
-  }
-
-  async function blockChosen() {
-    const picked = items.filter((m) => chosen.has(m.id))
-    if (picked.length === 0 || !currentUser) return
-    try {
-      setStatus(describeBlock(await blockSenders({ userId: currentUser.id, mail: picked })))
       await afterBulk()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -923,7 +896,7 @@ export function MailPage() {
             {filter === 'junk' && items.length > 0 && (
               <button onClick={() => setEmptying(true)}
                 className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-negative-700 hover:border-negative-100 hover:bg-negative-50">
-                <Trash2 size={14} /> Empty junk
+                <Trash2 size={14} /> Delete all junk
               </button>
             )}
             {/*
@@ -978,13 +951,21 @@ export function MailPage() {
               </button>
             )}
             {/*
-              Block, without opening anything. Address only — a whole-domain block stays behind
-              the open message, because that one can silence a company and should cost a look.
+              BLOCKING IS NOT A BULK ACTION, and it was one here.
+
+              "Don't bulk block people. That's a very bad and dangerous idea." The firm had just
+              lost thirty addresses to one press -- their own bank among them -- through the same
+              capability offered from the Empty junk box, and offering it again on a selection
+              leaves the same hazard one screen away.
+
+              It is not like the others on this bar. Everything else here is about MAIL THAT IS
+              ALREADY HERE and is visible afterwards: junk it, read it, delete it, and you can see
+              what happened. Blocking is about EVERY FUTURE MESSAGE from somebody, it shows nothing
+              once done, and what it costs is a client's mail that silently never arrives.
+
+              So it stays on the open message, where you have read something before deciding, and
+              it is one sender at a time.
             */}
-            <button onClick={() => void blockChosen()}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
-              <Ban size={14} /> Block {chosen.size === 1 ? 'sender' : 'senders'}
-            </button>
             {/*
               Junk, both ways round. Which one is offered follows the tab you are standing on:
               on the Junk tab the useful action is rescuing something, everywhere else it is
@@ -2741,7 +2722,6 @@ function EmptyJunkModal({ count, userId, onClose, onDone }: {
   onClose: () => void
   onDone: (message: string) => void
 }) {
-  const [alsoBlock, setAlsoBlock] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -2750,13 +2730,9 @@ function EmptyJunkModal({ count, userId, onClose, onDone }: {
     setBusy(true)
     setError(null)
     try {
-      const r = await emptyJunk({ userId, alsoBlock })
-      const bits = [`${r.deleted} ${r.deleted === 1 ? 'message' : 'messages'} cleared out of Raptor`]
-      if (r.blocked.length > 0) bits.push(`${r.blocked.length} senders blocked`)
-      if (r.refused.length > 0) {
-        bits.push(`left alone: ${r.refused.map((x) => `${x.address} (${x.reason})`).join(', ')}`)
-      }
-      onDone(`${bits.join('. ')}.`)
+      const r = await emptyJunk({ userId })
+      onDone(`${r.deleted} ${r.deleted === 1 ? 'message' : 'messages'} deleted from Raptor. `
+        + 'They are still in your real mailbox.')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setBusy(false)
@@ -2764,25 +2740,27 @@ function EmptyJunkModal({ count, userId, onClose, onDone }: {
   }
 
   return (
-    <Modal title="Empty junk" onClose={onClose} width={480}>
+    /*
+      DELETING JUNK DELETES JUNK, AND NOTHING ELSE.
+      
+      This box used to offer "Block these senders too", TICKED BY DEFAULT, and the firm pressed it:
+      "I accidentally just said empty junk and then it said block all of these people ... that's a
+      very bad and dangerous idea." Thirty addresses went onto the blocklist in one action, among
+      them their own bank, Telkom, a supplier and four real people who had written to them.
+      
+      The two are not one decision. Deleting junk is about mail that is ALREADY HERE, it is
+      reversible in the way that matters -- every message is still on the mail server -- and it is
+      done in a hurry, because junk is where the volume is. Blocking is about EVERY FUTURE MESSAGE
+      from somebody, it is invisible once done, and what it costs is a client's mail that silently
+      never arrives. A destructive sweep must not carry a permanent silent decision with it.
+      
+      Blocking one sender still lives on the open message, where you have read something first.
+    */
+    <Modal title="Delete all junk" onClose={onClose} width={480}>
       <p className="text-sm text-slate-500">
-        This removes {count === 1 ? 'the message' : `all ${count} messages`} in junk from Raptor.
-        They stay in your real mailbox &mdash; nothing here touches Outlook.
+        This deletes {count === 1 ? 'the message' : `all ${count} messages`} in junk from Raptor.
+        They stay in your real mailbox &mdash; nothing here touches Outlook, and nobody is blocked.
       </p>
-
-      <label className="flex items-start gap-2.5 mt-4 px-3.5 py-3 rounded-lg border border-slate-200 cursor-pointer">
-        <input type="checkbox" checked={alsoBlock} className="mt-0.5"
-          onChange={(e) => setAlsoBlock(e.target.checked)} />
-        <span>
-          <span className="block text-sm font-medium text-slate-800">
-            Block these senders too
-          </span>
-          <span className="block text-xs text-slate-400 mt-0.5">
-            Stops the same rubbish arriving again tomorrow. Addresses only, never whole domains,
-            and never an address on a debtor&rsquo;s file.
-          </span>
-        </span>
-      </label>
 
       {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
 
@@ -2794,7 +2772,7 @@ function EmptyJunkModal({ count, userId, onClose, onDone }: {
         </button>
         <button onClick={() => void run()} disabled={busy}
           className="text-sm font-medium px-3.5 py-2 rounded-lg border border-negative-100 bg-negative-50 text-negative-700 disabled:opacity-50">
-          Empty junk
+          Delete all junk
         </button>
       </div>
 
