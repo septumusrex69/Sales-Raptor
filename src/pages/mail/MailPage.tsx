@@ -4,11 +4,14 @@ import {
   AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, CircleCheck, ExternalLink,
   Inbox, Link2, Download, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
   Forward as ForwardIcon,
-  Search, ShieldAlert, Trash2, Undo2, X, CalendarDays
+  Search, ShieldAlert, Trash2, Undo2, X, CalendarDays, CalendarPlus
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal } from '../../components/ui/Modal'
-import { inviteHeadline, inviteWhen, parseInvite } from '../../lib/calendarInvite.ts'
+import { inviteHeadline, inviteWhen, parseInvite, type CalendarInvite } from '../../lib/calendarInvite.ts'
+import {
+  acceptInvite, eventForInvite, fetchCalendarEvents, removeCalendarEvent, type CalendarEvent,
+} from '../../lib/calendarEvents.ts'
 import { useAuth } from '../../store/AuthContext'
 import { relativeDayLabel } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
@@ -172,6 +175,40 @@ export function MailPage() {
   const [imagesSkipped, setImagesSkipped] = useState<Record<string, number>>({})
   /** The raw ICS of a meeting request, kept beside its text. Parsed on render — see parseInvite. */
   const [calendars, setCalendars] = useState<Record<string, string>>({})
+  /*
+   * This person's own calendar, so an invite already accepted says so rather than offering to add
+   * it a second time. Loaded once; accepting one adds to it in place.
+   */
+  const [events, setEvents] = useState<CalendarEvent[]>([])
+
+  /**
+   * Put a meeting request on this person's own calendar.
+   *
+   * The event is added to the list in place rather than by refetching: the card is looking at
+   * `events` to decide whether to say "in your calendar", and a round trip there would leave the
+   * button reading "Add" for a second after somebody pressed it.
+   */
+  async function accept(invite: CalendarInvite, mailId: string) {
+    if (!currentUser) return
+    const event = await acceptInvite({ invite, ownerId: currentUser.id, userEmailId: mailId })
+    setEvents((list) => [...list.filter((e) => e.id !== event.id), event])
+    setStatus(`Added to your Raptor calendar${event.startsAt || event.startsOn ? '' : ' \u2014 without a time, because the invite did not give one in any timezone'}.`)
+  }
+
+  async function dropEvent(id: string) {
+    await removeCalendarEvent(id)
+    setEvents((list) => list.filter((e) => e.id !== id))
+    setStatus('Taken off your Raptor calendar.')
+  }
+  useEffect(() => {
+    if (!currentUser) return
+    let cancelled = false
+    void fetchCalendarEvents(currentUser.id)
+      .then((list) => { if (!cancelled) setEvents(list) })
+      /* A calendar we could not read costs a button its "already added" state, not the mailbox. */
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [currentUser])
   const [reading, setReading] = useState<string | null>(null)
   const [readError, setReadError] = useState<Record<string, string>>({})
   const [view, setView] = useEmailView()
@@ -886,7 +923,8 @@ export function MailPage() {
                   )}
                 </div>
                 <MailBody mail={m} body={bodies[m.id]} images={bodyImages[m.id]}
-                  calendar={calendars[m.id]}
+                  calendar={calendars[m.id]} events={events}
+                  onAccept={(inv) => accept(inv, m.id)} onRemoveEvent={dropEvent}
                   skippedImages={imagesSkipped[m.id]}
                   loadingBody={reading === m.id}
                   bodyError={readError[m.id]} onBlock={() => setBlocking(m)}
@@ -920,6 +958,9 @@ export function MailPage() {
                   body={bodies[m.id]}
                   images={bodyImages[m.id]}
                   calendar={calendars[m.id]}
+                  events={events}
+                  onAccept={(inv) => accept(inv, m.id)}
+                  onRemoveEvent={dropEvent}
                   skippedImages={imagesSkipped[m.id]}
                   loadingBody={reading === m.id}
                   bodyError={readError[m.id]}
@@ -1366,13 +1407,18 @@ function MailSummary({ mail, tight, blocked }: {
 
 /** The message itself, shared by the expanded row and the reading pane. */
 function MailBody({
-  mail, body, images, calendar, skippedImages, loadingBody, bodyError, onBlock, onReply, onForward,
-  onJunk, onMove, onUnread, onNoRecord, onUndoNoRecord, onDownload, downloading, downloadError,
+  mail, body, images, calendar, events, onAccept, onRemoveEvent, skippedImages, loadingBody,
+  bodyError, onBlock, onReply, onForward, onJunk, onMove, onUnread, onNoRecord, onUndoNoRecord,
+  onDownload, downloading, downloadError,
 }: {
   mail: MailItem
   body?: string
   /** The raw ICS where this was a meeting request. Parsed here — see parseInvite. */
   calendar?: string
+  /** This person's calendar, so an invite already on it says so. */
+  events: CalendarEvent[]
+  onAccept: (invite: CalendarInvite) => Promise<void>
+  onRemoveEvent: (id: string) => Promise<void>
   /** Pictures drawn into the message — a signature, nearly always. */
   images?: InlineImage[]
   /** How many were left behind for being too big. Said out loud rather than left as a gap. */
@@ -1571,7 +1617,9 @@ function MailBody({
         Above the message text on purpose. Where there IS text as well it is the organiser's
         covering note, and what the meeting actually is beats a note about it.
       */}
-      {!loadingBody && <InviteCard ics={calendar} />}
+      {!loadingBody && (
+        <InviteCard ics={calendar} events={events} onAccept={onAccept} onRemove={onRemoveEvent} />
+      )}
 
       {loadingBody && (
         <p className="text-[13px] text-slate-400 inline-flex items-center gap-1.5">
@@ -1670,11 +1718,26 @@ function MailBody({
  * The .ics is attached to the message and downloads from the row above, which opens in whatever
  * calendar they actually use. That is the honest answer until Raptor has one of its own.
  */
-function InviteCard({ ics }: { ics?: string }) {
+function InviteCard({ ics, events, onAccept, onRemove }: {
+  ics?: string
+  events: CalendarEvent[]
+  onAccept: (invite: CalendarInvite) => Promise<void>
+  onRemove: (id: string) => Promise<void>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const invite = parseInvite(ics)
   if (!invite) return null
+
   const when = inviteWhen(invite.when)
   const people = invite.attendees.filter((a) => a.name || a.email)
+  const already = eventForInvite(events, invite)
+
+  async function run(work: () => Promise<void>) {
+    setBusy(true); setError(null)
+    try { await work() } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
 
   return (
     <div className={`mb-3 rounded-lg border px-3 py-2.5 ${
@@ -1708,21 +1771,59 @@ function InviteCard({ ics }: { ics?: string }) {
         )}
       </dl>
 
-      {invite.cancelled && (
+      {invite.cancelled ? (
         <p className="text-[11px] text-negative-700 mt-1.5">
-          The organiser has called this off. Nothing to accept.
+          The organiser has called this off. Nothing to add.
+        </p>
+      ) : (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {busy && <Loader2 size={13} className="animate-spin text-slate-400" />}
+          {already ? (
+            /*
+              ALREADY ON IT, AND THE UNDO BESIDE IT. Matched on the invite's UID rather than on
+              its title and time, because a revised invitation changes the time and is still the
+              same meeting -- which is exactly when somebody presses the button again.
+            */
+            <>
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-positive-700">
+                <Check size={12} /> In your Raptor calendar
+              </span>
+              <button type="button" disabled={busy} onClick={() => void run(() => onRemove(already.id))}
+                className="text-[11px] font-medium text-slate-500 hover:underline">
+                Take it off
+              </button>
+            </>
+          ) : (
+            <button type="button" disabled={busy} onClick={() => void run(() => onAccept(invite))}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
+              <CalendarPlus size={13} /> Add to my calendar
+            </button>
+          )}
+          {/*
+            WHAT THIS DOES NOT DO, said plainly. Adding it here does not tell the organiser
+            anything -- that is an iTIP reply and Raptor does not send one yet. Somebody who
+            believed the organiser had been told would not turn up expected.
+          */}
+          <span className="text-[11px] text-slate-500">
+            {already
+              ? 'The organiser has not been told either way \u2014 reply if they are expecting one.'
+              : 'Goes on your Raptor calendar only. The organiser is not notified.'}
+          </span>
+        </div>
+      )}
+
+      {/*
+        A FLOATING TIME CANNOT BE PUT IN A DAY. The invite named no zone, which means "whatever
+        the reader's clock says" -- so it is stored without one and the calendar shows it as
+        undated rather than inventing an hour.
+      */}
+      {!invite.cancelled && invite.when.startsAt && !invite.when.allDay && !invite.when.timeZone && (
+        <p className="text-[11px] text-gold-700 mt-1.5">
+          The invite gives no timezone, so this cannot be placed at an hour with any confidence.
         </p>
       )}
-      {!invite.cancelled && (
-        /*
-          SAID PLAINLY, rather than leaving somebody to wonder where the buttons are. It is also
-          the honest version of the answer: the file is right there and their own calendar knows
-          what to do with it.
-        */
-        <p className="text-[11px] text-slate-500 mt-1.5">
-          Raptor has no calendar of its own yet — download the invite above to add it to yours.
-        </p>
-      )}
+
+      {error && <p className="text-[11px] text-negative-700 mt-1.5">{error}</p>}
     </div>
   )
 }
@@ -1741,13 +1842,17 @@ function InviteLine({ label, value, note }: { label: string; value: string; note
 }
 
 function MailRow({
-  mail, chosen, expanded, selecting, blocked, body, images, calendar, skippedImages, loadingBody,
+  mail, chosen, expanded, selecting, blocked, body, images, calendar, events, onAccept,
+  onRemoveEvent, skippedImages, loadingBody,
   bodyError, onToggle, onChoose, onLink, onBlock, onReply, onForward, onJunk, onMove, onUnread,
   onNoRecord, onUndoNoRecord, onDownload, downloading, downloadError,
 }: {
   mail: MailItem
   /** The raw ICS where this was a meeting request. Passed through to MailBody. */
   calendar?: string
+  events: CalendarEvent[]
+  onAccept: (invite: CalendarInvite) => Promise<void>
+  onRemoveEvent: (id: string) => Promise<void>
   chosen: boolean
   expanded: boolean
   /** Tick boxes are showing, so the gutter carries one instead of the unread mark. */
@@ -1818,6 +1923,7 @@ function MailRow({
       {expanded && (
         <div className="px-5 pb-4 pl-[2.9rem]">
           <MailBody mail={mail} body={body} images={images} calendar={calendar}
+            events={events} onAccept={onAccept} onRemoveEvent={onRemoveEvent}
             skippedImages={skippedImages}
             loadingBody={loadingBody}
             bodyError={bodyError} onBlock={onBlock} onReply={onReply} onForward={onForward} onJunk={onJunk}

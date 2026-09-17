@@ -18,8 +18,8 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  describeRepeat, icsDate, icsLines, icsPerson, inviteHeadline, inviteWhen, parseInvite,
-  unescapeIcsText, unfoldIcs,
+  describeRepeat, icsDate, icsLines, icsPerson, inviteHeadline, inviteInstant, inviteWhen,
+  parseInvite, unescapeIcsText, unfoldIcs, zonedTimeToUtc,
 } from '../../src/lib/calendarInvite.ts'
 
 let pass = 0
@@ -241,6 +241,52 @@ ok('the month is spelled in full',
   inviteWhen({ startsAt: '2026-09-17T09:00', endsAt: null, allDay: false, timeZone: null })
     .includes('September'))
 
+/* ---------- a wall-clock time as a real instant ---------- */
+
+/*
+ * NEEDED ONLY NOW THE EVENT IS STORED. Showing "16:00 (Africa/Johannesburg)" needs no timezone
+ * database; putting it on a calendar grid, sorting it against a task, and saying which is next
+ * does. The offset comes out of Intl, so no database is added to the bundle and the answer is the
+ * one the operating system would give.
+ */
+eq('Johannesburg is two hours ahead', zonedTimeToUtc('2026-09-17T16:00', 'Africa/Johannesburg'), '2026-09-17T14:00:00.000Z')
+eq('...in December as well, because South Africa has no daylight saving',
+  zonedTimeToUtc('2026-12-17T16:00', 'Africa/Johannesburg'), '2026-12-17T14:00:00.000Z')
+/*
+ * THE SECOND PASS IS NOT A NICETY. The offset depends on the instant and the instant is what is
+ * being solved for, so the first guess is wrong by an hour across a daylight-saving boundary.
+ * London in January is +0 and in July is +1, off the same wall-clock hour.
+ */
+eq('London in winter is UTC', zonedTimeToUtc('2026-01-15T09:00', 'Europe/London'), '2026-01-15T09:00:00.000Z')
+eq('...and in summer is an hour ahead', zonedTimeToUtc('2026-07-15T09:00', 'Europe/London'), '2026-07-15T08:00:00.000Z')
+/* A zone behind UTC, to prove the sign is not the other way round. */
+eq('New York is behind, not ahead', zonedTimeToUtc('2026-01-15T09:00', 'America/New_York'), '2026-01-15T14:00:00.000Z')
+/* Midnight is the hour en-GB renders as 24 in hour12:false; unhandled it lands a day out. */
+eq('midnight does not land a day out', zonedTimeToUtc('2026-09-17T00:00', 'Africa/Johannesburg'), '2026-09-16T22:00:00.000Z')
+eq('an unknown zone is refused rather than guessed', zonedTimeToUtc('2026-09-17T16:00', 'Mars/Olympus'), null)
+eq('something that is not a wall time is not one', zonedTimeToUtc('whenever', 'Africa/Johannesburg'), null)
+
+{
+  const inv = parseInvite(REQUEST)
+  const at = inviteInstant(inv.when)
+  eq('an invite resolves to an instant', at.startsAt, '2026-09-17T14:00:00.000Z')
+  eq('...and so does its end', at.endsAt, '2026-09-17T15:00:00.000Z')
+}
+eq('a UTC invite is already an instant',
+  inviteInstant({ startsAt: '2026-09-17T14:00', endsAt: null, allDay: false, timeZone: 'UTC' }).startsAt,
+  '2026-09-17T14:00:00.000Z')
+/*
+ * A FLOATING TIME IS NOT A FACT ABOUT THE MEETING. With no zone it means "whatever the reader's
+ * own clock says", and recording that as an instant would put it in somebody's day at an hour
+ * the organiser never named.
+ */
+eq('a floating time is not recorded as an instant',
+  inviteInstant({ startsAt: '2026-09-17T16:00', endsAt: null, allDay: false, timeZone: null }).startsAt, null)
+/* An all-day event is a date and has no time to resolve. */
+eq('a whole day stays a date',
+  inviteInstant({ startsAt: '2026-09-17', endsAt: '2026-09-18', allDay: true, timeZone: null }).startsAt,
+  '2026-09-17')
+
 /* ---------- and the part reaches the page at all ---------- */
 
 /*
@@ -293,7 +339,7 @@ ok('the slow path reads a calendar part too',
 ok('the route sends it to the browser', /calendar: body\.calendar/.test(route))
 ok('...the client reads it off the response', /calendar: body\.calendar \?\? ''/.test(userMail))
 ok('...the page keeps it beside the text', /setCalendars\(\(c\) => \(\{ \.\.\.c, \[mail\.id\]: calendar \}\)\)/.test(page))
-ok('...and renders it', /<InviteCard ics=\{calendar\} \/>/.test(page))
+ok('...and renders it', /<InviteCard ics=\{calendar\} events=\{events\}/.test(page))
 
 /*
  * ABOVE THE MESSAGE TEXT. Where there is a covering note as well, what the meeting IS beats a
@@ -317,12 +363,66 @@ ok('...and renders it', /<InviteCard ics=\{calendar\} \/>/.test(page))
  */
 {
   const card = page.slice(page.indexOf('function InviteCard('), page.indexOf('function InviteLine('))
-  ok('the invite does not offer to accept what it cannot store', !/Accept/.test(card))
-  ok('...and says why, rather than leaving somebody hunting for the button',
-    /Raptor has no calendar of its own yet/.test(card))
-  /* A cancellation must not be dressed in the same colours as an invitation. */
+  const events = read('../../src/lib/calendarEvents.ts')
+
+  /*
+   * THE MEETING GOES ON RAPTOR'S OWN CALENDAR, at the firm's instruction: "it should go to the
+   * Raptor calendar ... the Raptor one should be the main one." Before the table existed there
+   * was deliberately no button, because one that stored the meeting nowhere would have left
+   * somebody believing it was in their day.
+   */
+  ok('an invite can be added to the calendar', /Add to my calendar/.test(card))
+  ok('...and it is already-on-it aware', /const already = eventForInvite\(events, invite\)/.test(card))
+  ok('...matched on the invite\'s UID, not its title and time',
+    /events\.find\(\(e\) => e\.icalUid === invite\.uid\)/.test(events))
+  /*
+   * A REVISED INVITATION CARRIES THE SAME UID. Inserted blindly, an organiser who moves a meeting
+   * twice fills somebody's Tuesday with three copies of one catch-up.
+   */
+  ok('...so a revision updates rather than duplicating',
+    /onConflict: 'owner_id,ical_uid'/.test(events))
+  /* An invite with no UID cannot be matched to a revision, and must not conflict on a null key. */
+  ok('...and one with no UID is inserted rather than upserted onto nothing',
+    /invite\.uid\s*\n?\s*\? supabase\.from\('calendar_events'\)\.upsert/.test(events))
+
+  /*
+   * A CANCELLATION OFFERS NO BUTTON, and the write refuses it as well. Two guards, because the
+   * cost of getting it wrong is a meeting in somebody's day that the organiser has called off.
+   */
   ok('a cancellation is coloured as one', /invite\.cancelled \? 'border-negative-100/.test(card))
-  ok('...and says there is nothing to accept', /The organiser has called this off/.test(card))
+  ok('...and offers nothing to add', /invite\.cancelled \? \(/.test(card))
+  ok('...and says so', /The organiser has called this off/.test(card))
+  ok('...and the write refuses one even if the screen ever did',
+    /if \(invite\.cancelled\) throw new Error/.test(events))
+
+  /*
+   * WHAT ADDING IT DOES NOT DO. There is no iTIP reply yet, so the organiser is told nothing --
+   * and somebody who believed otherwise would not be expected when they turned up.
+   */
+  ok('the card says the organiser is not notified', /The organiser is not notified/.test(card))
+  /*
+   * A FLOATING TIME CANNOT BE PLACED IN A DAY. The invite named no zone, which means the reader's
+   * own clock, so it is stored without an hour rather than being given one nobody stands behind.
+   */
+  ok('...and an invite with no timezone says it cannot be placed at an hour',
+    /gives no timezone/.test(card))
+}
+
+/* ---------- and the calendar page shows them ---------- */
+
+{
+  const cal = read('../../src/pages/calendar/CalendarPage.tsx')
+  ok('the calendar page reads meetings', /fetchCalendarEvents\(currentUser\.id\)/.test(cal))
+  ok('...and puts them on the grid', /\.\.\.meetingEvents/.test(cal))
+  /*
+   * AN UNDATED MEETING IS LEFT OFF, not placed at midnight. A meeting shown on the wrong day is
+   * worse than one somebody has to open the mail to find.
+   */
+  ok('...leaving off the ones with no hour anybody can stand behind',
+    /if \(when === null\) return \[\]/.test(cal))
+  /* A personal calendar is not a manager's to read. */
+  ok('...and does not show one person\'s meetings to another',
+    /owner === 'All' \|\| owner === currentUser\?\.id/.test(cal))
 }
 
 if (failures.length) {

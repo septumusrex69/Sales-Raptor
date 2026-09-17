@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
@@ -8,6 +8,10 @@ import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { companyById, formatDate, TODAY } from '../../data/mockData'
 import { DEAL_CLOSE_EVENT_COLOR, TASK_TYPE_COLORS } from '../../lib/colors'
+import { fetchCalendarEvents, type CalendarEvent } from '../../lib/calendarEvents.ts'
+
+/* A meeting is neither a task nor a deal date, so it does not borrow either one's colour. */
+const MEETING_EVENT_COLOR = 'var(--c-steel)'
 import { buildDrilldownUrl } from '../../lib/drilldown'
 import type { Task } from '../../types'
 
@@ -49,6 +53,23 @@ export function CalendarPage() {
   const [view, setView] = useState<ViewMode>('Month')
   const [cursor, setCursor] = useState(new Date(TODAY))
 
+  /*
+   * MEETINGS, which this page could not show until there was a table to keep them in.
+   *
+   * Their own fetch rather than AppStore's: a calendar event belongs to ONE person and RLS scopes
+   * it to them, where everything in the store is the firm's shared sales data. Loading it through
+   * the store would put one person's meetings behind a cache every other page also reads.
+   */
+  const [meetings, setMeetings] = useState<CalendarEvent[]>([])
+  useEffect(() => {
+    if (!currentUser) return
+    let cancelled = false
+    void fetchCalendarEvents(currentUser.id)
+      .then((list) => { if (!cancelled) setMeetings(list) })
+      .catch(() => { /* a calendar we could not read costs the meetings, not the page. */ })
+    return () => { cancelled = true }
+  }, [currentUser])
+
   const events = useMemo<CalEvent[]>(() => {
     const taskEvents = tasks
       .filter((t: Task) => t.status !== 'Cancelled')
@@ -79,8 +100,35 @@ export function CalendarPage() {
         ownerId: d.ownerId,
         href: `/deals/${d.id}`,
       }))
-    return [...taskEvents, ...closeEvents]
-  }, [tasks, deals, owner])
+    /*
+     * An accepted meeting, on the day it is actually on.
+     *
+     * UNDATED ONES ARE LEFT OFF, not placed at midnight. An invite that named no timezone has no
+     * hour anybody can stand behind -- see inviteInstant -- and a meeting shown on the wrong day
+     * is worse than one somebody has to open the mail to find.
+     */
+    const meetingEvents = meetings
+      /* Somebody else's meetings are not shown even to a manager: it is a personal calendar. */
+      .filter(() => owner === 'All' || owner === currentUser?.id)
+      /* flatMap, so an undated meeting is simply absent rather than a null the list has to
+         carry and then narrow back out — the narrowing is where the type lies get told. */
+      .flatMap((m): CalEvent[] => {
+        const when = m.allDay ? m.startsOn : m.startsAt
+        if (when === null) return []
+        return [{
+          id: `m-${m.id}`,
+          primary: m.title,
+          type: 'Meeting',
+          note: m.location ?? undefined,
+          date: new Date(when),
+          color: MEETING_EVENT_COLOR,
+          ownerId: m.ownerId,
+          href: '/mail',
+        }]
+      })
+
+    return [...taskEvents, ...closeEvents, ...meetingEvents]
+  }, [tasks, deals, owner, meetings, currentUser])
 
   function shift(amount: number) {
     const next = new Date(cursor)

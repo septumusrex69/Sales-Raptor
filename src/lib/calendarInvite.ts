@@ -299,3 +299,83 @@ export function inviteHeadline(invite: CalendarInvite): string {
   if (invite.method === 'PUBLISH') return 'Meeting details'
   return 'Meeting request'
 }
+
+/* ------------------------------------------------------------------ *
+ * Turning an invite's wall-clock time into an instant.
+ * ------------------------------------------------------------------ *
+ *
+ * NOW IT HAS TO BE DONE, because the event is being STORED. Showing "16:00 (Africa/Johannesburg)"
+ * on screen needs no zone database; putting it on a calendar grid, sorting it against a task and
+ * telling somebody it is next does.
+ *
+ * The offset comes out of Intl, which every browser and Node build carries — so no timezone
+ * database is added to the bundle, and the answer is the same one the operating system would
+ * give. What is NOT done is inventing an offset when the invite named no zone.
+ */
+
+/**
+ * What a zone's offset was at a given instant, in minutes east of UTC.
+ *
+ * Formats the instant AS that zone sees it, reads the pieces back as though they were UTC, and
+ * takes the difference. It is the standard trick and it is exact, because the formatter is the
+ * same one the platform uses for everything else.
+ */
+function offsetMinutes(utcMillis: number, timeZone: string): number | null {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone, hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).formatToParts(new Date(utcMillis))
+    const get = (t: string) => Number(parts.find((p) => p.type === t)?.value)
+    const asUtc = Date.UTC(
+      get('year'), get('month') - 1, get('day'),
+      /* 24 is how en-GB renders midnight in hour12:false. Left alone it lands a day out. */
+      get('hour') % 24, get('minute'), get('second'),
+    )
+    return Math.round((asUtc - utcMillis) / 60000)
+  } catch {
+    /* An unknown TZID — a Windows zone name, say. Better to say so than to guess. */
+    return null
+  }
+}
+
+/**
+ * A wall-clock time in a named zone, as a real instant.
+ *
+ * TWO PASSES, and the second is not a nicety. The offset depends on the instant, and the instant
+ * is what we are solving for — so the first guess uses the offset at the wall time read as UTC,
+ * which is wrong by up to an hour across a daylight-saving boundary. Re-reading the offset at the
+ * corrected instant settles it. South Africa has no daylight saving and converges on the first
+ * pass; London in March does not, and a meeting an hour out is the whole point of this file.
+ */
+export function zonedTimeToUtc(wall: string, timeZone: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(wall)
+  if (!m) return null
+  const [, y, mo, d, h, mi] = m.map(Number) as unknown as number[]
+  const naive = Date.UTC(y, mo - 1, d, h, mi)
+
+  const first = offsetMinutes(naive, timeZone)
+  if (first === null) return null
+  const second = offsetMinutes(naive - first * 60000, timeZone)
+  if (second === null) return null
+  return new Date(naive - second * 60000).toISOString()
+}
+
+/**
+ * When the meeting actually is, ready to be stored.
+ *
+ * Null where the invite gave a floating time and no zone: that means "whatever the reader's own
+ * clock says", which is not a fact about the meeting and must not be recorded as one.
+ */
+export function inviteInstant(when: InviteWhen): { startsAt: string | null; endsAt: string | null } {
+  const one = (wall: string | null): string | null => {
+    if (!wall) return null
+    /* An all-day event is a DATE and has no time to resolve; it is stored as the date it is. */
+    if (when.allDay) return wall.slice(0, 10)
+    if (when.timeZone === 'UTC') return `${wall}:00.000Z`
+    if (when.timeZone) return zonedTimeToUtc(wall, when.timeZone)
+    return null
+  }
+  return { startsAt: one(when.startsAt), endsAt: one(when.endsAt) }
+}

@@ -266,11 +266,16 @@ asked about, in increasing size:
 - **SEND a meeting request.** Also contained. `api/email/send.ts` already goes out through the
   agent's own mailbox; an invite is that same send carrying a `text/calendar; method=REQUEST`
   alternative and an .ics. No new endpoint, which matters — `api/` is at 12 of 12.
-- **ACCEPT one into a calendar. THERE IS NO CALENDAR.** `CalendarPage` is a rendering of `tasks`
-  and deal close dates; there is no events table and no connection to Outlook or Google. Replying
-  to the organiser is easy (an iTIP `METHOD:REPLY` with `PARTSTAT=ACCEPTED`, sent as mail), but
-  accepting would notify them and land nowhere. Either an events table or a real calendar
-  connection has to exist first, and which one is a decision about what Raptor is for.
+- ~~**ACCEPT one into a calendar.**~~ Done — `calendar_events`, and the button on the invite.
+  The firm chose Raptor-only for now: "the Raptor one should be the main one ... nah, I just keep
+  it at Raptor for now."
+- **THE ORGANISER IS NOT TOLD.** Accepting puts the meeting on Raptor's calendar and sends
+  nothing. A proper acceptance is an iTIP reply — an email carrying `METHOD:REPLY` with
+  `PARTSTAT=ACCEPTED` back to the organiser — which `api/email/send.ts` could carry with no new
+  endpoint. The card says so plainly meanwhile, because somebody who believed the organiser had
+  been told would not be expected when they arrived.
+- **Nothing syncs to Outlook or Google.** Deliberate for now, and the reason the .ics download
+  stays on the message: it is the way a meeting reaches the calendar on somebody's phone.
 
 ---
 

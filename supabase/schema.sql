@@ -3374,3 +3374,83 @@ as $$
 $$;
 
 grant execute on function public.nav_counts() to authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- Raptor's own calendar
+-- ---------------------------------------------------------------------------
+-- The firm's instruction on a meeting request: "it should go to the Raptor calendar ... the
+-- Raptor one should be the main one. Nah, I just keep it at Raptor for now."
+--
+-- Until now the Calendar page was a RENDERING of tasks and deal close dates -- there was nothing
+-- an event could be stored in, so an invite could be read and not accepted, and the .ics went to
+-- whatever calendar the device happened to have. This is the table that makes accepting mean
+-- something.
+--
+-- PERSONAL, not the firm's. An event belongs to the person whose invitation it was. A shared
+-- diary is a different thing with different rules about who may see what, and the collections
+-- diary already exists for the work.
+create table if not exists public.calendar_events (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references auth.users(id) on delete cascade,
+
+  title text not null,
+  -- Null where the invite gave a floating time and no zone: that means "whatever the reader's
+  -- own clock says", which is not a fact about the meeting and must not be recorded as one.
+  starts_at timestamptz,
+  ends_at timestamptz,
+  -- A whole day is a DATE, not midnight. Stored separately so it is never shown as 00:00.
+  all_day boolean not null default false,
+  starts_on date,
+  ends_on date,
+
+  location text,
+  notes text,
+
+  source text not null default 'manual' check (source in ('manual', 'invite')),
+
+  -- iTIP identity. The SAME meeting arrives again whenever the organiser changes anything, and
+  -- without this every edit would land as a second copy in somebody's day.
+  ical_uid text,
+  organiser_name text,
+  organiser_email text,
+  -- As the invite gave them. Read, never joined on: these are people outside the firm.
+  attendees jsonb not null default '[]'::jsonb,
+
+  -- The message it came off, so the event can point back at what was agreed to.
+  user_email_id uuid references public.user_emails(id) on delete set null,
+
+  created_at timestamptz not null default now(),
+  created_by uuid references auth.users(id)
+);
+
+-- One meeting per person, however many times the organiser revises it. Partial, because a
+-- hand-made event has no UID and several of those are not a duplicate of anything.
+create unique index if not exists calendar_events_uid_idx
+  on public.calendar_events (owner_id, ical_uid)
+  where ical_uid is not null;
+
+-- What the month, week and day views ask for: this person's events over a span.
+create index if not exists calendar_events_owner_idx
+  on public.calendar_events (owner_id, starts_at);
+
+comment on column public.calendar_events.starts_at is
+  'Null for an all-day event (see starts_on) and for an invite whose time was floating -- a '
+  'floating time means the reader''s own clock and is not a fact about the meeting.';
+comment on column public.calendar_events.ical_uid is
+  'The invite''s UID. A revised invitation carries the same one, so it updates rather than '
+  'arriving as a second meeting.';
+
+alter table public.calendar_events enable row level security;
+
+-- YOUR OWN CALENDAR AND NOBODY ELSE'S. Not a manager override either: this is a person's diary
+-- of meetings they were invited to, which is a different thing from the collections diary the
+-- firm manages.
+create policy calendar_events_own_select on public.calendar_events
+  for select using (owner_id = auth.uid());
+create policy calendar_events_own_insert on public.calendar_events
+  for insert with check (owner_id = auth.uid());
+create policy calendar_events_own_update on public.calendar_events
+  for update using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+create policy calendar_events_own_delete on public.calendar_events
+  for delete using (owner_id = auth.uid());
