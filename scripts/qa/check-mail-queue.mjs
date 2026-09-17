@@ -474,7 +474,7 @@ ok('...and the list is fetched at that size', /offset: at \* pageSize, limit: pa
  * AND REFETCHED WHEN IT CHANGES. A page size that only takes effect on the next filter change is
  * a control that does nothing when you press it, which is worse than not offering it.
  */
-ok('...and refetched when it changes', /\[currentUser, filter, search, unreadOnly, pageSize\]/.test(page))
+ok('...and refetched when it changes', /\[currentUser, filter, search, unreadOnly, pageSize, searchEverywhere\]/.test(page))
 /* Back to the first page, or "page 4 of 50" becomes "page 4 of 200" and skips 600 messages. */
 ok('...from the first page', /setPageSize\(n\); setPage\(0\)/.test(page))
 /*
@@ -553,6 +553,75 @@ ok('...as the same control the book uses', /aria-pressed=\{pageSize === n\}/.tes
   ok('...and only the one that would change something',
     /items\.some\(\(m\) => chosen\.has\(m\.id\) && !m\.readAt\)/.test(bulk)
     && /items\.some\(\(m\) => chosen\.has\(m\.id\) && !!m\.readAt\)/.test(bulk))
+}
+
+/* ---------- 8. a search looks at the whole mailbox ---------- */
+
+/*
+ * The firm's question gave this away: "if you search, can you only search in a specific folder, or
+ * can you search across the whole mailbox?" It was the tab -- which is the wrong default for a
+ * search box. Somebody looking for a message knows the sender and the subject and has no idea
+ * which of six tabs it settled in, and a search that quietly excludes junk is the worst case of
+ * all, because junk is exactly where a message goes missing.
+ */
+{
+  ok('the scope builder knows about it', /everywhere\?: boolean/.test(mail))
+  ok('...and drops the tab clause entirely', /const wholeMailbox = !!input\.everywhere && searching/.test(mail))
+  /*
+   * GUARDED ON THE TERM AS WELL AS THE FLAG. Without a search, "everywhere" would silently turn
+   * whichever tab somebody is looking at into the whole mailbox -- junk and sent folded in, which
+   * is not a view anybody asked for.
+   */
+  ok('...only while something is actually being searched for',
+    /const searching = !!input\.search\?\.trim\(\)/.test(mail))
+  /* The tab clauses hang off the same condition, so there is one place that decides. */
+  ok('...and the tab clauses hang off that one condition',
+    /if \(wholeMailbox\) \{[\s\S]{0,400}?\} else if \(input\.filter === 'needs-filing'\)/.test(mail))
+
+  /* The page asks for it, and it is on by default because that is the common question. */
+  ok('the mailbox searches everywhere by default', /useState\(true\)[\s\S]{0,80}?searchEverywhere|const \[searchEverywhere, setSearchEverywhere\] = useState\(true\)/.test(page))
+  ok('...passing it to the query', /everywhere: searchEverywhere,/.test(page))
+
+  /*
+   * AND IT SAYS SO, only while searching. A permanent switch beside the box is a question asked of
+   * somebody who has not typed anything yet; a line that states what is happening and offers the
+   * other reading in the same breath is not.
+   */
+  const bar = page.slice(page.indexOf('function MailSearchBar('), page.indexOf('\nfunction RowGutter'))
+  ok('the bar says where it is looking', /Searching the whole mailbox, junk and sent included/.test(bar))
+  ok('...naming the narrower option', /Search \$\{tabLabel\} only/.test(bar))
+  ok('...and only once there is something to look for', /search\.trim\(\) !== '' && \(/.test(bar))
+}
+
+/* ---------- 9. the gutter collapses when nothing is being selected ---------- */
+
+/*
+ * "The little circles that indicate the name are in a weird place, off-centre and a little bit to
+ * the right -- make them a little more to the left. The moment you select something it'll move a
+ * little to the right to make space for that little circle."
+ *
+ * The column was permanently sixteen pixels wide because it carried the unread mark as well as the
+ * tick box -- so every avatar was pushed in off the edge, on every row, for ever, to serve a mode
+ * that is off almost all the time.
+ */
+{
+  const gutter = page.slice(page.indexOf('function RowGutter('), page.indexOf('\n/**\n * What has happened to this message'))
+  ok('the gutter exists', gutter.length > 0)
+  ok('...and is nothing at all unless something is being selected', /if \(!selecting\) return null/.test(gutter))
+  /* Only the tick box is left in it; the unread mark has gone to the avatar. */
+  ok('...carrying only the tick box', !/bg-brand-500/.test(gutter))
+
+  /* And the pane's wrapper collapses with it, or the padding is the gap all over again. */
+  ok('the pane\u2019s lead collapses too', /selecting \? 'pl-4 pt-2\.5 shrink-0' : ''/.test(page))
+
+  /*
+   * THE UNREAD MARK IS ON THE AVATAR NOW. It costs no width there and sits nearer the name it
+   * belongs to. The ring is the row's background, so it reads as sitting ON the face.
+   */
+  const summary = page.slice(page.indexOf('function MailSummary('), page.indexOf('\nfunction MessageActions'))
+  ok('unread is marked on the face', /\{!mail\.readAt && \(/.test(summary))
+  ok('...as a badge on it', /absolute -top-0\.5 -right-0\.5/.test(summary))
+  ok('...reading as on it rather than behind it', /ring-2 ring-white/.test(summary))
 }
 
 if (failures.length) {

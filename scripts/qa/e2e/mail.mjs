@@ -404,6 +404,34 @@ try {
   await page.waitForTimeout(900)
   t.check('and back to 50', await rows2().count(), 50)
 
+  /* ---------- a search reaches past the tab ---------- */
+
+  /*
+   * "If you search, can you only search in a specific folder, or can you search across the whole
+   * mailbox?" It was the folder. Checked from the JUNK tab, because that is the case that matters:
+   * a search that quietly excludes junk is the worst of all, since junk is exactly where a message
+   * goes missing. The message searched for is in the inbox, not in junk.
+   */
+  await page.getByRole('button', { name: /^Junk/ }).click()
+  await page.waitForTimeout(700)
+  await page.getByLabel('Search your mailbox').fill('Debt collection')
+  await page.waitForTimeout(900)
+  t.ok('a search from Junk finds an inbox message',
+    await page.getByText('Debt collection enquiry').first().isVisible())
+  t.ok('...and says where it is looking',
+    await page.getByText(/Searching the whole mailbox/).isVisible())
+
+  /* And the narrower reading is one press away, and really is narrower. */
+  await page.getByRole('button', { name: 'Search Junk only' }).click()
+  await page.waitForTimeout(900)
+  t.check('...narrowed to the tab, it is not there', await page.getByText('Debt collection enquiry').count(), 0)
+  await page.getByRole('button', { name: 'Search everywhere' }).click()
+  await page.waitForTimeout(700)
+  await page.getByLabel('Search your mailbox').fill('')
+  await page.waitForTimeout(700)
+  await page.getByRole('button', { name: /^All/ }).click()
+  await page.waitForTimeout(700)
+
   /* ---------- select all, with the reading pane up ---------- */
 
   /*

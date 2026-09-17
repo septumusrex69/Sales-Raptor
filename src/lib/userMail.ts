@@ -259,6 +259,19 @@ export interface MailScope {
   search?: string
   /** Only messages not yet read. Composes with the tab rather than replacing it. */
   unreadOnly?: boolean
+  /**
+   * Search the WHOLE mailbox rather than the tab you happen to be standing on.
+   *
+   * The firm asked the question that gave this away: "if you search, can you only search in a
+   * specific folder, or can you search across the whole mailbox?" It was the tab, and that is the
+   * wrong default for a search box -- somebody looking for a message knows the sender and the
+   * subject and has no idea which of six tabs it settled in. A search that quietly excludes junk
+   * is worst of all, because junk is exactly where a message goes missing.
+   *
+   * Only meaningful WITH a search term. On its own it would just be the All tab with junk and sent
+   * folded in, which is not a view anybody asked for.
+   */
+  everywhere?: boolean
 }
 
 /**
@@ -289,7 +302,18 @@ export function scope<Q>(q: Q, input: MailScope): Q {
    * dealt with, and a queue that keeps showing what you have already dealt with is a queue
    * nobody reads. See the generated column in schema.sql.
    */
-  if (input.filter === 'needs-filing') out = out.eq('is_settled', false).eq('is_junk', false).eq('is_sent', false)
+  /*
+   * A SEARCH GOES EVERYWHERE, so no tab clause is applied at all -- junk and sent included. See
+   * MailScope.everywhere. Guarded on the term as well as the flag, because without one this would
+   * silently turn the tab you are looking at into the whole mailbox.
+   */
+  const searching = !!input.search?.trim()
+  const wholeMailbox = !!input.everywhere && searching
+
+  if (wholeMailbox) {
+    /* No tab clause at all. Deliberately empty rather than a chain of `else if`s each carrying
+       `&& !wholeMailbox` -- one condition in one place is what keeps this readable. */
+  } else if (input.filter === 'needs-filing') out = out.eq('is_settled', false).eq('is_junk', false).eq('is_sent', false)
   /*
    * WHAT WE SENT, including from Outlook or a phone — the Sent folder is synced, so this is the
    * whole of it rather than only what Raptor sent itself.

@@ -186,6 +186,18 @@ export function MailPage() {
   const [senderRules, setSenderRules] = useState<SenderRule[]>([])
   const [emptying, setEmptying] = useState(false)
   const [search, setSearch] = useState('')
+  /*
+   * A search looks at the WHOLE mailbox, not the tab you happen to be standing on.
+   *
+   * The firm's question gave it away: "if you search, can you only search in a specific folder, or
+   * can you search across the whole mailbox?" It was the tab -- which is the wrong default for a
+   * search box. Somebody looking for a message knows the sender and the subject and has no idea
+   * which of six tabs it settled in, and a search that quietly excludes junk is worst of all,
+   * because junk is exactly where a message goes missing.
+   *
+   * Switchable, because "only the tab I am on" is a real question too -- just not the common one.
+   */
+  const [searchEverywhere, setSearchEverywhere] = useState(true)
   const [items, setItems] = useState<MailItem[]>([])
   const [more, setMore] = useState(false)
   const [page, setPage] = useState(0)
@@ -309,7 +321,7 @@ export function MailPage() {
         return
       }
       const res = await fetchMail({
-        userId: currentUser.id, filter, search, unreadOnly,
+        userId: currentUser.id, filter, search, unreadOnly, everywhere: searchEverywhere,
         offset: at * pageSize, limit: pageSize,
       })
       setItems(res.items)
@@ -338,7 +350,7 @@ export function MailPage() {
     } finally {
       setLoading(false)
     }
-  }, [currentUser, filter, search, unreadOnly, pageSize])
+  }, [currentUser, filter, search, unreadOnly, pageSize, searchEverywhere])
 
   useEffect(() => { void load(0) }, [load])
 
@@ -1012,7 +1024,9 @@ export function MailPage() {
         {filter !== 'blocked' && !paneShowing && (
           <div className="border-b border-slate-100">
             <MailSearchBar search={search} onSearch={setSearch}
-              unreadOnly={unreadOnly} onUnreadOnly={setUnreadOnly} unread={unread} />
+              unreadOnly={unreadOnly} onUnreadOnly={setUnreadOnly} unread={unread}
+              everywhere={searchEverywhere} onEverywhere={setSearchEverywhere}
+              tabLabel={TABS.find((t) => t.id === filter)?.label ?? 'this tab'} />
           </div>
         )}
 
@@ -1079,10 +1093,13 @@ export function MailPage() {
             emptyDetail="Pick a message on the left to read it."
             listHeader={
               <MailSearchBar search={search} onSearch={setSearch}
-                unreadOnly={unreadOnly} onUnreadOnly={setUnreadOnly} unread={unread} />
+                unreadOnly={unreadOnly} onUnreadOnly={setUnreadOnly} unread={unread}
+                everywhere={searchEverywhere} onEverywhere={setSearchEverywhere}
+                tabLabel={TABS.find((t) => t.id === filter)?.label ?? 'this tab'} />
             }
             renderLead={(m) => (
-              <span className="pl-4 pt-2.5 shrink-0">
+              /* Collapses with the gutter: padding on an empty span is the gap all over again. */
+              <span className={selecting ? 'pl-4 pt-2.5 shrink-0' : ''}>
                 <RowGutter mail={m} selecting={selecting} chosen={chosen.has(m.id)}
                   onChoose={(on) => setChosen((prev) => {
                     const next = new Set(prev)
@@ -1575,16 +1592,24 @@ function Empty({ filter, searching }: { filter: Exclude<Pane, 'blocked'>; search
  * have answered one of them. The count rides in the option itself, which is the honest place for
  * it -- it is the number of rows choosing that option leaves behind.
  */
-function MailSearchBar({ search, onSearch, unreadOnly, onUnreadOnly, unread }: {
+function MailSearchBar({
+  search, onSearch, unreadOnly, onUnreadOnly, unread, everywhere, onEverywhere, tabLabel,
+}: {
   search: string
   onSearch: (value: string) => void
   unreadOnly: boolean
   onUnreadOnly: (on: boolean) => void
   /** Unread within the tab and search already applied, so the number matches what you would get. */
   unread: number
+  /** Whether a search reaches past this tab into the rest of the mailbox. See MailScope. */
+  everywhere: boolean
+  onEverywhere: (on: boolean) => void
+  /** What the current tab is called, so the narrower option can name it. */
+  tabLabel: string
 }) {
   return (
-    <div className="px-4 py-3 flex items-center gap-2">
+    <div className="px-4 py-3 space-y-1.5">
+      <div className="flex items-center gap-2">
       <label className="relative min-w-0 flex-1">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input
@@ -1623,6 +1648,25 @@ function MailSearchBar({ search, onSearch, unreadOnly, onUnreadOnly, unread }: {
           className={`absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none ${
             unreadOnly ? 'text-brand-700' : 'text-slate-400'}`} />
       </div>
+      </div>
+
+      {/*
+        WHERE THE SEARCH IS LOOKING, said only while it is looking anywhere.
+
+        A line rather than a control, because the default is right nearly always and a permanent
+        segmented switch beside the box would be a question asked of somebody who has not typed
+        anything yet. It states what is happening and offers the other reading in the same breath.
+      */}
+      {search.trim() !== '' && (
+        <p className="text-[11px] text-slate-400">
+          {everywhere ? 'Searching the whole mailbox, junk and sent included.' : `Searching ${tabLabel} only.`}
+          {' '}
+          <button type="button" onClick={() => onEverywhere(!everywhere)}
+            className="font-medium text-slate-500 underline underline-offset-2 hover:text-slate-800">
+            {everywhere ? `Search ${tabLabel} only` : 'Search everywhere'}
+          </button>
+        </p>
+      )}
     </div>
   )
 }
@@ -1633,14 +1677,23 @@ function RowGutter({ mail, selecting, chosen, onChoose }: {
   chosen: boolean
   onChoose: (on: boolean) => void
 }) {
+  /*
+   * NOTHING AT ALL WHEN NOTHING IS BEING SELECTED. The firm: "the little circles that indicate the
+   * name are in a weird place, off-centre and a little bit to the right -- make them a little more
+   * to the left. The moment you select something it'll move a little to the right to make space
+   * for that little circle."
+   *
+   * Exactly so. This column was permanently sixteen pixels wide because it carried the unread mark
+   * as well as the tick box, which pushed every avatar in off the edge and left a gap beside it on
+   * every row, for ever, to serve a mode that is off almost all the time. The unread mark moved
+   * onto the avatar itself -- see MailSummary -- so the column can collapse, and the list shifts
+   * right only while Select is actually on.
+   */
+  if (!selecting) return null
   return (
-    <span className="w-4 shrink-0 grid place-items-center self-start mt-1.5">
-      {selecting ? (
-        <input type="checkbox" checked={chosen} onChange={(e) => onChoose(e.target.checked)}
-          aria-label={`Select the email from ${mail.fromAddress}`} />
-      ) : !mail.readAt ? (
-        <span className="w-2 h-2 rounded-full bg-brand-500" title="Unread" />
-      ) : null}
+    <span className="w-4 shrink-0 grid place-items-center self-start mt-3">
+      <input type="checkbox" checked={chosen} onChange={(e) => onChoose(e.target.checked)}
+        aria-label={`Select the email from ${mail.fromAddress}`} />
     </span>
   )
 }
@@ -1733,9 +1786,21 @@ function MailSummary({ mail, tight, blocked }: {
         recognising one takes a glance where reading a name takes a beat.
 
         A span, because this whole summary renders inside a button and a div there is invalid.
+
+        AND IT CARRIES THE UNREAD MARK, which used to have a column of its own to the left of it.
+        That column was sixteen pixels on every row for ever to serve a dot that is on some of
+        them -- and it was what pushed the avatars in off the edge. As a badge it costs nothing,
+        and it is nearer the name it belongs to. The ring is the row's own background, so the dot
+        reads as sitting ON the face rather than behind it.
       */}
-      <Avatar name={mail.fromName || mail.fromAddress} color={senderColour(mail.fromAddress)}
-        size={tight ? 32 : 36} />
+      <span className="relative shrink-0 inline-flex">
+        <Avatar name={mail.fromName || mail.fromAddress} color={senderColour(mail.fromAddress)}
+          size={tight ? 32 : 36} />
+        {!mail.readAt && (
+          <span aria-hidden title="Unread"
+            className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-brand-500 ring-2 ring-white" />
+        )}
+      </span>
 
       <span className="block min-w-0 flex-1">
       {/* 1. Who it is from, and when. */}
