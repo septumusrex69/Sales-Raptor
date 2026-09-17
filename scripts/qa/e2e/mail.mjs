@@ -263,29 +263,29 @@ try {
    */
   t.ok('...and the icons say what they are',
     await page.getByRole('button', { name: 'Mark unread' }).isVisible())
-  /*
-   * AND THE REST ARE NOT LOOSE BUTTONS. Nine of equal weight in one wrapping row put Block sender
-   * directly under Reply on a narrow pane, which is the layout this replaced.
-   */
-  t.check('blocking is not a button on the toolbar',
-    await page.getByRole('button', { name: 'Block sender' }).count(), 0)
-  const dots = page.getByRole('button', { name: 'More things to do with this message' })
-  t.ok('the rest are behind the dots', await dots.isVisible())
-  await dots.click()
-  await page.waitForTimeout(250)
-  t.ok('...which is where blocking lives now',
-    await page.getByRole('button', { name: 'Block sender' }).isVisible())
-  await page.keyboard.press('Escape')
-  await page.mouse.click(5, 5)
-  await page.waitForTimeout(250)
 
   /* ---------- the warning fires on the right message, and only there ---------- */
 
   t.ok('an unmatched message says so', await page.getByText('Not matched yet').first().isVisible())
-  t.ok('...and offers the picker',
-    await page.getByRole('button', { name: 'Match to a record' }).isVisible())
-  t.ok('...and a brand-new lead beside it',
-    await page.getByRole('button', { name: 'Create lead' }).first().isVisible())
+  /*
+   * EVERY ANSWER, ON THE MESSAGE THAT IS STILL ASKING. The firm: "move to junk, mark as free,
+   * block the sender -- it's down there at the three dots, but for a new email it should be up
+   * there." Checked on the screen, because whether a button is reachable without opening a menu is
+   * not something source-reading can tell you.
+   */
+  for (const label of ['Match to a record', 'Mark as open', 'Move to junk', 'Block sender', 'Create lead']) {
+    t.ok(`...and offers ${label} without opening anything`,
+      await page.getByRole('button', { name: label }).first().isVisible())
+  }
+  /*
+   * AND THE DOTS ARE GONE, because the bar has taken everything that was behind them. A dots
+   * button opening a blank panel reads as a feature that has broken.
+   */
+  t.check('...with nothing left behind the dots',
+    await page.getByRole('button', { name: 'More things to do with this message' }).count(), 0)
+  /* Back to the top of the message, or the shot is of paragraph 17 rather than of the bar. */
+  await page.getByRole('heading', { name: 'Debt collection enquiry' }).scrollIntoViewIfNeeded()
+  await page.waitForTimeout(300)
   await t.shot(page, '22-mail-open-unmatched')
 
   /* Back to the list, which is what the rest of this reads against. */
@@ -298,6 +298,21 @@ try {
   t.check('a matched message is not nagged', await page.getByText('Not matched yet').count(), 0)
   t.ok('...it says where it went instead',
     await page.getByText(/On Willem Bezuidenhout/).first().isVisible())
+
+  /*
+   * "OTHERWISE IT SHOULD ALWAYS BE DOWN THERE." Once the question is answered the bar goes and the
+   * dots come back -- these are corrections now rather than decisions, so they cost a click.
+   */
+  t.check('...and blocking is no longer a loose button',
+    await page.getByRole('button', { name: 'Block sender' }).count(), 0)
+  const dots = page.getByRole('button', { name: 'More things to do with this message' })
+  t.ok('...the dots are back', await dots.isVisible())
+  await dots.click()
+  await page.waitForTimeout(250)
+  t.ok('...and that is where blocking lives', await page.getByRole('button', { name: 'Block sender' }).isVisible())
+  await page.keyboard.press('Escape')
+  await page.mouse.click(5, 5)
+  await page.waitForTimeout(250)
 
   /* Nor is one deliberately settled as free mail: somebody already answered the question. */
   await page.getByText('Follow up on outstanding account').first().click()

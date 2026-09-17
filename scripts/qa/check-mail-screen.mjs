@@ -131,14 +131,58 @@ ok('...which says what it is instead', /A new enquiry off the website/.test(bar)
  */
 ok('...and what replying from it would mean', /will not\s*\n?\s*appear on any record/.test(bar))
 /*
- * TWO WAYS OUT, IN BOTH BRANCHES. The bar reads one way for a website enquiry and another for
- * everything else, and each branch writes its own pair of buttons -- so the count is what matters:
- * one branch quietly losing a button would still satisfy "the button exists somewhere".
+ * EVERY ANSWER TO "WHAT IS THIS?", ON THE MESSAGE THAT IS STILL ASKING. The firm, on a bar that
+ * offered two of them: "move to junk, mark as free, block the sender -- it's down there at the
+ * three dots, but for a new email, which is completely new, it should be up there."
+ *
+ * The order is theirs and it runs from "this is work" to "this is not".
  */
-check('the picker is offered on both', (bar.match(/onClick=\{onLink\}/g) ?? []).length, 2)
-check('...and a brand-new lead beside it', (bar.match(/onClick=\{onCreateLead\}/g) ?? []).length, 2)
+/*
+ * COUNTED, NOT MERELY PRESENT. The bar reads one way for a website enquiry and another for
+ * everything else, and each branch writes its own buttons -- so "it exists somewhere in here" is
+ * satisfied by the other branch, and one branch quietly losing a button passes. Matching and
+ * making a lead are offered in BOTH, so both appear twice.
+ */
+ok('the picker is offered', /onClick=\{onLink\} className=\{primary\}/.test(bar))
+/*
+ * COUNTED, because each branch writes its own. "It exists somewhere in here" is satisfied by the
+ * OTHER branch, so one branch quietly losing its lead button would pass.
+ */
+check('...and a brand-new lead, in both readings of the bar',
+  (bar.match(/onClick=\{onCreateLead\}/g) ?? []).length, 2)
+/* One button, two jobs: file it as open mail, or -- on an enquiry -- match it after all. */
+ok('...filing it as open mail', /onClick=\{fromForm \? onLink : onNoRecord\}/.test(bar))
+ok('...binning it', /onClick=\{\(\) => onJunk\(!mail\.isJunk\)\}/.test(bar))
+ok('...stopping the sender', /onClick=\{onBlock\}/.test(bar))
+/*
+ * JUNK BOTH WAYS ROUND. A message can be unmatched AND in junk at once, and offering "Move to
+ * junk" on one that is already there is a button that does nothing.
+ */
+ok('a message already in junk is offered the way back', /<Undo2 size=\{15\} \/> Not junk/.test(bar))
+
 /* And the order swaps: an enquiry off the form has one answer, so it leads with the lead. */
-ok('the enquiry leads with the lead', /fromForm \? \(\s*\n\s*<>\s*\n\s*<button onClick=\{onCreateLead\}/.test(bar))
+ok('the enquiry leads with the lead',
+  /fromForm \? \(\s*\n\s*<button onClick=\{onCreateLead\} className=\{primary\}>/.test(bar))
+
+/*
+ * BLOCKING IS NOT OFFERED ON A WEBSITE ENQUIRY, and this is the guard worth having. Every enquiry
+ * off the site arrives from the SAME address, so blocking it from here would not silence one
+ * time-waster -- it would silence the contact form, permanently, and the next fortnight's
+ * enquiries would simply never arrive.
+ */
+ok('blocking is kept off a website enquiry', /\{!fromForm && \(\s*\n\s*<button onClick=\{onBlock\}/.test(bar))
+
+/*
+ * AND THE MENU GIVES THEM UP WHILE THE BAR HAS THEM. "Otherwise it should always be down there."
+ * The same action in two places on one screen is how somebody ends up pressing neither.
+ */
+ok('the menu stands down while the bar is up', /const barIsUp = !mail\.isFiled && !mail\.noRecordAt/.test(page))
+ok('...for filing as open', /!mail\.isFiled && !barIsUp/.test(page))
+ok('...and for blocking, except on a website enquiry',
+  /const barHasDisposal = barIsUp && !isLeadIntake\(mail\.fromAddress\)/.test(page))
+/* An empty menu is worse than no menu: it reads as a feature that has broken. */
+ok('and the dots disappear when there is nothing behind them',
+  /\{moreActions\.length > 0 && \(/.test(page))
 ok('matching is the one to press', /bg-gold-400/.test(bar))
 /*
  * SILENT ON ANYTHING ALREADY ANSWERED. Filed mail has its record and free mail was deliberately

@@ -1891,10 +1891,18 @@ function MessageActions({
         The rest, behind the dots. They are filing decisions -- taken once per message and never
         in a hurry -- so they cost a click and buy back a bar that reads at a glance.
       */}
-      <div className={sticky ? '' : 'ml-auto'}>
-        <RowMenu width="w-56" bordered={!sticky} up={sticky}
-          label="More things to do with this message" items={moreActions} />
-      </div>
+      {/*
+        AND NOTHING WHERE THERE IS NOTHING. On an unmatched message the bar has taken every filing
+        decision, which leaves this menu empty -- and a dots button that opens a blank panel is
+        worse than no dots at all: it reads as a feature that has broken rather than as one that
+        does not apply.
+      */}
+      {moreActions.length > 0 && (
+        <div className={sticky ? '' : 'ml-auto'}>
+          <RowMenu width="w-56" bordered={!sticky} up={sticky}
+            label="More things to do with this message" items={moreActions} />
+        </div>
+      )}
 
       {/* A hairline, so the thing you came for is not just another icon in the row. */}
       {sticky && <span aria-hidden className="mx-1 w-px h-5 bg-slate-200" />}
@@ -2033,23 +2041,39 @@ function MailBody({
    *   and it is offered even on mail already filed, because blocking is about future noise and not
    *   about the message in front of you.
    */
+  /*
+   * WHILE THE BAR IS UP, THE BAR OWNS THEM. The firm: "it's down there at the three dots, but for
+   * a new email, which is completely new, it should be up there -- otherwise it should always be
+   * down there." So this menu carries what the bar does not, and the two never offer the same
+   * action at once: the same button in two places on one screen is how somebody ends up pressing
+   * neither, and how two bugs get reported for one control.
+   *
+   * The exception is a website enquiry, where the bar deliberately does not offer blocking --
+   * every enquiry comes from the one address, and blocking it would silence the contact form for
+   * good. There it stays here, behind a deliberate click. See NotMatchedBar.
+   */
+  const barIsUp = !mail.isFiled && !mail.noRecordAt
+  const barHasDisposal = barIsUp && !isLeadIntake(mail.fromAddress)
+
   const moreActions: RowMenuItem[] = [
     ...(mail.linkedTo?.kind === 'account' && onMove
       ? [{ label: 'Unmatch', icon: <Undo2 size={15} />, onClick: onMove }]
       : []),
-    ...(!mail.isFiled
+    ...(!mail.isFiled && !barIsUp
       ? [mail.noRecordAt
         ? { label: 'Put back in the queue', icon: <Undo2 size={15} />, onClick: onUndoNoRecord }
         : { label: 'Mark as open', icon: <CircleCheck size={15} />, onClick: onNoRecord }]
       : []),
-    ...(!mail.isFiled
+    ...(!mail.isFiled && !barIsUp
       ? [mail.isJunk
         ? { label: 'Not junk', icon: <Undo2 size={15} />, onClick: () => onJunk(false) }
         : { label: 'Move to junk', icon: <ShieldAlert size={15} />, onClick: () => onJunk(true) }]
       : []),
     /* "Block", to match the Blocked tab. The long phrasing described the mechanism; this names
        the thing, and the two now obviously belong together. */
-    { label: 'Block sender', icon: <Ban size={15} />, onClick: onBlock, danger: true },
+    ...(barHasDisposal
+      ? []
+      : [{ label: 'Block sender', icon: <Ban size={15} />, onClick: onBlock, danger: true }]),
   ]
 
   /* Gathered once, because the bar renders in one of two places and a second argument list would
@@ -2082,7 +2106,8 @@ function MailBody({
         difference. It is the state that costs money -- a reply sent from an unmatched message goes
         out earning nothing -- so it states itself.
       */}
-      <NotMatchedBar mail={mail} onLink={onLink} onCreateLead={onCreateLead} />
+      <NotMatchedBar mail={mail} onLink={onLink} onCreateLead={onCreateLead}
+        onNoRecord={onNoRecord} onJunk={onJunk} onBlock={onBlock} />
       {mail.attachmentNames.length > 0 && (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           {/*
@@ -2236,10 +2261,13 @@ function MailBody({
  *
  * Nothing is charged either way. Annexure B is for debtor accounts; the sales side raises nothing.
  */
-function NotMatchedBar({ mail, onLink, onCreateLead }: {
+function NotMatchedBar({ mail, onLink, onCreateLead, onNoRecord, onJunk, onBlock }: {
   mail: MailItem
   onLink: () => void
   onCreateLead: () => void
+  onNoRecord: () => void
+  onJunk: (junk: boolean) => void
+  onBlock: () => void
 }) {
   /* Filed mail has its answer, and open mail has been given one deliberately -- neither is a
      loose end, and a bar over both would be a warning that fires when nothing is wrong. */
@@ -2247,48 +2275,98 @@ function NotMatchedBar({ mail, onLink, onCreateLead }: {
 
   /*
    * AN ENQUIRY OFF THE WEBSITE IS NOT A QUESTION. Every other unmatched message asks one -- debtor,
-   * client, nobody? -- and form@bredellferreira.co.za has exactly one answer, so the two buttons
-   * swap places and the wording stops hedging. Offering "Match to a record" first here would send
-   * somebody hunting the book for a stranger who by definition is not in it.
+   * client, nobody? -- and form@bredellferreira.co.za has exactly one answer, so Create lead leads
+   * and the wording stops hedging. Offering "Match to a record" first here would send somebody
+   * hunting the book for a stranger who by definition is not in it.
    */
   const fromForm = isLeadIntake(mail.fromAddress)
 
-  const primary = 'inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500'
-  const secondary = 'inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+  const primary = 'inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500'
+  const secondary = 'inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+  const danger = 'inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-negative-100 hover:bg-negative-50 hover:text-negative-700'
 
   return (
-    <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-3
-      flex flex-wrap items-center gap-x-3 gap-y-2.5">
-      <Info size={16} className="shrink-0 text-slate-400" />
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-slate-800">
-          {fromForm ? 'A new enquiry off the website' : 'Not matched yet'}
-        </p>
-        <p className="text-xs text-slate-400 mt-0.5">
-          {fromForm
-            ? 'It came through the contact form, so it belongs to nobody yet. Their details are in the message.'
-            : 'This email is not on a lead, a deal or a debtor account. Replying from here will not appear on any record.'}
-        </p>
+    <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-3">
+      <div className="flex items-start gap-3">
+        <Info size={16} className="shrink-0 text-slate-400 mt-0.5" />
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-slate-800">
+            {fromForm ? 'A new enquiry off the website' : 'Not matched yet'}
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {fromForm
+              ? 'It came through the contact form, so it belongs to nobody yet. Their details are in the message.'
+              : 'This email is not on a lead, a deal or a debtor account. Replying from here will not appear on any record.'}
+          </p>
+        </div>
       </div>
-      <div className="shrink-0 flex items-center gap-2">
+
+      {/*
+        EVERY ANSWER TO "WHAT IS THIS?", ON THE MESSAGE THAT IS STILL ASKING.
+
+        The firm, on a bar that offered two of them: "here immediately -- move to junk, mark as
+        free, block the sender. It's down there at the three dots, but for a new email, which is
+        completely new, it should be up there. Otherwise it should always be down there."
+
+        Which is exactly the rule. A message nobody has decided about is the one moment all of
+        these are live, so the bar owns them while the question is open; once it is answered the
+        bar goes and they live behind the dots, where they are corrections rather than decisions.
+        They are taken OUT of that menu while the bar is up -- see moreActions -- because the same
+        action in two places on one screen is how somebody ends up pressing neither.
+
+        The firm's order, and it runs from "this is work" to "this is not": match it, file it as
+        open, bin it, stop the sender. Create lead sits at the end as the other kind of yes.
+
+        Their own row, not squeezed beside the text: five buttons and a sentence in one wrapping
+        flex row is a layout that reflows differently on every message.
+      */}
+      <div className="flex flex-wrap items-center gap-2 mt-2.5">
         {fromForm ? (
-          <>
-            <button onClick={onCreateLead} className={primary}>
-              <UserPlus size={15} /> Create lead
-            </button>
-            <button onClick={onLink} className={secondary}>
-              <Link2 size={15} /> Match instead
-            </button>
-          </>
+          <button onClick={onCreateLead} className={primary}>
+            <UserPlus size={15} /> Create lead
+          </button>
         ) : (
-          <>
-            <button onClick={onLink} className={primary}>
-              <Link2 size={15} /> Match to a record
-            </button>
-            <button onClick={onCreateLead} className={secondary}>
-              <UserPlus size={15} /> Create lead
-            </button>
-          </>
+          <button onClick={onLink} className={primary}>
+            <Link2 size={15} /> Match to a record
+          </button>
+        )}
+
+        <button onClick={fromForm ? onLink : onNoRecord} className={secondary}>
+          {fromForm
+            ? <><Link2 size={15} /> Match instead</>
+            : <><CircleCheck size={15} /> Mark as open</>}
+        </button>
+
+        {/*
+          Junk, both ways round. A message already in junk wants rescuing, not shelving -- and it
+          can be both unmatched and in junk at once, which is the case this would otherwise offer
+          "Move to junk" on.
+        */}
+        <button onClick={() => onJunk(!mail.isJunk)} className={secondary}>
+          {mail.isJunk
+            ? <><Undo2 size={15} /> Not junk</>
+            : <><ShieldAlert size={15} /> Move to junk</>}
+        </button>
+
+        {/*
+          BLOCKING IS NOT OFFERED ON A WEBSITE ENQUIRY, and this is the one place in this bar where
+          the firm's order is departed from deliberately.
+
+          Every enquiry off the site arrives from the same address. Blocking it from here would not
+          silence one time-waster -- it would silence the contact form, permanently, for everybody,
+          and the next fortnight's enquiries would simply never arrive. It stays behind the dots,
+          where it costs a deliberate click and a box that says what it does.
+        */}
+        {!fromForm && (
+          <button onClick={onBlock} className={danger}>
+            <Ban size={15} /> Block sender
+          </button>
+        )}
+
+        {!fromForm && (
+          <button onClick={onCreateLead} className={secondary}>
+            <UserPlus size={15} /> Create lead
+          </button>
         )}
       </div>
     </div>
