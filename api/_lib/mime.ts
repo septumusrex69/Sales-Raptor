@@ -46,6 +46,8 @@ export interface InlineImage {
 export interface MessageBody {
   text: string
   html: string
+  /** The raw ICS of a meeting request, where the message was one. Parsed in the browser. */
+  calendar: string
   images: InlineImage[]
   /**
    * Pictures that were in the message but were left behind for being too big.
@@ -172,7 +174,15 @@ export function readableParts(parts: MessagePart[]): { parts: MessagePart[]; ski
   let skippedImages = 0
 
   for (const p of parts) {
-    if (p.type === 'text/plain' || p.type === 'text/html') {
+    /*
+     * text/calendar is the BODY of a meeting request, not a file attached to one.
+     *
+     * Without it a meeting request read as "This message has no text in it": the invite's only
+     * content is the calendar part, and plenty of senders include no text alternative at all. The
+     * size cap applies for the same reason it applies to text -- a recurring series with a year
+     * of exceptions in it is not something to pull down a mobile connection.
+     */
+    if (p.type === 'text/plain' || p.type === 'text/html' || p.type === 'text/calendar') {
       // A .txt or .html somebody genuinely attached is a file, not the message.
       if (p.disposition === 'attachment') continue
       if (p.size <= MAX_TEXT_PART && text.length < MAX_TEXT_PARTS) text.push(p)
@@ -242,6 +252,7 @@ export function assembleBody(
 ): MessageBody | null {
   const texts: string[] = []
   const htmls: string[] = []
+  const calendars: string[] = []
   const images: InlineImage[] = []
 
   for (const p of wanted) {
@@ -249,6 +260,7 @@ export function assembleBody(
     if (!content) continue
     if (p.type === 'text/plain') texts.push(toText(content, p.charset))
     else if (p.type === 'text/html') htmls.push(toText(content, p.charset))
+    else if (p.type === 'text/calendar') calendars.push(toText(content, p.charset))
     else {
       images.push({
         cid: p.cid ?? '',
@@ -258,11 +270,17 @@ export function assembleBody(
     }
   }
 
-  if (texts.length === 0 && htmls.length === 0) return null
+  /*
+   * A CALENDAR PART ON ITS OWN IS A MESSAGE. An invite frequently carries no text alternative,
+   * and returning null here sent the whole thing down the fallback path to be reported as empty.
+   */
+  if (texts.length === 0 && htmls.length === 0 && calendars.length === 0) return null
   const html = htmls.join('\n')
   return {
     text: plainText(texts.join('\n\n').trim() || undefined, html),
     html,
+    /* The first one. A message carrying two meetings is not a shape worth guessing at. */
+    calendar: calendars[0] ?? '',
     images,
     // A picture we asked for and did not get counts as skipped too — the gap is the same to
     // whoever is reading it.

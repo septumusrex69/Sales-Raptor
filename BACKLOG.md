@@ -256,10 +256,13 @@ An invite arrived in the mailbox and Raptor could show neither its contents nor 
 The attachment half is fixed — see the commit — and the rest is three separate jobs the firm
 asked about, in increasing size:
 
-- **READ the invite.** `readableParts()` takes `text/plain` and `text/html` only, and an invite's
-  body is `text/calendar; method=REQUEST`. Parsing the .ics for its summary, time, place,
-  organiser and attendees, and rendering that as an invite rather than a wall of `BEGIN:VEVENT`,
-  is a contained job: a pure parser in `src/lib/`, a block in the mail reader, no new endpoint.
+- ~~**READ the invite.**~~ Done — `src/lib/calendarInvite.ts` and the block above the message.
+- **A TIME IN A NAMED ZONE IS NOT CONVERTED.** `DTSTART;TZID=Africa/Johannesburg:20260917T160000`
+  is shown as 16:00 with the zone named beside it, because resolving the offset needs a timezone
+  database the parser does not have. Everybody in this firm is in one zone, so it reads correctly
+  today and would read an hour out for an invite from London. Fixing it means `Intl.DateTimeFormat`
+  with the TZID, which is a small job — worth doing before anybody works across zones, and not
+  worth guessing at before then.
 - **SEND a meeting request.** Also contained. `api/email/send.ts` already goes out through the
   agent's own mailbox; an invite is that same send carrying a `text/calendar; method=REQUEST`
   alternative and an .ics. No new endpoint, which matters — `api/` is at 12 of 12.

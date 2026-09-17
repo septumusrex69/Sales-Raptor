@@ -205,6 +205,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Pictures that were there and are not shown. Said out loud, because a signature that
         // silently fails to appear looks identical to a message that never had one.
         imagesSkipped: body.imagesSkipped,
+        /*
+         * The raw ICS of a meeting request, parsed in the BROWSER.
+         *
+         * Unlike the HTML above, an ICS is not markup and nothing renders it -- it is read into
+         * a handful of fields and those are what the page draws. Parsing it here would put the
+         * rule on the side of the wall that npm run build does not typecheck and that the check
+         * scripts cannot import; in src/lib it is checked without a browser or a mailbox.
+         */
+        calendar: body.calendar,
       })
     } catch (err) {
       res.status(502).json({ error: err instanceof Error ? err.message : 'Could not reach your mailbox.' })

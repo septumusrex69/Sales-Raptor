@@ -611,9 +611,20 @@ export async function fetchMessageBody(
      * thrown away before anything could look at it. See findLinkedDetails.
      */
     const fallbackImages = inlineImagesFromParsed(parsed.attachments)
+    /*
+     * A meeting request reaches this path whenever the structure walk could not place its
+     * calendar part, and mailparser hands that part back among the attachments rather than as
+     * body text. Missed here, an invite that fell back would read as empty even though the
+     * fast path had just been taught to understand it -- one of the two ways in fixed and the
+     * other not, which is the shape of bug that survives a release.
+     */
+    const ics = (parsed.attachments ?? []).find(
+      (a) => (a.contentType ?? '').toLowerCase().startsWith('text/calendar'),
+    )
     return {
       text: plainText(parsed.text, parsed.html),
       html: parsed.html || '',
+      calendar: ics?.content ? Buffer.from(ics.content as Buffer).toString('utf8') : '',
       images: fallbackImages.images,
       imagesSkipped: fallbackImages.skippedImages,
     }

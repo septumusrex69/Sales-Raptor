@@ -562,6 +562,8 @@ export async function fetchMailBody(
   accessToken: string,
 ): Promise<{
   text: string; details: ContactCandidate[]; images: InlineImage[]; imagesSkipped: number
+  /** The raw ICS where the message was a meeting request. Parsed by the page — see parseInvite. */
+  calendar: string
 }> {
   const res = await fetch('/api/email/attachment', {
     method: 'POST',
@@ -570,7 +572,7 @@ export async function fetchMailBody(
   })
   const body = (await res.json().catch(() => ({}))) as {
     text?: string; details?: ContactCandidate[]; images?: InlineImage[]
-    imagesSkipped?: number; error?: string
+    imagesSkipped?: number; calendar?: string; error?: string
   }
   if (!res.ok) throw new Error(body.error ?? 'Could not read that message.')
   // `details` are read off the message's HTML on the server — see findLinkedDetails. They are
@@ -580,6 +582,7 @@ export async function fetchMailBody(
     details: body.details ?? [],
     images: body.images ?? [],
     imagesSkipped: body.imagesSkipped ?? 0,
+    calendar: body.calendar ?? '',
   }
 }
 

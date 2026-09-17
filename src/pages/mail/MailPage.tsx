@@ -4,10 +4,11 @@ import {
   AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, CircleCheck, ExternalLink,
   Inbox, Link2, Download, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
   Forward as ForwardIcon,
-  Search, ShieldAlert, Trash2, Undo2, X,
+  Search, ShieldAlert, Trash2, Undo2, X, CalendarDays
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal } from '../../components/ui/Modal'
+import { inviteHeadline, inviteWhen, parseInvite } from '../../lib/calendarInvite.ts'
 import { useAuth } from '../../store/AuthContext'
 import { relativeDayLabel } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
@@ -169,6 +170,8 @@ export function MailPage() {
   const [bodyImages, setBodyImages] = useState<Record<string, InlineImage[]>>({})
   /** Pictures that were in the message and were too large to carry, so the page can say so. */
   const [imagesSkipped, setImagesSkipped] = useState<Record<string, number>>({})
+  /** The raw ICS of a meeting request, kept beside its text. Parsed on render — see parseInvite. */
+  const [calendars, setCalendars] = useState<Record<string, string>>({})
   const [reading, setReading] = useState<string | null>(null)
   const [readError, setReadError] = useState<Record<string, string>>({})
   const [view, setView] = useEmailView()
@@ -320,8 +323,9 @@ export function MailPage() {
     setReading(mail.id)
     setReadError((e) => { const next = { ...e }; delete next[mail.id]; return next })
     try {
-      const { text, details, images, imagesSkipped: skipped } = await fetchMailBody(mail.id, token)
+      const { text, details, images, imagesSkipped: skipped, calendar } = await fetchMailBody(mail.id, token)
       setBodies((b) => ({ ...b, [mail.id]: text }))
+      setCalendars((c) => ({ ...c, [mail.id]: calendar }))
       // Kept beside the text: these came out of the message's LINKS, which is the only thing an
       // image signature leaves behind.
       setLinkedDetails((d) => ({ ...d, [mail.id]: details }))
@@ -882,6 +886,7 @@ export function MailPage() {
                   )}
                 </div>
                 <MailBody mail={m} body={bodies[m.id]} images={bodyImages[m.id]}
+                  calendar={calendars[m.id]}
                   skippedImages={imagesSkipped[m.id]}
                   loadingBody={reading === m.id}
                   bodyError={readError[m.id]} onBlock={() => setBlocking(m)}
@@ -914,6 +919,7 @@ export function MailPage() {
                   blocked={blocked}
                   body={bodies[m.id]}
                   images={bodyImages[m.id]}
+                  calendar={calendars[m.id]}
                   skippedImages={imagesSkipped[m.id]}
                   loadingBody={reading === m.id}
                   bodyError={readError[m.id]}
@@ -1360,11 +1366,13 @@ function MailSummary({ mail, tight, blocked }: {
 
 /** The message itself, shared by the expanded row and the reading pane. */
 function MailBody({
-  mail, body, images, skippedImages, loadingBody, bodyError, onBlock, onReply, onForward, onJunk,
-  onMove, onUnread, onNoRecord, onUndoNoRecord, onDownload, downloading, downloadError,
+  mail, body, images, calendar, skippedImages, loadingBody, bodyError, onBlock, onReply, onForward,
+  onJunk, onMove, onUnread, onNoRecord, onUndoNoRecord, onDownload, downloading, downloadError,
 }: {
   mail: MailItem
   body?: string
+  /** The raw ICS where this was a meeting request. Parsed here — see parseInvite. */
+  calendar?: string
   /** Pictures drawn into the message — a signature, nearly always. */
   images?: InlineImage[]
   /** How many were left behind for being too big. Said out loud rather than left as a gap. */
@@ -1555,6 +1563,16 @@ function MailBody({
       {/* A rule under the controls, so the message reads as the message and not as more toolbar. */}
       <div className="border-b border-slate-100 mb-3" />
 
+      {/*
+        A MEETING REQUEST, READ. Until now an invite rendered as "This message has no text in it":
+        its body is a text/calendar part, and the reader took text/plain and text/html only. A
+        collector could see somebody had written and nothing about what was being asked.
+
+        Above the message text on purpose. Where there IS text as well it is the organiser's
+        covering note, and what the meeting actually is beats a note about it.
+      */}
+      {!loadingBody && <InviteCard ics={calendar} />}
+
       {loadingBody && (
         <p className="text-[13px] text-slate-400 inline-flex items-center gap-1.5">
           <Loader2 size={13} className="animate-spin" /> Fetching the message from your mailbox&hellip;
@@ -1641,12 +1659,95 @@ function MailBody({
   )
 }
 
+/**
+ * A meeting request, as the four things somebody needs to decide whether to go.
+ *
+ * WHAT IT DOES NOT DO IS PRETEND. Raptor has no calendar to put a meeting in -- CalendarPage
+ * renders tasks and deal dates, there is no events table and no connection to Outlook or Google
+ * -- so there is no Accept button here. A button that notified the organiser and put the meeting
+ * nowhere would be worse than none: the collector would believe it was in their day.
+ *
+ * The .ics is attached to the message and downloads from the row above, which opens in whatever
+ * calendar they actually use. That is the honest answer until Raptor has one of its own.
+ */
+function InviteCard({ ics }: { ics?: string }) {
+  const invite = parseInvite(ics)
+  if (!invite) return null
+  const when = inviteWhen(invite.when)
+  const people = invite.attendees.filter((a) => a.name || a.email)
+
+  return (
+    <div className={`mb-3 rounded-lg border px-3 py-2.5 ${
+      /* A cancellation is not an invitation and must not look like one. */
+      invite.cancelled ? 'border-negative-100 bg-negative-50' : 'border-gold-300 bg-gold-50'
+    }`}>
+      <p className={`text-[11px] uppercase tracking-wide font-medium inline-flex items-center gap-1.5 ${
+        invite.cancelled ? 'text-negative-700' : 'text-[var(--c-gold-deep)]'
+      }`}>
+        <CalendarDays size={12} /> {inviteHeadline(invite)}
+      </p>
+
+      <p className={`text-sm font-medium mt-1 break-words ${
+        invite.cancelled ? 'text-negative-700 line-through' : 'text-navy-950'
+      }`}>
+        {invite.summary ?? 'Untitled meeting'}
+      </p>
+
+      <dl className="mt-1.5 space-y-0.5">
+        {when && <InviteLine label="When" value={when} note={invite.repeats} />}
+        {invite.location && <InviteLine label="Where" value={invite.location} />}
+        {invite.organiser && (
+          <InviteLine label="Called by"
+            value={invite.organiser.name ?? invite.organiser.email ?? 'Unknown'}
+            note={invite.organiser.name ? invite.organiser.email : null} />
+        )}
+        {people.length > 0 && (
+          <InviteLine label={people.length === 1 ? 'Also asked' : `Also asked (${people.length})`}
+            value={people.slice(0, 4).map((a) => a.name ?? a.email).join(', ')
+              + (people.length > 4 ? `, and ${people.length - 4} more` : '')} />
+        )}
+      </dl>
+
+      {invite.cancelled && (
+        <p className="text-[11px] text-negative-700 mt-1.5">
+          The organiser has called this off. Nothing to accept.
+        </p>
+      )}
+      {!invite.cancelled && (
+        /*
+          SAID PLAINLY, rather than leaving somebody to wonder where the buttons are. It is also
+          the honest version of the answer: the file is right there and their own calendar knows
+          what to do with it.
+        */
+        <p className="text-[11px] text-slate-500 mt-1.5">
+          Raptor has no calendar of its own yet — download the invite above to add it to yours.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** One line of the invite. Values wrap; a Teams link is long and must not push the pane wide. */
+function InviteLine({ label, value, note }: { label: string; value: string; note?: string | null }) {
+  return (
+    <div className="flex flex-wrap gap-x-2 text-[11px]">
+      <dt className="text-slate-500 shrink-0">{label}</dt>
+      <dd className="text-slate-800 min-w-0 break-words">
+        {value}
+        {note && <span className="text-slate-400"> · {note}</span>}
+      </dd>
+    </div>
+  )
+}
+
 function MailRow({
-  mail, chosen, expanded, selecting, blocked, body, images, skippedImages, loadingBody, bodyError,
-  onToggle, onChoose, onLink, onBlock, onReply, onForward, onJunk, onMove, onUnread, onNoRecord,
-  onUndoNoRecord, onDownload, downloading, downloadError,
+  mail, chosen, expanded, selecting, blocked, body, images, calendar, skippedImages, loadingBody,
+  bodyError, onToggle, onChoose, onLink, onBlock, onReply, onForward, onJunk, onMove, onUnread,
+  onNoRecord, onUndoNoRecord, onDownload, downloading, downloadError,
 }: {
   mail: MailItem
+  /** The raw ICS where this was a meeting request. Passed through to MailBody. */
+  calendar?: string
   chosen: boolean
   expanded: boolean
   /** Tick boxes are showing, so the gutter carries one instead of the unread mark. */
@@ -1716,7 +1817,8 @@ function MailRow({
 
       {expanded && (
         <div className="px-5 pb-4 pl-[2.9rem]">
-          <MailBody mail={mail} body={body} images={images} skippedImages={skippedImages}
+          <MailBody mail={mail} body={body} images={images} calendar={calendar}
+            skippedImages={skippedImages}
             loadingBody={loadingBody}
             bodyError={bodyError} onBlock={onBlock} onReply={onReply} onForward={onForward} onJunk={onJunk}
             onMove={onMove} onUnread={onUnread}
