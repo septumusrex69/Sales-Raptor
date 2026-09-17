@@ -330,3 +330,49 @@ export function plainText(text: string | undefined, html: string | false | undef
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 }
+
+/* ------------------------------------------------------------------ *
+ * Attachments that arrive with no filename.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Which of a message's attachments are worth listing.
+ *
+ * ONE RULE, EXPORTED, because two sides read it: the sync names them and the download route has
+ * to find the same one again. Written out twice they drift, and the drift is silent -- see
+ * placeholderIndex.
+ *
+ * `related` parts are the pictures drawn into the body (a signature logo), not files somebody
+ * attached; an unnamed image with no filename is the remaining tracking-pixel shape.
+ */
+export function listedAttachments<T extends {
+  filename?: string; related?: boolean; contentDisposition?: string; contentType?: string
+}>(attachments: T[] | undefined): T[] {
+  return (attachments ?? []).filter(
+    (att) => !att.related && !(!att.filename && (att.contentType ?? '').startsWith('image/')),
+  )
+}
+
+/**
+ * The name an unnamed attachment is listed under.
+ *
+ * A calendar invite is the common case: the .ics part carries no filename parameter at all, so
+ * there is nothing to call it but its position.
+ */
+export const placeholderName = (index: number): string => `attachment-${index + 1}`
+
+/**
+ * Read that position back, or null where the name is a real filename.
+ *
+ * THE BUG THIS EXISTS TO CLOSE. The sync named an unnamed part "attachment-1" and the download
+ * route looked for a part whose filename EQUALLED "attachment-1" -- in the structure walk and in
+ * the mailparser fallback both. Nothing is ever called that, so every unnamed attachment was
+ * listed on the message and returned 404 on every attempt, for ever. A calendar invite is the
+ * shape that made it visible, but it was never about calendars.
+ */
+export function placeholderIndex(name: string): number | null {
+  const m = /^attachment-(\d+)$/.exec(name)
+  if (!m) return null
+  const n = Number(m[1]) - 1
+  return n >= 0 ? n : null
+}

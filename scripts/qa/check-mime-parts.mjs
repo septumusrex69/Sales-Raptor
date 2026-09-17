@@ -18,7 +18,8 @@
 import { createRequire } from 'node:module'
 import {
   assembleBody, decodeQuotedPrintable, decodeTransfer, describeParts, flattenParts,
-  inlineImagesFromParsed, partContent, plainText, readableParts, toText,
+  inlineImagesFromParsed, listedAttachments, partContent, placeholderIndex, placeholderName,
+  plainText, readableParts, toText,
 } from '../../api/_lib/mime.ts'
 
 const require = createRequire(import.meta.url)
@@ -243,6 +244,56 @@ check('an empty message is not an error', plainText('', ''), '')
 const described = describeParts(real)
 check('the diagnostic describes the shape', described.includes('1.2:image/png/base64/41000b/cid/inline'), true)
 check('and never carries a filename', /mandate\.pdf|sig\.png/.test(described), false)
+
+/* ---------- an attachment that arrived with no name ---------- */
+
+/*
+ * THE BUG THIS CLOSES. A calendar invite's .ics part carries no filename parameter, so the sync
+ * listed it by position as "attachment-1" -- and the download route looked for a part whose
+ * filename EQUALLED "attachment-1", in the structure walk and the mailparser fallback both.
+ * Nothing is ever called that. Every unnamed attachment was listed on the message and 404ed on
+ * every attempt to open it, for ever, silently.
+ *
+ * So the naming and the reading of it are one exported rule now, and these check they are inverse.
+ */
+check('a placeholder is a position, not a name', placeholderIndex('attachment-1'), 0)
+check('...counting from one on screen and from nought in the list', placeholderIndex('attachment-3'), 2)
+check('a real filename is not a position', placeholderIndex('meeting.ics'), null)
+/* A file genuinely CALLED "attachment-1.pdf" must not be read as a position. */
+check('...even one that starts like one', placeholderIndex('attachment-1.pdf'), null)
+check('nought is not a position, because the names start at one', placeholderIndex('attachment-0'), null)
+/* Round trip: what the sync writes is what the route reads back. */
+for (const i of [0, 1, 9]) {
+  check(`naming and reading position ${i} are inverse`, placeholderIndex(placeholderName(i)), i)
+}
+
+{
+  /*
+   * The filter has to be the same on both sides or the positions mean different things. A
+   * signature logo is `related` and a tracking pixel is an unnamed image; neither is a file
+   * somebody attached, and both shift every number after them if only one side drops them.
+   */
+  const attachments = [
+    { filename: 'invoice.pdf', contentType: 'application/pdf' },
+    { related: true, filename: 'logo.png', contentType: 'image/png' },
+    { contentType: 'image/gif' },
+    { contentType: 'text/calendar' },
+  ]
+  const listed = listedAttachments(attachments)
+  check('a signature logo is not an attachment', listed.some((a) => a.filename === 'logo.png'), false)
+  check('...nor is an unnamed image', listed.some((a) => a.contentType === 'image/gif'), false)
+  check('a real file is', listed[0].filename, 'invoice.pdf')
+  check('...and so is an unnamed calendar invite', listed[1].contentType, 'text/calendar')
+  /*
+   * AND THE POSITION SURVIVES THE FILTER. The invite is fourth in the message and second in the
+   * list; numbered before filtering it would be "attachment-4" and resolve to nothing.
+   */
+  const names = listed.map((a, i) => a.filename || placeholderName(i))
+  check('the invite is numbered by its place in the LIST, not the message', names[1], 'attachment-2')
+  check('...and reading that back finds it again',
+    listed[placeholderIndex(names[1])].contentType, 'text/calendar')
+}
+check('nothing in, nothing listed', listedAttachments(undefined).length, 0)
 
 console.log(failures === 0
   ? '\nPASS — a message is taken apart from its structure, only the readable parts are fetched,'

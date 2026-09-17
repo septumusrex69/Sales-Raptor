@@ -250,6 +250,27 @@ work that well" — email is the priority.
 
 ---
 
+## Calendar invites, and meetings
+
+An invite arrived in the mailbox and Raptor could show neither its contents nor its attachment.
+The attachment half is fixed — see the commit — and the rest is three separate jobs the firm
+asked about, in increasing size:
+
+- **READ the invite.** `readableParts()` takes `text/plain` and `text/html` only, and an invite's
+  body is `text/calendar; method=REQUEST`. Parsing the .ics for its summary, time, place,
+  organiser and attendees, and rendering that as an invite rather than a wall of `BEGIN:VEVENT`,
+  is a contained job: a pure parser in `src/lib/`, a block in the mail reader, no new endpoint.
+- **SEND a meeting request.** Also contained. `api/email/send.ts` already goes out through the
+  agent's own mailbox; an invite is that same send carrying a `text/calendar; method=REQUEST`
+  alternative and an .ics. No new endpoint, which matters — `api/` is at 12 of 12.
+- **ACCEPT one into a calendar. THERE IS NO CALENDAR.** `CalendarPage` is a rendering of `tasks`
+  and deal close dates; there is no events table and no connection to Outlook or Google. Replying
+  to the organiser is easy (an iTIP `METHOD:REPLY` with `PARTSTAT=ACCEPTED`, sent as mail), but
+  accepting would notify them and land nowhere. Either an events table or a real calendar
+  connection has to exist first, and which one is a decision about what Raptor is for.
+
+---
+
 ## Next on the trace
 
 - **The judgment layout.** The firm: "I see where the judgment is, but I think we can still kind

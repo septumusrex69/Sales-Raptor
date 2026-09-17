@@ -3,8 +3,9 @@ import { simpleParser } from 'mailparser'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decrypt } from './crypto.js'
 import {
-  assembleBody, describeParts, flattenParts, inlineImagesFromParsed, partContent, plainText,
-  readableParts, type MessageBody, type MessagePart,
+  assembleBody, describeParts, flattenParts, inlineImagesFromParsed, listedAttachments,
+  partContent, placeholderIndex, placeholderName, plainText, readableParts,
+  type MessageBody, type MessagePart,
 } from './mime.js'
 import {
   automatedMailKind, automatedMailNote,
@@ -57,9 +58,14 @@ const MAX_ATTACHMENT_NAMES = 10
 function realAttachmentNames(
   attachments: { filename?: string; related?: boolean; contentDisposition?: string; contentType?: string }[] | undefined,
 ): string[] {
-  return (attachments ?? [])
-    .filter((att) => !att.related && !(!att.filename && (att.contentType ?? '').startsWith('image/')))
-    .map((att, i) => att.filename || `attachment-${i + 1}`)
+  /*
+   * THROUGH listedAttachments AND placeholderName, which the download route also uses. The filter
+   * and the naming convention used to live only here, and the route that has to find the file
+   * again knew nothing about either -- so an attachment with no filename was listed on the
+   * message and 404ed on every attempt to open it.
+   */
+  return listedAttachments(attachments)
+    .map((att, i) => att.filename || placeholderName(i))
     .slice(0, MAX_ATTACHMENT_NAMES)
 }
 
@@ -682,6 +688,24 @@ export interface FetchedAttachment {
  * payslip sends four megabytes; downloading the one a collector clicked used to mean pulling
  * all four across from Johannesburg and throwing three away.
  */
+/**
+ * What to call a file that arrived with no name.
+ *
+ * "attachment-1.ics" opens in a calendar; "attachment-1" opens in nothing, and the person saving
+ * it has to know what it was and rename it by hand. The extension is taken from the part's own
+ * content type, which is the only thing the message actually told us about it.
+ */
+const EXTENSIONS: Record<string, string> = {
+  'text/calendar': '.ics', 'application/pdf': '.pdf', 'text/plain': '.txt',
+  'text/html': '.html', 'application/json': '.json', 'text/csv': '.csv',
+  'message/rfc822': '.eml', 'application/zip': '.zip',
+}
+
+function suggestedName(placeholder: string, contentType: string | undefined): string {
+  const ext = EXTENSIONS[(contentType ?? '').toLowerCase().split(';')[0].trim()]
+  return ext ? `${placeholder}${ext}` : placeholder
+}
+
 export async function fetchAttachment(
   conn: { email: string; imap_host: string; imap_port: number; encrypted_password: string },
   location: { folder?: string | null; uid?: number | null; messageId?: string | null },
@@ -694,7 +718,14 @@ export async function fetchAttachment(
      * string mailparser produces, which is what the sync recorded and what the caller checked
      * the request against — so the two cannot disagree about which file was asked for.
      */
-    const named = parts.find((p) => p.filename === filename)
+    /*
+     * A PLACEHOLDER IS A POSITION, NOT A NAME, so it is never matched against filenames -- no
+     * part is called "attachment-1" and looking for one only wastes a round trip before failing.
+     * It is resolved positionally below, against the same list the sync numbered.
+     */
+    const named = placeholderIndex(filename) === null
+      ? parts.find((p) => p.filename === filename)
+      : undefined
     if (named) {
       const msg = await client.fetchOne(String(uid), { uid: true, bodyParts: [named.part] }, { uid: true })
       const content = partContent(msg, named)
@@ -708,9 +739,19 @@ export async function fetchAttachment(
     const whole = await client.fetchOne(String(uid), { source: true }, { uid: true })
     if (!whole || !whole.source) return null
     const parsed = await simpleParser(whole.source)
-    const match = (parsed.attachments ?? []).find((att) => (att.filename || '') === filename)
+    const listed = listedAttachments(parsed.attachments)
+    const at = placeholderIndex(filename)
+    const match = at === null
+      ? listed.find((att) => (att.filename || '') === filename)
+      /* The same list, in the same order, numbered the same way the sync numbered it. */
+      : listed[at]
     if (!match) return null
-    return { filename, contentType: match.contentType || 'application/octet-stream', content: match.content as Buffer }
+    return {
+      /* Named for the person saving it: "attachment-1" tells them nothing about what it is. */
+      filename: match.filename || suggestedName(filename, match.contentType),
+      contentType: match.contentType || 'application/octet-stream',
+      content: match.content as Buffer,
+    }
   })
 }
 
