@@ -167,3 +167,87 @@ export function normaliseAddress(raw: string | null | undefined): string | null 
   const address = (angled ? angled[1] : raw).trim().toLowerCase()
   return address.includes('@') ? address : null
 }
+
+/* ---------- mail our own systems produced ---------- */
+
+/**
+ * Whether a message is a bounce or an out-of-office rather than something a person wrote.
+ *
+ * WHY THIS HAD TO EXIST. An inbound message is matched to an account by the Message-ID it quotes
+ * in References or In-Reply-To, and nothing checked who sent it. A Mail Delivery Subsystem
+ * failure notice for a demand letter quotes that id — so the bounce was filed on the debtor's
+ * account as their correspondence, put on their timeline in the daemon's name, and charged R13
+ * under item 6.
+ *
+ * That is money on a real debtor's statement for our own mail server talking to itself, and it
+ * counts toward the items 1-7 ceiling, so it also displaces a fee the firm could have charged.
+ * Once remittance has run it cannot be taken off.
+ *
+ * DELIBERATELY CONSERVATIVE, and the direction of the error is the reason. A bounce read as a
+ * reply costs the debtor R13 and puts a wrong line on their timeline. A REPLY READ AS A BOUNCE
+ * loses the debtor's own words — the thing the account exists to record. So this fires only on
+ * signals that cannot be produced by a person typing a message:
+ *
+ *   - a null Return-Path, which is how the standards require a bounce to be sent so that it
+ *     cannot itself bounce, and which no ordinary mail carries;
+ *   - a delivery-status report, which is the machine-readable bounce format;
+ *   - X-Failed-Recipients, which only a failing relay adds;
+ *   - Auto-Submitted anything-but-'no', which RFC 3834 defines for exactly this purpose;
+ *   - a sender of mailer-daemon or postmaster.
+ *
+ * `Precedence: bulk` is NOT here although it would catch more. Mailing lists set it, and so do
+ * some legitimate senders — a debtor's message must never be discarded because their employer's
+ * mail server is chatty.
+ */
+export type AutomatedMail = 'bounce' | 'auto_reply'
+
+export function automatedMailKind(headers: {
+  from?: string | null
+  returnPath?: string | null
+  autoSubmitted?: string | null
+  contentType?: string | null
+  failedRecipients?: string | null
+  autoReply?: string | null
+}): AutomatedMail | null {
+  const from = (headers.from ?? '').toLowerCase()
+  const returnPath = (headers.returnPath ?? '').trim()
+  const contentType = (headers.contentType ?? '').toLowerCase()
+
+  /*
+   * The null sender. A bounce is sent from <> precisely so that a bounce of a bounce cannot
+   * loop — it is the one header on this list that is definitional rather than conventional.
+   */
+  if (returnPath === '<>' || returnPath === '') {
+    /* An absent Return-Path is not a null one: plenty of mail reaches us without the header. */
+    if (headers.returnPath !== undefined && headers.returnPath !== null) return 'bounce'
+  }
+  if (/multipart\/report/.test(contentType) && /delivery-status/.test(contentType)) return 'bounce'
+  if ((headers.failedRecipients ?? '').trim() !== '') return 'bounce'
+  /* The two mailbox names reserved by the standards for a mail system talking about itself. */
+  if (/(^|[<\s:])(mailer-daemon|postmaster)@/.test(from)) return 'bounce'
+
+  /* RFC 3834: anything other than 'no' means a machine composed it. */
+  const auto = (headers.autoSubmitted ?? '').trim().toLowerCase()
+  if (auto !== '' && auto !== 'no') return 'auto_reply'
+  if ((headers.autoReply ?? '').trim() !== '') return 'auto_reply'
+  return null
+}
+
+/**
+ * What the account's timeline says about a message we did not file.
+ *
+ * IT IS STILL WORTH KNOWING, which is why this exists rather than the message being dropped. A
+ * demand letter that bounced did not arrive, and a collector about to ring and ask why there has
+ * been no answer needs to know the letter never got there. An out-of-office is weaker but still
+ * tells them when somebody is back.
+ *
+ * Written as OUR record, in our voice — the daemon is not the debtor and must not appear on the
+ * timeline as though it were.
+ */
+export function automatedMailNote(kind: AutomatedMail, subject: string | null): string {
+  const about = (subject ?? '').trim()
+  const tail = about ? ` Subject: "${about}".` : ''
+  return kind === 'bounce'
+    ? `An email we sent could not be delivered.${tail} No correspondence fee has been raised — this is our mail system reporting a failure, not the debtor writing to us.`
+    : `An automatic reply came back to an email we sent.${tail} No correspondence fee has been raised — nobody wrote it.`
+}

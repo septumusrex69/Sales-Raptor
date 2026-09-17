@@ -31,6 +31,7 @@ import type { ContactCandidate } from './signature'
 import { chargeItem, type ChargeResult } from './accountCharges'
 import { addNote } from './accountWorkspace'
 import {
+  automatedMailKind,
   CORRESPONDENCE_ACTION_CODE, CORRESPONDENCE_DESCRIPTION, CORRESPONDENCE_ITEM_ID,
   EMAIL_IN_KIND, receivedEmailNote,
 } from './emailRules'
@@ -1070,6 +1071,27 @@ async function fileOnAccount(input: {
   accountId: string
   actor: { id: string | null; name: string | null }
 }): Promise<ChargeResult> {
+  /*
+   * THE SAME RULE ON THE OTHER DOOR.
+   *
+   * The sync refuses to file a bounce as a debtor's correspondence; this is the path a PERSON
+   * uses, and without the same guard an agent could put a Mail Delivery Subsystem notice on an
+   * account by hand and raise the R13 the sync had just declined.
+   *
+   * Only the sender is available here — the mailbox row keeps the address, the subject and a
+   * snippet, not the headers — so this catches less than the sync does. It catches the case that
+   * matters: mail from the two mailbox names the standards reserve for a mail system reporting
+   * on itself.
+   */
+  const automated = automatedMailKind({ from: input.mail.fromAddress })
+  if (automated !== null) {
+    throw new Error(
+      automated === 'bounce'
+        ? 'That is a delivery failure notice from a mail system, not correspondence from the debtor. Filing it would charge them R13 under item 6 for our own server\u2019s message.'
+        : 'That is an automatic reply, not something the debtor wrote. Filing it would charge them R13 under item 6.',
+    )
+  }
+
   const charge = await chargeItem({
     accountId: input.accountId,
     itemId: CORRESPONDENCE_ITEM_ID,

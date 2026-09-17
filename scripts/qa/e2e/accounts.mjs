@@ -18,6 +18,23 @@ import {
   accountsPage,
 } from './fixtures.mjs'
 
+/**
+ * The first day a hand-out plan can put anything on: the next working day on or after today.
+ *
+ * The same rule as handOut.ts's nextWorkingDay, so the fixture and the planner cannot disagree
+ * about which day the grid opens on.
+ */
+const FIRST_PLAN_DAY = (() => {
+  const d = new Date()
+  for (let i = 0; i < 30; i += 1) {
+    const iso = d.toISOString().slice(0, 10)
+    const day = new Date(`${iso}T00:00:00Z`).getUTCDay()
+    if (day !== 0 && day !== 6) return iso
+    d.setUTCDate(d.getUTCDate() + 1)
+  }
+  return d.toISOString().slice(0, 10)
+})()
+
 const t = makeRunner('accounts')
 const PAGE_SIZE = 100
 const seen = []
@@ -64,9 +81,15 @@ const handlers = [
    * that "the red count agrees with the cells" passes by both sides being zero — which is exactly
    * what happened the first time it was written. A collector holding 60 against a 50-a-day
    * capacity makes the case real.
+   *
+   * AND THE DAY IS COMPUTED, NOT WRITTEN DOWN. It was a literal date — the day this check was
+   * written — and it passed exactly until the next morning: a hand-out window starts at the next
+   * working day, so a yesterday never appears in the grid and the cell reading 60 stopped
+   * existing. Three checks went red for a reason that had nothing to do with the code they guard,
+   * which is how a suite teaches people to ignore it.
    */
   [(u) => u.includes('/rpc/diary_day_load'), () => ({
-    body: [{ owner_id: BENCH[0].id, due_on: '2026-09-16', entries: 60 }],
+    body: [{ owner_id: BENCH[0].id, due_on: FIRST_PLAN_DAY, entries: 60 }],
   })],
   [(u) => u.includes('/rest/v1/diary_entries'), () => ({ body: [] })],
   [

@@ -7,6 +7,7 @@ import {
   readableParts, type MessageBody, type MessagePart,
 } from './mime.js'
 import {
+  automatedMailKind, automatedMailNote,
   CORRESPONDENCE_ACTION_CODE, CORRESPONDENCE_DESCRIPTION, CORRESPONDENCE_ITEM_ID,
   EMAIL_IN_KIND, normaliseAddress, receivedEmailNote, threadIds,
 } from '../../src/lib/emailRules.js'
@@ -277,6 +278,47 @@ async function markUserEmailOnRecord(
  * mail from it is somebody else's — and a debtor writing from an address we had given up on is
  * precisely the contact a collector needs to see.
  */
+/**
+ * The raw header lines a bounce is recognised by.
+ *
+ * READ OFF headerLines, NOT parsed.headers. mailparser turns some headers into objects — a
+ * Content-Type comes back as `{ value, params }` — and a caller expecting a string gets
+ * "[object Object]", which matches nothing and fails silently in the direction that charges the
+ * debtor. headerLines is the unparsed truth: `{ key, line }` with the key already lower-cased.
+ *
+ * The Content-Type is rebuilt from its parts because that is the one header whose PARAMETER
+ * matters: `multipart/report` alone is not a bounce, `report-type=delivery-status` is.
+ */
+function headerFields(parsed: {
+  /* Readonly, because that is how mailparser hands it over and copying it buys nothing. */
+  headerLines?: readonly { readonly key: string; readonly line: string }[]
+  from?: { text: string }
+}): {
+  from: string | null
+  returnPath: string | null
+  autoSubmitted: string | null
+  contentType: string | null
+  failedRecipients: string | null
+  autoReply: string | null
+} {
+  const lines = parsed.headerLines ?? []
+  const of = (name: string): string | null => {
+    const hit = lines.find((h) => h.key === name)
+    if (!hit) return null
+    /* "Auto-Submitted: auto-replied" -> "auto-replied". A header with no colon is not a header. */
+    const at = hit.line.indexOf(':')
+    return at === -1 ? '' : hit.line.slice(at + 1).trim()
+  }
+  return {
+    from: parsed.from?.text ?? of('from'),
+    returnPath: of('return-path'),
+    autoSubmitted: of('auto-submitted'),
+    contentType: of('content-type'),
+    failedRecipients: of('x-failed-recipients'),
+    autoReply: of('x-autoreply') ?? of('x-autorespond'),
+  }
+}
+
 async function findAccount(
   admin: SupabaseClient,
   fromAddress: string,
@@ -809,6 +851,47 @@ async function syncMailbox(
        * far more likely to be about the debt than about a deal.
        */
       const accountMatch = await findAccount(admin, fromAddress, parsed)
+
+      /*
+       * OUR OWN MAIL SYSTEM IS NOT THE DEBTOR.
+       *
+       * A bounce quotes the Message-ID of the letter it is reporting on, so it matched the
+       * account by thread exactly as a reply does — and was filed as the debtor's correspondence,
+       * put on their timeline in the daemon's name, and charged R13 under item 6. That is money
+       * on a real statement for our mail server talking to itself, it counts toward the items 1-7
+       * ceiling so it displaces a fee the firm could have charged, and once remittance has run it
+       * cannot be taken off.
+       *
+       * Checked AFTER the match, because the note below needs to know which account it belongs
+       * to — and an automated message that matches nothing is just mail in a mailbox.
+       */
+      const automated = accountMatch ? automatedMailKind(headerFields(parsed)) : null
+      if (accountMatch && automated) {
+        /*
+         * Still recorded, because a demand letter that bounced did not arrive — and a collector
+         * about to ring and ask why nobody has answered needs to know the letter never got there.
+         * Our words, in our voice, with no fee attached.
+         */
+        await admin.from('account_notes').insert({
+          account_id: accountMatch.accountId,
+          body: automatedMailNote(automated, parsed.subject ?? null),
+          kind: 'note',
+          /* 'system' — Raptor wrote this sentence, not a person. The timeline filters on it. */
+          source: 'system',
+          author_name: null,
+          created_by: null,
+        })
+        console.log(
+          `[emailSync] ${path} UID ${uid}: ${automated} for account ${accountMatch.accountId} — noted, not filed, not charged`,
+        )
+        /*
+         * Marked against the account so nobody can file it by hand afterwards and raise the R13
+         * this branch just refused. It belongs to that account; it is simply not the debtor's.
+         */
+        if (mailboxRowId) await markUserEmailLinked(admin, mailboxRowId, accountMatch.accountId)
+        continue
+      }
+
       if (accountMatch) {
         const filedOnAccount = await fileAccountEmail(admin, accountMatch.accountId, {
           fromAddress,
