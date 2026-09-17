@@ -33,7 +33,7 @@ import { addNote } from './accountWorkspace'
 import {
   automatedMailKind,
   CORRESPONDENCE_ACTION_CODE, CORRESPONDENCE_DESCRIPTION, CORRESPONDENCE_ITEM_ID,
-  EMAIL_IN_KIND, receivedEmailNote,
+  EMAIL_IN_KIND, receivedEmailNote, type Recipient,
 } from './emailRules'
 
 export interface MailItem {
@@ -41,6 +41,14 @@ export interface MailItem {
   folder: string
   /** Pulled from the Sent folder. Never filed on a record and never charged. */
   isSent: boolean
+  /**
+   * Everyone the message went to, and everyone copied.
+   *
+   * THE MAPPER IS THE TRAP THIS CODEBASE HAS A NAME FOR. A column in the database, in the type
+   * and in the select but missing from toItem reads as undefined for ever and nothing fails.
+   */
+  toRecipients: Recipient[]
+  ccRecipients: Recipient[]
   /** Who it went to. The useful address on a sent message, where From is always us. */
   toAddress: string | null
   toName: string | null
@@ -91,6 +99,8 @@ interface MailRow {
   id: string
   folder: string
   is_sent: boolean | null
+  to_recipients: Recipient[] | null
+  cc_recipients: Recipient[] | null
   to_address: string | null
   to_name: string | null
   uid: number
@@ -138,7 +148,8 @@ interface MailRow {
  * be spelled out the same way.
  */
 const COLUMNS = `
-  id, folder, is_sent, to_address, to_name, uid, message_id, from_address, from_name, subject, snippet,
+  id, folder, is_sent, to_address, to_name, to_recipients, cc_recipients,
+  uid, message_id, from_address, from_name, subject, snippet,
   attachment_names, is_junk, occurred_at, read_at, is_filed, is_settled, no_record_at,
   linked_account_id, linked_lead_id, linked_deal_id, linked_company_id, linked_contact_id,
   debtor_accounts!user_emails_linked_account_id_fkey ( account_number, debtor_first_name, debtor_surname ),
@@ -200,6 +211,9 @@ function toItem(r: MailRow): MailItem {
     id: r.id,
     folder: r.folder,
     isSent: !!r.is_sent,
+    /* Defaulted to empty rather than left undefined: a list nobody can map over is a crash. */
+    toRecipients: Array.isArray(r.to_recipients) ? r.to_recipients : [],
+    ccRecipients: Array.isArray(r.cc_recipients) ? r.cc_recipients : [],
     toAddress: r.to_address ?? null,
     toName: r.to_name ?? null,
     uid: r.uid,

@@ -4,9 +4,10 @@ import {
   AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, CircleCheck, ExternalLink,
   Inbox, Link2, Download, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
   Forward as ForwardIcon,
-  Search, ShieldAlert, Trash2, Undo2, X, CalendarDays, CalendarPlus
+  Search, ShieldAlert, Trash2, Undo2, X, CalendarDays, CalendarPlus, ReplyAll
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
+import { RowMenu, type RowMenuItem } from '../../components/ui/RowMenu'
 import { Modal } from '../../components/ui/Modal'
 import { inviteHeadline, inviteWhen, parseInvite, type CalendarInvite } from '../../lib/calendarInvite.ts'
 import {
@@ -16,7 +17,7 @@ import { useAuth } from '../../store/AuthContext'
 import { relativeDayLabel } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
 import { recordSentEmail, replySubject } from '../../lib/accountEmails'
-import { forwardBody, forwardSubject } from '../../lib/emailRules'
+import { forwardBody, forwardSubject, recipientLine, replyAllTo } from '../../lib/emailRules'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import { useEmailView } from '../../lib/emailView'
@@ -148,6 +149,28 @@ export function MailPage() {
    */
   const [linkThenReply, setLinkThenReply] = useState(false)
   const [replying, setReplying] = useState<MailItem | null>(null)
+  /** Whether the open reply is answering everybody. Decides the Cc the composer opens with. */
+  const [replyAll, setReplyAll] = useState(false)
+  /*
+   * WHICH ADDRESS IS ME.
+   *
+   * Asked of the mailbox rather than taken from the login, because they are not always the same
+   * person's: mail can be read from a connected mailbox that differs from the address somebody
+   * signs in with. Both are used, because either one being on the original is enough to mean "me"
+   * -- and being copied on your own reply-all doubles the thread every round.
+   */
+  const [mailbox, setMailbox] = useState<string | null>(null)
+  useEffect(() => {
+    const token = session?.access_token
+    if (!token) return
+    let cancelled = false
+    void fetch('/api/email/status', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((b: { email?: string | null }) => { if (!cancelled) setMailbox(b.email ?? null) })
+      /* Not knowing costs a reply-all one address it might have dropped, not the mailbox. */
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [session])
   /** A brand-new message to anybody. Not a reply, so it carries no thread and no record. */
   const [composing, setComposing] = useState(false)
   /** A message being passed on, with the original underneath it. */
@@ -390,12 +413,33 @@ export function MailPage() {
    * The picker still offers a way out for mail that genuinely belongs to no debtor — a supplier,
    * a colleague — but as the deliberate second choice, which is what it should be.
    */
-  function startReply(mail: MailItem) {
+  function startReply(mail: MailItem, all = false) {
+    setReplyAll(all)
     // Filed anywhere is enough — a lead's reply belongs on the lead, and the composer says
     // plainly that nothing will be charged for it.
     if (mail.isFiled) { setReplying(mail); return }
     setLinkThenReply(true)
     setLinking(mail)
+  }
+
+  /**
+   * The Cc a reply-all opens with, or undefined for an ordinary reply.
+   *
+   * Undefined rather than empty, because the composer shows the Cc box only when it is given one
+   * — an empty Cc field on every reply is a control nobody fills in and everybody reads past.
+   *
+   * `mine` is the connected mailbox: it is on the original, because that is how the message
+   * reached us, and left in every reply-all would drop a copy back in our own inbox.
+   */
+  function replyAllCc(mail: MailItem): string | undefined {
+    if (!replyAll) return undefined
+    const { cc } = replyAllTo({
+      from: { name: mail.fromName, address: mail.fromAddress },
+      to: mail.toRecipients,
+      cc: mail.ccRecipients,
+      mine: [mailbox, currentUser?.email].filter((a): a is string => !!a),
+    })
+    return recipientLine(cc)
   }
 
   /**
@@ -905,6 +949,13 @@ export function MailPage() {
                       {m.fromName && <span className="text-slate-300"> &middot; {m.fromAddress}</span>}
                       {' · '}{relativeDayLabel(m.occurredAt)}
                     </p>
+                    {/*
+                      WHO ELSE WAS ON IT, at the firm's instruction: "I can't see all the other
+                      recipients of an email." A debtor who copies their attorney, or a client who
+                      copies two of their own people, read as a private message -- and somebody
+                      answering it had no way to know the answer needed to reach three people.
+                    */}
+                    <RecipientLines mail={m} />
                   </div>
                   {m.linkedTo ? (
                     // Said here rather than on every row in the list — one place, where somebody
@@ -928,7 +979,8 @@ export function MailPage() {
                   skippedImages={imagesSkipped[m.id]}
                   loadingBody={reading === m.id}
                   bodyError={readError[m.id]} onBlock={() => setBlocking(m)}
-                  onReply={() => startReply(m)} onForward={() => startForward(m)} onJunk={(j) => void junkOne(m, j)}
+                  onReply={() => startReply(m)} onReplyAll={() => startReply(m, true)}
+                  onForward={() => startForward(m)} onJunk={(j) => void junkOne(m, j)}
                   onMove={mayRefile ? () => setMoving(m) : null}
                   onUnread={() => void unreadOne(m)}
                   onNoRecord={() => setSettling(m)}
@@ -975,6 +1027,7 @@ export function MailPage() {
                   })}
                   onLink={() => startLink(m)}
                   onReply={() => startReply(m)}
+                  onReplyAll={() => startReply(m, true)}
                   onForward={() => startForward(m)}
                   onJunk={(j) => void junkOne(m, j)}
                   onMove={mayRefile ? () => setMoving(m) : null}
@@ -1105,6 +1158,7 @@ export function MailPage() {
       {replying && (
         <ComposeEmailModal
           to={replying.fromAddress}
+          initialCc={replyAllCc(replying)}
           initialSubject={replySubject(replying.subject)}
           /*
            * The box starts empty, on purpose, exactly as it does on the account page. A debtor's
@@ -1408,8 +1462,8 @@ function MailSummary({ mail, tight, blocked }: {
 /** The message itself, shared by the expanded row and the reading pane. */
 function MailBody({
   mail, body, images, calendar, events, onAccept, onRemoveEvent, skippedImages, loadingBody,
-  bodyError, onBlock, onReply, onForward, onJunk, onMove, onUnread, onNoRecord, onUndoNoRecord,
-  onDownload, downloading, downloadError,
+  bodyError, onBlock, onReply, onReplyAll, onForward, onJunk, onMove, onUnread, onNoRecord,
+  onUndoNoRecord, onDownload, downloading, downloadError,
 }: {
   mail: MailItem
   body?: string
@@ -1427,6 +1481,13 @@ function MailBody({
   bodyError?: string
   onBlock: () => void
   onReply: () => void
+  /**
+   * Answer everybody who was on it.
+   *
+   * Offered only where there IS somebody else — a message addressed to one person has nothing
+   * for this button to do, and one that does nothing is one people stop believing.
+   */
+  onReplyAll: () => void
   /** Pass it on to somebody who was not in the conversation — an attorney, the client. */
   onForward: () => void
   /** Shelve it, or rescue it. Absent on filed mail, which is a record either way. */
@@ -1445,6 +1506,50 @@ function MailBody({
   downloading: string | null
   downloadError: string | null
 }) {
+  /*
+   * The overflow menu's contents, decided here rather than in the markup.
+   *
+   * Each entry carries its own reason for being offered at all:
+   *
+   * - UNMATCH is only on mail filed on a DEBTOR account, and only where the caller may refile it —
+   *   the database refuses it for anybody else, so offering the button would be a lie. It is ONE
+   *   item and it says Unmatch, because two items made the agent choose between "rematch" and
+   *   "unmatch" before knowing which they could do, and the answer to "which account should this
+   *   be on?" is frequently "I do not know yet". The box behind it offers rematching underneath.
+   * - MARK UNREAD is "not yet", which is a legitimate answer. Without it, opening a message to see
+   *   whether it was urgent was the same act as deciding it was not.
+   * - FREE MAIL is the third answer to "what is this?" and the one the mailbox had no word for. A
+   *   telephone provider's invoice is not junk and belongs on no account. Hidden on matched mail:
+   *   that is on a record and a fee may have been raised against it, so calling it free would be a
+   *   contradiction the database refuses anyway.
+   * - JUNK sits between "file it" and "block them": this message is not work, without claiming
+   *   anything about the sender. Hidden on filed mail — a message on a record is neither junk nor
+   *   anybody's to reclassify.
+   * - BLOCK is last and is the only one marked as damage. It is the one action you should have
+   *   read something before taking, which is why it is on the open message and not on every row —
+   *   and it is offered even on mail already filed, because blocking is about future noise and not
+   *   about the message in front of you.
+   */
+  const moreActions: RowMenuItem[] = [
+    ...(mail.linkedTo?.kind === 'account' && onMove
+      ? [{ label: 'Unmatch', icon: <Undo2 size={15} />, onClick: onMove }]
+      : []),
+    { label: 'Mark unread', icon: <MailIcon size={15} />, onClick: onUnread },
+    ...(!mail.isFiled
+      ? [mail.noRecordAt
+        ? { label: 'Put back in the queue', icon: <Undo2 size={15} />, onClick: onUndoNoRecord }
+        : { label: 'Mark as free', icon: <CircleCheck size={15} />, onClick: onNoRecord }]
+      : []),
+    ...(!mail.isFiled
+      ? [mail.isJunk
+        ? { label: 'Not junk', icon: <Undo2 size={15} />, onClick: () => onJunk(false) }
+        : { label: 'Move to junk', icon: <ShieldAlert size={15} />, onClick: () => onJunk(true) }]
+      : []),
+    /* "Block", to match the Blocked tab. The long phrasing described the mechanism; this names
+       the thing, and the two now obviously belong together. */
+    { label: 'Block sender', icon: <Ban size={15} />, onClick: onBlock, danger: true },
+  ]
+
   return (
     <>
       {/*
@@ -1461,17 +1566,20 @@ function MailBody({
         is the property that makes a toolbar a toolbar.
       */}
       {/*
-        Everything you can do with an open message, in one row.
+        THREE ANSWERS IN FRONT, EVERYTHING ELSE BEHIND THE DOTS.
 
-        Reply is first and is the whole reason the mailbox stopped being read-only: answering a
-        debtor used to mean finding their account and starting again there, so the mailbox was a
-        filing tray rather than a place you worked. What it does depends on whether this message
-        is on an account yet — see startReply.
+        Nine buttons of equal weight in one wrapping row is not a toolbar, it is a list you have to
+        read every time — and on a narrow pane it wrapped to three lines, which put Block sender
+        directly under Reply. The firm, on a layout that grouped them: "I like this type of
+        organization. Make it like this."
 
-        Blocking lives on the OPEN message rather than as another button on every row. It is the
-        one action you should have read something before taking — and it is offered even on mail
-        already linked to an account, because blocking a sender is about future noise, not about
-        the message in front of you.
+        Reply, Reply all and Forward are what an open message is actually for, and they are the
+        whole reason the mailbox stopped being read-only: answering a debtor used to mean finding
+        their account and starting again there. What Reply does depends on whether this message is
+        on an account yet — see startReply.
+
+        The rest are filing decisions. They are taken once per message and never in a hurry, so
+        they cost a click and buy back a row that reads at a glance.
       */}
       {/* No top margin: this is the first thing in the card now, not a footer under a message. */}
       <div className="flex flex-wrap items-center gap-2">
@@ -1479,6 +1587,20 @@ function MailBody({
           className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
           <Reply size={13} /> Reply
         </button>
+
+        {/*
+          REPLY ALL, at the firm's instruction: "I also can't respond to all recipients." A debtor
+          who copies their attorney was answered privately, so the attorney never saw the answer to
+          the question they had been copied on.
+
+          Absent where nobody else was on it, rather than present and doing the same as Reply.
+        */}
+        {(mail.toRecipients.length + mail.ccRecipients.length) > 1 && (
+          <button onClick={onReplyAll}
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+            <ReplyAll size={13} /> Reply all
+          </button>
+        )}
 
         {/*
           FORWARD, which Reply alone could not cover. Passing a debtor's dispute to the client who
@@ -1494,8 +1616,10 @@ function MailBody({
           Through to the debtor's file, which is the other half of managing mail from one place:
           the message is here, but the balance, the arrangement and the history are there.
 
-          A Link, not a button, so it behaves like one — middle-click and "open in new tab" both
-          work, which matters when you are working a message and want the account beside it.
+          It stays out in front rather than going behind the dots because it is a destination and
+          not a decision — and because it is a Link, so it behaves like one: middle-click and "open
+          in new tab" both work, which matters when you are working a message and want the account
+          beside it. Neither survives being an item in a menu.
         */}
         {mail.linkedTo && (
           <Link to={mail.linkedTo.path}
@@ -1508,80 +1632,15 @@ function MailBody({
         )}
 
         {/*
-          Junk sits between "file it" and "block them": it says this message is not work,
-          without claiming anything about the sender. Hidden on filed mail — a message on a
-          record is neither junk nor anybody's to reclassify.
+          Everything else, in the firm's own words. Built as a list rather than written out as
+          markup so that what is offered and what is hidden is decided in one place — the rules are
+          conditional enough (filed, junk, free, administrator) that spread across nine blocks of
+          JSX they stopped being readable.
+
+          Wider than the default menu because "Put back in the queue" is the firm's wording and
+          wrapping it across two lines would read as a mistake.
         */}
-        {/*
-          Only on mail already filed on a DEBTOR account, and only for an administrator — the
-          database refuses it for anyone else, so offering the button would be a lie. Not offered
-          on a lead or a client, where no fee is involved and nothing is at stake.
-        */}
-        {/*
-          ONE button, and it says Unmatch.
-          
-          Two buttons made the agent choose between "rematch" and "unmatch" before knowing which
-          they could actually do — and the answer to "which account should this be on?" is
-          frequently "I do not know yet". So the box behind this leads with unmatching and offers
-          rematching underneath, for when somebody does know.
-        */}
-        {mail.linkedTo?.kind === 'account' && onMove && (
-          <button onClick={onMove}
-            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50">
-            <Undo2 size={13} /> Unmatch
-          </button>
-        )}
-
-        {/*
-          Put it back the way you found it.
-
-          It sits with the other actions rather than beside the subject because it belongs to the
-          same decision as Reply and Junk: you have now read this, so what happens to it? "Not
-          yet" is a legitimate answer, and without a way to say it, opening a message to see
-          whether it was urgent was the same act as deciding it was not.
-        */}
-        <button onClick={onUnread}
-          className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50">
-          <MailIcon size={13} /> Mark unread
-        </button>
-
-        {/*
-          The third answer to "what is this?", and the one the mailbox had no word for.
-
-          Beside Reply and Junk because it is the same decision — you have read this, now what
-          happens to it? A telephone provider's invoice is not junk and belongs on no account,
-          and before this the only honest option was to leave it in the queue for ever.
-
-          Hidden on matched mail: that is on a record and a fee may have been raised against it,
-          so calling it free would be a contradiction the database refuses anyway.
-        */}
-        {!mail.isFiled && (mail.noRecordAt ? (
-          <button onClick={onUndoNoRecord}
-            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50">
-            <Undo2 size={13} /> Put back in the queue
-          </button>
-        ) : (
-          <button onClick={onNoRecord}
-            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50">
-            <CircleCheck size={13} /> Mark as free
-          </button>
-        ))}
-
-        {!mail.isFiled && (
-          <button onClick={() => onJunk(!mail.isJunk)}
-            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50">
-            {mail.isJunk
-              ? <><Undo2 size={13} /> Not junk</>
-              : <><ShieldAlert size={13} /> Move to junk</>}
-          </button>
-        )}
-
-        <button onClick={onBlock}
-          className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-negative-100 hover:bg-negative-50 hover:text-negative-700">
-          {/* "Block", to match the Blocked tab. The long phrasing described the mechanism;
-              this names the thing, and the two now obviously belong together. */}
-          <Ban size={13} /> Block sender
-        </button>
+        <RowMenu width="w-56" label="More things to do with this message" items={moreActions} />
       </div>
       {mail.attachmentNames.length > 0 && (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -1718,6 +1777,32 @@ function MailBody({
  * The .ics is attached to the message and downloads from the row above, which opens in whatever
  * calendar they actually use. That is the honest answer until Raptor has one of its own.
  */
+/**
+ * To and Cc, under the sender.
+ *
+ * Absent entirely where there is nobody to name: a message addressed to one person, which is most
+ * of them, gains nothing from a line saying so. Mail synced before these columns existed has
+ * empty lists and is silent for the same reason -- it says nothing rather than claiming nobody
+ * else was on it.
+ */
+function RecipientLines({ mail }: { mail: MailItem }) {
+  if (mail.toRecipients.length === 0 && mail.ccRecipients.length === 0) return null
+  return (
+    <div className="mt-0.5 space-y-0.5">
+      {mail.toRecipients.length > 0 && (
+        <p className="text-xs text-slate-400 break-words">
+          <span className="text-slate-500">To</span> {recipientLine(mail.toRecipients)}
+        </p>
+      )}
+      {mail.ccRecipients.length > 0 && (
+        <p className="text-xs text-slate-400 break-words">
+          <span className="text-slate-500">Cc</span> {recipientLine(mail.ccRecipients)}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function InviteCard({ ics, events, onAccept, onRemove }: {
   ics?: string
   events: CalendarEvent[]
@@ -1844,8 +1929,8 @@ function InviteLine({ label, value, note }: { label: string; value: string; note
 function MailRow({
   mail, chosen, expanded, selecting, blocked, body, images, calendar, events, onAccept,
   onRemoveEvent, skippedImages, loadingBody,
-  bodyError, onToggle, onChoose, onLink, onBlock, onReply, onForward, onJunk, onMove, onUnread,
-  onNoRecord, onUndoNoRecord, onDownload, downloading, downloadError,
+  bodyError, onToggle, onChoose, onLink, onBlock, onReply, onReplyAll, onForward, onJunk, onMove,
+  onUnread, onNoRecord, onUndoNoRecord, onDownload, downloading, downloadError,
 }: {
   mail: MailItem
   /** The raw ICS where this was a meeting request. Passed through to MailBody. */
@@ -1872,6 +1957,7 @@ function MailRow({
   onLink: () => void
   onBlock: () => void
   onReply: () => void
+  onReplyAll: () => void
   onForward: () => void
   onJunk: (junk: boolean) => void
   onMove: (() => void) | null
@@ -1922,11 +2008,21 @@ function MailRow({
 
       {expanded && (
         <div className="px-5 pb-4 pl-[2.9rem]">
+          {/*
+            WHO ELSE WAS ON IT, here as well as in the reading pane. The firm: "I can't see all the
+            other recipients of an email." Offering Reply all on a row that never says who would be
+            copied is worse than not offering it -- the one thing somebody must be able to check
+            before pressing it is the list.
+          */}
+          <div className="-mt-1 mb-2.5">
+            <RecipientLines mail={mail} />
+          </div>
           <MailBody mail={mail} body={body} images={images} calendar={calendar}
             events={events} onAccept={onAccept} onRemoveEvent={onRemoveEvent}
             skippedImages={skippedImages}
             loadingBody={loadingBody}
-            bodyError={bodyError} onBlock={onBlock} onReply={onReply} onForward={onForward} onJunk={onJunk}
+            bodyError={bodyError} onBlock={onBlock} onReply={onReply} onReplyAll={onReplyAll}
+            onForward={onForward} onJunk={onJunk}
             onMove={onMove} onUnread={onUnread}
             onNoRecord={onNoRecord} onUndoNoRecord={onUndoNoRecord} onDownload={onDownload}
             downloading={downloading} downloadError={downloadError} />

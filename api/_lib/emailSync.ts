@@ -178,6 +178,9 @@ async function fileUserEmail(
     /** Who it went to. The useful address on a sent message; From is always us. */
     toAddress?: string | null
     toName?: string | null
+    /** Everyone the message went to, and everyone copied. See replyAllTo. */
+    toRecipients?: { name: string | null; address: string }[]
+    ccRecipients?: { name: string | null; address: string }[]
   },
 ): Promise<string | null> {
   const { data, error } = await admin
@@ -197,6 +200,8 @@ async function fileUserEmail(
         is_sent: message.isSent ?? false,
         to_address: message.toAddress ?? null,
         to_name: message.toName ?? null,
+        to_recipients: message.toRecipients ?? [],
+        cc_recipients: message.ccRecipients ?? [],
         /*
          * Sent mail arrives settled. It is not waiting to be matched to anything — we wrote it,
          * we know where it went — and a Sent folder dropping 2 000 messages into the queue an
@@ -858,6 +863,26 @@ async function syncMailbox(
       const blocked = isBlocked(normaliseAddress(fromAddress), blocks)
       if (blocked) console.log(`[emailSync] ${path} UID ${uid}: sender blocked, no mailbox row`)
 
+      /*
+       * EVERYONE, not the first one.
+       *
+       * mailparser gives an AddressObject or an array of them depending on how the header was
+       * written, so both shapes have to be flattened -- a message with two To headers is rare
+       * and is exactly the one where dropping the second would lose somebody from a reply-all.
+       */
+      const people = (field: unknown): { name: string | null; address: string }[] => {
+        const objs = Array.isArray(field) ? field : field ? [field] : []
+        return objs.flatMap((o) => (o && typeof o === 'object' && 'value' in o
+          ? ((o as { value?: { address?: string; name?: string }[] }).value ?? [])
+          : []))
+          .filter((v) => !!v.address)
+          .map((v) => ({
+            name: v.name || null,
+            address: normaliseAddress(v.address as string) ?? (v.address as string),
+          }))
+      }
+      const toRecipients = people(parsed.to)
+      const ccRecipients = people(parsed.cc)
       const firstTo = parsed.to && 'value' in parsed.to ? parsed.to.value?.[0] : undefined
 
       const mailboxRowId = blocked ? null : await fileUserEmail(admin, conn.user_id, {
@@ -873,6 +898,8 @@ async function syncMailbox(
         isSent,
         toAddress: firstTo?.address ? normaliseAddress(firstTo.address) ?? firstTo.address : null,
         toName: firstTo?.name || null,
+        toRecipients,
+        ccRecipients,
         at: (parsed.date ?? new Date()).toISOString(),
         // isBlocked's twin — the same matching, the opposite intent. See loadSenderRules.
         noRecordNeeded: isBlocked(normaliseAddress(fromAddress), senderRules),

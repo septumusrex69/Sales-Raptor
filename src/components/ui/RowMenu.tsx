@@ -8,7 +8,19 @@ export interface RowMenuItem {
   danger?: boolean
 }
 
-export function RowMenu({ items }: { items: RowMenuItem[] }) {
+export function RowMenu({ items, width = 'w-48', label }: {
+  items: RowMenuItem[]
+  /**
+   * How wide the panel is. Defaults to the width every row menu in the app has always been.
+   *
+   * A menu whose longest item wraps onto two lines reads as a mistake, and the firm's own wording
+   * is sometimes a sentence -- "Put back in the queue", not "Unfile" -- so the panel gives way
+   * rather than the words.
+   */
+  width?: string
+  /** Named where the icon alone would not say whose menu this is -- e.g. two on one row. */
+  label?: string
+}) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -22,11 +34,12 @@ export function RowMenu({ items }: { items: RowMenuItem[] }) {
 
   return (
     <div ref={ref} className="relative" onClick={(e) => e.stopPropagation()}>
-      <button onClick={() => setOpen((o) => !o)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400">
+      <button onClick={() => setOpen((o) => !o)} aria-label={label ?? 'More actions'} aria-expanded={open}
+        className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400">
         <MoreHorizontal size={16} />
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-40">
+        <div className={`absolute right-0 top-full mt-1 ${width} bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-40`}>
           {items.map((item) => (
             <button
               key={item.label}

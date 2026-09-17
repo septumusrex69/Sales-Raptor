@@ -251,3 +251,62 @@ export function automatedMailNote(kind: AutomatedMail, subject: string | null): 
     ? `An email we sent could not be delivered.${tail} No correspondence fee has been raised — this is our mail system reporting a failure, not the debtor writing to us.`
     : `An automatic reply came back to an email we sent.${tail} No correspondence fee has been raised — nobody wrote it.`
 }
+
+/* ------------------------------------------------------------------ *
+ * Replying to everybody.
+ * ------------------------------------------------------------------ */
+
+export interface Recipient { name: string | null; address: string }
+
+/**
+ * Who a reply-all goes to.
+ *
+ * THE FIRM ASKED FOR IT: "I also can't respond to all recipients." A debtor who copies their
+ * attorney, or a client who copies two of their own people, arrived looking like a private
+ * message and Reply answered the sender alone -- so the attorney never saw the answer to the
+ * question they were copied on.
+ *
+ * THE TWO WAYS THIS GOES WRONG, and both are worse than not having the button:
+ *
+ *   - COPYING YOURSELF. Your own address is on the original, because it was sent to you. Left in,
+ *     every reply-all puts a copy back in your own inbox and the thread doubles each round.
+ *   - DROPPING SOMEBODY. The whole point is that everyone who saw the question sees the answer;
+ *     a list that quietly loses one person is a private reply wearing a reply-all's label.
+ *
+ * Matched on the address, case-folded, because a mail server does not care about case and the
+ * same person is routinely written three ways across one thread. `mine` is a list, not one
+ * address: an agent's mail reaches them at their own address and at anything the firm forwards.
+ *
+ * Bcc is absent on purpose -- it is not in the message we received, so there is nobody to add.
+ */
+export function replyAllTo(input: {
+  /** Who wrote it. Always the first recipient of the answer. */
+  from: Recipient
+  to: Recipient[]
+  cc: Recipient[]
+  /** Every address that is the person replying. Never copied back to themselves. */
+  mine: string[]
+}): { to: Recipient[]; cc: Recipient[] } {
+  const key = (a: string) => a.trim().toLowerCase()
+  const mine = new Set(input.mine.map(key).filter((a) => a !== ''))
+
+  /* The sender leads, and is claimed here so the Cc pass cannot add them a second time. */
+  const seen = new Set<string>([key(input.from.address)])
+  const cc: Recipient[] = []
+
+  for (const person of [...input.to, ...input.cc]) {
+    const k = key(person.address)
+    if (k === '' || seen.has(k) || mine.has(k)) continue
+    seen.add(k)
+    cc.push(person)
+  }
+
+  return { to: [input.from], cc }
+}
+
+/** One address list, as a header line reads: "Jane Smith <jane@x.co.za>, bob@y.co.za". */
+export function recipientLine(people: Recipient[]): string {
+  return people
+    .map((p) => (p.name ? `${p.name} <${p.address}>` : p.address))
+    .join(', ')
+}

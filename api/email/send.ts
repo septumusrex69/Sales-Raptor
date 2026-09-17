@@ -30,8 +30,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const { to, subject, bodyHtml, inReplyTo } = (req.body ?? {}) as {
+  const { to, cc, subject, bodyHtml, inReplyTo } = (req.body ?? {}) as {
     to?: string; subject?: string; bodyHtml?: string
+    /**
+     * Everyone else who was on the message being answered.
+     *
+     * Reply-all only. The firm: "I also can't respond to all recipients" — a debtor who copies
+     * their attorney was answered privately, so the attorney never saw the answer to the question
+     * they had been copied on. Who ends up here is decided by replyAllTo, which takes the sender
+     * out of the list and the agent's own addresses with them.
+     */
+    cc?: string
     /**
      * The Message-ID this is a reply to, where it is one.
      *
@@ -93,6 +102,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     })
     const info = await transporter.sendMail({
       from: conn.email as string, to, subject, html: fullHtml, attachments,
+      /*
+       * BOTH PLACES, or the Sent copy shows a message that reached fewer people than it did.
+       * Absent rather than empty: nodemailer accepts an empty Cc and mail servers vary.
+       */
+      ...(cc && cc.trim() ? { cc } : {}),
       ...(inReplyTo ? { inReplyTo, references: [inReplyTo] } : {}),
     })
     // Kept so an inbound reply carrying this value in In-Reply-To can be threaded back to the
@@ -112,6 +126,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // message exactly as the recipient got it rather than with a broken image in it.
     const raw = await new MailComposer({
       from: conn.email as string, to, subject, html: fullHtml, attachments,
+      /*
+       * BOTH PLACES, or the Sent copy shows a message that reached fewer people than it did.
+       * Absent rather than empty: nodemailer accepts an empty Cc and mail servers vary.
+       */
+      ...(cc && cc.trim() ? { cc } : {}),
       ...(inReplyTo ? { inReplyTo, references: [inReplyTo] } : {}),
     }).compile().build()
     await appendToSent(

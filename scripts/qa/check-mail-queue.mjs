@@ -258,11 +258,17 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
   /*
    * Every action moved, not just Reply. Half a toolbar at the top and half at the bottom is
    * worse than either, because now there are two places to look instead of one.
+   *
+   * Some of them are now items in the overflow menu rather than buttons of their own -- the row
+   * leads with Reply, Reply all and Forward and puts the filing decisions behind the dots. Where
+   * each one lives is check-reply-all.mjs's business; what matters here is only that none of them
+   * went back under the message.
    */
   for (const [what, needle] of [
     ['forward', '<button onClick={onForward}'],
-    ['mark unread', '<button onClick={onUnread}'],
-    ['block sender', '<button onClick={onBlock}'],
+    ['mark unread', 'onClick: onUnread'],
+    ['block sender', 'onClick: onBlock'],
+    ['reach the rest of the actions', '<RowMenu'],
     ['open the record it is filed on', '<Link to={mail.linkedTo.path}'],
   ]) {
     const at = mailBody.indexOf(needle)

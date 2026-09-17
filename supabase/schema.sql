@@ -3454,3 +3454,25 @@ create policy calendar_events_own_update on public.calendar_events
   for update using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 create policy calendar_events_own_delete on public.calendar_events
   for delete using (owner_id = auth.uid());
+
+
+-- ---------------------------------------------------------------------------
+-- Who else was on an email
+-- ---------------------------------------------------------------------------
+-- The firm: "I can't see all the other recipients of an email. And I also can't respond to all
+-- recipients." user_emails carried to_address and to_name -- the FIRST recipient only, kept
+-- because "who is this from" is the wrong question about a message we sent. A debtor who copies
+-- their attorney, or a client who copies two of their own people, arrived looking like a private
+-- message, and replying went back to the sender alone.
+--
+-- Whole lists, as the message carried them, with names: a reply-all has to reach exactly the
+-- people the original did, and a name is what lets somebody check that before they send.
+alter table public.user_emails add column if not exists to_recipients jsonb not null default '[]'::jsonb;
+alter table public.user_emails add column if not exists cc_recipients jsonb not null default '[]'::jsonb;
+
+comment on column public.user_emails.to_recipients is
+  'Everyone on To, as [{name, address}] in the order the message carried them. to_address is the '
+  'first of these and stays for the Sent tab, which shows one recipient per row.';
+comment on column public.user_emails.cc_recipients is
+  'Everyone on Cc. Bcc is deliberately absent: it is not in the message we received, and a list '
+  'that looked complete while missing people would be worse than no list.';

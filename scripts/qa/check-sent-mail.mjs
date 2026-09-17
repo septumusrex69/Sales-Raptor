@@ -10,10 +10,11 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-sent-mail.mjs
  */
 import { readFileSync } from 'node:fs'
-import { forwardBody, forwardSubject, replySubject } from '../../src/lib/emailRules.ts'
+import { forwardBody, forwardSubject, recipientLine, replyAllTo, replySubject } from '../../src/lib/emailRules.ts'
 
 let pass = 0
 const failures = []
+const eq = (name, actual, expected) => check(name, JSON.stringify(actual), JSON.stringify(expected))
 function check(name, actual, expected) {
   if (Object.is(actual, expected)) { pass += 1; return }
   failures.push(`${name}\n    expected ${JSON.stringify(expected)}\n    got      ${JSON.stringify(actual)}`)
@@ -119,6 +120,89 @@ ok('forwarding fetches the real message', /await fetchMailBody\(mail\.id, token\
 ok('the unmatch names the tab it actually lands in', /You will find it under \$\{landsIn\}/.test(page))
 ok('...and knows junk goes to Junk', /mail\.isJunk \? 'Junk'/.test(page))
 ok('...and that free mail does not go to the queue either', /mail\.noRecordAt \? 'Free mail'/.test(page))
+
+/* ---------- replying to everybody ---------- */
+
+/*
+ * THE FIRM ASKED FOR IT: "I also can't respond to all recipients." A debtor who copies their
+ * attorney arrived looking like a private message, and Reply answered the sender alone -- so the
+ * attorney never saw the answer to the question they were copied on.
+ */
+const P = (address, name = null) => ({ name, address })
+
+{
+  const out = replyAllTo({
+    from: P('ernest@example.co.za', 'Ernest Mohlalisi'),
+    to: [P('stephan@bredellferreira.co.za')],
+    cc: [P('camille@bredellferreira.co.za')],
+    mine: ['stephan@bredellferreira.co.za'],
+  })
+  /* The sender leads: they asked the question and the answer is addressed to them. */
+  eq('the sender is who the reply is to', out.to.map((p) => p.address), ['ernest@example.co.za'])
+  /*
+   * COPYING YOURSELF is the first way this goes wrong. Your own address is on the original --
+   * that is how it reached you -- and left in, every reply-all drops a copy back in your own
+   * inbox and the thread doubles every round.
+   */
+  eq('...and you are not copied on your own reply', out.cc.map((p) => p.address), ['camille@bredellferreira.co.za'])
+}
+
+/*
+ * DROPPING SOMEBODY is the second, and it is the worse one: the whole point is that everybody who
+ * saw the question sees the answer, so a list that quietly loses one person is a private reply
+ * wearing a reply-all's label.
+ */
+eq('everybody else on it is carried', replyAllTo({
+  from: P('a@x.co.za'),
+  to: [P('me@firm.co.za'), P('b@x.co.za')],
+  cc: [P('c@y.co.za'), P('d@z.co.za')],
+  mine: ['me@firm.co.za'],
+}).cc.map((p) => p.address), ['b@x.co.za', 'c@y.co.za', 'd@z.co.za'])
+
+/* A mail server does not care about case, and one person is routinely written three ways. */
+eq('the same person in two cases is one person', replyAllTo({
+  from: P('a@x.co.za'),
+  to: [P('B@X.co.za')],
+  cc: [P('b@x.co.za')],
+  mine: [],
+}).cc.length, 1)
+eq('...and that is how you are recognised too', replyAllTo({
+  from: P('a@x.co.za'),
+  to: [P('Me@Firm.co.za')],
+  cc: [],
+  mine: ['me@firm.co.za'],
+}).cc.length, 0)
+/* An agent's mail reaches them at their own address and at anything the firm forwards. */
+eq('any of your addresses is still you', replyAllTo({
+  from: P('a@x.co.za'),
+  to: [P('me@firm.co.za'), P('info@firm.co.za')],
+  cc: [],
+  mine: ['me@firm.co.za', 'info@firm.co.za'],
+}).cc.length, 0)
+
+/*
+ * THE SENDER IS CLAIMED FIRST, so a sender who also appears on Cc -- which Outlook does on its
+ * own messages -- is not both replied to and copied.
+ */
+eq('the sender is not copied as well as addressed', replyAllTo({
+  from: P('a@x.co.za'), to: [P('b@x.co.za')], cc: [P('a@x.co.za')], mine: [],
+}).cc.map((p) => p.address), ['b@x.co.za'])
+
+/* A message to you alone has nobody to copy, and reply-all is then just reply. */
+eq('a private message copies nobody', replyAllTo({
+  from: P('a@x.co.za'), to: [P('me@firm.co.za')], cc: [], mine: ['me@firm.co.za'],
+}).cc.length, 0)
+/* An empty address is not a person and must not become an empty entry on the line. */
+eq('a blank address is not a recipient', replyAllTo({
+  from: P('a@x.co.za'), to: [P('')], cc: [], mine: [],
+}).cc.length, 0)
+
+/* And the header line, which is what somebody reads before pressing send. */
+eq('a named recipient reads as a name and an address',
+  recipientLine([P('jane@x.co.za', 'Jane Smith')]), 'Jane Smith <jane@x.co.za>')
+eq('...and an unnamed one as the address alone', recipientLine([P('bob@y.co.za')]), 'bob@y.co.za')
+eq('several are one line', recipientLine([P('a@x.co'), P('b@x.co')]), 'a@x.co, b@x.co')
+eq('nobody is nothing', recipientLine([]), '')
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)

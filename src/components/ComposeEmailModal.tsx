@@ -13,6 +13,7 @@ export function ComposeEmailModal({
   initialBody,
   contextNote,
   inReplyTo,
+  initialCc,
   onClose,
   onSent,
 }: {
@@ -52,6 +53,14 @@ export function ComposeEmailModal({
    * mail client shows the answer inside the thread rather than as a fresh message.
    */
   inReplyTo?: string | null
+  /**
+   * Everyone else who was on the message being answered, for a reply-all.
+   *
+   * Shown and EDITABLE, because the list is the part somebody has to be able to check: a
+   * reply-all that quietly copied a debtor's attorney would be the firm's mistake, not the
+   * sender's, and the only moment to catch it is before Send.
+   */
+  initialCc?: string
   onClose: () => void
   /**
    * `emailMessageId` is the sent message's own Message-ID, so a reply can be threaded back.
@@ -62,6 +71,7 @@ export function ComposeEmailModal({
   const { session } = useAuth()
   const listId = useId()
   const [address, setAddress] = useState(to ?? recipients?.[0]?.email ?? '')
+  const [cc, setCc] = useState(initialCc ?? '')
   const [subject, setSubject] = useState(initialSubject ?? '')
   const [body, setBody] = useState(initialBody ?? '')
   const [submitting, setSubmitting] = useState(false)
@@ -80,6 +90,8 @@ export function ComposeEmailModal({
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({
           to: address.trim(),
+          /* Absent rather than empty, so a cleared box sends to the one recipient only. */
+          ...(cc.trim() ? { cc: cc.trim() } : {}),
           subject: subject.trim(),
           bodyHtml: body.trim().replace(/\n/g, '<br>'),
           ...(inReplyTo ? { inReplyTo } : {}),
@@ -123,6 +135,21 @@ export function ComposeEmailModal({
             </datalist>
           )}
         </FormField>
+        {/*
+          ONLY ON A REPLY-ALL. An empty Cc box on every new message is a field nobody fills in and
+          everybody reads past; here it is pre-filled with the people who were on the original, and
+          the point of showing it is that somebody can take one of them OUT before sending.
+        */}
+        {initialCc !== undefined && (
+          <FormField label="Cc">
+            <input
+              className={inputClass}
+              value={cc}
+              onChange={(e) => setCc(e.target.value)}
+              placeholder="Nobody else"
+            />
+          </FormField>
+        )}
         <FormField label="Subject" required>
           <input className={inputClass} value={subject} onChange={(e) => setSubject(e.target.value)} required autoFocus={!initialSubject} />
         </FormField>
