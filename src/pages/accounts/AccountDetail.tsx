@@ -3,7 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle, ArrowLeft, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2,
   Mail, MapPin, MessageCircle, MessageSquare, Phone, Plus, Printer, Search, ShieldAlert, StickyNote,
-  Upload, User, Users, X, XCircle,
+  User, Users, X, XCircle,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { PhoneLink } from '../../components/PhoneLink'
@@ -1684,7 +1684,14 @@ function StandingPanel({ account, standing, position, traces, traceAction, onUpl
     && traces.length === 0 && !claimNobodyCanMake
 
   return (
-    <Card>
+    /*
+      A CONTAINER, so the blocks inside can lay themselves out on THIS PANEL'S width rather than
+      the screen's. The two are not the same thing: in the three-column layout this card is about
+      19rem wide on a 27" monitor, and a screen-width breakpoint would cheerfully put four columns
+      inside it. Named, because @container/details on the debtor card is a different box and a
+      variant naming that one from in here would never match anything.
+    */
+    <Card className="@container/trace">
       {/*
         THE WAY IN HAS TO BE A BUTTON. It was a line of small text inside a summary block, and the
         firm's report was "I don't know how to open that area where all the information is" —
@@ -1692,45 +1699,33 @@ function StandingPanel({ account, standing, position, traces, traceAction, onUpl
         job once a trace exists, so it gives up the emphasis.
       */}
       {/*
-        THE FIRM'S OWN HEADING, off the design they drew. "TRACE" in small grey capitals named a
-        section; "Trace information" with a line under it says what is in the card, which is what
-        somebody scanning three panels needs. Upload gives up the emphasis because opening a trace
-        that exists is the commoner job by far.
+        THE HOUSE SCALE, not the mockup's.
+
+        This shipped at the size the design was drawn at -- an 18px heading, a 20px number, 18px
+        icons -- and the firm's verdict was "super bulky". They were right, and the mistake was
+        mine twice over: a mockup is drawn full-bleed and this panel is a 19rem column, and every
+        other card beside it already had a settled scale. A survey of the screen afterwards found
+        exactly three pieces of oversized type on it and all three were this panel's.
+
+        So: an 11px uppercase heading like every other panel, 11px labels, 13px values. What is
+        KEPT from the design is the shape -- the bordered card, the icon in the gutter, the rules
+        between findings, the two columns -- because that was never the problem.
       */}
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-        <div className="min-w-0">
-          <h3 className="text-lg font-semibold text-navy-950">Trace information</h3>
-          <p className="text-xs text-slate-500 mt-0.5">
-            {traces.length > 0
-              ? 'Contact details and findings from the uploaded trace'
-              : 'Nothing filed yet \u2014 run a search or upload a report you already have'}
-          </p>
-        </div>
-        {traces.length > 0 && (
-          <div className="flex items-center gap-2 shrink-0">
-            <button type="button" onClick={onUpload}
-              className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
-              <Upload size={14} /> Upload trace
-            </button>
+      <PanelTitle action={
+        <span className="inline-flex items-center gap-2">
+          <button type="button" onClick={onUpload}
+            className="text-[11px] font-medium text-[var(--c-steel)] hover:underline">
+            Upload a trace
+          </button>
+          {traces.length > 0 && (
             <button type="button" onClick={() => onOpenTrace(traces[0].id)}
-              className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
-              <Search size={14} /> Open {traces.length > 1 ? `${traces.length} traces` : 'trace'}
+              className="text-[11px] font-medium px-2 py-1 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 inline-flex items-center gap-1">
+              <Search size={11} /> Open {traces.length > 1 ? `${traces.length} traces` : 'the trace'}
             </button>
-          </div>
-        )}
-      </div>
+          )}
+        </span>
+      }>Trace information</PanelTitle>
 
-      {/*
-        THE EMPTY BOX, at the firm's instruction: "put it there as an empty box where you can
-        upload a trace or do the trace."
-
-        It used to be a line of grey text, and only on a company -- the reasoning was that an
-        empty card on several hundred thousand individual accounts is a card people stop seeing.
-        The firm has overruled that, and they are right for a reason the old note missed: this is
-        not an empty card, it is the two ways of starting the work. A collector on an account with
-        no profile has a question ("who is this and where are they?") and this box is the answer
-        to it.
-      */}
       {bare && (
         <div className="rounded-xl border border-dashed border-slate-200 px-4 py-5 text-center">
           <p className="text-sm text-slate-600 font-medium">No trace on this account yet</p>
@@ -1844,19 +1839,19 @@ function StandingPanel({ account, standing, position, traces, traceAction, onUpl
         account is worth attaching.
       */}
       {ownJudgments.length > 0 && (
-        <div className="rounded-xl border border-slate-200 overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
-            <p className="inline-flex items-center gap-2 text-base font-semibold text-navy-950">
-              <Gavel size={16} className="text-slate-400" />
+        <div className="rounded-lg border border-slate-200 overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-2 border-b border-slate-100">
+            <p className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-slate-400">
+              <Gavel size={12} />
               Judgments
-              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 normal-case tracking-normal">
                 {summary.count}
               </span>
             </p>
-            <p className="text-xs text-slate-500 shrink-0">
+            <p className="text-[11px] text-slate-400 shrink-0">
               {summary.newest
-                ? `Most recent: ${formatDate(summary.newest)}`
-                : 'No filing date recorded'}
+                ? `most recent ${formatDate(summary.newest)}`
+                : 'no filing date recorded'}
             </p>
           </div>
 
@@ -1865,29 +1860,36 @@ function StandingPanel({ account, standing, position, traces, traceAction, onUpl
             is not nothing, and a figure that quietly left it out would be read as the whole.
           */}
           {summary.total > 0 && (
-            <p className="px-4 pt-2.5 text-xs text-slate-500">
+            <p className="px-2.5 pt-2 text-[11px] text-slate-400">
               {summary.withoutAmount > 0 ? 'At least ' : ''}
-              <span className="font-medium text-slate-700">{formatMoney(summary.total)}</span>
+              <span className="font-medium text-slate-600">{formatMoney(summary.total)}</span>
               {summary.withoutAmount > 0 && ` \u2014 ${summary.withoutAmount} without a recorded amount`}
             </p>
           )}
 
           <ul className="divide-y divide-slate-100">
             {ownJudgments.map((j) => (
-              <li key={j.id} className="px-4 py-3">
+              <li key={j.id} className="px-2.5 py-2">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-navy-950 break-words">
+                    <p className="text-sm font-medium text-slate-800 break-words">
                       {j.plaintiff ?? 'Plaintiff not recorded'}
                     </p>
-                    <p className="text-xs text-slate-500">Creditor</p>
+                    <p className="text-[11px] text-slate-400">creditor</p>
                   </div>
                   {j.amount !== null && (
                     <span className="text-sm text-slate-700 tabular-nums shrink-0">{formatMoney(j.amount)}</span>
                   )}
                 </div>
 
-                <dl className="mt-2.5 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
+                {/*
+                  TWO COLUMNS IN THIS PANEL, FOUR WHERE THERE IS ROOM. The design was drawn with
+                  four across a full-width card; this panel is a 19rem column in the three-column
+                  layout, where four columns give each about forty pixels and "Judgement By
+                  Default" wraps to four lines. @container, so it answers to the PANEL's width and
+                  not the screen's -- the same card is wide in the one-column layout.
+                */}
+                <dl className="mt-2 grid grid-cols-2 @lg/trace:grid-cols-4 gap-x-3 gap-y-1.5">
                   <JudgmentCell label="Date" value={j.filedOn ? formatDate(j.filedOn) : null} />
                   {/*
                     WHAT THE DEBT WAS, then WHAT THE COURT DID. The bureau's two columns are
@@ -1905,7 +1907,7 @@ function StandingPanel({ account, standing, position, traces, traceAction, onUpl
                   could parse is still a judgment, and who sued is the part worth having.
                 */}
                 {j.plaintiff === null && j.sourceText !== null && (
-                  <p className="mt-2 text-xs text-slate-500 italic">
+                  <p className="mt-1.5 text-[11px] text-slate-500 italic">
                     As printed: &ldquo;{j.sourceText}&rdquo;
                   </p>
                 )}
@@ -1932,81 +1934,83 @@ function TraceFound({ trace, onOpen }: { trace: FiledTrace; onOpen: () => void }
   const kin = found.relatives[0] ?? null
 
   return (
-    <div className="mb-4 rounded-xl border border-slate-200 overflow-hidden">
-      {/*
-        THE NUMBER IS THE HEADLINE, at the size somebody reads across a desk. Everything else on
-        this card is context for the decision "do I ring this, and what do I say when they answer".
-      */}
-      <Finding icon={<Phone size={18} />} label="Phone number"
+    <div className="mb-3 rounded-lg border border-slate-200 overflow-hidden">
+      <Finding icon={<Phone size={12} />} label="Phone number"
         action={(
           <button type="button" onClick={onOpen}
-            className="text-sm font-medium text-[var(--c-steel)] hover:underline inline-flex items-center gap-1 shrink-0">
-            {who ? `Review ${who}` : 'Review trace'} &rarr;
+            className="text-[11px] font-medium text-[var(--c-steel)] hover:underline shrink-0">
+            {who ? 'Review' : 'Review trace'} &rarr;
           </button>
         )}>
         {found.phone === null ? (
           <p className="text-sm text-slate-400">No number on this trace</p>
         ) : (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-lg font-semibold text-navy-950"><PhoneLink number={found.phone.value} /></span>
-            {/* Confirmed means somebody rang it and reached them — not that a bureau printed it. */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {/*
+              The gutter already has a telephone on it, so PhoneLink is given its own content:
+              its default is "<icon> number" and the row was showing two receivers.
+            */}
+            <span className="text-sm font-medium text-navy-950">
+              <PhoneLink number={found.phone.value}>{found.phone.value}</PhoneLink>
+            </span>
+            {/* Confirmed means somebody rang it and reached them, not that a bureau printed it. */}
             {found.phone.outcome === 'verified' && (
-              <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full bg-positive-50 text-positive-700">
-                <CheckCircle2 size={12} /> Confirmed
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-positive-50 text-positive-700">
+                <CheckCircle2 size={10} /> Confirmed
               </span>
             )}
             {found.phone.promotedContactId !== null && (
-              <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-500">On account</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">On account</span>
             )}
           </div>
         )}
       </Finding>
 
       {found.address && (
-        <Finding icon={<MapPin size={18} />} label="Address" divider>
-          <p className="text-sm text-navy-950 break-words">{found.address.value}</p>
-          {found.address.label && <p className="text-sm text-slate-500">{found.address.label}</p>}
+        <Finding icon={<MapPin size={12} />} label="Address" divider>
+          <p className="text-sm text-slate-800 break-words">{found.address.value}</p>
+          {found.address.label && <p className="text-[11px] text-slate-400">{found.address.label}</p>}
         </Finding>
       )}
 
       {found.employer && (
-        <Finding icon={<Building2 size={18} />} label="Employer" divider>
-          <p className="text-sm text-navy-950 break-words">{found.employer.value}</p>
-          {found.employer.label && <p className="text-xs text-slate-500">{found.employer.label}</p>}
+        <Finding icon={<Building2 size={12} />} label="Employer" divider>
+          <p className="text-sm text-slate-800 break-words">{found.employer.value}</p>
+          {found.employer.label && <p className="text-[11px] text-slate-400">{found.employer.label}</p>}
         </Finding>
       )}
 
       {/*
-        PROPERTY AND NEXT OF KIN SIT SIDE BY SIDE, which is the firm's own layout. They are the two
+        PROPERTY AND NEXT OF KIN SIDE BY SIDE, which is the firm's own layout. They are the two
         findings that change what KIND of account this is rather than how to reach them: something
         to attach, and somebody else who might know where they are.
       */}
       {(found.properties.length > 0 || kin !== null) && (
-        <div className="grid sm:grid-cols-2 border-t border-slate-100 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+        <div className="grid @sm/trace:grid-cols-2 border-t border-slate-100 divide-y @sm/trace:divide-y-0 @sm/trace:divide-x divide-slate-100">
           {found.properties.length > 0 && (
-            <Finding icon={<Home size={18} />} label="Property">
-              <p className="text-sm font-semibold text-navy-950 break-words">{found.properties[0].value}</p>
-              <p className="text-xs text-slate-500">
+            <Finding icon={<Home size={12} />} label="Property">
+              <p className="text-sm text-slate-800 break-words">{found.properties[0].value}</p>
+              <p className="text-[11px] text-slate-400">
                 {[
                   found.properties[0].amount !== null
-                    ? `Purchase price: ${formatMoney(found.properties[0].amount)}` : null,
+                    ? `bought for ${formatMoney(found.properties[0].amount)}` : null,
                   found.properties.length > 1 ? `and ${found.properties.length - 1} more` : null,
                 ].filter(Boolean).join(' \u00b7 ')}
               </p>
             </Finding>
           )}
           {kin !== null && (
-            <Finding icon={<User size={18} />} label="Possible next of kin">
-              <p className="text-sm font-semibold text-navy-950 break-words">{kin.value}</p>
+            <Finding icon={<User size={12} />} label="Possible next of kin">
+              <p className="text-sm text-slate-800 break-words">{kin.value}</p>
               {/*
-                "Unverified" is the whole point of the word "possible". A shared surname is evidence
-                of a family connection and not proof of one, and a collector who opens a call to
-                somebody's sister as though the relationship were established has made it worse.
+                "Unverified" is the whole point of the word "possible". A shared surname is
+                evidence of a family connection and not proof of one, and a collector who opens a
+                call to somebody's sister as though it were established has made it worse.
               */}
-              <p className="text-xs text-slate-500">
+              <p className="text-[11px] text-slate-400">
                 {found.relatives.length > 1
-                  ? `Unverified relationship \u00b7 and ${found.relatives.length - 1} more`
-                  : 'Unverified relationship'}
+                  ? `unverified \u00b7 and ${found.relatives.length - 1} more`
+                  : 'unverified relationship'}
               </p>
             </Finding>
           )}
@@ -2014,11 +2018,11 @@ function TraceFound({ trace, onOpen }: { trace: FiledTrace; onOpen: () => void }
       )}
 
       {found.directorships.length > 0 && (
-        <Finding icon={<Building2 size={18} />} label="Directs" divider>
-          <p className="text-sm text-navy-950 break-words">
+        <Finding icon={<Building2 size={12} />} label="Directs" divider>
+          <p className="text-sm text-slate-800 break-words">
             {found.directorships.slice(0, 3).map((d) => d.value).join(', ')}
             {found.directorships.length > 3 && (
-              <span className="text-slate-500"> and {found.directorships.length - 3} more</span>
+              <span className="text-slate-400"> and {found.directorships.length - 3} more</span>
             )}
           </p>
         </Finding>
@@ -2026,27 +2030,15 @@ function TraceFound({ trace, onOpen }: { trace: FiledTrace; onOpen: () => void }
 
       {/*
         WHAT NOBODY HAS TRIED YET, which is the only measure of whether the search was worth
-        buying. Silent at nought, because a line saying "0 untried" is a line that has nothing to
-        say and still takes a row.
+        buying. Silent at nought: a line reading "0 untried" has nothing to say and still takes
+        a row.
       */}
       {found.untried > 0 && (
         <button type="button" onClick={onOpen}
-          className="w-full text-left px-4 py-2.5 border-t border-slate-100 bg-slate-50/70 text-xs font-medium text-[var(--c-steel)] hover:bg-gold-50">
-          {found.untried} finding{found.untried === 1 ? '' : 's'} nobody has tried yet \u2014 work the trace &rarr;
+          className="w-full text-left px-2.5 py-1.5 border-t border-slate-100 bg-slate-50/70 text-[11px] font-medium text-[var(--c-steel)] hover:bg-gold-50">
+          {found.untried} finding{found.untried === 1 ? '' : 's'} nobody has tried yet &rarr;
         </button>
       )}
-    </div>
-  )
-}
-
-/** One column of a judgment. Absent values say so rather than leaving a blank under a heading. */
-function JudgmentCell({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-xs text-slate-500">{label}</dt>
-      <dd className={`text-sm break-words ${value ? 'text-navy-950' : 'text-slate-400'}`}>
-        {value ?? 'Not recorded'}
-      </dd>
     </div>
   )
 }
@@ -2060,16 +2052,29 @@ function Finding({ icon, label, children, action, divider }: {
   divider?: boolean
 }) {
   return (
-    <div className={`flex items-start gap-3 px-4 py-3 ${divider ? 'border-t border-slate-100' : ''}`}>
+    <div className={`flex items-start gap-2 px-2.5 py-2 ${divider ? 'border-t border-slate-100' : ''}`}>
       <span className="shrink-0 text-slate-400 mt-0.5">{icon}</span>
       <div className="min-w-0 flex-1">
-        <p className="text-xs text-slate-500">{label}</p>
+        <p className="text-[11px] text-slate-400">{label}</p>
         {children}
       </div>
       {action}
     </div>
   )
 }
+
+/** One column of a judgment. Absent values say so rather than leaving a blank under a heading. */
+function JudgmentCell({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[10px] uppercase tracking-wide text-slate-400">{label}</dt>
+      <dd className={`text-xs break-words ${value ? 'text-slate-800' : 'text-slate-400'}`}>
+        {value ?? 'Not recorded'}
+      </dd>
+    </div>
+  )
+}
+
 
 /**
  * The other companies a director sits on.

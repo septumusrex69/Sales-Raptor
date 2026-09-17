@@ -291,9 +291,14 @@ ok('...from a button on the panel, not a line of text', /Open \{traces\.length >
  * modal instead of ringing. So the ways in are named: "Review trace" at the top, and the untried
  * count at the foot.
  */
-ok('...and the summary carries its own way in', /\{who \? `Review \$\{who\}` : 'Review trace'\}/.test(detail))
+ok('...and the summary carries its own way in', /\{who \? 'Review' : 'Review trace'\}/.test(detail))
+/*
+ * PhoneLink is given its own content on purpose. Its default rendering is "<icon> number", and
+ * the gutter of this row already carries a telephone -- so the row shipped with two receivers on
+ * it. Asserted on the CHILDREN, because that is the whole of the fix.
+ */
 ok('...and the number in it is dialled, not swallowed by a wrapping button',
-  /<PhoneLink number=\{found\.phone\.value\} \/>/.test(detail))
+  /<PhoneLink number=\{found\.phone\.value\}>\{found\.phone\.value\}<\/PhoneLink>/.test(detail))
 /*
  * The count says how much of what the firm paid for nobody has tried yet, which is the only
  * measure of whether the search was worth buying. Silent at nought: a line reading "0 untried"

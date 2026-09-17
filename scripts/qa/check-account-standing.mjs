@@ -322,8 +322,25 @@ ok('the panel does not build its own trace button',
  * The firm's own heading, off the design they drew. "TRACE" in small grey capitals named a
  * section; "Trace information" with a line under it says what is in the card.
  */
-ok('the panel is called Trace information', /Trace information<\/h3>/.test(detail))
-ok('...and says what is in it', /Contact details and findings from the uploaded trace/.test(detail))
+ok('the panel is called Trace information', /}>Trace information<\/PanelTitle>/.test(detail))
+/*
+ * AND IT WEARS THE SAME HEADING AS EVERY OTHER PANEL BESIDE IT. It shipped once with an 18px
+ * heading and a subtitle, drawn full-bleed and dropped into a 19rem column; the firm's word was
+ * "super bulky". PanelTitle is the house heading -- 11px, uppercase, grey -- and using it is what
+ * makes this card look like the ones above and below it rather than a poster.
+ */
+ok('...through the same heading component as the panels beside it',
+  /<PanelTitle action=\{[\s\S]{0,900}}>Trace information<\/PanelTitle>/.test(detail))
+/*
+ * The panel is its own @container, so the blocks inside lay out on THIS CARD'S width. In the
+ * three-column layout it is about 19rem wide on a big monitor, and a screen-width breakpoint
+ * would put four columns in it. Named, because @container/details is the debtor card and a
+ * variant naming that one from in here matches nothing at all -- silently.
+ */
+ok('...and sizes its contents on its own width', /<Card className="@container\/trace">/.test(detail))
+ok('...with every container variant naming that container',
+  (detail.match(/@[a-z]+\/trace:/g) ?? []).length > 0
+  && !/@[a-z]+\/details:/.test(detail))
 /*
  * A WARNING THAT ONLY FIRES WHEN SOMETHING IS ACTUALLY WRONG. The account reports as under
  * administration and there is no record of who is administering it — a claim nobody can submit.
@@ -428,6 +445,43 @@ ok('the warning carries the fix', /Add the practitioner/.test(detail))
 ok('...and the panel can change one already on file', /action=\{\{ label: 'Change', onClick: onPractitioner \}\}/.test(detail))
 ok('...and the total says it is a floor when one has no amount',
   /summary\.withoutAmount > 0 \? 'At least ' : ''/.test(detail))
+
+/* ---------- and it is the same size as everything beside it ---------- */
+
+/*
+ * THE SCREEN HAS ONE TYPE SCALE AND THIS PANEL HAD ITS OWN.
+ *
+ * The trace card was built from a mockup drawn full-bleed and dropped into a 19rem column: an
+ * 18px heading, a 20px number, 18px icons. The firm's verdict was "super bulky ... make it fit in
+ * with the rest of the screen", and a survey afterwards found exactly three pieces of oversized
+ * type on the whole account screen -- all three of them this panel's.
+ *
+ * So the scale is asserted rather than left to whoever edits next. text-sm for a value,
+ * text-[11px] for a label, text-xs in between; nothing bigger, because a panel that shouts is a
+ * panel that makes the ones beside it look broken.
+ */
+{
+  const panels = read('../../src/pages/accounts/AccountWorkspacePanels.tsx')
+  for (const [name, source] of [['the account screen', detail], ['the workspace panels', panels]]) {
+    const big = (source.match(/text-(lg|xl|2xl|3xl)\b/g) ?? [])
+    ok(`${name} has nothing set larger than the house scale`, big.length === 0)
+  }
+  /*
+   * text-base is the same story one size down. Checked separately so a failure says which of the
+   * two it was rather than pointing at a combined regex.
+   */
+  ok('...and nothing at text-base either', !/text-base\b/.test(detail))
+}
+/* The icons in the gutter are 12px, which is what sits level with an 11px label. */
+ok('the finding icons are the size of the text beside them',
+  !/<(Phone|MapPin|Home|User|Building2|Gavel) size=\{1[4-9]\}/.test(detail))
+/*
+ * THE RULES BETWEEN FINDINGS STAY. The firm asked for them by name -- "I like the lines they kind
+ * of had between the information" -- and they are what makes a list of five facts readable
+ * without five headings.
+ */
+ok('the findings are still ruled off from one another', /divider \?/.test(detail))
+ok('...and the card is still bordered', /rounded-lg border border-slate-200 overflow-hidden/.test(detail))
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
