@@ -3514,3 +3514,35 @@ comment on column public.email_connections.oldest_seen_uid_sent is
 update public.user_emails
 set read_at = coalesce(read_at, occurred_at)
 where is_sent = true and read_at is null;
+
+-- ---------------------------------------------------------------------------
+-- THE OTHER FIFTEEN FOLDERS.
+--
+-- The firm reported two messages that were in their mail client and not in Raptor. The sync's own
+-- log gave the answer: that server has EIGHTEEN folders and the sync read three of them --
+-- INBOX, the Junk one and the Sent one. Archive, Blocked, "Spam Emails 1/2/3" and the rest were
+-- never opened, so anything a server-side rule or another mail client filed into them was
+-- invisible here, permanently, with nothing on screen saying so.
+--
+-- Three columns cannot hold eighteen watermarks, so the rest live here keyed by folder path.
+-- Trash and Drafts are still skipped: deleted mail is deleted, and a draft is not correspondence.
+-- ---------------------------------------------------------------------------
+alter table public.email_connections
+  add column if not exists folder_uids jsonb not null default '{}'::jsonb;
+
+comment on column public.email_connections.folder_uids is
+  'A high-water mark per IMAP folder, keyed by path. last_seen_uid / _junk / _sent stay as the marks for INBOX, Junk and Sent; every other folder on the server lives here.';
+
+-- ---------------------------------------------------------------------------
+-- AND THE LOW-WATER MARKS WERE WRONG.
+--
+-- They were set from a FORWARD run's own minimum UID, which on a mailbox that was already syncing
+-- is the oldest of the four messages that happened to arrive that minute -- not the oldest message
+-- Raptor holds. One read 59528 against a mailbox whose oldest stored message is 5101, so "fetch
+-- older mail" would have spent its first dozen presses re-reading mail Raptor already had.
+--
+-- Cleared, so the floor is derived from the oldest row actually stored -- which is what the
+-- backfill does when the column is null, and is right by construction.
+-- ---------------------------------------------------------------------------
+update public.email_connections
+set oldest_seen_uid = null, oldest_seen_uid_junk = null, oldest_seen_uid_sent = null;

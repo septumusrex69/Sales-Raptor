@@ -24,6 +24,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { bumpUnread } from '../../src/lib/emailRules.ts'
+import { looksLikeJunk, otherFolders } from '../../api/_lib/emailSync.ts'
 
 let pass = 0
 const failures = []
@@ -100,15 +101,19 @@ ok('...and files nothing onto an account', !/markUserEmailLinked/.test(backfill)
 
 const forward = slice(sync, 'const patch: Record<string, unknown>', 'return { logged: inboxResult', 'the watermark patch')
 /*
- * ONLY WHERE IT IS NOT ALREADY KNOWN. A forward run reaching UID 900 must not move the floor up
- * from 400: that would strand everything between them, which is the same bug this mark exists to
- * fix, with an extra step.
+ * IT IS NOT SET BY A FORWARD RUN AT ALL, and the version that tried to was the bug.
+ *
+ * "Record it where it is not already known" sounds right and is wrong on any mailbox that was
+ * already syncing: a forward run returns the minimum of the UIDs IT fetched, which mid-flight is
+ * the oldest of the four messages that happened to arrive that minute. It wrote 59528 against a
+ * mailbox whose oldest stored message is 5101, and the backfill would then have spent its first
+ * dozen presses re-reading mail Raptor already had.
+ *
+ * backfillMailbox derives the floor from the oldest row actually stored when the column is null,
+ * which is right by construction and needs no watermark at all.
  */
-ok('the floor is only ever set once', /conn\.oldest_seen_uid == null && inboxResult\.minUid != null/.test(forward))
-ok('...for junk as well', /conn\.oldest_seen_uid_junk == null/.test(forward))
-ok('...and for sent', /conn\.oldest_seen_uid_sent == null/.test(forward))
-/* And a run that fetched nothing has no floor to report, so it must not write one. */
-ok('a run that fetched nothing reports no floor', /minUid = uids\.length > 0 \? Math\.min\(\.\.\.uids\) : null/.test(sync))
+ok('a forward run writes no floor', !/oldest_seen_uid/.test(forward))
+ok('...and the backfill works it out instead', /floor = \(data\?\.uid as number \| undefined\) \?\? null/.test(sync))
 
 /* ---------- 4. no thirteenth serverless function ---------- */
 
@@ -186,6 +191,97 @@ const before = { ...zero }
 bumpUnread(before, mail({}), 1)
 check('the counts it was given are not mutated', before.all, 0)
 
+/* ---------- 6. the folders the sync could not see ---------- */
+
+/*
+ * THE BUG THE FIRM FOUND, AND MY FIRST ANSWER TO IT WAS WRONG.
+ *
+ * They reported two messages that were in their mail client and not in Raptor. I said the sync had
+ * only ever read forward and those messages predated the first run. They then pointed out the mail
+ * had arrived that afternoon — and they were right. My query had run three hours before it.
+ *
+ * The sync's own log gave the real answer. That server has EIGHTEEN folders and the sync read
+ * three. Anything a server-side rule or another mail client filed into Archive, Blocked or one of
+ * the "Spam Emails" folders was invisible here, permanently, with nothing on screen saying so.
+ *
+ * The list below is the real one out of that log, which is why it is ugly.
+ */
+const REAL_FOLDERS = [
+  'INBOX', 'INBOX.Sent', 'INBOX.Drafts', 'INBOX.Archive', 'INBOX.spambucket', 'INBOX.Trash',
+  'INBOX.Archive.Deleted Items', 'INBOX.Blocked', 'INBOX.Sent.Trash', 'INBOX.Sent Items',
+  'INBOX.Spam Emails', 'INBOX.Spam Emails 1', 'INBOX.Spam Emails 2', 'INBOX.Spam Emails 3',
+  'INBOX.Trash.Untitled Folder', 'INBOX.Trash.Untitled Folder 1',
+  'INBOX.Trash.Untitled Folder 1 1', 'INBOX.Trash.Untitled Folder 2',
+]
+
+const rest = otherFolders(REAL_FOLDERS, ['INBOX.spambucket', 'INBOX.Sent'])
+
+/* The ones that were being missed, and the reason the firm could not find their mail. */
+for (const wanted of ['INBOX.Archive', 'INBOX.Blocked', 'INBOX.Spam Emails', 'INBOX.Spam Emails 3',
+  'INBOX.Sent Items']) {
+  ok(`${wanted} is read now`, rest.includes(wanted))
+}
+
+/*
+ * TRASH IS NOT. Deleted mail is deleted, and pulling it into a working queue would put everything
+ * somebody has already thrown away back in front of them.
+ */
+for (const skipped of ['INBOX.Trash', 'INBOX.Trash.Untitled Folder', 'INBOX.Trash.Untitled Folder 1 1']) {
+  ok(`${skipped} is left alone`, !rest.includes(skipped))
+}
+/*
+ * AND NEITHER IS "Archive.Deleted Items" -- a nested folder that contains the word "Archive" and
+ * is deleted mail. The pattern's leading (^|\.) matches the separator, so this falls out of the
+ * whole-path test without a second one on the last segment.
+ */
+ok('deleted mail under an archive is still deleted mail', !rest.includes('INBOX.Archive.Deleted Items'))
+/* A draft is half-written and never sent. It is not correspondence with anybody. */
+ok('drafts are left alone', !rest.includes('INBOX.Drafts'))
+/* And the three already handled by name are not read a second time. */
+ok('the inbox is not read twice', !rest.includes('INBOX'))
+ok('...nor the junk folder', !rest.includes('INBOX.spambucket'))
+ok('...nor the sent folder', !rest.includes('INBOX.Sent'))
+/* Case is the server's business, not ours. */
+ok('a differently-cased path still counts as handled',
+  !otherFolders(['INBOX.SENT'], ['INBOX.Sent']).includes('INBOX.SENT'))
+
+/*
+ * SPAM BY NAME, because a server has exactly one \\Junk special-use folder and this mailbox has
+ * five things that are plainly spam. It only changes how the row is labelled -- the message is
+ * still fetched and still visible, which is the whole point of reading these folders.
+ */
+ok('"Spam Emails 2" is treated as junk', looksLikeJunk('INBOX.Spam Emails 2'))
+ok('...and Blocked with it', looksLikeJunk('INBOX.Blocked'))
+ok('...but an archive is not junk', !looksLikeJunk('INBOX.Archive'))
+ok('...nor is "Sent Items"', !looksLikeJunk('INBOX.Sent Items'))
+
+/* ---------- 7. and reading them must not bill anybody ---------- */
+
+/*
+ * A FOLDER'S FIRST READ IS HISTORY, NOT POST. Fifteen folders came into view at once, and running
+ * a year of old mail through the ordinary path would raise Annexure B item 6 -- today -- against
+ * debtors for correspondence dealt with months ago.
+ */
+ok('a first read files the row and stops', /if \(isSent \|\| firstRead\) \{/.test(sync))
+ok('...and the folder loop says which reads are first', /known == null,\s*\n\s*\)/.test(sync))
+
+/*
+ * ONE NEW FOLDER PER RUN. Reading a folder for the first time fetches and parses every message in
+ * its window; fifteen of those in one serverless request is a timeout, which saves no watermark
+ * and does the whole thing again next run, for ever.
+ */
+ok('the backlog is worked off one folder at a time', /let firstReadsLeft = 1/.test(sync))
+ok('...and a known folder is never held back by that', /if \(known == null && firstReadsLeft <= 0\) continue/.test(sync))
+
+/*
+ * ONE UNREADABLE FOLDER MUST NOT COST THE RUN. A server can refuse a SELECT on a folder that
+ * exists, and throwing there would lose the watermarks of every folder already read -- including
+ * the INBOX, which would then re-read its window on the next run.
+ */
+ok('a folder that will not open is skipped, not fatal', /\$\{path\}: skipped --/.test(sync))
+/* And every mark is written in ONE update, or a failure between two writes strands one of them. */
+ok('the watermarks are saved together', /patch\.folder_uids = marks/.test(sync))
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')
@@ -193,6 +289,6 @@ if (failures.length) {
 }
 console.log(`${pass} passed, 0 failed`)
 console.log(`
-Mail older than the first sync can be reached instead of being invisible, a forward run cannot
-strand a band of messages behind it, no thirteenth serverless function was needed, and the tab
-badges move the same way the tabs themselves do.`)
+Every folder on the server is read rather than three of them, a folder's first read files history
+without billing anybody for it, mail older than the first sync can be reached, and the tab badges
+move the same way the tabs themselves do.`)

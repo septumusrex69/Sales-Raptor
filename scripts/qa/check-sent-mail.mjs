@@ -31,7 +31,12 @@ const schema = readFileSync(new URL('../../supabase/schema.sql', import.meta.url
 /* ---------- sent mail must never be filed or charged ---------- */
 
 ok('the sync knows which kind of folder it is reading', /kind: 'inbox' \| 'junk' \| 'sent'/.test(sync))
-ok('sent mail leaves before anything is filed', /if \(isSent\) \{/.test(sync))
+/*
+ * The same guard now also stops a folder's FIRST read, which is history rather than post -- see
+ * firstRead in emailSync. Sent mail is still the case this file is about, and the guarantee is
+ * unchanged: it leaves before anything is filed.
+ */
+ok('sent mail leaves before anything is filed', /if \(isSent \|\| firstRead\) \{/.test(sync))
 {
   /*
    * ORDER IS THE WHOLE GUARANTEE. The early return has to come before findAccount, which is where
@@ -39,9 +44,9 @@ ok('sent mail leaves before anything is filed', /if \(isSent\) \{/.test(sync))
    * returns -1 for a string that is gone, and -1 beats everything, so an order-only check passes
    * vacuously the moment the guard is deleted.
    */
-  ok('...and the guard exists at all', sync.includes('if (isSent) {'))
+  ok('...and the guard exists at all', sync.includes('if (isSent || firstRead) {'))
   ok('...before the account match that charges item 6',
-    sync.indexOf('if (isSent) {') < sync.indexOf('await findAccount('))
+    sync.indexOf('if (isSent || firstRead) {') < sync.indexOf('await findAccount('))
 }
 // includes() rather than a regex: the pattern is two literal backslashes and escaping them
 // through a regex literal is how a check ends up asserting nothing.

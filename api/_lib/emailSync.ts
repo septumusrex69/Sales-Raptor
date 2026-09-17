@@ -23,6 +23,8 @@ export interface EmailConnectionRow {
   last_seen_uid: number | null
   last_seen_uid_junk: number | null
   last_seen_uid_sent: number | null
+  /* A high-water mark per folder, for everything beyond INBOX, Junk and Sent. See otherFolders. */
+  folder_uids?: Record<string, number> | null
   /* How far BACK each folder has been read. See backfillMailbox. */
   oldest_seen_uid?: number | null
   oldest_seen_uid_junk?: number | null
@@ -53,6 +55,53 @@ function findFolder(mailboxes: ListResponse[], specialUse: string, commonNames: 
   if (bySpecialUse) return bySpecialUse.path
   const byName = mailboxes.find((m) => commonNames.includes(m.name.toLowerCase()) || commonNames.includes(m.path.toLowerCase()))
   return byName?.path
+}
+
+/**
+ * THE OTHER FOLDERS, which Raptor could not see.
+ *
+ * The firm reported two messages that were in their mail client and not in Raptor. The sync's own
+ * log gave the answer: this server has EIGHTEEN folders and the sync read three of them.
+ *
+ *   INBOX, INBOX.Sent, INBOX.Drafts, INBOX.Archive, INBOX.spambucket, INBOX.Trash,
+ *   INBOX.Archive.Deleted Items, INBOX.Blocked, INBOX.Sent.Trash, INBOX.Sent Items,
+ *   INBOX.Spam Emails, INBOX.Spam Emails 1, INBOX.Spam Emails 2, INBOX.Spam Emails 3, ...
+ *
+ * A server-side rule, or another mail client, files mail into those — and everything it touched
+ * was invisible here, permanently, with nothing on screen saying so. That is worse than an empty
+ * mailbox: an empty one looks broken, and this looked complete.
+ *
+ * WHAT IS SKIPPED, AND WHY EACH:
+ *  - Trash, and anything under it. Deleted mail is deleted; pulling it back into a working queue
+ *    would put every message somebody has already thrown away in front of them again.
+ *  - Drafts. Half-written and never sent — not correspondence with anybody.
+ *  - The three that are already handled by name, so they are not read twice.
+ */
+const SKIP_FOLDER = /(^|\.)(trash|deleted items|drafts|junk e-?mail)(\.|$)/i
+
+export function otherFolders(paths: string[], handled: (string | undefined)[]): string[] {
+  const already = new Set(handled.filter((p): p is string => !!p).map((p) => p.toLowerCase()))
+  return paths.filter((path) => {
+    if (already.has(path.toLowerCase())) return false
+    if (path.toUpperCase() === 'INBOX') return false
+    /*
+     * Tested on the whole path, which covers a nested folder for free: the leading (^|\.) matches
+     * the separator, so "INBOX.Archive.Deleted Items" is recognised as deleted mail rather than as
+     * an archive that happens to contain the word.
+     */
+    return !SKIP_FOLDER.test(path)
+  })
+}
+
+/**
+ * Whether a folder's mail should be treated as junk.
+ *
+ * By name, because a server has exactly one \\Junk special-use folder and this mailbox has five
+ * things that are plainly spam. It only changes how the row is labelled -- the message is still
+ * fetched and still visible, which is the whole point of reading these folders at all.
+ */
+export function looksLikeJunk(path: string): boolean {
+  return /(^|\.)(spam|junk|blocked|bulk)/i.test(path.split('.').pop() ?? path)
 }
 
 /** No point recording 40 filenames on one message; nobody scans past the first few. */
@@ -817,6 +866,16 @@ async function syncMailbox(
    * the same code would bill the debtor twice for one email.
    */
   kind: 'inbox' | 'junk' | 'sent',
+  /**
+   * This folder has never been read before, so what is in it is HISTORY.
+   *
+   * The rows are filed and nothing else happens to them: no matching onto debtor accounts, no
+   * Annexure B item 6 for receiving them, no notifications. Fifteen folders coming into view at
+   * once is a year of old mail, and running it through the ordinary path would raise fees today
+   * against debtors for correspondence that was dealt with months ago — on paper, by somebody who
+   * has since left. Whatever arrives in them AFTER this is ordinary new mail and is treated so.
+   */
+  firstRead = false,
 ): Promise<{ logged: number; maxUid: number; minUid: number | null }> {
   const isJunk = kind === 'junk'
   const isSent = kind === 'sent'
@@ -954,12 +1013,22 @@ async function syncMailbox(
       })
 
       /*
-       * SENT MAIL STOPS HERE. Everything below files the message onto a record and charges for
-       * it — item 6 for a debtor's email, an activity for a CRM contact. A message we sent was
-       * charged as item 1(a) when it went out, and the account already has its own copy from the
-       * send. Going on would bill the debtor twice and file the message against itself.
+       * SENT MAIL STOPS HERE, AND SO DOES A FOLDER'S FIRST READ.
+       *
+       * Everything below files the message onto a record and charges for it — item 6 for a
+       * debtor's email, an activity for a CRM contact.
+       *
+       * A message WE sent was charged as item 1(a) when it went out and the account already has
+       * its own copy from the send; going on would bill the debtor twice and file the message
+       * against itself.
+       *
+       * And a folder being read for the first time is history, not post. Fifteen folders came
+       * into view at once when the sync stopped ignoring them, and running a year of old mail
+       * through this path would raise fees today against debtors for correspondence dealt with
+       * months ago. The rows are filed so they can be SEEN — which is the whole complaint — and
+       * whatever arrives in that folder afterwards is ordinary new mail. See firstRead.
        */
-      if (isSent) {
+      if (isSent || firstRead) {
         if (mailboxRowId) logged += 1
         continue
       }
@@ -1343,24 +1412,68 @@ export async function syncConnection(
      */
     const sentResult = sentPath ? await syncMailbox(client, admin, conn, sentPath, conn.last_seen_uid_sent, 'sent') : { logged: 0, maxUid: conn.last_seen_uid_sent ?? 0, minUid: null }
 
+    /*
+     * AND EVERYTHING ELSE ON THE SERVER. See otherFolders: this mailbox has eighteen folders and
+     * the sync read three, so anything a rule filed into Archive, Blocked or "Spam Emails 2" was
+     * invisible here with nothing saying so.
+     *
+     * ONE NEW FOLDER PER RUN. Reading a folder for the first time means fetching and parsing
+     * every message in its window, and fifteen of those in one serverless request is a timeout —
+     * which leaves no watermark saved and does the whole thing again on the next run, for ever.
+     * Folders already known cost one SEARCH each and almost always return nothing. So the backlog
+     * is worked off a folder at a time over successive syncs, and nothing is ever half-read.
+     */
+    const marks: Record<string, number> = { ...(conn.folder_uids ?? {}) }
+    let firstReadsLeft = 1
+    let otherLogged = 0
+    for (const path of otherFolders(mailboxes.map((m) => m.path), [junkPath, sentPath])) {
+      const known = marks[path]
+      if (known == null && firstReadsLeft <= 0) continue
+      if (known == null) firstReadsLeft -= 1
+      try {
+        const res = await syncMailbox(
+          client, admin, conn, path, known ?? null,
+          looksLikeJunk(path) ? 'junk' : 'inbox',
+          known == null,
+        )
+        marks[path] = res.maxUid
+        otherLogged += res.logged
+      } catch (err) {
+        /*
+         * One unreadable folder must not cost the run. A server can refuse a SELECT on a folder
+         * that exists -- a shared mailbox nobody has rights to, a name with a character ImapFlow
+         * and the server disagree about -- and throwing here would lose the watermarks of every
+         * folder already read this run, including the INBOX.
+         */
+        console.error(`[emailSync] ${path}: skipped -- ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
     // Checked deliberately: a swallowed error here would leave a watermark stuck, so a
     // future sync silently reprocesses the same already-logged messages from scratch (only
     // caught downstream by the dedup upsert above, at the cost of a full re-fetch every time).
     const patch: Record<string, unknown> = { last_seen_uid: inboxResult.maxUid, last_synced_at: new Date().toISOString() }
     if (junkPath) patch.last_seen_uid_junk = junkResult.maxUid
     if (sentPath) patch.last_seen_uid_sent = sentResult.maxUid
+    /* Written with the other watermarks in ONE update: two writes could leave a folder marked
+       as read while the INBOX's own mark was lost to a failure between them. */
+    patch.folder_uids = marks
     /*
-     * AND HOW FAR BACK WE HAVE READ, recorded only where it is not already known. A forward run
-     * reaching UID 900 must not move the floor up from 400 -- that would strand everything between
-     * them, which is the very bug this mark exists to fix.
+     * THE LOW-WATER MARK IS NOT SET HERE, AND THAT IS THE FIX.
+     *
+     * It was: "record it where it is not already known" -- which sounds right and is wrong on any
+     * mailbox that was already syncing. A forward run returns the minimum of the UIDs IT fetched,
+     * so on a mailbox mid-flight that is the oldest of the four messages that happened to arrive
+     * that minute. It wrote 59528 against a mailbox whose oldest stored message is 5101, and
+     * "fetch older mail" would then have spent its first dozen presses re-reading mail Raptor
+     * already had.
+     *
+     * backfillMailbox derives the floor from the oldest row actually stored when the column is
+     * null, which is right by construction and needs no watermark at all. So none is written.
      */
-    if (conn.oldest_seen_uid == null && inboxResult.minUid != null) patch.oldest_seen_uid = inboxResult.minUid
-    if (junkPath && conn.oldest_seen_uid_junk == null && junkResult.minUid != null) patch.oldest_seen_uid_junk = junkResult.minUid
-    if (sentPath && conn.oldest_seen_uid_sent == null && sentResult.minUid != null) patch.oldest_seen_uid_sent = sentResult.minUid
     const { error: watermarkError } = await admin.from('email_connections').update(patch).eq('user_id', conn.user_id)
     if (watermarkError) throw new Error(`Failed to save sync watermark: ${watermarkError.message}`)
 
-    return { logged: inboxResult.logged + junkResult.logged + sentResult.logged }
+    return { logged: inboxResult.logged + junkResult.logged + sentResult.logged + otherLogged }
   } finally {
     await client.logout().catch(() => {})
   }
