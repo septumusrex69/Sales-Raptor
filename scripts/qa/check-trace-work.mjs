@@ -346,6 +346,45 @@ ok('...with the relationship as their role', /personRole: asNextOfKin \? 'Next o
  */
 ok('promoting never decides the primary number', /isPrimary: false/.test(data))
 
+/* ---------- starting the search ---------- */
+
+/*
+ * THE ID NUMBER GOES WITH YOU. The firm's instruction: "you would click on the trace, it would
+ * automatically copy the ID number to paste into the tracing system." Thirteen digits have to
+ * arrive in somebody else's search box exactly right, and a digit retyped wrong is a search about
+ * a different person that the firm still pays for.
+ */
+const button = readFileSync(new URL('../../src/pages/accounts/TraceButton.tsx', import.meta.url), 'utf8')
+ok('the trace click copies what XDS is searched on', /navigator\.clipboard\?\.writeText\(idNumber\)/.test(button))
+/*
+ * BOTH INSIDE THE TAP. Safari allows a new tab, and a clipboard write, only while it can still
+ * see the tap that asked. Either moved after an await is silently refused and the button looks
+ * broken. Asserted as presence first — indexOf returns -1 for something deleted, and -1 beats
+ * everything, so an order-only check passes the moment its subject is gone.
+ */
+ok('...and opens the portal in the same click', button.includes("window.open(XDS_PORTAL_URL"))
+ok('...with the copy started before the tab steals the gesture',
+  button.indexOf('navigator.clipboard') < button.indexOf('window.open(XDS_PORTAL_URL'))
+/*
+ * A CLIPBOARD WRITE CAN BE REFUSED AFTER IT IS ACCEPTED — writeText resolves asynchronously. So
+ * what the modal claims waits for the real answer, and where it was refused the number is shown
+ * to be copied by hand. Told nothing, a collector retypes it off the account behind the modal.
+ */
+ok('what it claims waits for the clipboard to answer',
+  /write\.then\(\(\) => setCopied\('yes'\)\)\.catch\(\(\) => setCopied\('no'\)\)/.test(button))
+ok('...and a refused copy shows the number instead', /copied === 'no' \|\| copied === 'asking'/.test(button))
+ok('...and an account with no number says so rather than copying nothing',
+  /copied === 'nothing'/.test(button))
+
+/*
+ * ASKED AFTERWARDS, which is the only moment the answer exists — an account can carry a company
+ * and three sureties and nobody knows before opening the portal how many they will look for.
+ */
+ok('it asks how many searches were run', /How many traces did you do\?/.test(button))
+ok('...and charges item 4\u00a0(c) on the answer', /recordTrace\(\{ accountId, actor, count \}\)/.test(button))
+/* Closing without answering is a portal opened by mistake, and charges nothing. */
+ok('...and closing without answering charges nothing', /Didn&apos;t trace/.test(button))
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')

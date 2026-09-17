@@ -291,21 +291,35 @@ ok('...and not left among the figures', !/side=\{\[[^\]]*[Ss]tandingPanel/.test(
  */
 ok('the two cards are spaced in every layout', /const detailsPanel = \(\s*\n\s*<div className="space-y-4">/.test(detail))
 /*
- * SILENT WHEN THERE IS NOTHING TO SAY — for a PERSON.
+ * THE EMPTY STATE IS THE WAY IN, on every account.
  *
- * Nearly the whole book is individuals with no bureau profile pulled, and an empty card on
- * several hundred thousand accounts is a card people stop seeing.
- *
- * A COMPANY IS THE OTHER WAY ROUND. A company with no directors on file is incomplete — there is
- * nobody to ring — and the thing that fixes it is the upload button in this panel's header. So
- * the empty card is the useful state there, and it says what is missing.
+ * This card used to hide itself on an individual with nothing on it — an empty card across
+ * several hundred thousand accounts is a card people stop seeing. The firm asked for it back:
+ * "put it there as an empty box where you can upload a trace or do the trace." They are right,
+ * and the old reasoning answered the wrong question. It is not an empty card, it is where the
+ * work starts, and an individual with no bureau profile is exactly the account where somebody
+ * needs to run a search.
  */
 ok('the panel knows when it is empty',
   /const bare = !hasPractitioner && directors\.length === 0 && judgments\.length === 0/.test(detail))
-ok('...and renders itself away, but only for a person',
-  /if \(bare && account\.debtorKind !== 'company'\) return null/.test(detail))
-ok('...while a company is told what is missing',
-  /No bureau profile filed yet/.test(detail))
+ok('...and shows the box rather than hiding itself',
+  !/if \(bare && account\.debtorKind !== 'company'\) return null/.test(detail))
+ok('...saying plainly that there is no trace', /No trace on this account yet/.test(detail))
+/*
+ * BOTH WAYS IN, which is the point of the box: run a search, or read a PDF you already have.
+ * The search is the one that costs money, so it is the one that carries the weight.
+ */
+ok('...offering the search itself', /\{traceAction\}/.test(detail))
+ok('...and the upload beside it', /Upload a trace I already have/.test(detail))
+/*
+ * ONE Trace button, handed in rather than rebuilt. A second copy in the panel would be a second
+ * place for item 4(c) to drift from the one in the action row.
+ */
+ok('the panel does not build its own trace button',
+  (detail.match(/<TraceButton/g) ?? []).length === 2 && /traceAction: React\.ReactNode/.test(detail))
+
+/* The firm's word for this panel. It is about the trace, not about an abstract "standing". */
+ok('the panel is called Trace', />Trace<\/PanelTitle>/.test(detail))
 /*
  * A WARNING THAT ONLY FIRES WHEN SOMETHING IS ACTUALLY WRONG. The account reports as under
  * administration and there is no record of who is administering it — a claim nobody can submit.

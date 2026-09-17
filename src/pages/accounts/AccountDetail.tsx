@@ -331,6 +331,13 @@ export function AccountDetail() {
         userId={currentUser?.id ?? null} onEmail={setComposeTo} />
       <StandingPanel account={account} standing={standing} position={position}
         traces={traces}
+        traceAction={(
+          <TraceButton accountId={account.id} actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+            idNumber={account.debtorIdNumber}
+            label="Do the trace"
+            className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg bg-brand-600 text-white shadow-sm hover:bg-brand-700"
+            onDone={reload} onUpload={() => setTracing(true)} />
+        )}
         onUpload={() => setTracing(true)}
         onOpenTrace={setOpenTrace}
         onPractitioner={() => setPractitioner({ suggest: null })} />
@@ -600,6 +607,7 @@ export function AccountDetail() {
         onDiarise={() => setDiariseOpen(true)}
         accountId={account.id}
         actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+        idNumber={account.debtorIdNumber}
         onTraced={reload}
         onUpload={() => setTracing(true)}
       />
@@ -871,7 +879,9 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onDiarise, accountId, actor, onTraced, onUpload }: {
+function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onDiarise, accountId, actor, idNumber, onTraced, onUpload }: {
+  /** Copied to the clipboard when XDS opens — see TraceButton. */
+  idNumber: string | null
   /** The number SMS goes to, and what the row shows when there is no number at all. */
   callNumber?: string
   /** Every number that could reach this debtor, primary first. */
@@ -931,7 +941,8 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
       */}
       <Action icon={ShieldAlert} label="Escalate" onClick={onDispute}
         title="Raise a dispute, ask a team leader, or recommend it for litigation" />
-      <TraceButton accountId={accountId} actor={actor} className={`${ACTION_BASE} ${ACTION_ENABLED}`}
+      <TraceButton accountId={accountId} actor={actor} idNumber={idNumber}
+        className={`${ACTION_BASE} ${ACTION_ENABLED}`}
         onDone={onTraced} onUpload={onUpload} />
       {/*
         When this account comes back, and why. Sits with the other actions rather than in a
@@ -1608,13 +1619,21 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
  *
  * Absent on nearly every account, and silent when absent.
  */
-function StandingPanel({ account, standing, position, traces, onUpload, onOpenTrace, onPractitioner }: {
+function StandingPanel({ account, standing, position, traces, traceAction, onUpload, onOpenTrace, onPractitioner }: {
   account: DebtorAccount
   standing: AccountStanding
   /** The rung the account sits on, so a missing practitioner can be a warning only when it is one. */
   position: DeskPosition
   /** Every trace filed on this account, newest first, with everything each one found. */
   traces: FiledTrace[]
+  /**
+   * The Trace button itself, rendered by the account screen and handed in.
+   *
+   * Handed in rather than rebuilt here so there is one of it: it copies the ID number, opens XDS,
+   * asks how many searches were run and raises item 4(c). A second copy of that in this file
+   * would be a second place for the charge to drift.
+   */
+  traceAction: React.ReactNode
   /** Read a bureau PDF onto the account. See TraceUploadModal. */
   onUpload: () => void
   /** Open one for working: ring its numbers, record what happened, promote the real ones. */
@@ -1644,18 +1663,17 @@ function StandingPanel({ account, standing, position, traces, onUpload, onOpenTr
   const claimNobodyCanMake = position === 'under_administration' && !hasPractitioner
 
   /*
-   * A COMPANY ALWAYS GETS THIS PANEL, even empty, and a person only gets it when there is
-   * something in it.
+   * EVERY ACCOUNT GETS THIS PANEL, empty or not.
    *
-   * The difference is that a company with no directors on file is INCOMPLETE — there is nobody to
-   * ring, and the thing that fixes it is the button in this panel's header. An individual with no
-   * bureau profile is simply an ordinary account, and an empty card on all several hundred
-   * thousand of those is a card people stop seeing. Their upload sits on the Trace button, at the
-   * moment the search is run.
+   * It used to be hidden on an individual with nothing on it, on the reasoning that an empty card
+   * across several hundred thousand accounts is a card people stop seeing. The firm asked for it
+   * back -- "put it there as an empty box where you can upload a trace or do the trace" -- and the
+   * old reasoning was answering the wrong question. It is not an empty card; it is where the work
+   * starts. An individual with no bureau profile is precisely the account where somebody needs to
+   * run a search, and hiding the way to do it does not make the account less empty.
    */
   const bare = !hasPractitioner && directors.length === 0 && judgments.length === 0
     && traces.length === 0 && !claimNobodyCanMake
-  if (bare && account.debtorKind !== 'company') return null
 
   return (
     <Card>
@@ -1678,13 +1696,40 @@ function StandingPanel({ account, standing, position, traces, onUpload, onOpenTr
             Upload a trace
           </button>
         </span>
-      }>Standing</PanelTitle>
+      }>Trace</PanelTitle>
 
+      {/*
+        THE EMPTY BOX, at the firm's instruction: "put it there as an empty box where you can
+        upload a trace or do the trace."
+
+        It used to be a line of grey text, and only on a company -- the reasoning was that an
+        empty card on several hundred thousand individual accounts is a card people stop seeing.
+        The firm has overruled that, and they are right for a reason the old note missed: this is
+        not an empty card, it is the two ways of starting the work. A collector on an account with
+        no profile has a question ("who is this and where are they?") and this box is the answer
+        to it.
+      */}
       {bare && (
-        <p className="text-sm text-slate-400">
-          No bureau profile filed yet. A company is reached through its directors &mdash; upload the
-          trace and they land here.
-        </p>
+        <div className="rounded-xl border border-dashed border-slate-200 px-4 py-5 text-center">
+          <p className="text-sm text-slate-600 font-medium">No trace on this account yet</p>
+          <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+            {account.debtorKind === 'company'
+              ? 'A company is reached through its directors. Run a search and they land here, with the judgments against it.'
+              : 'Numbers, addresses, employment and next of kin all come off a bureau profile.'}
+          </p>
+          <div className="mt-3 flex flex-wrap items-start justify-center gap-2">
+            {/*
+              THE SEARCH FIRST. Uploading is what you do with a PDF you already have; running one
+              is what somebody with an empty panel actually needs, and it is the one that costs
+              money -- so it is the one that gets the weight and the confirmation behind it.
+            */}
+            {traceAction}
+            <button type="button" onClick={onUpload}
+              className="text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+              Upload a trace I already have
+            </button>
+          </div>
+        </div>
       )}
 
       {claimNobodyCanMake && (

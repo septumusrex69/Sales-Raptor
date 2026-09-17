@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Search } from 'lucide-react'
+import { Check, Loader2, Search } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { recordTrace, XDS_PORTAL_URL } from '../../lib/accountTrace'
 import { scheduleFor } from '../../lib/annexureB'
@@ -19,9 +19,20 @@ const COUNTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
  * Closing without answering charges nothing, which is the right outcome for a portal opened by
  * mistake and for a search that turned out not to be needed.
  */
-export function TraceButton({ accountId, actor, className, onDone, onUpload }: {
+export function TraceButton({ accountId, actor, idNumber, label, className, onDone, onUpload }: {
   accountId: string
   actor: { id: string | null; name: string | null }
+  /**
+   * What XDS is searched ON: a person's ID number, or a company's registration number.
+   *
+   * Copied to the clipboard on the click, at the firm's instruction -- "it would automatically
+   * copy the ID number to paste into the tracing system". It is thirteen digits that have to
+   * arrive somewhere else exactly right, and retyping them is how a search comes back about
+   * somebody else entirely.
+   */
+  idNumber: string | null
+  /** What to call the button. The panel's empty box wants a fuller phrase than the action row. */
+  label?: string
   /** The action row's styling, so this matches the buttons beside it. */
   className: string
   onDone: () => Promise<void>
@@ -39,6 +50,8 @@ export function TraceButton({ accountId, actor, className, onDone, onUpload }: {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ charge: ChargeResult; count: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /* 'asking' until the clipboard answers, because a write can be refused after it is accepted. */
+  const [copied, setCopied] = useState<'asking' | 'yes' | 'no' | 'nothing'>('nothing')
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => () => {
@@ -49,10 +62,25 @@ export function TraceButton({ accountId, actor, className, onDone, onUpload }: {
 
   function open() {
     /*
-     * Opened inside the click and before anything else. Safari only allows a new tab while it can
-     * still see the tap that asked for one; open it after any await and the tab is silently
-     * blocked, which looks exactly like a broken button.
+     * BOTH OF THESE HAVE TO START INSIDE THE TAP.
+     *
+     * Safari allows a new tab, and a clipboard write, only while it can still see the tap that
+     * asked for one. Either one moved after an await is silently refused, which looks exactly
+     * like a broken button. The clipboard call is started here and answered later -- writeText
+     * resolves asynchronously, so what is shown in the modal waits for the real answer rather
+     * than claiming success the moment it was asked for.
      */
+    setCopied(idNumber === null ? 'nothing' : 'asking')
+    if (idNumber !== null) {
+      try {
+        const write = navigator.clipboard?.writeText(idNumber)
+        if (write) write.then(() => setCopied('yes')).catch(() => setCopied('no'))
+        else setCopied('no')
+      } catch {
+        /* A browser with no clipboard permission at all. The number is shown instead. */
+        setCopied('no')
+      }
+    }
     window.open(XDS_PORTAL_URL, '_blank', 'noopener,noreferrer')
     setResult(null)
     setError(null)
@@ -79,7 +107,7 @@ export function TraceButton({ accountId, actor, className, onDone, onUpload }: {
   return (
     <span className="inline-flex flex-col items-start">
       <button type="button" onClick={open} title="Open XDS and record a credit bureau search — Annexure B item 4(c)" className={className}>
-        <Search size={14} /> Trace
+        <Search size={14} /> {label ?? 'Trace'}
       </button>
 
       {/*
@@ -109,6 +137,30 @@ export function TraceButton({ accountId, actor, className, onDone, onUpload }: {
             XDS is open in a new tab. One account can carry a company and its sureties, so tell us how many
             searches you ran and they go on the statement as a single line.
           </p>
+
+          {/*
+            THE NUMBER, EITHER WAY. On the clipboard where the browser allowed it, and on the
+            screen where it did not -- a collector told nothing would retype thirteen digits from
+            the account behind this modal, and a digit wrong there is a search about somebody
+            else that the firm still pays for.
+          */}
+          {copied === 'yes' && (
+            <p className="text-xs text-[var(--c-green)] mt-3 inline-flex items-center gap-1.5">
+              <Check size={13} /> {idNumber} is on your clipboard — paste it into the search.
+            </p>
+          )}
+          {(copied === 'no' || copied === 'asking') && idNumber !== null && (
+            <p className="text-xs text-slate-500 mt-3">
+              Search on <span className="font-medium text-slate-700 select-all">{idNumber}</span>
+              {copied === 'no' && ' — this browser would not let us copy it for you.'}
+            </p>
+          )}
+          {copied === 'nothing' && (
+            <p className="text-xs text-slate-500 mt-3">
+              This account has no ID or registration number on it, so there is nothing to search on
+              yet. Add one under the debtor&rsquo;s details.
+            </p>
+          )}
           <div className="flex flex-wrap gap-2 mt-4">
             {COUNTS.map((n) => (
               <button
