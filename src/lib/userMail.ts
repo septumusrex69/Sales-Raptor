@@ -256,7 +256,7 @@ interface Narrowable {
   or(filters: string): Narrowable
 }
 
-function scope<Q>(q: Q, input: MailScope): Q {
+export function scope<Q>(q: Q, input: MailScope): Q {
   let out = q as Narrowable
 
   /*
@@ -357,15 +357,22 @@ export async function fetchMail(input: MailScope & {
 
 /** How many messages are waiting to be filed. Counted in the database, not fetched and counted here. */
 export async function countNeedsFiling(userId: string): Promise<number> {
-  const { count, error } = await supabase
-    .from('user_emails')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    // is_settled: a supplier's invoice somebody has marked as needing no record has been dealt
-    // with, and a badge that keeps counting it is a badge that never reaches nought.
-    .eq('is_settled', false)
-    .eq('is_junk', false)
-    .is('read_at', null)
+  /*
+   * THROUGH scope(), SO THE NUMBER AND THE LIST CANNOT DISAGREE.
+   *
+   * These clauses were written out again here and had already drifted two ways from the list they
+   * sit over. The count required the message to be UNREAD and the list did not, so opening five
+   * unmatched messages took the badge to nought above a list of five — the exact "badge that says
+   * 3 over a list of 5" that scope() was extracted to prevent, reintroduced one level above the
+   * guard. And the count never excluded what we had SENT, which the list does.
+   *
+   * Reading is not matching. A message a collector has read is still on nobody's file, and the
+   * badge is counting work left, not mail left unopened.
+   */
+  const { count, error } = await scope(
+    supabase.from('user_emails').select('id', { count: 'exact', head: true }).eq('user_id', userId),
+    { filter: 'needs-filing' },
+  )
   if (error) throw new Error(error.message)
   return count ?? 0
 }

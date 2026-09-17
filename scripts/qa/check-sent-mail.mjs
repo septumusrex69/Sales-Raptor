@@ -118,7 +118,7 @@ ok('forwarding fetches the real message', /await fetchMailBody\(mail\.id, token\
  */
 ok('the unmatch names the tab it actually lands in', /You will find it under \$\{landsIn\}/.test(page))
 ok('...and knows junk goes to Junk', /mail\.isJunk \? 'Junk'/.test(page))
-ok('...and that settled mail does not go to the queue either', /mail\.noRecordAt \? 'No record needed'/.test(page))
+ok('...and that free mail does not go to the queue either', /mail\.noRecordAt \? 'Free mail'/.test(page))
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)

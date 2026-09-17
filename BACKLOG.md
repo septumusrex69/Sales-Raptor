@@ -240,6 +240,21 @@ work that well" — email is the priority.
 
 ---
 
+## Decided, so nobody reopens it
+
+- **Mail sent to a debtor from Outlook is not charged.** It is pulled into the Sent tab so the
+  mailbox is complete, and that is all. Raising item 1(a) on it was proposed and the firm turned
+  it down in those words: "We will be only working from inside Raptor." Charging what the sync
+  scrapes out of a Sent folder would put fees on a debtor's account that nobody in Raptor ever
+  decided to raise, and there is no way to tell a demand from a personal note once it is there.
+- **A reply to a debtor raises item 1(a) and nothing else.** Item 6, "correspondence received and
+  attended to", is raised once when the message ARRIVES and is filed — receiving it and attending
+  to it are one charge. A second item 6 on the reply would bill the debtor twice for one incoming
+  email. Both halves together are the R13 + R25 the firm means by "correspondence and an email
+  charge"; they are simply raised at the two different moments they happen.
+
+---
+
 ## Not this session's
 
 The sales pipeline, mandates, online signature, layouts and mail belong to the sales session on

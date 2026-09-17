@@ -62,7 +62,7 @@ const handlers = [
   [(u) => u.includes('/rpc/book_summary'), () => ({ body: [BOOK_SUMMARY] })],
   [(u) => u.includes('/rpc/book_facets'), () => ({ body: FACETS })],
   [(u) => u.includes('/rpc/account_view_counts'), () => ({ body: [VIEW_COUNTS] })],
-  [(u) => u.includes('/rpc/nav_counts'), () => ({ body: { mail: 0, tasks: 0, disputes: 0 } })],
+  [(u) => u.includes('/rpc/nav_counts'), () => ({ body: { mail: 0, tasks: 0, disputes: 0, diary: 0 } })],
   /* What the hand-out planner reads: who carries what, and what is already in their diaries. */
   [(u) => u.includes('/rpc/collector_book_load'), () => ({
     body: [

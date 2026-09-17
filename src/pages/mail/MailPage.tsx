@@ -70,8 +70,13 @@ const TABS: { id: Pane; label: string; hint: string }[] = [
    * Real work mail that belongs on nobody's file: not junk, and the sender must not be blocked
    * because you need their mail. Before this it lived in Needs matching for ever, and a work
    * queue with permanent residents is a queue nobody reads.
+   *
+   * The firm's word, and it was called "No record needed" first. That name described what the
+   * database does with the row. "Free" describes the thing that actually matters to the person
+   * marking it: mail on an account raises Annexure B item 6 for receiving it, and this mail
+   * raises nothing. Free of a file and free of a fee, which is the same decision either way.
    */
-  { id: 'no-record', label: 'No record needed', hint: 'Suppliers and the like — dealt with, on nobody\u2019s file' },
+  { id: 'no-record', label: 'Free mail', hint: 'Suppliers and the like — dealt with, on nobody\u2019s file, and nothing charged' },
   { id: 'junk', label: 'Junk', hint: 'Your mail server thought this was spam' },
   /*
    * Read off the mailbox's own Sent folder rather than only what Raptor sent, so mail sent from
@@ -79,7 +84,7 @@ const TABS: { id: Pane; label: string; hint: string }[] = [
    * matched and is not part of the incoming working list.
    */
   { id: 'sent', label: 'Sent', hint: 'What you have sent, from anywhere' },
-  { id: 'blocked', label: 'Senders', hint: 'Blocked, and senders that never need matching' },
+  { id: 'blocked', label: 'Blocked', hint: 'Senders you have blocked, and senders whose mail always arrives free' },
 ]
 
 const PAGE = 50
@@ -92,6 +97,8 @@ const debtorLabel = (a: DebtorAccount) =>
 
 export function MailPage() {
   const { currentUser, session } = useAuth()
+  // Only for logging a reply on a lead, deal, client or contact — see the reply handler.
+  const { addActivity } = useAppStore()
   const [filter, setFilter] = useState<Pane>('all')
   /*
    * Unread, and whether the list is narrowed to it.
@@ -241,7 +248,7 @@ export function MailPage() {
       // A blocklist we could not read costs a chip on some rows, not the mailbox. Nothing louder.
       .catch(() => {})
     // The other half of the same question — which senders never need matching. Loaded together
-    // because the Senders tab shows both and the same version counter refreshes them.
+    // because the Blocked tab shows both and the same version counter refreshes them.
     void fetchSenderRules(currentUser.id)
       .then((list) => { if (!cancelled) setSenderRules(list) })
       .catch(() => {})
@@ -518,7 +525,7 @@ export function MailPage() {
       const done = await markNoRecordNeeded(ids, currentUser?.id ?? null)
       const refused = ids.length - done
       setStatus(
-        `${done} ${done === 1 ? 'email' : 'emails'} marked as needing no record.`
+        `${done} ${done === 1 ? 'email' : 'emails'} marked as free mail.`
         + (refused > 0 ? ` ${refused} left alone — already matched to a record.` : ''),
       )
       await afterBulk()
@@ -584,28 +591,21 @@ export function MailPage() {
     <div className="space-y-4">
       <Card padded={false}>
         <div className="px-5 py-4 flex flex-wrap items-center gap-3 border-b border-slate-100">
-          <div className="mr-auto min-w-0">
+          <div className="min-w-0">
             <h2 className="text-sm font-semibold text-slate-800">My mailbox</h2>
             <p className="text-xs text-slate-400 mt-0.5">
               Everything stays until you match it or block the sender. Nothing is deleted on a
               timer, and nothing here is ever removed from your real mailbox.
             </p>
           </div>
-          <label className={`relative ${filter === 'blocked' ? 'hidden' : ''}`}>
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Sender or subject"
-              aria-label="Search your mailbox"
-              className="text-sm rounded-lg border border-slate-200 pl-8 pr-3 py-2 w-52 focus:outline-none focus:ring-2 focus:ring-brand-100"
-            />
-          </label>
-          <button onClick={() => void syncMine()} disabled={syncing}
-            className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50">
-            {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            {syncing ? 'Checking…' : 'Check now'}
-          </button>
+          {/*
+            THE ORDER IS THE FIRM'S. Writing a new message is the first thing on the bar because
+            it is the one thing here that starts work rather than sorting it; the actions follow;
+            and searching and choosing how the mail is laid out sit hard right, away from the
+            buttons that change mail. `ml-auto` rides on the search box rather than the heading:
+            the heading has to be free to shrink, and an auto margin on a shrinking box moves
+            with it.
+          */}
           {/*
             A message to anybody, from here. Every other compose in Raptor hangs off a record —
             a debtor, a lead, a deal — which covers replying and covers nothing else. Writing to
@@ -616,6 +616,11 @@ export function MailPage() {
             className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
             <PenLine size={14} />
             New email
+          </button>
+          <button onClick={() => void syncMine()} disabled={syncing}
+            className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50">
+            {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            {syncing ? 'Checking…' : 'Check now'}
           </button>
           {/* Junk earns its own one-tap answer: it is where the volume is and where nobody
               wants to read anything. */}
@@ -642,6 +647,16 @@ export function MailPage() {
               {selecting ? 'Done' : 'Select'}
             </button>
           )}
+          <label className={`relative ml-auto ${filter === 'blocked' ? 'hidden' : ''}`}>
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Sender or subject"
+              aria-label="Search your mailbox"
+              className="text-sm rounded-lg border border-slate-200 pl-8 pr-3 py-2 w-52 focus:outline-none focus:ring-2 focus:ring-brand-100"
+            />
+          </label>
           {/* Not on the blocklist, which is a list of senders rather than of mail. */}
           {filter !== 'blocked' && <EmailViewSwitcher view={view} onChange={setView} />}
         </div>
@@ -728,7 +743,7 @@ export function MailPage() {
             {items.some((m) => chosen.has(m.id) && !m.isSettled) && (
               <button onClick={() => void noRecordChosen()}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
-                <CircleCheck size={14} /> No record needed
+                <CircleCheck size={14} /> Mark as free
               </button>
             )}
             {/*
@@ -1051,9 +1066,39 @@ export function MailPage() {
             const answering = replying
             setReplying(null)
             if (!answering?.linkedAccountId) {
+              /*
+               * THE ACTIVITY, WHICH WAS NOT BEING WRITTEN.
+               *
+               * This branch already told the agent "Reply sent and logged on Acme" and then
+               * logged nothing: ComposeEmailModal hands the sent subject and body back for the
+               * caller to record, the account branch below records it through recordSentEmail,
+               * and this one simply returned. So a reply to a lead went out, the agent was told
+               * it was on the lead's history, and it was on nothing — the worst shape a message
+               * can take, because nobody goes looking for what they were told is already there.
+               *
+               * Written the same way the lead and deal pages write their own sent mail: one
+               * Email activity carrying the subject and body. No charge, and there is nothing to
+               * charge — Annexure B prices collecting a debt, and none of these is a debt.
+               */
+              const on = answering?.linkedTo
+              if (on) {
+                addActivity({
+                  type: 'Email',
+                  // Kept with the modal's "Email sent: " framing, which is the CRM activity
+                  // convention on the lead and deal pages. Stripped only on the account side,
+                  // where account_emails stores the debtor's own subject line.
+                  subject: rawSubject,
+                  notes: bodyText,
+                  emailMessageId: messageId ?? undefined,
+                  leadId: on.kind === 'lead' ? on.id : undefined,
+                  dealId: on.kind === 'deal' ? on.id : undefined,
+                  companyId: on.kind === 'client' ? on.id : undefined,
+                  contactId: on.kind === 'contact' ? on.id : undefined,
+                })
+              }
               // Said plainly rather than left to be discovered. The agent chose this path.
-              setStatus(answering?.linkedTo
-                ? `Reply sent and logged on ${answering.linkedTo.label}. No charge — Annexure B is for debtor accounts.`
+              setStatus(on
+                ? `Reply sent and logged on ${on.label}. No charge — Annexure B is for debtor accounts.`
                 : 'Reply sent. Not charged and not recorded — it was not matched to anything.')
               return
             }
@@ -1113,7 +1158,7 @@ function Empty({ filter, searching }: { filter: Exclude<Pane, 'blocked'>; search
   const words: Record<MailFilter, string> = {
     'needs-filing': 'Nothing waiting. Every email has been matched, settled or thrown away.',
     filed: 'Nothing matched to a record yet.',
-    'no-record': 'Nothing here yet. Mark a supplier\u2019s email as needing no record and it lands here.',
+    'no-record': 'Nothing here yet. Mark a supplier\u2019s email as free and it lands here.',
     all: 'Your mailbox is empty. Connect it under Settings → Integrations if you have not yet.',
     // Junk is a shelf, not a bin: nothing here has been deleted, it is just kept out of All.
     junk: 'Nothing in junk.',
@@ -1197,9 +1242,9 @@ function MailStatus({ mail, blocked, tight }: {
         /* Settled, but on nobody's file — so it must not wear the green "Matched" chip, which
            would have a supplier's invoice claiming to be on somebody's account. */
         <span className={`${chip} bg-slate-100 text-slate-500`}
-          title="Dealt with — it belongs on nobody's file">
+          title="Dealt with — it belongs on nobody's file and nothing was charged">
           <CircleCheck size={10} className="shrink-0" />
-          <span className="truncate">{tight ? 'No record' : 'No record needed'}</span>
+          <span className="truncate">{tight ? 'Free' : 'Free mail'}</span>
         </span>
       ) : mail.isJunk ? (
         <span className={`${chip} bg-slate-100 text-slate-500`}>
@@ -1529,7 +1574,7 @@ function MailBody({
           and before this the only honest option was to leave it in the queue for ever.
 
           Hidden on matched mail: that is on a record and a fee may have been raised against it,
-          so "needs no record" would be a contradiction the database refuses anyway.
+          so calling it free would be a contradiction the database refuses anyway.
         */}
         {!mail.isFiled && (mail.noRecordAt ? (
           <button onClick={onUndoNoRecord}
@@ -1539,7 +1584,7 @@ function MailBody({
         ) : (
           <button onClick={onNoRecord}
             className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50">
-            <CircleCheck size={13} /> No record needed
+            <CircleCheck size={13} /> Mark as free
           </button>
         ))}
 
@@ -1748,7 +1793,7 @@ function SenderRulesList({ rules, onRemove }: {
   return (
     <div className="border-t border-slate-100">
       <div className="px-5 py-3 bg-slate-50/70">
-        <p className="text-sm font-semibold text-slate-700">Never needs matching</p>
+        <p className="text-sm font-semibold text-slate-700">Always free</p>
         <p className="text-xs text-slate-400 mt-0.5">
           Suppliers and the like. Their mail still arrives and is still searchable &mdash; it
           simply lands already dealt with instead of joining the queue.
@@ -1757,7 +1802,7 @@ function SenderRulesList({ rules, onRemove }: {
 
       {rules.length === 0 ? (
         <p className="px-5 py-6 text-center text-xs text-slate-400">
-          Nothing yet. Open a supplier&rsquo;s email, choose &ldquo;No record needed&rdquo;, and
+          Nothing yet. Open a supplier&rsquo;s email, choose &ldquo;Mark as free&rdquo;, and
           you can settle the sender for good from there.
         </p>
       ) : (
@@ -1888,7 +1933,7 @@ function NoRecordModal({ mail, userId, rule, onClose, onDone }: {
         return
       }
       if (!scope) {
-        onDone('Marked as needing no record. It is out of the queue and still in your mailbox.')
+        onDone('Marked as free mail. It is out of the queue and still in your mailbox.')
         return
       }
       const { pattern, settled } = await addSenderRule({
@@ -1906,7 +1951,7 @@ function NoRecordModal({ mail, userId, rule, onClose, onDone }: {
   }
 
   return (
-    <Modal title="No record needed" onClose={onClose} width={480}>
+    <Modal title="Free mail" onClose={onClose} width={480}>
       <p className="text-sm text-slate-500">
         For mail that is real work but belongs on nobody&rsquo;s file &mdash; a supplier, the
         accountant, a service provider. It leaves <strong className="font-medium text-slate-600">
@@ -1963,7 +2008,7 @@ function NoRecordModal({ mail, userId, rule, onClose, onDone }: {
       <p className="text-xs text-slate-400 mt-4">
         This is not a block. Their mail still arrives and is still searchable, and you can still
         match it to a record later if it turns out to belong on one. Rules are yours alone and
-        come off again under the Senders tab.
+        come off again under the Blocked tab.
       </p>
       {busy && (
         <p className="text-xs text-slate-400 mt-2 inline-flex items-center gap-1.5">
@@ -2622,11 +2667,11 @@ function MoveModal({ mail, actor, onClose, onDone }: {
        * for an unmatch, too: matching a newsletter to a debtor by mistake is exactly the thing
        * being undone.
        *
-       * A message settled some other way (marked as needing no record, or still on a lead or a
+       * A message settled some other way (marked as free mail, or still on a lead or a
        * deal) is not in Needs matching either, and saying so beats sending somebody hunting.
        */
       const landsIn = mail.isJunk ? 'Junk'
-        : mail.noRecordAt ? 'No record needed'
+        : mail.noRecordAt ? 'Free mail'
           : 'Needs matching'
       onDone(
         `Unmatched from ${was}. You will find it under ${landsIn}.`

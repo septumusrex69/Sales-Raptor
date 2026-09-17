@@ -3307,3 +3307,70 @@ comment on column public.account_contacts.person_role is
 -- Grouping the panel by person is the only query this adds, and it is per account.
 create index if not exists account_contacts_person_idx
   on public.account_contacts (account_id, person_name);
+
+
+-- ---------------------------------------------------------------------------
+-- nav_counts: the mail badge was counting our own sent messages
+-- ---------------------------------------------------------------------------
+-- Sent mail is written into user_emails by the sync so the Sent tab has something to show, and
+-- it is inserted settled (no_record_at set) because we know where it went. But nothing ever sets
+-- read_at on it -- nobody "reads" a message they wrote -- so every sent message satisfied
+-- "unread and not junk" for ever. A mailbox whose Sent folder syncs 2 000 messages put 2 000 on
+-- the sidebar, and the badge could never be cleared by any action a person can take.
+--
+-- Same rule as the Mail page itself, which excludes is_sent from every tab but Sent.
+--
+-- FOUR columns, not the three defined earlier in this file. The diary column was added by
+-- another session's migration against the shared staging database and is live there; the
+-- definition above predates it. Postgres refuses a change to the OUT parameters of an existing
+-- function (42P13), so the fourth column has to be carried whether or not this file ever saw it
+-- added. The tasks, disputes and diary clauses below are the live ones, copied verbatim.
+create or replace function public.nav_counts()
+returns table (mail integer, tasks integer, disputes integer, diary integer)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    -- UNREAD mail, whether or not it has been matched. Junk excluded: it is not work. Sent
+    -- excluded: we wrote it, and it is not waiting on anybody.
+    --
+    -- This used to count only mail that still needed matching, on the theory that a matched
+    -- message is already dealt with. In practice almost everything matches itself on arrival --
+    -- every message in the book did -- so the badge sat at nought for ever and a new email
+    -- arrived with nothing on the sidebar to say so. Unread is the thing a person actually
+    -- clears, by reading it, and it is what somebody means when they ask whether mail has come.
+    (select count(*)::integer from public.user_emails
+      where user_id = auth.uid()
+        and is_junk = false
+        and is_sent = false
+        and read_at is null),
+    -- Mine, still open, and due by the end of today. Not "all my tasks", which would be a
+    -- permanent number nobody could ever clear.
+    (select count(*)::integer from public.tasks
+      where owner_id = auth.uid()
+        and status not in ('Completed', 'Cancelled')
+        and due_date < date_trunc('day', now()) + interval '1 day'),
+    -- Disputes waiting on ME, not every dispute the firm has open. The difference between a
+    -- number somebody works and a number that sits at 20 forever.
+    -- Lowercase 'closed'. account_queries.status is one of open / with_client / answered /
+    -- closed, so "not closed" is the whole of the open book, not just stage 'open'.
+    (select count(*)::integer from public.account_queries
+      where owner_id = auth.uid()
+        and status <> 'closed'),
+    -- My diary: what is due today, plus what I am already behind on.
+    --
+    -- The arrears are INCLUDED on purpose, even though including them risks exactly the failure
+    -- this file warns about -- a badge that never reaches zero stops being read. The alternative
+    -- is worse: a book arrived here with 279 overdue entries, and a badge that showed only
+    -- today's work would read "4" to somebody three months behind. The number has to be able to
+    -- frighten, or it is not telling the truth. It reaches zero when the diary is genuinely
+    -- clear, which is the condition the firm actually wants to manage towards.
+    (select count(*)::integer from public.diary_entries
+      where owner_id = auth.uid()
+        and state = 'open'
+        and due_on <= current_date);
+$$;
+
+grant execute on function public.nav_counts() to authenticated;
