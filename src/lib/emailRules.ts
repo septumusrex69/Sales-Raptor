@@ -380,8 +380,8 @@ export function companyFromDomain(domain: string | null | undefined): string {
  * The sender's name, out of a From header that may not contain one.
  *
  * WHY THIS EXISTS: the sync stored mailparser's `.text` for the From header, which is the whole
- * formatted address -- `"Urban Haus" <info@urbanhausgroup.co.za>` -- and not the display name. So
- * every list row read `"Urban Haus" <info@urbanhaus...` truncated, the open message printed the
+ * formatted address -- `"Kestrel Supplies" <info@kestrel.example>` -- and not the display name. So
+ * every list row read `"Kestrel Supplies" <info@kestrel...` truncated, the open message printed the
  * address twice, and a button offering to open the record was as wide as an email address. The
  * sync now stores the name alone; this cleans up everything already synced, which cannot be
  * re-read because the upsert ignores duplicates on purpose.
@@ -418,10 +418,31 @@ export function senderName(name: string | null | undefined, address: string): st
  * which is both shorter and how every mail client writes it.
  */
 export function recipientNames(people: Recipient[], mine: string[] = []): string {
+  return recipientLabels(people, mine).join(', ')
+}
+
+function recipientLabels(people: Recipient[], mine: string[]): string[] {
   const key = (a: string) => a.trim().toLowerCase()
   const own = new Set(mine.map(key).filter((a) => a !== ''))
   return people
     .map((p) => (own.has(key(p.address)) ? 'you' : (senderName(p.name, p.address) ?? p.address)))
     .filter((label) => label !== '')
-    .join(', ')
+}
+
+/**
+ * The same list, cut to what fits: "Ruben +4".
+ *
+ * Spark's, and the firm sent it over as the shape they want. It is better than truncating, which
+ * is what this did first: a clipped line ends mid-address and says nothing about how much was
+ * clipped, so "To: Stephan Ferreira <stephan@bredellferre…" could be one person or nine. A count
+ * is exact, and nine people on a message is itself the thing worth knowing before you answer.
+ *
+ * The full list still goes in the title, which is where somebody checks an address.
+ */
+export function recipientSummary(
+  people: Recipient[], mine: string[] = [], shown = 2,
+): string {
+  const labels = recipientLabels(people, mine)
+  if (labels.length <= shown) return labels.join(', ')
+  return `${labels.slice(0, shown).join(', ')} +${labels.length - shown}`
 }

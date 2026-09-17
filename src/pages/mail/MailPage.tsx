@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, CircleCheck, ExternalLink,
@@ -20,7 +20,7 @@ import { relativeDayLabel, timeOfDay } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
 import { recordSentEmail, replySubject } from '../../lib/accountEmails'
 import {
-  companyFromDomain, forwardBody, forwardSubject, recipientLine, recipientNames, replyAllTo,
+  companyFromDomain, forwardBody, forwardSubject, recipientLine, recipientSummary, replyAllTo,
   splitPersonName,
 } from '../../lib/emailRules'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
@@ -1006,7 +1006,14 @@ export function MailPage() {
               </span>
             )}
             renderDetail={(m) => (
-              <div className="px-5 py-4">
+              /*
+                A COLUMN AT LEAST AS TALL AS THE PANE, so the floating bar has a bottom to sit on.
+                Sticky alone is not enough: a three-line message ends three lines down, and the bar
+                would hang there in the middle of an empty pane instead of at the foot of it. With
+                min-h-full and mt-auto it is at the bottom of a short message and stays on screen
+                through a long one, which is the whole behaviour the firm liked in Spark.
+              */
+              <div className="px-5 py-4 min-h-full flex flex-col">
                 {/*
                   THE MESSAGE'S OWN HEADING: what it is about, when it came, who it is from and
                   who else was on it -- in that order, and each on its own line.
@@ -1670,6 +1677,151 @@ function MailSummary({ mail, tight, blocked }: {
   )
 }
 
+/**
+ * Everything you can do with an open message, in one bar, in one of two places.
+ *
+ * See the placement note in MailBody: floating at the foot of the reading pane, an ordinary row at
+ * the top of an expanded list row. Written once so the two cannot end up offering different things.
+ */
+function MessageActions({
+  mail, sticky, moreActions, onReply, onReplyAll, onForward, onUnread,
+}: {
+  mail: MailItem
+  sticky: boolean
+  moreActions: RowMenuItem[]
+  onReply: () => void
+  onReplyAll: () => void
+  onForward: () => void
+  onUnread: () => void
+}) {
+  /*
+   * SPARK'S BAR, WHICH THE FIRM SENT OVER: "I kind of like the one that Spark did better -- it's
+   * smaller and it's kind of nicer ... it stays there, so if you scroll up or down through the
+   * email it kind of stays there as a little bar."
+   *
+   * A floating pill at the foot of the message, icon-only, with the overflow at one end and the
+   * one action you actually came for set apart at the other. Three things follow from that shape
+   * and each of them is the point:
+   *
+   *  - IT FLOATS, so the old complaint ("it's sitting there at the bottom and I have to scroll
+   *    down all the way to do anything") does not come back. It is at the bottom AND always on
+   *    screen, which the version at the top of the message only managed by being in the way.
+   *  - IT IS ICONS, which is where the bulk went. Six labelled buttons and a record name wrapped
+   *    onto a second row on an iPad; six icons do not.
+   *  - REPLY KEEPS ITS WORD. Spark's accent button is separated and unlabelled, and a row of
+   *    near-identical arrows is fine for somebody who uses Spark all day. A collector should not
+   *    have to work out which arrow is reply-all, so the ones that are only arrows carry tooltips
+   *    and the one that matters carries its name.
+   */
+  return (
+    <div className={sticky
+      /* pointer-events-none on the rail so the bar does not swallow clicks on the message under
+       it; restored on the pill itself, which is the only part anybody aims at. */
+      ? 'sticky bottom-3 z-20 mt-auto pt-4 flex justify-center pointer-events-none'
+      : 'flex flex-wrap items-center gap-1.5 pb-2'}>
+      <div className={sticky
+      ? 'pointer-events-auto inline-flex items-center gap-0.5 rounded-full border border-slate-200 bg-white/95 backdrop-blur px-1.5 py-1 shadow-lg'
+      : 'contents'}>
+
+      {/*
+        Not yet, which is a legitimate answer. Without it, opening a message to see whether it
+        was urgent was the same act as deciding it was not. First, as it is in Spark.
+      */}
+      <BarButton sticky={sticky} onClick={onUnread} label="Mark unread" icon={<MailIcon size={15} />} />
+
+      {/*
+        REPLY ALL, at the firm's instruction: "I also can't respond to all recipients." A debtor
+        who copies their attorney was answered privately, so the attorney never saw the answer
+        to the question they had been copied on.
+
+        Absent where nobody else was on it, rather than present and doing the same as Reply.
+      */}
+      {(mail.toRecipients.length + mail.ccRecipients.length) > 1 && (
+        <BarButton sticky={sticky} onClick={onReplyAll} label="Reply all" icon={<ReplyAll size={15} />} />
+      )}
+
+      {/*
+        FORWARD, which Reply alone could not cover. Passing a debtor's dispute to the client who
+        has to answer it, or a mandate to the attorney, is everyday work that otherwise meant
+        opening Outlook — and mail managed in two places is mail managed in neither.
+      */}
+      <BarButton sticky={sticky} onClick={onForward} label="Forward" icon={<ForwardIcon size={15} />} />
+
+      {/*
+        Through to the debtor's file, which is the other half of managing mail from one place:
+        the message is here, but the balance, the arrangement and the history are there.
+
+        Still a Link, because middle-click and "open in new tab" both work on one and neither
+        survives being anything else — which matters when you are working a message and want
+        the account beside it. Its label lives in the tooltip on the bar, where the record name
+        was the widest thing on the row and the reason it wrapped.
+      */}
+      {mail.linkedTo && (
+        <Link to={mail.linkedTo.path} title={`Open ${mail.linkedTo.label}`}
+          aria-label={`Open ${mail.linkedTo.label}`}
+          className={sticky
+            ? 'inline-flex items-center justify-center w-9 h-9 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+            : 'inline-flex items-center gap-1 min-w-0 max-w-[15rem] text-[13px] font-medium px-2 py-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-50'}>
+          <ExternalLink size={15} className="shrink-0" />
+          {!sticky && <span className="truncate">Open {mail.linkedTo.label}</span>}
+        </Link>
+      )}
+
+      {/*
+        The rest, behind the dots. They are filing decisions -- taken once per message and never
+        in a hurry -- so they cost a click and buy back a bar that reads at a glance.
+      */}
+      <div className={sticky ? '' : 'ml-auto'}>
+        <RowMenu width="w-56" bordered={!sticky} up={sticky}
+          label="More things to do with this message" items={moreActions} />
+      </div>
+
+      {/* A hairline, so the thing you came for is not just another icon in the row. */}
+      {sticky && <span aria-hidden className="mx-1 w-px h-5 bg-slate-200" />}
+
+      {/*
+        REPLY, set apart, where Spark puts its own accent button. It is the whole reason the
+        mailbox stopped being read-only: answering a debtor used to mean finding their account
+        and starting again there, so the mailbox was a filing tray rather than a place you
+        worked. What it does depends on whether this message is on an account yet -- see
+        startReply.
+      */}
+      <button onClick={onReply}
+        className={`inline-flex items-center gap-1.5 font-medium border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 ${
+          sticky ? 'text-[13px] px-3.5 py-1.5 rounded-full' : 'text-[13px] px-3 py-1.5 rounded-lg'}`}>
+        <Reply size={15} /> Reply
+      </button>
+      </div>
+    </div>
+
+  )
+}
+
+/**
+ * One icon on that bar.
+ *
+ * Icon-only where it floats and labelled where it does not, because the two placements have
+ * different room and the same buttons. A tooltip AND an aria-label on both: an icon with neither
+ * is a button nobody can name, and "which arrow was reply-all?" is exactly the question a
+ * collector should not have to answer from memory.
+ */
+function BarButton({ sticky, onClick, label, icon }: {
+  sticky: boolean
+  onClick: () => void
+  label: string
+  icon: ReactNode
+}) {
+  return (
+    <button onClick={onClick} title={label} aria-label={label}
+      className={sticky
+        ? 'inline-flex items-center justify-center w-9 h-9 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+        : 'inline-flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'}>
+      {icon}
+      {!sticky && label}
+    </button>
+  )
+}
+
 /** The message itself, shared by the expanded row and the reading pane. */
 function MailBody({
   mail, body, images, calendar, events, onAccept, onRemoveEvent, skippedImages, loadingBody,
@@ -1745,8 +1897,10 @@ function MailBody({
    *   item and it says Unmatch, because two items made the agent choose between "rematch" and
    *   "unmatch" before knowing which they could do, and the answer to "which account should this
    *   be on?" is frequently "I do not know yet". The box behind it offers rematching underneath.
-   * - MARK UNREAD is "not yet", which is a legitimate answer. Without it, opening a message to see
-   *   whether it was urgent was the same act as deciding it was not.
+   * MARK UNREAD IS NOT HERE. It is on the bar itself, where Spark puts it and where it belongs:
+   * it is the one of these that gets pressed in a hurry -- "not yet", said while scanning -- and
+   * it was in both places for one commit, which is one place too many.
+ *
    * - FREE MAIL is the third answer to "what is this?" and the one the mailbox had no word for. A
    *   telephone provider's invoice is not junk and belongs on no account. Hidden on matched mail:
    *   that is on a record and a fee may have been raised against it, so calling it free would be a
@@ -1763,7 +1917,6 @@ function MailBody({
     ...(mail.linkedTo?.kind === 'account' && onMove
       ? [{ label: 'Unmatch', icon: <Undo2 size={15} />, onClick: onMove }]
       : []),
-    { label: 'Mark unread', icon: <MailIcon size={15} />, onClick: onUnread },
     ...(!mail.isFiled
       ? [mail.noRecordAt
         ? { label: 'Put back in the queue', icon: <Undo2 size={15} />, onClick: onUndoNoRecord }
@@ -1779,112 +1932,27 @@ function MailBody({
     { label: 'Block sender', icon: <Ban size={15} />, onClick: onBlock, danger: true },
   ]
 
+  /* Gathered once, because the bar renders in one of two places and a second argument list would
+     be a second set of buttons waiting to happen. */
+  const bar = {
+    mail, sticky: !!sticky, moreActions, onReply, onReplyAll, onForward, onUnread,
+  }
+
   return (
     <>
       {/*
-        THE ACTIONS COME FIRST, at the firm's instruction: "it's sitting there at the bottom and I
-        have to scroll down all the way to do anything. Put it on the top of the message."
+        IN THE LIST, THE ACTIONS STAY AT THE TOP, at the firm's earlier instruction: "it's sitting
+        there at the bottom and I have to scroll down all the way to do anything."
 
-        They were under the body, which reads as the natural order -- read the thing, then decide
-        what to do about it -- and is wrong for the messages people actually get. A corporate
-        signature is a full-width letterhead and a photograph; the message above it is three
-        lines. So the decision was a screen and a half below the thing it was about, and Reply
-        was the hardest button in the mailbox to reach.
+        That complaint is about a bar you have to REACH. Spark's floating one never has to be
+        reached -- it is at the foot of the pane and always on screen -- so in the reading pane it
+        goes to the bottom and floats. An expanded row in the list has no scroll container of its
+        own, so there is nothing for a bar to float in and nothing to stop it sitting over the next
+        message; there it stays an ordinary row, above the message, where it always was.
 
-        Above the message, they are in the same place on every message whatever its length, which
-        is the property that makes a toolbar a toolbar.
+        One component, two placements, so the two cannot drift into different sets of buttons.
       */}
-      {/*
-        THREE ANSWERS IN FRONT, EVERYTHING ELSE BEHIND THE DOTS.
-
-        Nine buttons of equal weight in one wrapping row is not a toolbar, it is a list you have to
-        read every time — and on a narrow pane it wrapped to three lines, which put Block sender
-        directly under Reply. The firm, on a layout that grouped them: "I like this type of
-        organization. Make it like this."
-
-        Reply, Reply all and Forward are what an open message is actually for, and they are the
-        whole reason the mailbox stopped being read-only: answering a debtor used to mean finding
-        their account and starting again there. What Reply does depends on whether this message is
-        on an account yet — see startReply.
-
-        The rest are filing decisions. They are taken once per message and never in a hurry, so
-        they cost a click and buy back a row that reads at a glance.
-      */}
-      {/*
-        A BAR, AND IT STAYS. The firm, on the version that scrolled away: "the whole thing ... is
-        very bulky ... I kind of like the one that Spark did better -- it's smaller and it stays
-        there, so if you scroll up or down through the email it kind of stays there as a little
-        bar."
-
-        Sticky at the TOP rather than the bottom, which is the same instruction they gave before
-        ("it's sitting there at the bottom and I have to scroll down all the way to do anything")
-        with the persistence added: whatever you have scrolled to, the answer to "now what?" is on
-        screen and in one place.
-
-        Smaller too. It was set at button size for a mockup and then carried a second row -- the
-        record link, as wide as an email address -- which is where the bulk actually was. That
-        link is now the chip in the header, which was already there and already said the same
-        thing, so the toolbar is one row again.
-      */}
-      <div className={`flex flex-wrap items-center gap-1.5 bg-white ${
-        sticky ? 'sticky top-0 z-20 -mx-5 px-5 py-2 border-b border-slate-100' : 'pb-2'}`}>
-        <button onClick={onReply}
-          className="inline-flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
-          <Reply size={14} /> Reply
-        </button>
-
-        {/*
-          REPLY ALL, at the firm's instruction: "I also can't respond to all recipients." A debtor
-          who copies their attorney was answered privately, so the attorney never saw the answer to
-          the question they had been copied on.
-
-          Absent where nobody else was on it, rather than present and doing the same as Reply.
-        */}
-        {(mail.toRecipients.length + mail.ccRecipients.length) > 1 && (
-          <button onClick={onReplyAll}
-            className="inline-flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50">
-            <ReplyAll size={14} /> Reply all
-          </button>
-        )}
-
-        {/*
-          FORWARD, which Reply alone could not cover. Passing a debtor's dispute to the client who
-          has to answer it, or a mandate to the attorney, is everyday work that otherwise meant
-          opening Outlook — and mail managed in two places is mail managed in neither.
-        */}
-        <button onClick={onForward}
-          className="inline-flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50">
-          <ForwardIcon size={14} /> Forward
-        </button>
-
-        {/*
-          Through to the debtor's file, which is the other half of managing mail from one place:
-          the message is here, but the balance, the arrangement and the history are there.
-
-          A TEXT LINK NOW, NOT A BUTTON. As a bordered button carrying a record name it was the
-          widest thing on the toolbar and pushed itself onto a second row -- which is where the
-          bulk the firm complained about actually was. Still a Link, because middle-click and
-          "open in new tab" both work on one and neither survives being anything else, and that
-          matters when you are working a message and want the account beside it.
-        */}
-        {mail.linkedTo && (
-          <Link to={mail.linkedTo.path} title={`Open ${mail.linkedTo.label}`}
-            className="inline-flex items-center gap-1 min-w-0 max-w-[15rem] text-[13px] font-medium px-2 py-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-50">
-            <ExternalLink size={13} className="shrink-0" />
-            <span className="truncate">Open {mail.linkedTo.label}</span>
-          </Link>
-        )}
-
-        {/*
-          HARD RIGHT, away from the three. The dots are not a fourth answer to "what do I do with
-          this?" -- they are where the rest of them live, and sitting shoulder to shoulder with
-          Forward is exactly what would make them read as one.
-        */}
-        <div className="ml-auto">
-          <RowMenu width="w-56" bordered
-            label="More things to do with this message" items={moreActions} />
-        </div>
-      </div>
+      {!sticky && <MessageActions {...bar} />}
 
       {/*
         WHERE THIS MESSAGE IS FILED, and both ways of fixing it when the answer is nowhere.
@@ -2014,6 +2082,7 @@ function MailBody({
         </>
       )}
 
+      {sticky && <MessageActions {...bar} />}
 
     </>
   )
@@ -2131,16 +2200,21 @@ function RecipientLines({ mail, mine }: {
   if (mail.toRecipients.length === 0 && mail.ccRecipients.length === 0) return null
   const own = (mine ?? []).filter((a): a is string => !!a)
   const line = 'text-xs text-slate-400 truncate'
+  /*
+   * "+4" RATHER THAN A CUT-OFF LINE, which is Spark's and is what the firm sent over. A clipped
+   * line ends mid-address and says nothing about how much was clipped; a count is exact, and nine
+   * people on a message is itself worth knowing before you answer it.
+   */
   return (
     <div className="mt-0.5">
       {mail.toRecipients.length > 0 && (
         <p className={line} title={recipientLine(mail.toRecipients)}>
-          <span className="text-slate-500">To:</span> {recipientNames(mail.toRecipients, own)}
+          <span className="text-slate-500">To:</span> {recipientSummary(mail.toRecipients, own)}
         </p>
       )}
       {mail.ccRecipients.length > 0 && (
         <p className={line} title={recipientLine(mail.ccRecipients)}>
-          <span className="text-slate-500">Cc:</span> {recipientNames(mail.ccRecipients, own)}
+          <span className="text-slate-500">Cc:</span> {recipientSummary(mail.ccRecipients, own)}
         </p>
       )}
     </div>
@@ -2890,11 +2964,22 @@ function CreateLeadFromMailModal({ mail, body, actor, onClose, onCreated }: {
 
   const initial = fromForm
     ? {
-      firstName: intake.firstName ?? '',
-      lastName: intake.lastName ?? '',
+      /*
+       * THE NAME IS THE ONE THING THE HEADER IS RIGHT ABOUT. The firm's form posts a Contact
+       * Number, a Company or Business Name and a Subject -- and no name field at all, because it
+       * puts the person's name in the From display name instead. So the body is asked first and
+       * the header is the fallback, which is the opposite way round from every other field here.
+       */
+      firstName: intake.firstName ?? split.firstName,
+      lastName: intake.lastName ?? split.lastName,
       companyName: intake.companyName ?? '',
       phone: intake.phone ?? '',
-      /* Never the From header here, for the reason in the block comment above. */
+      /*
+       * NEVER THE FROM HEADER. It is form@bredellferreira.co.za -- the firm's own address -- and
+       * saved on a lead it would match every later enquiry to that same lead. Blank is the honest
+       * answer where the form did not ask for one, and the Contact Number is what makes the lead
+       * reachable.
+       */
       email: intake.email ?? '',
       source: 'Website' as LeadSource,
     }

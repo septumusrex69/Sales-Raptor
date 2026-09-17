@@ -884,7 +884,7 @@ async function syncMailbox(
       /*
        * THE DISPLAY NAME, NOT THE WHOLE HEADER.
        *
-       * `.text` is mailparser's formatted address -- `"Urban Haus" <info@urbanhausgroup.co.za>` --
+       * `.text` is mailparser's formatted address -- `"Kestrel Supplies" <info@kestrel.example>` --
        * and storing that made every list row read as a truncated address, printed the address
        * twice on the open message, and made a button offering to open the record as wide as an
        * email address. The name is in .value[0].name and is frequently absent, which is a null and
@@ -908,7 +908,7 @@ async function syncMailbox(
         fromAddress: normaliseAddress(fromAddress) ?? fromAddress,
         /*
          * THE NAME, NOT THE WHOLE HEADER. `.text` is mailparser's formatted address --
-         * `"Urban Haus" <info@urbanhausgroup.co.za>` -- and storing that made every list row read
+         * `"Kestrel Supplies" <info@kestrel.example>` -- and storing that made every list row read
          * as a truncated address and the open message print the address twice. The display name
          * is in .value[0].name, and is frequently absent, which is a null and not a fallback.
          */

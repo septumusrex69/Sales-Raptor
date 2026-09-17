@@ -29,6 +29,23 @@
  */
 export const LEAD_INTAKE_ADDRESSES = ['form@bredellferreira.co.za']
 
+/**
+ * The firm's own domains, worked out from the addresses above rather than written down again.
+ *
+ * NO ADDRESS HERE MAY EVER BECOME A LEAD'S. These bodies carry the enquiry and then the firm's own
+ * signature under it -- "Email: info@bredellferreira.co.za" -- and that line is a labelled email
+ * field as far as any parser is concerned. Saved on the lead it would be worse than useless: the
+ * address would match the firm's own future mail, and a salesperson would be writing to reception.
+ */
+const FIRM_DOMAINS = new Set(
+  LEAD_INTAKE_ADDRESSES.map((a) => a.slice(a.lastIndexOf('@') + 1).toLowerCase()),
+)
+
+const isFirmAddress = (value: string) => {
+  const at = value.lastIndexOf('@')
+  return at > -1 && FIRM_DOMAINS.has(value.slice(at + 1).trim().toLowerCase())
+}
+
 export function isLeadIntake(address: string | null | undefined): boolean {
   const a = (address ?? '').trim().toLowerCase()
   return a !== '' && LEAD_INTAKE_ADDRESSES.includes(a)
@@ -42,6 +59,8 @@ export interface IntakeFields {
   email: string
   /** What they actually wrote, where the form sends it as a labelled field. */
   message: string
+  /** Which service they are asking about -- "Debt Collecting". See the LABELS note. */
+  topic: string
 }
 
 /*
@@ -61,10 +80,22 @@ const LABELS: { key: keyof IntakeFields | 'fullName'; patterns: RegExp }[] = [
   { key: 'fullName', patterns: /^(full[\s_-]*name|name|your[\s_-]*name|contact[\s_-]*name)$/i },
   { key: 'firstName', patterns: /^(first[\s_-]*name|firstname|given[\s_-]*name)$/i },
   { key: 'lastName', patterns: /^(last[\s_-]*name|lastname|surname|family[\s_-]*name)$/i },
-  { key: 'companyName', patterns: /^(company|company[\s_-]*name|business|business[\s_-]*name|organisation|organization|firm)$/i },
+  /*
+   * "Company or Business Name" is what the firm's own form actually posts -- seen on a real
+   * enquiry, and not a spelling anybody would have guessed. The rest are the ones a form usually
+   * uses; this one is the one that matters.
+   */
+  { key: 'companyName', patterns: /^(company|company[\s_-]*name|business|business[\s_-]*name|company[\s_-]*or[\s_-]*business[\s_-]*name|organisation|organization|firm)$/i },
   { key: 'phone', patterns: /^(phone|telephone|tel|mobile|cell|cellphone|contact[\s_-]*number|phone[\s_-]*number)$/i },
   { key: 'email', patterns: /^(e-?mail|email[\s_-]*address|your[\s_-]*e-?mail)$/i },
   { key: 'message', patterns: /^(message|enquiry|inquiry|comments?|details|query|how can we help)$/i },
+  /*
+   * What they want done, as the firm's form labels it -- "Subject: Debt Collecting". NOT the
+   * email's own subject line, which on every one of these reads "New Message From Bredell
+   * Ferreira" and tells nobody anything. It is the one field on the form that says which service
+   * the enquiry is about, which is the first thing a salesperson needs.
+   */
+  { key: 'topic', patterns: /^(subject|service|services|interested[\s_-]*in|regarding|about)$/i },
 ]
 
 /** Empty is not a value: a form that posts "Company:" with nothing after it has told us nothing. */
@@ -106,6 +137,13 @@ export function parseLeadIntake(body: string | null | undefined): Partial<Intake
     }
     if (value === '') continue
 
+    /*
+     * The firm's own address is never the lead's, however it is labelled. See FIRM_DOMAINS: the
+     * signature under these enquiries carries one on an "Email:" line, which is indistinguishable
+     * from the real thing to everything above this point.
+     */
+    if (hit.key === 'email' && isFirmAddress(value)) continue
+
     if (hit.key === 'fullName') {
       /* Split only where nothing more specific was given -- an explicit Surname field wins. */
       const parts = value.split(' ')
@@ -128,7 +166,7 @@ export function parseLeadIntake(body: string | null | undefined): Partial<Intake
    */
   if (out.email === undefined) {
     const found = (body ?? '').match(/[\w.+-]+@[\w-]+\.[\w.-]+/g) ?? []
-    const outside = found.find((a) => !/@bredellferreira\.co\.za$/i.test(a))
+    const outside = found.find((a) => !isFirmAddress(a))
     if (outside) out.email = outside
   }
 

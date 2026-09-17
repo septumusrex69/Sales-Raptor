@@ -259,7 +259,7 @@ export const MAIL = [
     id: 'aaaaaaa1-0000-4000-8000-000000000004',
     folder: 'INBOX', is_sent: false, uid: 104,
     message_id: '<documents-4@example.co.za>',
-    from_address: 'gail.trout@example.co.za', from_name: 'Gail Trout',
+    from_address: 'nadia.pretorius@example.co.za', from_name: 'Nadia Pretorius',
     subject: 'Request for information',
     snippet: 'I would like to know what documents you need from me to proceed.',
     to_address: 'stephan@bredellferreira.co.za', to_name: 'Stephan',
@@ -286,7 +286,7 @@ export const MAIL = [
     message_id: '<website-6@bredellferreira.co.za>',
     from_address: 'form@bredellferreira.co.za', from_name: 'Ernest Mohlalisi',
     subject: 'New Message From Bredell Ferreira',
-    snippet: 'You have a new enquiry from the website. Name: Ernest Mohlalisi Company: Urban Haus',
+    snippet: 'Good Day We are looking for a service provider to collect money from customers',
     to_address: 'stephan@bredellferreira.co.za', to_name: 'Stephan',
     to_recipients: [{ name: 'Stephan', address: 'stephan@bredellferreira.co.za' }],
     cc_recipients: [],
@@ -321,14 +321,29 @@ export const MAIL = [
  * a salesperson then phones.
  */
 export const FORM_BODY = [
-  'You have a new enquiry from the website.',
+  'Good Day',
   '',
-  'Name: Ernest Mohlalisi',
-  'Company: Urban Haus',
-  'Email: ernest@urbanhausgroup.co.za',
-  'Phone: 010 555 0142',
-  'Message: I would like assistance recovering money owed to me.',
+  /*
+   * THE FIRM'S OWN FORM, in its own words and in its own order -- taken from a real enquiry and
+   * then rewritten with invented details, because this repo is public.
+   *
+   * Three things about it are why this fixture exists and not a tidier one:
+   *  - "Contact Number" and "Company or Business Name" are the labels the site actually posts,
+   *    and neither is a spelling anybody would have guessed.
+   *  - There is NO name field and NO email field. The person's name is in the From display name,
+   *    which is why the parser is asked first and the header is the fallback.
+   *  - "Subject" here is the SERVICE they want, not the email's subject line, which on every one
+   *    of these reads "New Message From Bredell Ferreira" and tells nobody anything.
+   */
+  'We are looking for a service provider to collect money from customers dating back a few years.',
+  'Contact Number: 021-555 0130',
+  'Company or Business Name: Vaal Fire Services',
+  'Subject: Debt Collecting',
   '',
   '--',
-  'Bredell Ferreira | 011 555 0100 | info@bredellferreira.co.za',
+  'Bredell Ferreira',
+  /* The firm's OWN switchboard, labelled, under the enquiry -- which is what these mails carry and
+     what makes first-match-wins load-bearing rather than decorative. */
+  'Tel: 011 555 0100',
+  'Email: info@bredellferreira.co.za',
 ].join('\n')

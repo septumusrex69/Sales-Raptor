@@ -136,6 +136,7 @@ ok('...and the same for Cc',
 /* ---------- 4. the screen says who else was on it ---------- */
 
 const lines = slice(page, 'function RecipientLines', 'function InviteCard', 'RecipientLines')
+const rules = readFileSync(new URL('../../src/lib/emailRules.ts', import.meta.url), 'utf8')
 /*
  * SILENT WHERE THERE IS NOBODY. Most mail is addressed to one person and gains nothing from a
  * line saying so -- and mail synced before these columns existed has empty lists, where a "To"
@@ -151,12 +152,17 @@ ok('Cc is labelled', />Cc:</.test(lines))
  * goes into a Cc box; printed on screen it is four wrapped lines for three people, which is what
  * the firm called bulky. So the visible text is names and the full list is the hover.
  */
-ok('each line shows names rather than addresses', (lines.match(/recipientNames\(/g) ?? []).length === 2)
+ok('each line shows names rather than addresses', (lines.match(/recipientSummary\(/g) ?? []).length === 2)
 ok('...with the real addresses still one hover away', (lines.match(/title=\{recipientLine\(/g) ?? []).length === 2)
 /* One line each: the saving is the whole point, so a long list must not be allowed to wrap. */
 ok('a long list is cut off rather than wrapping onto four lines', /truncate/.test(lines))
 /* Your own address reads as "you", which is shorter and is what every mail client does. */
-ok('the agent themselves is not listed by name', /recipientNames\(mail\.toRecipients, own\)/.test(lines))
+ok('the agent themselves is not listed by name', /recipientSummary\(mail\.toRecipients, own\)/.test(lines))
+/*
+ * AND A LONG LIST IS COUNTED, NOT CLIPPED -- "To: Ruben +4", which is Spark's and is what the firm
+ * sent over. A clipped line ends mid-address and says nothing about how much was clipped.
+ */
+ok('...and a long list says how many were left out', /\+\$\{labels\.length - shown\}/.test(rules))
 
 /*
  * ON BOTH SCREENS. The mailbox has a reading pane and a plain list, and they are separate
@@ -170,8 +176,13 @@ ok('the expanded list row names them too',
 
 /* ---------- 5. reply-all ---------- */
 
-const body = slice(page, 'function MailBody', 'function RecipientLines', 'MailBody')
-const row = slice(body, "<div className={`flex flex-wrap items-center gap-1.5 bg-white ", '<NotMatchedBar', 'the action row')
+const body = slice(page, 'function MailBody', '\nfunction InviteCard', 'MailBody')
+/*
+ * The bar is its own component now: it renders floating at the foot of the reading pane and as an
+ * ordinary row at the top of an expanded list row, and writing it twice would have been two sets
+ * of buttons waiting to drift.
+ */
+const row = slice(page, 'function MessageActions', '\nfunction BarButton', 'the action bar')
 
 /*
  * OFFERED ONLY WHERE THERE IS SOMEBODY TO COPY. On a message addressed to you alone, reply-all
@@ -180,7 +191,7 @@ const row = slice(body, "<div className={`flex flex-wrap items-center gap-1.5 bg
  */
 ok('Reply all is offered only when more than one person was on it',
   /\(mail\.toRecipients\.length \+ mail\.ccRecipients\.length\) > 1/.test(row))
-ok('...and it is in the row, not behind the dots', /Reply all/.test(row))
+ok('...and it is on the bar, not behind the dots', /label="Reply all"/.test(row))
 
 const startReply = slice(page, 'function startReply', '\n  }', 'startReply')
 ok('replying knows which kind it is', /function startReply\(mail: MailItem, all = false\)/.test(startReply))
@@ -253,9 +264,11 @@ const more = slice(body, 'const moreActions: RowMenuItem[] = [', '\n  ]', 'moreA
  * WHAT AN OPEN MESSAGE IS FOR stays in the row. These three are why the mailbox stopped being
  * read-only, and putting any of them one click away would undo that.
  */
-for (const label of ['Reply', 'Reply all', 'Forward']) {
+for (const label of ['Reply', 'Reply all', 'Forward', 'Mark unread']) {
   /* Asserted as the button's own text -- "/> Reply" -- so a comment mentioning it cannot pass. */
-  ok(`${label} is in the row`, row.includes(`/> ${label}\n`))
+  /* Asserted on the button's own text or its label -- a comment mentioning it cannot pass. */
+  ok(`${label} is in the row`,
+    row.includes(`/> ${label}\n`) || row.includes(`label="${label}"`))
   ok(`...and ${label} is not buried in the menu`, !more.includes(`label: '${label}'`))
 }
 
@@ -263,10 +276,11 @@ for (const label of ['Reply', 'Reply all', 'Forward']) {
  * THE FILING DECISIONS go behind the dots. They are taken once per message and never in a hurry,
  * so they cost a click and buy back a row that reads at a glance.
  */
-for (const label of ['Mark unread', 'Mark as free', 'Put back in the queue', 'Move to junk',
+for (const label of ['Mark as free', 'Put back in the queue', 'Move to junk',
   'Not junk', 'Unmatch', 'Block sender']) {
   ok(`${label} is in the menu`, more.includes(`label: '${label}'`))
-  ok(`...and ${label} is not also a button in the row`, !row.includes(`> ${label}`))
+  ok(`...and ${label} is not also a button on the bar`,
+    !row.includes(`> ${label}`) && !row.includes(`label="${label}"`))
 }
 
 /* Each still carries the rule that decides whether it is offered at all. */
@@ -285,7 +299,29 @@ ok('Block sender is marked as the damaging one', /label: 'Block sender'[\s\S]*da
  */
 ok('the account is still one click away', /<Link to=\{mail\.linkedTo\.path\}/.test(row))
 /* And the bar stays put while a long message scrolls under it -- the firm liked that in Spark. */
-ok('the bar stays on screen while the message scrolls', /sticky \? 'sticky top-0/.test(row))
+/*
+ * AND IT STAYS ON SCREEN, which is what the firm liked in Spark: "it stays there, so if you scroll
+ * up or down through the email it kind of stays there as a little bar." Floating at the foot of the
+ * pane rather than pinned to the top of it -- the old complaint was about a bar you had to REACH,
+ * and one that is always on screen never has to be reached.
+ */
+ok('the bar stays on screen while the message scrolls', /'sticky bottom-3 z-20/.test(row))
+/* And it must not swallow clicks on the message underneath it. */
+ok('...without eating clicks on the message under it',
+  /pointer-events-none/.test(row) && /pointer-events-auto/.test(row))
+/* Its own menu opens upwards, or it opens off the bottom of the screen. */
+ok('...and its menu opens upwards', /up=\{sticky\}/.test(row))
+
+/*
+ * AND EVERY ICON ON IT HAS A NAME. Floating, these are icons and nothing else -- a button with no
+ * accessible name cannot be read out, cannot be hovered for an answer, and "which arrow was
+ * reply-all?" is exactly the question a collector should not have to answer from memory.
+ */
+const barButton = slice(page, 'function BarButton', '\nfunction ', 'BarButton')
+ok('an icon on the bar says what it is on hover', /title=\{label\}/.test(barButton))
+ok('...and to a screen reader', /aria-label=\{label\}/.test(barButton))
+/* And spells it out where there is room for it, which is the list placement. */
+ok('...and spells it out where there is room', /\{!sticky && label\}/.test(barButton))
 ok('...and it is not in the menu instead', !/linkedTo\.path/.test(more))
 
 if (failures.length) {

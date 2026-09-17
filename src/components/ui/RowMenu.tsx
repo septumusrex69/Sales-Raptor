@@ -8,7 +8,7 @@ export interface RowMenuItem {
   danger?: boolean
 }
 
-export function RowMenu({ items, width = 'w-48', label, bordered = false }: {
+export function RowMenu({ items, width = 'w-48', label, bordered = false, up = false }: {
   items: RowMenuItem[]
   /**
    * How wide the panel is. Defaults to the width every row menu in the app has always been.
@@ -28,6 +28,15 @@ export function RowMenu({ items, width = 'w-48', label, bordered = false }: {
    * as decoration -- so it takes the same shape as its neighbours.
    */
   bordered?: boolean
+  /**
+   * Open upwards.
+   *
+   * For a menu whose trigger sits at the foot of a pane: downwards it opens off the bottom of the
+   * screen, and the only way to reach an item is to scroll a page that has just had a menu pinned
+   * over it. Not automatic -- measuring the viewport on every open is a lot of machinery for a
+   * question the caller already knows the answer to.
+   */
+  up?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -49,7 +58,7 @@ export function RowMenu({ items, width = 'w-48', label, bordered = false }: {
         <MoreHorizontal size={16} />
       </button>
       {open && (
-        <div className={`absolute right-0 top-full mt-1 ${width} bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-40`}>
+        <div className={`absolute right-0 ${up ? 'bottom-full mb-1' : 'top-full mt-1'} ${width} bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-40`}>
           {items.map((item) => (
             <button
               key={item.label}

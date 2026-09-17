@@ -108,8 +108,8 @@ check('nothing at all is fetched when there is no text to anchor it',
  * threw exactly that away and the message rendered blank, which is indistinguishable from the
  * feature never having worked.
  */
-const REAL_SIG_A = '("IMAGE" "JPEG" ("NAME" "banner.jpg") "<a@urbanhaus>" NIL "BASE64" 420000 NIL ("INLINE" ("FILENAME" "banner.jpg")) NIL NIL)'
-const REAL_SIG_B = '("IMAGE" "PNG" ("NAME" "logo.png") "<b@urbanhaus>" NIL "BASE64" 260000 NIL ("INLINE" ("FILENAME" "logo.png")) NIL NIL)'
+const REAL_SIG_A = '("IMAGE" "JPEG" ("NAME" "banner.jpg") "<a@kestrel.example>" NIL "BASE64" 420000 NIL ("INLINE" ("FILENAME" "banner.jpg")) NIL NIL)'
+const REAL_SIG_B = '("IMAGE" "PNG" ("NAME" "logo.png") "<b@kestrel.example>" NIL "BASE64" 260000 NIL ("INLINE" ("FILENAME" "logo.png")) NIL NIL)'
 const richSig = readableParts(flattenParts(await structure(
   `(${TEXT}${REAL_SIG_A}${REAL_SIG_B} "RELATED" ("BOUNDARY" "r") NIL NIL NIL)`,
 )))

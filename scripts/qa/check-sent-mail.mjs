@@ -211,16 +211,16 @@ eq('nobody is nothing', recipientLine([]), '')
 
 /*
  * THE BUG THIS EXISTS FOR: the sync stored mailparser's `.text` for the From header, which is the
- * whole formatted address and not the display name. Every list row read `"Urban Haus"
- * <info@urbanhaus...` truncated, the open message printed the address twice, and a button
+ * whole formatted address and not the display name. Every list row read `"Kestrel Supplies"
+ * <info@kestrel...` truncated, the open message printed the address twice, and a button
  * offering to open the record was as wide as an email address. The sync now stores the name
  * alone; this cleans up what is already synced, which cannot be re-read because the upsert
  * ignores duplicates on purpose.
  */
 check('a whole From header gives up its name',
-  senderName('"Urban Haus" <info@urbanhausgroup.co.za>', 'info@urbanhausgroup.co.za'), 'Urban Haus')
+  senderName('"Kestrel Supplies" <info@kestrel.example>', 'info@kestrel.example'), 'Kestrel Supplies')
 check('...quoted or not',
-  senderName('Urban Haus <info@urbanhausgroup.co.za>', 'info@urbanhausgroup.co.za'), 'Urban Haus')
+  senderName('Kestrel Supplies <info@kestrel.example>', 'info@kestrel.example'), 'Kestrel Supplies')
 check('a plain name is left alone', senderName('Ernest Mohlalisi', 'e@x.co.za'), 'Ernest Mohlalisi')
 /*
  * NULL, NOT THE ADDRESS. An address masquerading as a name is worse than an honest address: it

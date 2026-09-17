@@ -66,7 +66,7 @@ ok('...character by character, so it cannot depend on the page', /charCodeAt\(i\
 ok('...and nothing about it is random', !/Math\.random/.test(colour))
 ok('...nor drawn from where the row happens to sit', !/index/.test(colour))
 
-const summary = slice(page, 'function MailSummary', 'function MailBody', 'MailSummary')
+const summary = slice(page, 'function MailSummary', '\nfunction MessageActions', 'MailSummary')
 ok('every row in the list carries one',
   /<Avatar name=\{mail\.fromName \|\| mail\.fromAddress\} color=\{senderColour\(mail\.fromAddress\)\}/.test(summary))
 /*
@@ -130,9 +130,15 @@ ok('...which says what it is instead', /A new enquiry off the website/.test(bar)
  * earning nothing. Said plainly rather than left to be discovered on the statement.
  */
 ok('...and what replying from it would mean', /will not\s*\n?\s*appear on any record/.test(bar))
-/* Two ways out, because there are two reasons a message matches nothing. */
-ok('the picker is offered', /onClick=\{onLink\}/.test(bar))
-ok('...and a brand-new lead beside it', /onClick=\{onCreateLead\}/.test(bar))
+/*
+ * TWO WAYS OUT, IN BOTH BRANCHES. The bar reads one way for a website enquiry and another for
+ * everything else, and each branch writes its own pair of buttons -- so the count is what matters:
+ * one branch quietly losing a button would still satisfy "the button exists somewhere".
+ */
+check('the picker is offered on both', (bar.match(/onClick=\{onLink\}/g) ?? []).length, 2)
+check('...and a brand-new lead beside it', (bar.match(/onClick=\{onCreateLead\}/g) ?? []).length, 2)
+/* And the order swaps: an enquiry off the form has one answer, so it leads with the lead. */
+ok('the enquiry leads with the lead', /fromForm \? \(\s*\n\s*<>\s*\n\s*<button onClick=\{onCreateLead\}/.test(bar))
 ok('matching is the one to press', /bg-gold-400/.test(bar))
 /*
  * SILENT ON ANYTHING ALREADY ANSWERED. Filed mail has its record and free mail was deliberately
@@ -179,6 +185,12 @@ ok('...and no second Add Lead call beside it', !/addLead\(/.test(lead))
  */
 ok('a form enquiry is recognised', /const fromForm = isLeadIntake\(mail\.fromAddress\)/.test(lead))
 ok('...and read out of the message', /parseLeadIntake\(text\)/.test(lead))
+/*
+ * EXCEPT THE NAME, WHICH IS THE ONE THING THE HEADER IS RIGHT ABOUT. The firm's form posts no name
+ * field at all -- it puts the person's name in the From display name -- so here alone the body is
+ * asked first and the header is the fallback.
+ */
+ok('...with the name falling back to the sender', /firstName: intake\.firstName \?\? split\.firstName/.test(lead))
 const formBranch = slice(lead, 'const initial = fromForm', ': {', 'the form-enquiry prefills')
 ok('...with their address taken from the body', /email: intake\.email \?\? ''/.test(formBranch))
 ok('...and never from the sender', !/mail\.fromAddress/.test(formBranch))
@@ -238,32 +250,57 @@ ok('...and neither is chosen for you', !/autoFocus/.test(done))
  * switchboard on it, which somebody then phones.
  */
 const FORM_BODY = [
-  'You have a new enquiry from the website.',
+  'Good Day',
   '',
-  'Name: Ernest Mohlalisi',
-  'Company: Urban Haus',
-  'Email: ernest@urbanhausgroup.co.za',
-  'Phone: 010 555 0142',
-  'Message: I would like assistance recovering money owed to me.',
+  /*
+   * THE FIRM'S OWN FORM, in its own words -- taken from a real enquiry and then rewritten with
+   * invented details, because this repo is public. What it does NOT have is the point: no name
+   * field and no email field. The person's name is in the From display name.
+   */
+  'We are looking for a service provider to collect money from customers dating back a few years.',
+  'Contact Number: 021-555 0130',
+  'Company or Business Name: Vaal Fire Services',
+  'Subject: Debt Collecting',
   '',
   '--',
   'Bredell Ferreira',
-  /* The firm's OWN switchboard, labelled, under the enquiry -- which is what these mails carry and
-     what makes first-match-wins load-bearing rather than decorative. */
   'Tel: 011 555 0100',
   'Email: info@bredellferreira.co.za',
 ].join('\n')
 
 const parsed = parseLeadIntake(FORM_BODY)
-check('the name is read off the form', parsed.firstName, 'Ernest')
-check('...and the surname with it', parsed.lastName, 'Mohlalisi')
-check('the company is read off the form', parsed.companyName, 'Urban Haus')
-check('...and their real address', parsed.email, 'ernest@urbanhausgroup.co.za')
 /*
- * THE FIRST MATCH WINS, which is what keeps the firm's own footer off the lead: these bodies carry
- * the enquiry and then a signature with a switchboard number under it.
+ * THE LABELS THE SITE ACTUALLY USES. "Contact Number" and "Company or Business Name" are not
+ * spellings anybody would have guessed, and a parser that misses them hands back a blank form on
+ * the one message the firm most wants turned into a lead.
  */
-check('...and THEIR number, not the footer\u2019s', parsed.phone, '010 555 0142')
+check('the company is read off the form', parsed.companyName, 'Vaal Fire Services')
+/*
+ * AND THEIR NUMBER, NOT THE FOOTER'S. These bodies carry the enquiry and then the firm's own
+ * signature under it, with a switchboard number in it -- taking the last match would put the
+ * firm's own number on the lead, which a salesperson would then phone.
+ */
+check('...and THEIR number, not the footer\u2019s', parsed.phone, '021-555 0130')
+/*
+ * "Subject" on this form is the SERVICE, not the email's subject line -- which on every one of
+ * these reads "New Message From Bredell Ferreira" and tells nobody anything. It is the first
+ * thing a salesperson needs and it was going nowhere.
+ */
+check('what they want is read too', parsed.topic, 'Debt Collecting')
+/*
+ * NO NAME FIELD AND NO EMAIL FIELD, which is the shape of the real thing and the reason the screen
+ * falls back to the From display name for the name. Asserted, because a fixture that quietly grew
+ * one would make that fallback untested.
+ */
+check('the form gives no name', parsed.firstName, undefined)
+/* The only address in it is the firm's own, and that must never become the lead's. */
+check('...and no address of theirs', parsed.email, undefined)
+
+/* The other shapes a form can post, which the firm's may change to without telling anybody. */
+const labelled = parseLeadIntake('Name: Ernest Mohlalisi\nEmail: ernest@example.co.za')
+check('a name field is read where there is one', labelled.firstName, 'Ernest')
+check('...and split', labelled.lastName, 'Mohlalisi')
+check('...and their address with it', labelled.email, 'ernest@example.co.za')
 
 /* An explicit Surname field beats splitting a Name field, where the form sends both. */
 const split = parseLeadIntake('Name: Johan van der Merwe\nSurname: van der Merwe')

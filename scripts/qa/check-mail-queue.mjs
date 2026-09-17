@@ -312,7 +312,20 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
   ok('the message renderer exists', start > -1)
   const mailBody = page.slice(start, page.indexOf('function MailRow(', start))
 
-  const reply = mailBody.indexOf('<button onClick={onReply}')
+  /*
+   * WHERE THE ACTIONS ARE NOW: one component, two placements.
+   *
+   * In the LIST they are still above the message, which is where the firm asked for them ("it's
+   * sitting there at the bottom and I have to scroll down all the way to do anything"). In the
+   * READING PANE they float at the foot of the pane, Spark's way, which the firm sent over and
+   * preferred -- and which answers the same complaint better, because a bar that is always on
+   * screen never has to be reached at all.
+   *
+   * So the ordering assertions below apply to the list placement only. What the pane does is
+   * checked in check-reply-all.mjs, on the bar itself.
+   */
+  const inline = mailBody.indexOf('{!sticky && <MessageActions')
+  const floating = mailBody.indexOf('{sticky && <MessageActions')
   const attachments = mailBody.indexOf('{mail.attachmentNames.length > 0 && (')
   const body = mailBody.indexOf('whitespace-pre-wrap break-words')
   const signature = mailBody.indexOf('In this message')
@@ -321,43 +334,44 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
    * Presence before order, always. indexOf returns -1 for something deleted and -1 beats
    * everything, so an order-only assertion passes vacuously the moment its subject is gone.
    */
-  ok('there is a reply button', reply > -1)
-  ok('...an attachment row', attachments > -1)
+  ok('the list renders the actions inline', inline > -1)
+  ok('...and the pane floats them', floating > -1)
+  ok('...there is an attachment row', attachments > -1)
   ok('...the message body itself', body > -1)
   ok('...and the pictures it was written with', signature > -1)
 
-  ok('reply comes before the message, not after it', reply < body)
-  ok('...and before the signature pictures that used to bury it', reply < signature)
+  ok('in the list the actions come before the message, not after it', inline < body)
+  ok('...and before the signature pictures that used to bury them', inline < signature)
   ok('the attachments are above the message too', attachments < body)
   /* The controls come first; the files they act on second; the message last. */
-  ok('...and below the buttons, which are the things you press most', reply < attachments)
+  ok('...and below the buttons, which are the things you press most', inline < attachments)
+  /*
+   * AND THE FLOATING ONE IS LAST. A bar that sticks to the bottom only stays on screen while its
+   * own place in the flow is on screen -- put half way up a long message it scrolls away exactly
+   * when it is wanted, and looks correct in the markup the whole time.
+   */
+  ok('the floating bar is the last thing in the message', floating > signature)
 
   /*
-   * Every action moved, not just Reply. Half a toolbar at the top and half at the bottom is
-   * worse than either, because now there are two places to look instead of one.
-   *
-   * Some of them are now items in the overflow menu rather than buttons of their own -- the row
-   * leads with Reply, Reply all and Forward and puts the filing decisions behind the dots. Where
-   * each one lives is check-reply-all.mjs's business; what matters here is only that none of them
-   * went back under the message.
+   * Both placements come out of ONE component, so the list and the pane cannot end up offering
+   * different buttons -- which is what two argument lists would have quietly produced.
    */
+  const bar = page.slice(page.indexOf('function MessageActions'), page.indexOf('\nfunction BarButton'))
+  ok('there is one bar, written once', bar.length > 0)
   for (const [what, needle] of [
-    ['forward', '<button onClick={onForward}'],
-    ['mark unread', 'onClick: onUnread'],
-    ['block sender', 'onClick: onBlock'],
+    ['reply', 'onClick={onReply}'],
+    ['forward', 'onClick={onForward}'],
+    ['mark unread', 'onClick={onUnread}'],
     ['reach the rest of the actions', '<RowMenu'],
     ['open the record it is filed on', '<Link to={mail.linkedTo.path}'],
   ]) {
-    const at = mailBody.indexOf(needle)
-    ok(`there is a way to ${what}`, at > -1)
-    ok(`...and it moved with the rest`, at < body)
+    ok(`there is a way to ${what}`, bar.includes(needle))
   }
+  /* Blocking stays behind the dots, on the open message rather than on every row. */
+  ok('there is a way to block the sender', mailBody.includes('onClick: onBlock'))
 
   // A rule under the controls, so the message reads as the message and not as more toolbar.
   ok('the controls are ruled off from the message', /border-b border-slate-100 mb-3/.test(mailBody))
-  /* It is the first thing in the card now, so a top margin would open a gap above everything. */
-  ok('...and carry no margin above them',
-    !/<div className="mt-3 flex flex-wrap items-center gap-2">\s*\n\s*<button onClick=\{onReply\}/.test(mailBody))
 }
 
 if (failures.length) {

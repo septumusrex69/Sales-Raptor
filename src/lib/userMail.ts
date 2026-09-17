@@ -222,7 +222,7 @@ function toItem(r: MailRow): MailItem {
     fromAddress: r.from_address,
     /*
      * CLEANED ON THE WAY OUT. Everything synced before this stored the whole From header as the
-     * name -- `"Urban Haus" <info@urbanhausgroup.co.za>` -- and those rows cannot be re-read,
+     * name -- `"Kestrel Supplies" <info@kestrel.example>` -- and those rows cannot be re-read,
      * because fileUserEmail ignores duplicates on purpose so a re-sync cannot overwrite an
      * agent's filing. See senderName: null where there is no real name, so the caller can fall
      * back to the address rather than print it twice.

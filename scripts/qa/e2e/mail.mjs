@@ -210,6 +210,13 @@ try {
     await page.getByRole('button', { name: 'Reply all' }).isVisible())
   t.ok('...and Forward', await page.getByRole('button', { name: 'Forward' }).isVisible())
   /*
+   * NAMED EVEN WHERE IT IS ONLY AN ARROW. On the floating bar these are icons, and an icon with no
+   * accessible name is a button nobody can identify -- "which arrow was reply-all?" is exactly the
+   * question a collector should not have to answer from memory.
+   */
+  t.ok('...and the icons say what they are',
+    await page.getByRole('button', { name: 'Mark unread' }).isVisible())
+  /*
    * AND THE REST ARE NOT LOOSE BUTTONS. Nine of equal weight in one wrapping row put Block sender
    * directly under Reply on a narrow pane, which is the layout this replaced.
    */
@@ -322,13 +329,24 @@ try {
   await t.shot(page, '25-mail-website-enquiry')
   await page.getByRole('button', { name: 'Create lead' }).first().click()
   await page.waitForTimeout(600)
-  t.check('their real address comes off the message, not the sender',
-    await box().getByLabel('Email', { exact: true }).inputValue(), 'ernest@urbanhausgroup.co.za')
-  t.check('...their company with it',
-    await box().getByLabel(/^Company/).inputValue(), 'Urban Haus')
+  /*
+   * THE FORM POSTS NO NAME FIELD -- it puts the person's name in the From display name -- so here
+   * alone the header is the fallback and the body is asked first.
+   */
+  t.check('the name falls back to the sender, which is where the form puts it',
+    await box().getByLabel(/^First Name/).inputValue(), 'Ernest')
+  t.check('...their company off the body',
+    await box().getByLabel(/^Company/).inputValue(), 'Vaal Fire Services')
   /* The firm's own switchboard is in the footer of that same body. First match wins. */
   t.check('...and THEIR number, not the footer\u2019s',
-    await box().getByLabel('Phone', { exact: true }).inputValue(), '010 555 0142')
+    await box().getByLabel('Phone', { exact: true }).inputValue(), '021-555 0130')
+  /*
+   * AND NO ADDRESS AT ALL, which is the honest answer. The From header is the firm's own form and
+   * the only address in the body is the firm's own signature -- either one saved on the lead would
+   * match the firm's own future mail to it.
+   */
+  t.check('...and no address, because the form did not ask for one',
+    await box().getByLabel('Email', { exact: true }).inputValue(), '')
   await t.shot(page, '26-mail-lead-from-form')
   await box().getByRole('button', { name: 'Cancel' }).click()
   await page.waitForTimeout(400)
