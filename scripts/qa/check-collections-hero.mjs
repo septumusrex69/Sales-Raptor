@@ -215,13 +215,38 @@ ok(`together they leave the picture visible (${combined.toFixed(2)} at the worst
 ok(`the heavy pass is the one across (${worst[0]} vs ${worst[1]})`, worst[0] > worst[1])
 
 /*
- * FULL BLEED AND SQUARE. The panel was an inset rounded card floating in the page's own padding
- * and the firm's word for it was "bulky". The radius and the negative margins have to agree:
- * square corners on an inset card look like a mistake, and a bled panel with a radius cuts into
- * the window edge.
+ * IT IS A CARD, ROUNDED OFF THE SAME TOKEN AS EVERY OTHER HERO.
+ *
+ * It ran full bleed with square corners for a version — the panel had been called "bulky" and
+ * edge-to-edge was the answer to that. It was the wrong answer, and the firm said so: a square
+ * panel running into the sidebar beside eight rounded ones is the one screen somebody forgot to
+ * finish. A hard-coded 18px would pass a check for "round" and still drift the day a skin moves
+ * the token, so what is asserted is that this reads the SAME token .app-hero does.
  */
-ok('the corners are square', /border-radius: 0;/.test(css.slice(css.indexOf('.collections-hero {'), css.indexOf('.collections-hero::before'))))
-ok('...and the panel cancels the page’s padding', /collections-hero -mx-6 -mt-6/.test(hero))
+const panel = css.slice(css.indexOf('.collections-hero {'), css.indexOf('.collections-hero::before'))
+ok('the panel is rounded off the shared token', /border-radius: var\(--skin-hero-radius\);/.test(panel))
+ok('...the same one every other hero uses',
+  /\.app-hero \{[\s\S]*?border-radius: var\(--skin-hero-radius\);/.test(css))
+/* And it sits inside the page's padding rather than cancelling it. */
+ok('...and it does not bleed past the page’s padding', !/collections-hero[^"]*-mx-6/.test(hero))
+
+/*
+ * THE FOUR FIGURES SIT ON ONE LINE.
+ *
+ * The labels above them are different lengths and one carries a date, so on any width where
+ * "Collected this period" wraps and "Ahead of pace" does not, the four big figures land at four
+ * different heights. The rendered proof is in the browser check next door, which measures them;
+ * this asserts the mechanism, because a passing measurement at one window width says nothing
+ * about the next.
+ */
+const tile = hero.slice(hero.indexOf('function Tile('))
+ok('the label reserves its second line', /min-h-\[2\.2em\]/.test(tile))
+/*
+ * min-height, NOT height: a third line has to push the figure down rather than be cut in half.
+ * `\b` is no good here — it sits happily between the `-` and the `h` of `min-h-`, so the first
+ * version of this line reported the correct code as broken. Found by running it.
+ */
+ok('...as a minimum rather than a cap', !/[^-]h-\[2\.2em\]/.test(tile))
 
 /*
  * THE CONTROLS LOSE THEIR BOXES BUT NOT THEIR AFFORDANCE. A control drawn as text is a control

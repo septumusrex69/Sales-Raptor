@@ -251,23 +251,68 @@ try {
     await page.getByRole('heading', { name: 'Collections', exact: true }).isVisible())
 
   /*
-   * FULL BLEED. The complaint that started this was that the panel was "bulky" — an inset card
-   * with a frame and a gap around it. Measured against the scrolling area rather than read off
-   * the class, because a negative margin the parent clips is a negative margin that did nothing.
+   * IT IS A CARD, INSET AND ROUNDED LIKE EVERY OTHER HERO. It ran full bleed with square corners
+   * for a version and the firm sent it back: one square panel bleeding into the sidebar beside
+   * eight rounded ones reads as the screen somebody forgot to finish. Measured off the scrolling
+   * area rather than read off the class, because a margin the parent clips is a margin that did
+   * nothing either way.
    */
-  const bleed = await page.evaluate(() => {
+  const frame = await page.evaluate(() => {
     const el = document.querySelector('.collections-hero')
     const hero = el.getBoundingClientRect()
     const main = document.querySelector('main').getBoundingClientRect()
     return {
       left: hero.left - main.left, right: main.right - hero.right, top: hero.top - main.top,
-      radius: getComputedStyle(el).borderTopLeftRadius,
+      radius: parseFloat(getComputedStyle(el).borderTopLeftRadius),
     }
   })
-  t.ok(`it runs to the left edge (${Math.round(bleed.left)}px)`, Math.abs(bleed.left) < 2)
-  t.ok(`...and to the right (${Math.round(bleed.right)}px)`, Math.abs(bleed.right) < 2)
-  t.ok(`...and up under the top bar (${Math.round(bleed.top)}px)`, Math.abs(bleed.top) < 2)
-  t.ok(`...with square corners (${bleed.radius})`, parseFloat(bleed.radius) === 0)
+  t.ok(`it sits inside the page's padding, left (${Math.round(frame.left)}px)`, frame.left >= 12)
+  t.ok(`...right (${Math.round(frame.right)}px)`, frame.right >= 12)
+  t.ok(`...and top (${Math.round(frame.top)}px)`, frame.top >= 12)
+  t.ok(`...with the corners rounded (${frame.radius}px)`, frame.radius >= 8)
+
+  /*
+   * AND THE FOUR FIGURES SIT ON ONE LINE.
+   *
+   * They did not: the labels above them are different lengths and one carries a date, so at any
+   * width where "Collected this period" wraps onto a second line and "Ahead of pace" does not,
+   * the four big numbers land at four different heights and the row stops reading as a row.
+   *
+   * MEASURED AT TWO WIDTHS, because this is a wrapping bug and one width proves nothing about
+   * the next — the firm found it on an iPad, not on the laptop this suite runs at. 1300 is a
+   * width where two of the four labels wrap and two do not, which is the shape of the bug;
+   * below 1280 the tiles stack two-up and there is no line left to hold.
+   */
+  const figureTops = async () => page.evaluate(() =>
+    [...document.querySelectorAll('.collections-hero .grid > div')]
+      .map((tile) => Math.round(tile.querySelectorAll('p')[1].getBoundingClientRect().top)))
+
+  const wide = await figureTops()
+  t.check('all four figures are there to line up', wide.length, 4)
+  t.ok(`...and they are on one line (${wide.join(', ')})`, new Set(wide).size === 1)
+
+  await page.setViewportSize({ width: 1300, height: 1000 })
+  const narrow = await figureTops()
+  t.ok(`...still on one line where the labels wrap (${narrow.join(', ')})`, new Set(narrow).size === 1)
+  /*
+   * AND THE LABELS REALLY DO WRAP AT THAT WIDTH, or the line above passes for the wrong reason —
+   * a check that only ever sees one-line labels proves nothing about the case it exists for.
+   *
+   * Counted off a Range rather than off the elements' heights, which is the trap the first
+   * version of this fell into: reserving the second line is the fix, so every label box is the
+   * same height whether or not it wrapped, and comparing heights found nothing by construction.
+   * A Range over the text gives one rect per line box, which is the actual wrap.
+   */
+  const lines = await page.evaluate(() =>
+    [...document.querySelectorAll('.collections-hero .grid > div')].map((tile) => {
+      const range = document.createRange()
+      range.selectNodeContents(tile.querySelector('p'))
+      return range.getClientRects().length
+    }))
+  t.ok(`...and at least one label wraps there (${lines.join(', ')})`, Math.max(...lines) >= 2)
+  t.ok('...while another does not, which is what knocked them out of line',
+    Math.min(...lines) === 1)
+  await page.setViewportSize({ width: 1440, height: 1000 })
 
   /* The firm's own lines, which is most of why they asked for the panel. */
   t.ok('the greeting is on it',

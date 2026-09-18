@@ -54,14 +54,14 @@ export function CollectionsHero({ figures, filters, action }: {
 
   return (
     /*
-      FULL BLEED, AND THE CORNERS ARE SQUARE. This was an inset rounded card floating inside the
-      page's own padding, with the lockup repeated across the top of it — the firm's word for it
-      was "bulky", and they were right: a panel with a frame, a gap and a second copy of the
-      brand reads as a box sitting on the screen rather than as the top of the screen. The
-      negative margins cancel <main>'s p-6 so the photograph runs edge to edge under the top bar,
-      which is where the picture stops being decoration and starts being the page.
+      A CARD, LIKE EVERY OTHER HERO ON THE APP. It ran full bleed for a version, cancelling the
+      page's padding with negative margins — the panel had been called "bulky" and edge-to-edge
+      was the answer to that. It was the wrong answer: what was bulky was the second lockup and
+      the padding inside it, not the card, and a square panel running into the sidebar beside
+      eight rounded ones reads as the one screen somebody forgot to finish. The radius itself is
+      in the stylesheet, off the same token .app-hero uses.
     */
-    <div className="collections-hero -mx-6 -mt-6 px-6 pt-7 pb-5 sm:px-10 sm:pt-9 sm:pb-6">
+    <div className="collections-hero px-6 pt-7 pb-5 sm:px-10 sm:pt-9 sm:pb-6">
       {/* ---------- the line, and the firm's own words beside it ---------- */}
       <div className="flex items-start justify-between gap-6">
         <div>
@@ -199,7 +199,18 @@ function Tile({ icon, label, value, tone, children }: {
     <div className="flex items-start gap-3.5 rounded-xl border border-white/10 bg-slate-950/45 px-4 py-4 backdrop-blur-sm">
       <span className="mt-0.5 shrink-0 text-gold-400">{icon}</span>
       <div className="min-w-0">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/65">{label}</p>
+        {/*
+          TWO LINES ARE RESERVED FOR THE LABEL WHETHER OR NOT IT NEEDS THEM.
+
+          The four labels are different lengths and one of them carries a date, so on any width
+          where "Collected this period" wraps and "Ahead of pace" does not, the big figures sit
+          at four different heights and the row stops reading as a row. Reserving the second line
+          costs a few pixels of empty space on the short ones and buys a straight line across all
+          four, which is the whole point of putting them side by side. min-height rather than
+          height: a label that somehow needs a third line should push the figure down, not be
+          cut in half.
+        */}
+        <p className="min-h-[2.2em] leading-[1.1] text-[10px] font-semibold uppercase tracking-[0.16em] text-white/65">{label}</p>
         <p className={`text-2xl sm:text-[28px] font-bold tabular-nums mt-1 ${colour}`}>{value}</p>
         <div className="text-xs text-white/60 mt-1.5">{children}</div>
       </div>
