@@ -282,9 +282,14 @@ try {
    */
   t.ok(`...set between 48 and 56px (${heading.size})`,
     parseFloat(heading.size) >= 48 && parseFloat(heading.size) <= 56)
-  /* Semibold, not black: at this size a heavy weight reads as advertising. */
-  t.ok(`...at a medium weight (${heading.weight})`,
-    Number(heading.weight) >= 500 && Number(heading.weight) <= 650)
+  /*
+   * LIGHT, NOT BOLD, and measured as the weight the browser RESOLVED rather than read off the
+   * class. A font-light class on a family that ships no light cut renders at 400 and looks almost
+   * right; asserting the class would pass on that and the firm would be looking at the same line
+   * they just sent back.
+   */
+  t.ok(`...at a light weight (${heading.weight})`,
+    Number(heading.weight) >= 250 && Number(heading.weight) <= 400)
   t.ok('...in white on the dark panel', /255, 255, 255/.test(heading.colour))
   /*
    * TWO TONES, BROKEN BY HAND. The firm's reference sets the first half white and the second in

@@ -150,10 +150,16 @@ const track = /tracking-\[(-?[\d.]+)em\]/.exec(title)
 ok('...with tracking set for lower case', Boolean(track))
 ok(`...pulled in rather than opened up (${track?.[1]}em)`, Number(track?.[1]) < 0)
 /*
- * SEMIBOLD, NOT BLACK, at the firm's instruction: "medium/semi-bold rather than an excessively
- * heavy black weight", because at this size a heavy weight reads as advertising typography.
+ * LIGHT, NOT BOLD. It was set at 600 first — the brief asked for "medium/semi-bold" — and the firm
+ * read it back as thick. At 52px a weight chosen for body copy reads as advertising, and the whole
+ * direction here is restraint: in a display line it is the LACK of weight that carries the money.
+ *
+ * Asserted as a floor and a ceiling. A ceiling alone would pass on a hairline that disappears over
+ * the cloud, and a floor alone is what let 600 through in the first place.
  */
-ok('...at a medium weight rather than a black one', /font-semibold/.test(title) && !/font-(bold|black|extrabold)/.test(title))
+ok('...at a light weight', /font-light\b/.test(title))
+ok('...and nothing heavier crept back in',
+  !/font-(medium|semibold|bold|black|extrabold)\b/.test(title))
 
 /*
  * AND IT DOES NOT NAME THE SCREEN. The panel carried "Collections" twice at one point — a gold

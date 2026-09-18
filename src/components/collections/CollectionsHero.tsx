@@ -90,12 +90,19 @@ export function CollectionsHero({ figures, filters, action, progress }: {
               works as a deliberate break: left to wrap it lands wherever the window is wide and
               the colour change falls mid-phrase.
 
-              A MODERN SANS, NOT A DISPLAY FACE, at the firm's instruction, and semibold rather
-              than black: at this size a heavy weight reads as advertising rather than as a
-              dashboard. It inherits the app's own family rather than loading a second one.
+              A MODERN SANS, NOT A DISPLAY FACE, at the firm's instruction, and LIGHT rather than
+              semibold. It was set at 600 first, which the brief asked for, and the firm read it
+              back as thick — they are right: at 52px a weight chosen for body copy reads as
+              advertising, and the whole direction here is restraint. Weight is what carries the
+              "expensive" in a display line, and less of it carries more.
+
+              THE TRACKING OPENS UP WITH IT. -0.02em is right for semibold, where the letterforms
+              are heavy enough to crowd; pull a light weight in that far and the words start to
+              run together at this size. It inherits the app's own family rather than loading a
+              second one.
             */}
-            <h1 className="mt-4 text-[32px] sm:text-[44px] lg:text-[52px] font-semibold
-              tracking-[-0.02em] leading-[1.04] text-white">
+            <h1 className="mt-4 text-[32px] sm:text-[44px] lg:text-[52px] font-light
+              tracking-[-0.01em] leading-[1.04] text-white">
               The sky is only<br />
               <span className="text-[var(--ch-champagne)]">the beginning.</span>
             </h1>
