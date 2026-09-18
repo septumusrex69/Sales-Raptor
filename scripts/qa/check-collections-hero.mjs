@@ -127,6 +127,18 @@ const title = hero.slice(hero.indexOf('<h1'), hero.indexOf('</h1>'))
 ok('there is a heading to read', title.length > 40)
 ok('the firm’s line is on it', /The sky is only the beginning\./.test(title))
 ok('...unbroken', !/<br/.test(title))
+/*
+ * THE CAPITALS ARE CSS, NOT TYPED. Same as the eyebrow, the rail and the line at the foot — this
+ * panel already has one way of doing capitals and a second would be a second thing to change —
+ * and a reader who copies the line out of the page gets it back in sentence case.
+ */
+ok('...set in capitals by the stylesheet', /\buppercase\b/.test(title))
+ok('...rather than typed in them', !/THE SKY IS ONLY/.test(title))
+/* Tight tracking is right for lower case and wrong for capitals: letterforms of one height with
+   no ascenders between them need the air putting back, or the line reads as a block. */
+const track = /tracking-\[(-?[\d.]+)em\]/.exec(title)
+ok('...with tracking to read them by', Boolean(track))
+ok(`...opened up rather than tightened (${track?.[1]}em)`, Number(track?.[1]) > 0)
 /* And balanced, so the widths where it does wrap do not drop one word onto a line of its own. */
 ok('...and balanced where it has to wrap', /text-balance/.test(title))
 

@@ -74,8 +74,18 @@ export function CollectionsHero({ figures, filters, action }: {
             one sentence, so a break put anywhere inside it would be arbitrary. text-wrap:balance
             is there for the widths where it has to wrap anyway — left alone the last word drops
             to a line of its own, which on a heading this size is very visible.
+
+            SET IN CAPITALS BY CSS, NOT BY TYPING THEM. Same as the eyebrow, the rail and the line
+            at the foot, which is half the reason: this panel already has one way of doing capitals
+            and a second would be a second thing to change. The other half is that a reader who
+            copies the line out of the page gets it back in sentence case, and the firm gets to
+            change its mind about the treatment without retyping the sentence.
+
+            AND THE TRACKING TURNS POSITIVE. The sentence-case version was set tight, which is
+            right for lower case and wrong for capitals — letterforms of one height with no
+            ascenders to separate them need the air putting back or the line reads as a block.
           */}
-          <h1 className="mt-2.5 text-2xl sm:text-[32px] font-semibold tracking-[-0.015em] text-white leading-[1.15] text-balance">
+          <h1 className="mt-2.5 text-2xl sm:text-[32px] font-semibold uppercase tracking-[0.015em] text-white leading-[1.15] text-balance">
             The sky is only the beginning.
           </h1>
           <p className="mt-3 text-[11px] font-medium uppercase tracking-[0.3em] text-gold-400">

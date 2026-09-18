@@ -222,8 +222,13 @@ try {
   const heading = await page.locator('.collections-hero h1').evaluate((el) => ({
     text: el.innerText, colour: getComputedStyle(el).color, size: getComputedStyle(el).fontSize,
   }))
-  t.check('the title is the firm’s own line',
-    heading.text.replace(/\s+/g, ' ').trim(), 'The sky is only the beginning.')
+  /*
+   * innerText reports what is RENDERED, so a heading set in capitals by CSS comes back in
+   * capitals — which is the assertion worth making. Reading textContent instead would return
+   * the sentence-case source and pass whether the transform applied or not.
+   */
+  t.check('the title is the firm’s own line, in capitals',
+    heading.text.replace(/\s+/g, ' ').trim(), 'THE SKY IS ONLY THE BEGINNING.')
   t.ok(`...set large (${heading.size})`, parseFloat(heading.size) >= 28)
   t.ok('...in white on the dark panel', /255, 255, 255/.test(heading.colour))
   /*
