@@ -180,6 +180,50 @@ export const UNGRADED_EQUIVALENT: CollectorGrade = 'Junior'
 export const DEFAULT_BOOK_CEILING = 500
 
 /**
+ * What a month's collection target is, before anybody sets one.
+ *
+ * THE FIRM'S OWN FIGURES, and the first two being equal is theirs as well: "make all the junior
+ * collectors 60 and the skilled collector 60 and then the senior 80 and then the elite 100". A
+ * junior and a skilled collector carry the same book and are asked for the same rand; what
+ * separates them is which accounts they may be given, not how hard the month is.
+ *
+ * A DEFAULT, NOT A RULE. It is what applies until a team leader sets a figure for somebody in
+ * Settings → Targets, or (when the collector's own dashboard exists) until the collector raises
+ * their own for the month. Without it the whole screen reads "No target" until thirty numbers
+ * have been typed in one at a time, which is how a screen gets abandoned in its first week.
+ *
+ * Grade is the only thing it can key on that is already maintained. Ungraded means Junior, the
+ * same way it does everywhere else — see UNGRADED_EQUIVALENT.
+ */
+export const DEFAULT_MONTH_TARGET: Record<CollectorGrade, number> = {
+  Junior: 60000,
+  Skilled: 60000,
+  Senior: 80000,
+  Elite: 100000,
+}
+
+/**
+ * The target that applies to somebody, and where it came from.
+ *
+ * WHERE IT CAME FROM IS SHOWN, NOT HIDDEN. A team leader looking at a floor of targets has to be
+ * able to tell the ones somebody chose from the ones the system assumed — otherwise the first
+ * time a figure looks wrong, nobody can say whether it was set wrong or never set at all.
+ */
+export type TargetOrigin = 'set' | 'grade'
+
+export function monthTargetFor(input: {
+  /** What a team leader (or later, the collector) set for this month. Null where nobody has. */
+  set: number | null | undefined
+  grade: CollectorGrade | null | undefined
+  /** Whether this person works a book at all. Somebody who does not has no target, not nought. */
+  collects: boolean
+}): { target: number | null; origin: TargetOrigin } {
+  if (input.set != null && input.set > 0) return { target: input.set, origin: 'set' }
+  if (!input.collects) return { target: null, origin: 'grade' }
+  return { target: DEFAULT_MONTH_TARGET[input.grade ?? UNGRADED_EQUIVALENT], origin: 'grade' }
+}
+
+/**
  * How many of a day's slots are held for work handed to this person.
  *
  * The firm's rule: a clerk who can work 45 a day may only diarise 35 of them himself, so there

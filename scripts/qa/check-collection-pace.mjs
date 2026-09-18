@@ -30,8 +30,9 @@ process.env.TZ = 'Africa/Johannesburg'
 
 import { readFileSync } from 'node:fs'
 import {
-  dayKey, monthPace, paceLine, standingLabel, teamTotal, workDaysInclusive,
+  dayKey, monthPace, paceLine, standingLabel, targetLaps, teamTotal, workDaysInclusive,
 } from '../../src/lib/collectionPace.ts'
+import { DEFAULT_MONTH_TARGET, monthTargetFor } from '../../src/lib/collectorGrade.ts'
 
 let pass = 0
 const failures = []
@@ -181,44 +182,180 @@ check('a team nobody was set has no target', untargeted.target, null)
 check('...but still has its collections', untargeted.collected, 900)
 check('an empty team has no target either', teamTotal([]).target, null)
 
+/* ---------- a target before anybody sets one ---------- */
+
+/*
+ * THE FIRM'S OWN FIGURES, and the first two being equal is theirs too: "make all the junior
+ * collectors 60 and the skilled collector 60 and then the senior 80 and then the elite 100". A
+ * junior and a skilled collector carry the same book and are asked for the same rand; what
+ * separates them is which accounts they may be given.
+ */
+check('a junior is asked for R60 000', DEFAULT_MONTH_TARGET.Junior, 60000)
+check('a skilled collector for the same', DEFAULT_MONTH_TARGET.Skilled, 60000)
+check('a senior for R80 000', DEFAULT_MONTH_TARGET.Senior, 80000)
+check('an elite for R100 000', DEFAULT_MONTH_TARGET.Elite, 100000)
+
+const resolved = (over = {}) => monthTargetFor({ set: null, grade: 'Senior', collects: true, ...over })
+check('with nothing set, the grade supplies it', resolved().target, 80000)
+check('...and the screen is told where it came from', resolved().origin, 'grade')
+check('a figure somebody set wins', resolved({ set: 45000 }).target, 45000)
+check('...and says so', resolved({ set: 45000 }).origin, 'set')
+/*
+ * NOUGHT IS NOT A TARGET SOMEBODY SET. A stored nought is how a target is cleared -- see the
+ * setTarget path in AppStore -- so reading it as "they were set nothing" would pin a whole team
+ * at 0% of R0 instead of falling back to their grade.
+ */
+check('a cleared target falls back to the grade', resolved({ set: 0 }).target, 80000)
+check('...and so does a null one', resolved({ set: null }).target, 80000)
+/*
+ * UNGRADED MEANS JUNIOR, the same as everywhere else -- see UNGRADED_EQUIVALENT. A firm with
+ * thirty ungraded clerks must not be a firm with thirty people who have no target.
+ */
+check('an ungraded collector gets the junior figure', resolved({ grade: null }).target, 60000)
+/* Somebody who works no book has no target. Nought would put them at the top of a list of
+   people needing help, which is a real problem but a different one. */
+check('somebody with no book has no target at all', resolved({ collects: false }).target, null)
+
+/* ---------- the bar laps when somebody passes their target ---------- */
+
+/*
+ * THE FIRM'S OWN IDEA: "when somebody has exceeded their target, the bar that's there starts
+ * over, but now it's a different colour." A bar pinned at 100% makes a collector at 260% and one
+ * at 101% look identical, on a screen whose whole job is to show who is carrying the month.
+ */
+check('nothing collected is an empty bar', targetLaps(0).fill, 0)
+check('...and no target at all is too', targetLaps(null).fill, 0)
+check('...and neither is a lap', targetLaps(null).laps, 0)
+check('a third of the way is a third of a bar', targetLaps(1 / 3).fill, 1 / 3)
+check('...still on the first colour', targetLaps(1 / 3).over, false)
+/*
+ * AN EXACT TARGET IS A FULL BAR, NOT AN EMPTY ONE. Somebody who has just hit their figure has
+ * earned a full bar; resetting it to nothing at the instant they got there would be the screen
+ * taking the moment away from them.
+ */
+check('exactly on target fills the bar', targetLaps(1).fill, 1)
+check('...and is not yet a second lap', targetLaps(1).laps, 0)
+check('...and keeps the first colour', targetLaps(1).over, false)
+check('a sliver past it starts a second bar', Math.round(targetLaps(1.01).fill * 100) / 100, 0.01)
+check('...which is one whole target behind them', targetLaps(1.01).laps, 1)
+check('...and is drawn in the other colour', targetLaps(1.01).over, true)
+check('half way round again', targetLaps(1.5).fill, 0.5)
+check('twice the target is a full second bar', targetLaps(2).fill, 1)
+check('...and still one lap, not two', targetLaps(2).laps, 1)
+check('a hair past twice starts a third', targetLaps(2.01).laps, 2)
+check('three and a half targets', targetLaps(3.5).laps, 3)
+check('...with the half showing', targetLaps(3.5).fill, 0.5)
+/* A negative cannot happen from paceLine, but a bar drawn at -40% would overflow its track. */
+check('a negative draws nothing rather than overflowing', targetLaps(-0.4).fill, 0)
+
 /* ---------- the numbers reach the screen ---------- */
 
 const page = readFileSync(new URL('../../src/pages/CollectorDashboard.tsx', import.meta.url), 'utf8')
 
-ok('the Performance screen computes the month in work days', /monthPace\(period\.start, period\.end/.test(page))
-ok('the work-day header is rendered', /<PaceCard/.test(page))
-ok('it carries the firm’s four header facts',
-  /label="Work days"/.test(page) && /label="Worked"/.test(page)
-  && /label="Expected pace"/.test(page) && /label="Gap vs pace"/.test(page))
+ok('the Collections screen computes the month in work days', /monthPace\(period\.start, period\.end, asAt\)/.test(page))
+
+/*
+ * READ AS AT A DAY, which is what makes it the firm's report rather than a dashboard. Their own
+ * sheet is headed "Date: 14/09/2026" and every percentage on it is read against how far into the
+ * month's work days that date is.
+ */
+ok('the report can be read as at a day', /type="date" value=\{dayKey\(asAt\)\}/.test(page))
+ok('...and the pace is taken at that day, not at today', /monthPace\(period\.start, period\.end, asAt\)/.test(page))
+/*
+ * CLAMPED INTO THE PERIOD. A date outside the month would produce a report with more work days
+ * behind it than the month has, and every percentage on the screen would be nonsense rather than
+ * wrong in a way somebody could spot.
+ */
+ok('...and a date outside the period is pulled back into it',
+  /if \(picked < period\.start\) return period\.start/.test(page))
+ok('...and never past today', /new Date\(\) > period\.end \? period\.end : new Date\(\)/.test(page))
+
+ok('the month header is a progress bar', /<MonthProgress/.test(page))
+ok('...carrying the work days behind and ahead', /working days completed/.test(page))
+ok('...and marking the pace expected by now', /% expected by now/.test(page))
+ok('the day\u2019s own figure leads', /Collected today/.test(page))
 ok('the teams sheet is rendered', /<TeamTable/.test(page))
-ok('the needing-attention table is rendered', /<TargetTable/.test(page))
+ok('the clerk sheet is rendered', /<ClerkTable/.test(page))
 ok('needed a week is on the teams table only', /Needed a week/.test(page))
 
 /*
- * BOTH VIEWS EXIST, and the fair one is what the page opens on. Ranking collectors on rand
- * measures the book somebody was handed; the whole of collectorScore.ts exists to stop that, and
- * a target table that quietly became the default would undo it.
+ * TWO TABS, NOT THREE. The firm dropped "Target reached": a filtered list of the people who are
+ * fine is a list nobody opens twice, and the pill on the row already says it.
  */
-ok('the fair comparison is still there', /<FairTable/.test(page))
-ok('...and is what the card opens on', /useState<EveryoneView>\('fair'\)/.test(page))
-ok('...and still says why it is ordered that way', /not by rand/.test(page))
-ok('the attention list says it is not a ranking', /it is not a ranking of collectors/.test(page))
+const clerks = page.slice(page.indexOf('function ClerkTable('), page.indexOf('function ExportButton('))
+ok('there is a clerk table to read', clerks.length > 1000)
+ok('the clerk table has an all-clerks tab', /'All clerks'/.test(clerks))
+ok('...and a needs-attention tab', /'Needs attention'/.test(clerks))
+ok('...and no target-reached tab', !/Target reached/i.test(clerks))
+ok('...and it opens on the roster', /useState<ClerkView>\('all'\)/.test(clerks))
+/*
+ * THE ROSTER IS ALPHABETICAL. Sorted by rand it would quietly become a leaderboard on the one
+ * figure that measures the book somebody was handed rather than the person.
+ */
+ok('the roster is alphabetical, not ranked', /a\.name\.localeCompare\(b\.name, 'en-ZA'\)/.test(clerks))
+ok('needs attention is only people behind their own pace',
+  /l\.line\.standing === 'behind' \|\| l\.line\.standing === 'critical'/.test(clerks))
+ok('...worst first', /\.sort\(worstFirst\)/.test(clerks))
+/* Where a target came from is shown, or nobody can tell a figure set wrong from one never set. */
+ok('a grade-supplied target says so', /from grade/.test(clerks))
 
 /*
- * Worst first is the whole point of a list headed "needing attention" — and this is asserted
- * against the attention table's OWN source, not against the page. Both tables sort the same way
- * and with the same expression, so a page-wide regex is satisfied by the teams table and would
- * go on passing with the collectors' list reversed.
+ * Worst first is asserted against the SHARED helper, and the helper against itself. Both tables
+ * sort the same way, so a page-wide regex is satisfied by either one and would go on passing with
+ * the other reversed.
  */
-const attention = page.slice(page.indexOf('function TargetTable'), page.indexOf('function TeamTable'))
-const teamsTable = page.slice(page.indexOf('function TeamTable'))
-ok('there is an attention table to read', attention.length > 500)
-ok('there is a teams table to read', teamsTable.length > 500)
-ok('the attention list sorts worst first', /a\.line\.achieved - b\.line\.achieved/.test(attention))
+const sorter = page.slice(page.indexOf('function worstFirst'), page.indexOf('function ClerkTable('))
+ok('there is a worst-first sort to read', sorter.length > 100)
+ok('it sorts worst first', /a\.line\.achieved - b\.line\.achieved/.test(sorter))
 ok('...with people who have no target at the bottom',
-  /Number\(a\.line\.achieved === null\) - Number\(b\.line\.achieved === null\)/.test(attention))
-ok('the teams list sorts worst first too', /a\.line\.achieved - b\.line\.achieved/.test(teamsTable))
+  /Number\(a\.line\.achieved === null\) - Number\(b\.line\.achieved === null\)/.test(sorter))
+const teamsTable = page.slice(page.indexOf('function TeamTable'))
+ok('there is a teams table to read', teamsTable.length > 500)
+ok('the teams list sorts worst first too', /\.sort\(worstFirst\)/.test(teamsTable))
 ok('a collector with no team is a line on the teams table', /'No team'/.test(teamsTable))
+
+/*
+ * THE FAIR COMPARISON SURVIVED THE REDESIGN, as its own card. Rand leads the page now, which is
+ * what the firm runs the month on -- but the figures that compare two collectors fairly must
+ * still be on the screen, or the redesign quietly turned the page into a rand leaderboard.
+ */
+ok('the fair comparison is still there', /<FairTable/.test(page))
+ok('...ordered on the book-independent figure',
+  /paymentsPerHundred \?\? -1\) - \(a\.paymentsPerHundred/.test(page))
+ok('...and still says why', /not by rand/.test(page))
+
+/* The team filter narrows the totals as well as the table: a team leader reading their team's
+   list against the firm's headline figures is reading two different things. */
+ok('the team filter narrows the rows', /const shownRows = useMemo/.test(page))
+ok('...and the totals are taken from the narrowed rows', /totalStats\(shownRows\)/.test(page))
+
+/*
+ * THE EXPORT IS BUILT IN THE BROWSER. No new endpoint -- Vercel's Hobby plan caps this project at
+ * twelve functions and it is at twelve -- and nothing leaves the machine, which is the right
+ * posture for a list of named people and what they have collected.
+ */
+ok('the day can be exported', /Export daily report/.test(page))
+ok('...without a server seeing it', /new Blob\(\['\\uFEFF', csv\], \{ type: 'text\/csv/.test(page))
+/*
+ * THE BOM IS WRITTEN AS AN ESCAPE, NOT AS THE CHARACTER. Excel needs it or every R sign and every
+ * en dash in a team name opens as mojibake -- but pasted in literally it is an invisible
+ * character sitting in the source that no reviewer can see and any editor may strip.
+ */
+ok('...and the byte-order mark is not an invisible character in the source',
+  !page.includes('\ufeff'))
+ok('...and no endpoint was added for it', !/fetch\('\/api\//.test(page))
+ok('...and the file says which period and day it is of', /\['As at', dayKey\(asAt\)\]/.test(page))
+/* Quoted and doubled, or a team called "Smit, Botha & Seun" becomes two columns and shifts every
+   figure on the row one to the left. */
+ok('...with its cells quoted', /String\(v\)\.replace\(\/"\/g, '""'\)/.test(page))
+
+/* ---------- the tab is called what the firm calls the work ---------- */
+
+const sidebar = readFileSync(new URL('../../src/components/layout/Sidebar.tsx', import.meta.url), 'utf8')
+ok('the tab says Collections', /label: 'Collections'/.test(sidebar))
+ok('...and no longer says Performance', !/label: 'Performance'/.test(sidebar))
+/* The route is unchanged on purpose: renaming it would break every bookmark for a word. */
+ok('...on the same route as before', /to: '\/performance', label: 'Collections'/.test(sidebar))
 
 /* ---------- a collections target can be set and stored ---------- */
 

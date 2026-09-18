@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Loader2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { AlertTriangle, Download, Loader2, Search } from 'lucide-react'
 import { Card } from '../components/ui/Card'
 import { StatTile } from '../components/ui/StatTile'
 import { SalesMonthPicker } from '../components/ui/SalesMonthPicker'
@@ -11,99 +11,170 @@ import {
   THRESHOLDS, band, overBookBy, scoreCollector, totalStats,
   type Band, type CollectorScore, type CollectorStats,
 } from '../lib/collectorScore.ts'
-import { bookCeilingOf } from '../lib/collectorGrade.ts'
+import { bookCeilingOf, monthTargetFor } from '../lib/collectorGrade.ts'
 import { getCurrentSalesMonth, getPreviousSalesMonth, type SalesMonthPeriod } from '../lib/salesMonth'
 import { pctDelta } from '../lib/pctDelta'
 import { resolveTarget } from '../lib/targets'
 import {
-  monthPace, paceLine, standingLabel, teamTotal,
+  dayKey, monthPace, paceLine, standingLabel, targetLaps, teamTotal,
   type MonthPace, type PaceLine, type PaceStanding,
 } from '../lib/collectionPace.ts'
 import { formatCurrency } from '../data/mockData'
 import type { ID, Target, Team, User } from '../types'
 
-/** Who sees everybody rather than only themselves. */
+/** Who sees the whole floor rather than only themselves. */
 const SEES_EVERYONE = ['Administrator', 'Sales Manager', 'Liaison Manager', 'Pre-legal Team Leader']
 
+/** What a person's target is, and whether anybody actually chose it. */
+interface ResolvedTarget { target: number | null; origin: 'set' | 'grade' }
+
 /**
- * How a collector is doing, on the firm's own month.
+ * Collections — the firm's daily performance report.
  *
  * THE PERIOD IS THE 11th TO THE 10th, not the calendar month, because that is the period the
  * firm reports to clients on and remits against. A dashboard on a different month from the
  * statements would have two true answers to "how much did we collect in September".
  *
- * WHAT IT REFUSES TO DO IS RANK ON RAND. Collected is the biggest number here and the one the
- * firm earns on, so it leads — but the figures that compare two collectors are payments per
- * hundred accounts, the promise-kept rate and coverage. A junior on 130 gym memberships cannot
- * produce a commercial collector's rand however well they work, and a leaderboard that says
- * otherwise keeps them on gym memberships for ever.
+ * IT IS READ AS AT A DAY, which is the other half of what makes it the firm's report rather than
+ * a dashboard. Their own sheet is headed "Date: 14/09/2026" and every percentage on it is read
+ * against how far into the month's WORK DAYS that date is. Being able to move that date back is
+ * what lets a team leader answer "where were we on Friday" without keeping a copy of Friday's
+ * spreadsheet.
+ *
+ * WHAT IT REFUSES TO DO IS RANK PEOPLE ON RAND. Rand collected leads, because the firm earns on
+ * it and the month is run on it — but the list is never SORTED by it. A junior on 130 gym
+ * memberships cannot produce a commercial collector's rand however well they work, and a
+ * leaderboard that says otherwise keeps them on gym memberships for ever. The figures that
+ * compare two collectors fairly are further down, in their own card.
  */
 export function CollectorDashboard() {
   const { users, teams, targets } = useAppStore()
   const { currentUser } = useAuth()
   const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(new Date()))
+  /* Null means "the latest day this period has", which is today for the month in progress and
+     the last day of it for a month that has closed. Cleared whenever the period changes. */
+  const [asAtKey, setAsAtKey] = useState<string | null>(null)
+  const [teamId, setTeamId] = useState<string>('')
   const [rows, setRows] = useState<CollectorStats[] | null>(null)
+  const [todayRows, setTodayRows] = useState<CollectorStats[] | null>(null)
   const [previous, setPrevious] = useState<CollectorStats[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const seesEveryone = SEES_EVERYONE.includes(currentUser?.role ?? '')
 
   /*
-   * The month in WORK DAYS, which is how the firm reads every percentage on this screen. Read
-   * once per render from a single `new Date()` so the header, the tiles and both tables cannot
-   * disagree about what day it is halfway down the page.
+   * The day the report is read as at, kept inside the period whatever is asked for.
+   *
+   * A date outside the month would produce a report with more work days behind it than the month
+   * has, or none at all, and every percentage on the screen would be nonsense rather than wrong
+   * in a way somebody could spot.
    */
-  const pace = useMemo(() => monthPace(period.start, period.end, new Date()), [period])
+  const asAt = useMemo(() => {
+    const latest = new Date() > period.end ? period.end : new Date()
+    if (!asAtKey) return latest
+    const picked = new Date(`${asAtKey}T12:00:00`)
+    if (Number.isNaN(picked.getTime())) return latest
+    if (picked < period.start) return period.start
+    return picked > latest ? latest : picked
+  }, [asAtKey, period])
 
-  /** What a person was set for this month. Undefined target, not nought — see `paceLine`. */
-  const targetFor = useCallback(
-    (userId: ID): number | null =>
-      resolveTarget(targets, 'user', userId, 'collected', period.key)?.targetValue ?? null,
-    [targets, period.key],
-  )
+  /* The instant the period's figures are counted up to: the end of the day being read. */
+  const asAtEnd = useMemo(() => {
+    const end = new Date(asAt)
+    end.setHours(23, 59, 59, 999)
+    return end > period.end ? period.end : end
+  }, [asAt, period.end])
+
+  const dayStart = useMemo(() => {
+    const start = new Date(asAt)
+    start.setHours(0, 0, 0, 0)
+    return start
+  }, [asAt])
 
   useEffect(() => {
     let cancelled = false
     setRows(null); setError(null)
     const prior = getPreviousSalesMonth(period)
     void Promise.all([
-      fetchCollectorPerformance(period.start, period.end),
+      fetchCollectorPerformance(period.start, asAtEnd),
+      /* The day on its own, for "collected today". The firm's sheet leads with it and so does
+         theirs: the first question every morning is what came in yesterday. */
+      fetchCollectorPerformance(dayStart, asAtEnd),
       fetchCollectorPerformance(prior.start, prior.end),
     ])
-      .then(([now, before]) => {
+      .then(([now, day, before]) => {
         if (cancelled) return
-        setRows(now); setPrevious(before)
+        setRows(now); setTodayRows(day); setPrevious(before)
       })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
     return () => { cancelled = true }
-  }, [period])
+  }, [period, asAtEnd, dayStart])
+
+  /*
+   * The month in WORK DAYS, as at the day being read. Every percentage below is read against it:
+   * ten per cent collected is exactly on pace on the second working day and a crisis on the
+   * eighteenth, and without this the screen cannot tell the two apart.
+   */
+  const pace = useMemo(() => monthPace(period.start, period.end, asAt), [period, asAt])
+
+  /** What a person was set, or what their grade says before anybody sets anything. */
+  const targetFor = useCallback((userId: ID, collects: boolean): ResolvedTarget => {
+    const set = resolveTarget(targets, 'user', userId, 'collected', period.key)?.targetValue ?? null
+    const grade = users.find((u) => u.id === userId)?.collectorGrade ?? null
+    return monthTargetFor({ set, grade, collects })
+  }, [targets, users, period.key])
+
+  /* A collector's own team, for the filter and for the team roll-up. */
+  const teamOf = useCallback(
+    (userId: ID): string => users.find((u) => u.id === userId)?.teamId ?? '',
+    [users],
+  )
+
+  /*
+   * THE TEAM FILTER NARROWS EVERYTHING BELOW IT, including the totals at the top. A filter that
+   * changed the table and left the headline figures showing the whole floor would have a team
+   * leader reading their team's list against the firm's numbers.
+   */
+  const shownRows = useMemo(
+    () => (rows ?? []).filter((r) => !teamId || teamOf(r.userId) === teamId),
+    [rows, teamId, teamOf],
+  )
+  const shownToday = useMemo(
+    () => (todayRows ?? []).filter((r) => !teamId || teamOf(r.userId) === teamId),
+    [todayRows, teamId, teamOf],
+  )
 
   const mine = rows?.find((r) => r.userId === currentUser?.id) ?? null
   const minePrior = previous?.find((r) => r.userId === currentUser?.id) ?? null
 
   /*
-   * An agent sees their own figures; a team leader sees the firm's, with everybody listed. Both
+   * An agent sees their own figures; a team leader sees the floor's, with everybody listed. Both
    * read the same numbers — visibility here is about whose totals lead the page, not about
    * hiding anything, which the firm settled early.
    */
-  const shown = seesEveryone && rows ? totalStats(rows) : mine
+  const shown = seesEveryone && rows ? totalStats(shownRows) : mine
   const shownPrior = seesEveryone && previous ? totalStats(previous) : minePrior
   const score = shown ? scoreCollector(shown) : null
   const priorScore = shownPrior ? scoreCollector(shownPrior) : null
 
+  const collectedToday = seesEveryone
+    ? shownToday.reduce((t, r) => t + r.collected, 0)
+    : todayRows?.find((r) => r.userId === currentUser?.id)?.collected ?? 0
+
   /*
-   * The target the header is read against. A collector sees their own; a team leader sees the
-   * floor's, which is the sum of the people's rather than a figure typed in separately — a total
-   * a team leader cannot take apart again and explain to the person it is made of is no use to
-   * them. `teamTotal` also reports how many of the people actually have one set, because a floor
-   * target built from nineteen of twenty-eight collectors is understated and must say so.
+   * The target the headline is read against: the sum of the people's own, never a figure typed in
+   * separately. A total a team leader cannot take apart again and explain to the person it is
+   * made of is no use to them.
    */
   const floor = useMemo(
-    () => teamTotal((rows ?? []).map((r) => ({ collected: r.collected, target: targetFor(r.userId) }))),
-    [rows, targetFor],
+    () => teamTotal(shownRows.map((r) => ({
+      collected: r.collected,
+      target: targetFor(r.userId, r.inPlayAccounts > 0 || r.collected > 0).target,
+    }))),
+    [shownRows, targetFor],
   )
-  const shownTarget = seesEveryone ? floor.target : targetFor(currentUser?.id ?? '')
-  const line = shown ? paceLine(shown.collected, shownTarget, pace) : null
+  const myTarget = targetFor(currentUser?.id ?? '', (mine?.inPlayAccounts ?? 0) > 0).target
+  const line = shown ? paceLine(shown.collected, seesEveryone ? floor.target : myTarget, pace) : null
 
   const ceiling = bookCeilingOf(currentUser?.bookCeiling)
   const over = mine ? overBookBy(mine, ceiling) : 0
@@ -116,17 +187,58 @@ export function CollectorDashboard() {
   const pct = (now: number, before: number | undefined) =>
     (before === undefined ? undefined : pctDelta(now, before))
 
+  /** Teams that actually have somebody collecting, so the filter offers nothing empty. */
+  const teamOptions = useMemo(() => {
+    const present = new Set((rows ?? []).map((r) => teamOf(r.userId)))
+    return teams.filter((t) => present.has(t.id))
+  }, [rows, teams, teamOf])
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold text-slate-800">
             {seesEveryone ? 'Collections' : 'My collections'}
           </h1>
-          <p className="text-xs text-slate-400">{period.rangeLabel}</p>
+          <p className="text-xs text-slate-400">Daily performance report</p>
         </div>
-        <SalesMonthPicker value={period} onChange={setPeriod} referenceDate={new Date()} />
+        {rows && rows.length > 0 && seesEveryone && (
+          <ExportButton rows={shownRows} today={shownToday} users={users} teams={teams}
+            pace={pace} asAt={asAt} period={period} targetFor={targetFor} />
+        )}
       </div>
+
+      {/*
+        THE THREE THINGS THAT DECIDE WHAT EVERY FIGURE BELOW MEANS: which month, as at which day,
+        and whose. Kept on one row and above everything, because a number read under the wrong one
+        of them is not slightly wrong, it is about somebody else.
+      */}
+      <Card padded={false}>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3">
+          <label className="flex items-center gap-2 text-xs text-slate-500">
+            Collection period
+            <SalesMonthPicker value={period} onChange={(p) => { setPeriod(p); setAsAtKey(null) }}
+              referenceDate={new Date()} />
+          </label>
+          <label className="flex items-center gap-2 text-xs text-slate-500">
+            As at
+            <input type="date" value={dayKey(asAt)} onChange={(e) => setAsAtKey(e.target.value || null)}
+              min={dayKey(period.start)}
+              max={dayKey(new Date() > period.end ? period.end : new Date())}
+              className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700" />
+          </label>
+          {seesEveryone && teamOptions.length > 0 && (
+            <label className="flex items-center gap-2 text-xs text-slate-500">
+              Team
+              <select value={teamId} onChange={(e) => setTeamId(e.target.value)}
+                className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700">
+                <option value="">All teams</option>
+                {teamOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </label>
+          )}
+        </div>
+      </Card>
 
       {/*
         THE NOTICE A COLLECTOR ACTUALLY SEES. It also appears on the Collectors table in Settings,
@@ -162,64 +274,43 @@ export function CollectorDashboard() {
         <Card>
           <p className="text-sm text-slate-600">You do not have a collections book yet.</p>
           <p className="text-xs text-slate-400 mt-1">
-            A team leader sets your grade and allocates accounts in Settings → Users → Collectors.
+            A team leader sets your grade and allocates accounts in Settings &rarr; Users &rarr;
+            Collectors.
           </p>
         </Card>
       ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <StatTile
-              accent="gold"
-              label="Collected"
-              value={formatCurrency(score.collected)}
-              compareLabel={`vs ${getPreviousSalesMonth(period).label}`}
-              pctChange={pct(score.collected, priorScore?.collected)}
-              hint="Payments received in this period, on accounts held at the time the money came in. Reversed payments are excluded."
-            />
-            <StatTile
-              label="Payments"
-              value={score.payments.toLocaleString('en-ZA')}
-              compareLabel={`vs ${getPreviousSalesMonth(period).label}`}
-              pctChange={pct(score.payments, priorScore?.payments)}
-              hint="How many debtors actually paid, regardless of size."
-            />
-            {/*
-              ONE FACT PER TILE. "560 · R4 460 000" was two, and it wrapped onto two lines at
-              every width — and the obvious fix, borrowing the comparison line for the second
-              figure, needs a pctChange, which would print a confident "0%" that means nothing.
-              Average payment moves down to the secondary row instead.
-            */}
-            <StatTile
-              label="Accounts"
-              value={score.inPlayAccounts.toLocaleString('en-ZA')}
-              hint="In play right now. Written-off and frozen accounts do not count against a book."
-            />
-            <StatTile
-              label="Book value"
-              value={formatCurrency(score.inPlayValue)}
-              hint="Capital outstanding across the accounts in play."
-            />
+            <ReportTile label={isToday(asAt) ? 'Collected today' : `Collected on ${shortDay(asAt)}`}
+              value={formatCurrency(collectedToday)} />
+            <ReportTile label="Collected this period" value={formatCurrency(score.collected)}
+              note={line?.target != null
+                ? <>Target for the period <span className="text-slate-600">{formatCurrency(line.target)}</span></>
+                : 'No target set'} />
+            <PaceTile line={line} />
+            <ReportTile label="Needed per working day"
+              value={moneyText(line?.neededADay ?? null)}
+              note={line?.stillNeeded != null ? `${formatCurrency(line.stillNeeded)} remaining` : undefined} />
           </div>
 
-          {/*
-            The firm's own month header, in the firm's own terms. Everything below it that is
-            expressed as a percentage of target is meaningless without it: 10% collected is
-            exactly on pace on the second working day and a crisis on the eighteenth.
-          */}
-          <PaceCard
-            pace={pace}
-            line={line}
-            note={
-              seesEveryone && floor.withTarget > 0 && floor.withTarget < floor.members
-                ? `The floor target is the sum of ${floor.withTarget} of ${floor.members} collectors' own targets — ${floor.members - floor.withTarget === 1 ? 'one has' : `${floor.members - floor.withTarget} have`} none set, so it is short by their share.`
-                : undefined
-            }
-          />
+          <MonthProgress pace={pace} line={line}
+            note={seesEveryone && floor.withTarget < floor.members
+              ? `${floor.members - floor.withTarget} of ${floor.members} have no target, so the total is short by their share.`
+              : undefined} />
+
+          {seesEveryone && shownRows.length > 0 && (
+            <>
+              <TeamTable rows={shownRows} users={users} teams={teams} targets={targets}
+                periodKey={period.key} pace={pace} targetFor={targetFor} />
+              <ClerkTable rows={shownRows} today={shownToday} users={users} teams={teams}
+                pace={pace} targetFor={targetFor} />
+            </>
+          )}
 
           {/*
-            The second row is the one that compares people fairly, and it says so. Kept apart from
-            the money above rather than mixed in with it, because the two answer different
-            questions and a collector should be able to tell which is which.
+            The card that compares people fairly, and it says so. Kept apart from the money above
+            rather than mixed in with it, because the two answer different questions and a
+            collector should be able to tell which is which.
           */}
           <Card padded={false}>
             <p className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wide text-slate-400">
@@ -248,10 +339,24 @@ export function CollectorDashboard() {
             </div>
           </Card>
 
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatTile size="secondary" label="Payments"
+              value={score.payments.toLocaleString('en-ZA')}
+              compareLabel={`vs ${getPreviousSalesMonth(period).label}`}
+              pctChange={pct(score.payments, priorScore?.payments)}
+              hint="How many debtors actually paid, regardless of size." />
             <StatTile size="secondary" label="Average payment"
               value={score.averagePayment === null ? '—' : formatCurrency(score.averagePayment)}
               hint="Collected divided by the number of payments." />
+            <StatTile size="secondary" label="Accounts"
+              value={score.inPlayAccounts.toLocaleString('en-ZA')}
+              hint="In play right now. Written-off and frozen accounts do not count against a book." />
+            <StatTile size="secondary" label="Book value"
+              value={formatCurrency(score.inPlayValue)}
+              hint="Capital outstanding across the accounts in play." />
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <StatTile size="secondary" label="Calls" value={score.calls.toLocaleString('en-ZA')} />
             <StatTile size="secondary" label="Emails" value={score.emailsSent.toLocaleString('en-ZA')} />
             <StatTile size="secondary" label="SMS" value={score.smsSent.toLocaleString('en-ZA')} />
@@ -259,16 +364,453 @@ export function CollectorDashboard() {
               hint="Your own words. Notes Raptor composes itself are not counted." />
           </div>
 
-          {seesEveryone && rows.length > 0 && (
-            <>
-              <TeamTable rows={rows} users={users} teams={teams} targets={targets}
-                periodKey={period.key} pace={pace} targetFor={targetFor} />
-              <EveryoneCard rows={rows} users={users} pace={pace} targetFor={targetFor} />
-            </>
-          )}
+          {seesEveryone && shownRows.length > 0 && <FairTable rows={shownRows} users={users} />}
         </>
       )}
     </div>
+  )
+}
+
+/* ---------- reading the numbers ---------- */
+
+/** A ratio as the firm writes it. One decimal, because 0.8% and 1.2% are different problems. */
+const pctText = (v: number | null): string => (v === null ? '—' : `${(v * 100).toFixed(1)}%`)
+/** The gap always carries its sign: "+9.9%" is ahead of pace and "-6.9%" is behind it. */
+const gapText = (v: number | null): string =>
+  v === null ? '—' : `${v >= 0 ? '+' : '−'}${(Math.abs(v) * 100).toFixed(1)}%`
+const moneyText = (v: number | null): string => (v === null ? '—' : formatCurrency(v))
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+/* Written out rather than through Intl: en-ZA renders September as "Sept", which is neither the
+   full month nor a normal abbreviation, and this codebase has been bitten by it before. */
+const shortDay = (d: Date): string => `${d.getDate()} ${MONTHS[d.getMonth()]}`
+const isToday = (d: Date): boolean => dayKey(d) === dayKey(new Date())
+
+const STANDING_STYLE: Record<PaceStanding, string> = {
+  met: 'bg-emerald-100 text-emerald-800',
+  'on-track': 'bg-emerald-50 text-emerald-700',
+  behind: 'bg-amber-50 text-amber-800',
+  critical: 'bg-rose-50 text-rose-700',
+  'no-target': 'bg-slate-100 text-slate-500',
+}
+
+function StatusPill({ standing }: { standing: PaceStanding }) {
+  return (
+    <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${STANDING_STYLE[standing]}`}>
+      {standingLabel(standing)}
+    </span>
+  )
+}
+
+/**
+ * The progress bar, and it laps.
+ *
+ * THE FIRM'S OWN IDEA: "when somebody has exceeded their target, the bar that's there starts
+ * over, but now it's a different colour." A bar pinned at 100% says somebody is past target and
+ * nothing else — a collector at 260% and one at 101% look identical on a screen whose whole job
+ * is to show who is carrying the month. Past target the bar starts again in green, and the count
+ * of whole targets behind them is printed beside it.
+ *
+ * The arithmetic is in targetLaps, which is pure and checked. Here it is only drawn.
+ */
+function ProgressBar({ achieved, width = 'w-24' }: { achieved: number | null; width?: string }) {
+  const { fill, laps, over } = targetLaps(achieved)
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className={`inline-block ${width} h-1.5 rounded-full bg-slate-200 overflow-hidden align-middle`}>
+        <span
+          className={`block h-full rounded-full ${over ? 'bg-emerald-500' : 'bg-gold-400'}`}
+          style={{ width: `${Math.round(fill * 100)}%` }}
+        />
+      </span>
+      {/* Only where it means something. "×1" on everybody past target would be noise. */}
+      {laps > 1 && <span className="text-[11px] font-medium text-emerald-700">&times;{laps}</span>}
+    </span>
+  )
+}
+
+/** One of the four figures across the top. Label, the number, and the thing it is read against. */
+function ReportTile({ label, value, note, tone }: {
+  label: string
+  value: string
+  note?: ReactNode
+  tone?: 'behind' | 'ahead'
+}) {
+  const colour = tone === 'behind' ? 'text-rose-700' : tone === 'ahead' ? 'text-emerald-700' : 'text-slate-800'
+  return (
+    <Card>
+      <p className="text-xs font-medium text-slate-500">{label}</p>
+      <p className={`text-2xl font-semibold tabular-nums mt-1 ${colour}`}>{value}</p>
+      {note && <p className="text-xs text-slate-400 mt-1">{note}</p>}
+    </Card>
+  )
+}
+
+/**
+ * Ahead or behind, in rand rather than in percentage points.
+ *
+ * THE SIGN IS IN THE WORD, not only in the colour. "Behind pace R150 000" is readable to somebody
+ * who cannot tell the firm's amber from its green, and it is what a team leader says out loud.
+ */
+function PaceTile({ line }: { line: PaceLine | null }) {
+  if (!line || line.target === null) {
+    return <ReportTile label="Against pace" value="—" note="No target set" />
+  }
+  const expected = line.target * line.expected
+  const by = line.collected - expected
+  return (
+    <ReportTile
+      label={by >= 0 ? 'Ahead of pace' : 'Behind pace'}
+      value={formatCurrency(Math.abs(by))}
+      tone={by >= 0 ? 'ahead' : 'behind'}
+      note={<>Expected by now <span className="text-slate-600">{formatCurrency(expected)}</span></>}
+    />
+  )
+}
+
+/**
+ * The month on one bar, with the day's pace marked on it.
+ *
+ * THE MARKER IS THE POINT. A bar alone says 36% and leaves the reader to work out whether that is
+ * good; the line at 30% says it is ahead, on the day it is being read. It is the same comparison
+ * the status pills make, drawn once for the whole floor.
+ */
+function MonthProgress({ pace, line, note }: {
+  pace: MonthPace
+  line: PaceLine | null
+  note?: string
+}) {
+  const { fill, laps, over } = targetLaps(line?.achieved ?? null)
+  const marker = Math.min(100, Math.round(pace.expected * 100))
+  return (
+    <Card padded={false}>
+      <div className="px-4 pt-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <p className="text-sm text-slate-500">
+          Monthly progress{' '}
+          <span className="font-semibold text-slate-800 tabular-nums">
+            {line?.achieved === null || line?.achieved === undefined
+              ? 'no target set'
+              : `${pctText(line.achieved)} achieved`}
+          </span>
+          {laps > 0 && (
+            <span className="ml-2 text-xs font-medium text-emerald-700">
+              {laps === 1 ? 'past target' : `${laps} targets over`}
+            </span>
+          )}
+        </p>
+        <p className="text-xs text-slate-400 tabular-nums">
+          {pace.daysWorked} of {pace.workDays} working days completed
+          {pace.finished ? ' · month closed' : ` · ${pace.daysLeft} remaining`}
+        </p>
+      </div>
+      <div className="px-4 pt-3 pb-1">
+        <div className="relative h-2.5 rounded-full bg-slate-200">
+          <div className={`h-full rounded-full ${over ? 'bg-emerald-500' : 'bg-gold-400'}`}
+            style={{ width: `${Math.round(fill * 100)}%` }} />
+          {/* Hidden once the month is over: there is no pace left to keep, only a result. */}
+          {!pace.finished && (
+            <div className="absolute inset-y-[-3px] w-px bg-slate-500" style={{ left: `${marker}%` }} />
+          )}
+        </div>
+      </div>
+      <div className="px-4 pb-3 relative h-4">
+        {!pace.finished && (
+          <span className="absolute text-[11px] text-slate-500 tabular-nums -translate-x-1/2 whitespace-nowrap"
+            style={{ left: `calc(${marker}% + 1rem)` }}>
+            {marker}% expected by now
+          </span>
+        )}
+      </div>
+      {note && <p className="px-4 pb-3 -mt-1 text-xs text-amber-700">{note}</p>}
+    </Card>
+  )
+}
+
+/* ---------- the clerks ---------- */
+
+type ClerkView = 'all' | 'attention'
+
+interface ClerkLine {
+  userId: ID
+  name: string
+  team: string
+  today: number
+  line: PaceLine
+  origin: 'set' | 'grade'
+}
+
+function clerkLines(input: {
+  rows: CollectorStats[]
+  today: CollectorStats[]
+  users: User[]
+  teams: Team[]
+  pace: MonthPace
+  targetFor: (id: ID, collects: boolean) => ResolvedTarget
+}): ClerkLine[] {
+  const { rows, today, users, teams, pace, targetFor } = input
+  return rows.map((r) => {
+    const user = users.find((u) => u.id === r.userId)
+    const { target, origin } = targetFor(r.userId, r.inPlayAccounts > 0 || r.collected > 0)
+    return {
+      userId: r.userId,
+      name: user?.name ?? 'Unknown',
+      team: teams.find((t) => t.id === user?.teamId)?.name ?? 'No team',
+      today: today.find((d) => d.userId === r.userId)?.collected ?? 0,
+      line: paceLine(r.collected, target, pace),
+      origin,
+    }
+  })
+}
+
+/**
+ * Sort a list of people by how far behind they are, worst first.
+ *
+ * Everybody with no target sits at the bottom. Sorting a null achieved as a nought would put
+ * people nobody has given a figure to at the top of a list headed "needs attention" — which is a
+ * real problem, but a different one, and it would push the collector who is genuinely at 0.8% of
+ * R100 000 off the top of the screen.
+ */
+function worstFirst<T extends { line: PaceLine }>(a: T, b: T): number {
+  if (a.line.achieved === null || b.line.achieved === null) {
+    return Number(a.line.achieved === null) - Number(b.line.achieved === null)
+  }
+  return a.line.achieved - b.line.achieved
+}
+
+/**
+ * Everybody, against their target.
+ *
+ * TWO TABS, NOT THREE. The firm dropped "Target reached" — a filtered list of the people who are
+ * fine is a list nobody opens twice, and the pill on the row already says it. What is left is the
+ * roster and the people to go and stand next to this morning.
+ *
+ * THE ROSTER IS ALPHABETICAL, NOT RANKED. Sorting it by rand would quietly make it a leaderboard
+ * on the one figure that measures the book somebody was handed rather than the person — which is
+ * what the whole of collectorScore.ts exists to prevent. Needs attention sorts by percentage of
+ * that person's OWN target, which survives being given a different book.
+ */
+function ClerkTable({ rows, today, users, teams, pace, targetFor }: {
+  rows: CollectorStats[]
+  today: CollectorStats[]
+  users: User[]
+  teams: Team[]
+  pace: MonthPace
+  targetFor: (id: ID, collects: boolean) => ResolvedTarget
+}) {
+  const [view, setView] = useState<ClerkView>('all')
+  const [search, setSearch] = useState('')
+
+  const lines = useMemo(
+    () => clerkLines({ rows, today, users, teams, pace, targetFor }),
+    [rows, today, users, teams, pace, targetFor],
+  )
+
+  const shown = useMemo(() => {
+    const needle = search.trim().toLowerCase()
+    const matching = needle
+      ? lines.filter((l) => l.name.toLowerCase().includes(needle) || l.team.toLowerCase().includes(needle))
+      : lines
+    if (view === 'attention') {
+      /* Behind their own pace, in either band. Somebody at or past pace is not "needing
+         attention" however small their rand, and a list that included them would not be read. */
+      return matching
+        .filter((l) => l.line.standing === 'behind' || l.line.standing === 'critical')
+        .sort(worstFirst)
+    }
+    return [...matching].sort((a, b) => a.name.localeCompare(b.name, 'en-ZA'))
+  }, [lines, view, search])
+
+  return (
+    <Card padded={false}>
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 pt-3 pb-2">
+        <div className="flex items-center gap-3">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400">Clerk performance</p>
+          <div className="flex rounded-lg border border-slate-200 p-0.5">
+            {([['all', 'All clerks'], ['attention', 'Needs attention']] as const).map(([id, label]) => (
+              <button key={id} type="button" onClick={() => setView(id)}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                  view === id ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-700'
+                }`}>
+                {label}
+                {id === 'attention' && (
+                  <span className="ml-1.5 tabular-nums opacity-70">
+                    {lines.filter((l) => l.line.standing === 'behind' || l.line.standing === 'critical').length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+        <label className="relative">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search clerks&hellip;"
+            className="rounded-lg border border-slate-200 pl-7 pr-2 py-1.5 text-sm w-48 text-slate-700" />
+        </label>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+              <th className="px-4 py-2 font-medium">Clerk</th>
+              <th className="px-3 py-2 font-medium">Team</th>
+              <th className="px-3 py-2 font-medium text-right">Today</th>
+              <th className="px-3 py-2 font-medium text-right">Period to date</th>
+              <th className="px-3 py-2 font-medium text-right">Target</th>
+              <th className="px-3 py-2 font-medium text-right">Achieved</th>
+              <th className="px-3 py-2 font-medium text-right">Gap vs pace</th>
+              <th className="px-3 py-2 font-medium text-right">Needed / day</th>
+              <th className="px-3 py-2 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((l) => (
+              <tr key={l.userId} className="border-b border-slate-50 last:border-0">
+                <td className="px-4 py-2">
+                  <span className="flex items-center gap-2">
+                    <UserAvatar userId={l.userId} size={22} />
+                    <span className="text-slate-700">{l.name}</span>
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-slate-500">{l.team}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                  {l.today > 0 ? formatCurrency(l.today) : '—'}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-slate-700">
+                  {formatCurrency(l.line.collected)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-slate-500">
+                  {moneyText(l.line.target)}
+                  {/*
+                    WHERE THE FIGURE CAME FROM. A team leader looking at thirty targets has to be
+                    able to tell the ones somebody chose from the ones the grade supplied —
+                    otherwise the first time one looks wrong, nobody can say whether it was set
+                    wrong or never set at all.
+                  */}
+                  {l.line.target !== null && l.origin === 'grade' && (
+                    <span className="block text-[10px] text-slate-400">from grade</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <span className="inline-flex items-center gap-2 justify-end">
+                    <span className="tabular-nums font-medium text-slate-800">{pctText(l.line.achieved)}</span>
+                    <ProgressBar achieved={l.line.achieved} />
+                  </span>
+                </td>
+                {/*
+                  THE GAP IN PERCENTAGE POINTS, beside the percentage it is a gap from. The pill
+                  says which band somebody is in; this says how far from the line they are, which
+                  is the difference between a conversation and a warning.
+                */}
+                <td className={`px-3 py-2 text-right tabular-nums ${
+                  l.line.gap === null ? 'text-slate-400' : l.line.gap < 0 ? 'text-rose-700' : 'text-emerald-700'
+                }`}>
+                  {gapText(l.line.gap)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                  {moneyText(l.line.neededADay)}
+                </td>
+                <td className="px-3 py-2"><StatusPill standing={l.line.standing} /></td>
+              </tr>
+            ))}
+            {shown.length === 0 && (
+              <tr>
+                <td colSpan={9} className="px-4 py-6 text-center text-sm text-slate-400">
+                  {view === 'attention'
+                    ? 'Nobody is behind their pace right now.'
+                    : 'Nobody matches that.'}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <p className="px-4 py-2 text-[11px] text-slate-400">
+        Showing {shown.length} of {lines.length} clerks.
+        {' '}A target with no figure set follows the collector&rsquo;s grade; a team leader can set
+        one per person in Settings &rarr; Targets.
+      </p>
+    </Card>
+  )
+}
+
+/**
+ * The day's report, as a file.
+ *
+ * CSV rather than a PDF, because the firm already keeps this in a spreadsheet and what they do
+ * with it next is sort it and send it on. Built in the browser: there is no new endpoint, which
+ * matters because Vercel's Hobby plan caps this project at twelve functions and it is at twelve.
+ *
+ * Nothing leaves the browser. The rows are already on the screen; this writes them to a file on
+ * the reader's own machine and no server sees them — which is the right posture for a list of
+ * named people and what they have collected.
+ */
+function ExportButton({ rows, today, users, teams, pace, asAt, period, targetFor }: {
+  rows: CollectorStats[]
+  today: CollectorStats[]
+  users: User[]
+  teams: Team[]
+  pace: MonthPace
+  asAt: Date
+  period: SalesMonthPeriod
+  targetFor: (id: ID, collects: boolean) => ResolvedTarget
+}) {
+  function save() {
+    const lines = clerkLines({ rows, today, users, teams, pace, targetFor }).sort(
+      (a, b) => a.name.localeCompare(b.name, 'en-ZA'),
+    )
+    /* Quoted and doubled, because a team called "Smit, Botha & Seun" would otherwise become two
+       columns and shift every figure on the row one to the left. */
+    const cell = (v: string | number | null) =>
+      v === null ? '' : `"${String(v).replace(/"/g, '""')}"`
+    const head = [
+      'Clerk', 'Team', 'Today', 'Period to date', 'Target', 'Target from',
+      'Achieved %', 'Gap vs pace %', 'Still needed', 'Needed per day', 'Status',
+    ]
+    const body = lines.map((l) => [
+      l.name, l.team, l.today, l.line.collected, l.line.target,
+      l.origin === 'set' ? 'set' : 'grade',
+      l.line.achieved === null ? null : (l.line.achieved * 100).toFixed(1),
+      l.line.gap === null ? null : (l.line.gap * 100).toFixed(1),
+      l.line.stillNeeded, l.line.neededADay === null ? null : Math.round(l.line.neededADay),
+      standingLabel(l.line.standing),
+    ])
+    /*
+      The header says what the figures are OF. A file called "collections.csv" with no period and
+      no as-at date in it is a file nobody can file, and a month later nobody can tell two of them
+      apart.
+    */
+    const preamble = [
+      ['Bredell Ferreira — collections daily report'],
+      ['Collection period', period.rangeLabel],
+      ['As at', dayKey(asAt)],
+      ['Working days', `${pace.daysWorked} of ${pace.workDays}`],
+      ['Expected pace', `${Math.round(pace.expected * 100)}%`],
+      [],
+    ]
+    const csv = [...preamble.map((r) => r.map(cell).join(',')), head.map(cell).join(','),
+      ...body.map((r) => r.map(cell).join(','))].join('\r\n')
+
+    /* A BOM, so Excel opens it as UTF-8. Without it "Keamogetse" is fine and every R sign and
+       every en dash in a team name arrives as mojibake. */
+    const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    try {
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `collections-${dayKey(asAt)}.csv`
+      a.click()
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+  }
+
+  return (
+    <button type="button" onClick={save}
+      className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+      <Download size={13} /> Export daily report
+    </button>
   )
 }
 
@@ -301,14 +843,30 @@ function Measure({ label, value, note, tone = 'unknown', asPercent, hint }: {
   )
 }
 
-/** Everyone, for a team leader. Ordered by the book-independent figure, never by rand. */
+/**
+ * How people compare, for a team leader.
+ *
+ * ORDERED BY THE BOOK-INDEPENDENT FIGURE, NEVER BY RAND, and kept as its own card below the
+ * money rather than as a tab beside it. Rand collected measures the book somebody was handed at
+ * least as much as it measures them: a junior on 130 gym memberships cannot produce a commercial
+ * collector's rand however well they work. These are the figures that survive being given a
+ * different book, and they are the ones that should decide who is promoted.
+ */
 function FairTable({ rows, users }: { rows: CollectorStats[]; users: { id: string; name: string }[] }) {
   const scored = useMemo(
     () => rows.map(scoreCollector).sort((a, b) => (b.paymentsPerHundred ?? -1) - (a.paymentsPerHundred ?? -1)),
     [rows],
   )
   return (
-    <div className="overflow-x-auto">
+    <Card padded={false}>
+      <p className="px-4 pt-3 pb-2 text-[11px] uppercase tracking-wide text-slate-400">
+        How people compare
+        <span className="block normal-case tracking-normal text-slate-400 text-xs mt-0.5 max-w-xl">
+          Ordered by payments per hundred accounts, not by rand &mdash; otherwise whoever holds the
+          biggest book is always top and nothing is learnt.
+        </span>
+      </p>
+      <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
@@ -352,202 +910,8 @@ function FairTable({ rows, users }: { rows: CollectorStats[]; users: { id: strin
             ))}
         </tbody>
       </table>
-    </div>
-  )
-}
-
-/* ---------- pace against target ---------- */
-
-/** A ratio as the firm writes it. One decimal, because 0.8% and 1.2% are different problems. */
-const pctText = (v: number | null): string => (v === null ? '—' : `${(v * 100).toFixed(1)}%`)
-/** The gap always carries its sign: "+9.9%" is ahead of pace and "-6.9%" is behind it. */
-const gapText = (v: number | null): string =>
-  v === null ? '—' : `${v >= 0 ? '+' : '−'}${(Math.abs(v) * 100).toFixed(1)}%`
-const moneyText = (v: number | null): string => (v === null ? '—' : formatCurrency(v))
-
-const STANDING_STYLE: Record<PaceStanding, string> = {
-  met: 'bg-emerald-100 text-emerald-800',
-  'on-track': 'bg-emerald-50 text-emerald-700',
-  behind: 'bg-amber-50 text-amber-800',
-  critical: 'bg-rose-50 text-rose-700',
-  'no-target': 'bg-slate-100 text-slate-500',
-}
-
-function StatusPill({ standing }: { standing: PaceStanding }) {
-  return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${STANDING_STYLE[standing]}`}>
-      {standingLabel(standing)}
-    </span>
-  )
-}
-
-function Fact({ label, value, tone }: { label: string; value: string; tone?: 'behind' | 'ahead' }) {
-  const colour = tone === 'behind' ? 'text-rose-700' : tone === 'ahead' ? 'text-emerald-700' : 'text-slate-800'
-  return (
-    <div>
-      <p className="text-[11px] uppercase tracking-wide text-slate-400">{label}</p>
-      <p className={`text-sm font-semibold tabular-nums ${colour}`}>{value}</p>
-    </div>
-  )
-}
-
-/**
- * The month, in work days — the firm's own sheet header.
- *
- * Shown whether or not a target has been set, because the work-day count is a fact about the
- * month that a team leader plans around on its own. The target half appears only once there is
- * a target: a row of dashes teaches nobody anything, and an invented nought would be worse.
- */
-function PaceCard({ pace, line, note }: { pace: MonthPace; line: PaceLine | null; note?: string }) {
-  return (
-    <Card padded={false}>
-      <div className="flex flex-wrap items-center gap-x-8 gap-y-3 px-4 py-3">
-        <Fact label="Work days" value={pace.workDays.toLocaleString('en-ZA')} />
-        <Fact label="Worked" value={pace.daysWorked.toLocaleString('en-ZA')} />
-        <Fact label="Left" value={pace.finished ? 'Month closed' : pace.daysLeft.toLocaleString('en-ZA')} />
-        <Fact label="Expected pace" value={pctText(pace.expected)} />
-        {line && line.target !== null && (
-          <>
-            <span className="hidden sm:block h-8 w-px bg-slate-100" aria-hidden />
-            <Fact label="Target" value={moneyText(line.target)} />
-            <Fact label="Achieved" value={pctText(line.achieved)} />
-            <Fact label="Gap vs pace" value={gapText(line.gap)}
-              tone={(line.gap ?? 0) < 0 ? 'behind' : 'ahead'} />
-            <Fact label="Still needed" value={moneyText(line.stillNeeded)} />
-            <Fact label="Needed a day" value={moneyText(line.neededADay)} />
-            <StatusPill standing={line.standing} />
-          </>
-        )}
       </div>
-      {line && line.target === null && (
-        <p className="px-4 pb-3 -mt-1 text-xs text-slate-400">
-          No collection target set for this month. A team leader sets one in Settings &rarr;
-          Targets, per person or per team.
-        </p>
-      )}
-      {note && <p className="px-4 pb-3 -mt-1 text-xs text-amber-700">{note}</p>}
     </Card>
-  )
-}
-
-type EveryoneView = 'fair' | 'target'
-
-/**
- * Everyone, two ways, and the toggle is the point.
- *
- * The firm keeps two sheets for two questions and so does this card. "Fair comparison" ranks on
- * figures that survive being given a different book, and is the one that should decide who is
- * promoted. "Needing attention" is their daily pace sheet — lowest percentage of target first —
- * and it is a list of who to go and stand next to this morning, not a ranking of collectors.
- * Merging them into one table would produce thirteen columns and quietly let rand rank people
- * again, which the whole of collectorScore.ts exists to prevent.
- */
-function EveryoneCard({ rows, users, pace, targetFor }: {
-  rows: CollectorStats[]
-  users: User[]
-  pace: MonthPace
-  targetFor: (id: ID) => number | null
-}) {
-  const [view, setView] = useState<EveryoneView>('fair')
-  return (
-    <Card padded={false}>
-      <div className="flex flex-wrap items-start justify-between gap-3 px-4 pt-3 pb-2">
-        <p className="text-[11px] uppercase tracking-wide text-slate-400">
-          Everyone
-          <span className="block normal-case tracking-normal text-slate-400 text-xs mt-0.5 max-w-xl">
-            {view === 'fair'
-              ? 'Ordered by payments per hundred accounts, not by rand — otherwise whoever holds the biggest book is always top and nothing is learnt.'
-              : 'Lowest percentage of target first. This is who needs help today; it is not a ranking of collectors — a small book cannot produce a big one’s rand however well it is worked.'}
-          </span>
-        </p>
-        <div className="flex rounded-lg border border-slate-200 p-0.5 shrink-0">
-          {([['fair', 'Fair comparison'], ['target', 'Needing attention']] as const).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setView(id)}
-              className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                view === id ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-      {view === 'fair'
-        ? <FairTable rows={rows} users={users} />
-        : <TargetTable rows={rows} users={users} pace={pace} targetFor={targetFor} />}
-    </Card>
-  )
-}
-
-function TargetTable({ rows, users, pace, targetFor }: {
-  rows: CollectorStats[]
-  users: User[]
-  pace: MonthPace
-  targetFor: (id: ID) => number | null
-}) {
-  const lines = useMemo(() => {
-    const out = rows.map((r) => ({
-      userId: r.userId,
-      name: users.find((u) => u.id === r.userId)?.name ?? 'Unknown',
-      line: paceLine(r.collected, targetFor(r.userId), pace),
-    }))
-    /*
-     * Worst first, and everybody with no target set at the bottom. Sorting a null achieved as a
-     * nought would put people nobody has given a figure to at the top of a list headed "needing
-     * attention" — which is a real problem, but a different one, and it would push the collector
-     * who is genuinely at 0.8% of R100 000 off the top of the screen.
-     */
-    return out.sort((a, b) => {
-      if (a.line.achieved === null || b.line.achieved === null) {
-        return Number(a.line.achieved === null) - Number(b.line.achieved === null)
-      }
-      return a.line.achieved - b.line.achieved
-    })
-  }, [rows, users, pace, targetFor])
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
-            <th className="px-4 py-2 font-medium">Collector</th>
-            <th className="px-3 py-2 font-medium text-right">Target</th>
-            <th className="px-3 py-2 font-medium text-right">Collected</th>
-            <th className="px-3 py-2 font-medium text-right">Achieved</th>
-            <th className="px-3 py-2 font-medium text-right">Gap vs pace</th>
-            <th className="px-3 py-2 font-medium text-right">Still needed</th>
-            <th className="px-3 py-2 font-medium text-right">Needed a day</th>
-            <th className="px-3 py-2 font-medium">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lines.map(({ userId, name, line }) => (
-            <tr key={userId} className="border-b border-slate-50 last:border-0">
-              <td className="px-4 py-2">
-                <span className="flex items-center gap-2">
-                  <UserAvatar userId={userId} size={22} />
-                  <span className="text-slate-700">{name}</span>
-                </span>
-              </td>
-              <td className="px-3 py-2 text-right tabular-nums text-slate-500">{moneyText(line.target)}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-slate-700">{formatCurrency(line.collected)}</td>
-              <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-800">{pctText(line.achieved)}</td>
-              <td className={`px-3 py-2 text-right tabular-nums ${
-                line.gap === null ? 'text-slate-400' : line.gap < 0 ? 'text-rose-700' : 'text-emerald-700'
-              }`}>
-                {gapText(line.gap)}
-              </td>
-              <td className="px-3 py-2 text-right tabular-nums text-slate-600">{moneyText(line.stillNeeded)}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-slate-600">{moneyText(line.neededADay)}</td>
-              <td className="px-3 py-2"><StatusPill standing={line.standing} /></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
   )
 }
 
@@ -570,14 +934,17 @@ function TeamTable({ rows, users, teams, targets, periodKey, pace, targetFor }: 
   targets: Target[]
   periodKey: string
   pace: MonthPace
-  targetFor: (id: ID) => number | null
+  targetFor: (id: ID, collects: boolean) => ResolvedTarget
 }) {
   const lines = useMemo(() => {
     const byTeam = new Map<string, { collected: number; target: number | null }[]>()
     for (const r of rows) {
       const teamId = users.find((u) => u.id === r.userId)?.teamId ?? ''
       const bucket = byTeam.get(teamId) ?? []
-      bucket.push({ collected: r.collected, target: targetFor(r.userId) })
+      bucket.push({
+        collected: r.collected,
+        target: targetFor(r.userId, r.inPlayAccounts > 0 || r.collected > 0).target,
+      })
       byTeam.set(teamId, bucket)
     }
     return [...byTeam.entries()]
@@ -595,12 +962,7 @@ function TeamTable({ rows, users, teams, targets, periodKey, pace, targetFor }: 
           line: paceLine(total.collected, own ?? total.target, pace),
         }
       })
-      .sort((a, b) => {
-        if (a.line.achieved === null || b.line.achieved === null) {
-          return Number(a.line.achieved === null) - Number(b.line.achieved === null)
-        }
-        return a.line.achieved - b.line.achieved
-      })
+      .sort(worstFirst)
   }, [rows, users, teams, targets, periodKey, pace, targetFor])
 
   if (lines.length === 0) return null
@@ -643,7 +1005,12 @@ function TeamTable({ rows, users, teams, targets, periodKey, pace, targetFor }: 
                 <td className="px-3 py-2 text-right tabular-nums text-slate-600">{total.members}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-slate-500">{moneyText(line.target)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-slate-700">{formatCurrency(line.collected)}</td>
-                <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-800">{pctText(line.achieved)}</td>
+                <td className="px-3 py-2 text-right">
+                  <span className="inline-flex items-center gap-2 justify-end">
+                    <span className="tabular-nums font-medium text-slate-800">{pctText(line.achieved)}</span>
+                    <ProgressBar achieved={line.achieved} />
+                  </span>
+                </td>
                 <td className="px-3 py-2 text-right tabular-nums text-slate-600">{moneyText(line.stillNeeded)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-slate-600">{moneyText(line.neededADay)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-slate-600">{moneyText(line.neededAWeek)}</td>

@@ -157,6 +157,36 @@ export function paceLine(
   }
 }
 
+/**
+ * A progress bar that laps.
+ *
+ * THE FIRM'S OWN IDEA, and a good one: "when somebody has exceeded their target, the bar that's
+ * there starts over, but now it's a different colour." A bar that simply pins at 100% tells you
+ * somebody is past target and nothing else — a collector at 260% and one at 101% look identical,
+ * on a screen whose whole job is to show who is carrying the month.
+ *
+ * AN EXACT MULTIPLE SHOWS A FULL BAR, NOT AN EMPTY ONE. Somebody who has just hit their target
+ * has earned a full bar; resetting it to nothing at the instant they got there would be the
+ * screen taking the moment away from them. So 100% is one full lap, 101% is a second bar with a
+ * sliver in it, and 200% is a second bar full.
+ */
+export interface TargetLaps {
+  /** How full the bar on screen is, 0–1. */
+  fill: number
+  /** How many whole targets are already behind them. Nought until the first one is passed. */
+  laps: number
+  /** Past target, so the bar is on its second lap or beyond and must not be the first colour. */
+  over: boolean
+}
+
+export function targetLaps(achieved: number | null | undefined): TargetLaps {
+  if (achieved == null || achieved <= 0) return { fill: 0, laps: 0, over: false }
+  /* ceil-1 rather than floor: it is what makes an exact multiple a full bar instead of an empty
+     one. At 1 it gives 0 laps and a fill of 1; at 1.01, one lap and a fill of 0.01. */
+  const laps = Math.max(0, Math.ceil(achieved) - 1)
+  return { fill: Math.min(1, achieved - laps), laps, over: laps >= 1 }
+}
+
 /** The firm's words for each band. "Slightly behind" is theirs; it is not "below target". */
 export function standingLabel(s: PaceStanding): string {
   switch (s) {

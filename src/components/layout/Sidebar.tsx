@@ -36,7 +36,12 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean; badge?:
   { to: '/diary', label: 'Diary', icon: CalendarClock, badge: 'diary' },
   // How the collections work is actually going. Beside the diary, because the diary is today's
   // work and this is whether the month's is landing.
-  { to: '/performance', label: 'Performance', icon: TrendingUp },
+  //
+  // CALLED "COLLECTIONS", AT THE FIRM'S INSTRUCTION. "Performance" said nothing about which half
+  // of the firm it was: the sales side has its own figures on the Dashboard, and a rep clicking
+  // "Performance" expecting theirs found a book they do not work. The route stays /performance so
+  // nobody's bookmark breaks.
+  { to: '/performance', label: 'Collections', icon: TrendingUp },
   { to: '/queries', label: 'Disputes', icon: MessageCircleQuestion, badge: 'disputes' },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare, badge: 'tasks' },
   { to: '/calendar', label: 'Calendar', icon: Calendar },

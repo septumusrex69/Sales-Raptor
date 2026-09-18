@@ -38,11 +38,17 @@ const LOOSE = {
 /**
  * The floor, chosen so every standing on the screen is fixed whatever day it is read on.
  *
- *   Test Leader   R120 000 in against R100 000  — past target, so "Target reached" always
- *   Thandi Junior      R500 in against R100 000 — half a per cent, so "Critical" always
- *   Unteamed Clerk  R7 000 in against nothing   — "No target", and last in the list always
+ *   Test Leader     R120 000 against R100 000 set   — past target, so "Target reached" always,
+ *                                                     and a bar on its second lap at 20%
+ *   Thandi Junior        R500 against R100 000 set  — half a per cent, so "Critical" always
+ *   Unteamed Clerk     R7 000 against nothing set   — R80 000 from their grade, and on no team
+ *
+ * THE DAY AND THE PERIOD ARE DIFFERENT FIGURES, deliberately. Answering both out of one fixture
+ * would put the same number on "Collected today" and "Collected this period", which looks exactly
+ * like a working pair of tiles and is a stub counting the same rows twice. The stub reads the
+ * range off the request and answers accordingly — see the handler below.
  */
-const perfRow = (id, collected, over = {}) => ({
+const perfRow = (id, collected) => ({
   user_id: id,
   in_play_accounts: 400,
   in_play_value: 2_000_000,
@@ -57,14 +63,22 @@ const perfRow = (id, collected, over = {}) => ({
   promises_kept: 5,
   promises_broken: 2,
   accounts_touched: 120,
-  ...over,
 })
 
-const PERFORMANCE = [
+/** The period to date: R127 500 across the floor. */
+const PERIOD = [
   perfRow(USER_ID, 120_000),
   perfRow(COLLEAGUE.id, 500),
   perfRow(LOOSE.id, 7_000),
 ]
+/** The day being read: R27 000, and nothing like the period total. */
+const DAY = [
+  perfRow(USER_ID, 20_000),
+  perfRow(COLLEAGUE.id, 0),
+  perfRow(LOOSE.id, 7_000),
+]
+/** Last period, for the comparisons on the secondary tiles. */
+const PRIOR = [perfRow(USER_ID, 90_000)]
 
 const target = (scopeId, value) => ({
   id: `target-${scopeId}`,
@@ -79,7 +93,21 @@ const target = (scopeId, value) => ({
   updated_at: '2026-01-01T00:00:00Z',
 })
 
+/* Two of the three are set; the third falls back to their grade, which is what proves the
+   fallback is wired rather than everybody happening to have a figure. */
 const TARGETS = [target(USER_ID, 100_000), target(COLLEAGUE.id, 100_000)]
+
+/**
+ * When the sales month the page opens on began: the 11th of this month, or of last month before
+ * the 11th. Four lines of arithmetic rather than a date typed in, because a fixture pinned to
+ * September is a fixture that fails in October for no reason and then gets deleted.
+ */
+const PERIOD_STARTS = (() => {
+  const now = new Date()
+  const start = new Date(now.getFullYear(), now.getMonth(), 11)
+  if (now.getDate() < 11) start.setMonth(start.getMonth() - 1)
+  return start.toISOString()
+})()
 
 const handlers = [
   [(u) => u.includes('/auth/v1/user'), () => ({ body: { id: USER_ID, email: PROFILE.email } })],
@@ -93,7 +121,29 @@ const handlers = [
   ],
   [(u) => u.includes('/rest/v1/teams'), () => ({ body: [TEAM] })],
   [(u) => u.includes('/rest/v1/targets'), () => ({ body: TARGETS })],
-  [(u) => u.includes('/rpc/collector_performance'), () => ({ body: PERFORMANCE })],
+  [
+    (u) => u.includes('/rpc/collector_performance'),
+    (u, req) => {
+      /*
+       * THE STUB ANSWERS THE RANGE IT WAS ASKED FOR.
+       *
+       * Three calls come back from one page load — the period to date, the day being read, and
+       * last period — and answering them all out of one fixture would put the same figure on
+       * "Collected today" and "Collected this period". That looks like a working pair of tiles
+       * and is a stub counting the same rows three times, which is the shape of vacuous fixture
+       * this suite has already shipped once.
+       */
+      const body = req.postDataJSON?.() ?? {}
+      const from = String(body.p_from ?? '')
+      const to = String(body.p_to ?? '')
+      /* One calendar day at both ends is the day being read. */
+      if (from.slice(0, 10) === to.slice(0, 10)) return { body: DAY }
+      /* The prior period is the only one that ENDS before this one begins. Computed rather than
+         written as a date, so the fixture is still right next month. */
+      if (to < PERIOD_STARTS) return { body: PRIOR }
+      return { body: PERIOD }
+    },
+  ],
   [(u) => u.includes('/rpc/nav_counts'), () => ({ body: { mail: 0, tasks: 0, disputes: 0, diary: 0 } })],
 ]
 
@@ -116,116 +166,152 @@ try {
   t.ok('the dev server answers', up)
 
   await page.getByRole('heading', { name: 'Collections', exact: true }).waitFor({ timeout: 20000 })
-  await page.getByText('Work days').first().waitFor({ timeout: 20000 })
-  await t.shot(page, '40-performance')
+  await page.getByText('Monthly progress').waitFor({ timeout: 20000 })
+  await t.shot(page, '40-collections')
 
-  /* ---------- the month header, once ---------- */
+  /* ---------- the day and the period are different questions ---------- */
 
   /*
-   * THE HEADER IS THE THING EVERY PERCENTAGE BELOW IT IS READ AGAINST. Ten per cent collected is
-   * exactly on pace on the second working day of the month and a crisis on the eighteenth, and
-   * without the work-day count on screen a team leader cannot tell which they are looking at.
+   * THE FIRST QUESTION EVERY MORNING is what came in yesterday, which is why the firm's own sheet
+   * leads with it. The fixture answers the day with R27 000 and the period with R127 500, so a
+   * tile showing the period's figure under "Collected today" fails here rather than looking
+   * plausible for a month.
    */
-  for (const label of ['Work days', 'Worked', 'Left', 'Expected pace']) {
-    t.check(`the month header carries "${label}", once`, await page.getByText(label, { exact: true }).count(), 1)
-  }
-  /* Each fact on the header is a label with its value in the next paragraph. Read that way round
-     so an assertion is about THAT fact's figure and not about a number somewhere on the page. */
-  const fact = async (label) => (
+  const tile = async (label) => (
     await page.locator('p', { hasText: new RegExp(`^${label}$`) })
       .locator('xpath=following-sibling::p[1]').first().innerText()
   ).trim()
 
-  const workDays = Number(await fact('Work days'))
-  t.ok('the work-day count is a real month, not nought', workDays >= 15 && workDays <= 23)
+  const todayTile = await tile('Collected today')
+  t.ok(`the day's own figure leads (${todayTile})`, /27[,\s\u00a0]000/.test(todayTile))
+  const periodTile = await tile('Collected this period')
+  t.ok(`...beside the period's (${periodTile})`, /127[,\s\u00a0]500/.test(periodTile))
+  t.check('...and they are not the same number', todayTile === periodTile, false)
+
+  /* ---------- the month on one bar ---------- */
 
   /*
-   * COLUMNS ARE READ OFF THE HEADER CELLS, not looked up by role.
-   *
-   * getByRole('columnheader') resolves to NOTHING in this Playwright build — every `th` on the
-   * page, and there are seventeen. An assertion that a column is absent would therefore have
-   * passed whether the column was there or not, which is the exact shape of a check that proves
-   * nothing. The text of the header cells is asserted instead, and asserted present before it is
-   * asserted absent, so an empty page cannot satisfy either half.
-   *
-   * The text comes back as the stylesheet renders it: upper-cased.
+   * THE HEADER IS WHAT EVERY PERCENTAGE BELOW IT IS READ AGAINST. Ten per cent collected is
+   * exactly on pace on the second working day and a crisis on the eighteenth.
    */
+  t.ok('the working days behind and ahead are on the screen',
+    await page.getByText(/of \d+ working days completed/).first().isVisible())
+  t.ok('...and the pace expected by now is marked on the bar',
+    await page.getByText(/% expected by now/).first().isVisible())
+  t.ok('the report can be read as at a day', await page.locator('input[type="date"]').first().isVisible())
+
+  /* ---------- the clerk sheet ---------- */
+
   const headers = async () => (await page.locator('th').allInnerTexts()).map((h) => h.trim())
   const shown = await headers()
   t.ok('the tables have header cells at all', shown.length > 8)
-
-  /*
-   * The floor's target is the sum of the people's: R100 000 and R100 000, with the third person
-   * contributing nothing because nobody set them one. A total of R300 000 would mean somebody had
-   * quietly counted an unset target as a figure of nought — which is the whole reason paceLine
-   * returns nulls rather than zeros.
-   */
-  const floorTarget = await fact('Target')
-  t.ok(`the floor target sums only the targets actually set (${floorTarget})`,
-    /200[,\s]000/.test(floorTarget))
-  t.check('...and nobody invented a third', /300[,\s]000/.test(floorTarget), false)
-  t.ok('the header carries what is still needed', (await fact('Still needed')).length > 2)
-  t.ok('...and says how many of the floor have one',
-    await page.getByText(/sum of 2 of 3 collectors/).first().isVisible())
-
-  /* ---------- the fair table is still what the page opens on ---------- */
-
-  /*
-   * Ranking collectors on rand measures the book somebody was handed at least as much as it
-   * measures them. The attention list is a pace tool and must never quietly become the ranking.
-   */
-  t.ok('the page opens on the fair comparison', shown.includes('PER 100'))
-  t.check('and the target columns are not up yet', shown.includes('GAP VS PACE'), false)
-  t.ok('the reason is still on the screen',
-    await page.getByText(/not by rand/).first().isVisible())
-
-  /* ---------- teams ---------- */
-
-  t.ok('the teams sheet is on the page', shown.includes('TEAM') && shown.includes('PEOPLE'))
-  t.ok('...naming the team', await page.locator('td', { hasText: new RegExp(`^${TEAM.name}$`) }).first().isVisible())
-  /*
-   * A collector on nobody's team is a line of their own, not a rounding error. Dropping them
-   * would make the teams table add up to less than the floor total directly above it.
-   */
-  t.ok('...and carrying the collectors with no team',
-    await page.locator('td', { hasText: /^No team/ }).first().isVisible())
-  /* A team nobody was given a figure has no target at all — "Target from 0 of 1" beside a
-     "No target" pill is noise, and a warning that fires when nothing is wrong stops being read. */
-  t.check('a team with nothing set is not nagged about it',
-    await page.getByText(/Target from 0 of/).count(), 0)
+  t.ok('the clerk sheet carries the target', shown.includes('TARGET'))
+  t.ok('...and what is achieved of it', shown.includes('ACHIEVED'))
+  t.ok('...and what is needed a day', shown.includes('NEEDED / DAY'))
   t.ok('the teams sheet carries the weekly figure', shown.includes('NEEDED A WEEK'))
 
-  /* ---------- the attention list ---------- */
-
-  await page.getByRole('button', { name: 'Needing attention' }).click()
-  await page.waitForTimeout(300)
-  await t.shot(page, '41-needing-attention')
-
-  const afterToggle = await headers()
-  t.ok('the target columns come up', afterToggle.includes('GAP VS PACE'))
-  t.ok('...along with what is still needed',
-    afterToggle.includes('STILL NEEDED') && afterToggle.includes('NEEDED A DAY'))
-  t.check('...and the fair ranking goes away', afterToggle.includes('PER 100'), false)
-  t.ok('it says it is not a ranking of collectors',
-    await page.getByText(/not a ranking of collectors/).first().isVisible())
+  /*
+   * TWO TABS, NOT THREE. The firm dropped "Target reached". Asserted against the TAB ROW and not
+   * against the page, because "Target reached" is also what the status pill says on a row that
+   * has passed its target — a page-wide check for the words would fail on correct code, and the
+   * obvious "fix" would be to delete the check.
+   */
+  const tabs = page.locator('div.flex.rounded-lg.border').first()
+  const tabText = await tabs.innerText()
+  t.ok(`the clerk sheet has an all-clerks tab (${tabText.replace(/\n/g, ' | ')})`, tabText.includes('All clerks'))
+  t.ok('...and a needs-attention tab', tabText.includes('Needs attention'))
+  t.check('...and no target-reached tab', /Target reached/i.test(tabText), false)
+  /* ...while the pill on the row that earned it is still there, which is the other half. */
+  t.ok('a collector past target is marked as having reached it',
+    await page.getByText('Target reached').first().isVisible())
 
   /*
-   * WORST FIRST is the whole point of a list headed "needing attention" — the collector at half
-   * a per cent of target is who a team leader goes and stands next to this morning.
+   * THE ROSTER IS ALPHABETICAL, NOT RANKED. Sorted by rand it would quietly become a leaderboard
+   * on the one figure that measures the book somebody was handed rather than the person.
    */
-  const rows = page.locator('table').last().locator('tbody tr')
-  const firstRow = await rows.first().innerText()
-  t.ok(`the worst collector is first (${firstRow.split('\n')[0]})`, firstRow.includes(COLLEAGUE.name))
-  t.ok('...and is marked Critical', firstRow.includes('Critical'))
+  const clerkRows = page.locator('table').nth(1).locator('tbody tr')
+  /* The name cell also carries the avatar's initials on their own line — "TL\nTest Leader" — and
+     sorting those compares TJ against TL rather than Thandi against Test. */
+  const names = await clerkRows.evaluateAll((rows) => rows.map(
+    (r) => (r.querySelector('td')?.innerText.trim().split('\n').pop() ?? '').trim(),
+  ))
+  t.check('every clerk is listed', names.length, 3)
+  t.check('...alphabetically', JSON.stringify(names),
+    JSON.stringify([...names].sort((a, b) => a.localeCompare(b, 'en-ZA'))))
+  /*
+   * AND IT IS NOT THE ORDER OF THEIR RAND. Asserting only "alphabetical" is not enough on its own
+   * — on this floor the top collector also happens to come first alphabetically, so a table
+   * silently sorted by rand would satisfy it. The two orders differ at the second and third rows,
+   * which is what makes the assertion mean something.
+   */
+  const byRand = [PROFILE.name, LOOSE.name, COLLEAGUE.name]
+  t.check('...and not the order of their rand',
+    JSON.stringify(names) === JSON.stringify(byRand), false)
 
-  const lastRow = await rows.last().innerText()
-  t.ok('somebody with no target is last', lastRow.includes(LOOSE.name))
-  /* Not "0.0%" — nought per cent of nothing is not an achievement of nought. */
-  t.ok('...and is marked as having no target, not nought', lastRow.includes('No target'))
-  t.check('...with no invented percentage against them', /\d\.\d%/.test(lastRow), false)
+  /* A target nobody set follows the grade, and the row says where the figure came from. */
+  t.ok('a grade-supplied target says so', await page.getByText('from grade').first().isVisible())
 
-  const middleRow = await rows.nth(1).innerText()
-  t.ok('past the target reads as reached', middleRow.includes('Target reached'))
+  /* ---------- the bar laps past target ---------- */
+
+  /*
+   * THE FIRM'S OWN IDEA, and it cannot be checked by reading source: "when somebody has exceeded
+   * their target, the bar that's there starts over, but now it's a different colour." Test Leader
+   * is at 120% of target, so their bar must be a FIFTH full and a different colour from Thandi
+   * Junior's, who is at half a per cent. A bar pinned at 100% would show them full and gold.
+   */
+  const barOf = async (name) => {
+    const row = clerkRows.filter({ hasText: name }).first()
+    return row.locator('td span[class*="rounded-full"] span').first().evaluate((el) => ({
+      width: el.getBoundingClientRect().width,
+      track: el.parentElement.getBoundingClientRect().width,
+      colour: getComputedStyle(el).backgroundColor,
+    }))
+  }
+  const over = await barOf('Test Leader')
+  const under = await barOf('Thandi Junior')
+  t.ok('both bars are drawn', over.track > 10 && under.track > 10)
+  const overFill = over.width / over.track
+  t.ok(`a collector at 120% shows a fifth of a bar, not a full one (${Math.round(overFill * 100)}%)`,
+    overFill > 0.1 && overFill < 0.32)
+  t.ok(`...in a different colour from somebody still short (${over.colour} vs ${under.colour})`,
+    over.colour !== under.colour)
+
+  /* ---------- the team filter narrows everything, including the totals ---------- */
+
+  /*
+   * A FILTER THAT CHANGED THE TABLE AND LEFT THE HEADLINE ALONE would have a team leader reading
+   * their team's list against the firm's numbers.
+   */
+  await page.getByRole('combobox').last().selectOption({ label: TEAM.name })
+  await page.waitForTimeout(400)
+  const filteredTile = await tile('Collected this period')
+  t.ok(`the headline follows the filter (${filteredTile})`, /120[,\s\u00a0]500/.test(filteredTile))
+  t.check('...and the unteamed collector is gone from the list',
+    await page.getByText(LOOSE.name).count(), 0)
+  await page.getByRole('combobox').last().selectOption({ label: 'All teams' })
+  await page.waitForTimeout(400)
+
+  /* ---------- needs attention is only people behind their own pace ---------- */
+
+  await page.getByRole('button', { name: /Needs attention/ }).click()
+  await page.waitForTimeout(300)
+  await t.shot(page, '41-needs-attention')
+  const attention = await page.locator('table').nth(1).locator('tbody tr')
+    .evaluateAll((rows) => rows.map((r) => r.innerText))
+  t.ok('the collector at half a per cent is on the list',
+    attention.some((r) => r.includes('Thandi Junior')))
+  t.check('...and the one past target is not', attention.some((r) => r.includes('Test Leader')), false)
+
+  /* ---------- the fair comparison survived the redesign ---------- */
+
+  /*
+   * Rand leads the page now, which is what the firm runs the month on. The figures that compare
+   * two collectors fairly must still be on the screen, or the redesign quietly turned the page
+   * into the rand leaderboard the whole of collectorScore.ts exists to prevent.
+   */
+  t.ok('the fair comparison is still on the page', (await headers()).includes('PER 100'))
+  t.ok('...and still says why it is ordered that way',
+    await page.getByText(/not by rand/).first().isVisible())
 
   const real = errors.filter((e) => !/favicon|404 \(Not Found\)/i.test(e))
   t.check('no console errors', real.length, 0)
@@ -243,7 +329,8 @@ try {
   stopServer(server)
 }
 
-const good = t.finish(`The month is on the screen in work days, the floor target is the sum of the
-people who actually have one and says so, the fair ranking is still what the page opens on, and
-the attention list puts the collector at half a per cent of target at the top. Screenshots in ${OUT}.`)
+const good = t.finish(`The day and the period are different figures, the month is marked with the
+pace expected by now, the roster is alphabetical rather than a rand leaderboard, a collector past
+target gets a second bar in another colour, and the team filter moves the headline as well as the
+list. Screenshots in ${OUT}.`)
 process.exit(good ? 0 : 1)
