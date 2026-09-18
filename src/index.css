@@ -293,66 +293,53 @@ select:autofill {
  * sit on — over the brightest part of the sky, white type at that size disappears.
  */
 .collections-hero {
+  /*
+   * THE PALETTE, SCOPED TO THIS PANEL. The firm gave exact values for the cinematic treatment and
+   * they are declared here rather than in the theme layer, because this is the only screen that
+   * wears them — putting a second gold in :root would leave two golds for the next person to
+   * choose between.
+   */
+  --ch-glass: rgba(7, 16, 24, 0.66);
+  --ch-edge: rgba(255, 255, 255, 0.08);
+  --ch-gold: #c9a04f;
+  --ch-champagne: #e4c68a;
+  --ch-muted: #aab3bd;
+
   position: relative;
   overflow: hidden;
-  /*
-   * THE SAME RADIUS AS EVERY OTHER HERO, off the same token.
-   *
-   * This ran full bleed with square corners for a version — the panel had been called "bulky"
-   * and edge-to-edge was the answer to that. It was the wrong answer: the firm's objection was
-   * to the second lockup and the padding inside it, not to the card, and a square panel bleeding
-   * into the sidebar beside eight rounded ones reads as the one screen somebody forgot to
-   * finish. Hard-coding 18px here would be the same mistake a level down — the token is what
-   * keeps this uniform when a skin changes it.
-   */
   border-radius: var(--skin-hero-radius);
-  background-color: #0b1420;
-  /*
-   * ONE PLAIN url(), AND NOT image-set(). This was three declarations of one property -- a plain
-   * JPEG, then -webkit-image-set, then the standard image-set -- on the theory that a browser
-   * which chokes on the last falls back to the one above it.
-   *
-   * THE BUILD FALSIFIES THAT THEORY. Lightning CSS reads the three as one intent and emits only
-   * two: a -webkit-image-set carrying type(), which WebKit's prefixed form has never supported
-   * and therefore rejects, and a standard image-set. The plain url() safety net is optimised
-   * away. So on any Safari that does not take the unprefixed form, BOTH declarations are invalid
-   * and there is nothing left -- which is a hero that renders as a flat navy panel, exactly as
-   * the firm reported it on an iPad.
-   *
-   * WebP has been read by Safari since 14, Chrome since 32 and Firefox since 65. Nobody here is
-   * on a browser that needs the JPEG, and one declaration is one thing a minifier cannot
-   * rearrange into nothing.
-   */
+  background-color: #07141d;
   background-image: url('/brand/collections-hero.webp');
   background-size: cover;
   background-position: center;
 }
+
+/*
+ * THE SCRIM, AND IT IS LIGHTER THAN THE ONE IT REPLACES.
+ *
+ * The brief is explicit that the photograph has to stay a major part of the page rather than a
+ * strip behind some widgets, so the wash runs heavy only where the headline sits and is almost
+ * nothing across the middle, where the sun is. The right edge comes back a little because the
+ * rail of small caps sits over bright cloud.
+ *
+ * THE TWO PASSES COMPOUND and that has been got wrong here twice. 0.82 across and 0.38 down are
+ * unremarkable apart and reach 0.89 where they meet, which is the darkest corner of the panel and
+ * is under the KPI row rather than under the picture.
+ */
 .collections-hero::before {
   content: '';
   position: absolute;
   inset: 0;
   pointer-events: none;
   background:
-    /*
-     * Heavy at the left edge and thin by the middle. The headline sits over the sunrise, which is
-     * the brightest part of the photograph, and white type on a sunburst is not readable at any
-     * weight. The right half is left almost alone: that is where the peak is, and darkening it
-     * evenly would leave a navy band with a picture faintly behind it.
-     */
     linear-gradient(
-      100deg,
-      rgba(8, 15, 24, 0.76) 0%,
-      rgba(8, 15, 24, 0.56) 26%,
-      rgba(8, 15, 24, 0.18) 54%,
-      rgba(8, 15, 24, 0.36) 100%
+      90deg,
+      rgba(5, 16, 25, 0.82) 0%,
+      rgba(5, 16, 25, 0.4) 42%,
+      rgba(5, 16, 25, 0.15) 70%,
+      rgba(5, 16, 25, 0.38) 100%
     ),
-    /*
-     * A second, much lighter pass down the panel so the tiles keep their contrast wherever the
-     * photograph is bright behind them. THE TWO COMPOUND — at 0.86 and 0.74 the foot of the
-     * panel went to almost solid navy and the picture may as well not have been there. Each
-     * one has to be read as half of what reaches the eye.
-     */
-    linear-gradient(to bottom, rgba(8, 15, 24, 0) 0%, rgba(8, 15, 24, 0.22) 50%, rgba(8, 15, 24, 0.55) 100%);
+    linear-gradient(to bottom, rgba(5, 16, 25, 0) 0%, rgba(5, 16, 25, 0.15) 55%, rgba(5, 16, 25, 0.38) 100%);
 }
 .collections-hero > * {
   position: relative;
@@ -360,12 +347,29 @@ select:autofill {
 }
 
 /*
+ * GLASS, NOT A BOX. The firm's word for the version before this was "bulky": four opaque tiles
+ * across the middle of a photograph leave a strip of sky at the top and nothing else. A panel
+ * that the picture shows through is the difference between a dashboard with a background and a
+ * photograph with figures on it.
+ *
+ * backdrop-filter is a progressive enhancement, not a requirement: where it is unsupported the
+ * fill alone still carries the type, which is why the fill is 0.66 rather than 0.2 and a blur.
+ */
+.hero-glass {
+  background: var(--ch-glass);
+  border: 1px solid var(--ch-edge);
+  border-radius: 10px;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+/*
  * THE CONTROLS AT THE FOOT OF THE HERO, DRAWN AS TEXT.
  *
- * The firm's design has that line reading as three facts with an icon in front of each, not as
- * three form fields — and one of the controls is the shared SalesMonthPicker, which eight other
- * screens render inside ordinary cards where the box is exactly right. So the chrome comes off
- * here, in a skin scoped to this panel, rather than as another variant on the component.
+ * The firm's design has that line reading as facts with an icon in front of each, not as a row of
+ * form fields — and one of the controls is the shared SalesMonthPicker, which eight other screens
+ * render inside ordinary cards where the box is exactly right. So the chrome comes off here, in a
+ * skin scoped to this panel, rather than as another variant on the component.
  *
  * WHAT DOES NOT COME OFF IS THE AFFORDANCE. A control that looks like text is a control nobody
  * finds, so hover and keyboard focus put the box straight back.

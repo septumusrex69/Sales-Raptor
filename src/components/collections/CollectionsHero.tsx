@@ -42,151 +42,157 @@ export interface HeroFigures {
   stillNeeded: number | null
 }
 
-export function CollectionsHero({ figures, filters, action }: {
+export function CollectionsHero({ figures, filters, action, progress }: {
   figures: HeroFigures
   /** The period, as-at and team controls. Rendered into the bar at the foot. */
   filters: ReactNode
   /** Export, or whatever else belongs beside the filters. */
   action?: ReactNode
+  /**
+   * The month bar, RENDERED BY THE PAGE and passed in.
+   *
+   * It used to be a card of its own underneath, and the firm asked for it inside the panel rather
+   * than as "another bulky white card immediately underneath". Passed as a node instead of as
+   * numbers so that the arithmetic stays in the one place that already does it — a second copy of
+   * "how far through the month are we" on this screen is a second answer to that question.
+   */
+  progress?: ReactNode
 }) {
   const { currentUser } = useAuth()
   const ahead = (figures.againstPace ?? 0) >= 0
 
   return (
     /*
-      A CARD, LIKE EVERY OTHER HERO ON THE APP. It ran full bleed for a version, cancelling the
-      page's padding with negative margins — the panel had been called "bulky" and edge-to-edge
-      was the answer to that. It was the wrong answer: what was bulky was the second lockup and
-      the padding inside it, not the card, and a square panel running into the sidebar beside
-      eight rounded ones reads as the one screen somebody forgot to finish. The radius itself is
-      in the stylesheet, off the same token .app-hero uses.
+      A CARD, LIKE EVERY OTHER HERO ON THE APP, and tall enough to be a photograph.
+
+      It ran full bleed with square corners for a version and the firm sent it back: one square
+      panel running into the sidebar beside eight rounded ones reads as the screen somebody forgot
+      to finish. The HEIGHT is the new part — the brief asks for "significantly more open mountain
+      scenery between the headline and the KPI section", which is a minimum height and a spacer
+      rather than padding, so the figures sit in the lower third whatever the window is doing.
     */
-    <div className="collections-hero px-6 pt-7 pb-5 sm:px-10 sm:pt-9 sm:pb-6">
-      {/* ---------- the line, and the firm's own words beside it ---------- */}
-      <div className="flex items-start justify-between gap-6">
-        <div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.3em] text-white/55">
-            {greetingLine(new Date(), currentUser?.name)}
-          </p>
+    <div className="collections-hero">
+      {/* The brief caps the content at 1250-1350px. Wider than that and the rail of small caps
+          ends up a screen away from the headline it belongs to. */}
+      <div className="mx-auto flex w-full max-w-[1320px] flex-col px-5 py-7 sm:px-9 sm:py-9
+        min-h-[520px] lg:min-h-[640px]">
+
+        {/* ---------- the line, and the firm's own words beside it ---------- */}
+        <div className="flex items-start justify-between gap-8">
+          <div>
+            <p className="text-[11px] font-medium uppercase tracking-[0.34em] text-white/60">
+              {greetingLine(new Date(), currentUser?.name)}
+            </p>
+            <span className="mt-3 block h-px w-14 bg-[var(--ch-gold)]" />
+            {/*
+              TWO TONES, ONE SENTENCE, AND A HARD BREAK BETWEEN THEM. The firm's reference sets the
+              first half white and the second in champagne, broken across two lines — which only
+              works as a deliberate break: left to wrap it lands wherever the window is wide and
+              the colour change falls mid-phrase.
+
+              A MODERN SANS, NOT A DISPLAY FACE, at the firm's instruction, and semibold rather
+              than black: at this size a heavy weight reads as advertising rather than as a
+              dashboard. It inherits the app's own family rather than loading a second one.
+            */}
+            <h1 className="mt-4 text-[32px] sm:text-[44px] lg:text-[52px] font-semibold
+              tracking-[-0.02em] leading-[1.04] text-white">
+              The sky is only<br />
+              <span className="text-[var(--ch-champagne)]">the beginning.</span>
+            </h1>
+            <p className="mt-5 text-[11px] font-medium uppercase tracking-[0.34em] text-[var(--ch-gold)]">
+              Discipline drives results
+            </p>
+          </div>
           {/*
-            ONE LINE, AND NO HARD BREAK IN IT. The line this replaced was two sentences and was
-            broken between them by hand, because the shape it made was half the point. This is
-            one sentence, so a break put anywhere inside it would be arbitrary. text-wrap:balance
-            is there for the widths where it has to wrap anyway — left alone the last word drops
-            to a line of its own, which on a heading this size is very visible.
-
-            SET IN CAPITALS BY CSS, NOT BY TYPING THEM. Same as the eyebrow, the rail and the line
-            at the foot, which is half the reason: this panel already has one way of doing capitals
-            and a second would be a second thing to change. The other half is that a reader who
-            copies the line out of the page gets it back in sentence case, and the firm gets to
-            change its mind about the treatment without retyping the sentence.
-
-            AND THE TRACKING TURNS POSITIVE. The sentence-case version was set tight, which is
-            right for lower case and wrong for capitals — letterforms of one height with no
-            ascenders to separate them need the air putting back or the line reads as a block.
+            The rail of small caps, right-aligned the way the firm drew it. Hidden on a phone
+            rather than wrapped: four words stacked down a narrow screen read as a list of
+            headings, not as a brand line.
           */}
-          <h1 className="mt-2.5 text-2xl sm:text-[32px] font-semibold uppercase tracking-[0.015em] text-white leading-[1.15] text-balance">
-            The sky is only the beginning.
-          </h1>
-          <p className="mt-3 text-[11px] font-medium uppercase tracking-[0.3em] text-gold-400">
-            Discipline drives results
-          </p>
+          <div className="hidden lg:block shrink-0 text-right">
+            <p className="text-[11px] font-medium uppercase tracking-[0.34em] text-[var(--ch-champagne)] leading-[2]">
+              Higher<br />Performance<br />Closer<br />Tomorrow
+            </p>
+            <span className="mt-3 ml-auto block h-px w-14 bg-[var(--ch-gold)]/70" />
+          </div>
         </div>
+
         {/*
-          The rail of small caps, right-aligned the way the firm drew it. Hidden on a phone
-          rather than wrapped: four words stacked down a narrow screen read as a list of
-          headings, not as a brand line.
+          THE OPEN SKY. A flexible spacer rather than a fixed margin, so the figures stay in the
+          lower third of the panel at every height instead of drifting up on a short window and
+          leaving the photograph as a band along the top.
         */}
-        <div className="hidden lg:block shrink-0 text-right">
-          <p className="text-[11px] font-medium uppercase tracking-[0.3em] text-gold-400 leading-[1.9]">
-            Higher<br />Performance<br />Closer<br />Tomorrow
-          </p>
-          <span className="mt-3 ml-auto block h-px w-16 bg-gold-500/70" />
+        <div className="min-h-[56px] flex-1" />
+
+        {/* ---------- the four figures ---------- */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 items-stretch">
+          <Tile icon={<Coins size={17} />} label={figures.todayLabel}
+            value={money(figures.today)}>
+            {figures.changeOnPrevious === null ? (
+              /* No comparison rather than a fabricated one. The first working day of the series has
+                 nothing behind it, and "+100%" against nothing is not a fact about the day. */
+              <span className="text-white/45">No working day before it to compare</span>
+            ) : (
+              <span className={`inline-flex items-center gap-1.5 ${
+                figures.changeOnPrevious >= 0 ? 'text-[#3ecf8e]' : 'text-[#e45d68]'
+              }`}>
+                {figures.changeOnPrevious >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
+                {signedPct(figures.changeOnPrevious)}
+                <span className="text-white/45">vs {figures.previousLabel}</span>
+              </span>
+            )}
+          </Tile>
+
+          <Tile icon={<BarChart3 size={17} />} label="Collected this period"
+            value={money(figures.collected)}>
+            {figures.target === null ? (
+              <span className="text-white/45">No target set for this period</span>
+            ) : (
+              <>
+                <span className="flex items-center gap-2.5">
+                  <HeroBar achieved={figures.achieved} />
+                  <span className="tabular-nums text-white/85">{pct(figures.achieved)}</span>
+                </span>
+                <span className="mt-1.5 block">
+                  Target <span className="text-white/85">{money(figures.target)}</span>
+                </span>
+              </>
+            )}
+          </Tile>
+
+          <Tile icon={<Target size={17} />}
+            label={figures.againstPace === null ? 'Against pace' : ahead ? 'Ahead of pace' : 'Behind pace'}
+            value={figures.againstPace === null ? '—' : money(Math.abs(figures.againstPace))}
+            tone={figures.againstPace === null ? undefined : ahead ? 'good' : 'bad'}>
+            {figures.expectedByNow === null
+              ? <span className="text-white/45">Nothing to measure against yet</span>
+              : <>Expected by now <span className="text-white/85">{money(figures.expectedByNow)}</span></>}
+          </Tile>
+
+          <Tile icon={<CalendarDays size={17} />} label="Needed per working day"
+            value={figures.neededADay === null ? '—' : money(figures.neededADay)}>
+            {figures.stillNeeded === null
+              ? <span className="text-white/45">No target set for this period</span>
+              : <>{money(figures.stillNeeded)} remaining</>}
+          </Tile>
         </div>
-      </div>
 
-      {/* ---------- the four figures ---------- */}
-      <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <Tile icon={<Coins size={22} />} label={figures.todayLabel}
-          value={money(figures.today)}>
-          {figures.changeOnPrevious === null ? (
-            /* No comparison rather than a fabricated one. The first working day of the series has
-               nothing behind it, and "+100%" against nothing is not a fact about the day. */
-            <span className="text-white/45">No working day before it to compare</span>
-          ) : (
-            <span className={`inline-flex items-center gap-1.5 ${
-              figures.changeOnPrevious >= 0 ? 'text-emerald-400' : 'text-rose-400'
-            }`}>
-              {figures.changeOnPrevious >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
-              {signedPct(figures.changeOnPrevious)}
-              <span className="text-white/45">vs {figures.previousLabel}</span>
-            </span>
-          )}
-        </Tile>
-
-        <Tile icon={<BarChart3 size={22} />} label="Collected this period"
-          value={money(figures.collected)}>
-          {figures.target === null ? (
-            <span className="text-white/45">No target set for this period</span>
-          ) : (
-            <>
-              <span className="block">
-                Target for the period{' '}
-                <span className="text-white/85">{money(figures.target)}</span>
-              </span>
-              <span className="mt-2 flex items-center gap-2.5">
-                <HeroBar achieved={figures.achieved} />
-                <span className="tabular-nums text-white/85">{pct(figures.achieved)}</span>
-              </span>
-            </>
-          )}
-        </Tile>
-
-        <Tile icon={<Target size={22} />}
-          label={figures.againstPace === null ? 'Against pace' : ahead ? 'Ahead of pace' : 'Behind pace'}
-          value={figures.againstPace === null ? '—' : money(Math.abs(figures.againstPace))}
-          tone={figures.againstPace === null ? undefined : ahead ? 'good' : 'bad'}>
-          {figures.expectedByNow === null
-            ? <span className="text-white/45">Nothing to measure against yet</span>
-            : <>Expected by now <span className="text-white/85">{money(figures.expectedByNow)}</span></>}
-        </Tile>
-
-        <Tile icon={<CalendarDays size={22} />} label="Needed per working day"
-          value={figures.neededADay === null ? '—' : money(figures.neededADay)}>
-          {figures.stillNeeded === null
-            ? <span className="text-white/45">No target set for this period</span>
-            : <>{money(figures.stillNeeded)} remaining</>}
-        </Tile>
-      </div>
-
-      {/*
-        WHAT THE FIGURES ABOVE ARE OF — as controls, not as a caption beside them.
-
-        This carried both at first: a line reading "Collection period: 11 Sep – 10 Oct 2026" and
-        then the picker that sets it, one under the other. Two rows saying the same thing, and the
-        reader has to work out which of them is the live one. The controls already show their own
-        values, so the caption went.
-
-        They are drawn as text rather than as boxed fields, which is how the firm draws them. The
-        affordance is not thrown away with the box: each one keeps a focus ring, the selects keep
-        their chevron, and hovering lights the whole control.
-      */}
-      <div className="hero-controls mt-7 flex flex-wrap items-center gap-x-4 gap-y-3">
-        {filters}
-        {action}
         {/*
-          The brand line is the only thing pushed right, and the export button sits with the
-          controls rather than opposite them. With the button on the right the row wrapped on a
-          laptop and left it stranded on a line of its own — which is the shape the firm called
-          bulky in the first place. Wrapped this way the brand line is what drops, right-aligned,
-          and nothing looks stranded.
+          ONE STRIP, TWO ROWS. The controls that say what the figures above are OF, and the month
+          they are being read against. They were two separate cards and the firm asked for one
+          panel — which is also the honest arrangement: the period picker and the month bar are
+          the same fact asked twice, once as a control and once as a result.
+
+          The controls are drawn as text rather than as boxed fields, which is how the firm draws
+          them. The affordance is not thrown away with the box: each keeps a focus ring, the
+          selects keep their chevron, and hovering lights the whole control.
         */}
-        <span className="ml-auto hidden lg:flex items-center gap-4">
-          <span className="block h-px w-12 bg-gold-500/70" />
-          <span className="text-[10px] font-medium uppercase tracking-[0.3em] text-white/45">
-            Built for a higher standard
-          </span>
-        </span>
+        <div className="hero-glass mt-4">
+          <div className="hero-controls flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-2.5">
+            {filters}
+            {action && <div className="ml-auto">{action}</div>}
+          </div>
+          {progress && <div className="border-t border-white/10">{progress}</div>}
+        </div>
       </div>
     </div>
   )
@@ -195,6 +201,11 @@ export function CollectionsHero({ figures, filters, action }: {
 /**
  * One of the four. Glass rather than a solid card, so the photograph is still a photograph
  * behind it — a row of opaque boxes would make the picture a strip along the top.
+ *
+ * COMPACT, AND ALL FOUR THE SAME HEIGHT. h-full inside an items-stretch grid, because the four
+ * carry different amounts underneath — one has a progress bar, one has a single line — and four
+ * panels of four heights across a photograph is the thing that reads as unfinished. The label
+ * reserves two lines for the same reason it does anywhere: so the figures sit on one line.
  *
  * The icon is its own column rather than sitting inline with the label, because the label is a
  * sentence of small caps and an icon in the middle of one is read as a word.
@@ -206,25 +217,16 @@ function Tile({ icon, label, value, tone, children }: {
   tone?: 'good' | 'bad'
   children: ReactNode
 }) {
-  const colour = tone === 'good' ? 'text-emerald-400' : tone === 'bad' ? 'text-rose-400' : 'text-white'
+  const colour = tone === 'good' ? 'text-[#3ecf8e]' : tone === 'bad' ? 'text-[#e45d68]' : 'text-white'
   return (
-    <div className="flex items-start gap-3.5 rounded-xl border border-white/10 bg-slate-950/45 px-4 py-4 backdrop-blur-sm">
-      <span className="mt-0.5 shrink-0 text-gold-400">{icon}</span>
+    <div className="hero-glass flex h-full items-start gap-3 px-3.5 py-3">
+      <span className="mt-0.5 shrink-0 text-[var(--ch-gold)]">{icon}</span>
       <div className="min-w-0">
-        {/*
-          TWO LINES ARE RESERVED FOR THE LABEL WHETHER OR NOT IT NEEDS THEM.
-
-          The four labels are different lengths and one of them carries a date, so on any width
-          where "Collected this period" wraps and "Ahead of pace" does not, the big figures sit
-          at four different heights and the row stops reading as a row. Reserving the second line
-          costs a few pixels of empty space on the short ones and buys a straight line across all
-          four, which is the whole point of putting them side by side. min-height rather than
-          height: a label that somehow needs a third line should push the figure down, not be
-          cut in half.
-        */}
-        <p className="min-h-[2.2em] leading-[1.1] text-[10px] font-semibold uppercase tracking-[0.16em] text-white/65">{label}</p>
-        <p className={`text-2xl sm:text-[28px] font-bold tabular-nums mt-1 ${colour}`}>{value}</p>
-        <div className="text-xs text-white/60 mt-1.5">{children}</div>
+        <p className="min-h-[2.2em] leading-[1.1] text-[10px] font-semibold uppercase tracking-[0.14em] text-white/65">
+          {label}
+        </p>
+        <p className={`text-[22px] sm:text-2xl font-semibold tabular-nums leading-none mt-0.5 ${colour}`}>{value}</p>
+        <div className="text-[11px] text-white/60 mt-2">{children}</div>
       </div>
     </div>
   )
@@ -238,8 +240,8 @@ function Tile({ icon, label, value, tone, children }: {
 function HeroBar({ achieved }: { achieved: number | null }) {
   const { fill, over } = targetLaps(achieved)
   return (
-    <span className="inline-block h-1.5 w-24 rounded-full bg-white/15 overflow-hidden align-middle">
-      <span className={`block h-full rounded-full ${over ? 'bg-emerald-400' : 'bg-gold-400'}`}
+    <span className="inline-block h-1 w-20 rounded-full bg-white/12 overflow-hidden align-middle">
+      <span className={`block h-full rounded-full ${over ? 'bg-[#3ecf8e]' : 'bg-[var(--ch-champagne)]'}`}
         style={{ width: `${Math.round(fill * 100)}%` }} />
     </span>
   )

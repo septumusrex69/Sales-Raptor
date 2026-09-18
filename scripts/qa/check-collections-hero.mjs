@@ -89,7 +89,8 @@ ok('the day before is filtered by team as well',
 ok('the hero uses the app’s own currency formatter', /const money = formatCurrency/.test(hero))
 ok('...and no hand-rolled one survives beside it', !/replace\(\/\\\\B\(\?=/.test(hero))
 ok('the hero’s bar laps on the same rule as the tables', /targetLaps\(achieved\)/.test(hero))
-ok('...including the colour it changes to', /over \? 'bg-emerald-400' : 'bg-gold-400'/.test(hero))
+ok('...including the colour it changes to',
+  /over \? 'bg-\[#3ecf8e\]' : 'bg-\[var\(--ch-champagne\)\]'/.test(hero))
 
 /* Every figure comes from the page's own `line`, which is what the tables are drawn from. */
 ok('collected comes from the same total as the tables', /collected: score\?\.collected \?\? 0/.test(page))
@@ -114,33 +115,45 @@ ok('the controls are not captioned by a copy of themselves',
 /* The firm's own lines, which is most of why the panel exists. */
 ok('the gold line under the headline is there', /Discipline drives results/.test(hero))
 ok('...and the rail beside it', /Higher<br \/>Performance<br \/>Closer<br \/>Tomorrow/.test(hero))
-ok('...and the one at the foot', /Built for a higher standard/.test(hero))
+/*
+ * The line at the foot went with the redesign. The firm's reference puts the control strip there
+ * instead, and a brand line squeezed beside a date picker is clutter rather than brand — so this
+ * asserts its ABSENCE, which is the thing that would otherwise creep back in.
+ */
+ok('...and the line at the foot went with the redesign', !/Built for a higher standard/.test(hero))
 
 /*
- * THE HEADLINE IS THE FIRM'S LINE, AND IT IS ONE SENTENCE WITH NO HARD BREAK IN IT.
+ * THE HEADLINE IS THE FIRM'S LINE, IN TWO TONES, BROKEN BY HAND.
  *
- * The line this replaced was two sentences and was broken between them by hand, because the
- * shape it made was half the point. This is one, so a <br> anywhere inside it would be an
- * arbitrary break that only looks right at the window width somebody happened to be at.
+ * The firm's reference sets the first half white and the second in champagne, across two lines.
+ * That only works as a deliberate break: left to wrap, the break lands wherever the window
+ * happens to be wide and the colour change falls in the middle of a phrase.
+ *
+ * SENTENCE CASE, NOT CAPITALS. It was set in capitals for one version, on the firm's instruction
+ * at the time; their reference for this design shows it in sentence case with the second half
+ * gold, and that is the newer instruction. Asserted rather than left implicit because the two
+ * treatments need opposite letter-spacing and reverting one without the other looks broken.
  */
 const title = hero.slice(hero.indexOf('<h1'), hero.indexOf('</h1>'))
 ok('there is a heading to read', title.length > 40)
-ok('the firm’s line is on it', /The sky is only the beginning\./.test(title))
-ok('...unbroken', !/<br/.test(title))
+ok('the firm’s first half is on it', /The sky is only/.test(title))
+ok('...and the second half is the second line', /<br \/>[\s\S]*the beginning\./.test(title))
+ok('...in champagne rather than white',
+  /text-\[var\(--ch-champagne\)\]"\s*>\s*the beginning\./.test(title))
+ok('...and not set in capitals', !/\buppercase\b/.test(title))
 /*
- * THE CAPITALS ARE CSS, NOT TYPED. Same as the eyebrow, the rail and the line at the foot — this
- * panel already has one way of doing capitals and a second would be a second thing to change —
- * and a reader who copies the line out of the page gets it back in sentence case.
+ * Tight tracking is right for lower case and wrong for capitals, and the reverse. The capitals
+ * version of this line carried +0.015em; sentence case at 52px needs it pulled back in, or the
+ * words drift apart at display size.
  */
-ok('...set in capitals by the stylesheet', /\buppercase\b/.test(title))
-ok('...rather than typed in them', !/THE SKY IS ONLY/.test(title))
-/* Tight tracking is right for lower case and wrong for capitals: letterforms of one height with
-   no ascenders between them need the air putting back, or the line reads as a block. */
 const track = /tracking-\[(-?[\d.]+)em\]/.exec(title)
-ok('...with tracking to read them by', Boolean(track))
-ok(`...opened up rather than tightened (${track?.[1]}em)`, Number(track?.[1]) > 0)
-/* And balanced, so the widths where it does wrap do not drop one word onto a line of its own. */
-ok('...and balanced where it has to wrap', /text-balance/.test(title))
+ok('...with tracking set for lower case', Boolean(track))
+ok(`...pulled in rather than opened up (${track?.[1]}em)`, Number(track?.[1]) < 0)
+/*
+ * SEMIBOLD, NOT BLACK, at the firm's instruction: "medium/semi-bold rather than an excessively
+ * heavy black weight", because at this size a heavy weight reads as advertising typography.
+ */
+ok('...at a medium weight rather than a black one', /font-semibold/.test(title) && !/font-(bold|black|extrabold)/.test(title))
 
 /*
  * AND IT DOES NOT NAME THE SCREEN. The panel carried "Collections" twice at one point — a gold
@@ -241,7 +254,7 @@ ok('both files exist', sizes.webp > 10_000 && sizes.jpg > 10_000)
  */
 const scrim = css.slice(css.indexOf('.collections-hero::before'), css.indexOf('.collections-hero > *'))
 ok('there is a scrim to read', scrim.length > 200)
-const darkest = Math.max(...[...scrim.matchAll(/rgba\(8, 15, 24, ([\d.]+)\)/g)].map((m) => Number(m[1])))
+const darkest = Math.max(...[...scrim.matchAll(/rgba\(5, 16, 25, ([\d.]+)\)/g)].map((m) => Number(m[1])))
 ok('the whole valley is in frame', /background-position: center;/.test(css))
 
 /*
@@ -252,7 +265,7 @@ ok('the whole valley is in frame', /background-position: center;/.test(css))
  */
 const passes = scrim.split('linear-gradient').slice(1)
 check('there are two passes over the picture', passes.length, 2)
-const worst = passes.map((p) => Math.max(...[...p.matchAll(/rgba\(8, 15, 24, ([\d.]+)\)/g)].map((m) => Number(m[1]))))
+const worst = passes.map((p) => Math.max(...[...p.matchAll(/rgba\(5, 16, 25, ([\d.]+)\)/g)].map((m) => Number(m[1]))))
 const combined = 1 - worst.reduce((acc, a) => acc * (1 - a), 1)
 ok(`together they leave the picture visible (${combined.toFixed(2)} at the worst corner)`, combined <= 0.9)
 /* And the horizontal pass is the heavy one: the type is on the left, the mountain on the right. */

@@ -296,6 +296,16 @@ export function CollectorDashboard() {
           <ExportButton rows={shownRows} today={shownToday} users={users} teams={teams}
             pace={pace} asAt={asAt} period={period} targetFor={targetFor} />
         ) : undefined}
+        /*
+          THE MONTH BAR MOVES INTO THE PANEL, at the firm's instruction — it was "another bulky
+          white card immediately underneath". Rendered here rather than inside the hero so that
+          the arithmetic stays in the one place that already does it: this is the same element
+          that used to sit below, with its colours changed.
+        */
+        progress={<MonthProgress pace={pace} line={line} tone="dark"
+          note={floor.withTarget < floor.members
+            ? `${floor.members - floor.withTarget} of ${floor.members} have no target, so the total is short by their share.`
+            : undefined} />}
       />
 
       {/*
@@ -360,11 +370,6 @@ export function CollectorDashboard() {
               </div>
             </Card>
           )}
-
-          <MonthProgress pace={pace} line={line}
-            note={floor.withTarget < floor.members
-              ? `${floor.members - floor.withTarget} of ${floor.members} have no target, so the total is short by their share.`
-              : undefined} />
 
           {shownRows.length > 0 && (
             <>
@@ -514,55 +519,75 @@ function ProgressBar({ achieved, width = 'w-24' }: { achieved: number | null; wi
  * good; the line at 30% says it is ahead, on the day it is being read. It is the same comparison
  * the status pills make, drawn once for the whole floor.
  */
-function MonthProgress({ pace, line, note }: {
+function MonthProgress({ pace, line, note, tone = 'light' }: {
   pace: MonthPace
   line: PaceLine | null
   note?: string
+  /**
+   * 'dark' renders it inside the Collections hero's glass panel rather than as a card of its own.
+   *
+   * A VARIANT RATHER THAN A SECOND COMPONENT, deliberately. The month bar is the same three facts
+   * wherever it is drawn — what was achieved, what was expected by now, how many days are left —
+   * and a second implementation for the dark panel is a second place for those to disagree with
+   * the tables underneath. Only the colours change; every figure comes from the same pace object.
+   */
+  tone?: 'light' | 'dark'
 }) {
   const { fill, laps, over } = targetLaps(line?.achieved ?? null)
   const marker = Math.min(100, Math.round(pace.expected * 100))
-  return (
-    <Card padded={false}>
+  const dark = tone === 'dark'
+
+  const body = (
+    <>
       <div className="px-4 pt-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <p className="text-sm text-slate-500">
+        <p className={dark ? 'text-sm text-white/60' : 'text-sm text-slate-500'}>
           Monthly progress{' '}
-          <span className="font-semibold text-slate-800 tabular-nums">
+          <span className={`font-semibold tabular-nums ${dark ? 'text-white' : 'text-slate-800'}`}>
             {line?.achieved === null || line?.achieved === undefined
               ? 'no target set'
               : `${pctText(line.achieved)} achieved`}
           </span>
           {laps > 0 && (
-            <span className="ml-2 text-xs font-medium text-emerald-700">
+            <span className={`ml-2 text-xs font-medium ${dark ? 'text-[#3ecf8e]' : 'text-emerald-700'}`}>
               {laps === 1 ? 'past target' : `${laps} targets over`}
             </span>
           )}
         </p>
-        <p className="text-xs text-slate-400 tabular-nums">
+        <p className={`text-xs tabular-nums ${dark ? 'text-white/45' : 'text-slate-400'}`}>
           {pace.daysWorked} of {pace.workDays} working days completed
           {pace.finished ? ' · month closed' : ` · ${pace.daysLeft} remaining`}
         </p>
       </div>
       <div className="px-4 pt-3 pb-1">
-        <div className="relative h-2.5 rounded-full bg-slate-200">
-          <div className={`h-full rounded-full ${over ? 'bg-emerald-500' : 'bg-gold-400'}`}
-            style={{ width: `${Math.round(fill * 100)}%` }} />
+        {/* Thinner on the dark panel, at the firm's instruction: over a photograph a 10px bar
+            reads as a widget, and the figure beside it is what anybody actually reads. */}
+        <div className={`relative rounded-full ${dark ? 'h-1.5 bg-white/12' : 'h-2.5 bg-slate-200'}`}>
+          <div className={`h-full rounded-full ${
+            over ? (dark ? 'bg-[#3ecf8e]' : 'bg-emerald-500') : (dark ? 'bg-[#d8b76b]' : 'bg-gold-400')
+          }`} style={{ width: `${Math.round(fill * 100)}%` }} />
           {/* Hidden once the month is over: there is no pace left to keep, only a result. */}
           {!pace.finished && (
-            <div className="absolute inset-y-[-3px] w-px bg-slate-500" style={{ left: `${marker}%` }} />
+            <div className={`absolute inset-y-[-3px] w-px ${dark ? 'bg-white/55' : 'bg-slate-500'}`}
+              style={{ left: `${marker}%` }} />
           )}
         </div>
       </div>
       <div className="px-4 pb-3 relative h-4">
         {!pace.finished && (
-          <span className="absolute text-[11px] text-slate-500 tabular-nums -translate-x-1/2 whitespace-nowrap"
-            style={{ left: `calc(${marker}% + 1rem)` }}>
+          <span className={`absolute text-[11px] tabular-nums -translate-x-1/2 whitespace-nowrap ${
+            dark ? 'text-white/45' : 'text-slate-500'
+          }`} style={{ left: `calc(${marker}% + 1rem)` }}>
             {marker}% expected by now
           </span>
         )}
       </div>
-      {note && <p className="px-4 pb-3 -mt-1 text-xs text-amber-700">{note}</p>}
-    </Card>
+      {note && (
+        <p className={`px-4 pb-3 -mt-1 text-xs ${dark ? 'text-[#e4c68a]' : 'text-amber-700'}`}>{note}</p>
+      )}
+    </>
   )
+
+  return dark ? <div>{body}</div> : <Card padded={false}>{body}</Card>
 }
 
 /* ---------- the clerks ---------- */
@@ -934,8 +959,15 @@ function ExportButton({ rows, today, users, teams, pace, asAt, period, targetFor
   }
 
   return (
+    /*
+      OUTLINED, NOT FILLED. A solid gold button on a photograph is the brightest thing on the
+      screen, and the brightest thing on this screen should be a figure. The firm asked for
+      "gold outlined or muted gold — not bright yellow"; it fills on hover, so it still reads as
+      the one thing here that does something.
+    */
     <button type="button" onClick={save}
-      className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+      className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg
+        border border-[#c9a04f]/60 text-[#e4c68a] hover:bg-[#c9a04f]/15 hover:border-[#c9a04f]">
       <Download size={13} /> Export daily report
     </button>
   )

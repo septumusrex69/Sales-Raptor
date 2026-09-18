@@ -216,34 +216,93 @@ try {
   t.ok(`the panel has real height (${Math.round(hero.height)}px)`, hero.height > 320)
 
   /*
+   * AND THE PANELS ON IT ARE GLASS, NOT BOXES.
+   *
+   * "Do NOT cover most of the photograph with large opaque widgets" is the centre of the brief,
+   * and it is the one thing on this screen a screenshot flatters — an opaque tile over a dark
+   * mountain looks almost right in a thumbnail and is wrong in front of you. Measured as the
+   * alpha the browser resolved, not read off the class, because a Tailwind arbitrary value that
+   * fails to compile produces no rule at all and the element simply inherits.
+   *
+   * Break-testing found this missing: filling the tiles solid navy left every other check green.
+   */
+  const glass = await page.evaluate(() => {
+    const el = document.querySelector('.collections-hero .hero-glass')
+    if (!el) return null
+    const s = getComputedStyle(el)
+    /*
+     * Parsed by counting components, not by a lookbehind on the last one. `rgb(7, 16, 24)` has no
+     * alpha and its last component is 24, so a regex that just takes the final number reports an
+     * opaque panel as "alpha 24" — which still fails the check, but tells whoever reads the
+     * failure something untrue about why.
+     */
+    const parts = (s.backgroundColor.match(/[\d.]+/g) ?? []).map(Number)
+    return { alpha: parts.length >= 4 ? parts[3] : 1, blur: s.backdropFilter, border: s.borderTopWidth }
+  })
+  t.ok('there are glass panels on the hero', glass !== null)
+  t.ok(`...the photograph shows through them (alpha ${glass?.alpha})`,
+    glass !== null && glass.alpha > 0 && glass.alpha < 0.85)
+  t.ok(`...with a blur behind them (${glass?.blur})`, /blur/.test(glass?.blur ?? ''))
+  t.ok(`...and a hairline edge (${glass?.border})`, parseFloat(glass?.border ?? '0') > 0)
+
+  /*
+   * THE FIGURES SIT IN THE LOWER THIRD, which is the other half of the same instruction:
+   * "significantly more open mountain scenery between the headline and the KPI section".
+   */
+  const layout = await page.evaluate(() => {
+    const hero = document.querySelector('.collections-hero').getBoundingClientRect()
+    const h1 = document.querySelector('.collections-hero h1').getBoundingClientRect()
+    const tile = document.querySelector('.collections-hero .grid .hero-glass').getBoundingClientRect()
+    return { open: tile.top - h1.bottom, tileFrom: (tile.top - hero.top) / hero.height }
+  })
+  t.ok(`there is open sky between the headline and the figures (${Math.round(layout.open)}px)`,
+    layout.open > 120)
+  t.ok(`...and the figures start in the lower half (${Math.round(layout.tileFrom * 100)}%)`,
+    layout.tileFrom > 0.5)
+
+  /*
    * AND THE TYPE ON IT IS READABLE. A scrim that is too light is the failure a screenshot flatters
    * and a person notices immediately; this measures the heading against the panel behind it.
    */
   const heading = await page.locator('.collections-hero h1').evaluate((el) => ({
     text: el.innerText, colour: getComputedStyle(el).color, size: getComputedStyle(el).fontSize,
+    weight: getComputedStyle(el).fontWeight,
   }))
   /*
    * innerText reports what is RENDERED, so a heading set in capitals by CSS comes back in
    * capitals — which is the assertion worth making. Reading textContent instead would return
    * the sentence-case source and pass whether the transform applied or not.
    */
-  t.check('the title is the firm’s own line, in capitals',
-    heading.text.replace(/\s+/g, ' ').trim(), 'THE SKY IS ONLY THE BEGINNING.')
-  t.ok(`...set large (${heading.size})`, parseFloat(heading.size) >= 28)
+  t.check('the title is the firm’s own line',
+    heading.text.replace(/\s+/g, ' ').trim(), 'The sky is only the beginning.')
+  /*
+   * SIZED TO THE BRIEF, at both ends. "Do NOT make the headline enormous" is half the instruction
+   * and 48-56px is the other half, so a lower bound alone would pass on the 72px version this
+   * replaced.
+   */
+  t.ok(`...set between 48 and 56px (${heading.size})`,
+    parseFloat(heading.size) >= 48 && parseFloat(heading.size) <= 56)
+  /* Semibold, not black: at this size a heavy weight reads as advertising. */
+  t.ok(`...at a medium weight (${heading.weight})`,
+    Number(heading.weight) >= 500 && Number(heading.weight) <= 650)
   t.ok('...in white on the dark panel', /255, 255, 255/.test(heading.colour))
   /*
-   * AND IT FITS ON ONE LINE at the width the floor actually works at. It is one sentence, so
-   * unlike the two-sentence line it replaced there is no sensible place to break it — a heading
-   * this size that wraps puts a word or two on a second line under all that white space and
-   * looks like a mistake. Counted off a Range, which gives one rect per line box; innerText
-   * would report a soft wrap as a single line and miss it entirely.
+   * TWO TONES, BROKEN BY HAND. The firm's reference sets the first half white and the second in
+   * champagne, on two lines — which only works as a deliberate break: left to wrap, the break
+   * lands wherever the window happens to be wide and the colour change falls mid-phrase.
+   *
+   * innerText renders the <br> as a newline, so this reads the rendered break rather than the
+   * presence of a tag.
    */
-  const titleLines = await page.evaluate(() => {
-    const range = document.createRange()
-    range.selectNodeContents(document.querySelector('.collections-hero h1'))
-    return range.getClientRects().length
-  })
-  t.check('...on one line at a working width', titleLines, 1)
+  t.check('...broken across two lines where the firm breaks it',
+    heading.text.trim().split('\n').map((l) => l.trim()).join(' | '),
+    'The sky is only | the beginning.')
+  const tail = await page.locator('.collections-hero h1 span').evaluate((el) => ({
+    text: el.innerText.trim(), colour: getComputedStyle(el).color,
+  }))
+  t.check('the second half is the second line', tail.text, 'the beginning.')
+  t.ok(`...and it is champagne rather than white (${tail.colour})`,
+    tail.colour !== heading.colour && !/255, 255, 255/.test(tail.colour))
 
   /*
    * THE PANEL DOES NOT NAME THE SCREEN, AND SOMETHING ELSE HAS TO.
@@ -330,8 +389,12 @@ try {
     await heroBox.getByText('Discipline drives results').isVisible())
   t.ok('...and the rail beside it',
     await heroBox.getByText(/Higher\s*Performance\s*Closer\s*Tomorrow/).isVisible())
-  t.ok('...and the one at the foot',
-    await heroBox.getByText('Built for a higher standard').isVisible())
+  /*
+   * The line at the foot went with the redesign: the firm's reference has the control strip
+   * there instead, and a brand line squeezed beside a date picker is clutter rather than brand.
+   */
+  t.ok('...and the line at the foot is gone with it',
+    (await heroBox.innerText()).indexOf('Built for a higher standard') === -1)
 
   /* The controls live IN the hero, not in a card below it. */
   t.check('the period picker is inside the panel', await heroBox.locator('select').count() >= 2, true)
