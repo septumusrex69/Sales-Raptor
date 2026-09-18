@@ -46,6 +46,33 @@ export function workDaysInclusive(from: string, to: string, extra: Record<string
   return count
 }
 
+/**
+ * The working day before this one.
+ *
+ * "COLLECTED TODAY, UP 14% ON YESTERDAY" IS A LIE EVERY MONDAY if yesterday means the calendar
+ * day before. Sunday's takings are nought, so Monday would always read as an infinite
+ * improvement and Tuesday as a collapse — a comparison that swings wildly for reasons that have
+ * nothing to do with the work is one people learn to ignore within a week.
+ *
+ * Steps back over weekends and public holidays. It may cross out of the month, and that is
+ * correct: the previous working day is a fact about days, not about the reporting period.
+ */
+export function previousWorkingDay(day: string, extra: Record<string, string> = {}): string | null {
+  let cursor = day
+  /* Christmas to New Year is the longest stretch this has to cross; ten days is ample. */
+  for (let guard = 0; guard < 10; guard += 1) {
+    cursor = addDays(cursor, -1)
+    if (isWorkingDay(cursor, extra)) return cursor
+  }
+  return null
+}
+
+const addDays = (key: string, by: number): string => {
+  const d = new Date(`${key}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + by)
+  return d.toISOString().slice(0, 10)
+}
+
 export interface MonthPace {
   workDays: number
   /** Work days elapsed INCLUDING today — see the note in `monthPace`. */

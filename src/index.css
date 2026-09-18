@@ -271,6 +271,68 @@ select:autofill {
 }
 
 /*
+ * The Collections hero photograph.
+ *
+ * Same bargain as the sign-in panel above: a background rather than an <img>, and the same three
+ * declarations of one property — anything modern takes the standard image-set, Safari 14-16 takes
+ * the -webkit- form and gets the same file, anything older keeps the plain JPEG.
+ *
+ * THE SCRIM IS A PSEUDO-ELEMENT, NOT PART OF THE BACKGROUND, which is the one place this departs
+ * from the raptor skin's hero. That one composes gradient and photograph into a single background
+ * so the copy's contrast cannot drift as the image changes behind it; here the image never
+ * changes, and keeping the scrim separate means the image-set declarations stay readable instead
+ * of repeating a four-stop gradient three times.
+ *
+ * Darkest on the left, where the wordmark and the headline sit, and lifting through the middle so
+ * the sunrise survives. The right edge comes back down so the rail of small caps has something to
+ * sit on — over the brightest part of the sky, white type at that size disappears.
+ */
+.collections-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--skin-hero-radius);
+  background-color: #0b1420;
+  background-image: url('/brand/collections-hero.jpg');
+  background-image: -webkit-image-set(url('/brand/collections-hero.webp') 1x);
+  background-image: image-set(
+    url('/brand/collections-hero.webp') type('image/webp') 1x,
+    url('/brand/collections-hero.jpg') type('image/jpeg') 1x
+  );
+  background-size: cover;
+  /* Down on the ridge line, not the sky. Centred vertically the crop fills the panel with cloud
+     and the mountains disappear, which is the one thing in the picture worth showing. */
+  background-position: center 62%;
+}
+
+.collections-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      100deg,
+      rgba(8, 15, 24, 0.94) 0%,
+      rgba(8, 15, 24, 0.78) 26%,
+      rgba(8, 15, 24, 0.3) 55%,
+      rgba(8, 15, 24, 0.5) 100%
+    ),
+    /*
+     * A second, much lighter pass down the panel so the tiles keep their contrast wherever the
+     * photograph is bright behind them. THE TWO COMPOUND — at 0.86 and 0.74 the foot of the
+     * panel went to almost solid navy and the picture may as well not have been there. Each
+     * one has to be read as half of what reaches the eye.
+     */
+    linear-gradient(to bottom, rgba(8, 15, 24, 0) 0%, rgba(8, 15, 24, 0.22) 55%, rgba(8, 15, 24, 0.55) 100%);
+}
+
+/* Everything the component draws sits above the scrim. */
+.collections-hero > * {
+  position: relative;
+  z-index: 1;
+}
+
+/*
  * The celebration when a deal is won or a mandate signed.
  *
  * The bird spins up in the middle, growing as it turns, then bursts into stars. Two nested

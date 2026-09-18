@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, Download, Loader2, Search } from 'lucide-react'
 import { Card } from '../components/ui/Card'
@@ -17,10 +17,11 @@ import { getCurrentSalesMonth, getPreviousSalesMonth, type SalesMonthPeriod } fr
 import { pctDelta } from '../lib/pctDelta'
 import { resolveTarget } from '../lib/targets'
 import {
-  dayKey, monthPace, paceLine, standingLabel, targetLaps, teamTotal,
+  dayKey, monthPace, paceLine, previousWorkingDay, standingLabel, targetLaps, teamTotal,
   type MonthPace, type PaceLine, type PaceStanding,
 } from '../lib/collectionPace.ts'
 import { placeLabel, standings } from '../lib/collectorTrend.ts'
+import { CollectionsHero } from '../components/collections/CollectionsHero'
 import { formatCurrency } from '../data/mockData'
 import type { ID, Target, Team, User } from '../types'
 
@@ -57,6 +58,7 @@ export function CollectorDashboard() {
   const [rows, setRows] = useState<CollectorStats[] | null>(null)
   const [todayRows, setTodayRows] = useState<CollectorStats[] | null>(null)
   const [previous, setPrevious] = useState<CollectorStats[] | null>(null)
+  const [beforeRows, setBeforeRows] = useState<CollectorStats[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   /*
@@ -88,6 +90,18 @@ export function CollectorDashboard() {
     return start
   }, [asAt])
 
+  /*
+   * The working day before the one being read, so the hero's comparison is not a Monday against
+   * a Sunday. Null on the rare day that has none within reach — see previousWorkingDay.
+   */
+  const beforeDay = useMemo(() => {
+    const key = previousWorkingDay(dayKey(asAt))
+    if (!key) return null
+    const start = new Date(`${key}T00:00:00`)
+    const end = new Date(`${key}T23:59:59.999`)
+    return { key, start, end }
+  }, [asAt])
+
   useEffect(() => {
     let cancelled = false
     setRows(null); setError(null)
@@ -98,14 +112,17 @@ export function CollectorDashboard() {
          theirs: the first question every morning is what came in yesterday. */
       fetchCollectorPerformance(dayStart, asAtEnd),
       fetchCollectorPerformance(prior.start, prior.end),
+      beforeDay
+        ? fetchCollectorPerformance(beforeDay.start, beforeDay.end)
+        : Promise.resolve([] as CollectorStats[]),
     ])
-      .then(([now, day, before]) => {
+      .then(([now, day, before, dayBefore]) => {
         if (cancelled) return
-        setRows(now); setTodayRows(day); setPrevious(before)
+        setRows(now); setTodayRows(day); setPrevious(before); setBeforeRows(dayBefore)
       })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
     return () => { cancelled = true }
-  }, [period, asAtEnd, dayStart])
+  }, [period, asAtEnd, dayStart, beforeDay])
 
   /*
    * The month in WORK DAYS, as at the day being read. Every percentage below is read against it:
@@ -154,6 +171,13 @@ export function CollectorDashboard() {
   const priorScore = shownPrior ? scoreCollector(shownPrior) : null
 
   const collectedToday = shownToday.reduce((t, r) => t + r.collected, 0)
+  /*
+   * The day before, through the same team filter as everything else — otherwise a team leader
+   * filtered to one team would see their team's day compared with the whole floor's.
+   */
+  const collectedBefore = (beforeRows ?? [])
+    .filter((r) => !teamId || teamOf(r.userId) === teamId)
+    .reduce((t, r) => t + r.collected, 0)
 
   /*
    * The target the headline is read against: the sum of the people's own, never a figure typed in
@@ -198,48 +222,61 @@ export function CollectorDashboard() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold text-slate-800">Collections</h1>
-          <p className="text-xs text-slate-400">Daily performance report</p>
-        </div>
-        {rows && rows.length > 0 && (
-          <ExportButton rows={shownRows} today={shownToday} users={users} teams={teams}
-            pace={pace} asAt={asAt} period={period} targetFor={targetFor} />
-        )}
-      </div>
-
       {/*
-        THE THREE THINGS THAT DECIDE WHAT EVERY FIGURE BELOW MEANS: which month, as at which day,
-        and whose. Kept on one row and above everything, because a number read under the wrong one
-        of them is not slightly wrong, it is about somebody else.
+        THE HERO IS THE REPORT'S OWN HEADER, to the firm's design: the four figures the floor is
+        run on, over the three controls that decide what those figures mean. Those controls used
+        to sit in a card of their own below the title, and a number read under the wrong one of
+        them is not slightly wrong — it is about somebody else, or about a different month. They
+        belong in the same frame as the figures they qualify.
+
+        EVERY FIGURE ON IT COMES FROM THE SAME QUERY AS THE TABLES UNDERNEATH. The mockup carried
+        round numbers; a hero that shows a figure nothing else on the page produces is decoration,
+        and people stop reading decoration.
       */}
-      <Card padded={false}>
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3">
-          <label className="flex items-center gap-2 text-xs text-slate-500">
-            Collection period
+      <CollectionsHero
+        figures={{
+          today: collectedToday,
+          todayLabel: isToday(asAt) ? 'Collected today' : `Collected on ${shortDay(asAt)}`,
+          /* Null rather than a fabricated percentage where the day before brought in nothing —
+             every increase on nought is infinite, and "+100%" would be the screen inventing one. */
+          changeOnPrevious: beforeRows === null || collectedBefore <= 0
+            ? null
+            : collectedToday / collectedBefore - 1,
+          previousLabel: beforeDay === null ? null
+            : beforeDay.key === dayKey(new Date(asAt.getTime() - 86400000))
+              ? 'yesterday' : shortDay(beforeDay.start),
+          collected: score?.collected ?? 0,
+          target: line?.target ?? null,
+          achieved: line?.achieved ?? null,
+          againstPace: line?.target == null ? null : line.collected - line.target * line.expected,
+          expectedByNow: line?.target == null ? null : line.target * line.expected,
+          neededADay: line?.neededADay ?? null,
+          stillNeeded: line?.stillNeeded ?? null,
+        }}
+        filters={
+          <>
             <SalesMonthPicker value={period} onChange={(p) => { setPeriod(p); setAsAtKey(null) }}
-              referenceDate={new Date()} />
-          </label>
-          <label className="flex items-center gap-2 text-xs text-slate-500">
-            As at
+              referenceDate={new Date()} variant="dark" />
             <input type="date" value={dayKey(asAt)} onChange={(e) => setAsAtKey(e.target.value || null)}
               min={dayKey(period.start)}
               max={dayKey(new Date() > period.end ? period.end : new Date())}
-              className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700" />
-          </label>
-          {teamOptions.length > 0 && (
-            <label className="flex items-center gap-2 text-xs text-slate-500">
-              Team
+              aria-label="Read the report as at"
+              className="rounded-lg border border-white/15 bg-white/10 px-2 py-1.5 text-xs text-white [color-scheme:dark]" />
+            {teamOptions.length > 0 && (
               <select value={teamId} onChange={(e) => setTeamId(e.target.value)}
-                className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700">
+                aria-label="Team"
+                className="rounded-lg border border-white/15 bg-white/10 px-2 py-1.5 text-xs text-white [color-scheme:dark]">
                 <option value="">All teams</option>
                 {teamOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
-            </label>
-          )}
-        </div>
-      </Card>
+            )}
+          </>
+        }
+        action={rows && rows.length > 0 ? (
+          <ExportButton rows={shownRows} today={shownToday} users={users} teams={teams}
+            pace={pace} asAt={asAt} period={period} targetFor={targetFor} />
+        ) : undefined}
+      />
 
       {/*
         THE NOTICE A COLLECTOR ACTUALLY SEES. It also appears on the Collectors table in Settings,
@@ -281,19 +318,6 @@ export function CollectorDashboard() {
         </Card>
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <ReportTile label={isToday(asAt) ? 'Collected today' : `Collected on ${shortDay(asAt)}`}
-              value={formatCurrency(collectedToday)} />
-            <ReportTile label="Collected this period" value={formatCurrency(score.collected)}
-              note={line?.target != null
-                ? <>Target for the period <span className="text-slate-600">{formatCurrency(line.target)}</span></>
-                : 'No target set'} />
-            <PaceTile line={line} />
-            <ReportTile label="Needed per working day"
-              value={moneyText(line?.neededADay ?? null)}
-              note={line?.stillNeeded != null ? `${formatCurrency(line.stillNeeded)} remaining` : undefined} />
-          </div>
-
           {/*
             THE OTHER HALF OF THE ANSWER. The headline above is the company's; this is the person
             reading it. The firm wanted both on one screen rather than behind a toggle — "they
@@ -460,45 +484,6 @@ function ProgressBar({ achieved, width = 'w-24' }: { achieved: number | null; wi
       {/* Only where it means something. "×1" on everybody past target would be noise. */}
       {laps > 1 && <span className="text-[11px] font-medium text-emerald-700">&times;{laps}</span>}
     </span>
-  )
-}
-
-/** One of the four figures across the top. Label, the number, and the thing it is read against. */
-function ReportTile({ label, value, note, tone }: {
-  label: string
-  value: string
-  note?: ReactNode
-  tone?: 'behind' | 'ahead'
-}) {
-  const colour = tone === 'behind' ? 'text-rose-700' : tone === 'ahead' ? 'text-emerald-700' : 'text-slate-800'
-  return (
-    <Card>
-      <p className="text-xs font-medium text-slate-500">{label}</p>
-      <p className={`text-2xl font-semibold tabular-nums mt-1 ${colour}`}>{value}</p>
-      {note && <p className="text-xs text-slate-400 mt-1">{note}</p>}
-    </Card>
-  )
-}
-
-/**
- * Ahead or behind, in rand rather than in percentage points.
- *
- * THE SIGN IS IN THE WORD, not only in the colour. "Behind pace R150 000" is readable to somebody
- * who cannot tell the firm's amber from its green, and it is what a team leader says out loud.
- */
-function PaceTile({ line }: { line: PaceLine | null }) {
-  if (!line || line.target === null) {
-    return <ReportTile label="Against pace" value="—" note="No target set" />
-  }
-  const expected = line.target * line.expected
-  const by = line.collected - expected
-  return (
-    <ReportTile
-      label={by >= 0 ? 'Ahead of pace' : 'Behind pace'}
-      value={formatCurrency(Math.abs(by))}
-      tone={by >= 0 ? 'ahead' : 'behind'}
-      note={<>Expected by now <span className="text-slate-600">{formatCurrency(expected)}</span></>}
-    />
   )
 }
 

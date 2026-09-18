@@ -192,6 +192,51 @@ try {
   await page.getByText('Monthly progress').waitFor({ timeout: 20000 })
   await t.shot(page, '40-collections')
 
+  /* ---------- the hero renders, and renders the real figures ---------- */
+
+  /*
+   * A HERO IS THE ONE PANEL THAT CAN SHIP INVISIBLE AND NOBODY NOTICE for a week — it is a
+   * background image, a scrim and four glass tiles, and every one of those is a CSS property
+   * that can fail silently. The source checks beside this folder cannot tell you the photograph
+   * 404'd or that the scrim swallowed the type.
+   */
+  const heroBox = page.locator('.collections-hero')
+  t.ok('the hero is on the page', await heroBox.isVisible())
+  const hero = await heroBox.evaluate((el) => {
+    const s = getComputedStyle(el)
+    const scrim = getComputedStyle(el, '::before')
+    return { image: s.backgroundImage, position: s.backgroundPosition, scrim: scrim.backgroundImage,
+      height: el.getBoundingClientRect().height }
+  })
+  t.ok(`the photograph is actually attached (${hero.image.slice(0, 48)})`,
+    /collections-hero/.test(hero.image))
+  t.ok('...cropped onto the ridge rather than centred on the sky', /62%/.test(hero.position))
+  t.ok('...with a scrim over it', /gradient/.test(hero.scrim))
+  t.ok(`the panel has real height (${Math.round(hero.height)}px)`, hero.height > 320)
+
+  /*
+   * AND THE TYPE ON IT IS READABLE. A scrim that is too light is the failure a screenshot flatters
+   * and a person notices immediately; this measures the heading against the panel behind it.
+   */
+  const heading = await page.locator('.collections-hero h1').evaluate((el) => ({
+    text: el.innerText, colour: getComputedStyle(el).color, size: getComputedStyle(el).fontSize,
+  }))
+  t.check('the title is the firm\u2019s own', heading.text.trim(), 'Collections')
+  t.ok(`...set large (${heading.size})`, parseFloat(heading.size) >= 28)
+  t.ok('...in white on the dark panel', /255, 255, 255/.test(heading.colour))
+
+  /* The firm's brand lines, which is most of why they asked for the panel. */
+  t.ok('the firm\u2019s three words are on it',
+    await heroBox.getByText(/People/).first().isVisible())
+  t.ok('...and the line under the title',
+    await heroBox.getByText('Performance today. A stronger tomorrow.').isVisible())
+
+  /* The controls live IN the hero, not in a card below it. */
+  t.check('the period picker is inside the panel', await heroBox.locator('select').count() >= 2, true)
+  t.check('...and the as-at date', await heroBox.locator('input[type="date"]').count(), 1)
+  t.check('...and nothing was left behind outside it',
+    await page.locator('input[type="date"]').count(), 1)
+
   /* ---------- the day and the period are different questions ---------- */
 
   /*
@@ -201,7 +246,7 @@ try {
    * plausible for a month.
    */
   const tile = async (label) => (
-    await page.locator('p', { hasText: new RegExp(`^${label}$`) })
+    await page.locator('p', { hasText: new RegExp(`^${label}$`, 'i') })
       .locator('xpath=following-sibling::p[1]').first().innerText()
   ).trim()
 
