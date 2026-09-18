@@ -69,12 +69,14 @@ export function CollectionsHero({ figures, filters, action }: {
             {greetingLine(new Date(), currentUser?.name)}
           </p>
           {/*
-            TWO LINES, BROKEN WHERE THE FIRM BREAKS IT. Left to wrap on its own the break lands
-            wherever the window happens to be wide, and half the point of the line is the shape
-            it makes — a sentence about today over a sentence about tomorrow.
+            ONE LINE, AND NO HARD BREAK IN IT. The line this replaced was two sentences and was
+            broken between them by hand, because the shape it made was half the point. This is
+            one sentence, so a break put anywhere inside it would be arbitrary. text-wrap:balance
+            is there for the widths where it has to wrap anyway — left alone the last word drops
+            to a line of its own, which on a heading this size is very visible.
           */}
-          <h1 className="mt-2.5 text-3xl sm:text-[46px] font-bold tracking-tight text-white leading-[1.12]">
-            Recovery today.<br />A stronger tomorrow.
+          <h1 className="mt-2.5 text-3xl sm:text-[46px] font-bold tracking-tight text-white leading-[1.12] text-balance">
+            The sky is only the beginning.
           </h1>
           <p className="mt-3 text-[11px] font-medium uppercase tracking-[0.3em] text-gold-400">
             Discipline drives results

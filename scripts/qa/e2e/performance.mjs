@@ -188,7 +188,7 @@ try {
   }
   t.ok('the dev server answers', up)
 
-  await page.getByRole('heading', { name: /Recovery today/ }).waitFor({ timeout: 20000 })
+  await page.getByRole('heading', { name: /The sky is only/ }).waitFor({ timeout: 20000 })
   await page.getByText('Monthly progress').waitFor({ timeout: 20000 })
   await t.shot(page, '40-collections')
 
@@ -223,18 +223,22 @@ try {
     text: el.innerText, colour: getComputedStyle(el).color, size: getComputedStyle(el).fontSize,
   }))
   t.check('the title is the firm’s own line',
-    heading.text.replace(/\s+/g, ' ').trim(), 'Recovery today. A stronger tomorrow.')
+    heading.text.replace(/\s+/g, ' ').trim(), 'The sky is only the beginning.')
   t.ok(`...set large (${heading.size})`, parseFloat(heading.size) >= 28)
   t.ok('...in white on the dark panel', /255, 255, 255/.test(heading.colour))
   /*
-   * BROKEN WHERE THE FIRM BREAKS IT. Half the point of the line is the shape it makes — today
-   * over tomorrow — and left to wrap on its own the break lands wherever the window happens to
-   * be wide. innerText renders the <br> as a newline, so this reads the rendered break rather
-   * than the presence of a tag.
+   * AND IT FITS ON ONE LINE at the width the floor actually works at. It is one sentence, so
+   * unlike the two-sentence line it replaced there is no sensible place to break it — a heading
+   * this size that wraps puts a word or two on a second line under all that white space and
+   * looks like a mistake. Counted off a Range, which gives one rect per line box; innerText
+   * would report a soft wrap as a single line and miss it entirely.
    */
-  t.check('...over two lines, today then tomorrow',
-    heading.text.trim().split('\n').map((l) => l.trim()).join(' | '),
-    'Recovery today. | A stronger tomorrow.')
+  const titleLines = await page.evaluate(() => {
+    const range = document.createRange()
+    range.selectNodeContents(document.querySelector('.collections-hero h1'))
+    return range.getClientRects().length
+  })
+  t.check('...on one line at a working width', titleLines, 1)
 
   /*
    * THE PANEL DOES NOT NAME THE SCREEN, AND SOMETHING ELSE HAS TO.

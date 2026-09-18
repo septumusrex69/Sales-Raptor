@@ -117,17 +117,18 @@ ok('...and the rail beside it', /Higher<br \/>Performance<br \/>Closer<br \/>Tom
 ok('...and the one at the foot', /Built for a higher standard/.test(hero))
 
 /*
- * THE HEADLINE IS TWO LINES, BROKEN WHERE THE FIRM BREAKS IT.
+ * THE HEADLINE IS THE FIRM'S LINE, AND IT IS ONE SENTENCE WITH NO HARD BREAK IN IT.
  *
- * Half the point of the line is the shape it makes — a sentence about today over a sentence
- * about tomorrow — and left to wrap on its own the break lands wherever the window happens to be
- * wide. Asserted as one string with the <br> in it rather than as two separate matches, which
- * would pass on a version that had lost the break.
+ * The line this replaced was two sentences and was broken between them by hand, because the
+ * shape it made was half the point. This is one, so a <br> anywhere inside it would be an
+ * arbitrary break that only looks right at the window width somebody happened to be at.
  */
 const title = hero.slice(hero.indexOf('<h1'), hero.indexOf('</h1>'))
 ok('there is a heading to read', title.length > 40)
-ok('the firm’s line is on it, broken in two',
-  /Recovery today\.<br \/>A stronger tomorrow\./.test(title))
+ok('the firm’s line is on it', /The sky is only the beginning\./.test(title))
+ok('...unbroken', !/<br/.test(title))
+/* And balanced, so the widths where it does wrap do not drop one word onto a line of its own. */
+ok('...and balanced where it has to wrap', /text-balance/.test(title))
 
 /*
  * AND IT DOES NOT NAME THE SCREEN. The panel carried "Collections" twice at one point — a gold
