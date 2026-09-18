@@ -188,7 +188,7 @@ try {
   }
   t.ok('the dev server answers', up)
 
-  await page.getByRole('heading', { name: /Fly high/ }).waitFor({ timeout: 20000 })
+  await page.getByRole('heading', { name: /Recovery today/ }).waitFor({ timeout: 20000 })
   await page.getByText('Monthly progress').waitFor({ timeout: 20000 })
   await t.shot(page, '40-collections')
 
@@ -210,9 +210,8 @@ try {
   })
   t.ok(`the photograph is actually attached (${hero.image.slice(0, 48)})`,
     /collections-hero/.test(hero.image))
-  /* getComputedStyle resolves the keywords: `right center` reads back as `100% 50%`. */
-  t.ok(`...anchored right so the bird\u2019s head is not cropped off (${hero.position})`,
-    /^100%/.test(hero.position))
+  /* getComputedStyle resolves the keyword: `center` reads back as `50% 50%`. */
+  t.ok(`...centred, which is the whole valley (${hero.position})`, /^50% 50%$/.test(hero.position))
   t.ok('...with a scrim over it', /gradient/.test(hero.scrim))
   t.ok(`the panel has real height (${Math.round(hero.height)}px)`, hero.height > 320)
 
@@ -223,44 +222,62 @@ try {
   const heading = await page.locator('.collections-hero h1').evaluate((el) => ({
     text: el.innerText, colour: getComputedStyle(el).color, size: getComputedStyle(el).fontSize,
   }))
-  t.check('the title is the firm\u2019s own line',
-    heading.text.replace(/\s+/g, ' ').trim(), 'Fly high. Never settle for less.')
+  t.check('the title is the firm’s own line',
+    heading.text.replace(/\s+/g, ' ').trim(), 'Recovery today. A stronger tomorrow.')
   t.ok(`...set large (${heading.size})`, parseFloat(heading.size) >= 28)
   t.ok('...in white on the dark panel', /255, 255, 255/.test(heading.colour))
+  /*
+   * BROKEN WHERE THE FIRM BREAKS IT. Half the point of the line is the shape it makes — today
+   * over tomorrow — and left to wrap on its own the break lands wherever the window happens to
+   * be wide. innerText renders the <br> as a newline, so this reads the rendered break rather
+   * than the presence of a tag.
+   */
+  t.check('...over two lines, today then tomorrow',
+    heading.text.trim().split('\n').map((l) => l.trim()).join(' | '),
+    'Recovery today. | A stronger tomorrow.')
 
   /*
-   * AND THE SECOND HALF IS GREY, which is the whole of the treatment the firm drew: one sentence
-   * in two weights, not a title with a subtitle. Rendered in one colour it is just a long title
-   * and the line loses its point, so the colour is measured rather than assumed from the class.
-   */
-  const tail = await page.locator('.collections-hero h1 span').evaluate((el) => ({
-    text: el.innerText, colour: getComputedStyle(el).color, size: getComputedStyle(el).fontSize,
-    weight: getComputedStyle(el).fontWeight,
-  }))
-  t.check('the lighter half is the second sentence', tail.text.trim(), 'Never settle for less.')
-  /*
-   * An alpha under 1, whichever colour space this Chromium answers in — it returns
-   * `oklab(... / 0.55)` here and `rgba(255, 255, 255, 0.55)` in older builds, and pinning either
-   * spelling makes this a check on the browser rather than on the design.
-   */
-  t.ok(`...set back from white (${tail.colour})`,
-    /[/,]\s*0\.\d+\s*\)/.test(tail.colour) && tail.colour !== heading.colour)
-  t.ok(`...at the same size as the bold half (${tail.size})`, tail.size === heading.size)
-  t.ok(`...but not bold (${tail.weight})`, Number(tail.weight) < 600)
-
-  /*
-   * THE WORD APPEARS ONCE. This is the thing the firm sent back: "Collections" was the gold
-   * eyebrow AND the heading under it, the same word twice, forty pixels apart. Counted in the
-   * rendered panel rather than in the source, because the eyebrow and the heading are in
-   * different components' worth of markup and a source grep would miss a third copy arriving
-   * from the filters row.
+   * THE PANEL DOES NOT NAME THE SCREEN, AND SOMETHING ELSE HAS TO.
+   *
+   * It carried "Collections" twice at one point — a gold eyebrow and the heading under it — and
+   * the firm's design for it carries the word nowhere at all. That is only safe because the
+   * route is titled in the bar above it, which it was NOT until this change: /performance was
+   * missing from the table and the bar was blank. Both halves are asserted together, because
+   * checking the hero alone passes happily on a screen that names itself nowhere.
    */
   const heroWords = (await heroBox.innerText()).match(/Collections/gi) ?? []
-  t.check(`the screen names itself once (${heroWords.length})`, heroWords.length, 1)
+  t.check(`the panel leaves the naming to the bar (${heroWords.length})`, heroWords.length, 0)
+  t.ok('...and the bar does name it',
+    await page.getByRole('heading', { name: 'Collections', exact: true }).isVisible())
 
-  /* The firm's brand lines, which is most of why they asked for the panel. */
-  t.ok('the firm\u2019s three words are on it',
-    await heroBox.getByText(/People/).first().isVisible())
+  /*
+   * FULL BLEED. The complaint that started this was that the panel was "bulky" — an inset card
+   * with a frame and a gap around it. Measured against the scrolling area rather than read off
+   * the class, because a negative margin the parent clips is a negative margin that did nothing.
+   */
+  const bleed = await page.evaluate(() => {
+    const el = document.querySelector('.collections-hero')
+    const hero = el.getBoundingClientRect()
+    const main = document.querySelector('main').getBoundingClientRect()
+    return {
+      left: hero.left - main.left, right: main.right - hero.right, top: hero.top - main.top,
+      radius: getComputedStyle(el).borderTopLeftRadius,
+    }
+  })
+  t.ok(`it runs to the left edge (${Math.round(bleed.left)}px)`, Math.abs(bleed.left) < 2)
+  t.ok(`...and to the right (${Math.round(bleed.right)}px)`, Math.abs(bleed.right) < 2)
+  t.ok(`...and up under the top bar (${Math.round(bleed.top)}px)`, Math.abs(bleed.top) < 2)
+  t.ok(`...with square corners (${bleed.radius})`, parseFloat(bleed.radius) === 0)
+
+  /* The firm's own lines, which is most of why they asked for the panel. */
+  t.ok('the greeting is on it',
+    await heroBox.getByText(/Good (morning|afternoon|evening), /).isVisible())
+  t.ok('...and the gold line under the headline',
+    await heroBox.getByText('Discipline drives results').isVisible())
+  t.ok('...and the rail beside it',
+    await heroBox.getByText(/Higher\s*Performance\s*Closer\s*Tomorrow/).isVisible())
+  t.ok('...and the one at the foot',
+    await heroBox.getByText('Built for a higher standard').isVisible())
 
   /* The controls live IN the hero, not in a card below it. */
   t.check('the period picker is inside the panel', await heroBox.locator('select').count() >= 2, true)

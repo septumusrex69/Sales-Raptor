@@ -20,6 +20,16 @@ const TITLES: { test: RegExp; title: string }[] = [
   { test: /^\/reports/, title: 'Reports' },
   { test: /^\/settings/, title: 'Settings' },
   { test: /^\/reps\/[^/]+$/, title: 'Rep Performance' },
+  /*
+   * The two Collections routes, which were missing from this table entirely — so the bar above
+   * them carried no heading at all. That mattered less while the panel underneath opened with
+   * the word "Collections" in gold; the firm's own design for it does not, and a screen that
+   * names itself nowhere is a screen somebody lands on from a link with no idea what they are
+   * looking at. The specific route first: /performance/<id> would otherwise match the general
+   * one and a collector's own figures would be titled with the whole floor's screen.
+   */
+  { test: /^\/performance\/[^/]+$/, title: 'Collector' },
+  { test: /^\/performance/, title: 'Collections' },
   { test: /^\/accounts\/[^/]+$/, title: 'Account' },
   { test: /^\/accounts/, title: 'Accounts' },
   { test: /^\/queries/, title: 'Disputes' },

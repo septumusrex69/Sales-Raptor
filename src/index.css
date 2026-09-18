@@ -290,7 +290,14 @@ select:autofill {
 .collections-hero {
   position: relative;
   overflow: hidden;
-  border-radius: var(--skin-hero-radius);
+  /*
+   * SQUARE, AND FULL BLEED. It was an inset rounded card floating inside the page's padding and
+   * the firm's word for it was "bulky" — a panel with a frame and a gap around it reads as a box
+   * sitting on the screen rather than as the top of the screen. The component cancels <main>'s
+   * padding with negative margins; the radius has to go with it or the corners cut into the
+   * window edge.
+   */
+  border-radius: 0;
   background-color: #0b1420;
   background-image: url('/brand/collections-hero.jpg');
   background-image: -webkit-image-set(url('/brand/collections-hero.webp') 1x);
@@ -299,15 +306,8 @@ select:autofill {
     url('/brand/collections-hero.jpg') type('image/jpeg') 1x
   );
   background-size: cover;
-  /*
-   * Anchored RIGHT, not centred. The bird's head sits hard against the right edge of the
-   * photograph and the left half is only feathers; a centred crop on a panel narrower than the
-   * picture takes the slice off both sides and cuts the beak. Cropping from the left instead
-   * loses feathers, which is the half nobody is looking at.
-   */
-  background-position: right center;
+  background-position: center;
 }
-
 .collections-hero::before {
   content: '';
   position: absolute;
@@ -315,18 +315,17 @@ select:autofill {
   pointer-events: none;
   background:
     /*
-     * MUCH LIGHTER THAN THE MOUNTAIN PICTURE THIS REPLACED. That one was a bright dawn sky and
-     * needed 0.94 at the left edge before white type would read on it. The hawk is already
-     * near-black everywhere but the eye and the beak, so the same scrim buried the bird
-     * entirely — the panel went back to being a plain navy band with a title on it. Enough to
-     * settle the feathers under the type and no more.
+     * Heavy at the left edge and thin by the middle. The headline sits over the sunrise, which is
+     * the brightest part of the photograph, and white type on a sunburst is not readable at any
+     * weight. The right half is left almost alone: that is where the peak is, and darkening it
+     * evenly would leave a navy band with a picture faintly behind it.
      */
     linear-gradient(
       100deg,
-      rgba(8, 15, 24, 0.72) 0%,
-      rgba(8, 15, 24, 0.55) 30%,
-      rgba(8, 15, 24, 0.2) 58%,
-      rgba(8, 15, 24, 0.12) 100%
+      rgba(8, 15, 24, 0.76) 0%,
+      rgba(8, 15, 24, 0.56) 26%,
+      rgba(8, 15, 24, 0.18) 54%,
+      rgba(8, 15, 24, 0.36) 100%
     ),
     /*
      * A second, much lighter pass down the panel so the tiles keep their contrast wherever the
@@ -334,13 +333,39 @@ select:autofill {
      * panel went to almost solid navy and the picture may as well not have been there. Each
      * one has to be read as half of what reaches the eye.
      */
-    linear-gradient(to bottom, rgba(8, 15, 24, 0) 0%, rgba(8, 15, 24, 0.2) 55%, rgba(8, 15, 24, 0.5) 100%);
+    linear-gradient(to bottom, rgba(8, 15, 24, 0) 0%, rgba(8, 15, 24, 0.22) 50%, rgba(8, 15, 24, 0.55) 100%);
 }
-
-/* Everything the component draws sits above the scrim. */
 .collections-hero > * {
   position: relative;
   z-index: 1;
+}
+
+/*
+ * THE CONTROLS AT THE FOOT OF THE HERO, DRAWN AS TEXT.
+ *
+ * The firm's design has that line reading as three facts with an icon in front of each, not as
+ * three form fields — and one of the controls is the shared SalesMonthPicker, which eight other
+ * screens render inside ordinary cards where the box is exactly right. So the chrome comes off
+ * here, in a skin scoped to this panel, rather than as another variant on the component.
+ *
+ * WHAT DOES NOT COME OFF IS THE AFFORDANCE. A control that looks like text is a control nobody
+ * finds, so hover and keyboard focus put the box straight back.
+ */
+.hero-controls select,
+.hero-controls input[type='date'] {
+  border-color: transparent;
+  background-color: transparent;
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+  font-size: 0.75rem;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.hero-controls select:hover,
+.hero-controls input[type='date']:hover,
+.hero-controls select:focus-visible,
+.hero-controls input[type='date']:focus-visible {
+  border-color: rgba(255, 255, 255, 0.28);
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 /*

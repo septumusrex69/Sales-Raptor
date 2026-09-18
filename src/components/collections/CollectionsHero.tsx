@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 import { BarChart3, CalendarDays, Coins, Target, TrendingDown, TrendingUp } from 'lucide-react'
-import { useTheme } from '../../store/ThemeContext'
+import { useAuth } from '../../store/AuthContext'
 import { targetLaps } from '../../lib/collectionPace.ts'
+import { greetingLine } from '../../lib/greeting.ts'
 import { formatCurrency } from '../../data/mockData'
 
 /**
@@ -17,6 +18,11 @@ import { formatCurrency } from '../../data/mockData'
  * comes from the same query the tables below it are drawn from, so the hero and the list can
  * never disagree. A hero that shows a number nothing else on the page produces is decoration,
  * and people stop reading decoration.
+ *
+ * IT DOES NOT NAME ITSELF, and that is deliberate. It carried the word "Collections" twice at
+ * one point — as a gold eyebrow and again as the heading under it — and stripping one of them
+ * out still left a panel introducing a screen the sidebar has already highlighted and the top
+ * bar already titles. The space goes to the firm's line instead.
  */
 export interface HeroFigures {
   /** What came in on the day being read, and what to call that day. */
@@ -43,55 +49,53 @@ export function CollectionsHero({ figures, filters, action }: {
   /** Export, or whatever else belongs beside the filters. */
   action?: ReactNode
 }) {
-  const { theme } = useTheme()
+  const { currentUser } = useAuth()
   const ahead = (figures.againstPace ?? 0) >= 0
 
   return (
-    <div className="collections-hero px-5 py-5 sm:px-7 sm:py-7">
-      {/* ---------- brand line ---------- */}
-      <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
-        <img src={theme.lockupLight} alt="Raptor by Bredell Ferreira" className="h-10 sm:h-12 w-auto" />
-        <p className="hidden sm:block text-[10px] font-medium uppercase tracking-[0.34em] text-white/55">
-          People <span className="text-white/25">|</span> Process <span className="text-white/25">|</span> Performance
-        </p>
-      </div>
-
-      {/* ---------- title, and the firm's own line ---------- */}
-      <div className="mt-5 flex flex-wrap items-end justify-between gap-6">
+    /*
+      FULL BLEED, AND THE CORNERS ARE SQUARE. This was an inset rounded card floating inside the
+      page's own padding, with the lockup repeated across the top of it — the firm's word for it
+      was "bulky", and they were right: a panel with a frame, a gap and a second copy of the
+      brand reads as a box sitting on the screen rather than as the top of the screen. The
+      negative margins cancel <main>'s p-6 so the photograph runs edge to edge under the top bar,
+      which is where the picture stops being decoration and starts being the page.
+    */
+    <div className="collections-hero -mx-6 -mt-6 px-6 pt-7 pb-5 sm:px-10 sm:pt-9 sm:pb-6">
+      {/* ---------- the line, and the firm's own words beside it ---------- */}
+      <div className="flex items-start justify-between gap-6">
         <div>
+          <p className="text-[11px] font-medium uppercase tracking-[0.3em] text-white/55">
+            {greetingLine(new Date(), currentUser?.name)}
+          </p>
           {/*
-            THE WORD "COLLECTIONS" APPEARS ONCE, AND IT IS THE GOLD LINE.
-
-            This carried it twice — as this eyebrow and again as the heading underneath — which
-            is how it first went up and is the thing the firm sent back. The eyebrow is what
-            names the screen; the heading is the firm's line, set the way they draw it on their
-            own material: the first half bold and white, the second half the same size in grey.
-            Two weights of one sentence, not a title and a subtitle, so it has to stay one <h1>
-            with a span inside rather than two stacked paragraphs.
+            TWO LINES, BROKEN WHERE THE FIRM BREAKS IT. Left to wrap on its own the break lands
+            wherever the window happens to be wide, and half the point of the line is the shape
+            it makes — a sentence about today over a sentence about tomorrow.
           */}
-          <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-gold-400">Collections</p>
-          <h1 className="text-3xl sm:text-5xl font-bold tracking-tight text-white mt-1.5">
-            Fly high.{' '}
-            <span className="font-normal text-white/55">Never settle for less.</span>
+          <h1 className="mt-2.5 text-3xl sm:text-[46px] font-bold tracking-tight text-white leading-[1.12]">
+            Recovery today.<br />A stronger tomorrow.
           </h1>
-          <span className="mt-4 block h-px w-16 bg-gold-500/70" />
+          <p className="mt-3 text-[11px] font-medium uppercase tracking-[0.3em] text-gold-400">
+            Discipline drives results
+          </p>
         </div>
         {/*
           The rail of small caps, right-aligned the way the firm drew it. Hidden on a phone
           rather than wrapped: four words stacked down a narrow screen read as a list of
           headings, not as a brand line.
         */}
-        <div className="hidden lg:block text-right">
-          <p className="text-[11px] font-medium uppercase tracking-[0.3em] text-white/70 leading-7">
-            Higher<br />Recovery<br />Brighter<br />Tomorrows
+        <div className="hidden lg:block shrink-0 text-right">
+          <p className="text-[11px] font-medium uppercase tracking-[0.3em] text-gold-400 leading-[1.9]">
+            Higher<br />Performance<br />Closer<br />Tomorrow
           </p>
-          <span className="mt-3 ml-auto block h-px w-14 bg-gold-500/70" />
+          <span className="mt-3 ml-auto block h-px w-16 bg-gold-500/70" />
         </div>
       </div>
 
       {/* ---------- the four figures ---------- */}
-      <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-        <Tile icon={<Coins size={18} />} label={figures.todayLabel}
+      <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <Tile icon={<Coins size={22} />} label={figures.todayLabel}
           value={money(figures.today)}>
           {figures.changeOnPrevious === null ? (
             /* No comparison rather than a fabricated one. The first working day of the series has
@@ -108,7 +112,7 @@ export function CollectionsHero({ figures, filters, action }: {
           )}
         </Tile>
 
-        <Tile icon={<BarChart3 size={18} />} label="Collected this period"
+        <Tile icon={<BarChart3 size={22} />} label="Collected this period"
           value={money(figures.collected)}>
           {figures.target === null ? (
             <span className="text-white/45">No target set for this period</span>
@@ -126,7 +130,7 @@ export function CollectionsHero({ figures, filters, action }: {
           )}
         </Tile>
 
-        <Tile icon={<Target size={18} />}
+        <Tile icon={<Target size={22} />}
           label={figures.againstPace === null ? 'Against pace' : ahead ? 'Ahead of pace' : 'Behind pace'}
           value={figures.againstPace === null ? '—' : money(Math.abs(figures.againstPace))}
           tone={figures.againstPace === null ? undefined : ahead ? 'good' : 'bad'}>
@@ -135,7 +139,7 @@ export function CollectionsHero({ figures, filters, action }: {
             : <>Expected by now <span className="text-white/85">{money(figures.expectedByNow)}</span></>}
         </Tile>
 
-        <Tile icon={<CalendarDays size={18} />} label="Needed per working day"
+        <Tile icon={<CalendarDays size={22} />} label="Needed per working day"
           value={figures.neededADay === null ? '—' : money(figures.neededADay)}>
           {figures.stillNeeded === null
             ? <span className="text-white/45">No target set for this period</span>
@@ -150,18 +154,27 @@ export function CollectionsHero({ figures, filters, action }: {
         then the picker that sets it, one under the other. Two rows saying the same thing, and the
         reader has to work out which of them is the live one. The controls already show their own
         values, so the caption went.
+
+        They are drawn as text rather than as boxed fields, which is how the firm draws them. The
+        affordance is not thrown away with the box: each one keeps a focus ring, the selects keep
+        their chevron, and hovering lights the whole control.
       */}
-      <div className="mt-6 pt-4 border-t border-white/10 flex flex-wrap items-center gap-x-5 gap-y-3">
-        <span className="hidden sm:inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-white/45">
-          <CalendarDays size={14} /> Period
-        </span>
+      <div className="hero-controls mt-7 flex flex-wrap items-center gap-x-4 gap-y-3">
         {filters}
-        <div className="ml-auto flex items-center gap-4">
-          {action}
-          <p className="hidden lg:block text-[10px] font-medium uppercase tracking-[0.3em] text-white/45">
-            Discipline creates results
-          </p>
-        </div>
+        {action}
+        {/*
+          The brand line is the only thing pushed right, and the export button sits with the
+          controls rather than opposite them. With the button on the right the row wrapped on a
+          laptop and left it stranded on a line of its own — which is the shape the firm called
+          bulky in the first place. Wrapped this way the brand line is what drops, right-aligned,
+          and nothing looks stranded.
+        */}
+        <span className="ml-auto hidden lg:flex items-center gap-4">
+          <span className="block h-px w-12 bg-gold-500/70" />
+          <span className="text-[10px] font-medium uppercase tracking-[0.3em] text-white/45">
+            Built for a higher standard
+          </span>
+        </span>
       </div>
     </div>
   )
@@ -170,6 +183,9 @@ export function CollectionsHero({ figures, filters, action }: {
 /**
  * One of the four. Glass rather than a solid card, so the photograph is still a photograph
  * behind it — a row of opaque boxes would make the picture a strip along the top.
+ *
+ * The icon is its own column rather than sitting inline with the label, because the label is a
+ * sentence of small caps and an icon in the middle of one is read as a word.
  */
 function Tile({ icon, label, value, tone, children }: {
   icon: ReactNode
@@ -180,13 +196,13 @@ function Tile({ icon, label, value, tone, children }: {
 }) {
   const colour = tone === 'good' ? 'text-emerald-400' : tone === 'bad' ? 'text-rose-400' : 'text-white'
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.045] px-4 py-3.5 backdrop-blur-sm">
-      <p className="flex items-center gap-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/65">
-        <span className="text-gold-400">{icon}</span>
-        {label}
-      </p>
-      <p className={`text-2xl sm:text-[28px] font-bold tabular-nums mt-1.5 ${colour}`}>{value}</p>
-      <div className="text-xs text-white/60 mt-1.5">{children}</div>
+    <div className="flex items-start gap-3.5 rounded-xl border border-white/10 bg-slate-950/45 px-4 py-4 backdrop-blur-sm">
+      <span className="mt-0.5 shrink-0 text-gold-400">{icon}</span>
+      <div className="min-w-0">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/65">{label}</p>
+        <p className={`text-2xl sm:text-[28px] font-bold tabular-nums mt-1 ${colour}`}>{value}</p>
+        <div className="text-xs text-white/60 mt-1.5">{children}</div>
+      </div>
     </div>
   )
 }

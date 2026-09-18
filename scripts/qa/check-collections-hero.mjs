@@ -21,6 +21,7 @@
  */
 import { readFileSync, statSync } from 'node:fs'
 import { previousWorkingDay } from '../../src/lib/collectionPace.ts'
+import { greetingFor, greetingLine } from '../../src/lib/greeting.ts'
 
 let pass = 0
 const failures = []
@@ -110,38 +111,60 @@ ok('...and the team filter', /aria-label="Team"/.test(page))
 ok('the controls are not captioned by a copy of themselves',
   !/Collection period: <span/.test(hero))
 
-/* The firm's own brand lines, which is most of why the panel exists. */
-ok('the firm’s three words are on it', /People <span[\s\S]{0,80}Process/.test(hero))
-ok('...and the four the sidebar carries', /Higher<br \/>Recovery<br \/>Brighter<br \/>Tomorrows/.test(hero))
-ok('...and the one at the foot', /Discipline creates results/.test(hero))
+/* The firm's own lines, which is most of why the panel exists. */
+ok('the gold line under the headline is there', /Discipline drives results/.test(hero))
+ok('...and the rail beside it', /Higher<br \/>Performance<br \/>Closer<br \/>Tomorrow/.test(hero))
+ok('...and the one at the foot', /Built for a higher standard/.test(hero))
 
 /*
- * THE HEADING IS ONE SENTENCE IN TWO WEIGHTS, and the word "Collections" is not in it.
+ * THE HEADLINE IS TWO LINES, BROKEN WHERE THE FIRM BREAKS IT.
  *
- * It was, at first — as the gold eyebrow and again as the heading right under it, the same word
- * twice — and that is what the firm sent back. The line that replaced it is set the way they draw
- * it on their own material: the first half bold and white, the second the same size in grey. So
- * the eyebrow is the only place the screen names itself, and the halves must be different
- * weights, because rendered in one weight this is just a long title.
+ * Half the point of the line is the shape it makes — a sentence about today over a sentence
+ * about tomorrow — and left to wrap on its own the break lands wherever the window happens to be
+ * wide. Asserted as one string with the <br> in it rather than as two separate matches, which
+ * would pass on a version that had lost the break.
  */
 const title = hero.slice(hero.indexOf('<h1'), hero.indexOf('</h1>'))
 ok('there is a heading to read', title.length > 40)
-ok('the bold half is the firm’s', /Fly high\./.test(title))
-ok('...and the lighter half follows it', /Never settle for less\./.test(title))
-ok('...set back rather than merely smaller', /font-normal text-white\/\d\d/.test(title))
+ok('the firm’s line is on it, broken in two',
+  /Recovery today\.<br \/>A stronger tomorrow\./.test(title))
+
 /*
- * Counted, not found: the eyebrow is the one place the word belongs.
- *
- * Comments are stripped before counting, because half this file's explanations say "Collections"
- * and a count over the raw source is a count of prose. `\b` on both ends keeps the component's
- * own name out of it — there is no word boundary inside `CollectionsHero`. Found by
- * break-testing: the first version of this line matched `>Collections<` and a second copy pasted
- * a line lower, where the preceding character happened to be a newline, sailed straight past it.
+ * AND IT DOES NOT NAME THE SCREEN. The panel carried "Collections" twice at one point — a gold
+ * eyebrow and the heading right under it — and the design that replaced it carries the word
+ * nowhere at all. That is only safe because the route is titled in the bar above it, which it
+ * was NOT until this change: /performance was missing from AppLayout's table and the bar was
+ * blank. So the two are asserted together; the hero alone would pass on a screen that names
+ * itself nowhere. Comments are stripped before counting, because half this file's explanations
+ * say "Collections" and a count over the raw source is a count of prose. `\b` on both ends keeps
+ * the component's own name out of it — there is no word boundary inside `CollectionsHero`.
  */
 const heroCode = hero.replace(/\/\*[\s\S]*?\*\//g, '')
-check('the screen names itself once', (heroCode.match(/\bCollections\b/g) ?? []).length, 1)
-ok('...and that once is the gold eyebrow',
-  /text-gold-400">Collections<\/p>/.test(hero))
+check('the panel leaves the naming to the bar', (heroCode.match(/\bCollections\b/g) ?? []).length, 0)
+ok('...and the bar has a title for the route',
+  /\{ test: \/\^\\\/performance\/, title: 'Collections' \}/.test(read('../../src/components/layout/AppLayout.tsx')))
+/* The specific route first, or a collector's own figures get the whole floor's title. */
+const titles = read('../../src/components/layout/AppLayout.tsx')
+ok('...with the collector’s own page titled before it',
+  titles.indexOf("title: 'Collector'") > 0
+  && titles.indexOf("title: 'Collector'") < titles.indexOf("title: 'Collections'"))
+
+/*
+ * THE GREETING IS RIGHT FOR THE TIME OF DAY. "Good morning" at four in the afternoon is the kind
+ * of detail that tells a person the screen is not paying attention.
+ */
+check('eight in the morning', greetingFor(new Date('2026-09-18T08:00:00')), 'Good morning')
+check('noon is already the afternoon', greetingFor(new Date('2026-09-18T12:00:00')), 'Good afternoon')
+check('and five is the evening', greetingFor(new Date('2026-09-18T17:00:00')), 'Good evening')
+check('the small hours are still the morning', greetingFor(new Date('2026-09-18T00:30:00')), 'Good morning')
+/* First name only: a greeting that answers with a full name reads as a letter from a bank. */
+check('the line uses the first name', greetingLine(new Date('2026-09-18T08:00:00'), 'Stephan Bredell'),
+  'Good morning, Stephan')
+/* And no dangling comma where the profile carries no name at all. */
+check('...and greets nobody by name rather than nobody',
+  greetingLine(new Date('2026-09-18T08:00:00'), ''), 'Good morning')
+check('...including where it is null', greetingLine(new Date('2026-09-18T08:00:00'), null), 'Good morning')
+ok('the hero renders it', /greetingLine\(new Date\(\), currentUser\?\.name\)/.test(hero))
 
 /* ---------- the photograph ---------- */
 
@@ -175,17 +198,44 @@ ok('both files exist', sizes.webp > 10_000 && sizes.jpg > 10_000)
 const scrim = css.slice(css.indexOf('.collections-hero::before'), css.indexOf('.collections-hero > *'))
 ok('there is a scrim to read', scrim.length > 200)
 const darkest = Math.max(...[...scrim.matchAll(/rgba\(8, 15, 24, ([\d.]+)\)/g)].map((m) => Number(m[1])))
+ok('the whole valley is in frame', /background-position: center;/.test(css))
+
 /*
- * ANCHORED RIGHT. The hawk's head is hard against the right edge of the photograph; a centred
- * crop on a panel narrower than the picture takes its slice off both sides and cuts the beak.
+ * AND THE TWO PASSES COMPOUND, which is the trap this has fallen into twice. At 0.86 across and
+ * 0.74 down, neither of which looks extreme on its own, the foot of the panel reached 0.96 and
+ * the photograph may as well not have been there. What matters is what reaches the eye, so the
+ * darkest each pass gets is combined the way the browser combines them rather than read apart.
  */
-ok('the crop keeps the bird’s head', /background-position: right center/.test(css))
+const passes = scrim.split('linear-gradient').slice(1)
+check('there are two passes over the picture', passes.length, 2)
+const worst = passes.map((p) => Math.max(...[...p.matchAll(/rgba\(8, 15, 24, ([\d.]+)\)/g)].map((m) => Number(m[1]))))
+const combined = 1 - worst.reduce((acc, a) => acc * (1 - a), 1)
+ok(`together they leave the picture visible (${combined.toFixed(2)} at the worst corner)`, combined <= 0.9)
+/* And the horizontal pass is the heavy one: the type is on the left, the mountain on the right. */
+ok(`the heavy pass is the one across (${worst[0]} vs ${worst[1]})`, worst[0] > worst[1])
+
 /*
- * AND THE SCRIM IS LIGHT ENOUGH TO LEAVE A BIRD THERE. The mountain picture this replaced was a
- * bright dawn sky and needed 0.94 at the left edge before white type read on it. The hawk is
- * already near-black, so that same scrim buried it and the panel went back to a plain navy band.
+ * FULL BLEED AND SQUARE. The panel was an inset rounded card floating in the page's own padding
+ * and the firm's word for it was "bulky". The radius and the negative margins have to agree:
+ * square corners on an inset card look like a mistake, and a bled panel with a radius cuts into
+ * the window edge.
  */
-ok(`the left edge stays off solid navy (darkest stop ${darkest})`, darkest <= 0.8)
+ok('the corners are square', /border-radius: 0;/.test(css.slice(css.indexOf('.collections-hero {'), css.indexOf('.collections-hero::before'))))
+ok('...and the panel cancels the page’s padding', /collections-hero -mx-6 -mt-6/.test(hero))
+
+/*
+ * THE CONTROLS LOSE THEIR BOXES BUT NOT THEIR AFFORDANCE. A control drawn as text is a control
+ * nobody finds, so the skin that strips the chrome has to put it back on hover AND on keyboard
+ * focus — the second is the one that gets forgotten, and forgetting it locks out the people
+ * working the whole screen from the keyboard.
+ */
+const skin = css.slice(css.indexOf('.hero-controls select,'))
+ok('the chrome comes off in a skin scoped to the hero', /\.hero-controls select/.test(skin))
+ok('...and comes back on hover', /\.hero-controls select:hover/.test(skin))
+ok('...and on keyboard focus', /\.hero-controls select:focus-visible/.test(skin))
+ok('...for the date field too', /\.hero-controls input\[type='date'\]:focus-visible/.test(skin))
+ok('the shared month picker is left alone',
+  !/variant="bare"|variant="text"/.test(read('../../src/components/ui/SalesMonthPicker.tsx')))
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
