@@ -3851,3 +3851,521 @@ where debtor_id_number ~* '^[A-Z]?\s*\d{4}\s*/\s*\d{4,7}\s*/\s*\d{2}\s*$'
   and (debtor_kind is distinct from 'company'
        or debtor_id_number <> regexp_replace(
             trim(debtor_id_number), '^[A-Za-z]?\s*(\d{4})\s*/\s*(\d{4,7})\s*/\s*(\d{2})\s*$', '\1/\2/\3'));
+
+
+-- ---------- What the firm says to a debtor, kept where it can be read and reviewed ----------
+--
+-- Everything Raptor sends a debtor is currently written where it is sent: the SMS compose box,
+-- the mail composer, queryLetters.ts. That survives while a collector writes one message to one
+-- debtor. It stops surviving the moment a campaign sends the same words to four hundred people,
+-- because the words are then the firm's position in writing, four hundred times over, and a
+-- sentence the attorney would not have approved is four hundred problems rather than one.
+--
+-- queryLetters.ts already says these letters "move into the letters/SMS/WhatsApp template system
+-- when that is built". This is that table.
+create table if not exists public.message_templates (
+  id uuid primary key default gen_random_uuid(),
+  kind text not null check (kind in ('sms', 'email', 'call_script')),
+  name text not null,
+  -- Email only. An SMS has no subject and neither does a script somebody reads aloud; carrying
+  -- one anyway means a screen renders an empty line above the words a collector is meant to say.
+  subject text,
+  body text not null,
+  -- The rung this is written for, or null for one that suits any account.
+  --
+  -- NULLABLE ON PURPOSE. Fourteen positions times three kinds is forty-two pieces of wording, and
+  -- a library that does nothing until all forty-two exist is a library nobody finishes filling. A
+  -- null position is the general version and the resolver falls back to it -- which is also why a
+  -- power hour never silently skips an account: the unusual positions, the ones with no script
+  -- yet, are precisely the accounts somebody should be ringing.
+  position text check (position is null or position in (
+    'new', 'paying', 'arranged', 'broken_arrangement', 'refusing', 'cannot_pay', 'negotiating',
+    'in_progress', 'tracing', 'disputed', 'legal', 'under_administration', 'frozen', 'closed'
+  )),
+  -- ISO 639-1. debtor_accounts.preferred_language exists and the firm works in more than one
+  -- language, so a template says which one it is in rather than the reader guessing. English is
+  -- the fallback, not a "default language" setting: a collector handed a script in the wrong
+  -- language is a small awkwardness, one handed nothing is a call that does not happen.
+  language text not null default 'en',
+  active boolean not null default true,
+  -- Stable name for a draft seeded by a migration, null for anything the firm writes itself.
+  -- It is what makes seeding idempotent: a later migration can add a new draft without
+  -- duplicating the ones already there, and without overwriting the firm's edits to them.
+  seed_key text unique,
+  created_at timestamptz not null default now(),
+  created_by uuid references public.profiles (id) on delete set null,
+  updated_at timestamptz not null default now(),
+  updated_by uuid references public.profiles (id) on delete set null
+);
+
+-- An email carries a subject and the other two do not. Enforced here as well as in the form,
+-- because a campaign will read these rows without going near the form.
+alter table public.message_templates drop constraint if exists message_templates_subject_kind;
+alter table public.message_templates add constraint message_templates_subject_kind check (
+  (kind = 'email' and subject is not null and btrim(subject) <> '')
+  or (kind <> 'email' and subject is null)
+);
+
+-- The resolver's only query: live templates of one kind, then position and language picked in
+-- memory over a list that is dozens of rows, not thousands.
+create index if not exists message_templates_kind_idx
+  on public.message_templates (kind, position, language)
+  where active;
+
+alter table public.message_templates enable row level security;
+grant select, insert, update, delete on public.message_templates to authenticated;
+
+-- Everyone reads them: an agent has to be able to see the script they are meant to read.
+drop policy if exists message_templates_select on public.message_templates;
+create policy message_templates_select on public.message_templates
+  for select to authenticated using (auth.uid() is not null);
+
+-- WRITING IS NARROWER THAN READING, which is the whole point of a library. The wording is the
+-- firm's legal position and the attorney signs it off; an agent who could edit it in the moment
+-- would be writing the firm's correspondence for four hundred debtors by accident.
+drop policy if exists message_templates_insert on public.message_templates;
+create policy message_templates_insert on public.message_templates
+  for insert to authenticated with check (
+    public.current_user_role() in ('Administrator', 'Pre-legal Team Leader', 'Liaison Manager')
+  );
+
+drop policy if exists message_templates_update on public.message_templates;
+create policy message_templates_update on public.message_templates
+  for update to authenticated
+  using (public.current_user_role() in ('Administrator', 'Pre-legal Team Leader', 'Liaison Manager'))
+  with check (public.current_user_role() in ('Administrator', 'Pre-legal Team Leader', 'Liaison Manager'));
+
+drop policy if exists message_templates_delete on public.message_templates;
+create policy message_templates_delete on public.message_templates
+  for delete to authenticated using (public.current_user_role() = 'Administrator');
+
+create or replace function public.touch_message_template()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  new.updated_at := now();
+  new.updated_by := auth.uid();
+  return new;
+end;
+$$;
+
+drop trigger if exists message_templates_touch on public.message_templates;
+create trigger message_templates_touch before update on public.message_templates
+  for each row execute function public.touch_message_template();
+
+-- ---------- The firm's first draft of what it says, so the library does not ship empty ----------
+--
+-- PLACEHOLDER WORDING, on the same footing as queryLetters.ts: this is a mechanism with words in
+-- it, not settled correspondence. The firm's attorney has the final text. Everything here is
+-- editable in the app precisely so that it can be replaced without a deployment.
+--
+-- SEEDED ONCE, BY KEY. `on conflict (seed_key) do nothing` is what makes this safe to re-run: a
+-- later migration can add a draft nobody has written yet without duplicating the ones already
+-- there, and without overwriting a word the firm has changed. A seed that overwrites edits is a
+-- seed that quietly reverts the attorney.
+--
+-- Every SMS here fits a SINGLE segment against a long surname and a five-figure balance, which is
+-- what keeps Annexure B item 1(c) at R3.50 rather than R7.00 for the same words. Straight
+-- apostrophes only: one curly quote pasted from Word forces UCS-2, where a segment holds 70
+-- characters instead of 160, and doubles the bill on its own.
+insert into public.message_templates (seed_key, kind, name, subject, body, position, language) values
+
+('sms-first-contact', 'sms', 'First contact', null,
+ '{{firm_name}}: your account {{reference}} with {{client_name}} is overdue. Please call {{agent_phone}} to arrange payment.',
+ null, 'en'),
+
+('sms-broken-arrangement', 'sms', 'Broken arrangement', null,
+ '{{firm_name}}: the arrangement on account {{reference}} has not been kept. Please call {{agent_phone}} today.',
+ 'broken_arrangement', 'en'),
+
+('sms-ptp-reminder', 'sms', 'Promise due tomorrow', null,
+ '{{firm_name}}: a reminder that your payment on account {{reference}} is due tomorrow. Queries: {{agent_phone}}.',
+ 'arranged', 'en'),
+
+('sms-payment-received', 'sms', 'Payment received', null,
+ '{{firm_name}}: thank you, your payment on {{reference}} is received. Balance {{balance}}. Queries {{agent_phone}}.',
+ 'paying', 'en'),
+
+-- NOT ONE WORD ABOUT A DEBT. A traced number is unverified by definition, so this message may well
+-- reach somebody who is not the debtor, and telling a third party that a person owes money is a
+-- disclosure the firm cannot take back. It says who wants to speak to whom, and nothing else.
+('sms-make-contact', 'sms', 'Please make contact (traced number)', null,
+ '{{firm_name}} needs to speak to {{debtor_name}} on a confidential matter. Please call {{agent_phone}}.',
+ 'tracing', 'en')
+
+on conflict (seed_key) do nothing;
+
+-- ---------- Email. Plain text on purpose: the mail sender wraps it and appends the sender's
+-- ---------- signature, so nothing here should try to be HTML. Annexure B item 1(a), R25 a send.
+insert into public.message_templates (seed_key, kind, name, subject, body, position, language) values
+
+('email-first-demand', 'email', 'Letter of demand', 'Account {{reference}} with {{client_name}}',
+$b$Dear {{debtor_name}}
+
+We act for {{client_name}} in respect of the above account, which has been handed to us for collection.
+
+The balance outstanding as at {{today}} is {{balance}}.
+
+We ask that you settle this amount, or contact us to arrange terms you can keep. We would rather agree an arrangement with you than escalate the matter, and an arrangement kept is the quickest way to close the account.
+
+Please quote reference {{reference}} on any payment.
+
+If you believe this amount is not owing, or is not owing by you, tell us why and we will put the account on hold while we take it up with our client.
+
+Yours faithfully
+{{agent_name}}
+{{firm_name}}
+{{agent_phone}}$b$,
+ null, 'en'),
+
+('email-broken-arrangement', 'email', 'Broken arrangement', 'Arrangement on account {{reference}}',
+$b$Dear {{debtor_name}}
+
+We agreed an arrangement on the above account and the payment due has not reached us.
+
+The balance outstanding as at {{today}} is {{balance}}.
+
+Please let us know what has happened. If your circumstances have changed we would rather rework the arrangement than have it fail a second time. An arrangement you cannot keep helps neither of us.
+
+Please quote reference {{reference}} on any payment.
+
+Yours faithfully
+{{agent_name}}
+{{firm_name}}
+{{agent_phone}}$b$,
+ 'broken_arrangement', 'en'),
+
+('email-arrangement-confirmed', 'email', 'Arrangement confirmed', 'Your arrangement on account {{reference}}',
+$b$Dear {{debtor_name}}
+
+We confirm the arrangement agreed today on the above account, which we administer for {{client_name}}.
+
+The balance outstanding as at {{today}} is {{balance}}.
+
+Please quote reference {{reference}} on every payment so that it is allocated to your account without delay.
+
+If a payment is going to be late, tell us before the date rather than after it. We can usually work around a date that moves; we cannot work around a payment that simply does not arrive.
+
+Yours faithfully
+{{agent_name}}
+{{firm_name}}
+{{agent_phone}}$b$,
+ 'arranged', 'en'),
+
+-- A SETTLEMENT FIGURE IS THE CLIENT'S TO GIVE, not the collector's, which is why this letter
+-- carries no number beyond the balance. A figure offered without a mandate is one the firm may
+-- have to honour.
+('email-settlement-discussion', 'email', 'Settlement discussion', 'Account {{reference}}: your proposal',
+$b$Dear {{debtor_name}}
+
+Thank you for speaking to us about the above account.
+
+The balance outstanding as at {{today}} is {{balance}}.
+
+We have put your proposal to {{client_name}} and will come back to you as soon as we have their instruction. Nothing is agreed until we confirm it to you in writing.
+
+In the meantime, please quote reference {{reference}} on any payment you are able to make. A payment now reduces the balance whatever is agreed later.
+
+Yours faithfully
+{{agent_name}}
+{{firm_name}}
+{{agent_phone}}$b$,
+ 'negotiating', 'en')
+
+on conflict (seed_key) do nothing;
+
+-- ---------- Call scripts, read on screen while the phone is ringing ----------
+--
+-- The shape matters as much as the words: OPEN is said aloud, the IF blocks are the three things
+-- that actually come back, and NEVER is the law rather than house style:
+--   * Debt Collectors Act 114 of 1998 and the Council's code: identify yourself and the firm, no
+--     false or misleading statements, no threat of legal action that is not actually intended.
+--   * NCA s126B: collecting on a PRESCRIBED debt is prohibited, and an acknowledgement revives
+--     it. Raptor carries the flag; the script must not talk a debtor into one.
+--   * NCA s129 is the statutory demand BEFORE court. An account on section 129 is in progress,
+--     not legal, and a script that calls it legal action is a misrepresentation.
+--   * The debt is confidential and may not be disclosed to a third party, which is the whole
+--     difficulty of a trace call and the reason that script says nothing about money.
+insert into public.message_templates (seed_key, kind, name, subject, body, position, language) values
+
+('call-general', 'call_script', 'General collection call', null,
+$b$OPEN
+Good day, may I speak to {{debtor_name}}?
+This is {{agent_name}} from {{firm_name}}. We handle the account {{reference}} for {{client_name}}.
+Is it convenient to speak now?
+
+STATE IT ONCE
+The balance on the account is {{balance}}. I am calling to agree how it will be settled.
+
+THEN STOP TALKING. The first person to speak after the figure usually concedes.
+
+IF THEY CAN PAY IN FULL
+Take the payment date and log the promise before you end the call.
+
+IF THEY CANNOT PAY IN FULL
+What can you manage, and on what date? Get a figure and a date, not "month end".
+Log it as a promise to pay. An arrangement that is not logged did not happen.
+
+IF THEY DISPUTE IT
+Do not argue the merits. Record what they dispute, raise the dispute on the account, and tell them
+the account is on hold while it is taken up with the client.
+
+CLOSE
+Repeat the amount and the date back to them, and say what happens if it is not met.
+Confirm the number to call back on: {{agent_phone}}.
+
+NEVER
+- Never say legal action is coming unless the firm has instructions to take it.
+- Never discuss the account with anybody other than the debtor. The debt is confidential.
+- Never continue if the account is flagged prescribed. Section 126B of the National Credit Act
+  prohibits collecting a prescribed debt, and an acknowledgement revives it. End the call and
+  refer it to a team leader.$b$,
+ null, 'en'),
+
+('call-new', 'call_script', 'First contact', null,
+$b$OPEN
+Good day, may I speak to {{debtor_name}}?
+This is {{agent_name}} from {{firm_name}}. {{client_name}} has handed your account to us.
+
+THIS MAY BE THE FIRST THEY HAVE HEARD OF IT. Say what the account is before you say what is owed,
+or the whole call goes on "what account?".
+
+CONFIRM WHO YOU ARE SPEAKING TO
+Before any detail: confirm the name and one other identifier. Giving the balance to the wrong
+person is a disclosure the firm cannot take back.
+
+STATE IT ONCE
+The account is {{reference}} with {{client_name}} and the balance is {{balance}}.
+
+CHECK THE DETAILS WHILE YOU HAVE THEM
+This is the one call where a debtor will willingly confirm a number, an address and an employer.
+Update them on the account before you end it. It is what stops this account becoming a trace.
+
+ASK THE QUESTION
+How would you like to settle this? Get a figure and a date.
+
+CLOSE
+Confirm the amount, the date and the reference {{reference}}.
+The number to call back on is {{agent_phone}}.
+
+NEVER
+- Never say legal action is coming unless the firm has instructions to take it.
+- Never discuss the account with anybody other than the debtor.
+- Never continue if the account is flagged prescribed. Refer it to a team leader.$b$,
+ 'new', 'en'),
+
+('call-broken-arrangement', 'call_script', 'Broken arrangement', null,
+$b$OPEN
+Good day, may I speak to {{debtor_name}}?
+{{agent_name}} from {{firm_name}}, about account {{reference}}.
+
+WHY THIS CALL IS DIFFERENT. They already agreed once. The purpose is not to agree again on the
+same terms, which are terms they could not keep. It is to find out what changed and agree terms
+they can.
+
+ASK, DO NOT ACCUSE
+We agreed a payment and it has not reached us. What happened?
+
+Then listen. A broken arrangement is usually a changed circumstance, and the collector who finds
+out what it is gets a second arrangement that holds.
+
+IF THE CIRCUMSTANCES HAVE CHANGED
+Rework the amount. A smaller payment that arrives beats a larger one that does not.
+
+IF THERE IS NO REASON
+Say plainly that a second broken arrangement limits what can be done, and get a date.
+
+CLOSE
+Repeat the new amount and date. Log the promise. The balance is {{balance}}.
+Call back on {{agent_phone}}.
+
+NEVER
+- Never threaten a consequence the firm will not actually apply.
+- Never discuss the account with anybody other than the debtor.
+- Never continue if the account is flagged prescribed. Refer it to a team leader.$b$,
+ 'broken_arrangement', 'en'),
+
+('call-arranged', 'call_script', 'Courtesy call on a live arrangement', null,
+$b$OPEN
+Good day, may I speak to {{debtor_name}}?
+{{agent_name}} from {{firm_name}}. Nothing is wrong. I am calling ahead of your payment on
+account {{reference}}.
+
+THIS IS A COURTESY CALL AND MUST SOUND LIKE ONE. An account that is being paid is an account
+working; a call that sounds like a demand is how a paying debtor becomes a difficult one.
+
+CONFIRM
+Your payment is due shortly. Is everything still in order for that date?
+
+IF THEY SAY IT WILL BE LATE
+Get the new date now. A date moved with notice is an arrangement kept as far as the firm is
+concerned; a date missed in silence is a broken one.
+
+CLOSE
+Thank them. Balance {{balance}}. Reference {{reference}} on the payment. {{agent_phone}}.
+
+NEVER
+- Never discuss the account with anybody other than the debtor.
+- Never use a courtesy call to renegotiate upward. It is the fastest way to lose a paying account.$b$,
+ 'arranged', 'en'),
+
+('call-cannot-pay', 'call_script', 'Cannot pay', null,
+$b$OPEN
+Good day, may I speak to {{debtor_name}}?
+{{agent_name}} from {{firm_name}}, about account {{reference}}.
+
+CANNOT PAY IS NOT REFUSING TO PAY. One is a pensioner or somebody who has lost a job; the other is
+a decision. Treating the first as the second costs the firm the account and the client the money.
+
+FIND OUT WHICH IT IS
+What has changed? Are you working at the moment? Is there any income at all?
+
+IF THERE IS SOME INCOME
+Ask for something small and regular rather than a lump sum. R200 a month that arrives is worth
+more to the client than R2 000 that does not.
+
+IF THERE IS GENUINELY NOTHING
+Do not press. Record the circumstances on the account, agree a date to speak again, and put it in
+the diary. Say clearly that the account does not go away, so they are not surprised later.
+
+IF THEY MENTION DEBT REVIEW, ADMINISTRATION OR SEQUESTRATION
+Stop collecting. Take the practitioner's name and reference and hand it to a team leader.
+
+CLOSE
+Balance {{balance}}. Call back on {{agent_phone}}.
+
+NEVER
+- Never suggest they borrow money to pay this account.
+- Never discuss the account with anybody other than the debtor.
+- Never continue if the account is flagged prescribed. Refer it to a team leader.$b$,
+ 'cannot_pay', 'en'),
+
+('call-refusing', 'call_script', 'Refusing to pay', null,
+$b$OPEN
+Good day, may I speak to {{debtor_name}}?
+{{agent_name}} from {{firm_name}}, about account {{reference}}.
+
+A REFUSAL IS A POSITION, AND A POSITION HAS A REASON. Find the reason before answering it.
+
+ASK
+You have told us you will not pay this. Can you tell me why?
+
+IF THE REASON IS A DISPUTE
+It is not a refusal, it is a dispute. Raise it on the account, say the account goes on hold while
+the client is asked, and move to the dispute script.
+
+IF THE REASON IS THE AMOUNT
+Say what the balance is made up of. Capital, interest and costs are separate figures, and a debtor
+who believes the whole balance is fees usually stops refusing once they see the capital.
+
+IF IT IS A DECISION
+Say once, plainly, what happens next, and only what the firm will actually do. Then record it.
+An honest "then the client will decide how to proceed" is stronger than a threat everybody knows
+is empty.
+
+CLOSE
+Record the refusal and the reason in your own words. That note is what the client is shown, and
+"refuses to pay" with no reason tells them nothing.
+
+NEVER
+- Never say legal action is coming unless the firm has instructions to take it.
+- Never say an account is at legal stage because a section 129 notice has gone out. Section 129 is
+  the statutory demand BEFORE court. It is not legal action, and saying so is a misrepresentation.
+- Never raise your voice, and never make it personal.$b$,
+ 'refusing', 'en'),
+
+('call-negotiating', 'call_script', 'Negotiating a settlement', null,
+$b$OPEN
+Good day, may I speak to {{debtor_name}}?
+{{agent_name}} from {{firm_name}}, about account {{reference}}.
+
+THE FIGURE IS THE CLIENT'S TO GIVE, NOT YOURS. A settlement offered without a mandate is one the
+firm may have to honour. Take their proposal; do not make one.
+
+ASK
+What are you able to offer, and over what period?
+
+WRITE IT DOWN EXACTLY
+Amount, number of payments, first date. "A few thousand soon" is not an offer and cannot be put to
+a client.
+
+SAY WHAT HAPPENS NEXT
+I will put this to {{client_name}} and come back to you. Nothing is agreed until we confirm it to
+you in writing.
+
+ASK FOR SOMETHING NOW
+Whatever is agreed later, a payment now reduces the balance. Can you make one today?
+
+CLOSE
+Balance {{balance}}. Reference {{reference}}. {{agent_phone}}.
+
+NEVER
+- Never agree a settlement figure or a discount without the client's mandate.
+- Never confirm a settlement verbally as final. It goes in writing or it did not happen.$b$,
+ 'negotiating', 'en'),
+
+('call-disputed', 'call_script', 'Chasing a dispute', null,
+$b$OPEN
+Good day, may I speak to {{debtor_name}}?
+{{agent_name}} from {{firm_name}}, about the query you raised on account {{reference}}.
+
+DO NOT COLLECT ON THIS CALL. The account is disputed. Asking for money while a dispute is open is
+what turns a dispute into a complaint.
+
+THE PURPOSE IS TO MOVE THE DISPUTE
+Either you need something from them, or they are waiting on the client. Say which.
+
+IF YOU NEED SOMETHING FROM THEM
+Name the one document or fact you need, and a date to have it by. Vague requests come back vague.
+
+IF THE CLIENT IS SITTING ON IT
+Say so honestly, say when you last chased, and give a date you will come back to them.
+
+CLOSE
+Confirm what each side is doing and by when. {{agent_phone}}.
+
+NEVER
+- Never press for payment while the dispute is open.
+- Never tell a debtor their dispute is unfounded before the client has answered it.$b$,
+ 'disputed', 'en'),
+
+-- THE HARDEST SCRIPT IN THE LIBRARY, AND THE SHORTEST. Every number on a trace is unverified, so
+-- the person answering may be a neighbour, an employer or a stranger. Telling any of them that a
+-- person owes money is a disclosure the firm cannot take back, so this script says nothing about
+-- an account, a balance or a client. The firm's name is as far as it goes.
+('call-tracing', 'call_script', 'Trace call to an unverified number', null,
+$b$OPEN
+Good day. I am trying to reach {{debtor_name}}. My name is {{agent_name}} from {{firm_name}}.
+
+IF IT IS THE DEBTOR
+Confirm the name and one other identifier, then move to the collection script for the account.
+
+IF IT IS SOMEBODY ELSE
+Please could you ask {{debtor_name}} to call {{agent_name}} on {{agent_phone}}.
+Nothing further. Not the client, not the amount, not the word "account", not the word "debt".
+
+IF THEY ASK WHAT IT IS ABOUT
+It is a confidential matter and I can only discuss it with {{debtor_name}}.
+Say it once, politely, and do not be drawn. "It is about money they owe" is the answer that costs
+the firm a complaint.
+
+IF THE NUMBER IS WRONG
+Apologise, ask them to disregard the call, and mark the number wrong on the account so that nobody
+rings it again.
+
+CLOSE
+Thank them for their time.
+
+NEVER
+- Never disclose that there is a debt, who the client is, or what is owed, to anybody who is not
+  the debtor. This is the single rule this script exists for.
+- Never leave the details on a voicemail you cannot confirm belongs to the debtor. Leave a name
+  and a number only.
+- Never tell a third party you are a debt collector if they have not asked who you are. Identify
+  the firm, not the trade.$b$,
+ 'tracing', 'en')
+
+on conflict (seed_key) do nothing;

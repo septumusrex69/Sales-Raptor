@@ -193,15 +193,34 @@ ok('...and says what to do when there are none', /Nobody recorded yet/.test(deta
  */
 ok('only hand-typed directors are editable', /d\.source === 'manual' && \(/.test(detail))
 
-/* The backfill, in the checked-in record. */
-const backfill = sql.slice(sql.lastIndexOf('-- ---------- A debtor is a person or a company'))
+/*
+ * The backfill, in the checked-in record.
+ *
+ * BOUNDED TO ITS OWN STATEMENT, not sliced to the end of the file. It was sliced to the end, and
+ * schema.sql is append-only — so the next thing appended to it became part of what this check
+ * read. The message-template drafts did exactly that, and the word "empty" in a call script
+ * failed a check about company names, because the pattern hunting for "(Pty)" matched the middle
+ * of it. Two bugs in one line, both of them the check's.
+ */
+const backfillFrom = sql.lastIndexOf('-- ---------- A debtor is a person or a company')
+const backfill = sql.slice(backfillFrom, sql.indexOf(';', backfillFrom) + 1)
 ok('the backfill is in the schema', backfill.length > 400)
+/* One statement, counted. `endsWith(';')` is not the same assertion: schema.sql also ends in a
+   semicolon, so an unbounded slice satisfies it and this check goes on reading the whole file. */
+check('...and it is one statement, not the rest of the file',
+  (backfill.match(/;/g) ?? []).length, 1)
 ok('...marking on the registration number, which is proof',
   /debtor_id_number ~\* '\^\[A-Z\]\?/.test(backfill))
 ok('...normalising the bureau prefix off at the same time', /regexp_replace/.test(backfill))
-/* A company-shaped NAME is evidence, not proof — `\bcc\b` matches a person with the initials
-   C.C. — and the cost of being wrong is a real person's account relabelled. */
-ok('...and never on the name alone', !/pty|\\bcc\\b/i.test(backfill.replace(/--[^\n]*/g, '')))
+/*
+ * A company-shaped NAME is evidence, not proof — `\bcc\b` matches a person with the initials
+ * C.C. — and the cost of being wrong is a real person's account relabelled and their trace
+ * refused. What that rule MEANS is that the statement never reads a name column, which is what is
+ * asserted here; hunting the SQL text for "pty" was always going to catch an ordinary word.
+ */
+const statement = backfill.replace(/--[^\n]*/g, '')
+ok('...and never on the name alone', !/debtor_surname|debtor_first_name/.test(statement))
+ok('...nor on a company-shaped word in the name', !/\(pty\)|\\bcc\\b/i.test(statement))
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
