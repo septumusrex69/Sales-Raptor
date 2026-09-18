@@ -16,6 +16,21 @@
  *   - A DAY OF THE MONTH. Clerk rotation is not an offset at all — it is "the 5th", and no number
  *     of days from a handover lands on the 5th of anything.
  *
+ * TWO TRACKS, NOT ONE, at the firm's instruction — and this is the decision everything else here
+ * is shaped by.
+ *
+ * The NOTICE track is anchored to the file: demand and section 129 on day 1, intention to list on
+ * day 10, final notice on day 35, whoever happens to be holding it. The ROTATION track is
+ * anchored to the calendar, on the 5th. They are independent, and they come apart immediately —
+ * the chart's "Phase 2 · Clerk 2 · day 40-80" is no longer a single thing, because day 42 and the
+ * day Clerk 2 takes over are now two different dates.
+ *
+ * THE REASON IS THAT A STATUTORY DEADLINE MUST NOT MOVE BECAUSE SOMEBODY WAS REALLOCATED. If the
+ * notices hung off the phase, then rotating a clerk would shift the date of a section 129, and a
+ * date the Act fixes would be decided by an allocation screen. The cost of keeping them apart is
+ * that a clerk can inherit a file mid-sequence, which is a training problem; the cost of joining
+ * them is a defective notice, which is a legal one.
+ *
  * Pure: every input is passed in, nothing is fetched, and there is no clock of its own. A
  * workflow that has to be reproducible three months after the fact cannot depend on a function
  * that reads today.
@@ -131,17 +146,30 @@ export function rotationDate(allocatedOn: string, holidays: Record<string, strin
 }
 
 /**
- * The month-ends this clerk actually gets, as dates.
+ * The month-ends this clerk is given, as dates. Always exactly two.
  *
- * WHY THIS IS SEPARATE FROM THE RULE. The rule is "the 5th, two months on" and the intent behind
- * it is "two month-ends each". Those agree for an account allocated in the middle of a month and
- * they do NOT agree for one allocated on the 3rd: the 5th is two days later, and the clerk ends
- * up with three 5ths rather than two. Returning the list rather than the count means a screen can
- * show which month-ends a clerk was given instead of asserting a number that is sometimes wrong,
- * and it is what makes the disagreement visible rather than buried in an off-by-one.
+ * THE 5th IN THE MONTH THE ACCOUNT ARRIVED DOES NOT COUNT, and that one line is the whole rule:
+ * you did not have that month. An account allocated on the 3rd of October reaches the 5th of
+ * October two days later, and nobody would call that a month-end the clerk was given. One
+ * allocated on the 18th of September reaches the 5th of October with seventeen days to work it,
+ * and the firm's own example counts it.
  *
- * The allocation day itself is excluded and the rotation day included: a clerk holds the account
- * up to and including the day it rotates.
+ * WHY THIS IS THE RULE RATHER THAN A CUT-OFF DAY. A threshold ("a month-end counts if you had it
+ * before the 20th") is a third number for a floor to remember on top of the 5th and the two
+ * months. The month the account arrived in is not a number at all — it is already on the file.
+ *
+ * AND IT MAKES THE ANSWER EXACTLY TWO, EVERY TIME, which is provable rather than hopeful. Write
+ * the allocation month M and the allocation day d. Rotation is the 5th of M+2, so the 5ths in
+ * play are those after the allocation date and up to it:
+ *   - d < 5  gives 5/M, 5/M+1, 5/M+2, and 5/M is dropped for being in M. Two.
+ *   - d >= 5 gives 5/M+1 and 5/M+2, neither of them in M. Two.
+ * The check next door asserts it for every allocation date in a year rather than for the two the
+ * firm happened to name.
+ *
+ * WHAT IT IS STILL ROUGH ABOUT, said here rather than discovered later: an account allocated on
+ * the 30th of September is given the 5th of October, five days on. The rule has no way to tell
+ * that from the 18th, because both are in the same month, and the firm has said they would rather
+ * have that than a third number. It is generous to the clerk, never to the firm.
  */
 export function monthEndsGiven(
   allocatedOn: string,
@@ -150,15 +178,47 @@ export function monthEndsGiven(
 ): string[] {
   const out: string[] = []
   if (rotatesOn <= allocatedOn) return out
+  const arrivedIn = allocatedOn.slice(0, 7)
   let year = Number(allocatedOn.slice(0, 4))
   let month = Number(allocatedOn.slice(5, 7))
   for (let guard = 0; guard < 120; guard++) {
     const day = Math.min(dayOfMonth, daysInMonth(year, month))
     const candidate = `${year}-${pad(month)}-${pad(day)}`
     if (candidate > rotatesOn) break
-    if (candidate > allocatedOn) out.push(candidate)
+    if (candidate > allocatedOn && candidate.slice(0, 7) !== arrivedIn) out.push(candidate)
     month += 1
     if (month > 12) { month = 1; year += 1 }
+  }
+  return out
+}
+
+/**
+ * Every rotation date from one handover onwards, each counted from the last.
+ *
+ * An account handed over on 18 September rotates on 5 November, 5 January, 5 March and 5 May.
+ *
+ * CHAINED RATHER THAN STEPPED IN FIXED JUMPS, and the two give the same answer today — 5th of
+ * M+2, M+4, M+6 is the same list. Worth saying, because the check next door tried to assert the
+ * difference and could not: there isn't one while the rotation day is the 5th, since moving a 5th
+ * forward off a weekend or a holiday never leaves its own month. Change the day to the 30th and
+ * it would, and then a jump from the handover would drift a month against the clerk who actually
+ * holds the file. The chain is the version that does not have to be revisited.
+ *
+ * WHICH IS WHY THE 160-DAY WORKFLOW IS NO LONGER 160 DAYS. Four clerks at two month-ends each is
+ * about 230 days from handover to closure. That is a consequence of the firm's own correction and
+ * not a side effect to be worked around — but it is a number their clients have been told, so it
+ * is surfaced here rather than left to be noticed on the first file that reaches the end.
+ */
+export function rotationSchedule(
+  allocatedOn: string,
+  rotations: number,
+  holidays: Record<string, string> = {},
+): string[] {
+  const out: string[] = []
+  let cursor = allocatedOn
+  for (let i = 0; i < Math.max(0, rotations); i++) {
+    cursor = rotationDate(cursor, holidays)
+    out.push(cursor)
   }
   return out
 }

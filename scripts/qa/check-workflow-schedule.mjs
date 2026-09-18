@@ -25,7 +25,7 @@
  */
 import {
   ROTATION_DAY_OF_MONTH, ROTATION_MONTHS, calendarDaysBetween, daysInMonth, dueDate,
-  monthEndsGiven, resumeDate, rotationDate, spineDay,
+  monthEndsGiven, resumeDate, rotationDate, rotationSchedule, spineDay,
 } from '../../src/lib/workflowSchedule.ts'
 import { isWorkingDay } from '../../src/lib/workingDays.ts'
 
@@ -135,22 +135,80 @@ check('a rotation landing on Easter Sunday moves past Family Day too',
 check('...and one falling on a working day stays put', rotationDate('2026-07-18'), '2026-09-07')
 
 /*
- * THE EDGE THE FIRM'S RULE AND THE FIRM'S INTENT DISAGREE ON, asserted rather than smoothed over.
- * The rule is "the 5th, two months on"; the intent is "two month-ends each". For an account
- * allocated on the 3rd the 5th is two days later, and the clerk ends up with three. This is a
- * question for the firm, not a decision to take quietly in a helper — so the list is returned and
- * the screen can show it.
+ * EXACTLY TWO, EVERY TIME, and the rule that gets there is one line: the 5th in the month the
+ * account arrived does not count, because you did not have that month.
+ *
+ * An account allocated on the 3rd of October reaches the 5th of October two days later, and
+ * nobody would call that a month-end the clerk was given. One allocated on the 18th of September
+ * reaches the 5th of October with seventeen days to work it, and the firm's own example counts
+ * it. A cut-off day would also separate those two and would be a third number for a floor to
+ * remember; the month the account arrived in is already on the file.
  */
-check('an account taken on the 3rd rotates on the 5th of the second month',
+check('an account taken on the 3rd still rotates on the 5th two months on',
   rotationDate('2026-10-03'), '2026-12-07')
-check('...which hands that clerk three month-ends, not two',
-  monthEndsGiven('2026-10-03', rotationDate('2026-10-03')),
-  ['2026-10-05', '2026-11-05', '2026-12-05'])
+check('...but the 5th in the month it arrived is not one of its month-ends',
+  monthEndsGiven('2026-10-03', rotationDate('2026-10-03')), ['2026-11-05', '2026-12-05'])
+check('...while a mid-month account keeps the very next 5th',
+  monthEndsGiven('2026-09-18', rotationDate('2026-09-18')), ['2026-10-05', '2026-11-05'])
 /* The day of allocation itself is never counted, and the rotation day always is. */
 check('an account taken ON a 5th does not count that day',
   monthEndsGiven('2026-09-05', '2026-11-05'), ['2026-10-05', '2026-11-05'])
 check('nothing is given where rotation is not after allocation',
   monthEndsGiven('2026-09-18', '2026-09-18'), [])
+
+/*
+ * ASSERTED FOR EVERY ALLOCATION DATE IN A YEAR, not for the two the firm happened to name.
+ *
+ * "Exactly two" is the whole promise of the rule, and a promise that holds on two examples is not
+ * a promise. This is the check that would have caught the version before it, which gave three to
+ * anything allocated in the first four days of a month — a case that never comes up while you are
+ * testing with today's date.
+ */
+const wrong = []
+for (let d = new Date(Date.UTC(2026, 0, 1)); d < new Date(Date.UTC(2027, 0, 1)); d.setUTCDate(d.getUTCDate() + 1)) {
+  const day = d.toISOString().slice(0, 10)
+  const given = monthEndsGiven(day, rotationDate(day))
+  if (given.length !== 2) wrong.push(`${day} -> ${given.length}`)
+}
+check(`every allocation date in 2026 gives exactly two month-ends (${wrong.slice(0, 4).join(', ')})`,
+  wrong, [])
+/* And every one of them is genuinely after the day the account arrived. */
+const early = []
+for (let d = new Date(Date.UTC(2026, 0, 1)); d < new Date(Date.UTC(2027, 0, 1)); d.setUTCDate(d.getUTCDate() + 1)) {
+  const day = d.toISOString().slice(0, 10)
+  for (const m of monthEndsGiven(day, rotationDate(day))) if (m <= day) early.push(`${day} -> ${m}`)
+}
+check('...none of them before the account arrived', early, [])
+
+/* ---------- the chain, and what it does to the length of the workflow ---------- */
+
+/*
+ * EACH CLERK'S TWO MONTH-ENDS ARE COUNTED FROM THE DAY THEY GOT IT.
+ *
+ * This is asserted as the dates themselves rather than as "chained, not jumped", which is what it
+ * said first. There is no difference to assert: 5th of M+2, M+4, M+6 is the same list either way
+ * while the rotation day is the 5th, because moving a 5th forward off a weekend never leaves its
+ * own month. Break-testing the chain by replacing it with fixed jumps left this check green,
+ * which is how the claim was found to be untestable rather than merely untested.
+ */
+const chain = rotationSchedule('2026-09-18', 4)
+check('four rotations from a September handover',
+  chain, ['2026-11-05', '2027-01-05', '2027-03-05', '2027-05-05'])
+/* Every clerk in the chain gets two, not just the first. */
+const handovers = ['2026-09-18', ...chain.slice(0, -1)]
+check('every clerk in the chain gets two month-ends',
+  handovers.map((from, i) => monthEndsGiven(from, chain[i]).length), [2, 2, 2, 2])
+
+/*
+ * AND SO THE 160-DAY WORKFLOW IS NOT 160 DAYS ANY MORE. Four clerks at two month-ends each is
+ * about two hundred and thirty days from handover to closure. That is a consequence of the firm's
+ * own correction rather than a fault, but it is a number their clients have been told, so it is
+ * asserted here rather than left to be discovered on the first file that reaches the end.
+ */
+const length = calendarDaysBetween('2026-09-18', chain[chain.length - 1])
+ok(`the fourth rotation is far past day 160 (${length})`, length > 200)
+ok('...and the chart’s own day-40 rotation is nowhere near the first one',
+  calendarDaysBetween('2026-09-18', chain[0]) > 40)
 
 /* ---------- where a file is on the spine ---------- */
 
