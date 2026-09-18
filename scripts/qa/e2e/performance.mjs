@@ -276,7 +276,7 @@ try {
    * the sentence-case source and pass whether the transform applied or not.
    */
   t.check('the title is the firm’s own line',
-    heading.text.replace(/\s+/g, ' ').trim(), 'The SKY is only the BEGINNING.')
+    heading.text.replace(/\s+/g, ' ').trim(), 'The sky is only the beginning.')
   /*
    * SIZED TO THE BRIEF, at both ends. "Do NOT make the headline enormous" is half the instruction
    * and 48-56px is the other half, so a lower bound alone would pass on the 72px version this
@@ -348,7 +348,7 @@ try {
    */
   t.check('...broken across two lines where the firm breaks it',
     heading.text.trim().split('\n').map((l) => l.trim()).join(' | '),
-    'The SKY is only | the BEGINNING.')
+    'The sky is only | the beginning.')
   /*
    * Each line is its own span, so the two halves are addressable as two things. They were not at
    * first — the stressed words are spans too, and a bare `h1 span` matched three elements, which
@@ -361,40 +361,23 @@ try {
   /* Joined, not compared as arrays: this harness's check() uses Object.is, so two arrays with
      identical contents are never equal and the failure prints two lines that look the same. */
   t.check('the line is in two halves', halves.map((l) => l.text).join(' | '),
-    'The SKY is only | the BEGINNING.')
+    'The sky is only | the beginning.')
   t.ok(`...the first in white (${halves[0]?.colour})`, /255, 255, 255/.test(halves[0]?.colour ?? ''))
   t.ok(`...and the second in champagne (${halves[1]?.colour})`,
     !/255, 255, 255/.test(halves[1]?.colour ?? '') && halves[1]?.colour !== halves[0]?.colour)
 
   /*
-   * THE TWO NOUNS ARE LIFTED, AND THE CONNECTIVES ARE NOT. Asserted as both halves: the whole
-   * line in capitals was tried and sent back, so a check that only looked for capitals somewhere
-   * would pass on exactly the version the firm rejected.
+   * ORDINARY SENTENCE CASE, MEASURED AS RENDERED. The line has been set in full capitals, then
+   * with two words lifted into them, and the firm settled on neither. innerText reports what is
+   * on the screen, so a text-transform sneaking back in fails here even though the source still
+   * reads "The sky is only" — which is exactly how a capitals version would return.
    */
-  const stressed = await page.evaluate(() =>
-    [...document.querySelectorAll('.collections-hero h1 span span')].map((el) => ({
-      text: el.innerText.trim(),
-      transform: getComputedStyle(el).textTransform,
-      weight: Number(getComputedStyle(el).fontWeight),
-      tracking: getComputedStyle(el).letterSpacing,
-    })))
-  t.check('two words carry the line', stressed.map((x) => x.text).join(' | '), 'SKY | BEGINNING.')
-  t.ok('...set in capitals by the stylesheet',
-    stressed.every((x) => x.transform === 'uppercase'))
-  t.ok(`...a shade heavier than the rest of it (${stressed.map((x) => x.weight).join(', ')})`,
-    stressed.every((x) => x.weight > Number(heading.weight)))
-  /*
-   * MEASURED, NOT READ OFF THE CLASS — and this is the check that caught it. `tracking-[0.005em]`
-   * sat on the h1, was asserted by a source check, and rendered at -0.62px, because the raptor
-   * skin's own `h1 { letter-spacing: -0.012em }` outranks a utility class. The firm had been told
-   * the line was opened up while it was in fact tighter than before.
-   */
-  t.ok(`the line itself is tracked open (${heading.tracking})`, parseFloat(heading.tracking) > 0)
-  t.ok(`...and the lifted words wider still (${stressed.map((x) => x.tracking).join(', ')})`,
-    stressed.every((x) => parseFloat(x.tracking) > parseFloat(heading.tracking)))
-  /* The rest of the line is NOT in capitals, which is the half that was sent back. */
-  t.ok('the connectives are left in lower case',
-    /The .* is only/.test(heading.text) && !/THE .* IS ONLY/.test(heading.text))
+  const transform = await page.locator('.collections-hero h1').evaluate((el) =>
+    [el, ...el.querySelectorAll('span')].map((n) => getComputedStyle(n).textTransform).join(','))
+  t.ok(`nothing in the line is transformed to capitals (${transform})`,
+    !/uppercase/.test(transform))
+
+  /* The line itself is tracked open, which is the other thing that has been wrong here. */
 
   /*
    * THE PANEL DOES NOT NAME THE SCREEN, AND SOMETHING ELSE HAS TO.

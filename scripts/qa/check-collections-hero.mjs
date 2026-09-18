@@ -19,7 +19,7 @@
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-collections-hero.mjs
  */
-import { readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { previousWorkingDay } from '../../src/lib/collectionPace.ts'
 import { greetingFor, greetingLine } from '../../src/lib/greeting.ts'
 
@@ -136,18 +136,23 @@ ok('...and the line at the foot went with the redesign', !/Built for a higher st
  */
 const title = hero.slice(hero.indexOf('<h1'), hero.indexOf('</h1>'))
 ok('there is a heading to read', title.length > 40)
-ok('the firm’s first half is on it', /The <Stress>sky<\/Stress> is only/.test(title))
-ok('...and the second half is the second line', /<br \/>[\s\S]*the <Stress>beginning\.<\/Stress>/.test(title))
+ok('the firm’s first half is on it', /<span>The sky is only<\/span>/.test(title))
+ok('...and the second half is the second line', /<br \/>[\s\S]*the beginning\./.test(title))
 ok('...in champagne rather than white',
-  /text-\[var\(--ch-champagne\)\]"\s*>\s*the <Stress>beginning\./.test(title))
+  /text-\[var\(--ch-champagne\)\]"\s*>\s*the beginning\./.test(title))
 /*
- * THE CAPS ARE ON THE NOUNS, NOT THE SENTENCE. Setting the whole line in capitals was tried and
- * the firm sent it back, so the ABSENCE of a blanket uppercase on the heading is asserted as well
- * as the presence of the two stressed words — a check that only looked for capitals somewhere
- * would pass on exactly the version that was rejected.
+ * ORDINARY SENTENCE CASE, AND THE CASE HAS BEEN ROUND THE HOUSES. The whole line was set in
+ * capitals once, then SKY and BEGINNING alone were lifted into them, and the firm settled on
+ * neither: "change it all back to small letters, it'll look better". The reason is the weight —
+ * at font-light a capital has no ascender or descender to give the line shape, so caps flatten it
+ * however they are arranged.
+ *
+ * Both of the rejected versions are asserted against, not just the last one. A check that only
+ * refused a blanket uppercase would pass on the two-lifted-words version, which is the one that
+ * was actually sent back most recently.
  */
-check('two words are lifted out of it', (title.match(/<Stress>/g) ?? []).length, 2)
-ok('...and the line itself is not set in capitals', !/\buppercase\b/.test(title))
+ok('...and not set in capitals at all', !/\buppercase\b/.test(title))
+ok('...with no words lifted into them either', !/<Stress>/.test(hero))
 /*
  * THE LINE IS TRACKED OPEN, AND IT IS SET IN THE STYLESHEET RATHER THAN AS A UTILITY CLASS.
  *
@@ -176,15 +181,8 @@ ok('...with no utility class left on the element pretending to do it',
  * the cloud, and a floor alone is what let 600 through in the first place.
  */
 ok('...at a light weight', /font-light\b/.test(title))
-/*
- * The stressed words need all three of capitals, a heavier weight and wider tracking TOGETHER.
- * At font-light a capital has no ascender or descender to give it presence and reads as a gap in
- * the line; capitals at the tracking that suits lower case always look cramped.
- */
-const stress = hero.slice(hero.indexOf('function Stress('), hero.indexOf('function Stress(') + 320)
-ok('the lifted words are capitals', /uppercase/.test(stress))
-ok('...a shade heavier than the line', /font-normal/.test(stress))
-ok('...and tracked wider', /tracking-\[0\.05em\]/.test(stress))
+/* And the helper that set them is gone rather than left behind unused. */
+ok('the helper that lifted them is gone too', !/function Stress\(/.test(hero))
 ok('...and nothing heavier crept back in',
   !/font-(medium|semibold|bold|black|extrabold)\b/.test(title))
 
@@ -268,17 +266,34 @@ ok('...and the 2x file is still only fetched by a screen that needs it',
   /@media \(min-resolution: 2dppx\) \{\s*\n\s*\.login-photo \{/.test(css))
 
 /*
- * IT HAS TO BE SMALL ENOUGH TO SHIP. The source was a 2.3MB PNG; a hero that costs two megabytes
- * on every visit to the screen people open first thing every morning is a hero that gets deleted.
+ * SMALL ENOUGH TO SHIP, AND BIG ENOUGH TO LOOK AT. Both ends, because they pull against each
+ * other and this asset has now been wrong at both.
+ *
+ * The source is a 2.3MB PNG and a hero that costs two megabytes on the screen people open first
+ * thing every morning is a hero that gets deleted. But it was encoded at 1800px wide from a
+ * 2048px source and then magnified into a panel 700px tall, and the firm's word for the result
+ * was "pixelated" — they were looking at compression artefacts being blown up.
+ *
+ * A floor on the file size is a crude proxy for "it was not encoded down to nothing", and crude
+ * is the point: it is the check that would have caught the 1800px encode, which passed a ceiling
+ * happily at 173KB.
  */
 const sizes = {
   webp: statSync(new URL('../../public/brand/collections-hero.webp', import.meta.url)).size,
-  jpg: statSync(new URL('../../public/brand/collections-hero.jpg', import.meta.url)).size,
 }
-ok(`the webp is under 250KB (${Math.round(sizes.webp / 1024)}KB)`, sizes.webp < 250 * 1024)
-ok(`the jpeg fallback is under 350KB (${Math.round(sizes.jpg / 1024)}KB)`, sizes.jpg < 350 * 1024)
-/* Both files must actually be there: image-set falls through silently to a coloured panel. */
-ok('both files exist', sizes.webp > 10_000 && sizes.jpg > 10_000)
+ok(`the webp is under 400KB (${Math.round(sizes.webp / 1024)}KB)`, sizes.webp < 400 * 1024)
+ok(`...and over 250KB, which is what stops it being re-encoded down to mush (${Math.round(sizes.webp / 1024)}KB)`,
+  sizes.webp > 250 * 1024)
+
+/*
+ * THE JPEG IS GONE, and its absence is asserted rather than just not mentioned. It only existed as
+ * the fallback in an image-set cascade; that cascade was removed when it turned out to be the
+ * reason the photograph never reached Safari, and the JPEG then sat in a PUBLIC repository at
+ * 370KB with nothing referencing it. An unreferenced asset is pure cost, and the way it comes back
+ * is somebody re-running an encode script that writes both.
+ */
+ok('the unreferenced JPEG is not back', !existsSync(new URL('../../public/brand/collections-hero.jpg', import.meta.url)))
+ok('...and nothing in the stylesheet asks for one', !/collections-hero\.jpg/.test(css))
 
 /*
  * THE SCRIM IS TWO GRADIENTS AND THEY COMPOUND. At 0.86 and 0.74 the foot of the panel went to

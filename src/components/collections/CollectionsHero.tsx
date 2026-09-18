@@ -85,28 +85,25 @@ export function CollectionsHero({ figures, filters, action, progress }: {
             </p>
             <span className="mt-3 block h-px w-14 bg-[var(--ch-gold)]" />
             {/*
-              TWO TONES, TWO LINES, AND THE TWO NOUNS IN CAPITALS.
+              TWO TONES, TWO LINES, AND ORDINARY SENTENCE CASE.
 
               The firm's reference sets the first half white and the second in champagne, across
               two lines. That only works as a deliberate break: left to wrap, the break lands
               wherever the window is wide and the colour change falls mid-phrase.
 
-              THE CAPS ARE ON THE NOUNS, not the sentence. Setting the whole line in capitals was
-              tried and the firm sent it back; setting none of it left a line they said looked
-              flat. Lifting SKY and BEGINNING alone gives the sentence a rhythm — two stressed
-              words with the connectives running quietly between them — and it is the firm's own
-              suggestion. They are set a shade heavier than the body of the line because capitals
-              at a light weight have no ascenders or descenders to hold them up and go weak; and
-              wider, because capitals set at lowercase tracking always look cramped.
+              THE CASE HAS BEEN ROUND THE HOUSES AND LANDED BACK HERE. The whole line was set in
+              capitals once, then SKY and BEGINNING alone were lifted into them, and the firm
+              settled on neither — "change it all back to small letters, it'll look better". They
+              are right, and the reason is the weight: at font-light there are no ascenders or
+              descenders in a capital to give the line any shape, so caps at this weight flatten
+              it however they are arranged. The two tones and the break carry it instead.
             */}
-            {/* Letter-spacing is in the stylesheet, not here: the skin's own h1 rule outranks a
-                utility class, so a tracking class on this element is markup that does nothing. */}
             <h1 className="mt-4 text-[32px] sm:text-[44px] lg:text-[52px] font-light
               leading-[1.06] text-white">
               {/* Each LINE is its own span, which is not decoration: it makes the two halves
                   addressable as two things, by a stylesheet and by anything reading the page. */}
-              <span>The <Stress>sky</Stress> is only</span><br />
-              <span className="text-[var(--ch-champagne)]">the <Stress>beginning.</Stress></span>
+              <span>The sky is only</span><br />
+              <span className="text-[var(--ch-champagne)]">the beginning.</span>
             </h1>
             <p className="mt-5 text-[11px] font-medium uppercase tracking-[0.34em] text-[var(--ch-gold)]">
               Discipline drives results
@@ -205,17 +202,6 @@ export function CollectionsHero({ figures, filters, action, progress }: {
       </div>
     </div>
   )
-}
-
-/**
- * A word lifted out of the headline.
- *
- * Capitals, a touch heavier and a touch wider. All three are needed together: at font-light a
- * capital has no ascender or descender to give it presence and reads as a gap in the line, and
- * capitals set at the tracking that suits lower case always look cramped.
- */
-function Stress({ children }: { children: ReactNode }) {
-  return <span className="font-normal uppercase tracking-[0.05em]">{children}</span>
 }
 
 /**
