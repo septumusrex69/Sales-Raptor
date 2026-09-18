@@ -21,6 +21,7 @@ import { CompanyDetail } from './pages/companies/CompanyDetail'
 import { AccountsList } from './pages/accounts/AccountsList'
 import { AccountDetail } from './pages/accounts/AccountDetail'
 import { DisputesBoard } from './pages/accounts/DisputesBoard'
+import { WorkflowsPage } from './pages/accounts/WorkflowsPage'
 import { CollectorDashboard } from './pages/CollectorDashboard'
 import { CollectorProfile } from './pages/CollectorProfile'
 import { DiaryPage } from './pages/diary/DiaryPage'
@@ -72,6 +73,10 @@ function App() {
               <Route path="/companies/:id" element={<RequireClientAccess><CompanyDetail /></RequireClientAccess>} handle={{ title: 'Client Details' }} />
               <Route path="/mail" element={<MailPage />} handle={{ title: 'Mail' }} />
               <Route path="/accounts" element={<AccountsList />} handle={{ title: 'Accounts' }} />
+              {/* Before the :id route in the file, though React Router would rank the static
+                  segment above the dynamic one either way. Kept in this order so that reading the
+                  table does not suggest an account could ever be called "workflows". */}
+              <Route path="/accounts/workflows" element={<WorkflowsPage />} handle={{ title: 'Workflows' }} />
               <Route path="/accounts/:id" element={<AccountDetail />} handle={{ title: 'Account' }} />
               <Route path="/diary" element={<DiaryPage />} handle={{ title: 'Diary' }} />
               <Route path="/performance" element={<CollectorDashboard />} handle={{ title: 'Collections' }} />

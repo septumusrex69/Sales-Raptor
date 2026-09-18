@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, Loader2, Search, UserCheck, X } from 'lucide-react'
+import { AlertTriangle, GitBranch, Loader2, Search, UserCheck, X } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { inputClass } from '../../components/ui/Modal'
 import { useAppStore } from '../../store/AppStore'
@@ -237,6 +237,18 @@ export function AccountsList() {
 
   return (
     <div className="space-y-4">
+      {/*
+        THE WAY IN TO THE WORKFLOWS, here rather than in the sidebar. A workflow is a property of
+        the book — it is what happens to an account after it is handed over — and the sidebar is
+        already fifteen items long. Somebody looking for it is looking at accounts.
+      */}
+      <div className="flex justify-end">
+        <Link to="/accounts/workflows"
+          className="text-xs text-slate-500 hover:text-slate-800 inline-flex items-center gap-1.5">
+          <GitBranch size={13} /> Workflows
+        </Link>
+      </div>
+
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {/*

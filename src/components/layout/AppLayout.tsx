@@ -30,6 +30,8 @@ const TITLES: { test: RegExp; title: string }[] = [
    */
   { test: /^\/performance\/[^/]+$/, title: 'Collector' },
   { test: /^\/performance/, title: 'Collections' },
+  /* The static route first: /accounts/workflows would otherwise be titled "Account". */
+  { test: /^\/accounts\/workflows$/, title: 'Workflows' },
   { test: /^\/accounts\/[^/]+$/, title: 'Account' },
   { test: /^\/accounts/, title: 'Accounts' },
   { test: /^\/queries/, title: 'Disputes' },
