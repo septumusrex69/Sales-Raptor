@@ -6,6 +6,7 @@ import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { SignatureEditor } from '../../components/settings/SignatureEditor'
 import { DataImportTab } from '../../components/settings/DataImportTab'
 import { CollectorsPanel } from '../../components/settings/CollectorsPanel'
+import { WorkflowsTab } from '../../components/settings/WorkflowsTab'
 import { customFields as initialCustomFields, industries, leadSources as initialLeadSources } from '../../data/mockData'
 import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
@@ -23,7 +24,7 @@ import { TARGET_METRICS, resolveTarget } from '../../lib/targets'
 import { getCurrentSalesMonth } from '../../lib/salesMonth'
 import { formatCurrency, TODAY } from '../../data/mockData'
 
-const TABS = ['Profile', 'Appearance', 'Users', 'Teams', 'Targets', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations', 'Data Import'] as const
+const TABS = ['Profile', 'Appearance', 'Users', 'Teams', 'Workflows', 'Targets', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations', 'Data Import'] as const
 type Tab = (typeof TABS)[number]
 
 export function SettingsPage() {
@@ -47,6 +48,7 @@ export function SettingsPage() {
         {tab === 'Appearance' && <AppearanceTab />}
         {tab === 'Users' && <UsersTab />}
         {tab === 'Teams' && <TeamsTab />}
+        {tab === 'Workflows' && <WorkflowsTab />}
         {tab === 'Targets' && <TargetsTab />}
         {tab === 'Pipelines' && <PipelinesTab />}
         {tab === 'Custom Fields' && <CustomFieldsTab />}

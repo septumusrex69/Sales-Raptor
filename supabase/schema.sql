@@ -4369,3 +4369,402 @@ NEVER
  'tracing', 'en')
 
 on conflict (seed_key) do nothing;
+
+
+-- ---------- Workflows, as data a person edits rather than code a developer deploys ----------
+--
+-- The firm's pre-legal workflow already exists on paper and keeps moving: the rotation rule
+-- changed the week it was handed over, and the day-0 file review came out the week after. A
+-- workflow written in code is a deployment every time a waiting period changes, and a waiting
+-- period changes because an attorney read something.
+--
+-- FIVE TABLES AND NOT ONE. A single JSON blob would be quicker today and would make every later
+-- question hard: which accounts are on which version, which node a file stopped at, whether this
+-- notice has already gone out. Those are row questions.
+create table if not exists public.workflows (
+  id uuid primary key default gen_random_uuid(),
+  -- Stable across every version, which is what an account in flight refers to.
+  key text not null unique,
+  name text not null,
+  description text,
+  domain text not null default 'collections' check (domain in ('collections', 'communications', 'sales')),
+  -- Whose work it is. Reuses the existing teams table rather than inventing an owner.
+  team_id uuid references public.teams (id) on delete set null,
+  created_at timestamptz not null default now(),
+  created_by uuid references public.profiles (id) on delete set null
+);
+
+-- A PUBLISHED WORKFLOW IS NOT EDITED, IT IS SUPERSEDED.
+--
+-- This is not bookkeeping. A workflow sends statutory notices; "what did version 1 say when this
+-- file went through it" is a question an attorney will ask about an account eighteen months from
+-- now, and it cannot be answered by a record somebody has been editing in place.
+create table if not exists public.workflow_versions (
+  id uuid primary key default gen_random_uuid(),
+  workflow_id uuid not null references public.workflows (id) on delete cascade,
+  version integer not null,
+  -- draft     being written; the only state the builder may change
+  -- active    published and running; frozen
+  -- archived  superseded by a later version; frozen, and kept because accounts ran on it
+  state text not null default 'draft' check (state in ('draft', 'active', 'archived')),
+  notes text,
+  published_at timestamptz,
+  published_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now(),
+  created_by uuid references public.profiles (id) on delete set null,
+  unique (workflow_id, version)
+);
+
+-- One active version per workflow, enforced rather than assumed: two actives is two answers to
+-- "what happens to an account handed over today".
+create unique index if not exists workflow_versions_one_active
+  on public.workflow_versions (workflow_id) where state = 'active';
+
+create table if not exists public.workflow_phases (
+  id uuid primary key default gen_random_uuid(),
+  version_id uuid not null references public.workflow_versions (id) on delete cascade,
+  ordinal smallint not null,
+  name text not null,
+  -- "Initial notices and engagement" -- the small line on the right of the dark bar.
+  subtitle text,
+  from_day integer not null,
+  to_day integer not null,
+  unique (version_id, ordinal)
+);
+
+create table if not exists public.workflow_nodes (
+  id uuid primary key default gen_random_uuid(),
+  version_id uuid not null references public.workflow_versions (id) on delete cascade,
+  phase_id uuid references public.workflow_phases (id) on delete set null,
+  -- Stable within a version, so a connection or a note can name a step in words.
+  key text not null,
+  kind text not null check (kind in (
+    'action', 'communication', 'document', 'task', 'assignment', 'wait'
+  )),
+  label text not null,
+  description text,
+
+  -- WHEN, AS AN ABSOLUTE DAY FROM THE HANDOVER, because that is what the firm's chart is labelled
+  -- with and what they asked to edit: "the amount of days or on which day". A relative offset was
+  -- tried and is better for re-ordering; it is worse for the thing this screen is for, which is
+  -- reading a day number off a chart and typing it in.
+  day integer not null,
+
+  -- THE PERIOD THIS STEP GIVES THE DEBTOR, which is NOT the same as when the next step runs.
+  --
+  -- The firm's mockup had one control for both, labelled "wait period after completion". "Final
+  -- notice -- seven days to settle" is two facts: the notice goes out on day 35 and the debtor has
+  -- until day 42. Merged into one field nobody can say whose the seven days are, and they behave
+  -- differently: a deadline does not move off a Saturday, because the debtor's clock does not stop
+  -- when the office shuts.
+  deadline_days integer,
+  -- Calendar days are the debtor's clock; business days are the statutory one. "20" means two
+  -- different dates and on a statutory period that is a notice to be served again.
+  deadline_unit text check (deadline_unit is null or deadline_unit in ('calendar', 'business')),
+
+  -- A communication node sends something. The template is the one the firm already writes in
+  -- Settings; null while the wording has not been written, which is most of them.
+  channel text check (channel is null or channel in (
+    'email', 'sms', 'whatsapp', 'post', 'registered_post', 'call', 'hand'
+  )),
+  template_id uuid references public.message_templates (id) on delete set null,
+  -- A notice the Act or the mandate requires rather than one the firm chooses to send. It is
+  -- never re-issued when a file rejoins, and proof of dispatch is kept against it.
+  statutory boolean not null default false,
+
+  -- Who does it. Free text for now ('Current clerk', 'Team leader') rather than a profile, because
+  -- a workflow is written once and run by whoever holds the file.
+  assign_to text,
+
+  -- VISUAL POSITION ONLY, and that is the whole point of it being separate from the connections.
+  -- The firm asked that dragging a card must not silently re-order execution; it cannot, because
+  -- nothing reads these to decide what runs next.
+  x integer,
+  y integer,
+  ordinal smallint not null default 0,
+  unique (version_id, key)
+);
+
+-- THE EDGES, AND THEY CAN LEAVE THE WORKFLOW.
+--
+-- to_workflow_id is here from the start although nothing uses it yet: the firm's next four
+-- workflows -- payment arrangement, default, dispute, sequestration -- are entered FROM this one
+-- and some of them come back. Adding the column later is easy; discovering that the design assumed
+-- a connection always points at a node in the same version is not.
+create table if not exists public.workflow_connections (
+  id uuid primary key default gen_random_uuid(),
+  version_id uuid not null references public.workflow_versions (id) on delete cascade,
+  from_node_id uuid not null references public.workflow_nodes (id) on delete cascade,
+  to_node_id uuid references public.workflow_nodes (id) on delete cascade,
+  -- Hands the account to another workflow. When it returns it returns to the day it left, which
+  -- is the firm's own rule -- that is a fact about a RUN, not about a definition, and the run
+  -- table is deliberately not built yet.
+  to_workflow_id uuid references public.workflows (id) on delete set null,
+  label text,
+  check (num_nonnulls(to_node_id, to_workflow_id) = 1)
+);
+
+create index if not exists workflow_nodes_version_idx on public.workflow_nodes (version_id, day, ordinal);
+create index if not exists workflow_connections_version_idx on public.workflow_connections (version_id, from_node_id);
+create index if not exists workflow_phases_version_idx on public.workflow_phases (version_id, ordinal);
+
+-- ---------- A published version is frozen, and the database is what says so ----------
+--
+-- In the form as well, but not ONLY in the form: a workflow will eventually be edited by a script,
+-- a migration or an import, and every one of those goes round a React component. What must not
+-- happen is an account's notices changing under it after the fact.
+create or replace function public.workflow_version_is_draft(p_version uuid)
+returns boolean
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select state = 'draft' from public.workflow_versions where id = p_version;
+$$;
+
+create or replace function public.refuse_frozen_workflow()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare
+  v uuid := coalesce(new.version_id, old.version_id);
+begin
+  if not public.workflow_version_is_draft(v) then
+    raise exception 'This workflow version is published. Take a draft of it before changing anything.'
+      using errcode = 'check_violation';
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists workflow_nodes_frozen on public.workflow_nodes;
+create trigger workflow_nodes_frozen before insert or update or delete on public.workflow_nodes
+  for each row execute function public.refuse_frozen_workflow();
+
+drop trigger if exists workflow_phases_frozen on public.workflow_phases;
+create trigger workflow_phases_frozen before insert or update or delete on public.workflow_phases
+  for each row execute function public.refuse_frozen_workflow();
+
+drop trigger if exists workflow_connections_frozen on public.workflow_connections;
+create trigger workflow_connections_frozen before insert or update or delete on public.workflow_connections
+  for each row execute function public.refuse_frozen_workflow();
+
+-- ---------- Row level security ----------
+alter table public.workflows enable row level security;
+alter table public.workflow_versions enable row level security;
+alter table public.workflow_phases enable row level security;
+alter table public.workflow_nodes enable row level security;
+alter table public.workflow_connections enable row level security;
+
+grant select, insert, update, delete on public.workflows to authenticated;
+grant select, insert, update, delete on public.workflow_versions to authenticated;
+grant select, insert, update, delete on public.workflow_phases to authenticated;
+grant select, insert, update, delete on public.workflow_nodes to authenticated;
+grant select, insert, update, delete on public.workflow_connections to authenticated;
+
+-- EVERYONE READS. A collector has to be able to see what is going to happen to the file they are
+-- holding, and a workflow nobody can read is a workflow nobody checks. WRITING IS NARROWER, which
+-- is the point of a library: a workflow decides when a statutory notice goes out, and an agent who
+-- could edit it in the moment would be rewriting the firm's process for every account at once.
+do $$
+declare t text;
+begin
+  foreach t in array array['workflows', 'workflow_versions', 'workflow_phases', 'workflow_nodes', 'workflow_connections']
+  loop
+    execute format('drop policy if exists %1$s_select on public.%1$s', t);
+    execute format(
+      'create policy %1$s_select on public.%1$s for select to authenticated using (auth.uid() is not null)', t);
+    execute format('drop policy if exists %1$s_write on public.%1$s', t);
+    execute format(
+      'create policy %1$s_write on public.%1$s for all to authenticated
+         using (public.current_user_role() in (''Administrator'', ''Pre-legal Team Leader'', ''Liaison Manager''))
+         with check (public.current_user_role() in (''Administrator'', ''Pre-legal Team Leader'', ''Liaison Manager''))', t);
+  end loop;
+end $$;
+
+-- ---------- Taking a draft of a published version ----------
+--
+-- "Click Edit: create a Draft version." Copies the phases, the nodes and the edges, remapping the
+-- edges onto the new node ids -- which is the whole reason this is a function and not four inserts
+-- in the client: a connection copied with its old from_node_id points into the version it came
+-- from, and the workflow silently runs half in each.
+create or replace function public.workflow_take_draft(p_version uuid)
+returns uuid
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare
+  v_workflow uuid;
+  v_next integer;
+  v_draft uuid;
+begin
+  select workflow_id into v_workflow from public.workflow_versions where id = p_version;
+  if v_workflow is null then raise exception 'No such workflow version.'; end if;
+
+  -- One draft at a time. A second draft off the same workflow is two people editing two futures.
+  select id into v_draft from public.workflow_versions
+   where workflow_id = v_workflow and state = 'draft' limit 1;
+  if v_draft is not null then return v_draft; end if;
+
+  select coalesce(max(version), 0) + 1 into v_next
+    from public.workflow_versions where workflow_id = v_workflow;
+
+  insert into public.workflow_versions (workflow_id, version, state, created_by)
+  values (v_workflow, v_next, 'draft', auth.uid())
+  returning id into v_draft;
+
+  create temp table _phase_map (old uuid, new uuid) on commit drop;
+  create temp table _node_map (old uuid, new uuid) on commit drop;
+
+  insert into public.workflow_phases (version_id, ordinal, name, subtitle, from_day, to_day)
+  select v_draft, ordinal, name, subtitle, from_day, to_day
+    from public.workflow_phases where version_id = p_version order by ordinal;
+  insert into _phase_map
+  select o.id, n.id from public.workflow_phases o
+    join public.workflow_phases n on n.version_id = v_draft and n.ordinal = o.ordinal
+   where o.version_id = p_version;
+
+  insert into public.workflow_nodes (
+    version_id, phase_id, key, kind, label, description, day, deadline_days, deadline_unit,
+    channel, template_id, statutory, assign_to, x, y, ordinal)
+  select v_draft, m.new, o.key, o.kind, o.label, o.description, o.day, o.deadline_days,
+         o.deadline_unit, o.channel, o.template_id, o.statutory, o.assign_to, o.x, o.y, o.ordinal
+    from public.workflow_nodes o
+    left join _phase_map m on m.old = o.phase_id
+   where o.version_id = p_version;
+  insert into _node_map
+  select o.id, n.id from public.workflow_nodes o
+    join public.workflow_nodes n on n.version_id = v_draft and n.key = o.key
+   where o.version_id = p_version;
+
+  insert into public.workflow_connections (version_id, from_node_id, to_node_id, to_workflow_id, label)
+  select v_draft, f.new, t.new, o.to_workflow_id, o.label
+    from public.workflow_connections o
+    join _node_map f on f.old = o.from_node_id
+    left join _node_map t on t.old = o.to_node_id
+   where o.version_id = p_version;
+
+  return v_draft;
+end;
+$$;
+
+grant execute on function public.workflow_take_draft(uuid) to authenticated;
+
+-- Publishing swaps them over in one statement, so there is never a moment with no active version
+-- and never a moment with two.
+create or replace function public.workflow_publish(p_version uuid)
+returns void
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare v_workflow uuid;
+begin
+  select workflow_id into v_workflow from public.workflow_versions where id = p_version;
+  if v_workflow is null then raise exception 'No such workflow version.'; end if;
+  update public.workflow_versions set state = 'archived'
+   where workflow_id = v_workflow and state = 'active';
+  update public.workflow_versions
+     set state = 'active', published_at = now(), published_by = auth.uid()
+   where id = p_version;
+end;
+$$;
+
+grant execute on function public.workflow_publish(uuid) to authenticated;
+
+-- ---------- Standard Collections, day 0 to day 80 ----------
+--
+-- The firm's own sequence, transcribed. The branch-heavy version that used to hang off it --
+-- payment arrangement, default, dispute, sequestration, liquidation -- is deliberately NOT here:
+-- each becomes a workflow of its own, entered from this one through a connection that carries a
+-- to_workflow_id. This is the main line and nothing else.
+--
+-- SEEDED AS A DRAFT, not as active, and that is a deliberate disagreement with the mockup's
+-- "Active" badge. A published version is frozen by a trigger, so a workflow labelled active that
+-- anybody can still edit would be a label contradicting the rule underneath it. It publishes with
+-- one press, and from then on editing takes a draft.
+do $$
+declare
+  v_workflow uuid;
+  v_version uuid;
+  v_notice uuid;
+  v_legal uuid;
+  v_team uuid;
+begin
+  if exists (select 1 from public.workflows where key = 'standard-collections') then return; end if;
+
+  select id into v_team from public.teams where name ilike '%pre-legal%' limit 1;
+
+  insert into public.workflows (key, name, description, domain, team_id)
+  values ('standard-collections', 'Standard Collections – Non-Paying Debtor',
+          'Main collection workflow for non-paying debtors. Day 0 to Day 80.', 'collections', v_team)
+  returning id into v_workflow;
+
+  insert into public.workflow_versions (workflow_id, version, state)
+  values (v_workflow, 1, 'draft') returning id into v_version;
+
+  insert into public.workflow_phases (version_id, ordinal, name, subtitle, from_day, to_day)
+  values (v_version, 1, 'Phase 1 · Notice', 'Initial notices and engagement', 0, 40)
+  returning id into v_notice;
+  insert into public.workflow_phases (version_id, ordinal, name, subtitle, from_day, to_day)
+  values (v_version, 2, 'Phase 2 · Legal', 'Legal process and preparation', 40, 80)
+  returning id into v_legal;
+
+  insert into public.workflow_nodes
+    (version_id, phase_id, key, kind, label, description, day, deadline_days, deadline_unit,
+     channel, statutory, assign_to, x, y, ordinal)
+  values
+    (v_version, v_notice, 'handover-received', 'action', 'Handover Received',
+     'The account arrives from the client and opens on the book.', 0, null, null,
+     null, false, 'Current clerk', 0, 0, 1),
+
+    (v_version, v_notice, 'demand-129', 'communication', 'Demand + Section 129',
+     'Issue demand and section 129 notice via registered post. Section 129 is the statutory demand BEFORE court — the account is in progress, not legal.',
+     1, null, null, 'registered_post', true, 'Current clerk', 1, 0, 2),
+
+    (v_version, v_notice, 'intention-to-list', 'communication', 'Intention to List',
+     'Notify the debtor of the intention to list with a credit bureau.',
+     10, 20, 'business', 'registered_post', true, 'Current clerk', 2, 0, 3),
+
+    (v_version, v_notice, 'follow-up-offer', 'communication', 'Follow-up + Offer',
+     'Follow up and put terms the debtor can keep.', 21, null, null, 'email', false, 'Current clerk', 3, 0, 4),
+
+    (v_version, v_notice, 'final-notice', 'communication', 'Final Notice',
+     'Issue final notice with 7 days to settle.', 35, 7, 'calendar',
+     'registered_post', true, 'Current clerk', 4, 0, 5),
+
+    (v_version, v_notice, 'rotate-clerk-2', 'assignment', 'Rotate to Clerk 2',
+     'The file moves to the second clerk.', 40, null, null, null, false, 'Clerk 2', 5, 0, 6),
+
+    (v_version, v_legal, 'listing-confirmed', 'action', 'Listing Confirmed',
+     'The bureau listing is confirmed on the file.', 42, null, null, null, false, 'Current clerk', 0, 1, 7),
+
+    (v_version, v_legal, 'intended-legal-action', 'communication', 'Intended Legal Action',
+     'Debtor placed in mora.', 50, null, null, 'registered_post', true, 'Current clerk', 1, 1, 8),
+
+    (v_version, v_legal, 'court-process-explained', 'communication', 'Court Process Explained',
+     'Explain what happens next and what it will cost.', 60, null, null, 'email', false, 'Current clerk', 2, 1, 9),
+
+    (v_version, v_legal, 'final-settlement-window', 'communication', 'Final Settlement Window',
+     'The last window to settle before the file goes to the attorney.', 70, null, null,
+     'email', false, 'Current clerk', 3, 1, 10),
+
+    (v_version, v_legal, 'draft-summons', 'document', 'Draft Summons',
+     'Draft the summons and put it up for attorney sign-off.', 75, null, null,
+     null, false, 'Team leader', 4, 1, 11),
+
+    (v_version, v_legal, 'rotate-clerk-3', 'assignment', 'Rotate to Clerk 3',
+     'The file moves to the third clerk.', 80, null, null, null, false, 'Clerk 3', 5, 1, 12);
+
+  -- The line, in order. Eleven edges for twelve steps.
+  insert into public.workflow_connections (version_id, from_node_id, to_node_id)
+  select v_version, a.id, b.id
+    from public.workflow_nodes a
+    join public.workflow_nodes b
+      on b.version_id = a.version_id and b.ordinal = a.ordinal + 1
+   where a.version_id = v_version;
+end $$;
