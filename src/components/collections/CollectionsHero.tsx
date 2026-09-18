@@ -59,11 +59,21 @@ export function CollectionsHero({ figures, filters, action }: {
       {/* ---------- title, and the firm's own line ---------- */}
       <div className="mt-5 flex flex-wrap items-end justify-between gap-6">
         <div>
+          {/*
+            THE WORD "COLLECTIONS" APPEARS ONCE, AND IT IS THE GOLD LINE.
+
+            This carried it twice — as this eyebrow and again as the heading underneath — which
+            is how it first went up and is the thing the firm sent back. The eyebrow is what
+            names the screen; the heading is the firm's line, set the way they draw it on their
+            own material: the first half bold and white, the second half the same size in grey.
+            Two weights of one sentence, not a title and a subtitle, so it has to stay one <h1>
+            with a span inside rather than two stacked paragraphs.
+          */}
           <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-gold-400">Collections</p>
-          <h1 className="text-3xl sm:text-5xl font-bold tracking-tight text-white mt-1.5">Collections</h1>
-          <p className="text-sm sm:text-base text-white/60 mt-1.5">
-            Performance today. A stronger tomorrow.
-          </p>
+          <h1 className="text-3xl sm:text-5xl font-bold tracking-tight text-white mt-1.5">
+            Fly high.{' '}
+            <span className="font-normal text-white/55">Never settle for less.</span>
+          </h1>
           <span className="mt-4 block h-px w-16 bg-gold-500/70" />
         </div>
         {/*

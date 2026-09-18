@@ -113,8 +113,35 @@ ok('the controls are not captioned by a copy of themselves',
 /* The firm's own brand lines, which is most of why the panel exists. */
 ok('the firm’s three words are on it', /People <span[\s\S]{0,80}Process/.test(hero))
 ok('...and the four the sidebar carries', /Higher<br \/>Recovery<br \/>Brighter<br \/>Tomorrows/.test(hero))
-ok('...and the line under the title', /Performance today\. A stronger tomorrow\./.test(hero))
 ok('...and the one at the foot', /Discipline creates results/.test(hero))
+
+/*
+ * THE HEADING IS ONE SENTENCE IN TWO WEIGHTS, and the word "Collections" is not in it.
+ *
+ * It was, at first — as the gold eyebrow and again as the heading right under it, the same word
+ * twice — and that is what the firm sent back. The line that replaced it is set the way they draw
+ * it on their own material: the first half bold and white, the second the same size in grey. So
+ * the eyebrow is the only place the screen names itself, and the halves must be different
+ * weights, because rendered in one weight this is just a long title.
+ */
+const title = hero.slice(hero.indexOf('<h1'), hero.indexOf('</h1>'))
+ok('there is a heading to read', title.length > 40)
+ok('the bold half is the firm’s', /Fly high\./.test(title))
+ok('...and the lighter half follows it', /Never settle for less\./.test(title))
+ok('...set back rather than merely smaller', /font-normal text-white\/\d\d/.test(title))
+/*
+ * Counted, not found: the eyebrow is the one place the word belongs.
+ *
+ * Comments are stripped before counting, because half this file's explanations say "Collections"
+ * and a count over the raw source is a count of prose. `\b` on both ends keeps the component's
+ * own name out of it — there is no word boundary inside `CollectionsHero`. Found by
+ * break-testing: the first version of this line matched `>Collections<` and a second copy pasted
+ * a line lower, where the preceding character happened to be a newline, sailed straight past it.
+ */
+const heroCode = hero.replace(/\/\*[\s\S]*?\*\//g, '')
+check('the screen names itself once', (heroCode.match(/\bCollections\b/g) ?? []).length, 1)
+ok('...and that once is the gold eyebrow',
+  /text-gold-400">Collections<\/p>/.test(hero))
 
 /* ---------- the photograph ---------- */
 
@@ -148,8 +175,17 @@ ok('both files exist', sizes.webp > 10_000 && sizes.jpg > 10_000)
 const scrim = css.slice(css.indexOf('.collections-hero::before'), css.indexOf('.collections-hero > *'))
 ok('there is a scrim to read', scrim.length > 200)
 const darkest = Math.max(...[...scrim.matchAll(/rgba\(8, 15, 24, ([\d.]+)\)/g)].map((m) => Number(m[1])))
-ok(`the vertical pass stays light (darkest stop ${darkest})`, darkest <= 0.95)
-ok('the picture is cropped onto the ridge, not the sky', /background-position: center 6\d%/.test(css))
+/*
+ * ANCHORED RIGHT. The hawk's head is hard against the right edge of the photograph; a centred
+ * crop on a panel narrower than the picture takes its slice off both sides and cuts the beak.
+ */
+ok('the crop keeps the bird’s head', /background-position: right center/.test(css))
+/*
+ * AND THE SCRIM IS LIGHT ENOUGH TO LEAVE A BIRD THERE. The mountain picture this replaced was a
+ * bright dawn sky and needed 0.94 at the left edge before white type read on it. The hawk is
+ * already near-black, so that same scrim buried it and the panel went back to a plain navy band.
+ */
+ok(`the left edge stays off solid navy (darkest stop ${darkest})`, darkest <= 0.8)
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
@@ -160,4 +196,4 @@ console.log(`${pass} passed, 0 failed`)
 console.log(`
 Four figures over the controls that decide what they mean, every one of them from the same query
 the tables are drawn from, compared against the previous WORKING day so a Monday is not measured
-against a Sunday — and a photograph that costs 138KB rather than 2.3MB.`)
+against a Sunday — and a photograph that costs a hundred-odd kilobytes rather than two megabytes.`)

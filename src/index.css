@@ -299,9 +299,13 @@ select:autofill {
     url('/brand/collections-hero.jpg') type('image/jpeg') 1x
   );
   background-size: cover;
-  /* Down on the ridge line, not the sky. Centred vertically the crop fills the panel with cloud
-     and the mountains disappear, which is the one thing in the picture worth showing. */
-  background-position: center 62%;
+  /*
+   * Anchored RIGHT, not centred. The bird's head sits hard against the right edge of the
+   * photograph and the left half is only feathers; a centred crop on a panel narrower than the
+   * picture takes the slice off both sides and cuts the beak. Cropping from the left instead
+   * loses feathers, which is the half nobody is looking at.
+   */
+  background-position: right center;
 }
 
 .collections-hero::before {
@@ -310,12 +314,19 @@ select:autofill {
   inset: 0;
   pointer-events: none;
   background:
+    /*
+     * MUCH LIGHTER THAN THE MOUNTAIN PICTURE THIS REPLACED. That one was a bright dawn sky and
+     * needed 0.94 at the left edge before white type would read on it. The hawk is already
+     * near-black everywhere but the eye and the beak, so the same scrim buried the bird
+     * entirely — the panel went back to being a plain navy band with a title on it. Enough to
+     * settle the feathers under the type and no more.
+     */
     linear-gradient(
       100deg,
-      rgba(8, 15, 24, 0.94) 0%,
-      rgba(8, 15, 24, 0.78) 26%,
-      rgba(8, 15, 24, 0.3) 55%,
-      rgba(8, 15, 24, 0.5) 100%
+      rgba(8, 15, 24, 0.72) 0%,
+      rgba(8, 15, 24, 0.55) 30%,
+      rgba(8, 15, 24, 0.2) 58%,
+      rgba(8, 15, 24, 0.12) 100%
     ),
     /*
      * A second, much lighter pass down the panel so the tiles keep their contrast wherever the
@@ -323,7 +334,7 @@ select:autofill {
      * panel went to almost solid navy and the picture may as well not have been there. Each
      * one has to be read as half of what reaches the eye.
      */
-    linear-gradient(to bottom, rgba(8, 15, 24, 0) 0%, rgba(8, 15, 24, 0.22) 55%, rgba(8, 15, 24, 0.55) 100%);
+    linear-gradient(to bottom, rgba(8, 15, 24, 0) 0%, rgba(8, 15, 24, 0.2) 55%, rgba(8, 15, 24, 0.5) 100%);
 }
 
 /* Everything the component draws sits above the scrim. */
