@@ -3572,3 +3572,44 @@ alter table public.email_connections
 alter table public.targets drop constraint if exists targets_metric_check;
 alter table public.targets add constraint targets_metric_check
   check (metric in ('leads', 'mandates', 'deals', 'revenue', 'book', 'accounts', 'activities', 'collected'));
+
+-- ---------- Answering a meeting request ----------
+-- "Add to my calendar" failed with "there is no unique or exclusion constraint matching the ON
+-- CONFLICT specification", and the reason was this index's WHERE clause. Postgres will only use a
+-- PARTIAL index for an ON CONFLICT when the statement repeats the same predicate, and PostgREST's
+-- upsert does not emit one — so every accepted invitation was refused. The same trap is recorded
+-- in CLAUDE.md for the diary's one-open-entry index, where being refused loudly is what is wanted;
+-- here it simply broke the button.
+--
+-- Dropping the predicate changes nothing about what is allowed. NULLs are distinct in a unique
+-- btree index, so a person may still keep as many hand-made events with no UID as they like, and
+-- an ON CONFLICT on a null UID matches nothing and inserts. Probed in a transaction that rolled
+-- back: a revised invitation updates in place, two hand-made events coexist, and an upsert with a
+-- null UID inserts a third.
+drop index if exists public.calendar_events_uid_idx;
+create unique index calendar_events_uid_idx
+  on public.calendar_events (owner_id, ical_uid);
+
+-- What this person told the organiser, and when.
+--
+-- On the MESSAGE rather than on the calendar event, because a declined meeting has no event and
+-- "did I reply to this?" is a question about the invitation that was sent to me. A revised
+-- invitation arrives as a new message and is answered again, which is correct: the organiser
+-- asked twice.
+alter table public.user_emails add column if not exists invite_response text
+  check (invite_response in ('accepted', 'tentative', 'declined'));
+alter table public.user_emails add column if not exists invite_responded_at timestamptz;
+
+comment on column public.user_emails.invite_response is
+  'The iTIP reply this person sent the organiser for a meeting request on this message. Null '
+  'means they have not answered it.';
+
+-- When a sync last STARTED, as opposed to last_synced_at which records when one finished.
+--
+-- Claimed before the mailbox is opened so that only one sync per person can be in flight. The
+-- runtime logs showed three identical /api/email/sync calls landing in the same second — the mail
+-- page, the messages menu and the cron — each walking eighteen folders over its own IMAP
+-- connection against one mailbox. Mail servers cap concurrent connections per account, so the
+-- three did not merely waste work: they queued behind each other and everything else the person
+-- was doing, which is what "it loads and loads and loads" is.
+alter table public.email_connections add column if not exists sync_started_at timestamptz;

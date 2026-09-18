@@ -59,7 +59,14 @@ function slice(src, from, to, label) {
  */
 ok('the sync has no backfill in it', !/backfillMailbox|BACKFILL_MESSAGE_LIMIT/.test(sync))
 ok('...and no low-water marks to drive one', !/oldest_seen_uid/.test(sync))
-ok('the endpoint takes no direction', !/older/.test(endpoint))
+/*
+ * NO INPUT AT ALL, which is the real guard. This read `!/older/` -- the word anywhere in the file
+ * -- and an ordinary comment about a stale sync claim tripped it. What must stay true is that the
+ * sync endpoint takes no request body: a direction, a window or a message count would all have to
+ * arrive through one, and the backfill is what that would grow back into.
+ */
+ok('the endpoint takes no request body at all', !/req\.body/.test(endpoint))
+ok('...and no direction to fetch in', !/\bdirection\b|fetchOlder|backfill/i.test(endpoint))
 ok('the mailbox does not ask for older mail', !/Fetch older mail/.test(page))
 /* And the columns went with the code, rather than sitting unused for somebody to wonder about. */
 ok('the columns are dropped', /drop column if exists oldest_seen_uid,/.test(schema))

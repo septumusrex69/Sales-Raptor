@@ -25,6 +25,7 @@
  * doing on a quiet day; not worth doing in the middle of a feature.
  */
 import { supabase } from './supabase'
+import type { InviteResponse } from './inviteReply.ts'
 import { senderName, type MailFilter } from './emailRules'
 import { refreshNavCounts } from './navCounts'
 import { mirrorReadToAccount, mirrorUnreadToAccount } from './mailReadState'
@@ -82,6 +83,13 @@ export interface MailItem {
   noRecordAt: string | null
   /** Dealt with, however it was dealt with: matched OR marked as needing no record. */
   isSettled: boolean
+  /**
+   * What this person told the organiser, where the message was a meeting request.
+   *
+   * Null means unanswered, which is not the same as declined — the organiser's tracking list
+   * shows those two differently and so must the card.
+   */
+  inviteResponse: InviteResponse | null
   /** Where it was filed, ready to label and link. Null while it is still waiting. */
   linkedTo: LinkedRecord | null
 }
@@ -122,6 +130,7 @@ interface MailRow {
   is_filed: boolean
   is_settled: boolean
   no_record_at: string | null
+  invite_response: InviteResponse | null
   debtor_accounts: {
     account_number: string | null
     debtor_first_name: string | null
@@ -152,6 +161,7 @@ const COLUMNS = `
   id, folder, is_sent, to_address, to_name, to_recipients, cc_recipients,
   uid, message_id, from_address, from_name, subject, snippet,
   attachment_names, is_junk, occurred_at, read_at, is_filed, is_settled, no_record_at,
+  invite_response,
   linked_account_id, linked_lead_id, linked_deal_id, linked_company_id, linked_contact_id,
   debtor_accounts!user_emails_linked_account_id_fkey ( account_number, debtor_first_name, debtor_surname ),
   leads ( first_name, last_name, company_name ),
@@ -238,6 +248,7 @@ function toItem(r: MailRow): MailItem {
     isFiled: r.is_filed,
     noRecordAt: r.no_record_at,
     isSettled: r.is_settled,
+    inviteResponse: r.invite_response ?? null,
     linkedTo: linkedRecord(r),
   }
 }

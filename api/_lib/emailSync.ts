@@ -717,28 +717,85 @@ async function findMatch(admin: SupabaseClient, fromAddress: string) {
  * show up in the connected mailbox (e.g. Spark) at all, even though it was
  * genuinely delivered.
  */
-export async function appendToSent(
+/* eslint-disable @typescript-eslint/no-explicit-any -- the admin client is untyped here. */
+/**
+ * Claim the right to sync one mailbox, or find that somebody already has it.
+ *
+ * ONE PLACE, BECAUSE THERE ARE TWO CALLERS and written twice they would drift — the cron would
+ * keep its own idea of how long a stale claim lives, and the two would stop excluding each other
+ * on exactly the mailbox that is busiest. The same rule as applyAccountFilters.
+ *
+ * The claim is a conditional UPDATE and is therefore atomic: two requests race for the row and
+ * exactly one comes back holding it.
+ *
+ * THE STALE WINDOW IS A CEILING, NOT A PROMISE. A function killed mid-sync never releases, and a
+ * mailbox that could never be synced again is a far worse bug than a duplicated connection, so a
+ * claim older than this is simply taken.
+ */
+export const SYNC_CLAIM_SECONDS = 60
+
+export async function claimSync(admin: any, userId: string): Promise<boolean> {
+  const stale = new Date(Date.now() - SYNC_CLAIM_SECONDS * 1000).toISOString()
+  const { data } = await admin
+    .from('email_connections')
+    .update({ sync_started_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .or(`sync_started_at.is.null,sync_started_at.lt.${stale}`)
+    .select('user_id')
+    .maybeSingle()
+  return Boolean(data)
+}
+
+/** Let the next one in as soon as this sync is done, rather than making it wait out the window. */
+export async function releaseSync(admin: any, userId: string): Promise<void> {
+  await admin.from('email_connections').update({ sync_started_at: null }).eq('user_id', userId)
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+export interface SentAppender {
+  /** File the message. A mailbox with no Sent folder does nothing and says so by returning false. */
+  append(rawMessage: string | Buffer): Promise<boolean>
+  close(): Promise<void>
+}
+
+/**
+ * Open the Sent folder now, append later.
+ *
+ * SPLIT IN TWO SO THE CONNECTION CAN BE OPENED WHILE THE MESSAGE IS STILL GOING OUT. Connecting,
+ * negotiating TLS, logging in and listing the mailboxes is four round trips to a mail server in
+ * another country, and done after the send it is time the person watching the spinner pays for
+ * twice. Started alongside the SMTP send it costs nothing, because the two talk to different
+ * servers and neither waits on the other.
+ *
+ * What is NOT moved earlier is the append itself: a message filed in Sent that then failed to
+ * send is a message somebody believes they have sent. The bytes only go in once SMTP has
+ * confirmed.
+ */
+export async function openSentAppender(
   conn: { email: string; imap_host: string; imap_port: number; encrypted_password: string },
-  rawMessage: string | Buffer,
-): Promise<void> {
-  const password = decrypt(conn.encrypted_password)
+): Promise<SentAppender> {
   const client = new ImapFlow({
     host: conn.imap_host,
     port: conn.imap_port,
     secure: conn.imap_port === 993,
-    auth: { user: conn.email, pass: password },
+    auth: { user: conn.email, pass: decrypt(conn.encrypted_password) },
     logger: false,
   })
   await client.connect()
-  try {
-    const mailboxes = await client.list()
-    const sentPath = findFolder(mailboxes, '\\Sent', ['sent', 'sent items', 'sent messages', 'inbox.sent', 'inbox/sent'])
-    if (!sentPath) return
-    await client.append(sentPath, rawMessage, ['\\Seen'])
-  } finally {
-    await client.logout().catch(() => {})
+  const mailboxes = await client.list()
+  const sentPath = findFolder(mailboxes, '\\Sent', ['sent', 'sent items', 'sent messages', 'inbox.sent', 'inbox/sent'])
+  return {
+    async append(rawMessage) {
+      if (!sentPath) return false
+      await client.append(sentPath, rawMessage, ['\\Seen'])
+      return true
+    },
+    async close() {
+      await client.logout().catch(() => {})
+    },
   }
 }
+
 
 export interface FetchedAttachment {
   filename: string

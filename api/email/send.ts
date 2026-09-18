@@ -3,7 +3,7 @@ import nodemailer from 'nodemailer'
 import MailComposer from 'nodemailer/lib/mail-composer'
 import { adminClient, requireCaller } from '../_lib/auth.js'
 import { decrypt, credentialsKeyProblem } from '../_lib/crypto.js'
-import { appendToSent } from '../_lib/emailSync.js'
+import { openSentAppender } from '../_lib/emailSync.js'
 import { SIGNATURE_CID, composeBody, fetchSignatureImage, signatureHtml } from '../_lib/signature.js'
 
 /** Sends an email through the caller's own connected mailbox via SMTP, with their saved signature appended. */
@@ -30,8 +30,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const { to, cc, subject, bodyHtml, inReplyTo, attachments: sent } = (req.body ?? {}) as {
+  const { to, cc, subject, bodyHtml, inReplyTo, attachments: sent, calendarReply } = (req.body ?? {}) as {
     to?: string; subject?: string; bodyHtml?: string
+    /**
+     * An iTIP reply to a meeting request, as a whole ICS file.
+     *
+     * Carried as `icalEvent` rather than as an ordinary attachment, because the two are not the
+     * same thing on the wire: nodemailer gives this one `Content-Type: text/calendar; method=REPLY`
+     * inside a multipart/alternative, which is what makes Outlook and Google fold the answer into
+     * the organiser's own meeting instead of showing them a file to open. Attached the other way
+     * it arrives as invite.ics sitting at the bottom of an email, and the organiser's tracking
+     * list still says nobody has answered.
+     */
+    calendarReply?: string
     /**
      * Files travelling with the message, base64 in this same JSON body.
      *
@@ -65,17 +76,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const { data: conn } = await admin.from('email_connections').select('*').eq('user_id', caller.id).maybeSingle()
+  /*
+   * BOTH LOOKUPS AT ONCE. They are two independent round trips to the same database for two
+   * unrelated rows, and run one after the other they were the first two of five waits a person
+   * sat through before the message even started going out. Nothing here depends on the other.
+   */
+  const [{ data: conn }, { data: profile }] = await Promise.all([
+    admin.from('email_connections').select('*').eq('user_id', caller.id).maybeSingle(),
+    admin
+      .from('profiles')
+      .select('email_signature, email_signature_image_url, email_signature_image_width, email_signature_image_align')
+      .eq('id', caller.id)
+      .maybeSingle(),
+  ])
   if (!conn) {
     res.status(400).json({ error: 'Connect your email account in Settings before sending email.' })
     return
   }
-
-  const { data: profile } = await admin
-    .from('profiles')
-    .select('email_signature, email_signature_image_url, email_signature_image_width, email_signature_image_align')
-    .eq('id', caller.id)
-    .maybeSingle()
   const signatureText = profile?.email_signature as string | null | undefined
   const signatureImageUrl = profile?.email_signature_image_url as string | null | undefined
   const signatureImageWidth = (profile?.email_signature_image_width as number | null | undefined) ?? 160
@@ -126,6 +143,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const fullHtml = composeBody(bodyHtml, signatureHtml(signatureText, image, imageSrc))
 
+  /* Built once and used for both the outgoing message and the Sent copy, so what the organiser
+     got and what the sender can see afterwards are the same bytes. */
+  const ical = calendarReply
+    ? { icalEvent: { method: 'REPLY', filename: 'invite.ics', content: calendarReply } }
+    : {}
+
+  /*
+   * The mailbox this copy will be filed in, opened WHILE the message is going out.
+   *
+   * The two talk to different servers, so the IMAP connect, TLS handshake, login and mailbox
+   * list happen for free inside the time SMTP is already taking. Started before the try below
+   * rather than inside it because a mailbox that will not open must not fail the send — the
+   * message still goes, and the Sent copy is what is lost.
+   */
+  const appenderSoon = openSentAppender({
+    email: conn.email as string,
+    imap_host: conn.imap_host as string,
+    imap_port: conn.imap_port as number,
+    encrypted_password: conn.encrypted_password as string,
+  }).catch(() => null)
+
   let sentMessageId: string | null = null
   try {
     const transporter = nodemailer.createTransport({
@@ -135,7 +173,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       auth: { user: conn.email as string, pass: decrypt(conn.encrypted_password as string) },
     })
     const info = await transporter.sendMail({
-      from: conn.email as string, to, subject, html: fullHtml, attachments,
+      from: conn.email as string, to, subject, html: fullHtml, attachments, ...ical,
       /*
        * BOTH PLACES, or the Sent copy shows a message that reached fewer people than it did.
        * Absent rather than empty: nodemailer accepts an empty Cc and mail servers vary.
@@ -148,6 +186,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // sender's address, which finds the client but not which of its deals is being discussed.
     sentMessageId = info.messageId ?? null
   } catch (err) {
+    /* The Sent connection was opened ahead of the send and nothing is going to be filed in it
+       now. Left open it would hold one of the mailbox's few concurrent slots until it timed out,
+       which is exactly the contention this change exists to remove. */
+    void appenderSoon.then((a) => a?.close())
     res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to send email.' })
     return
   }
@@ -159,7 +201,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // The Sent copy carries the same attachment, so the person's own mail client shows the
     // message exactly as the recipient got it rather than with a broken image in it.
     const raw = await new MailComposer({
-      from: conn.email as string, to, subject, html: fullHtml, attachments,
+      from: conn.email as string, to, subject, html: fullHtml, attachments, ...ical,
       /*
        * BOTH PLACES, or the Sent copy shows a message that reached fewer people than it did.
        * Absent rather than empty: nodemailer accepts an empty Cc and mail servers vary.
@@ -167,10 +209,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ...(cc && cc.trim() ? { cc } : {}),
       ...(inReplyTo ? { inReplyTo, references: [inReplyTo] } : {}),
     }).compile().build()
-    await appendToSent(
-      { email: conn.email as string, imap_host: conn.imap_host as string, imap_port: conn.imap_port as number, encrypted_password: conn.encrypted_password as string },
-      raw,
-    )
+    const appender = await appenderSoon
+    if (appender) {
+      try { await appender.append(raw) } finally { await appender.close() }
+    }
   } catch {
     // ignore -- the send itself already succeeded
   }

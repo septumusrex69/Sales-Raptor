@@ -166,6 +166,14 @@ export interface CalendarInvite {
   /** A phrase for a repeating meeting, or null for a one-off. Never the raw RRULE. */
   repeats: string | null
   uid: string | null
+  /**
+   * The revision number, echoed back unchanged in a reply.
+   *
+   * Without it the organiser's calendar cannot tell an answer to the meeting as it stands from an
+   * answer to the version it was before they moved it — and an accept against a stale sequence is
+   * discarded silently. Absent on plenty of real invitations, where nought is what it means.
+   */
+  sequence: number | null
 }
 
 const FREQ: Record<string, string> = {
@@ -243,7 +251,15 @@ export function parseInvite(ics: string | null | undefined): CalendarInvite | nu
     when: { startsAt: from.at, endsAt: to.at, allDay: from.allDay, timeZone: from.tz },
     repeats: describeRepeat(first('RRULE')?.value),
     uid: text('UID'),
+    sequence: sequenceOf(first('SEQUENCE')?.value),
   }
+}
+
+/** A SEQUENCE, or null where there was none. Null and nought are different: see CalendarInvite. */
+function sequenceOf(raw: string | undefined): number | null {
+  if (raw === undefined) return null
+  const n = Number(raw.trim())
+  return Number.isInteger(n) && n >= 0 ? n : null
 }
 
 const MONTHS = [

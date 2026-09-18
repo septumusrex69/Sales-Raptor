@@ -10,6 +10,9 @@
  */
 import { supabase } from './supabase'
 import { inviteInstant, type CalendarInvite } from './calendarInvite.ts'
+import {
+  attendeeFor, replyBody, replyIcs, replySubject, type InviteResponse,
+} from './inviteReply.ts'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON from PostgREST. */
 
@@ -113,14 +116,21 @@ export async function acceptInvite(input: {
   }
 
   /*
-   * An invite with no UID cannot be matched to a later revision, so it is inserted rather than
-   * upserted — PostgREST would otherwise conflict every one of them onto the same null key.
+   * ONE UPSERT, WHETHER OR NOT THERE IS A UID.
+   *
+   * This read `invite.uid ? upsert : insert` because the unique index used to be partial
+   * (`where ical_uid is not null`) and an upsert against it failed outright — "there is no unique
+   * or exclusion constraint matching the ON CONFLICT specification", which is what the firm saw
+   * on the button. Postgres will only use a partial index for an ON CONFLICT when the statement
+   * repeats its predicate, and PostgREST emits none. The index is now a plain one, which allows
+   * exactly the same rows — NULLs are distinct in a unique btree, so hand-made events with no UID
+   * still coexist — and an ON CONFLICT on a null UID matches nothing and inserts. The branch is
+   * gone rather than left in place untested.
    */
-  const q = invite.uid
-    ? supabase.from('calendar_events').upsert(row, { onConflict: 'owner_id,ical_uid' })
-    : supabase.from('calendar_events').insert(row)
-
-  const { data, error } = await q.select(COLUMNS).single()
+  const { data, error } = await supabase
+    .from('calendar_events')
+    .upsert(row, { onConflict: 'owner_id,ical_uid' })
+    .select(COLUMNS).single()
   if (error) throw new Error(error.message)
   return toEvent(data)
 }
@@ -143,4 +153,77 @@ export function eventForInvite(
 ): CalendarEvent | null {
   if (!invite.uid) return null
   return events.find((e) => e.icalUid === invite.uid) ?? null
+}
+
+/* ---------- answering the organiser ---------- */
+
+/**
+ * Tell the organiser, and remember that we did.
+ *
+ * TWO THINGS HAPPEN AND ONE OF THEM IS IRREVERSIBLE. The reply is an email: once it has gone,
+ * it has gone. So it goes FIRST, and the note in Raptor is written only after the mail server
+ * has taken it — the other order would leave a card saying "You accepted" for an answer that
+ * never left the building, which is exactly the kind of quiet lie that ends with somebody not
+ * turning up.
+ *
+ * A failure to write the note afterwards is swallowed on purpose: the organiser has been told,
+ * which is the part that matters to them, and the worst that follows is that the card offers
+ * the buttons again.
+ */
+export async function replyToInvite(input: {
+  invite: CalendarInvite
+  response: InviteResponse
+  /** Every address this person answers to, so the reply goes out as the one they were invited as. */
+  myAddresses: string[]
+  /** The message the invitation arrived on. The note is written against it. */
+  mailId: string | null
+  accessToken: string
+  /** When the meeting is, in words, for the one line the organiser reads. */
+  when: string | null
+}): Promise<void> {
+  const { invite, response, myAddresses, mailId, accessToken } = input
+  const organiser = invite.organiser?.email
+  if (!invite.uid || !organiser) {
+    throw new Error('This invitation does not say who to answer, so Raptor cannot reply to it.')
+  }
+  const me = attendeeFor(invite.attendees, myAddresses)
+  if (!me) throw new Error('Raptor does not know which address you were invited as.')
+
+  const at = inviteInstant(invite.when)
+  const ics = replyIcs({
+    uid: invite.uid,
+    sequence: invite.sequence,
+    summary: invite.summary,
+    organiser: { name: invite.organiser?.name ?? null, email: organiser },
+    me,
+    response,
+    now: new Date(),
+    /* An all-day event's dates are not instants and are left out rather than stamped at midnight
+       UTC, which would be a time nobody agreed to. */
+    startsAt: invite.when.allDay ? null : at.startsAt,
+    endsAt: invite.when.allDay ? null : at.endsAt,
+  })
+
+  const res = await fetch('/api/email/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({
+      to: organiser,
+      subject: replySubject(invite.summary, response),
+      bodyHtml: replyBody({ summary: invite.summary, response, when: input.when, me }),
+      calendarReply: ics,
+    }),
+  })
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(body.error ?? 'Could not send your answer to the organiser.')
+  }
+
+  if (!mailId) return
+  await supabase
+    .from('user_emails')
+    .update({ invite_response: response, invite_responded_at: new Date().toISOString() })
+    .eq('id', mailId)
+    /* The organiser already has the answer; a note we failed to write is not worth undoing it. */
+    .then(undefined, () => {})
 }

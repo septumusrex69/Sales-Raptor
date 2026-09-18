@@ -250,7 +250,12 @@ ok('an emptied Cc box sends no Cc', /\.\.\.\(cc\.trim\(\) \? \{ cc: cc\.trim\(\)
 
 /* ---------- 7. the send, in both places ---------- */
 
-ok('the endpoint accepts a Cc', /const \{ to, cc, subject, bodyHtml, inReplyTo, attachments: sent \}/.test(send))
+/*
+ * THE FIELD, NOT ITS NEIGHBOURS. This pinned the whole destructure in order and went red the day
+ * an unrelated field was added beside it -- a check that fails on correct code is a check somebody
+ * deletes. What matters is that `cc` is read off the body at all.
+ */
+ok('the endpoint accepts a Cc', /const \{[^}]*\bcc\b[^}]*\} = \(req\.body/.test(send))
 
 const SPREAD = /\.\.\.\(cc && cc\.trim\(\) \? \{ cc \} : \{\}\)/
 /*

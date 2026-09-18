@@ -301,6 +301,7 @@ const sync = read('../../api/_lib/emailSync.ts')
 const route = read('../../api/email/attachment.ts')
 const userMail = read('../../src/lib/userMail.ts')
 const page = read('../../src/pages/mail/MailPage.tsx')
+const schema = read('../../supabase/schema.sql')
 
 /*
  * SCOPED TO readableParts, which decides what is FETCHED. Asserted against the whole file it
@@ -381,9 +382,32 @@ ok('...and renders it', /<InviteCard ics=\{calendar\} events=\{events\}/.test(pa
    */
   ok('...so a revision updates rather than duplicating',
     /onConflict: 'owner_id,ical_uid'/.test(events))
-  /* An invite with no UID cannot be matched to a revision, and must not conflict on a null key. */
-  ok('...and one with no UID is inserted rather than upserted onto nothing',
-    /invite\.uid\s*\n?\s*\? supabase\.from\('calendar_events'\)\.upsert/.test(events))
+  /*
+   * ONE UPSERT, AND AN INDEX IT CAN ACTUALLY USE.
+   *
+   * This used to branch — upsert when there was a UID, plain insert when there was not — because
+   * the unique index carried `where ical_uid is not null`. Postgres only uses a PARTIAL index for
+   * an ON CONFLICT when the statement repeats its predicate, and PostgREST emits none, so the
+   * upsert failed outright: "there is no unique or exclusion constraint matching the ON CONFLICT
+   * specification" is what the firm saw on the button. The predicate is what is guarded now — put
+   * it back and the button breaks again, silently as far as anything else here is concerned.
+   *
+   * Hand-made events carry no UID and several of them are not a duplicate of anything. NULLs are
+   * distinct in a unique btree, which is what keeps that true without a predicate.
+   */
+  /*
+   * THE LAST DEFINITION, NOT THE FIRST. supabase/schema.sql is append-only: the original partial
+   * index is still in the file above the migration that replaced it, and a check reading the
+   * first match asserts against a definition the database has not had for some time. Read the
+   * first one and this check goes red on correct code, which is how a check gets deleted.
+   */
+  const uidIndexes = schema.match(/create unique index[^;]*calendar_events_uid_idx[^;]*;/gi) ?? []
+  const uidIndex = uidIndexes[uidIndexes.length - 1] ?? ''
+  ok('the schema defines the index at all', uidIndexes.length > 0)
+  ok('there is a unique index on the invite UID', /\(owner_id, ical_uid\)/.test(uidIndex))
+  ok('...and it is NOT partial, or the upsert cannot use it', !/where/i.test(uidIndex))
+  ok('...so the branch that worked around it is gone',
+    !/invite\.uid\s*\n?\s*\? supabase/.test(events))
 
   /*
    * A CANCELLATION OFFERS NO BUTTON, and the write refuses it as well. Two guards, because the
@@ -396,10 +420,23 @@ ok('...and renders it', /<InviteCard ics=\{calendar\} events=\{events\}/.test(pa
     /if \(invite\.cancelled\) throw new Error/.test(events))
 
   /*
-   * WHAT ADDING IT DOES NOT DO. There is no iTIP reply yet, so the organiser is told nothing --
-   * and somebody who believed otherwise would not be expected when they turned up.
+   * THE ORGANISER IS TOLD, and the card says so.
+   *
+   * The firm: "I don't know how to respond to this people. How am I going to confirm the
+   * meeting?" Putting a meeting on your own calendar tells nobody anything — the organiser's
+   * tracking list goes on saying "No response" — so the three answers are on the card and each
+   * one sends an iTIP reply. The old wording promised the opposite and must not survive.
    */
-  ok('the card says the organiser is not notified', /The organiser is not notified/.test(card))
+  ok('the card offers all three answers',
+    /\['accepted', 'tentative', 'declined'\] as const/.test(card))
+  ok('...and each one answers the organiser', /onRespond\(invite, r\)/.test(card))
+  ok('...and says the organiser is told', /is told straight away/.test(card))
+  ok('...and no longer claims they are not', !/The organiser is not notified/.test(card))
+  /* Offered only where a reply would reach somebody: a published calendar copy has no one to
+     answer, and a button that quietly goes nowhere is worse than no button. */
+  ok('...offered only where there is somebody to answer',
+    /const canAnswer = canReplyTo\(invite\)/.test(card))
+  ok('...and the calendar-only button is what is left otherwise', /Add to my calendar/.test(card))
   /*
    * A FLOATING TIME CANNOT BE PLACED IN A DAY. The invite named no zone, which means the reader's
    * own clock, so it is stored without an hour rather than being given one nobody stands behind.

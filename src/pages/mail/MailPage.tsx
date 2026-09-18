@@ -13,7 +13,11 @@ import { RowMenu, type RowMenuItem } from '../../components/ui/RowMenu'
 import { Modal } from '../../components/ui/Modal'
 import { inviteHeadline, inviteWhen, parseInvite, type CalendarInvite } from '../../lib/calendarInvite.ts'
 import {
-  acceptInvite, eventForInvite, fetchCalendarEvents, removeCalendarEvent, type CalendarEvent,
+  RESPONSE_WORD, canReplyTo, type InviteResponse,
+} from '../../lib/inviteReply.ts'
+import {
+  acceptInvite, eventForInvite, fetchCalendarEvents, removeCalendarEvent, replyToInvite,
+  type CalendarEvent,
 } from '../../lib/calendarEvents.ts'
 import { useAuth } from '../../store/AuthContext'
 import { relativeDayLabel, timeOfDay } from '../../lib/dateLabels'
@@ -289,6 +293,51 @@ export function MailPage() {
     setStatus(`Added to your Raptor calendar${event.startsAt || event.startsOn ? '' : ' \u2014 without a time, because the invite did not give one in any timezone'}.`)
   }
 
+  /**
+   * Answer the organiser, and put an accepted meeting in the day.
+   *
+   * THE REPLY IS THE POINT, and it goes first. The firm: "I need to click on that and it needs
+   * to accept the meeting and let them know that the meeting has been accepted." Adding it to
+   * the calendar told nobody anything — the organiser's own tracking list went on saying "No
+   * response", which is how somebody ends up sitting in a meeting room on their own.
+   *
+   * An accept or a tentative also lands on the Raptor calendar; a decline does not, and takes it
+   * off again if it was already there. Declining and keeping the meeting in your day is not a
+   * state anybody meant to be in.
+   */
+  async function respond(invite: CalendarInvite, response: InviteResponse, mail: MailItem) {
+    const token = session?.access_token
+    if (!token || !currentUser) return
+    await replyToInvite({
+      invite,
+      response,
+      /* Both, because mail arrives at the connected mailbox and the sign-in address is not always
+         the same one — the reply has to go out as the address the organiser actually invited. */
+      myAddresses: [mailbox, currentUser.email].filter((a): a is string => !!a),
+      mailId: mail.id,
+      accessToken: token,
+      when: inviteWhen(invite.when),
+    })
+
+    if (response === 'declined') {
+      const on = eventForInvite(events, invite)
+      if (on) await dropEvent(on.id)
+    } else {
+      const event = await acceptInvite({ invite, ownerId: currentUser.id, userEmailId: mail.id })
+      setEvents((list) => [...list.filter((e) => e.id !== event.id), event])
+    }
+
+    /* The card reads its state off the row, so the row has to hear about it without a reload. */
+    setItems((list) => list.map((m) => (
+      m.id === mail.id ? { ...m, inviteResponse: response } : m
+    )))
+    setStatus(
+      response === 'declined' ? 'Declined, and the organiser has been told.'
+        : response === 'tentative' ? 'Answered as tentative, and it is in your Raptor calendar.'
+          : 'Accepted. The organiser has been told and it is in your Raptor calendar.',
+    )
+  }
+
   async function dropEvent(id: string) {
     await removeCalendarEvent(id)
     setEvents((list) => list.filter((e) => e.id !== id))
@@ -304,6 +353,8 @@ export function MailPage() {
     return () => { cancelled = true }
   }, [currentUser])
   const [reading, setReading] = useState<string | null>(null)
+  /** Messages whose body is being fetched right now — see the guard in `toggleTo`. */
+  const fetchingBody = useRef<Set<string>>(new Set())
   const [readError, setReadError] = useState<Record<string, string>>({})
   const [view, setView] = useEmailView()
 
@@ -451,8 +502,24 @@ export function MailPage() {
     }
 
     if (bodies[mail.id] !== undefined) return
+    /*
+     * ONE FETCH PER MESSAGE, INCLUDING WHILE ONE IS STILL IN FLIGHT.
+     *
+     * The line above only knows about fetches that have already come back, and reading a message
+     * means opening an IMAP connection to the mail server — several seconds on a bad line. So
+     * somebody who clicks again because nothing has happened yet closes the message and reopens
+     * it, `bodies` is still empty, and a second identical fetch goes out. The runtime logs showed
+     * one message fetched five times inside five seconds, each one taking a connection the
+     * mailbox could have given to the fetch that was already running. Clicking impatiently made
+     * it slower, which is the worst possible shape for a bug like this.
+     *
+     * A ref rather than state on purpose: this must be true the instant it is set, not after the
+     * next render, which is precisely the window the second click lands in.
+     */
+    if (fetchingBody.current.has(mail.id)) return
     const token = session?.access_token
     if (!token) return
+    fetchingBody.current.add(mail.id)
     setReading(mail.id)
     setReadError((e) => { const next = { ...e }; delete next[mail.id]; return next })
     try {
@@ -468,6 +535,7 @@ export function MailPage() {
       // The snippet stays on screen, so this explains the gap rather than leaving it blank.
       setReadError((prev) => ({ ...prev, [mail.id]: e instanceof Error ? e.message : String(e) }))
     } finally {
+      fetchingBody.current.delete(mail.id)
       setReading(null)
     }
   }
@@ -1172,7 +1240,8 @@ export function MailPage() {
                 </div>
                 <MailBody mail={m} body={bodies[m.id]} images={bodyImages[m.id]}
                   calendar={calendars[m.id]} events={events}
-                  onAccept={(inv) => accept(inv, m.id)} onRemoveEvent={dropEvent}
+                  onAccept={(inv) => accept(inv, m.id)}
+                  onRespond={(inv, r) => respond(inv, r, m)} onRemoveEvent={dropEvent}
                   skippedImages={imagesSkipped[m.id]}
                   loadingBody={reading === m.id}
                   bodyError={readError[m.id]} onBlock={() => setBlocking(m)}
@@ -1204,6 +1273,7 @@ export function MailPage() {
                   calendar={calendars[m.id]}
                   events={events}
                   onAccept={(inv) => accept(inv, m.id)}
+                  onRespond={(inv, r) => respond(inv, r, m)}
                   onRemoveEvent={dropEvent}
                   skippedImages={imagesSkipped[m.id]}
                   loadingBody={reading === m.id}
@@ -1995,7 +2065,7 @@ function BarButton({ sticky, onClick, label, icon }: {
 
 /** The message itself, shared by the expanded row and the reading pane. */
 function MailBody({
-  mail, body, images, calendar, events, onAccept, onRemoveEvent, skippedImages, loadingBody,
+  mail, body, images, calendar, events, onAccept, onRespond, onRemoveEvent, skippedImages, loadingBody,
   bodyError, onBlock, onReply, onReplyAll, onForward, onJunk, onMove, onUnread, onNoRecord,
   onUndoNoRecord, onLink, onCreateLead, onDownload, downloading, downloadError, sticky,
 }: {
@@ -2006,6 +2076,8 @@ function MailBody({
   /** This person's calendar, so an invite already on it says so. */
   events: CalendarEvent[]
   onAccept: (invite: CalendarInvite) => Promise<void>
+  /** Tell the organiser. See replyToInvite — this is the half that leaves the building. */
+  onRespond: (invite: CalendarInvite, response: InviteResponse) => Promise<void>
   onRemoveEvent: (id: string) => Promise<void>
   /** Pictures drawn into the message — a signature, nearly always. */
   images?: InlineImage[]
@@ -2196,7 +2268,8 @@ function MailBody({
         covering note, and what the meeting actually is beats a note about it.
       */}
       {!loadingBody && (
-        <InviteCard ics={calendar} events={events} onAccept={onAccept} onRemove={onRemoveEvent} />
+        <InviteCard ics={calendar} events={events} onAccept={onAccept}
+          onRespond={onRespond} answered={mail.inviteResponse} onRemove={onRemoveEvent} />
       )}
 
       {loadingBody && (
@@ -2474,10 +2547,14 @@ function RecipientLines({ mail, mine }: {
   )
 }
 
-function InviteCard({ ics, events, onAccept, onRemove }: {
+function InviteCard({ ics, events, onAccept, onRespond, answered, onRemove }: {
   ics?: string
   events: CalendarEvent[]
+  /** Put it in the day and tell nobody. What is left when there is no organiser to answer. */
   onAccept: (invite: CalendarInvite) => Promise<void>
+  onRespond: (invite: CalendarInvite, response: InviteResponse) => Promise<void>
+  /** What this person already told the organiser, if anything. */
+  answered: InviteResponse | null
   onRemove: (id: string) => Promise<void>
 }) {
   const [busy, setBusy] = useState(false)
@@ -2488,6 +2565,9 @@ function InviteCard({ ics, events, onAccept, onRemove }: {
   const when = inviteWhen(invite.when)
   const people = invite.attendees.filter((a) => a.name || a.email)
   const already = eventForInvite(events, invite)
+  /* Offered only where a reply would actually reach somebody — see canReplyTo. */
+  const canAnswer = canReplyTo(invite)
+  const organiserName = invite.organiser?.name ?? invite.organiser?.email ?? 'The organiser'
 
   async function run(work: () => Promise<void>) {
     setBusy(true); setError(null)
@@ -2531,15 +2611,50 @@ function InviteCard({ ics, events, onAccept, onRemove }: {
         <p className="text-[11px] text-negative-700 mt-1.5">
           The organiser has called this off. Nothing to add.
         </p>
+      ) : canAnswer ? (
+        /*
+          THE THREE ANSWERS A MEETING HAS, and pressing one tells the organiser.
+          Accept and Tentative also put it in the day; Decline takes it back out if it was
+          already there, because declining a meeting you are still carrying is not a state
+          anybody meant to be in.
+        */
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {busy && <Loader2 size={13} className="animate-spin text-slate-400" />}
+          {(['accepted', 'tentative', 'declined'] as const).map((r) => (
+            <button key={r} type="button" disabled={busy}
+              onClick={() => void run(() => onRespond(invite, r))}
+              className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border disabled:opacity-50 ${
+                answered === r
+                  ? 'border-navy-950 bg-navy-950 text-white'
+                  : r === 'accepted'
+                    ? 'border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}>
+              {r === 'accepted' && <Check size={13} />}
+              {RESPONSE_WORD[r]}
+            </button>
+          ))}
+          <span className="text-[11px] text-slate-500">
+            {answered
+              ? `You answered ${RESPONSE_WORD[answered].toLowerCase()}. ${organiserName} has been told, and their calendar has been updated. Press another to change your answer.`
+              : `${organiserName} is told straight away, and their calendar updates itself.`}
+          </span>
+          {already && (
+            <button type="button" disabled={busy} onClick={() => void run(() => onRemove(already.id))}
+              className="text-[11px] font-medium text-slate-500 hover:underline">
+              Take it off my calendar
+            </button>
+          )}
+        </div>
       ) : (
+        /*
+          NOBODY TO ANSWER. A calendar attachment published rather than sent, or an invitation
+          with no organiser address on it, can still be put in the day -- but the card must not
+          offer to tell somebody who is not there, and must say which of the two this is.
+        */
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {busy && <Loader2 size={13} className="animate-spin text-slate-400" />}
           {already ? (
-            /*
-              ALREADY ON IT, AND THE UNDO BESIDE IT. Matched on the invite's UID rather than on
-              its title and time, because a revised invitation changes the time and is still the
-              same meeting -- which is exactly when somebody presses the button again.
-            */
             <>
               <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-positive-700">
                 <Check size={12} /> In your Raptor calendar
@@ -2555,15 +2670,10 @@ function InviteCard({ ics, events, onAccept, onRemove }: {
               <CalendarPlus size={13} /> Add to my calendar
             </button>
           )}
-          {/*
-            WHAT THIS DOES NOT DO, said plainly. Adding it here does not tell the organiser
-            anything -- that is an iTIP reply and Raptor does not send one yet. Somebody who
-            believed the organiser had been told would not turn up expected.
-          */}
           <span className="text-[11px] text-slate-500">
-            {already
-              ? 'The organiser has not been told either way \u2014 reply if they are expecting one.'
-              : 'Goes on your Raptor calendar only. The organiser is not notified.'}
+            {invite.organiser?.email
+              ? 'This is a copy of a meeting rather than a request, so there is nothing to answer.'
+              : 'The invitation does not say who to answer, so this goes on your calendar only.'}
           </span>
         </div>
       )}
@@ -2598,7 +2708,7 @@ function InviteLine({ label, value, note }: { label: string; value: string; note
 }
 
 function MailRow({
-  mail, chosen, expanded, selecting, blocked, body, images, calendar, events, onAccept,
+  mail, chosen, expanded, selecting, blocked, body, images, calendar, events, onAccept, onRespond,
   onRemoveEvent, skippedImages, loadingBody,
   bodyError, mine, onToggle, onChoose, onLink, onCreateLead, onBlock, onReply, onReplyAll,
   onForward, onJunk, onMove,
@@ -2609,6 +2719,7 @@ function MailRow({
   calendar?: string
   events: CalendarEvent[]
   onAccept: (invite: CalendarInvite) => Promise<void>
+  onRespond: (invite: CalendarInvite, response: InviteResponse) => Promise<void>
   onRemoveEvent: (id: string) => Promise<void>
   chosen: boolean
   expanded: boolean
@@ -2693,7 +2804,7 @@ function MailRow({
             <RecipientLines mail={mail} mine={mine} />
           </div>
           <MailBody mail={mail} body={body} images={images} calendar={calendar}
-            events={events} onAccept={onAccept} onRemoveEvent={onRemoveEvent}
+            events={events} onAccept={onAccept} onRespond={onRespond} onRemoveEvent={onRemoveEvent}
             skippedImages={skippedImages}
             loadingBody={loadingBody}
             bodyError={bodyError} onBlock={onBlock} onReply={onReply} onReplyAll={onReplyAll}

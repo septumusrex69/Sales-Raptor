@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { adminClient } from '../_lib/auth.js'
-import { syncConnection, type EmailConnectionRow } from '../_lib/emailSync.js'
+import { claimSync, releaseSync, syncConnection, type EmailConnectionRow } from '../_lib/emailSync.js'
 
 /*
  * NOTHING IS PRUNED. Mail stays until somebody deals with it.
@@ -44,13 +44,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const results: { userId: string; logged?: number; error?: string }[] = []
+  const results: { userId: string; logged?: number; error?: string; skipped?: boolean }[] = []
   for (const conn of (connections ?? []) as EmailConnectionRow[]) {
+    /*
+     * THE CRON DEFERS TO A PERSON. If somebody has their mailbox open and Raptor is already
+     * pulling it, the nightly run must not open a second connection to the same account — mail
+     * servers cap those per account, and the collision slows down the person who is actually
+     * sitting there. Skipping costs nothing: this mailbox was being synced anyway.
+     */
+    if (!(await claimSync(admin, conn.user_id))) {
+      results.push({ userId: conn.user_id, skipped: true })
+      continue
+    }
     try {
       const result = await syncConnection(admin, conn)
       results.push({ userId: conn.user_id, logged: result.logged })
     } catch (err) {
       results.push({ userId: conn.user_id, error: err instanceof Error ? err.message : 'Sync failed.' })
+    } finally {
+      await releaseSync(admin, conn.user_id)
     }
   }
 
