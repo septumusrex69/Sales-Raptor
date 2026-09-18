@@ -249,39 +249,44 @@ select:autofill {
  * never fetches a background on a display:none element, whereas it will happily download an
  * <img> inside one. A phone shouldn't pay for a picture it is never shown.
  *
- * Three declarations of one property, each overriding the last where it's understood. Anything
- * modern takes the standard image-set; Safari 14-16 takes the -webkit- form and gets the same
- * files; anything older keeps the plain JPEG. A browser that chokes on the last declaration
- * falls back to the one above it and still ends up with WebP, so the ordering is the safety
- * net rather than a guess about support.
+ * ONE PLAIN url(), AND NOT image-set(). This carried three declarations of one property on the
+ * theory that a browser which chokes on the last falls back to the one above it. The build
+ * falsifies that theory: Lightning CSS reads the three as one intent, drops the plain url()
+ * safety net, and emits a -webkit-image-set carrying type() -- which WebKit's prefixed form has
+ * never supported and therefore rejects. On any Safari that does not take the unprefixed form,
+ * both surviving declarations are invalid and the panel renders empty. The Collections hero had
+ * the identical rule and was reported blank on an iPad; this one is hidden below lg, which is
+ * the only reason nobody saw it here first.
  *
- * The 2x file is only ever fetched by a screen dense enough to need it — an ordinary monitor
- * pays 257KB, not 409KB.
+ * WebP has been read by Safari since 14, Chrome since 32 and Firefox since 65, so the JPEG is
+ * kept on disk for anything that links to it directly and is no longer in the cascade.
+ *
+ * THE 2x FILE IS STILL ONLY FETCHED BY A SCREEN DENSE ENOUGH TO NEED IT — an ordinary monitor
+ * pays 257KB, not 409KB. A resolution query does that in a way a minifier cannot collapse,
+ * because the two rules are not alternatives for one property, they are different conditions.
  */
 .login-photo {
-  background-image: url('/brand/raptor-login.jpg');
-  background-image: -webkit-image-set(url('/brand/raptor-login.webp') 1x, url('/brand/raptor-login@2x.webp') 2x);
-  background-image: image-set(
-    url('/brand/raptor-login.webp') type('image/webp') 1x,
-    url('/brand/raptor-login@2x.webp') type('image/webp') 2x,
-    url('/brand/raptor-login.jpg') type('image/jpeg') 1x
-  );
+  background-image: url('/brand/raptor-login.webp');
   background-size: cover;
   background-position: 32% center;
+}
+@media (min-resolution: 2dppx) {
+  .login-photo {
+    background-image: url('/brand/raptor-login@2x.webp');
+  }
 }
 
 /*
  * The Collections hero photograph.
  *
- * Same bargain as the sign-in panel above: a background rather than an <img>, and the same three
- * declarations of one property — anything modern takes the standard image-set, Safari 14-16 takes
- * the -webkit- form and gets the same file, anything older keeps the plain JPEG.
+ * Same bargain as the sign-in panel above: a background rather than an <img>, and one plain
+ * url() to a WebP for the reason set out on the declaration itself.
  *
  * THE SCRIM IS A PSEUDO-ELEMENT, NOT PART OF THE BACKGROUND, which is the one place this departs
  * from the raptor skin's hero. That one composes gradient and photograph into a single background
  * so the copy's contrast cannot drift as the image changes behind it; here the image never
- * changes, and keeping the scrim separate means the image-set declarations stay readable instead
- * of repeating a four-stop gradient three times.
+ * changes, and keeping the scrim separate keeps a four-stop gradient out of the declaration that
+ * loads the picture.
  *
  * Darkest on the left, where the wordmark and the headline sit, and lifting through the middle so
  * the sunrise survives. The right edge comes back down so the rail of small caps has something to
@@ -302,12 +307,23 @@ select:autofill {
    */
   border-radius: var(--skin-hero-radius);
   background-color: #0b1420;
-  background-image: url('/brand/collections-hero.jpg');
-  background-image: -webkit-image-set(url('/brand/collections-hero.webp') 1x);
-  background-image: image-set(
-    url('/brand/collections-hero.webp') type('image/webp') 1x,
-    url('/brand/collections-hero.jpg') type('image/jpeg') 1x
-  );
+  /*
+   * ONE PLAIN url(), AND NOT image-set(). This was three declarations of one property -- a plain
+   * JPEG, then -webkit-image-set, then the standard image-set -- on the theory that a browser
+   * which chokes on the last falls back to the one above it.
+   *
+   * THE BUILD FALSIFIES THAT THEORY. Lightning CSS reads the three as one intent and emits only
+   * two: a -webkit-image-set carrying type(), which WebKit's prefixed form has never supported
+   * and therefore rejects, and a standard image-set. The plain url() safety net is optimised
+   * away. So on any Safari that does not take the unprefixed form, BOTH declarations are invalid
+   * and there is nothing left -- which is a hero that renders as a flat navy panel, exactly as
+   * the firm reported it on an iPad.
+   *
+   * WebP has been read by Safari since 14, Chrome since 32 and Firefox since 65. Nobody here is
+   * on a browser that needs the JPEG, and one declaration is one thing a minifier cannot
+   * rearrange into nothing.
+   */
+  background-image: url('/brand/collections-hero.webp');
   background-size: cover;
   background-position: center;
 }

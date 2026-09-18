@@ -75,7 +75,7 @@ export function CollectionsHero({ figures, filters, action }: {
             is there for the widths where it has to wrap anyway — left alone the last word drops
             to a line of its own, which on a heading this size is very visible.
           */}
-          <h1 className="mt-2.5 text-3xl sm:text-[46px] font-bold tracking-tight text-white leading-[1.12] text-balance">
+          <h1 className="mt-2.5 text-2xl sm:text-[32px] font-semibold tracking-[-0.015em] text-white leading-[1.15] text-balance">
             The sky is only the beginning.
           </h1>
           <p className="mt-3 text-[11px] font-medium uppercase tracking-[0.3em] text-gold-400">

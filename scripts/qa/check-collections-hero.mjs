@@ -174,9 +174,40 @@ ok('the hero renders it', /greetingLine\(new Date\(\), currentUser\?\.name\)/.te
  * browsers take image-set, Safari 14-16 the -webkit- form, anything older the plain JPEG.
  */
 ok('the photograph is a background', /\.collections-hero \{/.test(css))
-ok('...with a JPEG anything can read', /background-image: url\('\/brand\/collections-hero\.jpg'\)/.test(css))
-ok('...a webkit image-set for Safari 14-16', /-webkit-image-set\(url\('\/brand\/collections-hero\.webp'\)/.test(css))
-ok('...and the standard one above it', /image-set\(\s*\n\s*url\('\/brand\/collections-hero\.webp'\) type\('image\/webp'\)/.test(css))
+const heroRule = css.slice(css.indexOf('.collections-hero {'), css.indexOf('.collections-hero::before'))
+ok('...declared as one plain url', /background-image: url\('\/brand\/collections-hero\.webp'\);/.test(heroRule))
+
+/*
+ * AND NOT AS image-set(), ANYWHERE IN THE STYLESHEET. This is the bug the firm found on an iPad
+ * and it is worth the whole comment, because the broken version looked MORE careful than the fix.
+ *
+ * Both photographs carried three declarations of one property -- a plain JPEG, then
+ * -webkit-image-set, then the standard image-set -- on the stated theory that a browser choking
+ * on the last falls back to the one above it. The build falsifies that theory. Lightning CSS
+ * reads the three as one intent and emits two: a -webkit-image-set carrying type(), which
+ * WebKit's prefixed form has never supported and therefore REJECTS, and a standard image-set.
+ * The plain url() safety net is optimised away. On any Safari that does not take the unprefixed
+ * form, both surviving declarations are invalid, nothing is left, and the hero renders as a flat
+ * navy panel -- which is exactly what was reported.
+ *
+ * ASSERTED OVER THE WHOLE STYLESHEET, not just this rule: the sign-in photograph had the
+ * identical bug and nobody had seen it, because that panel is hidden below lg. A check scoped to
+ * the hero would have left it there.
+ */
+/*
+ * Comments stripped first. The rule has to be asserted over the CODE, because the explanation of
+ * why image-set is gone necessarily says "image-set" several times -- and the first version of
+ * this line failed on the fixed stylesheet for exactly that reason. The usual trap runs the other
+ * way, a check passing because of the comment about the fix; this is the same mistake reflected.
+ */
+const cssCode = css.replace(/\/\*[\s\S]*?\*\//g, '')
+ok('image-set is not used anywhere in the stylesheet', !/image-set\(/.test(cssCode))
+ok('...including the sign-in photograph, which had the same bug',
+  /\.login-photo \{[\s\S]{0,200}background-image: url\('\/brand\/raptor-login\.webp'\);/.test(css))
+/* The dense-screen file survives as a resolution query, which is two conditions rather than two
+   alternatives for one property, and therefore nothing a minifier can collapse. */
+ok('...and the 2x file is still only fetched by a screen that needs it',
+  /@media \(min-resolution: 2dppx\) \{\s*\n\s*\.login-photo \{/.test(css))
 
 /*
  * IT HAS TO BE SMALL ENOUGH TO SHIP. The source was a 2.3MB PNG; a hero that costs two megabytes
@@ -224,8 +255,7 @@ ok(`the heavy pass is the one across (${worst[0]} vs ${worst[1]})`, worst[0] > w
  * finish. A hard-coded 18px would pass a check for "round" and still drift the day a skin moves
  * the token, so what is asserted is that this reads the SAME token .app-hero does.
  */
-const panel = css.slice(css.indexOf('.collections-hero {'), css.indexOf('.collections-hero::before'))
-ok('the panel is rounded off the shared token', /border-radius: var\(--skin-hero-radius\);/.test(panel))
+ok('the panel is rounded off the shared token', /border-radius: var\(--skin-hero-radius\);/.test(heroRule))
 ok('...the same one every other hero uses',
   /\.app-hero \{[\s\S]*?border-radius: var\(--skin-hero-radius\);/.test(css))
 /* And it sits inside the page's padding rather than cancelling it. */
