@@ -3825,3 +3825,29 @@ as $$
 $$;
 
 grant execute on function public.collector_daily(uuid, timestamptz, timestamptz) to authenticated;
+
+-- ---------- A debtor is a person or a company, and Raptor has to know which ----------
+-- debtor_kind was added after the book was imported and defaults to 'individual', so three of the
+-- firm's company accounts said so and the rest did not — the state CLAUDE.md already records:
+-- "The firm's two newest accounts are both companies and neither could say so." The account screen
+-- switches on this flag, so an unmarked company showed a panel headed "Debtor details" over a
+-- field labelled "ID Number" holding 2016/210735/07.
+--
+-- ONLY THE UNAMBIGUOUS HALF IS MARKED HERE. A registration number in the identity field is proof:
+-- nobody types 2019/123456/07 for a person. A company-shaped NAME is strong evidence and not proof
+-- — `\bcc\b` matches a person with the initials C.C. — and the cost of being wrong is a real
+-- person's account relabelled and their trace search refused. Those are left for a collector to
+-- set in one click, which the screen now suggests.
+--
+-- Normalised on the way past as well: the bureau prefixes a letter of its own (K2016/210735/07)
+-- and the firm's records do not, so two spellings of one company would never match a lookup keyed
+-- on the number — which is exactly what a CIPC or bureau enquiry is.
+update public.debtor_accounts
+set debtor_kind = 'company',
+    debtor_id_number = regexp_replace(
+      trim(debtor_id_number), '^[A-Za-z]?\s*(\d{4})\s*/\s*(\d{4,7})\s*/\s*(\d{2})\s*$', '\1/\2/\3'
+    )
+where debtor_id_number ~* '^[A-Z]?\s*\d{4}\s*/\s*\d{4,7}\s*/\s*\d{2}\s*$'
+  and (debtor_kind is distinct from 'company'
+       or debtor_id_number <> regexp_replace(
+            trim(debtor_id_number), '^[A-Za-z]?\s*(\d{4})\s*/\s*(\d{4,7})\s*/\s*(\d{2})\s*$', '\1/\2/\3'));

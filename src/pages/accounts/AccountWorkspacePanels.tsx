@@ -7,6 +7,7 @@ import { Card } from '../../components/ui/Card'
 import { PhoneLink } from '../../components/PhoneLink'
 import { formatDate, formatMoney } from '../../data/mockData'
 import type { DebtorAccount } from '../../lib/accountBook'
+import { identityProblem, kindFromIdentity } from '../../lib/debtorIdentity.ts'
 import {
   addContact, deleteDocument, documentUrl, retireContact, saveDebtorIdentity, saveDebtorPreferences,
   updateContact, uploadDocument, verifyContact, CONTACT_KINDS, DOCUMENT_KINDS, TRACE_KIND,
@@ -122,6 +123,42 @@ export function DebtorDetailsPanel({ account, name, workspace, properties, onCha
         </button>
       </div>
 
+      {/*
+        WHICH ONE THIS DEBTOR IS, and until now nothing could say.
+
+        The column has existed since the book was imported and there was no way to write to it, so
+        three accounts said "company" and the rest defaulted to "individual" — including sixteen
+        holding a registration number in the ID field and named "(Pty) Ltd". The whole panel turns
+        on this: what it is called, what the identity field is called, whether contacts are the
+        debtor's own numbers or the people who answer for a company, and what a trace is searched
+        on. It is one click because the consequence of getting it wrong is visible immediately.
+      */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <span className="text-[11px] text-slate-400">This debtor is</span>
+        <div className="flex rounded-lg border border-slate-200 p-0.5">
+          {([['individual', 'A person'], ['company', 'A company']] as const).map(([kind, label]) => (
+            <button key={kind} type="button" disabled={busy}
+              onClick={() => { if (account.debtorKind !== kind) run(() => saveDebtorIdentity(account.id, { debtorKind: kind })) }}
+              className={`rounded-md px-2.5 py-1 text-xs font-medium transition disabled:opacity-50 ${
+                account.debtorKind === kind ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-700'
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {/*
+          SUGGESTED, NEVER SWITCHED. A registration number in the identity field is proof of a
+          company, but flipping the account under somebody mid-call would relabel the panel and
+          refuse their trace search without anybody asking for it. The screen points; a person
+          decides.
+        */}
+        {!isCompany && kindFromIdentity(account.debtorIdNumber) === 'company' && (
+          <span className="text-[11px] text-gold-700">
+            That identity number is a company registration number.
+          </span>
+        )}
+      </div>
+
       {addKind && (
         <ContactForm accountId={account.id} initialKind={addKind} busy={busy}
           forCompany={isCompany} onDone={() => setAddKind(null)} run={run} />
@@ -142,10 +179,14 @@ export function DebtorDetailsPanel({ account, name, workspace, properties, onCha
         <TextSlot icon="id" label={isCompany ? 'Registration Number' : 'ID Number'}
           value={account.debtorIdNumber} busy={busy}
           placeholder={isCompany ? 'nnnn/nnnnnn/07' : '13 digits'}
-          // Said, not enforced. Some debtors are companies, some records are foreign passports,
-          // and refusing to store what a collector was actually given helps nobody.
-          /* A registration number is not thirteen digits, so the warning is for people only. */
-          warn={(v) => (!isCompany && v && !/^\d{13}$/.test(v.replace(/\s/g, '')) ? 'That is not 13 digits — check it against the ID.' : null)}
+          /*
+            Said, not enforced. Some records are foreign passports, some clients send a VAT number
+            by mistake, and refusing to store what a collector was actually given loses the only
+            thing anybody has to work from. identityProblem names what it looks like instead — a
+            registration number in a person's field, a telephone number in either — because "not
+            valid" sends somebody hunting for a typo while the name says which field it belongs in.
+          */
+          warn={(v) => identityProblem(account.debtorKind, v)}
           onSave={(v) => run(() => saveDebtorIdentity(account.id, { idNumber: v }))} />
 
         {/*

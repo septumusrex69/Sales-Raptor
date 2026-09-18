@@ -246,6 +246,41 @@ may type that a promise came in over WhatsApp, which is a note on one promise an
 The page says so in words rather than showing a tile reading "WhatsApp 0", which would be a lie that
 looks like a quiet month. `docs/whatsapp-integration.md` is the starting point if the firm wants it.
 
+## CIPC, and what is left before it can be wired up
+
+The firm asked for a CIPC lookup that confirms a company debtor and returns its directors. It is
+possible — CIPC runs a developer platform at developer.cipc.co.za (docs at guide.cipc.co.za) using
+OAuth 2.0, on an annual subscription running 1 April to 31 March with 30 days of sandbox. The
+`companyprofile` endpoint returns, in one call: enterprise name and status, type, registration and
+business start dates, financial year end, tax number, registered and postal addresses, and a
+directors array carrying first names, surname, initials, date of birth, status, type, appointment
+and resignation dates.
+
+**IT DOES NOT RETURN DIRECTOR ID NUMBERS.** The documented fields stop at date of birth. The ID is
+what makes a director traceable in their own right — see `account_directors.id_number` — so CIPC
+tells the firm WHO the directors are and the bureau trace still tells them HOW TO FIND THEM. The
+sensible order is CIPC first to confirm the company and get the names, a paid consumer trace only
+on the directors worth chasing.
+
+**Done, and needed no credentials:** a debtor can be marked a person or a company, the registration
+number is normalised on save so a lookup keyed on it can match, and directors can be typed in with
+their ID numbers before anybody has paid a bureau. Sixteen accounts holding a registration number
+in the identity field were marked as companies.
+
+**Still to decide before building the integration:**
+
+- **The credentials the firm supplied are a PERSONAL PORTAL LOGIN, not API credentials** — an ID
+  number and a password, which is how a human signs in to CIPC eServices. The API needs an OAuth
+  client id and secret issued by registering an application on the developer portal. Driving the
+  portal as a person with somebody's own login is screen-scraping against their terms, and it
+  breaks the first time CIPC changes a form.
+- **`api/` is at exactly 12 of 12 functions on Vercel Hobby.** The OAuth client secret can never
+  reach the browser, so this needs a server-side route: drop one, fold CIPC into an existing route,
+  or go Pro.
+- **Is it worth the subscription?** Sixteen company accounts of 23 739, carrying about R1.2m. That
+  is a real number and a small one; the annual fee should be read against it rather than against
+  the size of the book.
+
 ## Loose ends that will bite
 
 - **24 accounts have a telephone number in the ID field.** All individuals, and every one of them

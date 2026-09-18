@@ -148,3 +148,65 @@ export async function setSubStatus(accountId: string, subStatus: string): Promis
     .update({ sub_status: subStatus }).eq('id', accountId)
   if (error) throw new Error(error.message)
 }
+
+/* ---------- directors, by hand ---------- */
+
+/**
+ * Record a director nobody's bureau report has produced.
+ *
+ * DIRECTORS USED TO ARRIVE ONE WAY ONLY: read off a commercial trace PDF. That works when a trace
+ * has been bought, and the firm's ask is the case where one has not — "if there's a company, the
+ * ID numbers of the directors should also be stored". A collector reading a letterhead, a CIPC
+ * disclosure or a signed suretyship has the names and often the numbers long before anybody pays
+ * a bureau for them, and until now there was nowhere to put them.
+ *
+ * `source` marks where a director came from and defaults to 'xds' on the column, so anything
+ * typed in is stamped 'manual' and the two stay tellable apart. That matters for the CIPC work
+ * next: a name that came off the register and a name somebody typed are not equally trustworthy,
+ * and a re-import must never silently overwrite the one a person checked.
+ */
+export async function saveDirector(input: {
+  accountId: string
+  /** Absent for a new one; present to correct one already on the account. */
+  directorId?: string
+  fullName: string
+  idNumber: string | null
+  status: 'Active' | 'Resigned' | null
+  appointedOn: string | null
+  source?: string
+}): Promise<void> {
+  const row = {
+    account_id: input.accountId,
+    full_name: input.fullName,
+    id_number: input.idNumber,
+    status: input.status,
+    appointed_on: input.appointedOn,
+    source: input.source ?? 'manual',
+  }
+  const q = input.directorId
+    ? supabase.from('account_directors').update(row).eq('id', input.directorId)
+    : supabase.from('account_directors').insert(row)
+  const { error } = await q
+  /*
+   * The table is unique on (account_id, id_number, full_name), which is what stops a re-imported
+   * trace duplicating somebody. Typed in by hand it reads as a collision, and "duplicate key" is
+   * not a sentence anybody should have to decode.
+   */
+  if (error) {
+    throw new Error(/duplicate key/i.test(error.message)
+      ? 'That director is already on this account.'
+      : error.message)
+  }
+}
+
+/**
+ * Take one off.
+ *
+ * Deleted rather than marked resigned, because those are different facts: a director who has
+ * resigned is a real person who really was one, and the account should still say so. This is for
+ * the row that was wrong — the wrong company's director, a name typed twice.
+ */
+export async function removeDirector(directorId: string): Promise<void> {
+  const { error } = await supabase.from('account_directors').delete().eq('id', directorId)
+  if (error) throw new Error(error.message)
+}

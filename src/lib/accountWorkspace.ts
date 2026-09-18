@@ -10,6 +10,7 @@
  * about a phone number without being wrong about a balance.
  */
 import { supabase } from './supabase'
+import { normaliseRegistrationNumber, type DebtorKind } from './debtorIdentity.ts'
 import { nextDueDate, type Arrangement } from './arrangements'
 
 export {
@@ -610,11 +611,34 @@ export async function saveDebtorIdentity(accountId: string, patch: {
   idNumber?: string | null
   title?: string | null
   initials?: string | null
+  /**
+   * Whether this debtor is a person or a company.
+   *
+   * The column has existed since the book was imported and nothing could ever write to it, which
+   * is why three accounts said "company" and the rest did not. It decides what the whole account
+   * screen calls things — "Company details" over "Registration Number", contacts grouped under
+   * the people who answer for the company rather than listed as the debtor's own — and what a
+   * trace is searched on. Getting it wrong is visible immediately, which is the argument for
+   * letting a collector set it rather than inferring it.
+   */
+  debtorKind?: DebtorKind
 }): Promise<void> {
   const row: Record<string, string | null> = {}
   if ('firstName' in patch) row.debtor_first_name = patch.firstName?.trim() || null
   if ('surname' in patch) row.debtor_surname = patch.surname?.trim() || null
-  if ('idNumber' in patch) row.debtor_id_number = patch.idNumber?.replace(/\s/g, '') || null
+  if ('debtorKind' in patch && patch.debtorKind) row.debtor_kind = patch.debtorKind
+  /*
+   * A REGISTRATION NUMBER IS NORMALISED, AN ID NUMBER ONLY DESPACED. The bureau prefixes a letter
+   * of its own — K2016/210735/07 — and the firm's records do not, so two spellings of one company
+   * would never match a lookup keyed on the number, which is exactly what a CIPC or bureau
+   * enquiry is. Anything that is not a registration number is stored as typed: some records are
+   * foreign passports, and refusing to keep what a collector was given loses the only thing they
+   * have to work from.
+   */
+  if ('idNumber' in patch) {
+    const raw = patch.idNumber ?? ''
+    row.debtor_id_number = normaliseRegistrationNumber(raw) ?? (raw.replace(/\s/g, '') || null)
+  }
   if ('title' in patch) row.debtor_title = patch.title?.trim() || null
   if ('initials' in patch) row.debtor_initials = patch.initials?.trim() || null
   const { error } = await supabase.from('debtor_accounts').update(row).eq('id', accountId)

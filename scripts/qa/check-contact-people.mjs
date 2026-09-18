@@ -9,6 +9,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { contactsByPerson, otherPeople } from '../../src/lib/contactPeople.ts'
+import { identityProblem } from '../../src/lib/debtorIdentity.ts'
 
 let pass = 0
 const failures = []
@@ -108,8 +109,21 @@ ok('a company is not given a person\'s slots', /\{!isCompany && \(\s*\n\s*<>\s*\
 ok('...and says so in the heading', /isCompany \? 'Company details' : 'Debtor details'/.test(panels))
 ok('...calling the number a registration number',
   /isCompany \? 'Registration Number' : 'ID Number'/.test(panels))
-/* Thirteen digits is an ID, and a registration number is not, so the warning is for people only. */
-ok('...and not warning that it is the wrong length', /!isCompany && v && !\/\^\\d\{13\}/.test(panels))
+/*
+ * Thirteen digits is an ID and a registration number is not, so the warning is for people only.
+ *
+ * ASSERTED AGAINST THE RULE, NOT THE MARKUP. This used to pin the inline expression the panel
+ * carried — `!isCompany && v && !/^\d{13}$/...` — and went red the day that moved into a shared,
+ * checkable function that does the same job better. A check that fails when behaviour is
+ * preserved and only the shape changed is a check that gets deleted rather than understood.
+ */
+ok('the panel asks the shared rule rather than carrying its own copy',
+  /warn=\{\(v\) => identityProblem\(account\.debtorKind, v\)\}/.test(panels))
+eq('...and a company is not told its registration number is the wrong length',
+  identityProblem('company', '2016/210735/07'), null)
+/* The same rule now catches the two swaps the inline one could not say anything about. */
+ok('...while a registration number on a PERSON is pointed at',
+  /Mark this debtor as a company/.test(identityProblem('individual', '2016/210735/07') ?? ''))
 ok('a company lists who to ask for', /Who to ask for/.test(panels))
 /* The one the Call button dials, marked where the numbers are. */
 ok('...marking the number Call will dial', /c\.isPrimary && \(/.test(panels))

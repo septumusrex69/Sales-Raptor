@@ -42,9 +42,11 @@ import {
 import { clientLine, type ClientLine } from '../../lib/accountNarrative.ts'
 import {
   directorshipSummary, judgmentSummary, practitionerLabel, practitionerMeaning, splitJudgments,
-  type AccountJudgment, type AccountStanding, type DirectorCompany, type PractitionerKind,
+  type AccountDirector, type AccountJudgment, type AccountStanding, type DirectorCompany,
+  type PractitionerKind,
 } from '../../lib/accountStanding.ts'
 import { fetchStanding } from '../../lib/accountStandingData.ts'
+import { DirectorModal } from './DirectorModal'
 import { heldProperty, traceSummary, type FiledTrace } from '../../lib/traceStore.ts'
 import { fetchTraces } from '../../lib/traceStoreData.ts'
 import { TraceWorkspaceModal } from './TraceWorkspaceModal'
@@ -143,6 +145,8 @@ export function AccountDetail() {
   const [tracing, setTracing] = useState(false)
   /** Null = closed. A kind inside it is the office the trace's status line implied. */
   const [practitioner, setPractitioner] = useState<{ suggest: PractitionerKind | null } | null>(null)
+  /* Null when closed; `editing` null means adding, a director means correcting that one. */
+  const [director, setDirector] = useState<{ editing: AccountDirector | null } | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -345,7 +349,9 @@ export function AccountDetail() {
         )}
         onUpload={() => setTracing(true)}
         onOpenTrace={setOpenTrace}
-        onPractitioner={() => setPractitioner({ suggest: null })} />
+        onPractitioner={() => setPractitioner({ suggest: null })}
+        onAddDirector={() => setDirector({ editing: null })}
+        onEditDirector={(d) => setDirector({ editing: d })} />
     </div>
   )
   const timelinePanel = (
@@ -796,6 +802,15 @@ export function AccountDetail() {
           suggestKind={practitioner.suggest}
           onClose={() => setPractitioner(null)}
           onDone={reload}
+        />
+      )}
+
+      {director && (
+        <DirectorModal
+          accountId={account.id}
+          director={director.editing}
+          onClose={() => setDirector(null)}
+          onSaved={reload}
         />
       )}
 
@@ -1627,7 +1642,10 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
  *
  * Absent on nearly every account, and silent when absent.
  */
-function StandingPanel({ account, standing, position, traces, traceAction, onUpload, onOpenTrace, onPractitioner }: {
+function StandingPanel({
+  account, standing, position, traces, traceAction, onUpload, onOpenTrace, onPractitioner,
+  onAddDirector, onEditDirector,
+}: {
   account: DebtorAccount
   standing: AccountStanding
   /** The rung the account sits on, so a missing practitioner can be a warning only when it is one. */
@@ -1648,6 +1666,10 @@ function StandingPanel({ account, standing, position, traces, traceAction, onUpl
   onOpenTrace: (traceId: string) => void
   /** Record who to deal with instead of the debtor. Not on any PDF — see PractitionerModal. */
   onPractitioner: () => void
+  /** Put a director on the account by hand, where no trace has been bought. */
+  onAddDirector: () => void
+  /** Correct one that was typed in. Bureau-reported directors are not editable — see below. */
+  onEditDirector: (director: AccountDirector) => void
 }) {
   const kindLabel = practitionerLabel(account.practitionerKind)
   const hasPractitioner = !!(kindLabel || account.practitionerName || account.practitionerFirm)
@@ -1798,11 +1820,38 @@ function StandingPanel({ account, standing, position, traces, traceAction, onUpl
         <TraceFound key={trace.id} trace={trace} onOpen={() => onOpenTrace(trace.id)} />
       ))}
 
-      {directors.length > 0 && (
+      {/*
+        DIRECTORS CAN BE TYPED IN, not only read off a bureau PDF.
+
+        They arrived one way until now: parsed from a commercial trace. That works once a trace
+        has been bought, and the firm's ask is the case where one has not — "if there's a company,
+        the ID numbers of the directors should also be stored". A collector reading a letterhead,
+        a CIPC disclosure or a signed suretyship has the names, and often the numbers, long before
+        anybody pays a bureau for them. The ID number is the point of the exercise: it is what
+        makes a director traceable in their own right, and on a suretyship it is who actually owes
+        the money.
+
+        Offered on a company only. A director on an individual's account is not a thing.
+      */}
+      {(directors.length > 0 || account.debtorKind === 'company') && (
         <div className="mb-3">
-          <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5 inline-flex items-center gap-1.5">
-            <Users size={12} /> Directors
-          </p>
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <p className="text-[11px] uppercase tracking-wide text-slate-400 inline-flex items-center gap-1.5">
+              <Users size={12} /> Directors
+            </p>
+            {account.debtorKind === 'company' && (
+              <button type="button" onClick={onAddDirector}
+                className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
+                <Plus size={12} /> Add
+              </button>
+            )}
+          </div>
+          {directors.length === 0 && (
+            <p className="text-xs text-slate-400 mb-2">
+              Nobody recorded yet. Add them off a letterhead or a CIPC disclosure, or run a
+              commercial trace and they land here with the judgments against them.
+            </p>
+          )}
           <ul className="space-y-1.5">
             {directors.map((d) => (
               <li key={d.id} className="flex flex-wrap items-baseline justify-between gap-x-2 text-sm">
@@ -1823,6 +1872,18 @@ function StandingPanel({ account, standing, position, traces, traceAction, onUpl
                   suretyship it is the same debt — but it is not a judgment against the debtor.
                 */}
                 <PersonalJudgments judgments={directorJudgments.get(d.id) ?? []} />
+                {/*
+                  Correcting one is offered where it was TYPED, not where a bureau reported it.
+                  A trace's own reading of a name is evidence and editing it in place would leave
+                  the account disagreeing with the PDF filed against it, with nothing to say which
+                  had been changed.
+                */}
+                {d.source === 'manual' && (
+                  <button type="button" onClick={() => onEditDirector(d)}
+                    className="text-[11px] text-slate-400 hover:text-brand-600 hover:underline">
+                    Edit
+                  </button>
+                )}
               </li>
             ))}
           </ul>
