@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { AlertTriangle, Download, Loader2, Search } from 'lucide-react'
 import { Card } from '../components/ui/Card'
 import { StatTile } from '../components/ui/StatTile'
@@ -19,11 +20,9 @@ import {
   dayKey, monthPace, paceLine, standingLabel, targetLaps, teamTotal,
   type MonthPace, type PaceLine, type PaceStanding,
 } from '../lib/collectionPace.ts'
+import { placeLabel, standings } from '../lib/collectorTrend.ts'
 import { formatCurrency } from '../data/mockData'
 import type { ID, Target, Team, User } from '../types'
-
-/** Who sees the whole floor rather than only themselves. */
-const SEES_EVERYONE = ['Administrator', 'Sales Manager', 'Liaison Manager', 'Pre-legal Team Leader']
 
 /** What a person's target is, and whether anybody actually chose it. */
 interface ResolvedTarget { target: number | null; origin: 'set' | 'grade' }
@@ -59,8 +58,6 @@ export function CollectorDashboard() {
   const [todayRows, setTodayRows] = useState<CollectorStats[] | null>(null)
   const [previous, setPrevious] = useState<CollectorStats[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-
-  const seesEveryone = SEES_EVERYONE.includes(currentUser?.role ?? '')
 
   /*
    * The day the report is read as at, kept inside the period whatever is asked for.
@@ -145,21 +142,18 @@ export function CollectorDashboard() {
   )
 
   const mine = rows?.find((r) => r.userId === currentUser?.id) ?? null
-  const minePrior = previous?.find((r) => r.userId === currentUser?.id) ?? null
 
   /*
    * An agent sees their own figures; a team leader sees the floor's, with everybody listed. Both
    * read the same numbers — visibility here is about whose totals lead the page, not about
    * hiding anything, which the firm settled early.
    */
-  const shown = seesEveryone && rows ? totalStats(shownRows) : mine
-  const shownPrior = seesEveryone && previous ? totalStats(previous) : minePrior
+  const shown = rows ? totalStats(shownRows) : null
+  const shownPrior = previous ? totalStats(previous) : null
   const score = shown ? scoreCollector(shown) : null
   const priorScore = shownPrior ? scoreCollector(shownPrior) : null
 
-  const collectedToday = seesEveryone
-    ? shownToday.reduce((t, r) => t + r.collected, 0)
-    : todayRows?.find((r) => r.userId === currentUser?.id)?.collected ?? 0
+  const collectedToday = shownToday.reduce((t, r) => t + r.collected, 0)
 
   /*
    * The target the headline is read against: the sum of the people's own, never a figure typed in
@@ -174,7 +168,16 @@ export function CollectorDashboard() {
     [shownRows, targetFor],
   )
   const myTarget = targetFor(currentUser?.id ?? '', (mine?.inPlayAccounts ?? 0) > 0).target
-  const line = shown ? paceLine(shown.collected, seesEveryone ? floor.target : myTarget, pace) : null
+  const line = shown ? paceLine(shown.collected, floor.target, pace) : null
+  /* The agent's own month, for the strip under the floor's — and their place on it. */
+  const myLine = mine ? paceLine(mine.collected, myTarget, pace) : null
+  const myPlace = useMemo(
+    () => standings(
+      shownRows.filter((r) => r.inPlayAccounts > 0 || r.collected > 0),
+      (r) => r.collected,
+    ).get(currentUser?.id ?? ''),
+    [shownRows, currentUser],
+  )
 
   const ceiling = bookCeilingOf(currentUser?.bookCeiling)
   const over = mine ? overBookBy(mine, ceiling) : 0
@@ -197,12 +200,10 @@ export function CollectorDashboard() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold text-slate-800">
-            {seesEveryone ? 'Collections' : 'My collections'}
-          </h1>
+          <h1 className="text-lg font-semibold text-slate-800">Collections</h1>
           <p className="text-xs text-slate-400">Daily performance report</p>
         </div>
-        {rows && rows.length > 0 && seesEveryone && (
+        {rows && rows.length > 0 && (
           <ExportButton rows={shownRows} today={shownToday} users={users} teams={teams}
             pace={pace} asAt={asAt} period={period} targetFor={targetFor} />
         )}
@@ -227,7 +228,7 @@ export function CollectorDashboard() {
               max={dayKey(new Date() > period.end ? period.end : new Date())}
               className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700" />
           </label>
-          {seesEveryone && teamOptions.length > 0 && (
+          {teamOptions.length > 0 && (
             <label className="flex items-center gap-2 text-xs text-slate-500">
               Team
               <select value={teamId} onChange={(e) => setTeamId(e.target.value)}
@@ -293,17 +294,40 @@ export function CollectorDashboard() {
               note={line?.stillNeeded != null ? `${formatCurrency(line.stillNeeded)} remaining` : undefined} />
           </div>
 
+          {/*
+            THE OTHER HALF OF THE ANSWER. The headline above is the company's; this is the person
+            reading it. The firm wanted both on one screen rather than behind a toggle — "they
+            should see their own thing, but they should also be able to see the entire company's
+            performance, and where they stand relative to everybody else."
+          */}
+          {mine && myLine && (
+            <Card padded={false}>
+              <div className="flex flex-wrap items-center gap-x-8 gap-y-3 px-4 py-3">
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Your month</p>
+                <Fact label="Collected" value={formatCurrency(mine.collected)} />
+                <Fact label="Of target" value={pctText(myLine.achieved)} />
+                <Fact label="Payments" value={mine.payments.toLocaleString('en-ZA')} />
+                <Fact label="On the floor" value={placeLabel(myPlace)} />
+                {myLine.target !== null && <StatusPill standing={myLine.standing} />}
+                <Link to={`/performance/${mine.userId}`}
+                  className="ml-auto text-xs font-medium text-brand-600 hover:underline">
+                  Open my dashboard &rarr;
+                </Link>
+              </div>
+            </Card>
+          )}
+
           <MonthProgress pace={pace} line={line}
-            note={seesEveryone && floor.withTarget < floor.members
+            note={floor.withTarget < floor.members
               ? `${floor.members - floor.withTarget} of ${floor.members} have no target, so the total is short by their share.`
               : undefined} />
 
-          {seesEveryone && shownRows.length > 0 && (
+          {shownRows.length > 0 && (
             <>
               <TeamTable rows={shownRows} users={users} teams={teams} targets={targets}
                 periodKey={period.key} pace={pace} targetFor={targetFor} />
               <ClerkTable rows={shownRows} today={shownToday} users={users} teams={teams}
-                pace={pace} targetFor={targetFor} />
+                pace={pace} targetFor={targetFor} me={currentUser?.id ?? null} />
             </>
           )}
 
@@ -364,7 +388,7 @@ export function CollectorDashboard() {
               hint="Your own words. Notes Raptor composes itself are not counted." />
           </div>
 
-          {seesEveryone && shownRows.length > 0 && <FairTable rows={shownRows} users={users} />}
+          {shownRows.length > 0 && <FairTable rows={shownRows} users={users} />}
         </>
       )}
     </div>
@@ -392,6 +416,16 @@ const STANDING_STYLE: Record<PaceStanding, string> = {
   behind: 'bg-amber-50 text-amber-800',
   critical: 'bg-rose-50 text-rose-700',
   'no-target': 'bg-slate-100 text-slate-500',
+}
+
+/** A label and its figure, side by side. The shape the personal strip is made of. */
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[11px] uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="text-sm font-semibold tabular-nums text-slate-800">{value}</p>
+    </div>
+  )
 }
 
 function StatusPill({ standing }: { standing: PaceStanding }) {
@@ -528,12 +562,17 @@ function MonthProgress({ pace, line, note }: {
 
 /* ---------- the clerks ---------- */
 
-type ClerkView = 'all' | 'attention'
+type ClerkView = 'all' | 'attention' | 'rand'
 
 interface ClerkLine {
   userId: ID
   name: string
   team: string
+  /** Shown beside every place on the ranking. See the note on the ranking tab. */
+  grade: string
+  accounts: number
+  payments: number
+  averagePayment: number | null
   today: number
   line: PaceLine
   origin: 'set' | 'grade'
@@ -555,6 +594,12 @@ function clerkLines(input: {
       userId: r.userId,
       name: user?.name ?? 'Unknown',
       team: teams.find((t) => t.id === user?.teamId)?.name ?? 'No team',
+      grade: user?.collectorGrade ?? 'Ungraded',
+      accounts: r.inPlayAccounts,
+      payments: r.payments,
+      /* Null, not nought: somebody who took no payments has no average, and a R0 average would
+         sort them above a collector who took one small one. */
+      averagePayment: r.payments > 0 ? r.collected / r.payments : null,
       today: today.find((d) => d.userId === r.userId)?.collected ?? 0,
       line: paceLine(r.collected, target, pace),
       origin,
@@ -589,20 +634,33 @@ function worstFirst<T extends { line: PaceLine }>(a: T, b: T): number {
  * what the whole of collectorScore.ts exists to prevent. Needs attention sorts by percentage of
  * that person's OWN target, which survives being given a different book.
  */
-function ClerkTable({ rows, today, users, teams, pace, targetFor }: {
+function ClerkTable({ rows, today, users, teams, pace, targetFor, me }: {
   rows: CollectorStats[]
   today: CollectorStats[]
   users: User[]
   teams: Team[]
   pace: MonthPace
   targetFor: (id: ID, collects: boolean) => ResolvedTarget
+  /** The person reading, so their own row stands out of a list of thirty. */
+  me: ID | null
 }) {
   const [view, setView] = useState<ClerkView>('all')
   const [search, setSearch] = useState('')
+  const ranking = view === 'rand'
 
   const lines = useMemo(
     () => clerkLines({ rows, today, users, teams, pace, targetFor }),
     [rows, today, users, teams, pace, targetFor],
+  )
+
+  /*
+   * Places computed over EVERYBODY, not over what the search box happens to show. A place that
+   * moved when somebody typed a letter would not be a place.
+   */
+  const places = useMemo(
+    () => standings(lines.filter((l) => l.accounts > 0 || l.line.collected > 0),
+      (l) => l.line.collected),
+    [lines],
   )
 
   const shown = useMemo(() => {
@@ -617,6 +675,7 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor }: {
         .filter((l) => l.line.standing === 'behind' || l.line.standing === 'critical')
         .sort(worstFirst)
     }
+    if (view === 'rand') return [...matching].sort((a, b) => b.line.collected - a.line.collected)
     return [...matching].sort((a, b) => a.name.localeCompare(b.name, 'en-ZA'))
   }, [lines, view, search])
 
@@ -626,7 +685,7 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor }: {
         <div className="flex items-center gap-3">
           <p className="text-[11px] uppercase tracking-wide text-slate-400">Clerk performance</p>
           <div className="flex rounded-lg border border-slate-200 p-0.5">
-            {([['all', 'All clerks'], ['attention', 'Needs attention']] as const).map(([id, label]) => (
+            {([['all', 'All clerks'], ['attention', 'Needs attention'], ['rand', 'Ranking']] as const).map(([id, label]) => (
               <button key={id} type="button" onClick={() => setView(id)}
                 className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
                   view === id ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-700'
@@ -649,31 +708,92 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor }: {
         </label>
       </div>
 
+      {/*
+        THE RANKING CARRIES ITS OWN CONTEXT, and that is the whole reason it is allowed to exist.
+        The firm asked for it — "I like the idea of actually ranking them in terms of how much
+        rand they've collected" — and answered the obvious objection in the same breath: "so the
+        people know that if they're senior collectors they get more work, it's not a pissing
+        contest." That answer only holds if the grade and the size of the book are on the row
+        beside the rand, which is why this view carries both and the others do not.
+      */}
+      {ranking && (
+        <p className="px-4 pb-2 -mt-1 text-xs text-slate-400 max-w-2xl">
+          Ordered by rand collected, with the grade and the book beside it. A senior collector is
+          given the bigger accounts, so part of their rand is the book they were handed &mdash;
+          read the two together. Payments and the average payment are here for the same reason:
+          they move independently of the total.
+        </p>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
-              <th className="px-4 py-2 font-medium">Clerk</th>
+              {ranking && <th className="px-4 py-2 font-medium">Place</th>}
+              <th className={`${ranking ? 'px-3' : 'px-4'} py-2 font-medium`}>Clerk</th>
               <th className="px-3 py-2 font-medium">Team</th>
-              <th className="px-3 py-2 font-medium text-right">Today</th>
-              <th className="px-3 py-2 font-medium text-right">Period to date</th>
-              <th className="px-3 py-2 font-medium text-right">Target</th>
-              <th className="px-3 py-2 font-medium text-right">Achieved</th>
-              <th className="px-3 py-2 font-medium text-right">Gap vs pace</th>
-              <th className="px-3 py-2 font-medium text-right">Needed / day</th>
-              <th className="px-3 py-2 font-medium">Status</th>
+              {ranking ? (
+                <>
+                  <th className="px-3 py-2 font-medium">Grade</th>
+                  <th className="px-3 py-2 font-medium text-right">Accounts</th>
+                  <th className="px-3 py-2 font-medium text-right">Collected</th>
+                  <th className="px-3 py-2 font-medium text-right">Payments</th>
+                  <th className="px-3 py-2 font-medium text-right">Average payment</th>
+                </>
+              ) : (
+                <>
+                  <th className="px-3 py-2 font-medium text-right">Today</th>
+                  <th className="px-3 py-2 font-medium text-right">Period to date</th>
+                  <th className="px-3 py-2 font-medium text-right">Target</th>
+                  <th className="px-3 py-2 font-medium text-right">Achieved</th>
+                  <th className="px-3 py-2 font-medium text-right">Gap vs pace</th>
+                  <th className="px-3 py-2 font-medium text-right">Needed / day</th>
+                  <th className="px-3 py-2 font-medium">Status</th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody>
-            {shown.map((l) => (
-              <tr key={l.userId} className="border-b border-slate-50 last:border-0">
-                <td className="px-4 py-2">
-                  <span className="flex items-center gap-2">
+            {shown.map((l, at) => (
+              <tr key={l.userId}
+                className={`border-b border-slate-50 last:border-0 ${
+                  /* Your own row, out of thirty. Nothing louder than a tint: it is a marker, not
+                     a status, and colouring it like one would read as something being wrong. */
+                  l.userId === me ? 'bg-gold-50' : ''
+                }`}>
+                {ranking && (
+                  <td className="px-4 py-2 tabular-nums font-semibold text-slate-700">
+                    {/* Ties share a place, the way a results board does — see `standings`. */}
+                    {places.get(l.userId)?.place ?? at + 1}
+                  </td>
+                )}
+                <td className={`${ranking ? 'px-3' : 'px-4'} py-2`}>
+                  <Link to={`/performance/${l.userId}`}
+                    className="flex items-center gap-2 group">
                     <UserAvatar userId={l.userId} size={22} />
-                    <span className="text-slate-700">{l.name}</span>
-                  </span>
+                    <span className="text-slate-700 group-hover:underline">{l.name}</span>
+                    {l.userId === me && <span className="text-[10px] text-slate-400">(you)</span>}
+                  </Link>
                 </td>
                 <td className="px-3 py-2 text-slate-500">{l.team}</td>
+                {ranking ? (
+                  <>
+                    <td className="px-3 py-2 text-slate-500">{l.grade}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                      {l.accounts.toLocaleString('en-ZA')}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-800">
+                      {formatCurrency(l.line.collected)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                      {l.payments.toLocaleString('en-ZA')}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                      {l.averagePayment === null ? '—' : formatCurrency(l.averagePayment)}
+                    </td>
+                  </>
+                ) : (
+                  <>
                 <td className="px-3 py-2 text-right tabular-nums text-slate-600">
                   {l.today > 0 ? formatCurrency(l.today) : '—'}
                 </td>
@@ -712,11 +832,13 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor }: {
                   {moneyText(l.line.neededADay)}
                 </td>
                 <td className="px-3 py-2"><StatusPill standing={l.line.standing} /></td>
+                  </>
+                )}
               </tr>
             ))}
             {shown.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-sm text-slate-400">
+                <td colSpan={ranking ? 8 : 9} className="px-4 py-6 text-center text-sm text-slate-400">
                   {view === 'attention'
                     ? 'Nobody is behind their pace right now.'
                     : 'Nobody matches that.'}
@@ -862,8 +984,9 @@ function FairTable({ rows, users }: { rows: CollectorStats[]; users: { id: strin
       <p className="px-4 pt-3 pb-2 text-[11px] uppercase tracking-wide text-slate-400">
         How people compare
         <span className="block normal-case tracking-normal text-slate-400 text-xs mt-0.5 max-w-xl">
-          Ordered by payments per hundred accounts, not by rand &mdash; otherwise whoever holds the
-          biggest book is always top and nothing is learnt.
+          Ordered by payments per hundred accounts. The Ranking tab above orders on rand, which is
+          the month the firm is run on; these are the figures that survive being given a different
+          book, and they are the ones that should decide who is promoted.
         </span>
       </p>
       <div className="overflow-x-auto">

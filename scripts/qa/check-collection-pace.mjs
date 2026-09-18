@@ -322,7 +322,25 @@ ok('a collector with no team is a line on the teams table', /'No team'/.test(tea
 ok('the fair comparison is still there', /<FairTable/.test(page))
 ok('...ordered on the book-independent figure',
   /paymentsPerHundred \?\? -1\) - \(a\.paymentsPerHundred/.test(page))
-ok('...and still says why', /not by rand/.test(page))
+/*
+ * ASSERTED AGAINST THE RENDERED TEXT, NOT THE PAGE. The comment above FairTable says the same
+ * thing in almost the same words, so a regex over the whole file is satisfied by the explanation
+ * of the behaviour rather than by the behaviour -- the exact trap this codebase has a name for.
+ * The card's own caption is sliced out and asserted on.
+ */
+const fairCaption = page.slice(page.indexOf('How people compare\n'), page.indexOf('<div className="overflow-x-auto">', page.indexOf('How people compare\n')))
+ok('there is a caption on the fair card to read', fairCaption.length > 100)
+ok('...naming what the ranking is for', /the month the firm is run on/.test(fairCaption))
+ok('...and what these figures survive', /survive being given a different/.test(fairCaption))
+ok('...and what they are for', /should decide who is promoted/.test(fairCaption))
+/*
+ * THE RANKING ON RAND IS ALLOWED TO EXIST AND IS NOT ALLOWED TO BE THE DEFAULT. The firm asked
+ * for it; the page must still open on the roster, or the one figure that measures the book
+ * somebody was handed becomes the first thing anybody sees about a person.
+ */
+ok('there is a ranking on rand', /\['rand', 'Ranking'\]/.test(page))
+ok('...and it is not what the card opens on', /useState<ClerkView>\('all'\)/.test(page))
+ok('...and it never sorts the roster', !/view === 'all'[\s\S]{0,80}collected/.test(page))
 
 /* The team filter narrows the totals as well as the table: a team leader reading their team's
    list against the firm's headline figures is reading two different things. */

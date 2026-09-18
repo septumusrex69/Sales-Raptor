@@ -34,6 +34,21 @@ export interface CollectorStats {
   promisesBroken: number
   /** Distinct accounts worked in the period, however many times each. */
   accountsTouched: number
+  /**
+   * Traces BOUGHT and traces WORKED, which are two different things a month apart.
+   *
+   * Pulling a trace costs the firm money and produces a list of numbers, addresses and employers.
+   * Working it is ringing them and recording what happened. A collector who pulls forty traces
+   * and rings none of them has spent the firm's money and moved nothing — and one number for both
+   * would hide exactly that.
+   */
+  tracesPulled: number
+  /** What those traces gave them to work with: numbers, addresses, employers, links. */
+  traceLeads: number
+  /** Findings they actually tried, counted on the day the outcome was recorded. */
+  tracesWorked: number
+  /** Of those, the ones that turned out to be right. */
+  tracesVerified: number
 }
 
 export interface CollectorScore extends CollectorStats {
@@ -71,6 +86,15 @@ export interface CollectorScore extends CollectorStats {
   /** Resolved promises: the denominator of the kept rate, worth showing beside it. */
   promisesResolved: number
   callAnswerRate: number | null
+  /**
+   * Of the trace findings this person tried, how many were real.
+   *
+   * VERIFIED OVER WORKED, never over what the bureau printed. A trace comes back with eleven
+   * numbers and most of them are stale by construction — that is what a trace is. Judging
+   * somebody on how many of the eleven were good would be judging the bureau. What this measures
+   * is whether they are picking the likely ones and getting through.
+   */
+  traceHitRate: number | null
 }
 
 /** Null rather than zero when there is nothing to divide by. A rate of 0% is a claim; null is not. */
@@ -90,6 +114,7 @@ export function scoreCollector(s: CollectorStats): CollectorScore {
     promiseKeptRate: rate(s.promisesKept, promisesResolved),
     promisesResolved,
     callAnswerRate: rate(s.callsAnswered, s.calls),
+    traceHitRate: rate(s.tracesVerified, s.tracesWorked),
   }
 }
 
@@ -107,6 +132,9 @@ export const THRESHOLDS = {
   promiseKeptRate: { good: 0.7, fair: 0.45 },
   coverage: { good: 0.8, fair: 0.5 },
   callAnswerRate: { good: 0.35, fair: 0.2 },
+  /* A trace is a list of mostly-stale numbers by construction. Getting a third of what you try to
+     stick is good work, and these two are guesses until the firm has a season of real figures. */
+  traceHitRate: { good: 0.3, fair: 0.15 },
 } as const
 
 export function band(value: number | null, t: { good: number; fair: number }): Band {
@@ -149,5 +177,9 @@ export function totalStats(all: CollectorStats[]): CollectorStats {
      * sum of distinct counts, not a distinct count, and nobody should read it as the latter.
      */
     accountsTouched: sum((s) => s.accountsTouched),
+    tracesPulled: sum((s) => s.tracesPulled),
+    traceLeads: sum((s) => s.traceLeads),
+    tracesWorked: sum((s) => s.tracesWorked),
+    tracesVerified: sum((s) => s.tracesVerified),
   }
 }

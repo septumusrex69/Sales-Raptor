@@ -217,40 +217,34 @@ work that well" — email is the priority.
 
 ---
 
-## The collector's own dashboard, and where reporting lives
+## Reporting: where everything lives
 
-Raised by the firm on the Collections redesign and **not settled** — recorded here so the shape
-of the answer is not decided by accident, one screen at a time.
+Still open, and worth deciding before more is built. The collector's own dashboard is done (it is
+`/performance/:userId`), and everybody can see the floor and their place on it, so two of the three
+questions below are answered. The third is not.
 
-**What was asked.** "When we build each collector's dashboard, they would be able to change this
-month's target for themselves." And then, more usefully: "perhaps in this collections tab we
-should have a toggle between the company and the individual… but rather, I think maybe we should
-talk about this. Where are we going to put everything? Because this comes to reporting."
+- **Answered.** May a collector see the whole company? Yes — the firm's own instruction. The floor
+  list and every collector's page are open to everybody.
+- **Answered.** Ranking on rand? Yes, on the Ranking tab, with the grade and the size of the book
+  on the row beside it. The firm's own reason for allowing it — "so the people know that if they're
+  senior collectors they get more work" — only holds while that context stays on the row.
+- **STILL OPEN.** May a collector raise their own target for the month, lower it, or neither?
+  Raising only is the obvious answer and it is not ours to assume. A target somebody can lower on
+  the 25th is not a target; one nobody can raise is a ceiling on the person who would have beaten
+  it. Nothing is built until this is decided — the storage already exists (`targets`, scope `user`,
+  with a `period_key`), so it is a policy decision and a button, not a schema change.
+- **STILL OPEN.** Collections is a daily operational sheet; Reports is where a month is looked back
+  on and where a client's statement comes from. Keeping them apart is defensible. Having two places
+  that both answer "how did September go" is not.
 
-**What already exists, so nobody rebuilds it.**
+## WhatsApp is not in Raptor at all
 
-- Collections **already renders a personal view**: `SEES_EVERYONE` decides whether the page leads
-  with the floor's totals or with your own. An agent opening it today sees their own figures, their
-  own target and their own pace, with no tables. The "toggle" is half-built — what is missing is
-  letting a team leader look at one person, not a second page.
-- A **per-person, per-month target is already storable**: `targets` with `scope_type = 'user'`,
-  `metric = 'collected'` and a `period_key`. A collector raising their own target for the month is
-  a write to that row and a policy change on who may make it. No schema work.
-- `monthTargetFor` already reports **where a figure came from** (`set` vs `grade`), which is what
-  a screen needs to show "your team leader set this" against "you set this yourself".
+The firm asked for WhatsApp beside calls, SMS and email on the collector's page. There is no table,
+no integration and no message anywhere in the schema — only `promises_to_pay.origin`, where somebody
+may type that a promise came in over WhatsApp, which is a note on one promise and not a channel.
 
-**The three questions to answer before building anything.**
-
-1. **May a collector raise their own target, lower it, or neither?** Raising only is the obvious
-   answer and it is not the firm's to assume. A target somebody can lower on the 25th is not a
-   target, and one nobody can raise is a ceiling on the person who would have beaten it.
-2. **Whose report is Collections?** It is a daily operational sheet — what came in today, who is
-   behind, who to go and stand next to. That is different from Reports, which is where a month is
-   looked back on and where a client's own statement comes from. Keeping the daily sheet out of
-   Reports is defensible; having two places that both answer "how did September go" is not.
-3. **Does the sales side get the same treatment?** The Dashboard is the sales half's version of
-   this page and does not look like it. Either they converge or the difference is explained, or
-   the firm has two performance screens with two vocabularies.
+The page says so in words rather than showing a tile reading "WhatsApp 0", which would be a lie that
+looks like a quiet month. `docs/whatsapp-integration.md` is the starting point if the firm wants it.
 
 ## Loose ends that will bite
 

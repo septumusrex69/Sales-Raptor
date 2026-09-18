@@ -145,6 +145,29 @@ const handlers = [
     },
   ],
   [(u) => u.includes('/rpc/nav_counts'), () => ({ body: { mail: 0, tasks: 0, disputes: 0, diary: 0 } })],
+  /*
+   * A year of days behind the trend chart. Deliberately UNEVEN: every day the same would draw a
+   * flat chart, which looks exactly like a chart with no data in it and would let a broken
+   * bucketing pass unnoticed.
+   */
+  [
+    (u) => u.includes('/rpc/collector_daily'),
+    () => {
+      const out = []
+      const start = new Date()
+      start.setMonth(start.getMonth() - 11)
+      for (let i = 0; i < 330; i += 7) {
+        const d = new Date(start)
+        d.setDate(d.getDate() + i)
+        out.push({
+          on_day: d.toISOString().slice(0, 10),
+          collected: 5000 + (i % 40) * 900,
+          payments: 1 + (i % 5),
+        })
+      }
+      return { body: out }
+    },
+  ],
 ]
 
 let server
@@ -310,8 +333,82 @@ try {
    * into the rand leaderboard the whole of collectorScore.ts exists to prevent.
    */
   t.ok('the fair comparison is still on the page', (await headers()).includes('PER 100'))
-  t.ok('...and still says why it is ordered that way',
-    await page.getByText(/not by rand/).first().isVisible())
+  t.ok('...and still says what it is for',
+    await page.getByText(/should decide who is promoted/).first().isVisible())
+
+  /* ---------- the ranking the firm asked for, with its context ---------- */
+
+  /*
+   * THE RANKING ON RAND EXISTS AND IS NOT THE DEFAULT. The firm asked for it and answered the
+   * obvious objection themselves: "so the people know that if they're senior collectors they get
+   * more work, it's not a pissing contest." That only holds if the grade and the book are on the
+   * row beside the rand, which is what is checked here — in the browser, because it is a claim
+   * about what somebody reading the row actually sees.
+   */
+  await page.getByRole('button', { name: 'Ranking' }).click()
+  await page.waitForTimeout(300)
+  await t.shot(page, '42-ranking')
+  const ranked = await headers()
+  t.ok('the ranking gives everybody a place', ranked.includes('PLACE'))
+  t.ok('...with their grade beside it', ranked.includes('GRADE'))
+  t.ok('...and the size of their book', ranked.includes('ACCOUNTS'))
+  t.ok('...and how many people paid them', ranked.includes('PAYMENTS'))
+  t.ok('...and what the average payment was', ranked.includes('AVERAGE PAYMENT'))
+  t.ok('...and says in words why rand and book are read together',
+    await page.getByText(/part of their rand is the book they were handed/).first().isVisible())
+
+  const rankRows = page.locator('table').nth(1).locator('tbody tr')
+  /*
+   * The name cell carries the avatar's initials on their own line, and on your own row a "(you)"
+   * after the name — so neither the first line nor the last is reliably the name. Dropping both
+   * markers is what leaves it.
+   */
+  const order = await rankRows.evaluateAll((rows) => rows.map((r) => {
+    const lines = (r.querySelectorAll('td')[1]?.innerText ?? '').split('\n')
+      .map((l) => l.trim()).filter(Boolean)
+    return lines.filter((l) => l !== '(you)' && !/^[A-Z]{1,3}$/.test(l))[0] ?? ''
+  }))
+  /* Test Leader R120 000, Unteamed Clerk R7 000, Thandi Junior R500 — biggest first. */
+  t.check('the biggest collector is first', order[0], PROFILE.name)
+  t.check('...and the smallest last', order[order.length - 1], COLLEAGUE.name)
+
+  /* ---------- one collector's own page ---------- */
+
+  await rankRows.first().getByRole('link').click()
+  await page.getByText('On the floor this month').waitFor({ timeout: 20000 })
+  /* The chart's bars grow from nothing on mount, and a screenshot taken on the first frame shows
+     an empty frame. The bar COUNT below is the real check; this is so the picture is worth
+     looking at. */
+  await page.waitForTimeout(900)
+  await t.shot(page, '43-collector')
+
+  t.ok('a collector has a page of their own',
+    page.url().includes(`/performance/${USER_ID}`))
+  t.ok('...saying where they stand on rand',
+    await page.getByText(/1st of 3/).first().isVisible())
+  t.ok('...with their grade above it',
+    await page.getByText(/Senior collector/).first().isVisible())
+  t.ok('...and the size of their book beside it',
+    await page.getByText(/400 accounts on the book/).first().isVisible())
+  t.ok('...their promises, taken kept and broken',
+    await page.getByText('Still to come').first().isVisible())
+  t.ok('...how the day is spent', await page.getByText('How the day is spent').first().isVisible())
+  t.ok('...what they did with their traces', await page.getByText('Traces').first().isVisible())
+  t.ok('...and twelve months behind them',
+    await page.getByText(/Collections, last 12 months/).first().isVisible())
+  /*
+   * AND THE CHART ACTUALLY HAS BARS IN IT. The heading renders whether or not a single figure
+   * reached it, so asserting the heading alone would pass over an empty frame — which is exactly
+   * what a broken bucketing looks like: axes, gridlines, target line, and nothing drawn.
+   */
+  const bars = await page.locator('.recharts-bar-rectangle').count()
+  t.ok(`the twelve months are drawn, not just framed (${bars} bars)`, bars >= 6)
+  /*
+   * WHATSAPP IS SAID, NOT LEFT BLANK. Raptor does not send or store one, and a tile reading
+   * "WhatsApp 0" would be a lie that looks like a quiet month.
+   */
+  t.ok('WhatsApp is named as not counted',
+    await page.getByText(/WhatsApp is not counted here/).first().isVisible())
 
   const real = errors.filter((e) => !/favicon|404 \(Not Found\)/i.test(e))
   t.check('no console errors', real.length, 0)

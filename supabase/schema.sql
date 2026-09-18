@@ -3613,3 +3613,215 @@ comment on column public.user_emails.invite_response is
 -- three did not merely waste work: they queued behind each other and everything else the person
 -- was doing, which is what "it loads and loads and loads" is.
 alter table public.email_connections add column if not exists sync_started_at timestamptz;
+
+-- ============================================================================================
+-- What a collector does with a trace, and how a month looked day by day.
+--
+-- The firm, on the collector's own dashboard: "how many traces do they do, how effectively do
+-- they work their traces" and "graphs in terms of previous months... their collections for the
+-- last, let's say, 12 months, so they can see their progress".
+--
+-- A TRACE IS BOUGHT AND THEN WORKED, and they are two different things a month apart. Pulling one
+-- costs the firm money and produces a list of numbers and addresses; working it is ringing them
+-- and recording what happened. A collector who pulls forty traces and rings none of them has
+-- spent the firm's money and moved nothing, and one number for both would hide that.
+--
+-- Findings are counted on the day the OUTCOME was recorded, whoever pulled the trace: a trace
+-- bought in August and worked in September is September's effort.
+-- ============================================================================================
+drop function if exists public.collector_performance(timestamptz, timestamptz);
+
+create function public.collector_performance(p_from timestamptz, p_to timestamptz)
+returns table (
+  user_id uuid,
+  in_play_accounts integer,
+  in_play_value numeric,
+  collected numeric,
+  payments integer,
+  calls integer,
+  calls_answered integer,
+  emails_sent integer,
+  sms_sent integer,
+  notes_written integer,
+  promises_made integer,
+  promises_kept integer,
+  promises_broken integer,
+  accounts_touched integer,
+  traces_pulled integer,
+  trace_leads integer,
+  traces_worked integer,
+  traces_verified integer
+)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  with book as (
+    select assigned_to as uid,
+           count(*) filter (where status ilike 'Active%')::integer as in_play,
+           coalesce(sum(capital_outstanding) filter (where status ilike 'Active%'), 0) as value
+      from public.debtor_accounts
+     where assigned_to is not null
+     group by assigned_to
+  ),
+  paid as (
+    select h.user_id as uid,
+           coalesce(sum(p.amount), 0) as collected,
+           count(*)::integer as payments
+      from public.account_payments p
+      cross join lateral (
+        select dh.user_id
+          from public.account_desk_history dh
+         where dh.account_id = p.account_id
+           and dh.effective_from <= p.received_at
+         order by dh.effective_from desc
+         limit 1
+      ) h
+     where p.reversed_at is null
+       and p.received_at >= p_from and p.received_at < p_to
+       and h.user_id is not null
+     group by h.user_id
+  ),
+  rang as (
+    select placed_by as uid,
+           count(*)::integer as calls,
+           count(*) filter (where answered_at is not null)::integer as answered
+      from public.account_calls
+     where placed_by is not null and placed_at >= p_from and placed_at < p_to
+     group by placed_by
+  ),
+  mailed as (
+    select sent_by as uid, count(*)::integer as emails
+      from public.account_emails
+     where sent_by is not null and direction = 'out'
+       and occurred_at >= p_from and occurred_at < p_to
+     group by sent_by
+  ),
+  texted as (
+    select created_by as uid, count(*)::integer as sms
+      from public.sms_messages
+     where created_by is not null and account_id is not null and direction = 'outbound'
+       and created_at >= p_from and created_at < p_to
+     group by created_by
+  ),
+  wrote as (
+    select created_by as uid, count(*)::integer as notes
+      from public.account_notes
+     where created_by is not null and source = 'manual'
+       and created_at >= p_from and created_at < p_to
+     group by created_by
+  ),
+  promised as (
+    select created_by as uid,
+           count(*)::integer as made,
+           count(*) filter (where status = 'kept')::integer as kept,
+           count(*) filter (where status = 'broken')::integer as broken
+      from public.promises_to_pay
+     where created_by is not null
+       and created_at >= p_from and created_at < p_to
+     group by created_by
+  ),
+  touched as (
+    select uid, count(distinct account_id)::integer as accounts
+      from (
+        select placed_by as uid, account_id from public.account_calls
+         where placed_by is not null and placed_at >= p_from and placed_at < p_to
+        union all
+        select sent_by, account_id from public.account_emails
+         where sent_by is not null and direction = 'out'
+           and occurred_at >= p_from and occurred_at < p_to
+        union all
+        select created_by, account_id from public.account_notes
+         where created_by is not null and source = 'manual'
+           and created_at >= p_from and created_at < p_to
+      ) t
+     group by uid
+  ),
+  traced as (
+    select t.pulled_by as uid,
+           count(distinct t.id)::integer as traces,
+           count(i.id)::integer as leads
+      from public.account_traces t
+      left join public.account_trace_items i on i.trace_id = t.id
+     where t.pulled_by is not null
+       and t.created_at >= p_from and t.created_at < p_to
+     group by t.pulled_by
+  ),
+  trace_work as (
+    select outcome_by as uid,
+           count(*)::integer as worked,
+           count(*) filter (where outcome = 'verified')::integer as verified
+      from public.account_trace_items
+     where outcome_by is not null
+       and outcome_at >= p_from and outcome_at < p_to
+     group by outcome_by
+  )
+  select
+    pr.id, coalesce(b.in_play, 0), coalesce(b.value, 0),
+    coalesce(pd.collected, 0), coalesce(pd.payments, 0),
+    coalesce(r.calls, 0), coalesce(r.answered, 0),
+    coalesce(m.emails, 0), coalesce(tx.sms, 0), coalesce(w.notes, 0),
+    coalesce(pm.made, 0), coalesce(pm.kept, 0), coalesce(pm.broken, 0),
+    coalesce(tc.accounts, 0),
+    coalesce(tr.traces, 0), coalesce(tr.leads, 0),
+    coalesce(tw.worked, 0), coalesce(tw.verified, 0)
+  from public.profiles pr
+  left join book b on b.uid = pr.id
+  left join paid pd on pd.uid = pr.id
+  left join rang r on r.uid = pr.id
+  left join mailed m on m.uid = pr.id
+  left join texted tx on tx.uid = pr.id
+  left join wrote w on w.uid = pr.id
+  left join promised pm on pm.uid = pr.id
+  left join touched tc on tc.uid = pr.id
+  left join traced tr on tr.uid = pr.id
+  left join trace_work tw on tw.uid = pr.id
+  where pr.collector_grade is not null or b.in_play > 0 or pd.payments > 0;
+$$;
+
+grant execute on function public.collector_performance(timestamptz, timestamptz) to authenticated;
+
+-- Money in, day by day.
+--
+-- ONE ROUND TRIP FOR A YEAR, and the bucketing into sales months is left to the caller on purpose:
+-- the firm's month is the 11th to the 10th, that rule already lives in src/lib/salesMonth.ts, and
+-- writing it a second time in SQL is how two parts of Raptor end up disagreeing about which month
+-- a payment fell in. A year of days is about 365 rows.
+--
+-- p_user null is the whole floor, which is what the company trend behind a collector's own line
+-- is drawn from.
+create or replace function public.collector_daily(
+  p_user uuid, p_from timestamptz, p_to timestamptz
+)
+returns table (on_day date, collected numeric, payments integer)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    -- THE FIRM'S OWN DAY, not UTC. A payment at half past one in the morning in Johannesburg is
+    -- still yesterday in UTC, and a day's total that disagrees with the bank statement by one
+    -- payment is a day's total nobody will trust again.
+    (p.received_at at time zone 'Africa/Johannesburg')::date as on_day,
+    sum(p.amount) as collected,
+    count(*)::integer as payments
+  from public.account_payments p
+  cross join lateral (
+    select dh.user_id
+      from public.account_desk_history dh
+     where dh.account_id = p.account_id
+       and dh.effective_from <= p.received_at
+     order by dh.effective_from desc
+     limit 1
+  ) h
+  where p.reversed_at is null
+    and p.received_at >= p_from and p.received_at < p_to
+    and h.user_id is not null
+    and (p_user is null or h.user_id = p_user)
+  group by 1
+  order by 1;
+$$;
+
+grant execute on function public.collector_daily(uuid, timestamptz, timestamptz) to authenticated;

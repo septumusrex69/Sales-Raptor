@@ -249,12 +249,39 @@ ok('the change uses the shared helper', /import \{ pctDelta \}/.test(page))
 ok('...and does no percentage arithmetic of its own', !/\(now - before\) \/ before/.test(page))
 
 /*
- * THE LEADERBOARD IS NOT ORDERED BY RAND. Whoever holds the biggest book would be permanently
- * top and nothing would be learnt — and the collector on small accounts could never show a number
- * that earns them bigger ones.
+ * THE RANKING ON RAND EXISTS NOW, AND IT CARRIES ITS OWN CONTEXT.
+ *
+ * The firm asked for it directly — "I like the idea of actually ranking them in terms of how much
+ * rand they've collected" — and answered the obvious objection in the same breath: "so the people
+ * know that if they're senior collectors they get more work, it's not a pissing contest." That
+ * answer only holds if the grade and the size of the book are on the row beside the rand. Which
+ * is what is guarded here: the ranking may exist, and it may not exist WITHOUT its context.
  */
-ok('everyone is ordered by payments per hundred', /b\.paymentsPerHundred \?\? -1\) - \(a\.paymentsPerHundred \?\? -1\)/.test(page))
-ok('...and says why', /not by rand/.test(page))
+ok('the ranking orders on rand', /\.sort\(\(a, b\) => b\.line\.collected - a\.line\.collected\)/.test(page))
+ok('...carrying the grade beside it', /<th className="px-3 py-2 font-medium">Grade<\/th>/.test(page))
+ok('...and the size of the book', /Accounts<\/th>/.test(page))
+ok('...and says in words why the two are read together',
+  /part of their rand is the book they were handed/.test(page))
+ok('...and carries payments and the average, which move independently',
+  /Payments<\/th>/.test(page) && /Average payment<\/th>/.test(page))
+/*
+ * AND THE BOOK-INDEPENDENT ORDER IS STILL ON THE PAGE, in its own card. It is what should decide
+ * who is promoted, and if the ranking quietly replaced it the page would be a rand leaderboard
+ * with nothing to read against it.
+ */
+ok('the fair comparison still orders on payments per hundred',
+  /b\.paymentsPerHundred \?\? -1\) - \(a\.paymentsPerHundred \?\? -1\)/.test(page))
+/*
+ * ASSERTED AGAINST THE RENDERED TEXT, NOT THE PAGE. The comment above FairTable says the same
+ * thing in almost the same words, so a regex over the whole file is satisfied by the explanation
+ * of the behaviour rather than by the behaviour -- the exact trap this codebase has a name for.
+ * The card's own caption is sliced out and asserted on.
+ */
+const fairCaption = page.slice(page.indexOf('How people compare\n'), page.indexOf('<div className="overflow-x-auto">', page.indexOf('How people compare\n')))
+ok('there is a caption on the fair card to read', fairCaption.length > 100)
+ok('...naming what the ranking is for', /the month the firm is run on/.test(fairCaption))
+ok('...and what these figures survive', /survive being given a different/.test(fairCaption))
+ok('...and what they are for', /should decide who is promoted/.test(fairCaption))
 ok('the fair figures are separated from the money', /These compare fairly across unlike books/.test(page))
 
 /*
