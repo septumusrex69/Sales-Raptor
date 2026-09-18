@@ -72,6 +72,19 @@ export interface Step {
   /** A debtor's deadline stays where it falls; a job for a person moves to a working day. */
   onNonWorkingDay?: NonWorkingDay
   action: Action
+  /**
+   * THE PERIOD THIS STEP GIVES THE DEBTOR, which is NOT the same thing as `when`.
+   *
+   * "Final notice — seven days to settle" is two facts: the notice goes out on day 35, and the
+   * debtor has until day 42. A builder that offers one field for both — "wait period after
+   * completion" — makes them indistinguishable, and then nobody can say whether the seven days
+   * are the debtor's or the workflow's. They behave differently as well: a deadline stays where
+   * it falls when it lands on a Saturday, because the debtor's clock does not stop for the
+   * office, and the next step does not.
+   *
+   * Undefined where the step gives no period, which is most of them.
+   */
+  deadline?: WhenSpec
   /** What the chart says under the box: "Registered post", "20 business days". */
   note?: string
   /** The chart's own grouping. A LABEL ONLY — it no longer says who holds the file. */
@@ -202,6 +215,15 @@ export interface ResolvedStep {
   nominal: string
   /** How far down the workflow that is, in days from the start — counted on the NOMINAL date. */
   day: number
+  /**
+   * When the period this step gives the debtor runs out, or null where it gives none.
+   *
+   * Counted from the day the step actually happens rather than from its nominal date: a notice
+   * posted on the Monday because the Saturday was a Saturday gives its seven days from the
+   * Monday. And it never moves off a weekend itself — the debtor's clock does not stop because
+   * the office is shut.
+   */
+  deadline: string | null
 }
 
 /**
@@ -240,7 +262,13 @@ export function resolveSteps(
       ? dueDate(anchor, step.when, 'forward', holidays)
       : nominal
     anchors.set(step.id, nominal)
-    out.push({ step, on, nominal, day: spineDay({ startedOn, asAt: nominal }) })
+    out.push({
+      step,
+      on,
+      nominal,
+      day: spineDay({ startedOn, asAt: nominal }),
+      deadline: step.deadline ? dueDate(on, step.deadline, 'keep', holidays) : null,
+    })
   }
   return out
 }

@@ -38,32 +38,32 @@ export const PRE_LEGAL_160: WorkflowDefinition = {
   /* ---------------------------------------------------------------- the spine */
   spine: [
     {
-      id: 'handover',
-      label: 'Handover received',
+      /*
+       * DAY 0 IS A NOTICE TO THE DEBTOR, NOT A FILE REVIEW.
+       *
+       * The chart opened with "Handover Received — Validate File — Prescription · NCA · Mandate ·
+       * POPIA" and then a "Collectable?" decision with a No branch back to the client. The firm
+       * took both out: "I don't think that's really necessary because we don't upload files that
+       * are not collectible." The check happens before an account reaches Raptor at all, so a
+       * step asking it again is a step every file passes, which is a step nobody reads.
+       *
+       * WHAT THAT MOVES UPSTREAM, worth knowing rather than discovering: prescription. Collecting
+       * a prescribed debt is prohibited by section 126B and the call scripts stop on it, so the
+       * flag has to be right at import. Raptor carries `prescribed` on the account; nothing in
+       * this workflow re-checks it.
+       */
+      id: 'handover-notice',
+      label: 'Handover notice',
       after: 'start',
       when: { kind: 'calendar_days', days: 0 },
-      action: { kind: 'task', title: 'Validate the file: prescription, NCA, mandate, POPIA' },
-      note: 'Prescription · NCA · mandate · POPIA',
-      phase: 'Notice',
-    },
-    {
-      /*
-       * THE FIRST DECISION IS WHETHER TO COLLECT AT ALL, and it is first for a reason. A
-       * prescribed debt cannot be collected — section 126B — and a file taken on without a
-       * mandate is one the firm cannot bill. Everything after this point assumes it was answered.
-       */
-      id: 'collectable',
-      label: 'Collectable?',
-      after: 'handover',
-      when: { kind: 'calendar_days', days: 0 },
-      action: { kind: 'decision', question: 'Is this file collectable?' },
-      note: 'No — returned to the client, no contact made',
+      action: { kind: 'notice', template: null, channel: 'post', statutory: false },
+      note: 'Tells the debtor the account has been handed to us, and by whom',
       phase: 'Notice',
     },
     {
       id: 'demand-129',
       label: 'Demand and section 129',
-      after: 'collectable',
+      after: 'handover-notice',
       when: { kind: 'calendar_days', days: 1 },
       action: { kind: 'notice', template: null, channel: 'registered_post', statutory: true },
       note: 'Registered post. Section 129 is the statutory demand BEFORE court — this file is in progress, not legal',
@@ -75,7 +75,9 @@ export const PRE_LEGAL_160: WorkflowDefinition = {
       after: 'demand-129',
       when: { kind: 'calendar_days', days: 9 },
       action: { kind: 'notice', template: null, channel: 'registered_post', statutory: true },
-      note: 'Gives the debtor 20 business days',
+      /* The statutory clock, and it is the debtor's: it does not stop for a weekend. */
+      deadline: { kind: 'business_days', days: 20 },
+      note: 'Gives the debtor 20 business days to respond before the listing is confirmed',
       phase: 'Notice',
     },
     {
@@ -92,6 +94,7 @@ export const PRE_LEGAL_160: WorkflowDefinition = {
       after: 'follow-up-offer',
       when: { kind: 'calendar_days', days: 14 },
       action: { kind: 'notice', template: null, channel: 'registered_post', statutory: true },
+      deadline: { kind: 'calendar_days', days: 7 },
       note: 'Seven days to settle',
       phase: 'Notice',
     },
@@ -313,7 +316,7 @@ export const PRE_LEGAL_160: WorkflowDefinition = {
           action: { kind: 'notice', template: null, channel: 'email' },
           /* The wording for this one already exists, in queryLetters.ts, which says in its own
              header that it belongs in the template library once there is one. There is now. */
-          note: 'Within five business days. Wording exists in queryLetters.ts and needs moving into the library',
+          note: 'Wording exists in queryLetters.ts and needs moving into the library',
         },
         {
           id: 'investigate-dispute',

@@ -75,8 +75,28 @@ ok('...with no renegotiation first, as the chart says', /no renegotiation first/
 const resolved = resolveSteps(PRE_LEGAL_160.spine, '2026-09-18')
 check('every step resolved to a date', resolved.length, PRE_LEGAL_160.spine.length)
 const dayOf = Object.fromEntries(resolved.map((r) => [r.step.id, r.day]))
-check('handover is day 0', dayOf['handover'], 0)
+check('the handover notice is day 0', dayOf['handover-notice'], 0)
 check('demand and section 129 is day 1', dayOf['demand-129'], 1)
+
+/*
+ * DAY 0 IS A NOTICE TO THE DEBTOR, NOT A FILE REVIEW, AND NOTHING ASKS AGAIN WHETHER THE ACCOUNT
+ * IS COLLECTABLE.
+ *
+ * The chart opened with "Validate File" and a "Collectable?" decision with a No branch back to
+ * the client. The firm took both out: "we don't upload files that are not collectible". A step
+ * every single file passes is a step nobody reads, and one that nobody reads is worse than none
+ * because it looks like a control.
+ *
+ * Asserted as an absence, because this is the kind of thing that comes back — somebody reading
+ * the original chart will put it in again.
+ */
+ok('the first step sends the debtor something',
+  PRE_LEGAL_160.spine[0].action.kind === 'notice')
+check('nothing on the spine asks whether the file is collectable',
+  PRE_LEGAL_160.spine.filter((s) => /collectab|validate/i.test(`${s.id} ${s.label}`)).map((s) => s.id), [])
+/* And no branch is left dangling where that decision used to send files. */
+ok('no branch is left for the answer it no longer asks',
+  !PRE_LEGAL_160.branches.some((b) => /return to client|not collectable/i.test(b.name)))
 check('intention to list is day 10', dayOf['intention-to-list'], 10)
 check('follow-up and offer is day 21', dayOf['follow-up-offer'], 21)
 check('final notice is day 35', dayOf['final-notice'], 35)
@@ -127,6 +147,56 @@ ok('...and it is counted in business days, not calendar days',
 const december = resolveSteps(PRE_LEGAL_160.spine, '2026-12-01')
 const decDay = december.find((r) => r.step.id === 'listing-confirmed').day
 ok(`over the December holidays the same step takes longer (${decDay} days)`, decDay > dayOf['listing-confirmed'])
+
+/* ---------- a deadline is not a delay ---------- */
+
+/*
+ * THE DEBTOR'S PERIOD RUNS FROM THE DAY THE STEP ACTUALLY HAPPENED, not from its nominal day.
+ *
+ * A notice that would have gone out on the Saturday and goes out on the Monday gives its seven
+ * days from the MONDAY — the debtor cannot be held to a clock that started before they were
+ * written to. And the deadline itself never moves off a weekend: their clock does not stop
+ * because the office is shut.
+ *
+ * BUILT HERE RATHER THAN READ OFF THE SCREEN, because no step in the firm's workflow currently
+ * does both — every step that moves off a weekend is a job for a person, and none of those give
+ * the debtor a period. So the browser check cannot see this distinction at all, and asserting it
+ * there would have been a check that passes whichever way the code goes. Found by break-testing:
+ * counting the deadline off the nominal date left the browser check green.
+ */
+const moved = resolveSteps([{
+  id: 'weekend-notice',
+  label: 'A notice that lands on a Saturday',
+  after: 'start',
+  /* 19 September 2026 is a Saturday. */
+  when: { kind: 'calendar_days', days: 1 },
+  onNonWorkingDay: 'forward',
+  deadline: { kind: 'calendar_days', days: 7 },
+  action: { kind: 'notice', template: null, channel: 'post' },
+}], '2026-09-18')[0]
+check('the step itself moves to the Monday', moved.on, '2026-09-21')
+check('...while its day number stays where it was', moved.nominal, '2026-09-18'.slice(0, 8) + '19')
+check('...and the debtor’s seven days run from the Monday, not the Saturday',
+  moved.deadline, '2026-09-28')
+/* A deadline that fell on a weekend would stay there: the debtor's clock does not stop. */
+const weekendDeadline = resolveSteps([{
+  id: 'ends-on-a-sunday',
+  label: 'Ends on a Sunday',
+  after: 'start',
+  when: { kind: 'calendar_days', days: 0 },
+  deadline: { kind: 'calendar_days', days: 2 },
+  action: { kind: 'notice', template: null, channel: 'email' },
+}], '2026-09-18')[0]
+check('a deadline landing on a Sunday stays on the Sunday', weekendDeadline.deadline, '2026-09-20')
+/* And a step with no period says so rather than inventing one. */
+check('a step that gives no period has no deadline',
+  resolveSteps(PRE_LEGAL_160.spine, '2026-09-18')
+    .find((r) => r.step.id === 'handover-notice').deadline, null)
+/* The two the firm's own workflow does give. */
+check('the final notice gives seven days',
+  resolved.find((r) => r.step.id === 'final-notice').deadline, '2026-10-30')
+check('...and the intention to list gives twenty business days',
+  resolved.find((r) => r.step.id === 'intention-to-list').deadline, '2026-10-26')
 
 /* ---------- the rotations are NOT in the spine ---------- */
 
