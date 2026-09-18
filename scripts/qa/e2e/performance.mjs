@@ -267,6 +267,8 @@ try {
   const heading = await page.locator('.collections-hero h1').evaluate((el) => ({
     text: el.innerText, colour: getComputedStyle(el).color, size: getComputedStyle(el).fontSize,
     weight: getComputedStyle(el).fontWeight,
+    tracking: getComputedStyle(el).letterSpacing,
+    family: getComputedStyle(el).fontFamily,
   }))
   /*
    * innerText reports what is RENDERED, so a heading set in capitals by CSS comes back in
@@ -274,7 +276,7 @@ try {
    * the sentence-case source and pass whether the transform applied or not.
    */
   t.check('the title is the firm’s own line',
-    heading.text.replace(/\s+/g, ' ').trim(), 'The sky is only the beginning.')
+    heading.text.replace(/\s+/g, ' ').trim(), 'The SKY is only the BEGINNING.')
   /*
    * SIZED TO THE BRIEF, at both ends. "Do NOT make the headline enormous" is half the instruction
    * and 48-56px is the other half, so a lower bound alone would pass on the 72px version this
@@ -291,6 +293,51 @@ try {
   t.ok(`...at a light weight (${heading.weight})`,
     Number(heading.weight) >= 250 && Number(heading.weight) <= 400)
   t.ok('...in white on the dark panel', /255, 255, 255/.test(heading.colour))
+
+  /*
+   * AND IT IS ACTUALLY RENDERING IN INTER.
+   *
+   * --font-sans has named Inter since the theme was written and NOTHING EVER FETCHED IT — no
+   * @font-face, no link, no package — so every screen has been falling back to whatever
+   * ui-sans-serif resolves to: San Francisco on a Mac or an iPad, Segoe on Windows. That is
+   * survivable at 14px and it is not at 52px, where a system stack has no real light cut and the
+   * headline gets synthesised. It is what the firm was looking at when they said the font was
+   * wrong.
+   *
+   * MEASURED AS LOADED, NOT AS DECLARED. document.fonts.check asks whether a face is actually
+   * available at that size and weight; reading fontFamily off the element would return "Inter,
+   * ui-sans-serif, ..." and pass exactly as happily in the broken state, because the declaration
+   * was never the thing that was missing.
+   */
+  const font = await page.evaluate(async () => {
+    await document.fonts.ready
+    return {
+      declared: getComputedStyle(document.body).fontFamily,
+      /* Every face the document actually holds, and whether it was fetched. */
+      faces: [...document.fonts].map((f) => `${f.family}|${f.status}`),
+      /* The control: check() on a family that cannot exist. */
+      nonsense: document.fonts.check('300 52px NoSuchFaceAnywhere'),
+    }
+  })
+  t.ok(`the app declares Inter (${font.declared.split(',')[0]})`, /Inter/.test(font.declared))
+  /*
+   * THE FACE IS REALLY LOADED, read off the FontFaceSet rather than from document.fonts.check().
+   *
+   * check() returns TRUE for a family that does not exist — the probe above asks it about
+   * "NoSuchFaceAnywhere" and it says yes, because the fallback it would use is itself loaded. The
+   * first version of this check used it and passed with the font import deleted, which is how the
+   * next bug was found: @fontsource-variable/inter registers the family as "Inter Variable", so a
+   * stack asking only for "Inter" matched nothing and the app stayed on the system fallback with
+   * the webfont sitting in the page unused.
+   */
+  t.ok('...and check() is the wrong instrument, which is why it is not used', font.nonsense)
+  const loaded = font.faces.filter((f) => /^Inter/.test(f) && f.endsWith('|loaded'))
+  t.ok(`...an Inter face is actually loaded (${loaded.length} of ${font.faces.length})`,
+    loaded.length > 0)
+  /* And the family the page asks for is one the document holds, not a name nothing answers to. */
+  const family = font.declared.split(',')[0].replace(/["']/g, '').trim()
+  t.ok(`...under the name the stylesheet asks for (${family})`,
+    font.faces.some((f) => f.split('|')[0] === family))
   /*
    * TWO TONES, BROKEN BY HAND. The firm's reference sets the first half white and the second in
    * champagne, on two lines — which only works as a deliberate break: left to wrap, the break
@@ -301,13 +348,53 @@ try {
    */
   t.check('...broken across two lines where the firm breaks it',
     heading.text.trim().split('\n').map((l) => l.trim()).join(' | '),
-    'The sky is only | the beginning.')
-  const tail = await page.locator('.collections-hero h1 span').evaluate((el) => ({
-    text: el.innerText.trim(), colour: getComputedStyle(el).color,
-  }))
-  t.check('the second half is the second line', tail.text, 'the beginning.')
-  t.ok(`...and it is champagne rather than white (${tail.colour})`,
-    tail.colour !== heading.colour && !/255, 255, 255/.test(tail.colour))
+    'The SKY is only | the BEGINNING.')
+  /*
+   * Each line is its own span, so the two halves are addressable as two things. They were not at
+   * first — the stressed words are spans too, and a bare `h1 span` matched three elements, which
+   * Playwright refused rather than quietly picking one.
+   */
+  const halves = await page.evaluate(() =>
+    [...document.querySelectorAll('.collections-hero h1 > span')].map((el) => ({
+      text: el.innerText.replace(/\s+/g, ' ').trim(), colour: getComputedStyle(el).color,
+    })))
+  /* Joined, not compared as arrays: this harness's check() uses Object.is, so two arrays with
+     identical contents are never equal and the failure prints two lines that look the same. */
+  t.check('the line is in two halves', halves.map((l) => l.text).join(' | '),
+    'The SKY is only | the BEGINNING.')
+  t.ok(`...the first in white (${halves[0]?.colour})`, /255, 255, 255/.test(halves[0]?.colour ?? ''))
+  t.ok(`...and the second in champagne (${halves[1]?.colour})`,
+    !/255, 255, 255/.test(halves[1]?.colour ?? '') && halves[1]?.colour !== halves[0]?.colour)
+
+  /*
+   * THE TWO NOUNS ARE LIFTED, AND THE CONNECTIVES ARE NOT. Asserted as both halves: the whole
+   * line in capitals was tried and sent back, so a check that only looked for capitals somewhere
+   * would pass on exactly the version the firm rejected.
+   */
+  const stressed = await page.evaluate(() =>
+    [...document.querySelectorAll('.collections-hero h1 span span')].map((el) => ({
+      text: el.innerText.trim(),
+      transform: getComputedStyle(el).textTransform,
+      weight: Number(getComputedStyle(el).fontWeight),
+      tracking: getComputedStyle(el).letterSpacing,
+    })))
+  t.check('two words carry the line', stressed.map((x) => x.text).join(' | '), 'SKY | BEGINNING.')
+  t.ok('...set in capitals by the stylesheet',
+    stressed.every((x) => x.transform === 'uppercase'))
+  t.ok(`...a shade heavier than the rest of it (${stressed.map((x) => x.weight).join(', ')})`,
+    stressed.every((x) => x.weight > Number(heading.weight)))
+  /*
+   * MEASURED, NOT READ OFF THE CLASS — and this is the check that caught it. `tracking-[0.005em]`
+   * sat on the h1, was asserted by a source check, and rendered at -0.62px, because the raptor
+   * skin's own `h1 { letter-spacing: -0.012em }` outranks a utility class. The firm had been told
+   * the line was opened up while it was in fact tighter than before.
+   */
+  t.ok(`the line itself is tracked open (${heading.tracking})`, parseFloat(heading.tracking) > 0)
+  t.ok(`...and the lifted words wider still (${stressed.map((x) => x.tracking).join(', ')})`,
+    stressed.every((x) => parseFloat(x.tracking) > parseFloat(heading.tracking)))
+  /* The rest of the line is NOT in capitals, which is the half that was sent back. */
+  t.ok('the connectives are left in lower case',
+    /The .* is only/.test(heading.text) && !/THE .* IS ONLY/.test(heading.text))
 
   /*
    * THE PANEL DOES NOT NAME THE SCREEN, AND SOMETHING ELSE HAS TO.

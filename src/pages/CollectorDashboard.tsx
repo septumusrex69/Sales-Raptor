@@ -539,7 +539,7 @@ function MonthProgress({ pace, line, note, tone = 'light' }: {
 
   const body = (
     <>
-      <div className="px-4 pt-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+      <div className={`px-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 ${dark ? 'pt-2' : 'pt-3'}`}>
         <p className={dark ? 'text-sm text-white/60' : 'text-sm text-slate-500'}>
           Monthly progress{' '}
           <span className={`font-semibold tabular-nums ${dark ? 'text-white' : 'text-slate-800'}`}>
@@ -558,7 +558,7 @@ function MonthProgress({ pace, line, note, tone = 'light' }: {
           {pace.finished ? ' · month closed' : ` · ${pace.daysLeft} remaining`}
         </p>
       </div>
-      <div className="px-4 pt-3 pb-1">
+      <div className={`px-4 pb-1 ${dark ? 'pt-2' : 'pt-3'}`}>
         {/* Thinner on the dark panel, at the firm's instruction: over a photograph a 10px bar
             reads as a widget, and the figure beside it is what anybody actually reads. */}
         <div className={`relative rounded-full ${dark ? 'h-1.5 bg-white/12' : 'h-2.5 bg-slate-200'}`}>
@@ -572,7 +572,7 @@ function MonthProgress({ pace, line, note, tone = 'light' }: {
           )}
         </div>
       </div>
-      <div className="px-4 pb-3 relative h-4">
+      <div className={`px-4 relative ${dark ? 'pb-2 h-4' : 'pb-3 h-4'}`}>
         {!pace.finished && (
           <span className={`absolute text-[11px] tabular-nums -translate-x-1/2 whitespace-nowrap ${
             dark ? 'text-white/45' : 'text-slate-500'

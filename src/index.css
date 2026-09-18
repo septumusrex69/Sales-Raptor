@@ -2,7 +2,14 @@
 @import "./styles/raptor.css";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  /*
+   * "Inter Variable" FIRST, and that name is not a typo. @fontsource-variable/inter registers the
+   * family as `Inter Variable`, so a stack that asks only for "Inter" matches nothing and falls
+   * through to ui-sans-serif — which is what this did: the token named Inter, nothing fetched it
+   * for months, and then the fetch was added and it STILL was not used because of the name. Both
+   * spellings are listed so either package satisfies it.
+   */
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
 
   --color-navy-950: #0f161d;
   --color-navy-900: #151f29;
@@ -339,11 +346,27 @@ select:autofill {
       rgba(5, 16, 25, 0.15) 70%,
       rgba(5, 16, 25, 0.38) 100%
     ),
-    linear-gradient(to bottom, rgba(5, 16, 25, 0) 0%, rgba(5, 16, 25, 0.15) 55%, rgba(5, 16, 25, 0.38) 100%);
+    linear-gradient(to bottom, rgba(5, 16, 25, 0) 0%, rgba(5, 16, 25, 0.12) 55%, rgba(5, 16, 25, 0.3) 100%);
 }
 .collections-hero > * {
   position: relative;
   z-index: 1;
+}
+
+/*
+ * THE HEADLINE'S LETTER-SPACING, OWNED HERE RATHER THAN AS A UTILITY CLASS.
+ *
+ * The raptor skin sets `html[data-theme='raptor'] h1 { letter-spacing: -0.012em }` as a global
+ * typographic default, and that selector outranks any Tailwind class — so `tracking-[0.005em]` on
+ * the h1 was in the markup, was asserted by a source check, and was doing NOTHING. The rendered
+ * line was at -0.62px while the firm was being told it had been opened up.
+ *
+ * A display line is exactly the case that default is not written for, so it overrides it, at a
+ * specificity that actually wins and scoped to this panel so no other heading moves.
+ */
+html[data-theme='raptor'] .collections-hero h1,
+.collections-hero h1 {
+  letter-spacing: 0.005em;
 }
 
 /*

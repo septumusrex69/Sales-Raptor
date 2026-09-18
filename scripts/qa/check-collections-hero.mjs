@@ -136,19 +136,37 @@ ok('...and the line at the foot went with the redesign', !/Built for a higher st
  */
 const title = hero.slice(hero.indexOf('<h1'), hero.indexOf('</h1>'))
 ok('there is a heading to read', title.length > 40)
-ok('the firm’s first half is on it', /The sky is only/.test(title))
-ok('...and the second half is the second line', /<br \/>[\s\S]*the beginning\./.test(title))
+ok('the firm’s first half is on it', /The <Stress>sky<\/Stress> is only/.test(title))
+ok('...and the second half is the second line', /<br \/>[\s\S]*the <Stress>beginning\.<\/Stress>/.test(title))
 ok('...in champagne rather than white',
-  /text-\[var\(--ch-champagne\)\]"\s*>\s*the beginning\./.test(title))
-ok('...and not set in capitals', !/\buppercase\b/.test(title))
+  /text-\[var\(--ch-champagne\)\]"\s*>\s*the <Stress>beginning\./.test(title))
 /*
- * Tight tracking is right for lower case and wrong for capitals, and the reverse. The capitals
- * version of this line carried +0.015em; sentence case at 52px needs it pulled back in, or the
- * words drift apart at display size.
+ * THE CAPS ARE ON THE NOUNS, NOT THE SENTENCE. Setting the whole line in capitals was tried and
+ * the firm sent it back, so the ABSENCE of a blanket uppercase on the heading is asserted as well
+ * as the presence of the two stressed words — a check that only looked for capitals somewhere
+ * would pass on exactly the version that was rejected.
  */
-const track = /tracking-\[(-?[\d.]+)em\]/.exec(title)
-ok('...with tracking set for lower case', Boolean(track))
-ok(`...pulled in rather than opened up (${track?.[1]}em)`, Number(track?.[1]) < 0)
+check('two words are lifted out of it', (title.match(/<Stress>/g) ?? []).length, 2)
+ok('...and the line itself is not set in capitals', !/\buppercase\b/.test(title))
+/*
+ * THE LINE IS TRACKED OPEN, AND IT IS SET IN THE STYLESHEET RATHER THAN AS A UTILITY CLASS.
+ *
+ * It was a class first. The raptor skin sets `html[data-theme='raptor'] h1 { letter-spacing:
+ * -0.012em }` as a global default and that selector outranks any Tailwind class, so the class sat
+ * in the markup, passed a source check exactly like this one, and rendered at -0.62px — tighter
+ * than before, while the firm was being told it had been opened up. Found by measuring it in the
+ * browser, which is why the browser check next door measures rather than reads.
+ *
+ * So what is asserted here is the RULE and its specificity, not a class on the element.
+ */
+const rule = /\.collections-hero h1[\s\S]{0,80}letter-spacing: (-?[\d.]+)em;/.exec(css)
+ok('the headline’s tracking is set in the stylesheet', Boolean(rule))
+ok(`...opened up rather than pulled in (${rule?.[1]}em)`, Number(rule?.[1]) > 0)
+ok('...at a specificity that beats the skin’s own h1 rule',
+  /html\[data-theme='raptor'\] \.collections-hero h1/.test(css))
+/* And no dead tracking class left behind on the element to disagree with it. */
+ok('...with no utility class left on the element pretending to do it',
+  !/<h1[\s\S]{0,200}tracking-\[/.test(title))
 /*
  * LIGHT, NOT BOLD. It was set at 600 first — the brief asked for "medium/semi-bold" — and the firm
  * read it back as thick. At 52px a weight chosen for body copy reads as advertising, and the whole
@@ -158,6 +176,15 @@ ok(`...pulled in rather than opened up (${track?.[1]}em)`, Number(track?.[1]) < 
  * the cloud, and a floor alone is what let 600 through in the first place.
  */
 ok('...at a light weight', /font-light\b/.test(title))
+/*
+ * The stressed words need all three of capitals, a heavier weight and wider tracking TOGETHER.
+ * At font-light a capital has no ascender or descender to give it presence and reads as a gap in
+ * the line; capitals at the tracking that suits lower case always look cramped.
+ */
+const stress = hero.slice(hero.indexOf('function Stress('), hero.indexOf('function Stress(') + 320)
+ok('the lifted words are capitals', /uppercase/.test(stress))
+ok('...a shade heavier than the line', /font-normal/.test(stress))
+ok('...and tracked wider', /tracking-\[0\.05em\]/.test(stress))
 ok('...and nothing heavier crept back in',
   !/font-(medium|semibold|bold|black|extrabold)\b/.test(title))
 

@@ -75,7 +75,7 @@ export function CollectionsHero({ figures, filters, action, progress }: {
       {/* The brief caps the content at 1250-1350px. Wider than that and the rail of small caps
           ends up a screen away from the headline it belongs to. */}
       <div className="mx-auto flex w-full max-w-[1320px] flex-col px-5 py-7 sm:px-9 sm:py-9
-        min-h-[520px] lg:min-h-[640px]">
+        min-h-[540px] lg:min-h-[700px]">
 
         {/* ---------- the line, and the firm's own words beside it ---------- */}
         <div className="flex items-start justify-between gap-8">
@@ -85,26 +85,28 @@ export function CollectionsHero({ figures, filters, action, progress }: {
             </p>
             <span className="mt-3 block h-px w-14 bg-[var(--ch-gold)]" />
             {/*
-              TWO TONES, ONE SENTENCE, AND A HARD BREAK BETWEEN THEM. The firm's reference sets the
-              first half white and the second in champagne, broken across two lines — which only
-              works as a deliberate break: left to wrap it lands wherever the window is wide and
-              the colour change falls mid-phrase.
+              TWO TONES, TWO LINES, AND THE TWO NOUNS IN CAPITALS.
 
-              A MODERN SANS, NOT A DISPLAY FACE, at the firm's instruction, and LIGHT rather than
-              semibold. It was set at 600 first, which the brief asked for, and the firm read it
-              back as thick — they are right: at 52px a weight chosen for body copy reads as
-              advertising, and the whole direction here is restraint. Weight is what carries the
-              "expensive" in a display line, and less of it carries more.
+              The firm's reference sets the first half white and the second in champagne, across
+              two lines. That only works as a deliberate break: left to wrap, the break lands
+              wherever the window is wide and the colour change falls mid-phrase.
 
-              THE TRACKING OPENS UP WITH IT. -0.02em is right for semibold, where the letterforms
-              are heavy enough to crowd; pull a light weight in that far and the words start to
-              run together at this size. It inherits the app's own family rather than loading a
-              second one.
+              THE CAPS ARE ON THE NOUNS, not the sentence. Setting the whole line in capitals was
+              tried and the firm sent it back; setting none of it left a line they said looked
+              flat. Lifting SKY and BEGINNING alone gives the sentence a rhythm — two stressed
+              words with the connectives running quietly between them — and it is the firm's own
+              suggestion. They are set a shade heavier than the body of the line because capitals
+              at a light weight have no ascenders or descenders to hold them up and go weak; and
+              wider, because capitals set at lowercase tracking always look cramped.
             */}
+            {/* Letter-spacing is in the stylesheet, not here: the skin's own h1 rule outranks a
+                utility class, so a tracking class on this element is markup that does nothing. */}
             <h1 className="mt-4 text-[32px] sm:text-[44px] lg:text-[52px] font-light
-              tracking-[-0.01em] leading-[1.04] text-white">
-              The sky is only<br />
-              <span className="text-[var(--ch-champagne)]">the beginning.</span>
+              leading-[1.06] text-white">
+              {/* Each LINE is its own span, which is not decoration: it makes the two halves
+                  addressable as two things, by a stylesheet and by anything reading the page. */}
+              <span>The <Stress>sky</Stress> is only</span><br />
+              <span className="text-[var(--ch-champagne)]">the <Stress>beginning.</Stress></span>
             </h1>
             <p className="mt-5 text-[11px] font-medium uppercase tracking-[0.34em] text-[var(--ch-gold)]">
               Discipline drives results
@@ -128,7 +130,7 @@ export function CollectionsHero({ figures, filters, action, progress }: {
           lower third of the panel at every height instead of drifting up on a short window and
           leaving the photograph as a band along the top.
         */}
-        <div className="min-h-[56px] flex-1" />
+        <div className="min-h-[72px] flex-1" />
 
         {/* ---------- the four figures ---------- */}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 items-stretch">
@@ -194,7 +196,7 @@ export function CollectionsHero({ figures, filters, action, progress }: {
           selects keep their chevron, and hovering lights the whole control.
         */}
         <div className="hero-glass mt-4">
-          <div className="hero-controls flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-2.5">
+          <div className="hero-controls flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-1.5">
             {filters}
             {action && <div className="ml-auto">{action}</div>}
           </div>
@@ -203,6 +205,17 @@ export function CollectionsHero({ figures, filters, action, progress }: {
       </div>
     </div>
   )
+}
+
+/**
+ * A word lifted out of the headline.
+ *
+ * Capitals, a touch heavier and a touch wider. All three are needed together: at font-light a
+ * capital has no ascender or descender to give it presence and reads as a gap in the line, and
+ * capitals set at the tracking that suits lower case always look cramped.
+ */
+function Stress({ children }: { children: ReactNode }) {
+  return <span className="font-normal uppercase tracking-[0.05em]">{children}</span>
 }
 
 /**
@@ -226,14 +239,14 @@ function Tile({ icon, label, value, tone, children }: {
 }) {
   const colour = tone === 'good' ? 'text-[#3ecf8e]' : tone === 'bad' ? 'text-[#e45d68]' : 'text-white'
   return (
-    <div className="hero-glass flex h-full items-start gap-3 px-3.5 py-3">
+    <div className="hero-glass flex h-full items-start gap-3 px-3.5 py-2.5">
       <span className="mt-0.5 shrink-0 text-[var(--ch-gold)]">{icon}</span>
       <div className="min-w-0">
         <p className="min-h-[2.2em] leading-[1.1] text-[10px] font-semibold uppercase tracking-[0.14em] text-white/65">
           {label}
         </p>
-        <p className={`text-[22px] sm:text-2xl font-semibold tabular-nums leading-none mt-0.5 ${colour}`}>{value}</p>
-        <div className="text-[11px] text-white/60 mt-2">{children}</div>
+        <p className={`text-[19px] sm:text-[21px] font-medium tabular-nums leading-none mt-0.5 ${colour}`}>{value}</p>
+        <div className="text-[11px] text-white/60 mt-1.5">{children}</div>
       </div>
     </div>
   )
