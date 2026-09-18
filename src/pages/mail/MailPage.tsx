@@ -11,7 +11,9 @@ import { Avatar } from '../../components/ui/Avatar'
 import { Card } from '../../components/ui/Card'
 import { RowMenu, type RowMenuItem } from '../../components/ui/RowMenu'
 import { Modal } from '../../components/ui/Modal'
-import { inviteHeadline, inviteWhen, parseInvite, type CalendarInvite } from '../../lib/calendarInvite.ts'
+import {
+  inviteHeadline, inviteInstant, inviteWhen, parseInvite, type CalendarInvite,
+} from '../../lib/calendarInvite.ts'
 import {
   RESPONSE_WORD, canReplyTo, type InviteResponse,
 } from '../../lib/inviteReply.ts'
@@ -2565,6 +2567,14 @@ function InviteCard({ ics, events, onAccept, onRespond, answered, onRemove }: {
   const when = inviteWhen(invite.when)
   const people = invite.attendees.filter((a) => a.name || a.email)
   const already = eventForInvite(events, invite)
+  /*
+   * A meeting whose hour Raptor could not work out. Computed the same way the WRITE does, rather
+   * than from the presence of a TZID: the two disagreed, and the screen was the one that was
+   * wrong — it stayed quiet while the event was stored with no date.
+   */
+  const undated = !invite.when.allDay
+    && invite.when.startsAt !== null
+    && inviteInstant(invite.when).startsAt === null
   /* Offered only where a reply would actually reach somebody — see canReplyTo. */
   const canAnswer = canReplyTo(invite)
   const organiserName = invite.organiser?.name ?? invite.organiser?.email ?? 'The organiser'
@@ -2679,13 +2689,21 @@ function InviteCard({ ics, events, onAccept, onRespond, answered, onRemove }: {
       )}
 
       {/*
-        A FLOATING TIME CANNOT BE PUT IN A DAY. The invite named no zone, which means "whatever
-        the reader's clock says" -- so it is stored without one and the calendar shows it as
-        undated rather than inventing an hour.
+        A TIME THAT CANNOT BE PLACED IN A DAY, and the card has to say so BEFORE somebody accepts.
+        It used to fire only when the invite named no zone at all -- and the case that actually
+        bit was the opposite: an invitation naming `South Africa Standard Time`, which is a
+        Windows name Intl rejects. The time failed to resolve, the meeting was stored with no date
+        on it, and it appeared nowhere on the calendar while this card said nothing. Whether the
+        zone is missing or merely unreadable, the answer for the reader is the same.
       */}
-      {!invite.cancelled && invite.when.startsAt && !invite.when.allDay && !invite.when.timeZone && (
+      {!invite.cancelled && undated && (
         <p className="text-[11px] text-gold-700 mt-1.5">
-          The invite gives no timezone, so this cannot be placed at an hour with any confidence.
+          {invite.when.timeZone
+            ? <>Raptor does not recognise this invite&rsquo;s timezone
+              (&ldquo;{invite.when.timeZone}&rdquo;), so it cannot be placed at an hour. It will
+              go on your calendar without a time.</>
+            : <>The invite gives no timezone, so this cannot be placed at an hour with any
+              confidence. It will go on your calendar without a time.</>}
         </p>
       )}
 

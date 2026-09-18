@@ -70,6 +70,15 @@ export function CalendarPage() {
     return () => { cancelled = true }
   }, [currentUser])
 
+  /*
+   * The ones that could not be placed. Same test as the grid uses to place them, so the two
+   * cannot disagree about which meetings are missing.
+   */
+  const undated = useMemo(
+    () => meetings.filter((m) => (m.allDay ? m.startsOn : m.startsAt) === null),
+    [meetings],
+  )
+
   const events = useMemo<CalEvent[]>(() => {
     const taskEvents = tasks
       .filter((t: Task) => t.status !== 'Cancelled')
@@ -178,6 +187,37 @@ export function CalendarPage() {
           </div>
         </div>
       </div>
+
+      {/*
+        MEETINGS WITH NO HOUR, SAID OUT LOUD.
+        A meeting Raptor could not place has no square to sit in, and it used to be dropped from
+        the grid without a word -- so somebody who accepted an invitation, was told the organiser
+        had been notified, and then found nothing on their calendar had no way of telling whether
+        it had failed or they were looking in the wrong month. It happened for real, to an
+        ordinary Outlook invitation whose timezone name Raptor did not recognise. A line is not a
+        fix for that, but silence is a lie.
+      */}
+      {undated.length > 0 && (
+        <div className="rounded-lg border border-gold-300 bg-gold-50 px-3 py-2.5">
+          <p className="text-xs font-medium text-[var(--c-gold-deep)]">
+            {undated.length === 1
+              ? 'One accepted meeting has no time Raptor could work out, so it is not on the grid:'
+              : `${undated.length} accepted meetings have no time Raptor could work out, so they are not on the grid:`}
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {undated.map((m) => (
+              <li key={m.id} className="text-xs text-slate-700">
+                {m.title}
+                {m.organiserName && <span className="text-slate-500"> &middot; {m.organiserName}</span>}
+              </li>
+            ))}
+          </ul>
+          <p className="text-[11px] text-slate-500 mt-1">
+            The invitation gave a timezone Raptor could not read. Open the message in Mail to see
+            the time the organiser sent.
+          </p>
+        </div>
+      )}
 
       {view === 'Month' && <MonthView cursor={cursor} events={events} />}
       {view === 'Week' && <WeekView cursor={cursor} events={events} />}

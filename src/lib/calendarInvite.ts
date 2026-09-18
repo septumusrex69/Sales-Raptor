@@ -81,6 +81,122 @@ export function icsLines(text: string): IcsLine[] {
   return out
 }
 
+/* ------------------------------------------------------------------ *
+ * Windows timezone names.
+ * ------------------------------------------------------------------ *
+ *
+ * OUTLOOK DOES NOT WRITE IANA ZONE NAMES, and on a South African firm's mailbox Outlook is what
+ * nearly every invitation comes from. It writes `DTSTART;TZID="South Africa Standard Time"` —
+ * a Windows name, which Intl.DateTimeFormat rejects outright. This file used to carry the time as
+ * written, fail to resolve it, and store the meeting with no date at all: the reply went to the
+ * organiser, the event was created, and it appeared nowhere on the calendar because there was
+ * nowhere to put it. That is exactly what the firm reported.
+ *
+ * So the names are mapped. This is the CLDR windowsZones mapping, taking the territory-neutral
+ * ("001") entry for each zone, and it is deliberately a plain table rather than a dependency: it
+ * changes about once a year, it is four hundred bytes, and a zone this list has never heard of is
+ * still handled honestly further down.
+ */
+const WINDOWS_ZONES: Record<string, string> = {
+  'south africa standard time': 'Africa/Johannesburg',
+  'namibia standard time': 'Africa/Windhoek',
+  'w. central africa standard time': 'Africa/Lagos',
+  'e. africa standard time': 'Africa/Nairobi',
+  'egypt standard time': 'Africa/Cairo',
+  'morocco standard time': 'Africa/Casablanca',
+  'sudan standard time': 'Africa/Khartoum',
+  'libya standard time': 'Africa/Tripoli',
+  'mauritius standard time': 'Indian/Mauritius',
+  'greenwich standard time': 'Atlantic/Reykjavik',
+  'gmt standard time': 'Europe/London',
+  'w. europe standard time': 'Europe/Berlin',
+  'central europe standard time': 'Europe/Budapest',
+  'central european standard time': 'Europe/Warsaw',
+  'romance standard time': 'Europe/Paris',
+  'gtb standard time': 'Europe/Bucharest',
+  'fle standard time': 'Europe/Kiev',
+  'e. europe standard time': 'Europe/Chisinau',
+  'russian standard time': 'Europe/Moscow',
+  'turkey standard time': 'Europe/Istanbul',
+  'israel standard time': 'Asia/Jerusalem',
+  'arabic standard time': 'Asia/Baghdad',
+  'arab standard time': 'Asia/Riyadh',
+  'arabian standard time': 'Asia/Dubai',
+  'iran standard time': 'Asia/Tehran',
+  'azerbaijan standard time': 'Asia/Baku',
+  'caucasus standard time': 'Asia/Yerevan',
+  'georgian standard time': 'Asia/Tbilisi',
+  'west asia standard time': 'Asia/Tashkent',
+  'central asia standard time': 'Asia/Almaty',
+  'pakistan standard time': 'Asia/Karachi',
+  'india standard time': 'Asia/Calcutta',
+  'sri lanka standard time': 'Asia/Colombo',
+  'nepal standard time': 'Asia/Katmandu',
+  'bangladesh standard time': 'Asia/Dhaka',
+  'myanmar standard time': 'Asia/Rangoon',
+  'se asia standard time': 'Asia/Bangkok',
+  'china standard time': 'Asia/Shanghai',
+  'singapore standard time': 'Asia/Singapore',
+  'taipei standard time': 'Asia/Taipei',
+  'ulaanbaatar standard time': 'Asia/Ulaanbaatar',
+  'north asia standard time': 'Asia/Krasnoyarsk',
+  'w. australia standard time': 'Australia/Perth',
+  'tokyo standard time': 'Asia/Tokyo',
+  'korea standard time': 'Asia/Seoul',
+  'aus central standard time': 'Australia/Darwin',
+  'cen. australia standard time': 'Australia/Adelaide',
+  'e. australia standard time': 'Australia/Brisbane',
+  'aus eastern standard time': 'Australia/Sydney',
+  'tasmania standard time': 'Australia/Hobart',
+  'new zealand standard time': 'Pacific/Auckland',
+  'fiji standard time': 'Pacific/Fiji',
+  'tonga standard time': 'Pacific/Tongatapu',
+  'samoa standard time': 'Pacific/Apia',
+  'hawaiian standard time': 'Pacific/Honolulu',
+  'alaskan standard time': 'America/Anchorage',
+  'pacific standard time': 'America/Los_Angeles',
+  'us mountain standard time': 'America/Phoenix',
+  'mountain standard time': 'America/Denver',
+  'central standard time': 'America/Chicago',
+  'canada central standard time': 'America/Regina',
+  'central america standard time': 'America/Guatemala',
+  'eastern standard time': 'America/New_York',
+  'us eastern standard time': 'America/Indianapolis',
+  'sa pacific standard time': 'America/Bogota',
+  'venezuela standard time': 'America/Caracas',
+  'atlantic standard time': 'America/Halifax',
+  'sa western standard time': 'America/La_Paz',
+  'newfoundland standard time': 'America/St_Johns',
+  'e. south america standard time': 'America/Sao_Paulo',
+  'argentina standard time': 'America/Buenos_Aires',
+  'sa eastern standard time': 'America/Cayenne',
+  'mid-atlantic standard time': 'Atlantic/South_Georgia',
+  'azores standard time': 'Atlantic/Azores',
+  'cape verde standard time': 'Atlantic/Cape_Verde',
+  'utc': 'Etc/UTC',
+  'coordinated universal time': 'Etc/UTC',
+}
+
+/**
+ * The IANA name for whatever the invite called its zone.
+ *
+ * Three shapes arrive in the wild and all three have to work:
+ *   - `Africa/Johannesburg`, already IANA, which is handed straight back
+ *   - `South Africa Standard Time`, Windows, which is looked up
+ *   - `(UTC+02:00) South Africa Standard Time`, which some clients emit with the offset glued to
+ *     the front of the name — the prefix is stripped before the lookup
+ *
+ * A zone nobody here has heard of comes back as it went in. The caller then fails to resolve it
+ * and says so, which is the right outcome: a guessed offset puts a meeting an hour out, and a
+ * meeting an hour out is worse than one you had to read the zone off.
+ */
+export function ianaZone(tzid: string | null | undefined): string | null {
+  if (!tzid) return null
+  const cleaned = tzid.trim().replace(/^\((?:UTC|GMT)[+-]\d{2}:?\d{2}\)\s*/i, '').trim()
+  if (cleaned === '') return null
+  return WINDOWS_ZONES[cleaned.toLowerCase()] ?? cleaned
+}
+
 export interface InviteWhen {
   /** As written in the invite: 2026-09-17, or 2026-09-17T16:00. Never shifted. */
   startsAt: string | null
@@ -90,10 +206,68 @@ export interface InviteWhen {
   /**
    * The zone the times are written in, or null where they are already an instant.
    *
-   * 'UTC' where the value ended in Z, an IANA name where the invite named one, and null where it
-   * gave neither — a floating time, which means whatever the reader's own clock says.
+   * 'UTC' where the value ended in Z, whatever name the invite used where it named one, and null
+   * where it gave neither — a floating time, which means whatever the reader's own clock says.
+   *
+   * CARRIED AS WRITTEN, Windows name and all. Resolving it is inviteInstant's job and happens at
+   * the moment the meeting is stored, not here.
    */
   timeZone: string | null
+  /**
+   * The offset the invite itself declared for that zone, in minutes east of UTC.
+   *
+   * Every invitation carries a VTIMEZONE describing its own zone, and where that zone has no
+   * daylight saving the description is a single offset that is simply true — South Africa, most
+   * of Asia, Queensland. It is the fallback for a zone name nothing here recognises: the invite
+   * told us the answer, and refusing to read it would be pedantry at the cost of a meeting with
+   * no date on it.
+   *
+   * Null where the zone DOES change through the year, because then the offset depends on the date
+   * and picking one of the two would be a coin toss that lands an hour out half the year.
+   */
+  tzOffsetMinutes: number | null
+}
+
+/** `+0200` or `-053000`, as minutes east of UTC. */
+export function parseUtcOffset(value: string | undefined): number | null {
+  if (!value) return null
+  const m = /^([+-])(\d{2})(\d{2})(\d{2})?$/.exec(value.trim())
+  if (!m) return null
+  const mins = Number(m[2]) * 60 + Number(m[3])
+  return m[1] === '-' ? -mins : mins
+}
+
+/**
+ * The zones an invite describes that do NOT change through the year, as offsets.
+ *
+ * One sub-component inside the VTIMEZONE means one rule all year; two (a STANDARD and a DAYLIGHT)
+ * mean the offset depends on the date, and choosing between them needs the RRULE evaluated. That
+ * is real work for a case the name lookup already handles, so those are left out entirely rather
+ * than guessed at.
+ */
+export function fixedZoneOffsets(lines: IcsLine[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  let tzid: string | null = null
+  let parts = 0
+  let offset: number | null = null
+  let inside = false
+  for (const l of lines) {
+    const value = l.value.toUpperCase()
+    if (l.name === 'BEGIN' && value === 'VTIMEZONE') {
+      inside = true; tzid = null; parts = 0; offset = null
+      continue
+    }
+    if (!inside) continue
+    if (l.name === 'END' && value === 'VTIMEZONE') {
+      if (tzid && parts === 1 && offset !== null) out[tzid] = offset
+      inside = false
+      continue
+    }
+    if (l.name === 'TZID') tzid = l.value.trim()
+    else if (l.name === 'BEGIN' && (value === 'STANDARD' || value === 'DAYLIGHT')) parts += 1
+    else if (l.name === 'TZOFFSETTO') offset = parseUtcOffset(l.value)
+  }
+  return out
 }
 
 /**
@@ -248,7 +422,14 @@ export function parseInvite(ics: string | null | undefined): CalendarInvite | nu
     description: text('DESCRIPTION'),
     organiser: first('ORGANIZER') ? icsPerson(first('ORGANIZER')!) : null,
     attendees: event.filter((l) => l.name === 'ATTENDEE').map(icsPerson),
-    when: { startsAt: from.at, endsAt: to.at, allDay: from.allDay, timeZone: from.tz },
+    when: {
+      startsAt: from.at,
+      endsAt: to.at,
+      allDay: from.allDay,
+      timeZone: from.tz,
+      /* Looked up on the TZID EXACTLY AS DTSTART wrote it, which is how VTIMEZONE keys itself. */
+      tzOffsetMinutes: from.tz ? fixedZoneOffsets(all)[from.tz] ?? null : null,
+    },
     repeats: describeRepeat(first('RRULE')?.value),
     uid: text('UID'),
     sequence: sequenceOf(first('SEQUENCE')?.value),
@@ -390,8 +571,32 @@ export function inviteInstant(when: InviteWhen): { startsAt: string | null; ends
     /* An all-day event is a DATE and has no time to resolve; it is stored as the date it is. */
     if (when.allDay) return wall.slice(0, 10)
     if (when.timeZone === 'UTC') return `${wall}:00.000Z`
-    if (when.timeZone) return zonedTimeToUtc(wall, when.timeZone)
+    if (!when.timeZone) return null
+
+    /*
+     * THE NAME FIRST, THEN WHAT THE INVITE SAID ITSELF.
+     *
+     * Outlook writes Windows zone names — `South Africa Standard Time` — which Intl rejects, so
+     * ianaZone translates them. Where even that comes back unknown, the invitation's own
+     * VTIMEZONE may have declared a single offset for the zone, and a zone with one rule all year
+     * is simply telling us the answer.
+     *
+     * This order matters: the NAME wins, because a named zone knows about daylight saving and a
+     * declared offset only knows about the half of the year it was written in.
+     */
+    const zone = ianaZone(when.timeZone)
+    const byName = zone ? zonedTimeToUtc(wall, zone) : null
+    if (byName) return byName
+    if (when.tzOffsetMinutes !== null) return fixedOffsetToUtc(wall, when.tzOffsetMinutes)
     return null
   }
   return { startsAt: one(when.startsAt), endsAt: one(when.endsAt) }
+}
+
+/** A wall-clock time at a known fixed offset, as a real instant. */
+export function fixedOffsetToUtc(wall: string, offsetMinutes: number): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(wall)
+  if (!m) return null
+  const [, y, mo, d, h, mi] = m.map(Number) as unknown as number[]
+  return new Date(Date.UTC(y, mo - 1, d, h, mi) - offsetMinutes * 60000).toISOString()
 }
