@@ -186,14 +186,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return
       }
       /*
-       * The contact details are extracted HERE rather than in the browser, because the browser
-       * never sees the HTML — and must not: this is markup from outside the building, and
-       * rendering it is not worth faithful formatting. The hrefs are read on the server and only
-       * the handful of candidates crosses over.
+       * THE HTML NOW CROSSES OVER, and it did not used to. The rule here was that the browser
+       * never sees a message's markup, on the reasoning that rendering a stranger's HTML is not
+       * worth faithful formatting. That held until somebody opened a newsletter: flattening the
+       * markup takes the pictures out and takes the links off the words, so the message read as
+       * a wall of dead headings — "there's links there that I should press on, but it doesn't
+       * work". Faithful formatting turned out to be worth something after all.
+       *
+       * What changed is where it is rendered, not how much it is trusted. It goes into a
+       * sandboxed iframe with no scripting and a content policy that forbids every fetch, never
+       * into the app's own page — see src/lib/emailHtml.ts, which is also where remote pictures
+       * are held back until a person asks for them.
+       *
+       * The contact details are still read HERE rather than in the browser: they come off the
+       * hrefs, the server has the markup in hand anyway, and the page only ever wanted the
+       * handful of candidates.
        */
       res.status(200).json({
         ok: true,
         text: body.text,
+        html: body.html,
         details: body.html ? findLinkedDetails(body.html, mail.from_address as string | undefined) : [],
         /*
          * The pictures drawn INTO the message, chiefly signatures — carried as data: URIs so

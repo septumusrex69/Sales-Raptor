@@ -25,10 +25,21 @@
 import {
   OUT, PORT, chromium, makeRunner, signedInPage, startServer, stopServer,
 } from './harness.mjs'
-import { COMPANY, FORM_BODY, MAIL, PROFILE, TEAM, USER_ID, COLLEAGUE } from './fixtures.mjs'
+import {
+  COMPANY, FORM_BODY, MAIL, PROFILE, TEAM, USER_ID, COLLEAGUE,
+  NEWSLETTER_BANNER, NEWSLETTER_CID, NEWSLETTER_HTML, NEWSLETTER_LINK, NEWSLETTER_SIGNATURE,
+} from './fixtures.mjs'
 
 const t = makeRunner('mail')
 const seen = []
+/*
+ * EVERY REQUEST THAT LEFT FOR SOMEBODY ELSE'S SERVER.
+ *
+ * The promise about remote pictures is not a promise about markup — it is a promise that the
+ * browser asks nobody for anything. Counting the requests is the only way to check the promise
+ * that was actually made; asserting on the sanitiser's output checks the sanitiser.
+ */
+const remote = []
 
 const handlers = [
   [(u) => u.includes('/auth/v1/user'), () => ({ body: { id: USER_ID, email: PROFILE.email } })],
@@ -138,7 +149,43 @@ try {
         : `${message?.snippet ?? ''}`
     return route.fulfill({
       status: 200, contentType: 'application/json',
-      body: JSON.stringify({ text, details: [], images: [], imagesSkipped: 0, calendar: '' }),
+      body: JSON.stringify({
+        text,
+        /*
+         * ONE MESSAGE IS A NEWSLETTER. The rest come back as they always did — plain text and no
+         * markup — so every assertion the rest of this file makes about a message body is still
+         * reading the path it was written for.
+         */
+        html: message?.id === MAIL[3].id ? NEWSLETTER_HTML : '',
+        details: [],
+        images: message?.id === MAIL[3].id
+          ? [{ cid: NEWSLETTER_CID, filename: 'signature.gif', dataUri: NEWSLETTER_SIGNATURE }]
+          : [],
+        imagesSkipped: 0,
+        calendar: '',
+      }),
+    })
+  })
+
+  /*
+   * The outside world, stubbed and counted. Nothing here is reachable from the QA container, so
+   * without this a picture that DID get fetched would fail quietly and look like one that was
+   * never fetched at all — which is the exact opposite of what is being checked.
+   */
+  await page.route(/businesstech\.example/, (route) => {
+    remote.push(route.request().url())
+    /*
+     * A banner with real dimensions, not a 1x1 stand-in. A one-pixel image declared width="600"
+     * is stretched to a 600-pixel SQUARE by the frame's own `height:auto`, which pushes the whole
+     * message off the screenshot and makes a working render look like a blank pane.
+     */
+    return route.fulfill({
+      status: 200,
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="120">'
+        + '<rect width="600" height="120" fill="#0f172a"/>'
+        + '<text x="24" y="70" fill="#d4b062" font-size="28" font-family="sans-serif">'
+        + 'BusinessTech</text></svg>',
     })
   })
 
@@ -559,6 +606,96 @@ try {
   await t.shot(page, '26-mail-lead-from-form')
   await box().getByRole('button', { name: 'Cancel' }).click()
   await page.waitForTimeout(400)
+
+  /* ---------- a newsletter, read as a newsletter ---------- */
+
+  /*
+   * THE COMPLAINT THIS ANSWERS, in the firm's words: "it had pictures in it that I didn't
+   * download, and there's links there that I should press on, but it doesn't work."
+   *
+   * Only a browser can settle any of this. The sanitiser's own check beside this folder proves
+   * what the markup comes out looking like; it cannot prove that the frame ever rendered, that a
+   * link is a link somebody can press, that the script did not reach the page around it, or —
+   * the one that matters most — that no request actually left for somebody else's server.
+   */
+  await page.getByText('Request for information').first().click()
+  await page.waitForTimeout(1400)
+
+  const frame = page.frameLocator('iframe[title="Message"]')
+  const framed = page.locator('iframe[title="Message"]').first()
+
+  t.ok('a message written in HTML is shown as HTML', await framed.isVisible())
+  /*
+   * The sandbox, spelled out. `allow-scripts` is not in it and that absence is the whole
+   * security position — asserted as the exact string, because a flag added later would be added
+   * silently and this is the one line in the file nobody would think to re-read.
+   */
+  t.check('...in a frame that cannot run script',
+    await framed.getAttribute('sandbox'),
+    'allow-same-origin allow-popups allow-popups-to-escape-sandbox')
+  /*
+   * The fixture's script sets the TAB'S title, so if it ever runs this is what it renames.
+   *
+   * Three things have to fail at once for this to fire, which was confirmed by breaking them:
+   * the sanitiser has to leave the script in, the sandbox has to gain `allow-scripts`, AND the
+   * document's content policy has to stop forbidding inline script. Breaking any two of the
+   * three leaves this assertion green — which is the point of having three.
+   */
+  t.ok('...and the script inside the message never reached the page around it',
+    (await page.title()) !== 'PWNED')
+
+  const article = frame.getByRole('link', { name: 'Read the full article' })
+  t.ok('the link is a link, and it is there to press', await article.isVisible())
+  t.check('...pointing where the message pointed', await article.getAttribute('href'), NEWSLETTER_LINK)
+  t.check('...and opening away from Raptor, which is a single page',
+    await article.getAttribute('target'), '_blank')
+  t.check('...carrying no handler of its own', await article.getAttribute('onclick'), null)
+
+  /*
+   * THE FRAME IS AS TALL AS THE MESSAGE. Without allow-same-origin the height cannot be measured
+   * and the message sits in a fixed box — a scrollbar inside a scrolling list. A placeholder that
+   * never grew is 48px, so this fails on exactly that.
+   */
+  const tall = await framed.evaluate((el) => el.getBoundingClientRect().height)
+  t.ok(`the frame grew to the height of the message (${Math.round(tall)}px)`, tall > 100)
+
+  const signature = frame.getByAltText('BusinessTech')
+  t.ok('the signature that came WITH the message is drawn where it was written',
+    await signature.isVisible())
+  t.check('...out of the bytes already in hand, so it costs no request',
+    await signature.getAttribute('src'), NEWSLETTER_SIGNATURE)
+  /*
+   * It is in the message now, so listing it underneath would show the same logo twice.
+   *
+   * `exact` is not tidiness. getByText with a plain string matches a case-insensitive SUBSTRING,
+   * and the picture banner three lines below reads "Pictures in this message were not
+   * downloaded" — so the loose assertion found the banner, and would have gone on finding it
+   * whether the strip was there or not.
+   */
+  t.check('...and is not listed a second time underneath',
+    await page.getByText('In this message', { exact: true }).count(), 0)
+
+  t.check('nothing at all was fetched from anybody else\u2019s server', remote.length, 0)
+  t.ok('...and the message says so rather than leaving a gap',
+    await page.getByText('Pictures in this message were not downloaded').first().isVisible())
+
+  await t.shot(page, '27-mail-newsletter')
+
+  await page.getByRole('button', { name: 'Show pictures' }).first().click()
+  await page.waitForTimeout(1400)
+  t.ok('pressing Show pictures is what fetches them, and only then',
+    remote.some((u) => u.startsWith(NEWSLETTER_BANNER)))
+  t.ok('...and the banner is on screen', await frame.getByAltText('Banner').isVisible())
+  /*
+   * AND THE TRACKING PIXEL IS STILL NOT FETCHED. The fixture carries a 1x1 on the same server as
+   * the banner, so a rule that simply opened the gates would fetch it here. Asking to see the
+   * pictures is not asking for the sender to be told the message was read.
+   */
+  t.ok('...while the 1x1 in the same message is still fetched by nobody',
+    !remote.some((u) => u.includes('open.gif')))
+  t.check('...and the offer is gone, because it has been taken',
+    await page.getByText('Pictures in this message were not downloaded').count(), 0)
+  await t.shot(page, '28-mail-newsletter-pictures')
 
   /* ---------- nothing broke on the way ---------- */
 

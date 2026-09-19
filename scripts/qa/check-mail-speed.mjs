@@ -82,7 +82,20 @@ ok('...and it answers 200', /res\.status\(200\)/.test(skip))
 
 /* ---------- 2. one body fetch per message ---------- */
 
-const toggle = page.slice(page.indexOf('async function toggleTo('), page.indexOf('async function toggleTo(') + 2500)
+/*
+ * THE FUNCTION, BOUNDED BY ITS OWN CLOSING BRACE — not by a character count.
+ *
+ * This read 2 500 characters from the top of toggleTo, and the day the function grew by one
+ * setState the window stopped reaching the `finally` block. The check then reported that the
+ * in-flight mark is never cleared, which was not true of the code at any point: it was true of
+ * the slice. A count of characters is a guess about how long a function is allowed to be, and it
+ * fails as a false alarm, which is the worst way for a check to fail.
+ *
+ * `\n  }` at two spaces of indentation is this file's function-level closing brace; everything
+ * inside toggleTo closes at four or more.
+ */
+const toggleAt = page.indexOf('async function toggleTo(')
+const toggle = page.slice(toggleAt, page.indexOf('\n  }\n', toggleAt) + 4)
 ok('the open handler exists to read', toggle.length > 500)
 ok('a body already in hand is not fetched again', /if \(bodies\[mail\.id\] !== undefined\) return/.test(toggle))
 /*

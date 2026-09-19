@@ -391,6 +391,46 @@ MAIL.push(...FILLER)
  * phone number rather than the first would put the firm's own switchboard on the lead -- a number
  * a salesperson then phones.
  */
+/**
+ * A NEWSLETTER, which is the shape that broke.
+ *
+ * The firm opened one from a news service and reported two things at once: "it had pictures in it
+ * that I didn't download, and there's links there that I should press on, but it doesn't work."
+ * Both follow from the same cause — the markup was flattened to text on the server, which takes
+ * the pictures out and takes the links off the words.
+ *
+ * Every hostile thing an email can carry is in here on purpose, because the point of running this
+ * in a real browser is to watch them all fail:
+ *
+ *   - a script that reaches for the page around it. If the sandbox ever lost `allow-scripts`
+ *     being absent, this line renames the Raptor tab and the check below sees it.
+ *   - a tracking pixel and a banner on somebody else's server, which must not be fetched until a
+ *     person presses the button.
+ *   - a signature that came WITH the message, which must be drawn straight away because it costs
+ *     nobody a request.
+ *   - a real link, which is the whole complaint.
+ */
+export const NEWSLETTER_CID = 'sig-9@businesstech.example'
+/* A 1x1 transparent GIF. Small enough to read, real enough for the browser to render. */
+export const NEWSLETTER_SIGNATURE = 'data:image/gif;base64,'
+  + 'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+export const NEWSLETTER_LINK = 'https://businesstech.example/news/12345/'
+export const NEWSLETTER_BANNER = 'https://cdn.businesstech.example/banner.jpg'
+
+export const NEWSLETTER_HTML = [
+  '<html><head><style>.wrap{padding:12px}.lede{color:#123456}</style></head><body>',
+  '<script>window.parent.document.title = "PWNED"</script>',
+  '<div class="wrap">',
+  `<img src="${NEWSLETTER_BANNER}" width="600" alt="Banner">`,
+  '<h2 class="lede">Lenders face tighter affordability rules</h2>',
+  '<p>The regulator has published its findings on affordability assessments.</p>',
+  `<a href="${NEWSLETTER_LINK}" onclick="window.parent.location=1">Read the full article</a>`,
+  '<img src="https://cdn.businesstech.example/open.gif?id=42" width="1" height="1" alt="">',
+  '<p>Regards</p>',
+  `<img src="cid:${NEWSLETTER_CID}" alt="BusinessTech">`,
+  '</div></body></html>',
+].join('')
+
 export const FORM_BODY = [
   'Good Day',
   '',

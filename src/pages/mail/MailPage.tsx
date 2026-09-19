@@ -31,6 +31,7 @@ import {
 } from '../../lib/emailRules'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
+import { sanitizeEmailHtml } from '../../lib/emailHtml'
 import { useEmailView } from '../../lib/emailView'
 import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
@@ -273,6 +274,22 @@ export function MailPage() {
   const [bodyImages, setBodyImages] = useState<Record<string, InlineImage[]>>({})
   /** Pictures that were in the message and were too large to carry, so the page can say so. */
   const [imagesSkipped, setImagesSkipped] = useState<Record<string, number>>({})
+  /**
+   * Each message as it was actually written, where it was written in HTML.
+   *
+   * Kept BESIDE the flattened text rather than instead of it: the text is what a forward quotes
+   * and what the contact-form parser reads, and neither of those wants markup.
+   */
+  const [htmlBodies, setHtmlBodies] = useState<Record<string, string>>({})
+  /**
+   * Which messages the reader has asked to fetch pictures for.
+   *
+   * Off for every message until somebody presses the button, and never remembered past this page
+   * — the decision is about ONE message. A remote picture is how a sender finds out their mail
+   * was opened and when, which in this trade tells a debtor's attorney the letter landed and was
+   * read at 14:12 on Tuesday. So the default is the quiet one and the choice is taken each time.
+   */
+  const [showPictures, setShowPictures] = useState<Record<string, boolean>>({})
   /** The raw ICS of a meeting request, kept beside its text. Parsed on render — see parseInvite. */
   const [calendars, setCalendars] = useState<Record<string, string>>({})
   /*
@@ -525,8 +542,9 @@ export function MailPage() {
     setReading(mail.id)
     setReadError((e) => { const next = { ...e }; delete next[mail.id]; return next })
     try {
-      const { text, details, images, imagesSkipped: skipped, calendar } = await fetchMailBody(mail.id, token)
+      const { text, html, details, images, imagesSkipped: skipped, calendar } = await fetchMailBody(mail.id, token)
       setBodies((b) => ({ ...b, [mail.id]: text }))
+      setHtmlBodies((h) => ({ ...h, [mail.id]: html }))
       setCalendars((c) => ({ ...c, [mail.id]: calendar }))
       // Kept beside the text: these came out of the message's LINKS, which is the only thing an
       // image signature leaves behind.
@@ -1240,7 +1258,10 @@ export function MailPage() {
                     </span>
                   )}
                 </div>
-                <MailBody mail={m} body={bodies[m.id]} images={bodyImages[m.id]}
+                <MailBody mail={m} body={bodies[m.id]} html={htmlBodies[m.id]}
+                  images={bodyImages[m.id]}
+                  showPictures={!!showPictures[m.id]}
+                  onShowPictures={() => setShowPictures((p) => ({ ...p, [m.id]: true }))}
                   calendar={calendars[m.id]} events={events}
                   onAccept={(inv) => accept(inv, m.id)}
                   onRespond={(inv, r) => respond(inv, r, m)} onRemoveEvent={dropEvent}
@@ -1271,6 +1292,9 @@ export function MailPage() {
                   expanded={open === m.id}
                   blocked={blocked}
                   body={bodies[m.id]}
+                  html={htmlBodies[m.id]}
+                  showPictures={!!showPictures[m.id]}
+                  onShowPictures={() => setShowPictures((p) => ({ ...p, [m.id]: true }))}
                   images={bodyImages[m.id]}
                   calendar={calendars[m.id]}
                   events={events}
@@ -2066,13 +2090,92 @@ function BarButton({ sticky, onClick, label, icon }: {
 }
 
 /** The message itself, shared by the expanded row and the reading pane. */
+/**
+ * A message's own markup, on screen, with nothing of the message reaching the page.
+ *
+ * WHY AN IFRAME AND NOT dangerouslySetInnerHTML. A scan can always be got wrong; a frame does not
+ * have to be right. The sandbox here carries NO `allow-scripts`, which is a browser-level block on
+ * every way HTML has of running code — inline handlers, `javascript:` hrefs, scripts that were
+ * mis-nested past the scan in src/lib/emailHtml.ts — and it does not depend on that file. The
+ * document also carries `default-src 'none'`, so it cannot fetch anything from anybody. Layout is
+ * contained for free: a newsletter's `position:fixed` banner cannot sit over Raptor's own toolbar.
+ *
+ * WHY `allow-same-origin` IS IN THE LIST. Without it the frame is an opaque origin and this
+ * component cannot read the height of what it just rendered — which means either a fixed box with
+ * a scrollbar inside a scrolling list, or a two-line reply in a 600px hole. With it the height is
+ * measured and the frame is exactly as tall as the message. It is safe HERE and would not be
+ * anywhere else: same-origin is only worth having to a script, and no script can run in this
+ * document — the sandbox forbids it and the content policy forbids it again.
+ *
+ * `allow-popups-to-escape-sandbox` is what makes a link actually work. A link opened from a
+ * sandboxed frame inherits the sandbox unless this is set, so the debtor's bank statement portal
+ * would open in a tab with its own scripting turned off — which looks exactly like the broken
+ * links this was written to fix.
+ */
+function EmailFrame({ html }: { html: string }) {
+  const frame = useRef<HTMLIFrameElement | null>(null)
+  /* 0 means "not measured yet". The placeholder below is deliberately short: growing into place
+     reads better than a tall box collapsing. */
+  const [height, setHeight] = useState(0)
+
+  const measure = useCallback(() => {
+    const doc = frame.current?.contentDocument
+    if (!doc?.body) return
+    const wanted = Math.max(doc.body.scrollHeight, doc.documentElement?.scrollHeight ?? 0)
+    /*
+     * Capped, and the cap is not cosmetic. A marketing mail can run to tens of thousands of
+     * pixels, and a frame that tall inside a scrolling list means the list's own scrollbar stops
+     * describing the list. Past the cap the message scrolls inside its own frame, which is what
+     * every other mail client does with the reading pane anyway.
+     */
+    setHeight(Math.min(Math.max(wanted + 2, 48), 3200))
+  }, [])
+
+  /*
+   * Measured again a moment later, once rather than on a timer.
+   *
+   * `load` fires when the document and its subresources are done, but a webfont-less newsletter
+   * frequently reflows after that — and pressing "Show pictures" swaps in images whose own sizes
+   * are not known until they arrive. One late measurement covers both and costs nothing.
+   */
+  useEffect(() => {
+    setHeight(0)
+    const later = setTimeout(measure, 400)
+    return () => clearTimeout(later)
+  }, [html, measure])
+
+  return (
+    <iframe
+      ref={frame}
+      /* Named, because a frame with no title is an unlabelled region to a screen reader. */
+      title="Message"
+      srcDoc={html}
+      onLoad={measure}
+      referrerPolicy="no-referrer"
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      className="block w-full border-0 bg-white"
+      style={{ height: `${height || 48}px` }}
+    />
+  )
+}
+
 function MailBody({
-  mail, body, images, calendar, events, onAccept, onRespond, onRemoveEvent, skippedImages, loadingBody,
+  mail, body, html, showPictures, onShowPictures,
+  images, calendar, events, onAccept, onRespond, onRemoveEvent, skippedImages, loadingBody,
   bodyError, onBlock, onReply, onReplyAll, onForward, onJunk, onMove, onUnread, onNoRecord,
   onUndoNoRecord, onLink, onCreateLead, onDownload, downloading, downloadError, sticky,
 }: {
   mail: MailItem
   body?: string
+  /**
+   * The message as it was written, where it was written in HTML.
+   *
+   * Rendered in a sandboxed frame, never into this page — see EmailFrame and sanitizeEmailHtml.
+   */
+  html?: string
+  /** Whether the reader has asked to fetch this message's remote pictures. */
+  showPictures?: boolean
+  onShowPictures?: () => void
   /** The raw ICS where this was a meeting request. Parsed here — see parseInvite. */
   calendar?: string
   /** This person's calendar, so an invite already on it says so. */
@@ -2169,6 +2272,30 @@ function MailBody({
    * every enquiry comes from the one address, and blocking it would silence the contact form for
    * good. There it stays here, behind a deliberate click. See NotMatchedBar.
    */
+  /*
+   * The message, made safe to show.
+   *
+   * Recomputed only when the markup or the picture decision changes — a scan of a newsletter is
+   * not free and this component re-renders on every hover in the list behind it.
+   */
+  const safe = useMemo(
+    () => (html && html.trim() ? sanitizeEmailHtml(html, { images, showPictures }) : null),
+    [html, images, showPictures],
+  )
+  /*
+   * The pictures the message did NOT place for itself.
+   *
+   * A signature is a cid reference inside the markup, so once the markup is rendered the logo is
+   * already on screen; listing it again underneath showed every signature twice. What is left
+   * here is the picture that came with the message and is referred to by nothing — which still
+   * has to be shown, because that is the shape an image-only message arrives in.
+   */
+  const loosePictures = useMemo(() => {
+    if (!safe) return images ?? []
+    const placed = new Set(safe.usedCids)
+    return (images ?? []).filter((img) => !placed.has(img.cid.replace(/^<|>$/g, '').toLowerCase()))
+  }, [images, safe])
+
   const barIsUp = !mail.isFiled && !mail.noRecordAt
   const barHasDisposal = barIsUp && !isLeadIntake(mail.fromAddress)
 
@@ -2280,14 +2407,45 @@ function MailBody({
         </p>
       )}
 
-      {!loadingBody && body !== undefined && (
+      {!loadingBody && body !== undefined && safe && (
         /*
-         * The message as it was written. `whitespace-pre-wrap` because an email's own line breaks
-         * carry meaning — collapsing them turns a numbered arrangement into a paragraph.
-         * `break-words` because a pasted URL would otherwise push the page wide.
+         * THE MESSAGE AS IT WAS WRITTEN.
          *
-         * Rendered as TEXT, never as HTML: this is mail from outside the building, and putting a
-         * stranger's markup into the page is not worth faithful formatting.
+         * This used to be the flattened text for every message, on the rule that a stranger's
+         * markup has no business in the page. The rule still holds for THE PAGE — nothing here
+         * goes into Raptor's own DOM. It goes into a frame that cannot run script and cannot
+         * fetch anything, which is a different proposition, and it is what a newsletter needs to
+         * be readable at all: flattening takes the pictures out and takes the links off the
+         * words, which is exactly how this was reported ("there's links there that I should
+         * press on, but it doesn't work").
+         */
+        <>
+          {safe.blockedRemote > 0 && !showPictures && (
+            /*
+             * Not a warning — nothing is wrong. It is an offer, and it has to say what pressing
+             * it costs, because the cost is the whole reason the pictures are not already there.
+             */
+            <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border
+              border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-xs text-slate-500">
+                Pictures in this message were not downloaded, so the sender cannot tell you opened it.
+              </p>
+              <button type="button" onClick={onShowPictures}
+                className="text-xs font-medium text-[var(--c-green)] hover:underline">
+                Show pictures
+              </button>
+            </div>
+          )}
+          <EmailFrame html={safe.html} />
+        </>
+      )}
+
+      {!loadingBody && body !== undefined && !safe && (
+        /*
+         * A message written in plain text, and the fallback for one whose markup came back empty.
+         * `whitespace-pre-wrap` because an email's own line breaks carry meaning — collapsing them
+         * turns a numbered arrangement into a paragraph. `break-words` because a pasted URL would
+         * otherwise push the page wide.
          */
         <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
           {body.trim() || <span className="text-slate-400">This message has no text in it.</span>}
@@ -2316,13 +2474,13 @@ function MailBody({
         </p>
       )}
 
-      {!loadingBody && images && images.length > 0 && (
+      {!loadingBody && loosePictures.length > 0 && (
         <div className="mt-3">
           <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5">
             In this message
           </p>
           <div className="flex flex-wrap items-start gap-2">
-            {images.map((img, i) => (
+            {loosePictures.map((img, i) => (
               <ZoomableImage
                 key={img.cid || img.filename || i}
                 src={img.dataUri}
@@ -2726,7 +2884,8 @@ function InviteLine({ label, value, note }: { label: string; value: string; note
 }
 
 function MailRow({
-  mail, chosen, expanded, selecting, blocked, body, images, calendar, events, onAccept, onRespond,
+  mail, chosen, expanded, selecting, blocked, body, html, showPictures, onShowPictures,
+  images, calendar, events, onAccept, onRespond,
   onRemoveEvent, skippedImages, loadingBody,
   bodyError, mine, onToggle, onChoose, onLink, onCreateLead, onBlock, onReply, onReplyAll,
   onForward, onJunk, onMove,
@@ -2747,6 +2906,11 @@ function MailRow({
   blocked: BlockedSender[]
   /** The full text, once fetched. Undefined until then. */
   body?: string
+  /** The same message as markup, passed straight through to MailBody. */
+  html?: string
+  /** Whether this reader has asked for this message's remote pictures. */
+  showPictures?: boolean
+  onShowPictures?: () => void
   /** The pictures inside it, fetched alongside the text. */
   images?: InlineImage[]
   /** And how many were left behind for being too big. */
@@ -2821,7 +2985,8 @@ function MailRow({
           <div className="-mt-1 mb-2.5">
             <RecipientLines mail={mail} mine={mine} />
           </div>
-          <MailBody mail={mail} body={body} images={images} calendar={calendar}
+          <MailBody mail={mail} body={body} html={html} images={images}
+            showPictures={showPictures} onShowPictures={onShowPictures} calendar={calendar}
             events={events} onAccept={onAccept} onRespond={onRespond} onRemoveEvent={onRemoveEvent}
             skippedImages={skippedImages}
             loadingBody={loadingBody}

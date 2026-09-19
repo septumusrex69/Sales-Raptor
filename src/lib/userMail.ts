@@ -647,6 +647,14 @@ export async function fetchMailBody(
   accessToken: string,
 ): Promise<{
   text: string; details: ContactCandidate[]; images: InlineImage[]; imagesSkipped: number
+  /**
+   * The message as it was actually written, where it was written in HTML.
+   *
+   * Never rendered into the app's own page — it goes through sanitizeEmailHtml and into a
+   * sandboxed frame. The text above is still carried beside it and is still what a forward
+   * quotes, because a quoted reply is prose, not a newsletter.
+   */
+  html: string
   /** The raw ICS where the message was a meeting request. Parsed by the page — see parseInvite. */
   calendar: string
 }> {
@@ -656,7 +664,7 @@ export async function fetchMailBody(
     body: JSON.stringify({ mailId }),
   })
   const body = (await res.json().catch(() => ({}))) as {
-    text?: string; details?: ContactCandidate[]; images?: InlineImage[]
+    text?: string; html?: string; details?: ContactCandidate[]; images?: InlineImage[]
     imagesSkipped?: number; calendar?: string; error?: string
   }
   if (!res.ok) throw new Error(body.error ?? 'Could not read that message.')
@@ -664,6 +672,7 @@ export async function fetchMailBody(
   // what an image signature gives up, since its text yields nothing.
   return {
     text: body.text ?? '',
+    html: body.html ?? '',
     details: body.details ?? [],
     images: body.images ?? [],
     imagesSkipped: body.imagesSkipped ?? 0,
