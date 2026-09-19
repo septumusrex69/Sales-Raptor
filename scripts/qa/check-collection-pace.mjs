@@ -279,25 +279,92 @@ ok('the clerk sheet is rendered', /<ClerkTable/.test(page))
 ok('needed a week is on the teams table only', /Needed a week/.test(page))
 
 /*
- * TWO TABS, NOT THREE. The firm dropped "Target reached": a filtered list of the people who are
- * fine is a list nobody opens twice, and the pill on the row already says it.
+ * ONE TABLE, NO TABS.
+ *
+ * It had three -- All clerks, Needs attention, Ranking -- and the firm folded them into one:
+ * "remove the ranking page, remove the needs attention page and put everything at the all clerks
+ * page." Asserted as absences as well as presences, because the failure this guards against is a
+ * tab quietly surviving the merge with half the columns behind it.
  */
 const clerks = page.slice(page.indexOf('function ClerkTable('), page.indexOf('function ExportButton('))
 ok('there is a clerk table to read', clerks.length > 1000)
-ok('the clerk table has an all-clerks tab', /'All clerks'/.test(clerks))
-ok('...and a needs-attention tab', /'Needs attention'/.test(clerks))
-ok('...and no target-reached tab', !/Target reached/i.test(clerks))
-ok('...and it opens on the roster', /useState<ClerkView>\('all'\)/.test(clerks))
+{
+  /* Comments stripped, or the paragraph explaining why the tabs went would satisfy every one of
+     these absence checks -- the trap this suite has a name for. */
+  const code = clerks.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  ok('there is no needs-attention tab any more', !/'Needs attention'/.test(code))
+  ok('...nor a ranking tab', !/'Ranking'/.test(code))
+  ok('...nor the target-reached tab dropped before them', !/Target reached/i.test(code))
+  ok('...and no tab state left behind to switch on', !/ClerkView/.test(code))
+}
+
 /*
- * THE ROSTER IS ALPHABETICAL. Sorted by rand it would quietly become a leaderboard on the one
- * figure that measures the book somebody was handed rather than the person.
+ * THE ROSTER IS RANKED ON RAND, which reverses what this table used to be told to do.
+ *
+ * It was alphabetical on purpose, and the reason was good: sorted by rand it becomes a
+ * leaderboard on the one figure that measures the book somebody was handed rather than the
+ * person. The firm has now asked for exactly that -- "I think the ranking, it should
+ * automatically be ranked and rank it from one to down" -- which is their call to make, and they
+ * made the same call when they asked for the ranking in the first place: "so the people know that
+ * if they're senior collectors they get more work, it's not a pissing contest."
+ *
+ * So the safeguard did not go away, it moved onto the row. The grade and the size of the book are
+ * asserted below, and they are the condition this ranking exists under.
  */
-ok('the roster is alphabetical, not ranked', /a\.name\.localeCompare\(b\.name, 'en-ZA'\)/.test(clerks))
-ok('needs attention is only people behind their own pace',
-  /l\.line\.standing === 'behind' \|\| l\.line\.standing === 'critical'/.test(clerks))
-ok('...worst first', /\.sort\(worstFirst\)/.test(clerks))
+ok('the roster is ranked on rand collected', /b\.line\.collected - a\.line\.collected/.test(clerks))
+ok('...with ties falling back to the name, so the list does not reshuffle itself',
+  /\|\| a\.name\.localeCompare\(b\.name, 'en-ZA'\)/.test(clerks))
+ok('...and every row carries its place', /places\.get\(l\.userId\)/.test(clerks))
+/*
+ * SHARED PLACES FOR TIES, and computed over everybody rather than over what the search box shows
+ * -- a place that moved when somebody typed a letter would not be a place.
+ */
+ok('places come from the shared standings helper', /standings\(lines\.filter/.test(clerks))
+ok('...over people who have a book or have collected', /l\.accounts > 0 \|\| l\.line\.collected > 0/.test(clerks))
+
+/*
+ * THE CONDITION THE RANKING EXISTS UNDER. The firm's answer to "it's not a pissing contest" is
+ * that a senior collector is given the bigger accounts -- which is only visible while the grade
+ * and the number of accounts are on the row beside the rand. They were the old Ranking tab's own
+ * columns; ranking the roster and leaving them behind is the one version of this nobody asked for.
+ */
+ok('the grade is on the row', /\{l\.grade\}/.test(clerks))
+ok('...and the size of the book with it', /\{l\.accounts\.toLocaleString\('en-ZA'\)\}/.test(clerks))
+ok('...and the caption says how to read the two together',
+  /part of their rand is the book they were handed/.test(clerks))
+
+/*
+ * THE COLUMNS, IN THE FIRM'S OWN ORDER, asserted as the whole list at once.
+ *
+ * "Number, clerk, team, then target, then today, then period to date, then the number of payment,
+ * then the average payment, then the achieved, and then it can go to gap needed per day status."
+ *
+ * One equality rather than thirteen presence checks and twelve order checks: a list compared
+ * whole cannot pass with a column missing, duplicated or moved, and it cannot pass vacuously the
+ * way an indexOf comparison does when what it orders has been deleted.
+ */
+{
+  const thead = clerks.slice(clerks.indexOf('<thead>'), clerks.indexOf('</thead>'))
+  const headings = [...thead.matchAll(/<th[^>]*>([^<{}]+)<\/th>/g)].map((m) => m[1].trim())
+  check('the columns are in the order the firm asked for', headings.join(' | '),
+    '# | Clerk | Team | Target | Today | Period to date | Accounts | Payments '
+    + '| Average payment | Achieved | Gap vs pace | Needed / day | Status')
+}
+
 /* Where a target came from is shown, or nobody can tell a figure set wrong from one never set. */
 ok('a grade-supplied target says so', /from grade/.test(clerks))
+
+/*
+ * AND THE ONE THING THE NEEDS ATTENTION TAB TOLD YOU THAT A RANKED LIST DOES NOT: how many people
+ * are behind. It was read off the tab's own badge rather than out of the list, so the number
+ * survives in the footer. Silent at nought -- a line saying "0 are behind their pace" every day
+ * is a line people stop seeing, and that is what teaches them to stop reading the rest.
+ */
+ok('the count of people behind their pace survived the merge',
+  /const behind = useMemo/.test(clerks))
+ok('...counting the two bands that are behind',
+  /l\.line\.standing === 'behind' \|\| l\.line\.standing === 'critical'/.test(clerks))
+ok('...and saying nothing at nought', /\{behind > 0 && \(/.test(clerks))
 
 /*
  * Worst first is asserted against the SHARED helper, and the helper against itself. Both tables
@@ -330,17 +397,9 @@ ok('...ordered on the book-independent figure',
  */
 const fairCaption = page.slice(page.indexOf('How people compare\n'), page.indexOf('<div className="overflow-x-auto">', page.indexOf('How people compare\n')))
 ok('there is a caption on the fair card to read', fairCaption.length > 100)
-ok('...naming what the ranking is for', /the month the firm is run on/.test(fairCaption))
+ok('...naming what the ranking above it is for', /the month the firm is run on/.test(fairCaption))
 ok('...and what these figures survive', /survive being given a different/.test(fairCaption))
 ok('...and what they are for', /should decide who is promoted/.test(fairCaption))
-/*
- * THE RANKING ON RAND IS ALLOWED TO EXIST AND IS NOT ALLOWED TO BE THE DEFAULT. The firm asked
- * for it; the page must still open on the roster, or the one figure that measures the book
- * somebody was handed becomes the first thing anybody sees about a person.
- */
-ok('there is a ranking on rand', /\['rand', 'Ranking'\]/.test(page))
-ok('...and it is not what the card opens on', /useState<ClerkView>\('all'\)/.test(page))
-ok('...and it never sorts the roster', !/view === 'all'[\s\S]{0,80}collected/.test(page))
 
 /* The team filter narrows the totals as well as the table: a team leader reading their team's
    list against the firm's headline figures is reading two different things. */

@@ -592,13 +592,16 @@ function MonthProgress({ pace, line, note, tone = 'light' }: {
 
 /* ---------- the clerks ---------- */
 
-type ClerkView = 'all' | 'attention' | 'rand'
-
 interface ClerkLine {
   userId: ID
   name: string
   team: string
-  /** Shown beside every place on the ranking. See the note on the ranking tab. */
+  /**
+   * Shown under the name on every row of the ranking.
+   *
+   * Not decoration: it is half the firm's answer to why ranking on rand is not "a pissing
+   * contest" -- a senior collector is given the bigger accounts. See ClerkTable.
+   */
   grade: string
   accounts: number
   payments: number
@@ -653,16 +656,25 @@ function worstFirst<T extends { line: PaceLine }>(a: T, b: T): number {
 }
 
 /**
- * Everybody, against their target.
+ * Everybody, ranked, against their target.
  *
- * TWO TABS, NOT THREE. The firm dropped "Target reached" — a filtered list of the people who are
- * fine is a list nobody opens twice, and the pill on the row already says it. What is left is the
- * roster and the people to go and stand next to this morning.
+ * ONE TABLE, NOT THREE. It carried three tabs -- All clerks, Needs attention, Ranking -- and the
+ * firm folded them into one: "remove the ranking page, remove the needs attention page and put
+ * everything at the all clerks page." Both of the other two were a sort and a filter over the
+ * same rows, and a tab that only reorders what you are already looking at costs a click to learn
+ * nothing. Needs attention is the bottom of a ranked list, and the pill on the row says so
+ * anyway; its count survives in the footer, which is where it was actually read from.
  *
- * THE ROSTER IS ALPHABETICAL, NOT RANKED. Sorting it by rand would quietly make it a leaderboard
- * on the one figure that measures the book somebody was handed rather than the person — which is
- * what the whole of collectorScore.ts exists to prevent. Needs attention sorts by percentage of
- * that person's OWN target, which survives being given a different book.
+ * RANKED, WITH THE GRADE AND THE BOOK ON THE ROW. The firm asked for the ranking -- "I like the
+ * idea of actually ranking them in terms of how much rand they've collected" -- and answered the
+ * obvious objection in the same breath: "so the people know that if they're senior collectors
+ * they get more work, it's not a pissing contest." That answer only holds while the grade and the
+ * number of accounts are on the row beside the rand. They were the Ranking tab's own columns and
+ * they are the reason it was allowed to exist, so they came across with it: the grade under the
+ * name, the book in its own column. Ranking the roster and leaving them behind would be the one
+ * version of this the firm explicitly did not ask for.
+ *
+ * Places are shared by ties, the way a results board does -- see `standings`.
  */
 function ClerkTable({ rows, today, users, teams, pace, targetFor, me }: {
   rows: CollectorStats[]
@@ -674,9 +686,7 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor, me }: {
   /** The person reading, so their own row stands out of a list of thirty. */
   me: ID | null
 }) {
-  const [view, setView] = useState<ClerkView>('all')
   const [search, setSearch] = useState('')
-  const ranking = view === 'rand'
 
   const lines = useMemo(
     () => clerkLines({ rows, today, users, teams, pace, targetFor }),
@@ -686,10 +696,20 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor, me }: {
   /*
    * Places computed over EVERYBODY, not over what the search box happens to show. A place that
    * moved when somebody typed a letter would not be a place.
+   *
+   * Somebody with no book and nothing collected is left out rather than ranked last. They are not
+   * last at anything -- they have not been given anything to be last at -- and their row shows a
+   * dash instead.
    */
   const places = useMemo(
     () => standings(lines.filter((l) => l.accounts > 0 || l.line.collected > 0),
       (l) => l.line.collected),
+    [lines],
+  )
+
+  /** How many are behind their own pace. The number the Needs attention tab used to carry. */
+  const behind = useMemo(
+    () => lines.filter((l) => l.line.standing === 'behind' || l.line.standing === 'critical').length,
     [lines],
   )
 
@@ -698,38 +718,17 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor, me }: {
     const matching = needle
       ? lines.filter((l) => l.name.toLowerCase().includes(needle) || l.team.toLowerCase().includes(needle))
       : lines
-    if (view === 'attention') {
-      /* Behind their own pace, in either band. Somebody at or past pace is not "needing
-         attention" however small their rand, and a list that included them would not be read. */
-      return matching
-        .filter((l) => l.line.standing === 'behind' || l.line.standing === 'critical')
-        .sort(worstFirst)
-    }
-    if (view === 'rand') return [...matching].sort((a, b) => b.line.collected - a.line.collected)
-    return [...matching].sort((a, b) => a.name.localeCompare(b.name, 'en-ZA'))
-  }, [lines, view, search])
+    /* Rand collected, highest first -- the order the ranking was, now the order of the roster.
+       Ties fall back to the name so the list does not reshuffle itself between loads. */
+    return [...matching].sort(
+      (a, b) => b.line.collected - a.line.collected || a.name.localeCompare(b.name, 'en-ZA'),
+    )
+  }, [lines, search])
 
   return (
     <Card padded={false}>
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 pt-3 pb-2">
-        <div className="flex items-center gap-3">
-          <p className="text-[11px] uppercase tracking-wide text-slate-400">Clerk performance</p>
-          <div className="flex rounded-lg border border-slate-200 p-0.5">
-            {([['all', 'All clerks'], ['attention', 'Needs attention'], ['rand', 'Ranking']] as const).map(([id, label]) => (
-              <button key={id} type="button" onClick={() => setView(id)}
-                className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                  view === id ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-700'
-                }`}>
-                {label}
-                {id === 'attention' && (
-                  <span className="ml-1.5 tabular-nums opacity-70">
-                    {lines.filter((l) => l.line.standing === 'behind' || l.line.standing === 'critical').length}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
+        <p className="text-[11px] uppercase tracking-wide text-slate-400">Clerk performance</p>
         <label className="relative">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input value={search} onChange={(e) => setSearch(e.target.value)}
@@ -739,98 +738,83 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor, me }: {
       </div>
 
       {/*
-        THE RANKING CARRIES ITS OWN CONTEXT, and that is the whole reason it is allowed to exist.
-        The firm asked for it — "I like the idea of actually ranking them in terms of how much
-        rand they've collected" — and answered the obvious objection in the same breath: "so the
-        people know that if they're senior collectors they get more work, it's not a pissing
-        contest." That answer only holds if the grade and the size of the book are on the row
-        beside the rand, which is why this view carries both and the others do not.
+        THE RANKING CARRIES ITS OWN CONTEXT. It said this when it was a tab of its own and it says
+        it louder now that the whole roster is ordered this way: the rand is partly the book
+        somebody was handed, and the row carries what they were handed so the two can be read
+        together.
       */}
-      {ranking && (
-        <p className="px-4 pb-2 -mt-1 text-xs text-slate-400 max-w-2xl">
-          Ordered by rand collected, with the grade and the book beside it. A senior collector is
-          given the bigger accounts, so part of their rand is the book they were handed &mdash;
-          read the two together. Payments and the average payment are here for the same reason:
-          they move independently of the total.
-        </p>
-      )}
+      <p className="px-4 pb-2 -mt-1 text-xs text-slate-400 max-w-3xl">
+        Ranked on rand collected, with the grade and the size of the book beside it. A senior
+        collector is given the bigger accounts, so part of their rand is the book they were handed
+        &mdash; read the two together. Payments and the average payment move independently of the
+        total, which is why they are here.
+      </p>
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
-              {ranking && <th className="px-4 py-2 font-medium">Place</th>}
-              <th className={`${ranking ? 'px-3' : 'px-4'} py-2 font-medium`}>Clerk</th>
-              <th className="px-3 py-2 font-medium">Team</th>
-              {ranking ? (
-                <>
-                  <th className="px-3 py-2 font-medium">Grade</th>
-                  <th className="px-3 py-2 font-medium text-right">Accounts</th>
-                  <th className="px-3 py-2 font-medium text-right">Collected</th>
-                  <th className="px-3 py-2 font-medium text-right">Payments</th>
-                  <th className="px-3 py-2 font-medium text-right">Average payment</th>
-                </>
-              ) : (
-                <>
-                  <th className="px-3 py-2 font-medium text-right">Today</th>
-                  <th className="px-3 py-2 font-medium text-right">Period to date</th>
-                  <th className="px-3 py-2 font-medium text-right">Target</th>
-                  <th className="px-3 py-2 font-medium text-right">Achieved</th>
-                  <th className="px-3 py-2 font-medium text-right">Gap vs pace</th>
-                  <th className="px-3 py-2 font-medium text-right">Needed / day</th>
-                  <th className="px-3 py-2 font-medium">Status</th>
-                </>
-              )}
+              {/*
+                THE FIRM'S OWN ORDER, and it is not the order this table had. Who they are, what
+                they were set, what they have done, and only then how that reads as a percentage
+                and a status: "number, clerk, team, then target, then today, then period to date,
+                then the number of payment, then the average payment, then the achieved, and then
+                it can go to gap needed per day status."
+              */}
+              <th className="px-3 py-2 font-medium">#</th>
+              <th className="px-2.5 py-2 font-medium whitespace-nowrap">Clerk</th>
+              <th className="px-2.5 py-2 font-medium whitespace-nowrap">Team</th>
+              <th className="px-2.5 py-2 font-medium text-right">Target</th>
+              <th className="px-2.5 py-2 font-medium text-right">Today</th>
+              <th className="px-2.5 py-2 font-medium text-right">Period to date</th>
+              <th className="px-2.5 py-2 font-medium text-right">Accounts</th>
+              <th className="px-2.5 py-2 font-medium text-right">Payments</th>
+              <th className="px-2.5 py-2 font-medium text-right">Average payment</th>
+              <th className="px-2.5 py-2 font-medium text-right">Achieved</th>
+              <th className="px-2.5 py-2 font-medium text-right">Gap vs pace</th>
+              <th className="px-2.5 py-2 font-medium text-right">Needed / day</th>
+              <th className="px-2.5 py-2 font-medium whitespace-nowrap">Status</th>
             </tr>
           </thead>
           <tbody>
-            {shown.map((l, at) => (
+            {shown.map((l) => (
               <tr key={l.userId}
                 className={`border-b border-slate-50 last:border-0 ${
                   /* Your own row, out of thirty. Nothing louder than a tint: it is a marker, not
                      a status, and colouring it like one would read as something being wrong. */
                   l.userId === me ? 'bg-gold-50' : ''
                 }`}>
-                {ranking && (
-                  <td className="px-4 py-2 tabular-nums font-semibold text-slate-700">
-                    {/* Ties share a place, the way a results board does — see `standings`. */}
-                    {places.get(l.userId)?.place ?? at + 1}
-                  </td>
-                )}
-                <td className={`${ranking ? 'px-3' : 'px-4'} py-2`}>
+                <td className="px-3 py-2 tabular-nums font-semibold text-slate-700">
+                  {places.get(l.userId)
+                    ? places.get(l.userId)?.place
+                    : (
+                      <span className="font-normal text-slate-300"
+                        title="No book and nothing collected, so no place on the ranking.">
+                        &mdash;
+                      </span>
+                    )}
+                </td>
+                <td className="px-2.5 py-2 whitespace-nowrap">
                   <Link to={`/performance/${l.userId}`}
                     className="flex items-center gap-2 group">
                     <UserAvatar userId={l.userId} size={22} />
-                    <span className="text-slate-700 group-hover:underline">{l.name}</span>
-                    {l.userId === me && <span className="text-[10px] text-slate-400">(you)</span>}
+                    <span className="min-w-0">
+                      <span className="block text-slate-700 group-hover:underline">
+                        {l.name}
+                        {l.userId === me && <span className="ml-1 text-[10px] text-slate-400">(you)</span>}
+                      </span>
+                      {/*
+                        UNDER THE NAME RATHER THAN IN A COLUMN OF ITS OWN. It has to be on the row
+                        -- it is half the firm's answer to "it's not a pissing contest" -- and the
+                        table is thirteen columns wide already. A grade is one word and it belongs
+                        to the person, not to the figures.
+                      */}
+                      <span className="block text-[10px] text-slate-400">{l.grade}</span>
+                    </span>
                   </Link>
                 </td>
-                <td className="px-3 py-2 text-slate-500">{l.team}</td>
-                {ranking ? (
-                  <>
-                    <td className="px-3 py-2 text-slate-500">{l.grade}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">
-                      {l.accounts.toLocaleString('en-ZA')}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-800">
-                      {formatCurrency(l.line.collected)}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">
-                      {l.payments.toLocaleString('en-ZA')}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">
-                      {l.averagePayment === null ? '—' : formatCurrency(l.averagePayment)}
-                    </td>
-                  </>
-                ) : (
-                  <>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">
-                  {l.today > 0 ? formatCurrency(l.today) : '—'}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-700">
-                  {formatCurrency(l.line.collected)}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-500">
+                <td className="px-2.5 py-2 text-slate-500 whitespace-nowrap">{l.team}</td>
+                <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-slate-500">
                   {moneyText(l.line.target)}
                   {/*
                     WHERE THE FIGURE CAME FROM. A team leader looking at thirty targets has to be
@@ -842,10 +826,28 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor, me }: {
                     <span className="block text-[10px] text-slate-400">from grade</span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-right">
+                <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-slate-600">
+                  {l.today > 0 ? formatCurrency(l.today) : '—'}
+                </td>
+                <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap font-medium text-slate-800">
+                  {formatCurrency(l.line.collected)}
+                </td>
+                <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-slate-600">
+                  {l.accounts.toLocaleString('en-ZA')}
+                </td>
+                <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-slate-600">
+                  {l.payments.toLocaleString('en-ZA')}
+                </td>
+                <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-slate-600">
+                  {/* A dash, not R0. Somebody who took no payments has no average — see clerkLines. */}
+                  {l.averagePayment === null ? '—' : formatCurrency(l.averagePayment)}
+                </td>
+                <td className="px-2.5 py-2 text-right whitespace-nowrap">
                   <span className="inline-flex items-center gap-2 justify-end">
                     <span className="tabular-nums font-medium text-slate-800">{pctText(l.line.achieved)}</span>
-                    <ProgressBar achieved={l.line.achieved} />
+                    {/* Narrower than the teams table's. With thirteen columns on the row, thirty
+                        pixels of bar is thirty pixels the status pill does not have. */}
+                    <ProgressBar achieved={l.line.achieved} width="w-16" />
                   </span>
                 </td>
                 {/*
@@ -858,20 +860,16 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor, me }: {
                 }`}>
                   {gapText(l.line.gap)}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-slate-600">
                   {moneyText(l.line.neededADay)}
                 </td>
-                <td className="px-3 py-2"><StatusPill standing={l.line.standing} /></td>
-                  </>
-                )}
+                <td className="px-2.5 py-2 whitespace-nowrap"><StatusPill standing={l.line.standing} /></td>
               </tr>
             ))}
             {shown.length === 0 && (
               <tr>
-                <td colSpan={ranking ? 8 : 9} className="px-4 py-6 text-center text-sm text-slate-400">
-                  {view === 'attention'
-                    ? 'Nobody is behind their pace right now.'
-                    : 'Nobody matches that.'}
+                <td colSpan={13} className="px-4 py-6 text-center text-sm text-slate-400">
+                  Nobody matches that.
                 </td>
               </tr>
             )}
@@ -880,6 +878,15 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor, me }: {
       </div>
       <p className="px-4 py-2 text-[11px] text-slate-400">
         Showing {shown.length} of {lines.length} clerks.
+        {/*
+          WHAT THE NEEDS ATTENTION TAB WAS ACTUALLY FOR. The tab is gone and the number is not:
+          how many people are behind is the one thing it told you that a ranked list does not,
+          and it was read off the tab rather than out of it. Silent at nought, because a line
+          saying "0 are behind their pace" every day is a line people stop seeing.
+        */}
+        {behind > 0 && (
+          <> {behind === 1 ? 'One clerk is' : `${behind} clerks are`} behind their pace.</>
+        )}
         {' '}A target with no figure set follows the collector&rsquo;s grade; a team leader can set
         one per person in Settings &rarr; Targets.
       </p>
@@ -916,9 +923,18 @@ function ExportButton({ rows, today, users, teams, pace, asAt, period, targetFor
        columns and shift every figure on the row one to the left. */
     const cell = (v: string | number | null) =>
       v === null ? '' : `"${String(v).replace(/"/g, '""')}"`
+    /*
+     * THE THREE NEW COLUMNS GO ON THE END, not into the firm's on-screen order.
+     *
+     * The table now shows the book, the number of payments and the average payment, and a report
+     * of that table that leaves them out is a report somebody has to go back to the screen for.
+     * But this file is opened in a spreadsheet that has been kept for months, and moving a column
+     * moves every formula pointing at it. Appending costs nothing and breaks nothing.
+     */
     const head = [
       'Clerk', 'Team', 'Today', 'Period to date', 'Target', 'Target from',
       'Achieved %', 'Gap vs pace %', 'Still needed', 'Needed per day', 'Status',
+      'Grade', 'Accounts', 'Payments', 'Average payment',
     ]
     const body = lines.map((l) => [
       l.name, l.team, l.today, l.line.collected, l.line.target,
@@ -927,6 +943,10 @@ function ExportButton({ rows, today, users, teams, pace, asAt, period, targetFor
       l.line.gap === null ? null : (l.line.gap * 100).toFixed(1),
       l.line.stillNeeded, l.line.neededADay === null ? null : Math.round(l.line.neededADay),
       standingLabel(l.line.standing),
+      l.grade, l.accounts, l.payments,
+      /* Blank, not 0. Nobody took a payment, so there is no average -- and a 0 in a column a
+         spreadsheet averages would drag the floor's figure down with a number that is not one. */
+      l.averagePayment === null ? null : Math.round(l.averagePayment),
     ])
     /*
       The header says what the figures are OF. A file called "collections.csv" with no period and
@@ -1021,7 +1041,7 @@ function FairTable({ rows, users }: { rows: CollectorStats[]; users: { id: strin
       <p className="px-4 pt-3 pb-2 text-[11px] uppercase tracking-wide text-slate-400">
         How people compare
         <span className="block normal-case tracking-normal text-slate-400 text-xs mt-0.5 max-w-xl">
-          Ordered by payments per hundred accounts. The Ranking tab above orders on rand, which is
+          Ordered by payments per hundred accounts. The table above ranks on rand, which is
           the month the firm is run on; these are the figures that survive being given a different
           book, and they are the ones that should decide who is promoted.
         </span>

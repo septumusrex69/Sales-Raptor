@@ -519,42 +519,79 @@ try {
   t.ok('the teams sheet carries the weekly figure', shown.includes('NEEDED A WEEK'))
 
   /*
-   * TWO TABS, NOT THREE. The firm dropped "Target reached". Asserted against the TAB ROW and not
-   * against the page, because "Target reached" is also what the status pill says on a row that
-   * has passed its target — a page-wide check for the words would fail on correct code, and the
-   * obvious "fix" would be to delete the check.
+   * ONE TABLE, NO TABS. "Remove the ranking page, remove the needs attention page and put
+   * everything at the all clerks page." Checked against the card, because two of those words are
+   * also what the status pill says on a row -- a page-wide check for "Target reached" would fail
+   * on correct code and the obvious "fix" would be to delete the check.
    */
-  const tabs = page.locator('div.flex.rounded-lg.border').first()
-  const tabText = await tabs.innerText()
-  t.ok(`the clerk sheet has an all-clerks tab (${tabText.replace(/\n/g, ' | ')})`, tabText.includes('All clerks'))
-  t.ok('...and a needs-attention tab', tabText.includes('Needs attention'))
-  t.check('...and no target-reached tab', /Target reached/i.test(tabText), false)
+  const clerkCard = page.locator('table').nth(1).locator('xpath=ancestor::div[contains(@class,"rounded")][1]')
+  void clerkCard
+  t.check('there is no tab strip on the clerk sheet any more',
+    await page.getByRole('button', { name: 'All clerks' }).count()
+      + await page.getByRole('button', { name: 'Needs attention' }).count()
+      + await page.getByRole('button', { name: 'Ranking', exact: true }).count(), 0)
   /* ...while the pill on the row that earned it is still there, which is the other half. */
   t.ok('a collector past target is marked as having reached it',
     await page.getByText('Target reached').first().isVisible())
 
   /*
-   * THE ROSTER IS ALPHABETICAL, NOT RANKED. Sorted by rand it would quietly become a leaderboard
-   * on the one figure that measures the book somebody was handed rather than the person.
+   * THE COLUMNS, IN THE FIRM'S OWN ORDER, read off the screen.
+   *
+   * "Number, clerk, team, then target, then today, then period to date, then the number of
+   * payment, then the average payment, then the achieved, and then it can go to gap needed per
+   * day status." Source-reading checks the JSX beside this; only a browser says what order the
+   * columns actually came out in.
+   */
+  const clerkHeaders = await page.locator('table').nth(1).locator('thead th').allInnerTexts()
+  t.check('the clerk sheet\u2019s columns are in the order the firm asked for',
+    clerkHeaders.map((h) => h.trim()).join(' | '),
+    '# | CLERK | TEAM | TARGET | TODAY | PERIOD TO DATE | ACCOUNTS | PAYMENTS '
+    + '| AVERAGE PAYMENT | ACHIEVED | GAP VS PACE | NEEDED / DAY | STATUS')
+
+  /*
+   * AND THE ROSTER IS RANKED ON RAND, which is the reversal the firm asked for: "I think the
+   * ranking, it should automatically be ranked and rank it from one to down."
+   *
+   * This table was deliberately alphabetical before. It is worth asserting the order properly
+   * rather than loosely, because on this floor the top collector also happens to come first
+   * alphabetically -- so "the biggest is on top" alone would have gone on passing over an
+   * alphabetical list. The two orders differ at the second and third rows.
    */
   const clerkRows = page.locator('table').nth(1).locator('tbody tr')
-  /* The name cell also carries the avatar's initials on their own line — "TL\nTest Leader" — and
-     sorting those compares TJ against TL rather than Thandi against Test. */
-  const names = await clerkRows.evaluateAll((rows) => rows.map(
-    (r) => (r.querySelector('td')?.innerText.trim().split('\n').pop() ?? '').trim(),
-  ))
-  t.check('every clerk is listed', names.length, 3)
-  t.check('...alphabetically', JSON.stringify(names),
-    JSON.stringify([...names].sort((a, b) => a.localeCompare(b, 'en-ZA'))))
   /*
-   * AND IT IS NOT THE ORDER OF THEIR RAND. Asserting only "alphabetical" is not enough on its own
-   * — on this floor the top collector also happens to come first alphabetically, so a table
-   * silently sorted by rand would satisfy it. The two orders differ at the second and third rows,
-   * which is what makes the assertion mean something.
+   * The name cell carries three things besides the name: the avatar's initials on their own line,
+   * the grade on a line under it, and "(you)" on your own row -- which sits INSIDE the name's own
+   * line, so innerText reads "Test Leader(you)". Each of the three is dropped explicitly.
    */
-  const byRand = [PROFILE.name, LOOSE.name, COLLEAGUE.name]
-  t.check('...and not the order of their rand',
-    JSON.stringify(names) === JSON.stringify(byRand), false)
+  const names = await clerkRows.evaluateAll((rows) => rows.map((r) => {
+    const lines = (r.querySelectorAll('td')[1]?.innerText ?? '').split('\n')
+      .map((l) => l.replace(/\(you\)$/, '').trim()).filter(Boolean)
+    return lines.filter((l) => !/^[A-Z]{1,3}$/.test(l)
+      && !['Elite', 'Senior', 'Skilled', 'Junior', 'Ungraded'].includes(l))[0] ?? ''
+  }))
+  t.check('every clerk is listed', names.length, 3)
+  /* Test Leader R120 000, Unteamed Clerk R7 000, Thandi Junior R500 — biggest first. */
+  t.check('...ranked on rand, biggest first', names.join(' | '),
+    [PROFILE.name, LOOSE.name, COLLEAGUE.name].join(' | '))
+  t.check('...which is not the alphabetical order it used to be in',
+    names.join(' | ') === [...names].sort((a, b) => a.localeCompare(b, 'en-ZA')).join(' | '), false)
+
+  /*
+   * AND THE PLACE IS ON THE LEFT, counting from one. "Put the number on the left hand side as
+   * well, to see what the number is, like one, two, three."
+   */
+  const placeColumn = await clerkRows.evaluateAll((rows) => rows.map(
+    (r) => (r.querySelector('td')?.innerText ?? '').trim(),
+  ))
+  t.check('every row is numbered, from one down', placeColumn.join(' | '), '1 | 2 | 3')
+  /*
+   * AND THE NUMBER IS ON SCREEN. innerText reads a `display:none` cell perfectly well, so the
+   * line above passes over a number column that renders nothing -- found by hiding it and
+   * watching the check stay green. This layer exists because a panel shipped invisible once; a
+   * check that cannot see the difference is the same bug in the checks.
+   */
+  t.ok('...and the number column is actually visible',
+    await clerkRows.first().locator('td').first().isVisible())
 
   /* A target nobody set follows the grade, and the row says where the figure came from. */
   t.ok('a grade-supplied target says so', await page.getByText('from grade').first().isVisible())
@@ -599,16 +636,19 @@ try {
   await page.getByRole('combobox').last().selectOption({ label: 'All teams' })
   await page.waitForTimeout(400)
 
-  /* ---------- needs attention is only people behind their own pace ---------- */
+  /* ---------- what the Needs attention tab was actually for ---------- */
 
-  await page.getByRole('button', { name: /Needs attention/ }).click()
+  /*
+   * How many people are behind is the one thing that tab told you and a ranked list does not, and
+   * it was read off the tab's own badge rather than out of the list. It survives in the footer.
+   */
+  /* Scrolled to, because this page's own column scrolls rather than the window -- a full-page
+     screenshot of it is the top of the page and not the table the shot is for. */
+  await page.locator('table').nth(1).scrollIntoViewIfNeeded()
   await page.waitForTimeout(300)
-  await t.shot(page, '41-needs-attention')
-  const attention = await page.locator('table').nth(1).locator('tbody tr')
-    .evaluateAll((rows) => rows.map((r) => r.innerText))
-  t.ok('the collector at half a per cent is on the list',
-    attention.some((r) => r.includes('Thandi Junior')))
-  t.check('...and the one past target is not', attention.some((r) => r.includes('Test Leader')), false)
+  await t.shot(page, '41-clerk-ranking')
+  t.ok('the sheet still says how many are behind their pace',
+    await page.getByText(/behind their pace/).first().isVisible())
 
   /* ---------- the fair comparison survived the redesign ---------- */
 
@@ -621,45 +661,24 @@ try {
   t.ok('...and still says what it is for',
     await page.getByText(/should decide who is promoted/).first().isVisible())
 
-  /* ---------- the ranking the firm asked for, with its context ---------- */
+  /* ---------- the condition the ranking exists under ---------- */
 
   /*
-   * THE RANKING ON RAND EXISTS AND IS NOT THE DEFAULT. The firm asked for it and answered the
-   * obvious objection themselves: "so the people know that if they're senior collectors they get
-   * more work, it's not a pissing contest." That only holds if the grade and the book are on the
-   * row beside the rand, which is what is checked here — in the browser, because it is a claim
-   * about what somebody reading the row actually sees.
+   * THE GRADE AND THE BOOK ARE ON THE ROW. The firm asked for the ranking and answered the obvious
+   * objection themselves: "so the people know that if they're senior collectors they get more
+   * work, it's not a pissing contest." That answer only holds while the grade and the number of
+   * accounts sit beside the rand, which is why they came across from the tab that is gone.
+   * Checked in the browser, because it is a claim about what somebody reading the row sees.
    */
-  await page.getByRole('button', { name: 'Ranking' }).click()
-  await page.waitForTimeout(300)
-  await t.shot(page, '42-ranking')
-  const ranked = await headers()
-  t.ok('the ranking gives everybody a place', ranked.includes('PLACE'))
-  t.ok('...with their grade beside it', ranked.includes('GRADE'))
-  t.ok('...and the size of their book', ranked.includes('ACCOUNTS'))
-  t.ok('...and how many people paid them', ranked.includes('PAYMENTS'))
-  t.ok('...and what the average payment was', ranked.includes('AVERAGE PAYMENT'))
-  t.ok('...and says in words why rand and book are read together',
+  t.ok('the grade is on the row, under the name',
+    await page.locator('table').nth(1).locator('tbody tr').first()
+      .getByText(/Elite|Senior|Skilled|Junior|Ungraded/).first().isVisible())
+  t.ok('...and the sheet says in words why rand and book are read together',
     await page.getByText(/part of their rand is the book they were handed/).first().isVisible())
-
-  const rankRows = page.locator('table').nth(1).locator('tbody tr')
-  /*
-   * The name cell carries the avatar's initials on their own line, and on your own row a "(you)"
-   * after the name — so neither the first line nor the last is reliably the name. Dropping both
-   * markers is what leaves it.
-   */
-  const order = await rankRows.evaluateAll((rows) => rows.map((r) => {
-    const lines = (r.querySelectorAll('td')[1]?.innerText ?? '').split('\n')
-      .map((l) => l.trim()).filter(Boolean)
-    return lines.filter((l) => l !== '(you)' && !/^[A-Z]{1,3}$/.test(l))[0] ?? ''
-  }))
-  /* Test Leader R120 000, Unteamed Clerk R7 000, Thandi Junior R500 — biggest first. */
-  t.check('the biggest collector is first', order[0], PROFILE.name)
-  t.check('...and the smallest last', order[order.length - 1], COLLEAGUE.name)
 
   /* ---------- one collector's own page ---------- */
 
-  await rankRows.first().getByRole('link').click()
+  await clerkRows.first().getByRole('link').click()
   await page.getByText('On the floor this month').waitFor({ timeout: 20000 })
   /* The chart's bars grow from nothing on mount, and a screenshot taken on the first frame shows
      an empty frame. The bar COUNT below is the real check; this is so the picture is worth

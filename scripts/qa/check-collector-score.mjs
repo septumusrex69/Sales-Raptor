@@ -257,8 +257,14 @@ ok('...and does no percentage arithmetic of its own', !/\(now - before\) \/ befo
  * answer only holds if the grade and the size of the book are on the row beside the rand. Which
  * is what is guarded here: the ranking may exist, and it may not exist WITHOUT its context.
  */
-ok('the ranking orders on rand', /\.sort\(\(a, b\) => b\.line\.collected - a\.line\.collected\)/.test(page))
-ok('...carrying the grade beside it', /<th className="px-3 py-2 font-medium">Grade<\/th>/.test(page))
+ok('the ranking orders on rand', /b\.line\.collected - a\.line\.collected/.test(page))
+/*
+ * THE GRADE MOVED, THE RULE DID NOT. It was a column of its own on a Ranking tab; the firm folded
+ * the tabs into one table -- "remove the ranking page... put everything at the all clerks page"
+ * -- and thirteen columns is already more than fits, so the grade sits under the name instead.
+ * Where it is drawn was never the point. That it is on the row is.
+ */
+ok('...carrying the grade beside it', /\{l\.grade\}/.test(page))
 ok('...and the size of the book', /Accounts<\/th>/.test(page))
 ok('...and says in words why the two are read together',
   /part of their rand is the book they were handed/.test(page))
