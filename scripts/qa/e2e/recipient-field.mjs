@@ -65,16 +65,25 @@ try {
   t.check('...and nothing is left of the datalist', await page.locator('datalist').count(), 0)
 
   /*
-   * Opening it with nothing typed offers the people written to most, not nothing. Typed and
-   * cleared rather than clicked: the field carries autoFocus, so it already has focus and a click
-   * lands on the modal backdrop instead.
+   * NOTHING UNTIL SOMETHING IS TYPED.
+   *
+   * It offered the six most-written-to addresses the moment the box took focus, and the firm's
+   * first word on it was that this is too much: "it shouldn't automatically already throw you out
+   * all the options that there is... if you type R, then all the R's should start to come up."
+   *
+   * Asserted in the browser as well as against the function, because the panel has two ways of
+   * opening -- focus and typing -- and the rule that matters is about what is ON SCREEN, not
+   * about what the matcher returned. The field carries autoFocus, so it already has focus here
+   * and the empty box is the state the modal opens in.
    */
+  t.check('an empty box offers nothing at all', await options.count(), 0)
+  /* And the same after typing and clearing: back to an empty box is back to no panel. */
   await to.fill('a')
+  await options.first().waitFor({ timeout: 5000 })
+  t.ok('...though one letter does', await options.count() > 0)
   await to.fill('')
-  await list.waitFor({ timeout: 5000 })
-  const idle = await options.allInnerTexts()
-  t.ok(`an empty box already offers somebody (${idle.length})`, idle.length >= 3)
-  t.ok('...the one written to most often first', /accounts@bredellferreira/.test(idle[0]))
+  await page.waitForTimeout(300)
+  t.check('...and clearing it puts the panel away again', await options.count(), 0)
 
   /* ---------- the firm's own test ---------- */
 

@@ -56,7 +56,21 @@ export function wordsOf(suggestion: Suggestion): string[] {
  */
 export function rankOf(suggestion: Suggestion, query: string): number | null {
   const q = query.trim().toLowerCase()
-  if (q === '') return 0
+  /*
+   * AN EMPTY BOX IS NOT A QUERY, so nothing matches it.
+   *
+   * It used to match everything, and the panel opened on focus with the six most-written-to
+   * addresses in it. That was deliberate and it was wrong in use: the firm opened New email and
+   * got a list before typing a character -- "it shouldn't automatically already throw you out all
+   * the options that there is, because there's just too many. Literally just after you start
+   * typing. So if you type R, then all the R's should start to come up."
+   *
+   * The reasoning it replaces was that a box which only remembers once you guess the first letter
+   * remembers nobody. It holds for a box that CANNOT match a name -- and this one can: one letter
+   * already finds Reno by his name as well as by r.buitendag@, which is the whole point of the
+   * tiers below. The first letter is not a guess.
+   */
+  if (q === '') return null
   const address = suggestion.address.toLowerCase()
   const name = (suggestion.name ?? '').toLowerCase()
 
@@ -81,6 +95,9 @@ export function rankOf(suggestion: Suggestion, query: string): number | null {
  * recency, because the person you write to every week should lead even on a day you happened to
  * write to somebody else. `limit` is the number of rows the list can show without becoming
  * something to scroll rather than glance at.
+ *
+ * NOTHING AT ALL FOR AN EMPTY BOX — see rankOf. The panel appears on the first letter and not
+ * before it.
  */
 export function suggestRecipients(
   all: Suggestion[],

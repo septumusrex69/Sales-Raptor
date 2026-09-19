@@ -132,20 +132,34 @@ check('the order is stable where everything else is equal',
   suggestRecipients([s('z@x.co.za', 'Same', 1, '2026-01-01'), s('a@x.co.za', 'Same', 1, '2026-01-01')], 'same')
     .map((x) => x.address), ['a@x.co.za', 'z@x.co.za'])
 
-/* ---------- an empty box shows the people you write to ---------- */
+/* ---------- an empty box offers nothing at all ---------- */
 
 /*
- * Opening the field with nothing typed offers the list rather than nothing: the firm's complaint
- * was that the box remembered nobody, and a box that only remembers once you have guessed the
- * first letter correctly still remembers nobody.
+ * IT USED TO OFFER EVERYBODY, and that was the first thing the firm said about it: "it shouldn't
+ * automatically already throw you out all the options that there is, because there's just too
+ * many. Literally just after you start typing. So if you type R, then all the R's should start to
+ * come up."
+ *
+ * The reasoning being reversed was that a box which only remembers once you guess the first letter
+ * remembers nobody. That holds for a box which can only match addresses. This one matches names
+ * too -- one letter finds Reno both ways -- so the first letter is not a guess, and the assertion
+ * below is the other half of this pair: nothing at nought characters, and Reno at one.
  */
-check('an empty query offers everybody, most used first',
-  suggestRecipients(BOOK, '').map((x) => x.address),
-  [SHARED.address, RENO.address, ANDRIES.address, 'l.naidoo@acf.co.za', 'info@gpsprop.co.za'])
-check('...and whitespace is the same as empty', suggestRecipients(BOOK, '   ').length, 5)
-/* The list is a glance, not a scroll. */
-check('it is capped', suggestRecipients(BOOK, '', 2).length, 2)
-check('a cap of nothing shows nothing', suggestRecipients(BOOK, '', 0).length, 0)
+check('an empty query offers nobody', suggestRecipients(BOOK, '').length, 0)
+check('...and whitespace is the same as empty', suggestRecipients(BOOK, '   ').length, 0)
+check('...and an empty query is no match at all, rather than a match on everything',
+  rankOf(RENO, ''), null)
+/* ONE LETTER IS ENOUGH, which is what makes the rule above affordable. */
+check('one letter brings back the people it starts', suggestRecipients(BOOK, 'r').map((x) => x.address),
+  [RENO.address])
+check('...and it is the same letter in either case', suggestRecipients(BOOK, 'R').map((x) => x.address),
+  [RENO.address])
+/* The list is a glance, not a scroll. Asserted on a letter three people answer to, or the cap
+   would be doing nothing and the check would pass over a cap that had been deleted. */
+check('one letter finds more than one where more than one starts with it',
+  suggestRecipients(BOOK, 'a').length, 3)
+check('...and the list is capped', suggestRecipients(BOOK, 'a', 2).length, 2)
+check('a cap of nothing shows nothing', suggestRecipients(BOOK, 'a', 0).length, 0)
 
 /* ---------- when to stop offering ---------- */
 
