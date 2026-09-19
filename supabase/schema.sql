@@ -4768,3 +4768,97 @@ begin
       on b.version_id = a.version_id and b.ordinal = a.ordinal + 1
    where a.version_id = v_version;
 end $$;
+
+-- ---------- Who this person has written to before ----------
+--
+-- The firm: "if I've sent an email to Reno, I can paste in R, E, N, and then it picks it up."
+-- Nothing remembered anything: the compose box offered a datalist built only from whoever was
+-- already attached to the client, lead or deal in front of you, so the address of somebody you
+-- wrote to last week was a thing you had to go and find again.
+--
+-- DERIVED, NOT STORED. An address book is a second copy of the mailbox and it goes stale the day
+-- somebody changes a domain -- and worse, it is a copy of personal information kept for no reason
+-- beyond convenience, which is a POPIA answer nobody wants to give. This reads the sent mail that
+-- already exists and is thrown away after every call.
+--
+-- PER USER, AND ONLY THEIR OWN SENT MAIL. Whose desk an address came off is the whole point: a
+-- collector's suggestions must not be the floor's, both because it would be useless and because
+-- one agent's correspondents are not another agent's business.
+create table if not exists public.mail_recipient_hidden (
+  -- "You should be able to press a little X button next to it if it's wrong or you didn't like
+  -- it." A dismissal has to persist or the X is a joke: the address comes straight back off the
+  -- next query, because the sent message it was derived from is still there.
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  address text not null,
+  hidden_at timestamptz not null default now(),
+  primary key (user_id, address)
+);
+
+alter table public.mail_recipient_hidden enable row level security;
+grant select, insert, delete on public.mail_recipient_hidden to authenticated;
+
+-- YOUR OWN ONLY, READ AND WRITE. This is the one table in Raptor where read-open would be wrong:
+-- the rest of the debtor side is open because a team leader has to see what an agent is sitting
+-- on, and a list of the people somebody has chosen to stop being reminded of is not that.
+drop policy if exists mail_recipient_hidden_own on public.mail_recipient_hidden;
+create policy mail_recipient_hidden_own on public.mail_recipient_hidden
+  for all to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+create or replace function public.mail_recipient_history(p_limit integer default 200)
+returns table (address text, name text, uses integer, last_used timestamptz)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  with sent as (
+    -- The mailbox: the To line, and everyone on the To and Cc lists of a message this person sent.
+    -- to_recipients carries the full list where there was more than one, and to_address carries
+    -- the first; taking only one of the two loses either the extra recipients or the older
+    -- messages written before the list column existed.
+    select lower(btrim(u.to_address)) as address, nullif(btrim(u.to_name), '') as name, u.occurred_at
+      from public.user_emails u
+     where u.user_id = auth.uid() and u.is_sent and u.to_address is not null
+    union all
+    select lower(btrim(r->>'address')), nullif(btrim(r->>'name'), ''), u.occurred_at
+      from public.user_emails u
+      cross join lateral jsonb_array_elements(coalesce(u.to_recipients, '[]'::jsonb) || coalesce(u.cc_recipients, '[]'::jsonb)) r
+     where u.user_id = auth.uid() and u.is_sent and r->>'address' is not null
+    union all
+    -- Mail sent to a debtor from an account screen, which never passes through the mailbox table.
+    select lower(btrim(a.debtor_address)), null, a.occurred_at
+      from public.account_emails a
+     where a.sent_by = auth.uid() and a.direction = 'out' and a.debtor_address is not null
+  ),
+  clean as (
+    select s.address,
+           -- The most recent name seen for the address wins. A person who marries, or a shared
+           -- mailbox that is renamed, should not be suggested under the name they had in 2019.
+           (array_agg(s.name order by s.occurred_at desc) filter (where s.name is not null))[1] as name,
+           count(*)::integer as uses,
+           max(s.occurred_at) as last_used
+      from sent s
+     where s.address <> ''
+       -- An address has to look like one. A malformed To line in an old message would otherwise be
+       -- offered for ever as something nobody can ever successfully send to.
+       and s.address ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'
+       -- Never suggest the person back to themselves.
+       and s.address is distinct from (select lower(p.email) from public.profiles p where p.id = auth.uid())
+       and not exists (
+         select 1 from public.mail_recipient_hidden h
+          where h.user_id = auth.uid() and h.address = s.address
+       )
+     group by s.address
+  )
+  -- Most used first, then most recent. Frequency beats recency on purpose: the person you write
+  -- to every week should be the first suggestion even on a day you happened to write to somebody
+  -- else, and an address used once six months ago should not outrank them for having been typed
+  -- more recently.
+  select address, name, uses, last_used from clean
+   order by uses desc, last_used desc
+   limit greatest(1, least(p_limit, 500));
+$$;
+
+grant execute on function public.mail_recipient_history(integer) to authenticated;

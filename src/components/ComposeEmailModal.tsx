@@ -1,6 +1,7 @@
-import { useId, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { Paperclip, Plus, X } from 'lucide-react'
 import { Modal, FormField, inputClass } from './ui/Modal'
+import { RecipientField } from './RecipientField'
 import { DictateButton } from './ui/Dictate'
 import { DICTATION_LANGUAGES, storedLanguage } from '../lib/dictation'
 import { useAuth } from '../store/AuthContext'
@@ -104,7 +105,6 @@ export function ComposeEmailModal({
   onSent: (subject: string, bodyText: string, emailMessageId?: string, from?: string) => void
 }) {
   const { session } = useAuth()
-  const listId = useId()
   const [address, setAddress] = useState(to ?? recipients?.[0]?.email ?? '')
   const [cc, setCc] = useState(initialCc ?? '')
   /*
@@ -217,26 +217,16 @@ export function ComposeEmailModal({
     */
     <Modal title={initialSubject ? `Reply to ${to ?? address}` : 'New Email'} onClose={onClose} width={760}>
       <form onSubmit={handleSubmit}>
+        {/*
+          A DATALIST UNTIL NOW, AND IT REMEMBERED NOTHING. It offered only whoever was already
+          attached to the client, lead or deal in front of you, so the address of somebody written
+          to last week was a thing to go and find again — the firm's complaint exactly. A datalist
+          also cannot show a name beside an address, matches however the browser feels like it, and
+          has no way to take an entry back out; RecipientField does all three.
+        */}
         <FormField label="To" required>
-          <input
-            className={inputClass}
-            type="email"
-            list={recipients && recipients.length > 0 ? listId : undefined}
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder="name@company.co.za"
-            required
-            autoFocus={!address}
-          />
-          {recipients && recipients.length > 0 && (
-            <datalist id={listId}>
-              {recipients.map((r) => (
-                <option key={r.email} value={r.email}>
-                  {r.label ?? r.email}
-                </option>
-              ))}
-            </datalist>
-          )}
+          <RecipientField value={address} onChange={setAddress}
+            contextual={recipients} required autoFocus={!address} />
         </FormField>
         {/*
           OPEN ON A REPLY-ALL, where it is pre-filled with the people who were on the original and
