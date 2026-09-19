@@ -417,13 +417,37 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
     ok(`...counting ${tab.replace(/'/g, '')}`, byTab.includes(tab.replace(/'/g, '')))
   }
 
-  /* The page draws it, and draws the right one: work outstanding on the two work tabs, unread on
-     the rest. Two numbers answering two questions, and neither at zero. */
+  /*
+   * THE PAGE DRAWS THE RIGHT ONE, and which one is right changed.
+   *
+   * All used to carry work outstanding alongside Needs matching. The firm caught it on the
+   * screen: "I've got about four or five unread messages in my All mailbox, and it just shows
+   * that I have two." Both numbers were right; neither was the one being asked of a mailbox. So
+   * Needs matching carries work outstanding and every other tab -- All included -- carries unread.
+   *
+   * Pinned as the whole expression rather than as two loose mentions, because the failure this
+   * replaces was a tab quietly reading the other number while both names were still in the file.
+   */
   ok('the tabs carry a badge', /unreadByTab\[t\.id\]/.test(page))
-  ok('...work outstanding on All and Needs matching',
-    /\(t\.id === 'all' \|\| t\.id === 'needs-filing'\)\s*\n?\s*\? outstanding/.test(page))
+  ok('...work outstanding on Needs matching, and nowhere else',
+    /t\.id === 'needs-filing' \? outstanding\s*\n?\s*: unreadByTab\[t\.id\]/.test(page))
+  ok('...so All counts what has not been read', /const isWork = t\.id === 'needs-filing'/.test(page))
   ok('...and nothing at zero, which is what teaches people to stop reading badges',
     /if \(n <= 0\) return null/.test(page))
+
+  /*
+   * AND IT COUNTS THE SAME THING THE SIDEBAR COUNTS, which is where this drifted.
+   *
+   * nav_counts once counted mail still needing matching and was changed to unread; the All tab
+   * was not changed with it, so two badges six inches apart on one screen answered two different
+   * questions and neither said which. What nav_counts counts is asserted above, in SQL; this is
+   * the other side of the same rule, in TypeScript. The two cannot share code, so they are held
+   * side by side here instead.
+   */
+  ok('the All tab narrows on the same two facts the sidebar excludes on',
+    /input\.filter === 'all'\) out = out\.eq\('is_junk', false\)\.eq\('is_sent', false\)/.test(mail))
+  ok('...with unread applied on top, which is what countUnread adds to whatever tab it is given',
+    /\{ \.\.\.input, unreadOnly: true \}/.test(mail))
   /* Told apart by colour: unread is brand, the same as the dot on a row and the unread filter. */
   ok('...the two are told apart', /isWork \? 'bg-gold-500 text-navy-950' : 'bg-brand-500 text-white'/.test(page))
 
@@ -432,6 +456,26 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
   ok('marking unread has a handler', unreadOne.length > 0)
   ok('...which updates the row in place', /setItems\(\(list\) => list\.map/.test(unreadOne))
   ok('...and the badge with it', /setUnreadByTab\(\(counts\) => bumpUnread\(counts, mail, 1\)\)/.test(unreadOne))
+
+  /*
+   * AND THE OTHER HALF OF IT. Opening a message marked it read and un-bolded the row, and left
+   * every badge where it was -- so a badge counted what was unread when the page last loaded
+   * rather than what is unread now. Read four of five and All still said five. The sidebar
+   * already followed, because markMailRead fires refreshNavCounts, so the two also disagreed.
+   */
+  const toggleAt = page.indexOf('async function toggleTo(')
+  const toggle = page.slice(toggleAt, page.indexOf('\n  }\n', toggleAt) + 4)
+  ok('opening a message has a handler', toggle.length > 0)
+  ok('...which marks it read', /markMailRead\(\[mail\.id\]\)/.test(toggle))
+  ok('...and takes the badges down with it',
+    /setUnreadByTab\(\(counts\) => bumpUnread\(counts, mail, -1\)\)/.test(toggle))
+  /*
+   * Compared against the CALL, not the name. The comment above that line explains the fix and
+   * mentions markMailRead, so matching the bare name would have this reading its own prose --
+   * the trap this suite has fallen into more than once.
+   */
+  ok('...before the write, so the number moves when the row does',
+    toggle.indexOf('bumpUnread') < toggle.indexOf('void markMailRead('))
   /*
    * NO load() ON THE SUCCESS PATH. This is the whole fix: load() sets `loading`, the list unmounts,
    * and an unmounted list comes back at the top.

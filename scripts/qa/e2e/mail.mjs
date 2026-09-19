@@ -55,7 +55,23 @@ const handlers = [
   ],
   [(u) => u.includes('/rest/v1/companies'), () => ({ body: [COMPANY] })],
   [(u) => u.includes('/rest/v1/teams'), () => ({ body: [TEAM] })],
-  [(u) => u.includes('/rpc/nav_counts'), () => ({ body: { mail: 2, tasks: 0, disputes: 0, diary: 0 } })],
+  /*
+   * THE SIDEBAR'S MAIL BADGE, COUNTED OFF THE SAME FIXTURE THE TABS ARE COUNTED OFF.
+   *
+   * It was a hard-coded 2 while the All tab was counting something else entirely, so the one
+   * screen where those two numbers sit six inches apart could not be checked at all. nav_counts
+   * counts unread that is neither junk nor sent; the stub counts exactly that, so the assertion
+   * that the two agree is an assertion about the app rather than about the fixture.
+   */
+  [
+    (u) => u.includes('/rpc/nav_counts'),
+    () => ({
+      body: {
+        mail: MAIL.filter((m) => !m.is_junk && !m.is_sent && !m.read_at).length,
+        tasks: 0, disputes: 0, diary: 0,
+      },
+    }),
+  ],
   [(u) => u.includes('/rest/v1/mail_blocks'), () => ({ body: [] })],
   [(u) => u.includes('/rest/v1/mail_sender_rules'), () => ({ body: [] })],
   [(u) => u.includes('/rest/v1/calendar_events'), () => ({ body: [] })],
@@ -381,28 +397,71 @@ try {
   await page.waitForTimeout(700)
   t.check('open mail is not nagged either', await page.getByText('Not matched yet').count(), 0)
 
-  /* ---------- unread says WHICH tab, and marking unread does not reload ---------- */
+  /* ---------- what the numbers on the tabs are counting ---------- */
 
   /*
-   * The firm: "the junk email doesn't indicate to me if there's anything that's unread, the free
-   * mail also not." Three of the six fixtures are unread and one of them is on Open mail, so the
-   * tab has to carry a number -- with one number on All it carried nothing.
+   * READ OFF A FRESHLY LOADED PAGE. Everything above this opens messages, and opening one takes
+   * its tab down by one -- so asserting exact numbers here without reloading would be asserting
+   * how many messages the checks above happened to click.
    */
+  await page.reload()
+  await page.getByText('Debt collection enquiry').first().waitFor({ timeout: 20000 })
+  await page.waitForTimeout(900)
+
   const tabBadge = async (name) => {
     const tab = page.getByRole('button', { name: new RegExp(`^${name}`) }).first()
     const text = await tab.innerText()
     const n = /(\d+)/.exec(text)
     return n ? Number(n[1]) : 0
   }
-  t.ok('All says how much work is outstanding', await tabBadge('All') > 0)
-  t.ok('...and Needs matching with it', await tabBadge('Needs matching') > 0)
+  /* The sidebar's own Mail badge, which asks the same question of the same mailbox. */
+  const navBadge = async () => {
+    const text = await page.getByRole('link', { name: /^Mail\b/ }).first().innerText()
+    const n = /(\d+)/.exec(text)
+    return n ? Number(n[1]) : 0
+  }
+
   /*
-   * AND THE NUMBERS DIFFER. One fixture is unread and on Open mail; none is on Junk. Equal numbers
-   * on every tab is what a stub counting the whole fixture looks like, and it is indistinguishable
-   * from a working badge -- so the check is that Junk and Open mail disagree.
+   * ALL COUNTS WHAT HAS NOT BEEN READ, AND IT MUST AGREE WITH THE SIDEBAR.
+   *
+   * The firm, reading this screen: "I've got about four or five unread messages in my All
+   * mailbox, and it just shows that I have two." Both numbers on the screen were right and
+   * neither was the one being asked for -- All was carrying work outstanding while the sidebar
+   * six inches away was carrying unread. So the assertion is not "All shows a number": it is
+   * that All and the sidebar show THE SAME number, because they are one question.
+   */
+  t.check('All counts what has not been read', await tabBadge('All'), 5)
+  t.check('...and the sidebar says the same, because it is the same question', await navBadge(), 5)
+
+  /*
+   * AND NEEDS MATCHING COUNTS SOMETHING ELSE, which is why the two must differ here. Reading a
+   * message is not matching it: a message a collector has read is still on nobody's file.
+   */
+  t.check('Needs matching counts work still on nobody\u2019s file', await tabBadge('Needs matching'), 4)
+  t.ok('...which is not the same number as All, or one of them is answering the wrong question',
+    (await tabBadge('All')) !== (await tabBadge('Needs matching')))
+
+  /*
+   * AND EVERY OTHER TAB ITS OWN UNREAD. The firm's earlier instruction: "the junk email doesn't
+   * indicate to me if there's anything that's unread, the open mail also not." Equal numbers on
+   * every tab is what a stub counting the whole fixture looks like and is indistinguishable from
+   * a working badge, so these two are asserted exactly and the fixtures make them differ from All.
    */
   t.check('Junk says how many of ITS messages are unread', await tabBadge('Junk'), 2)
-  t.check('...and Open mail how many of its own', await tabBadge('Open mail'), 1)
+  t.check('...and Open mail how many of its own', await tabBadge('Open mail'), 2)
+
+  /*
+   * READING ONE TAKES THE BADGE DOWN WITH IT, without a reload.
+   *
+   * The other half of what marking unread already did. Without it the badge counted what was
+   * unread when the page last loaded rather than what is unread now -- read four of the five and
+   * All still said five, which is the same complaint in the other direction.
+   */
+  await page.getByText('Debt collection enquiry').first().click()
+  await page.waitForTimeout(800)
+  t.check('reading a message takes All down by one', await tabBadge('All'), 4)
+  t.check('...and leaves Needs matching alone, because reading is not matching',
+    await tabBadge('Needs matching'), 4)
 
   /*
    * MARKING UNREAD RELOADS NOTHING. "When I mark an email as unread it kind of reloads everything

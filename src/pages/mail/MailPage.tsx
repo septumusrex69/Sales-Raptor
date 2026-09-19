@@ -517,6 +517,16 @@ export function MailPage() {
       setItems((list) => list.map((m) => (
         m.id === mail.id ? { ...m, readAt: new Date().toISOString() } : m
       )))
+      /*
+       * AND THE TAB BADGES COME DOWN WITH IT, which is the other half of what unreadOne does and
+       * was missing here. Without it a badge counted what was unread when the page last loaded
+       * rather than what is unread now: read four of the five and All still said five, which is
+       * the same complaint as a badge that counts the wrong thing. The sidebar already follows —
+       * markMailRead fires refreshNavCounts — so leaving this out also had the two disagreeing.
+       *
+       * Reconciled by the next real load, exactly as the mark-unread side is.
+       */
+      setUnreadByTab((counts) => bumpUnread(counts, mail, -1))
       void markMailRead([mail.id]).catch(() => {})
     }
 
@@ -927,32 +937,35 @@ export function MailPage() {
                   filter === t.id ? 'border-gold-500 text-navy-950' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
                 {t.label}
                 {/*
-                  On All and on Needs filing, because they are the same number and it belongs
-                  wherever somebody is looking for work. Nothing at zero — a badge showing 0 is
-                  furniture, and it is what teaches people to stop reading the others.
-                */}
-                {/*
                   TWO DIFFERENT NUMBERS, and they answer different questions.
 
-                  All and Needs matching carry WORK OUTSTANDING -- what is still on nobody's file
-                  -- because that is what those two tabs are for and it is the number the sidebar
-                  badge agrees with.
+                  NEEDS MATCHING carries WORK OUTSTANDING -- what is still on nobody's file --
+                  because that is the one thing that tab is for.
 
-                  Every other tab carries UNREAD, at the firm's instruction: "the junk email
-                  doesn't indicate to me if there's anything that's unread, the open mail also
-                  not." Junk is the one that matters most: a client's reply a spam filter misfiled
-                  sat there with nothing anywhere saying it had arrived.
+                  EVERY OTHER TAB, ALL INCLUDED, carries UNREAD. All used to carry work
+                  outstanding too, and the firm caught it: "I've got about four or five unread
+                  messages in my All mailbox, and it just shows that I have two." Both numbers
+                  were right and neither was the one being asked for. The tab that means "the
+                  whole mailbox" has to answer the question people ask of a mailbox, which is how
+                  much of it they have not read -- and it is the number the sidebar's own Mail
+                  badge shows, so the two were visibly contradicting each other on one screen.
+                  (nav_counts counted mail needing matching once as well; it was changed to unread
+                  and this was not changed with it, which is how the two drifted apart.)
+
+                  The rest carry unread at the firm's earlier instruction: "the junk email doesn't
+                  indicate to me if there's anything that's unread, the open mail also not." Junk
+                  is the one that matters most: a client's reply a spam filter misfiled sat there
+                  with nothing anywhere saying it had arrived.
 
                   Nothing at zero, on either. A badge showing 0 is furniture, and furniture is what
                   teaches people to stop reading the others.
                 */}
                 {(() => {
                   const n = t.id === 'blocked' ? 0
-                    : (t.id === 'all' || t.id === 'needs-filing')
-                      ? outstanding
+                    : t.id === 'needs-filing' ? outstanding
                       : unreadByTab[t.id]
                   if (n <= 0) return null
-                  const isWork = t.id === 'all' || t.id === 'needs-filing'
+                  const isWork = t.id === 'needs-filing'
                   return (
                     <span title={isWork ? 'Still on nobody\u2019s file' : 'Unread'}
                       className={`min-w-4 h-4 px-1 rounded-full text-[10px] font-semibold

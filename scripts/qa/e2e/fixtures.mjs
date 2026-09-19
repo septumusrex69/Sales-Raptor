@@ -365,6 +365,14 @@ export const MAIL = [
  * Read and settled, so they add nothing to any badge: every unread and outstanding count in this
  * file is asserted exactly, and filler that moved them would break those checks for a reason that
  * has nothing to do with what they guard.
+ *
+ * ONE EXCEPTION, AND THE EXCEPTION IS THE POINT. The first of them is UNREAD and settled, which
+ * makes the mailbox's unread count and its outstanding count different numbers. They were
+ * accidentally equal -- four and four -- and while they were, every assertion about the All badge
+ * passed whichever of the two it happened to be showing. That is how All came to be carrying work
+ * outstanding while the sidebar six inches away carried unread, with nothing in this suite able
+ * to tell the difference, until the firm read the screen: "I've got about four or five unread
+ * messages in my All mailbox, and it just shows that I have two."
  */
 const FILLER = Array.from({ length: 50 }, (_, i) => ({
   id: `bbbbbbb1-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
@@ -376,7 +384,8 @@ const FILLER = Array.from({ length: 50 }, (_, i) => ({
   to_address: 'stephan@bredellferreira.co.za', to_name: 'Stephan',
   to_recipients: [], cc_recipients: [],
   attachment_names: [], is_junk: false, occurred_at: MAIL_AT(2000 + i),
-  read_at: MAIL_AT(1999 + i), is_filed: false, is_settled: true, no_record_at: MAIL_AT(1999 + i),
+  read_at: i === 0 ? null : MAIL_AT(1999 + i),
+  is_filed: false, is_settled: true, no_record_at: MAIL_AT(1999 + i),
   linked_account_id: null, linked_lead_id: null, linked_deal_id: null,
   linked_company_id: null, linked_contact_id: null,
   debtor_accounts: null, leads: null, deals: null, companies: null, contacts: null,
