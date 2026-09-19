@@ -41,6 +41,41 @@ const detail = read('../../src/pages/accounts/AccountDetail.tsx')
 const practitionerModal = read('../../src/pages/accounts/PractitionerModal.tsx')
 const standingData = read('../../src/lib/accountStandingData.ts')
 
+/* ---------- two different references, and neither is "theirs" ---------- */
+
+/*
+ * THE ACCOUNT CARRIES TWO REFERENCES THAT ARE NOT THE SAME THING, and they used to be called by
+ * the same word.
+ *
+ *   client_reference       the CLIENT'S own number for this debtor, quoted back on every
+ *                          statement and every remittance.
+ *   practitioner_reference the ESTATE'S number, quoted back on every claim submission.
+ *
+ * Both read "their reference" on screen, and "their" only resolves from whatever happens to be
+ * beside it. The firm marked the first one on the screen and wrote what it should say: client
+ * ref. So the header now names the client, and the practitioner's stays "their reference"
+ * because there "they" is the practitioner and the field sits inside their own block.
+ *
+ * The check is a pair on purpose. A find-and-replace of "Their reference" would have renamed the
+ * practitioner's field too, silently, and it would still have looked right on the one screen
+ * anybody was looking at.
+ */
+{
+  const addDebtor = read('../../src/components/companies/AddDebtorModal.tsx')
+  ok('the header names the client whose reference it is', /client ref \{account\.clientReference\}/.test(detail))
+  ok('...and no longer leaves "their" to be resolved from the line',
+    !/their ref \{account\.clientReference\}/.test(detail))
+  ok('...and the box it is typed into is called the same thing',
+    /label="Client reference"/.test(addDebtor))
+  /*
+   * AND THE ESTATE'S REFERENCE IS STILL THE PRACTITIONER'S. Asserted as a presence, because the
+   * absence check above is the one a careless rename satisfies -- this is the half that fails
+   * when the rename goes too far.
+   */
+  ok('the estate reference is still named for the practitioner',
+    /label="Their reference" value=\{account\.practitionerReference\}/.test(detail))
+}
+
 /* ---------- the practitioner: who to deal with instead of the debtor ---------- */
 
 ok('the account can say who is appointed',

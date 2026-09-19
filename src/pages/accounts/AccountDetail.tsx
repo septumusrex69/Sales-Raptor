@@ -502,7 +502,21 @@ export function AccountDetail() {
                 ? <Link to={`/companies/${client.id}`} className="text-gold-400 hover:underline">{client.name}</Link>
                 : <span className="text-gold-400">{client.name}</span>
               : <span>Unknown</span>}
-            {account.clientReference && <><span className="text-white/30">·</span><span>their ref {account.clientReference}</span></>}
+            {/*
+              "CLIENT REF", NOT "THEIR REF". The firm's own word, marked on the screen. It sat
+              beside the gold account number, whose tooltip reads "our reference", and the pair
+              was meant to be read as ours/theirs — but "their" only resolves if you have already
+              read the word Client at the start of the line, and a collector quoting a reference
+              back to a client is scanning, not reading.
+            */}
+            {account.clientReference && (
+              <>
+                <span className="text-white/30">·</span>
+                <span title="The client's own reference for this account">
+                  client ref {account.clientReference}
+                </span>
+              </>
+            )}
             {account.handoverDate && <><span className="text-white/30">·</span><span>handed over {formatDate(account.handoverDate)}</span></>}
           </span>
         }

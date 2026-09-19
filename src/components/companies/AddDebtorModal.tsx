@@ -77,7 +77,9 @@ export function AddDebtorModal({ companyName, existingReferences, busy, error, o
             hint={suggested ? `next in this client’s series` : undefined}>
             <input className={inputClass} value={form.accountNumber} onChange={set('accountNumber')} placeholder={suggested ?? 'ABC0001'} />
           </Field>
-          <Field label="Their reference" problem={problemFor('clientReference')}>
+          {/* The same field the account header names, and it has to be called the same thing
+              there and here — see AccountDetail. */}
+          <Field label="Client reference" problem={problemFor('clientReference')}>
             <input className={inputClass} value={form.clientReference} onChange={set('clientReference')} />
           </Field>
 
