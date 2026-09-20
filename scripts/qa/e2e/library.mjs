@@ -32,6 +32,8 @@ const ADMIN = { ...PROFILE, role: 'Administrator' }
 
 const t = makeRunner('library')
 const seen = []
+/** Every write the page sent, so a save can be checked on the wire and not on the screen. */
+const written = []
 
 /** The same stub for both people; only the profile's role changes. */
 const handlersFor = (profile) => [
@@ -53,7 +55,13 @@ const handlersFor = (profile) => [
      * the same rows under both libraries — which looks exactly like a working scope switch and is
      * a stub ignoring it.
      */
-    (u) => {
+    (u, req) => {
+      /* A write comes back as the row PostgREST would have returned, and is recorded so the
+         check can assert on what actually left the browser rather than on what the form shows. */
+      if (req.method() === 'PATCH' || req.method() === 'POST') {
+        written.push({ method: req.method(), url: u, body: req.postData() ?? '' })
+        return { body: [{ ...LIBRARY[0], id: 'cccccccc-0000-4000-8000-00000000000f' }] }
+      }
       const scope = /scope=eq\.(\w+)/.exec(u)?.[1]
       return { body: scope ? LIBRARY.filter((r) => r.scope === scope) : LIBRARY }
     },
@@ -113,14 +121,16 @@ try {
   await page.getByText('First contact').first().waitFor({ timeout: 20000 })
 
   const headings = async () => (await page.locator('h3').allInnerTexts()).map((h) => h.trim())
+  /* The left column's group headings, which are what the kinds are. */
+  const kinds = async () => (await headings()).filter((h) => /TEMPLATES|SCRIPTS|LETTERS/i.test(h))
 
   /*
    * LETTERS ARE A COLLECTIONS THING. A statutory notice goes by registered post because the Act
    * says so; nothing on the sales side is posted. An empty "Letters" heading sitting on the sales
    * library for ever is the furniture problem.
    */
-  t.ok(`collections has letters (${(await headings()).join(' | ')})`,
-    (await headings()).some((h) => /LETTERS/i.test(h)))
+  t.ok(`collections has letters (${(await kinds()).join(' | ')})`,
+    (await kinds()).some((h) => /LETTERS/i.test(h)))
   t.ok('...and the section shows the one there is',
     await page.getByText('Section 129 notice').first().isVisible())
 
@@ -128,16 +138,29 @@ try {
    * THE FINDING THE PAGE EXISTS FOR. The handover email asks for two fields nothing can fill, and
    * the row has to say so before anybody signs it off.
    */
-  const flag = page.getByText(/fields with nothing behind them/).first()
-  t.ok('a template nothing can fill is flagged on the row', await flag.isVisible())
-  t.check('...naming how many', (await flag.innerText()).trim(), '2 fields with nothing behind them')
-  t.check('...and only on that row',
-    await page.getByText(/fields? with nothing behind (them|it)/).count(), 1)
-
   await page.getByText('Handover notice').first().click()
-  await page.waitForTimeout(400)
-  t.ok('...and opening it says what it means in words',
+  await page.waitForTimeout(500)
+  const flag = page.getByText(/fields? with nothing behind/).first()
+  t.ok('a template nothing can fill is flagged when it is opened', await flag.isVisible())
+  t.check('...naming how many', (await flag.innerText()).replace(/\s+/g, ' ').trim(),
+    '2 fields with nothing behind them')
+  t.ok('...and says what it means in words',
     await page.getByText(/the message goes out with the braces still in it/).first().isVisible())
+
+  /*
+   * TWO VIEWS OF ONE THING, which the firm asked for by pointing at them: the fields in braces
+   * are what you edit, the same words filled in are what the debtor reads.
+   */
+  t.ok('the words show their fields', (await page.locator('pre').first().innerText()).includes('{{balance}}'))
+  await page.getByRole('button', { name: 'Example data' }).click()
+  await page.waitForTimeout(300)
+  const filled = await page.locator('pre').first().innerText()
+  t.ok(`...and fill in against the sample (${filled.slice(0, 40).replace(/\n/g, ' ')})`,
+    !filled.includes('{{balance}}') && filled.includes('R 48,250.00'))
+  /* The unfillable one stays in braces even here, which is the honest rendering: that IS what
+     the debtor would receive. */
+  t.ok('...except the one nothing can fill, which is the point',
+    filled.includes('{{bank_account_number}}'))
   await t.shot(page, '60-library-collections')
 
   /* ---------- the other side is a different library, not a filter ---------- */
@@ -152,6 +175,109 @@ try {
   t.check('...and offers no letters, because the sales side posts nothing',
     (await headings()).filter((h) => /LETTERS/i.test(h)).length, 0)
   await t.shot(page, '61-library-sales')
+
+  /* ---------- editing, and the merge field you press ---------- */
+
+  await page.getByRole('button', { name: 'Collections', exact: true }).click()
+  await page.waitForTimeout(600)
+  await page.getByText('First contact').first().click()
+  await page.waitForTimeout(400)
+  await page.getByRole('button', { name: 'Edit' }).click()
+  await page.waitForTimeout(400)
+
+  const words = page.locator('textarea').first()
+  t.ok('a template can be edited in the app', await words.isVisible())
+
+  /*
+   * THE MERGE FIELD IS A BUTTON, AND IT LANDS AT THE CURSOR. The firm: "you should be able to
+   * add, for example, a merge field... you can type the merge field or you can add the merge
+   * field." Appending to the end would leave somebody cutting and pasting it into the sentence it
+   * belongs in, which is the work the button was meant to save.
+   */
+  /*
+   * THE CARET IS PUT IN THE MIDDLE ON PURPOSE. The first version of this typed "Dear " and
+   * inserted with the caret already at the end — where inserting at the cursor and appending to
+   * the end produce the same string, so the check passed over an implementation that appends.
+   * Found by writing that implementation and watching this stay green.
+   */
+  await words.fill('Dear , please settle.')
+  await words.evaluate((el) => { el.focus(); el.setSelectionRange(5, 5) })
+  await page.getByRole('button', { name: '{{debtor_name}}' }).click()
+  await page.waitForTimeout(300)
+  t.check('pressing a field drops it in at the cursor, not at the end',
+    await words.inputValue(), 'Dear {{debtor_name}}, please settle.')
+  /* And the caret followed the text it just wrote, so the next one lands beside it. */
+  await page.getByRole('button', { name: '{{balance}}' }).click()
+  await page.waitForTimeout(300)
+  t.check('...and the caret moved with it, so the next lands beside the first',
+    await words.inputValue(), 'Dear {{debtor_name}}{{balance}}, please settle.')
+
+  /*
+   * AND A FIELD THAT DOES NOT EXIST IS CAUGHT HERE, not on the way out to four hundred debtors.
+   * renderTemplate leaves the placeholder standing, so this is the only moment it can be caught.
+   */
+  await words.fill('Dear {{ballance}}')
+  await page.waitForTimeout(300)
+  t.ok('a typed field that is not a field is refused',
+    await page.getByText(/is not a field on this side/).first().isVisible())
+  t.ok('...and Save is not available while it stands',
+    await page.getByRole('button', { name: 'Save' }).isDisabled())
+
+  /* ---------- a save reaches the database ---------- */
+
+  await words.fill('Dear {{debtor_name}}, account {{reference}} is overdue.')
+  await page.waitForTimeout(300)
+  const before = written.length
+  await page.getByRole('button', { name: 'Save' }).click()
+  await page.waitForTimeout(900)
+  t.ok(`the save left the browser (${written.length - before} write)`, written.length > before)
+  const sent = written[written.length - 1]
+  t.check('...as an update, not a new row', sent?.method, 'PATCH')
+  t.ok(`...carrying the words that were typed (${(sent?.body ?? '').slice(0, 60)})`,
+    (sent?.body ?? '').includes('account {{reference}} is overdue'))
+
+  /* ---------- a new one ---------- */
+
+  await page.getByRole('button', { name: 'New template' }).click()
+  await page.waitForTimeout(400)
+  t.ok('a new template opens empty', (await page.locator('textarea').first().inputValue()) === '')
+  t.ok('...and cannot be saved with no name and no words',
+    await page.getByRole('button', { name: 'Save' }).isDisabled())
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  await page.waitForTimeout(300)
+
+  /* ---------- the sidebar folds, and comes back ---------- */
+
+  /*
+   * THE FIRM ASKED FOR IT WHILE WORKING HERE: "if that thing can collapse that sidebar it could
+   * be easier to work on this." Measured in pixels, because the claim is about how much room the
+   * page gets and a class-name assertion would pass over a fold that moved nothing.
+   */
+  const rail = page.locator('aside.app-sidebar')
+  const wide = (await rail.boundingBox())?.width ?? 0
+  await page.getByRole('button', { name: 'Narrow the menu' }).click()
+  await page.waitForTimeout(600)
+  const narrow = (await rail.boundingBox())?.width ?? 0
+  t.ok(`the sidebar folds to a rail (${Math.round(wide)}px to ${Math.round(narrow)}px)`,
+    narrow > 0 && narrow < wide / 2)
+  /* Folded, not gone: every page must still be one click away. */
+  t.ok('...and the nav is still reachable',
+    await page.getByRole('link', { name: /^Library/ }).first().isVisible())
+  t.check('...with the labels gone', await page.getByText('Disputes', { exact: true }).count(), 0)
+
+  /*
+   * AND IT COMES BACK, which is the half a one-way fold would fail. Reloaded in between, because
+   * a preference that resets on the next page load is not a preference.
+   */
+  await page.reload()
+  await page.waitForTimeout(1200)
+  t.ok(`it is still folded after a reload (${Math.round((await rail.boundingBox())?.width ?? 0)}px)`,
+    ((await rail.boundingBox())?.width ?? 0) < wide / 2)
+  await t.shot(page, '62-library-collapsed')
+  await page.getByRole('button', { name: 'Widen the menu' }).click()
+  await page.waitForTimeout(600)
+  t.check(`...and comes back to its full width`,
+    Math.round((await rail.boundingBox())?.width ?? 0), Math.round(wide))
 
   const real = errors.filter((e) => !/favicon|404 \(Not Found\)/i.test(e))
   t.check('no console errors', real.length, 0)

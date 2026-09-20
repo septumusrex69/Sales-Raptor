@@ -4939,3 +4939,29 @@ drop index if exists message_templates_kind_idx;
 create index if not exists message_templates_scope_kind_idx
   on public.message_templates (scope, kind, position, language)
   where active;
+
+-- ---------------------------------------------------------------------------
+-- THE LIBRARY IS AN ADMINISTRATOR'S, AND ONLY AN ADMINISTRATOR'S.
+-- ---------------------------------------------------------------------------
+-- The firm, asked who maintains it: "collectors can't see the library because collectors don't
+-- build it. That's only basically administrators. Team leaders neither. They can't build this."
+--
+-- The policies above were written before that answer and let a Pre-legal Team Leader and a
+-- Liaison Manager write too. The page already refuses them, but a page is not a boundary -- the
+-- same write goes through PostgREST with a token anybody signed in has. The rule belongs here,
+-- and the screen only stops the app offering a button that would appear to work.
+--
+-- Reading stays open to everyone signed in. That is deliberate and it is not the same question:
+-- an agent has to be able to see the script they are meant to read aloud, and a campaign runner
+-- resolves these rows against the account in front of them.
+drop policy if exists message_templates_insert on public.message_templates;
+create policy message_templates_insert on public.message_templates
+  for insert to authenticated with check (
+    public.current_user_role() = 'Administrator'
+  );
+
+drop policy if exists message_templates_update on public.message_templates;
+create policy message_templates_update on public.message_templates
+  for update to authenticated
+  using (public.current_user_role() = 'Administrator')
+  with check (public.current_user_role() = 'Administrator');
