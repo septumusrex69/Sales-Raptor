@@ -43,6 +43,18 @@ behind it.
   Fees are raised on the action and only become billable once money is recovered.
 - **Fees are charged on ACCOUNTS ONLY** — never on leads or deals. The sales side raises nothing.
 - **Financial records are immutable** once remittance has run or a payment is processed.
+- **IMPORTED HISTORY IS FROZEN AT WHAT WAS IMPORTED.** The firm's own instruction: "what we
+  import, the data has to stay exactly like that, because we can't change the remittances that
+  has already been passed." Swordfish's figures are what the client was invoiced on, so they are
+  the record — not our arithmetic about what they should have been. Where the two differ, write
+  Swordfish's and REPORT the difference; `swordfishImport.ts` rule 1 already says this and it is
+  the reason it says it. Recalculating an imported fee or commission against a current schedule
+  rewrites an invoice a client has already paid.
+  **Corrections are the firm's decision, made case by case, never a migration that sweeps.** If a
+  discrepancy needs fixing, ask — do not fix it.
+- **New charges are priced on the schedule in force on the day of the action**, which from now on
+  means 2026. `scheduleFor(date)` decides this and it takes the ACTION's date, never today's —
+  a 2019 fee re-read today is still a 2019 fee.
 - **Refusing to pay ≠ cannot pay.** One is a legal decision, the other is a pensioner. Never put
   them on one list.
 
@@ -103,6 +115,14 @@ npm run qa -- --fast  # skip the browser
 npm run build         # tsc -b && vite build
 npm run lint
 ```
+
+**THESE RUN IN DEVELOPMENT, NOT IN THE APP.** `npm run qa` is something a person or a build runs
+before code ships. Nothing in `src/` or `api/` executes it, nothing watches live data with it, and
+it will never notify anybody that a figure in production has gone wrong. What it catches is
+somebody BREAKING THE MATHS before it reaches the firm. The protection for money already in the
+database is a different thing entirely and lives in the database: the four ledgers have no update
+or delete policy, so Postgres refuses — see `check-financial-immutability.mjs`, which exists to
+make sure that stays true.
 
 **Two kinds of check, answering different questions:**
 
