@@ -467,3 +467,56 @@ export const FORM_BODY = [
   'Tel: 011 555 0100',
   'Email: info@bredellferreira.co.za',
 ].join('\n')
+
+/* ------------------------------------------------------------------ *
+ * A record with a conversation on it.
+ * ------------------------------------------------------------------ */
+
+/**
+ * ONE LEAD AND ONE MESSAGE ON IT, so the actions on a record's email card can be driven.
+ *
+ * The message is RECEIVED and carries somebody else on Cc, because that is the case the firm set
+ * the condition on: "reply all, if there are other people that are CC'd." A message with only the
+ * two of us on it would show three of the four buttons and prove nothing about the fourth.
+ *
+ * Read, so Mark unread is offered — the button only appears on a message that has been read,
+ * which is the whole point of it.
+ */
+export const LEAD_ID = '77777777-7777-4777-8777-777777777777'
+export const LEAD_EMAIL = 'ernest@vaalfire.example'
+export const LEAD_CC = { name: 'Danielle Louwrens', address: 'danielle@louwrens-attorneys.example' }
+
+export const LEAD = {
+  id: LEAD_ID,
+  lead_number: 41,
+  first_name: 'Ernest',
+  last_name: 'Mohlalisi',
+  company_name: 'Vaal Fire Services',
+  email: LEAD_EMAIL,
+  phone: '021-555 0130',
+  source: 'Website',
+  status: 'New',
+  score: 60,
+  estimated_value: 120000,
+  owner_id: USER_ID,
+  company_id: COMPANY_ID,
+  created_at: MAIL_AT(4000),
+  updated_at: MAIL_AT(400),
+}
+
+export const LEAD_EMAIL_ACTIVITY = {
+  id: '88888888-8888-4888-8888-888888888888',
+  type: 'Email',
+  user_id: USER_ID,
+  lead_id: LEAD_ID,
+  company_id: COMPANY_ID,
+  subject: 'Email received: Quotation for the collection mandate',
+  notes: 'Good day, please could you confirm the commission structure before we sign.',
+  activity_date: MAIL_AT(300),
+  created_at: MAIL_AT(300),
+  is_read: true,
+  attachment_names: [],
+  email_message_id: '<quote-1@vaalfire.example>',
+  email_to_recipients: [{ name: 'Stephan', address: 'stephan@bredellferreira.co.za' }],
+  email_cc_recipients: [LEAD_CC],
+}

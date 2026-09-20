@@ -15,7 +15,7 @@
 import { chargeItem, type ChargeResult } from './accountCharges'
 import { addNote } from './accountWorkspace'
 import { supabase } from './supabase'
-import { mirrorReadToMailbox } from './mailReadState'
+import { mirrorReadToMailbox, mirrorUnreadToMailbox } from './mailReadState'
 import {
   EMAIL_ACTION_CODE, EMAIL_DESCRIPTION, EMAIL_ITEM_ID, EMAIL_OUT_KIND, sentEmailNote,
 } from './emailRules'
@@ -25,6 +25,12 @@ export * from './emailRules'
 interface Actor {
   id: string | null
   name: string | null
+}
+
+/** One person on a header line. The same shape user_emails and emailRules already use. */
+export interface Recipient {
+  name: string | null
+  address: string
 }
 
 export interface AccountEmail {
@@ -37,6 +43,15 @@ export interface AccountEmail {
   messageId: string | null
   inReplyTo: string | null
   attachmentNames: string[]
+  /**
+   * Everyone else the message went to, or was copied to.
+   *
+   * What makes a reply-all from the account possible: without it, answering a thread the
+   * debtor's attorney was on went back to the debtor alone. Empty on anything filed before the
+   * columns existed, which reads as "nobody else known" and simply hides the button.
+   */
+  toRecipients: Recipient[]
+  ccRecipients: Recipient[]
   sentByName: string | null
   /** Excluding VAT. Null where nothing was charged at all — every inbound message. */
   chargedExclVat: number | null
@@ -57,6 +72,8 @@ interface EmailRow {
   message_id: string | null
   in_reply_to: string | null
   attachment_names: string[] | null
+  to_recipients: Recipient[] | null
+  cc_recipients: Recipient[] | null
   sent_by_name: string | null
   charged_excl_vat: number | string | null
   read_at: string | null
@@ -75,6 +92,11 @@ function toEmail(r: EmailRow): AccountEmail {
     messageId: r.message_id,
     inReplyTo: r.in_reply_to,
     attachmentNames: r.attachment_names ?? [],
+    /* Named by hand like every other field here -- see the warning in CLAUDE.md. A column that
+       is in the table, in the type and in the select but missing from this mapper reads as
+       undefined for ever and nothing fails. */
+    toRecipients: r.to_recipients ?? [],
+    ccRecipients: r.cc_recipients ?? [],
     sentByName: r.sent_by_name,
     // Postgres numerics arrive as strings through PostgREST. Null stays null: it means no fee
     // was ever due, which the list shows differently from a fee that came out at zero.
@@ -89,7 +111,7 @@ function toEmail(r: EmailRow): AccountEmail {
 export async function fetchAccountEmails(accountId: string): Promise<AccountEmail[]> {
   const { data, error } = await supabase
     .from('account_emails')
-    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, sent_by_name, charged_excl_vat, read_at, received_by, occurred_at')
+    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, to_recipients, cc_recipients, sent_by_name, charged_excl_vat, read_at, received_by, occurred_at')
     .eq('account_id', accountId)
     .order('occurred_at', { ascending: false })
   if (error) throw new Error(error.message)
@@ -187,6 +209,33 @@ export async function markRepliesRead(ids: string[]): Promise<void> {
   // (Not a badge fix: a filed message is not counted by nav_counts. It is the bold row in the
   // mailbox's Filed and All tabs, still advertising itself as unread after it was answered.)
   await mirrorReadToMailbox((data ?? []).map((r) => r.message_id as string | null))
+}
+
+/**
+ * Put a message back to unread.
+ *
+ * The mirror of markRepliesRead, and it exists for the same reason the mailbox has one: you open
+ * a debtor's reply, see it needs an arrangement drawn up and twenty minutes you do not have, and
+ * put it back the way you found it so it is still waiting after lunch. Without it, opening a
+ * message to see whether it was urgent is the same act as deciding it was not.
+ *
+ * Only the agent it arrived for can do this -- account_emails_mark_read scopes the update to
+ * received_by -- which is correct: it is not anybody else's unread list to add to.
+ */
+export async function markRepliesUnread(ids: string[]): Promise<void> {
+  if (ids.length === 0) return
+  const { data, error } = await supabase
+    .from('account_emails')
+    .update({ read_at: null })
+    .in('id', ids)
+    /* Only rows that were actually read, so the returned ids are the ones that genuinely
+       changed and the mailbox copy is not touched for nothing. */
+    .not('read_at', 'is', null)
+    .select('message_id')
+  if (error) throw new Error(error.message)
+
+  // The same message is sitting in the agent's mailbox, where it is now bold again too.
+  await mirrorUnreadToMailbox((data ?? []).map((r) => r.message_id as string | null))
 }
 
 /**

@@ -18,6 +18,8 @@ import type { ActivityType, ProposalStatus, TaskType } from '../../types'
 import { NoteActivityList } from '../../components/NoteActivityRow'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
+import { WriteButton } from '../../components/email/MessageActions'
+import { openingFor, type ComposeOpening } from '../../lib/emailActivity'
 import { RowLimitSelect, applyRowLimitKeeping, type RowLimit } from '../../components/ui/RowLimitSelect'
 import { useFocusedEmailId } from '../../lib/focusedEmail'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
@@ -90,6 +92,20 @@ export function DealDetail() {
   const [noteLimit, setNoteLimit] = useState<RowLimit>(5)
   const [emailLimit, setEmailLimit] = useState<RowLimit>(5)
   const [composeOpen, setComposeOpen] = useState(false)
+  /**
+   * Answering a message that is already on the deal.
+   *
+   * THE DEAL HAD NO REPLY AT ALL. The card listed the conversation and offered no way to take
+   * part in it, so answering a client meant leaving for the client page or for Outlook. The firm
+   * asked for the same actions everywhere: "the same functions for the emailing inside the leads,
+   * the deals, the clients as well."
+   */
+  const [replyTarget, setReplyTarget] = useState<ComposeOpening | null>(null)
+  /* Every address that is us — see the same note on the client page. */
+  const mine = useMemo(
+    () => [currentUser?.email].filter((a): a is string => !!a),
+    [currentUser?.email],
+  )
   const [showClientEmails, setShowClientEmails] = useState(false)
   const [taskOpen, setTaskOpen] = useState(false)
   const [proposalOpen, setProposalOpen] = useState(false)
@@ -257,12 +273,7 @@ export function DealDetail() {
                 <Building2 size={12} /> Whole client
               </button>
             )}
-            <button
-              onClick={() => setComposeOpen(true)}
-              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-            >
-              <Mail size={12} /> Compose
-            </button>
+            <WriteButton onClick={() => setComposeOpen(true)} />
             <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
           </div>
         }
@@ -272,7 +283,34 @@ export function DealDetail() {
           {showClientEmails ? 'No emails on this client yet.' : 'No emails on this deal yet.'}
         </p>
       ) : (
-        <EmailActivityList activities={applyRowLimitKeeping(visibleEmails, emailLimit, focusedEmailId)} focusId={focusedEmailId} />
+        <EmailActivityList
+          activities={applyRowLimitKeeping(visibleEmails, emailLimit, focusedEmailId)}
+          focusId={focusedEmailId}
+          mine={mine}
+          onAnswer={(a, mode) => {
+            /*
+             * The deal's own contact leads. `recipients` carries addresses and labels, not ids,
+             * so there is nothing to match an activity's contact_id against here -- and the deal
+             * has one contact by definition, which is who the conversation is with.
+             */
+            const theirAddress = contact?.email ?? recipients[0]?.email ?? null
+            if (!theirAddress && mode !== 'forward') return
+            setReplyTarget(openingFor(
+              {
+                rawSubject: a.subject,
+                fromName: null,
+                fromAddress: theirAddress,
+                to: a.emailToRecipients ?? [],
+                cc: a.emailCcRecipients ?? [],
+                body: a.notes ?? '',
+                occurredAt: a.activityDate,
+                messageId: a.emailMessageId ?? null,
+              },
+              mode,
+              mine,
+            ))
+          }}
+        />
       )}
     </Card>
   )
@@ -641,6 +679,21 @@ export function DealDetail() {
             // Carries the deal; addActivity fills the client in from it, so one record lands on
             // both the deal's thread and the client's — no second copy. The Message-ID is what
             // lets the recipient's reply find its way back to this deal specifically.
+            addActivity({ type: 'Email', subject, notes: bodyText, dealId: deal.id, contactId: contact?.id, emailMessageId })
+          }
+        />
+      )}
+      {replyTarget && (
+        <ComposeEmailModal
+          to={replyTarget.to}
+          recipients={recipients}
+          initialCc={replyTarget.cc}
+          initialSubject={replyTarget.subject}
+          initialBody={replyTarget.body}
+          inReplyTo={replyTarget.inReplyTo}
+          contextNote={`Filed against this deal${company ? ` and ${company.name}` : ''}${deal.leadId ? ", and the lead's history" : ''} — one record, visible on each.`}
+          onClose={() => setReplyTarget(null)}
+          onSent={(subject, bodyText, emailMessageId) =>
             addActivity({ type: 'Email', subject, notes: bodyText, dealId: deal.id, contactId: contact?.id, emailMessageId })
           }
         />

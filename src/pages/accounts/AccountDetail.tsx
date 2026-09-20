@@ -58,9 +58,13 @@ import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
 import { DiariseModal } from '../../components/diary/DiariseModal'
 import { fetchQueries, type AccountQuery } from '../../lib/accountQueries'
 import {
-  fetchAccountEmails, markRepliesRead, recordSentEmail, replySubject, type AccountEmail,
+  fetchAccountEmails, markRepliesRead, markRepliesUnread, recordSentEmail, replySubject,
+  type AccountEmail,
 } from '../../lib/accountEmails'
 import { EmailsPanel } from './EmailsPanel'
+/* The same four helpers the mailbox answers its own mail with. Written once, so a reply-all from
+   an account and a reply-all from the mailbox cannot disagree about who is on a thread. */
+import { forwardBody, forwardSubject, recipientLine, replyAllTo } from '../../lib/emailRules'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { CallButton } from './CallButton'
 import { feeCeiling, scheduleFor } from '../../lib/annexureB'
@@ -130,6 +134,34 @@ export function AccountDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [composeTo, setComposeTo] = useState<string | null>(null)
+  /**
+   * The Cc line the composer opens with, for a reply-all.
+   *
+   * Editable in the box, deliberately: a reply-all that quietly copied a debtor's attorney would
+   * be the firm's mistake and not the sender's, and the only moment to catch it is before Send.
+   */
+  const [composeCc, setComposeCc] = useState('')
+  /**
+   * The message being passed on, where this is a forward.
+   *
+   * Separate from replyTo because the two produce opposite openings: a reply is threaded and
+   * addressed and starts empty; a forward is neither threaded nor addressed and starts with the
+   * original quoted under it.
+   */
+  const [forwardOf, setForwardOf] = useState<AccountEmail | null>(null)
+
+  /**
+   * Clear whatever the last message left behind, before opening the composer again.
+   *
+   * Four buttons now open the same modal with four different shapes. Without one place that
+   * resets them, forwarding a message and then replying to a different one opens a reply that is
+   * still carrying the forward's quoted body — the sort of bug that sends the wrong email.
+   */
+  function startCompose() {
+    setReplyTo(null)
+    setForwardOf(null)
+    setComposeCc('')
+  }
 
   // The action bar drives the panels below it rather than opening modals of its own: "Add Note"
   // puts the cursor in the note box that is already on the page, so there is one way to write a
@@ -676,8 +708,29 @@ export function AccountDetail() {
           emails={emails}
           userId={currentUser?.id ?? null}
           canSend={!!mailbox}
-          onCompose={() => { setReplyTo(null); setComposeTo(emailContact?.value ?? '') }}
-          onReply={(e) => { setReplyTo(e); setComposeTo(e.debtorAddress) }}
+          onCompose={() => { startCompose(); setComposeTo(emailContact?.value ?? '') }}
+          onReply={(e) => { startCompose(); setReplyTo(e); setComposeTo(e.debtorAddress) }}
+          /*
+           * EVERYBODY WHO WAS ON IT, worked out by the same helper the mailbox uses. It drops our
+           * own addresses (or every reply-all copies us back into our own inbox and the thread
+           * doubles each round) and promotes the sender to To.
+           */
+          onReplyAll={(e) => {
+            const { to, cc } = replyAllTo({
+              from: { name: e.sentByName, address: e.debtorAddress },
+              to: e.toRecipients,
+              cc: e.ccRecipients,
+              mine: [e.ourAddress, mailbox, currentUser?.email].filter((a): a is string => !!a),
+            })
+            startCompose()
+            setReplyTo(e)
+            setComposeTo(to[0]?.address ?? e.debtorAddress)
+            setComposeCc(recipientLine(cc))
+          }}
+          /* NOT threaded and NOT addressed: a forward goes to somebody who was not in the
+             conversation, so In-Reply-To would put our message inside a thread they have never
+             seen, and a prefilled To would be the wrong person. */
+          onForward={(e) => { startCompose(); setForwardOf(e); setComposeTo('') }}
           /*
            * Marked read where it is actually read, with the row updated in place rather than by
            * reloading the account — a full reload here would collapse the message the moment
@@ -688,6 +741,15 @@ export function AccountDetail() {
               x.id === e.id ? { ...x, readAt: new Date().toISOString() } : x
             )))
             void markRepliesRead([e.id])
+          }}
+          /*
+           * Back onto the unread list, with the row updated in place for the same reason reading
+           * one is: reloading the account here would close the message somebody just decided to
+           * come back to.
+           */
+          onUnread={(e) => {
+            setEmails((list) => list.map((x) => (x.id === e.id ? { ...x, readAt: null } : x)))
+            void markRepliesUnread([e.id])
           }}
         />
       )}
@@ -846,9 +908,31 @@ export function AccountDetail() {
           recipients={(workspace?.contacts ?? [])
             .filter((c) => c.kind === 'email' && !c.retiredAt)
             .map((c) => ({ email: c.value, label: c.label ?? undefined }))}
-          initialSubject={replyTo
-            ? replySubject(replyTo.subject)
-            : `Account ${account.accountNumber ?? ''} - ${name}`.trim()}
+          initialSubject={forwardOf
+            ? forwardSubject(forwardOf.subject)
+            : replyTo
+              ? replySubject(replyTo.subject)
+              : `Account ${account.accountNumber ?? ''} - ${name}`.trim()}
+          /*
+           * A FORWARD IS THE ONE THAT CARRIES THE ORIGINAL. A reply does not, and that is a
+           * decision explained below. A forward has to: the person receiving it was not in the
+           * conversation, so without the original quoted under it they are reading an answer to
+           * a question they never saw.
+           */
+          initialBody={forwardOf
+            ? forwardBody(
+              {
+                fromName: forwardOf.direction === 'in' ? forwardOf.sentByName : (currentUser?.name ?? null),
+                fromAddress: forwardOf.direction === 'in'
+                  ? forwardOf.debtorAddress
+                  : (forwardOf.ourAddress ?? mailbox ?? ''),
+                subject: forwardOf.subject,
+                occurredAt: forwardOf.occurredAt,
+              },
+              forwardOf.body ?? '',
+            )
+            : undefined}
+          initialCc={composeCc}
           /*
            * No quoted history, on a reply or anything else. The box starts empty.
            *
@@ -859,12 +943,12 @@ export function AccountDetail() {
            */
           inReplyTo={replyTo?.messageId ?? null}
           contextNote={`Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). Their reply comes back to this account on its own and is charged R13 under item 6.`}
-          onClose={() => { setComposeTo(null); setReplyTo(null) }}
+          onClose={() => { setComposeTo(null); startCompose() }}
           onSent={(rawSubject, bodyText, messageId, from) => {
             const to = composeTo
             const answering = replyTo
             setComposeTo(null)
-            setReplyTo(null)
+            startCompose()
             /*
              * Charged, recorded and put on the timeline — see recordSentEmail.
              *

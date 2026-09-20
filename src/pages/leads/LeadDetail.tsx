@@ -17,6 +17,7 @@ import { StatusBadge, ServiceBadge, StageBadge, ClassificationBadge } from '../.
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
+import { WriteButton } from '../../components/email/MessageActions'
 import { AddDealModal, QuickLogModal, ScheduleFollowUpModal, ScheduleMeetingModal } from '../../components/QuickModals'
 import { RejectLeadModal } from '../../components/leads/RejectLeadModal'
 import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
@@ -37,7 +38,7 @@ import { RowLimitSelect, applyRowLimitKeeping, type RowLimit } from '../../compo
 import { useFocusedEmailId } from '../../lib/focusedEmail'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
-import { parseEmailActivity } from '../../lib/emailActivity'
+import { openingFor, type ComposeOpening } from '../../lib/emailActivity'
 import { buildDrilldownUrl } from '../../lib/drilldown'
 import { formatCurrency, formatDate, formatLeadNumber, industries, leadSources } from '../../data/mockData'
 import { leadClassifications } from '../../data/mockData'
@@ -54,6 +55,11 @@ export function LeadDetail() {
   const navigate = useNavigate()
   const { leads, deals, contacts, activities, tasks, users, userById, updateLead, convertLeadToClient, addLeadDeal, rejectLead, deleteLead, addActivity, addContact, updateContact, addTask } = useAppStore()
   const { currentUser } = useAuth()
+  /* Every address that is us — see the same note on the client page. */
+  const mine = useMemo(
+    () => [currentUser?.email].filter((a): a is string => !!a),
+    [currentUser?.email],
+  )
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const lead = leads.find((l) => l.id === id)
   const resultingDeals = useMemo(() => deals.filter((d) => d.leadId === id), [deals, id])
@@ -101,7 +107,8 @@ export function LeadDetail() {
   const [emailOpen, setEmailOpen] = useState(false)
   const [emailLimit, setEmailLimit] = useState<RowLimit>(5)
   const [noteLimit, setNoteLimit] = useState<RowLimit>(5)
-  const [replyTarget, setReplyTarget] = useState<{ subject: string } | null>(null)
+  /** One state for reply, reply-all and forward — see the same note on the client page. */
+  const [replyTarget, setReplyTarget] = useState<ComposeOpening | null>(null)
   const [addContactOpen, setAddContactOpen] = useState(false)
   const [editContact, setEditContact] = useState<Contact | null>(null)
   const [contactEmailTarget, setContactEmailTarget] = useState<Contact | null>(null)
@@ -265,14 +272,7 @@ export function LeadDetail() {
         subtitle={`${emailActivities.length} message${emailActivities.length === 1 ? '' : 's'}`}
         action={
           <div className="flex items-center gap-2">
-            {lead.email && (
-              <button
-                onClick={() => setEmailOpen(true)}
-                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-              >
-                <Mail size={12} /> Compose
-              </button>
-            )}
+            {lead.email && <WriteButton onClick={() => setEmailOpen(true)} />}
             <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
           </div>
         }
@@ -284,14 +284,21 @@ export function LeadDetail() {
           activities={applyRowLimitKeeping(emailActivities, emailLimit, focusedEmailId)}
           focusId={focusedEmailId}
           showDeal
-          onReply={
-            lead.email
-              ? (a) => {
-                  const rawSubject = parseEmailActivity(a.subject)?.subject ?? a.subject
-                  setReplyTarget({ subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}` })
-                }
-              : undefined
-          }
+          mine={mine}
+          onAnswer={(a, mode) => setReplyTarget(openingFor(
+            {
+              rawSubject: a.subject,
+              fromName: null,
+              fromAddress: lead.email ?? null,
+              to: a.emailToRecipients ?? [],
+              cc: a.emailCcRecipients ?? [],
+              body: a.notes ?? '',
+              occurredAt: a.activityDate,
+              messageId: a.emailMessageId ?? null,
+            },
+            mode,
+            mine,
+          ))}
         />
       )}
     </Card>
@@ -810,10 +817,19 @@ export function LeadDetail() {
           }
         />
       )}
-      {replyTarget && lead.email && (
+      {/*
+        A FORWARD NEEDS NO LEAD ADDRESS. Reply and reply-all do -- there is nobody to answer
+        without one -- but a forward goes to somebody typed into the box, and gating it on the
+        lead having an email would hide the button on exactly the lead somebody is trying to pass
+        on to a colleague.
+      */}
+      {replyTarget && (lead.email || replyTarget.mode === 'forward') && (
         <ComposeEmailModal
-          to={lead.email}
+          to={replyTarget.to || lead.email || ''}
+          initialCc={replyTarget.cc}
           initialSubject={replyTarget.subject}
+          initialBody={replyTarget.body}
+          inReplyTo={replyTarget.inReplyTo}
           onClose={() => setReplyTarget(null)}
           onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, leadId: lead.id, companyId: lead.companyId })}
         />

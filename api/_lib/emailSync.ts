@@ -447,6 +447,15 @@ async function fileAccountEmail(
     messageId: string
     inReplyTo: string | null
     attachmentNames: string[]
+    /**
+     * Everyone the message was addressed to, and copied to.
+     *
+     * Carried onto the account's own copy so that answering FROM THE ACCOUNT can reach the same
+     * people the original did. Without them a debtor's attorney on the thread arrived looking
+     * like a private message, and replying from the account went back to the debtor alone.
+     */
+    toRecipients: { name: string | null; address: string }[]
+    ccRecipients: { name: string | null; address: string }[]
     folder: string
     uid: number
     at: string
@@ -470,6 +479,8 @@ async function fileAccountEmail(
         message_id: message.messageId,
         in_reply_to: message.inReplyTo,
         attachment_names: message.attachmentNames,
+        to_recipients: message.toRecipients,
+        cc_recipients: message.ccRecipients,
         email_folder: message.folder,
         email_uid: message.uid,
         // The debtor wrote it, so there is no Raptor user to credit. The name off the From
@@ -1140,6 +1151,10 @@ async function syncMailbox(
           messageId: parsed.messageId ?? `${conn.user_id}:${path}:${uid}`,
           inReplyTo: parsed.inReplyTo ?? null,
           attachmentNames: realAttachmentNames(parsed.attachments),
+          /* The same two lists the mailbox row already gets — worked out once, above, so the
+             account's copy and the mailbox's copy cannot disagree about who was on a message. */
+          toRecipients,
+          ccRecipients,
           folder: path,
           uid: msg.uid,
           at: (parsed.date ?? new Date()).toISOString(),
@@ -1237,6 +1252,13 @@ async function syncMailbox(
             // carrying a signed mandate or an invoice can't land in the CRM looking like an
             // ordinary (or, for an attachment-only email, empty) message.
             attachment_names: realAttachmentNames(parsed.attachments),
+            /*
+             * Everyone else on the message, so a reply from the lead, deal or client reaches the
+             * same people the original did. A client who copies two of their own people arrived
+             * looking like a private message, and answering it dropped both of them.
+             */
+            email_to_recipients: toRecipients,
+            email_cc_recipients: ccRecipients,
             // Breadcrumb back to the message itself, for on-demand attachment fetching.
             email_folder: path,
             email_uid: msg.uid,

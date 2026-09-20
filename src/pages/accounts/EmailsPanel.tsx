@@ -1,6 +1,8 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Download, Loader2, Mail, MailOpen, Paperclip, Reply } from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, Loader2, Mail, MailOpen, Paperclip } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
+import { MessageActions, WriteButton } from '../../components/email/MessageActions'
+import { hasOthers } from '../../lib/emailActivity'
 import { formatMoney } from '../../data/mockData'
 import { relativeDayLabel } from '../../lib/dateLabels'
 import type { AccountEmail } from '../../lib/accountEmails'
@@ -20,7 +22,9 @@ import { useAuth } from '../../store/AuthContext'
  * the words of the reply to it are the record of what was said, and a list that only shows
  * subject lines makes a person open ten things to find the one that matters.
  */
-export function EmailsPanel({ emails, userId, canSend, onCompose, onReply, onRead }: {
+export function EmailsPanel({
+  emails, userId, canSend, onCompose, onReply, onReplyAll, onForward, onRead, onUnread,
+}: {
   emails: AccountEmail[]
   /** Who is looking. Only the agent a message arrived for can mark it read. */
   userId: string | null
@@ -28,8 +32,19 @@ export function EmailsPanel({ emails, userId, canSend, onCompose, onReply, onRea
   canSend: boolean
   onCompose: () => void
   onReply: (email: AccountEmail) => void
+  /**
+   * Answer everybody who was on it.
+   *
+   * Given a null Cc line by the caller where nobody else was on the message, which is how the
+   * bar knows not to offer the button — see othersOn.
+   */
+  onReplyAll: (email: AccountEmail) => void
+  /** Pass it on to somebody who was not on it — an attorney, the client, a colleague. */
+  onForward: (email: AccountEmail) => void
   /** Called when an unread message is actually opened, so the Messages count can drop. */
   onRead: (email: AccountEmail) => void
+  /** Put it back on the unread list. Only the agent it arrived for may — see the RLS policy. */
+  onUnread: (email: AccountEmail) => void
 }) {
   /*
    * Nothing opens on its own.
@@ -73,7 +88,7 @@ export function EmailsPanel({ emails, userId, canSend, onCompose, onReply, onRea
             Anything sent from here is charged R25 under item 1(a). Their reply comes back to this
             list on its own and is charged R13 under item 6.
           </p>
-          <SendButton canSend={canSend} onClick={onCompose} className="mt-4" />
+          <WriteButton canSend={canSend} onClick={onCompose} className="mt-4" />
         </div>
       </Card>
     )
@@ -92,7 +107,7 @@ export function EmailsPanel({ emails, userId, canSend, onCompose, onReply, onRea
         </div>
         <div className="flex items-center gap-2">
           <EmailViewSwitcher view={view} onChange={setView} />
-          <SendButton canSend={canSend} onClick={onCompose} />
+          <WriteButton canSend={canSend} onClick={onCompose} />
         </div>
       </div>
 
@@ -127,7 +142,9 @@ export function EmailsPanel({ emails, userId, canSend, onCompose, onReply, onRea
                   )}
                 </p>
               </div>
-              <EmailBody email={e} canSend={canSend} onReply={() => onReply(e)} />
+              <EmailBody email={e} canSend={canSend} userId={userId}
+                onReply={() => onReply(e)} onReplyAll={() => onReplyAll(e)}
+                onForward={() => onForward(e)} onUnread={() => onUnread(e)} />
             </div>
           )}
         />
@@ -136,7 +153,9 @@ export function EmailsPanel({ emails, userId, canSend, onCompose, onReply, onRea
           {emails.map((e) => (
             <EmailRow key={e.id} email={e} expanded={open === e.id}
               onToggle={() => toggle(e)}
-              canSend={canSend} onReply={() => onReply(e)} />
+              canSend={canSend} userId={userId}
+              onReply={() => onReply(e)} onReplyAll={() => onReplyAll(e)}
+              onForward={() => onForward(e)} onUnread={() => onUnread(e)} />
           ))}
         </ul>
       )}
@@ -189,11 +208,42 @@ function EmailSummary({ email, tight }: { email: AccountEmail; tight?: boolean }
   )
 }
 
+/**
+ * Whether anybody besides us and the debtor was on this message.
+ *
+ * The firm's own condition for the button: "reply all, if there are other people that are CC'd."
+ * Our own mailbox is not somebody else — every message we received was addressed to us — and
+ * neither is the debtor, who is already the To of an ordinary reply.
+ *
+ * Empty on everything filed before the columns existed, which correctly reads as "nobody else
+ * known" and hides the button rather than offering one that would silently reply to one person.
+ */
+export function othersOn(email: AccountEmail): boolean {
+  /*
+   * THROUGH THE SHARED RULE, not beside it. This was written out again here for one commit and
+   * that is exactly the shape that drifts: the CRM's copy folded case and this one did not, so
+   * the same thread offered Reply all on a lead and hid it on the account. What differs between
+   * the two is only who counts as "not somebody else", which is the argument and not the rule.
+   */
+  return hasOthers(
+    email.toRecipients,
+    email.ccRecipients,
+    /* Our own mailbox is not somebody else — every message we received was addressed to us — and
+       neither is the debtor, who is already the To of an ordinary reply. */
+    [email.ourAddress, email.debtorAddress].filter((a): a is string => !!a),
+  )
+}
+
 /** The message itself, shared by the expanded row and the reading pane. */
-function EmailBody({ email, canSend, onReply }: {
+function EmailBody({ email, canSend, userId, onReply, onReplyAll, onForward, onUnread }: {
   email: AccountEmail
   canSend: boolean
+  /** Who is looking, because only the agent a message arrived for may unread it. */
+  userId: string | null
   onReply: () => void
+  onReplyAll: () => void
+  onForward: () => void
+  onUnread: () => void
 }) {
   const { session } = useAuth()
   const [busy, setBusy] = useState<string | null>(null)
@@ -215,8 +265,32 @@ function EmailBody({ email, canSend, onReply }: {
     }
   }
 
+  const inbound = email.direction === 'in'
+
   return (
     <>
+      {/*
+        THE ACTIONS COME FIRST. They used to sit under the body, and the firm hit the obvious
+        problem on a long message: "if you want to reply, you have to go all the way down."
+      */}
+      <MessageActions
+        canSend={canSend}
+        /* Item 1(a) on everything that leaves, so the button says what it costs before it is
+           pressed rather than after. Fees are charged on ACCOUNTS ONLY -- this is an account. */
+        replyNote="R25"
+        onReply={inbound ? onReply : null}
+        onReplyAll={inbound && othersOn(email) ? onReplyAll : null}
+        /* Offered on our own sent mail too. Passing on what WE said to a client or an attorney
+           is as ordinary as passing on what the debtor said. */
+        onForward={onForward}
+        /*
+          Only the agent it actually arrived for, which is all the RLS policy permits. Offering
+          it to anybody else would be a button that silently does nothing.
+        */
+        onMarkUnread={inbound && email.readAt && email.receivedBy && email.receivedBy === userId
+          ? onUnread
+          : null}
+      />
       {/* `whitespace-pre-wrap` because an email's own line breaks are part of what it said —
           collapsing them turns a numbered arrangement into a paragraph. */}
       <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
@@ -245,23 +319,22 @@ function EmailBody({ email, canSend, onReply }: {
         </div>
       )}
       {error && <p className="text-xs text-negative-700 mt-1.5">{error}</p>}
-      {email.direction === 'in' && (
-        <button onClick={onReply} disabled={!canSend}
-          title={canSend ? undefined : 'Connect your mailbox in Settings → Integrations first'}
-          className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-transparent">
-          <Reply size={13} /> Reply · R25
-        </button>
-      )}
     </>
   )
 }
 
-function EmailRow({ email, expanded, onToggle, canSend, onReply }: {
+function EmailRow({
+  email, expanded, onToggle, canSend, userId, onReply, onReplyAll, onForward, onUnread,
+}: {
   email: AccountEmail
   expanded: boolean
   onToggle: () => void
   canSend: boolean
+  userId: string | null
   onReply: () => void
+  onReplyAll: () => void
+  onForward: () => void
+  onUnread: () => void
 }) {
   const unread = email.direction === 'in' && !email.readAt
   return (
@@ -276,22 +349,12 @@ function EmailRow({ email, expanded, onToggle, canSend, onReply }: {
 
       {expanded && (
         <div className="px-5 pb-4 pl-[3.75rem]">
-          <EmailBody email={email} canSend={canSend} onReply={onReply} />
+          <EmailBody email={email} canSend={canSend} userId={userId}
+            onReply={onReply} onReplyAll={onReplyAll}
+            onForward={onForward} onUnread={onUnread} />
         </div>
       )}
     </li>
-  )
-}
-
-function SendButton({ canSend, onClick, className = '' }: {
-  canSend: boolean; onClick: () => void; className?: string
-}) {
-  return (
-    <button onClick={onClick} disabled={!canSend}
-      title={canSend ? undefined : 'Connect your mailbox in Settings → Integrations first'}
-      className={`inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 disabled:opacity-40 ${className}`}>
-      <Mail size={14} /> Write to them
-    </button>
   )
 }
 

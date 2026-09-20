@@ -394,6 +394,16 @@ export interface Activity {
   attachmentNames?: string[]
   /** The message's own Message-ID, used to thread replies back to the record that sent it. */
   emailMessageId?: string
+  /**
+   * Everyone else on a synced email: the To line and the Cc line, as the message carried them.
+   *
+   * What makes a reply-all from a lead, deal or client possible. Without them a client who copies
+   * two of their own people arrived looking like a private message, and answering it dropped both.
+   * Empty on anything synced before the columns existed, and on everything that is not an email —
+   * which reads as "nobody else known" and simply hides the button.
+   */
+  emailToRecipients?: { name: string | null; address: string }[]
+  emailCcRecipients?: { name: string | null; address: string }[]
 }
 
 export type ProposalStatus = 'Draft' | 'Sent' | 'Viewed' | 'Accepted' | 'Declined' | 'Expired'

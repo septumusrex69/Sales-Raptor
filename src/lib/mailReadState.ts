@@ -71,3 +71,22 @@ export async function mirrorReadToMailbox(messageIds: (string | null | undefined
     .is('read_at', null)
   if (error) console.error('[mailReadState] the mailbox copy stayed unread:', error.message)
 }
+
+/**
+ * Put it back to unread on the account → the copy in your mailbox goes back with it.
+ *
+ * THE FOURTH DIRECTION, and it was missing. Three of the four existed because the account could
+ * only ever be read, never unread — there was no button for it. Now there is one on every screen
+ * that shows a message, and without this the account row would go bold while the mailbox row
+ * stayed read, which is the same split this file exists to close.
+ */
+export async function mirrorUnreadToMailbox(messageIds: (string | null | undefined)[]): Promise<void> {
+  const ids = usable(messageIds)
+  if (ids.length === 0) return
+  const { error } = await supabase
+    .from('user_emails')
+    .update({ read_at: null })
+    .in('message_id', ids)
+    .not('read_at', 'is', null)
+  if (error) console.error('[mailReadState] the mailbox copy stayed read:', error.message)
+}

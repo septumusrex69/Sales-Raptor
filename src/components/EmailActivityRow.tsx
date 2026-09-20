@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowDownLeft, ArrowUpRight, Paperclip, Mail, Handshake } from 'lucide-react'
-import { emailDayLabel, emailTimeLabel, parseEmailActivity } from '../lib/emailActivity'
+import { ArrowDownLeft, ArrowUpRight, Paperclip, Handshake } from 'lucide-react'
+import {
+  emailDayLabel, emailTimeLabel, hasOthers, parseEmailActivity, type AnswerMode,
+} from '../lib/emailActivity'
+import { MessageActions } from './email/MessageActions'
 import { useEmailView } from '../lib/emailView'
 import { EmailViewSwitcher } from './email/EmailViewSwitcher'
 import { ReadingPane } from './email/ReadingPane'
@@ -106,13 +109,26 @@ function EmailPaneRow({ activity }: { activity: Activity }) {
  */
 export function EmailActivityRow({
   activity,
-  onReply,
+  onAnswer,
+  mine,
   showDeal,
   open: openProp,
   onToggleOpen,
 }: {
   activity: Activity
-  onReply?: () => void
+  /**
+   * Reply, reply all or forward — one callback rather than three.
+   *
+   * The page decides what the composer opens with (see openingFor); this decides which of the
+   * three is offered at all, which is a question about the message and belongs here.
+   */
+  onAnswer?: (mode: AnswerMode) => void
+  /**
+   * Every address that is us, so a reply-all is not offered when the only other name on the
+   * message is our own. Without it, mail addressed to two of the firm's own people would show a
+   * Reply all that copies the sender back to themselves.
+   */
+  mine?: string[]
   /**
    * Name the deal a message came from. On for the client and lead timelines, where an email
    * arrives from somewhere and the reader has no way to tell which piece of business it was
@@ -148,6 +164,18 @@ export function EmailActivityRow({
   const attachments = activity.attachmentNames ?? []
   const isIncoming = parsed?.direction === 'received'
   const isUnread = isIncoming && activity.isRead === false
+  /*
+   * Whether a reply-all would reach anybody a plain reply would not.
+   *
+   * Empty on everything synced before the columns existed, and on everything that is not a synced
+   * email, which correctly reads as "nobody else known" and hides the button. A Reply all that
+   * quietly did the same thing as Reply is a second button people learn to ignore.
+   */
+  const othersWereOn = hasOthers(
+    activity.emailToRecipients ?? [],
+    activity.emailCcRecipients ?? [],
+    mine ?? [],
+  )
   const actorName = userById(activity.userId)?.name
 
   function toggle() {
@@ -218,6 +246,23 @@ export function EmailActivityRow({
 
       {open && (
         <div className="pl-[46px] pr-3 pb-3.5">
+          {/*
+            THE ACTIONS COME FIRST, and they used to come last. The firm, on the same card on an
+            account: "to put these things at the top, currently it's still at the bottom, so if
+            you want to reply, you have to go all the way down."
+          */}
+          {onAnswer && (
+            <MessageActions
+              /* No fee note. Annexure B is for debtor ACCOUNTS; a lead, a deal and a client
+                 raise nothing, and a button claiming R25 here would be plainly wrong. */
+              onReply={isIncoming ? () => onAnswer('reply') : null}
+              onReplyAll={isIncoming && othersWereOn ? () => onAnswer('replyAll') : null}
+              onForward={() => onAnswer('forward')}
+              onMarkUnread={isIncoming && !isUnread
+                ? () => { updateActivity(activity.id, { isRead: false }); setOpen(false) }
+                : null}
+            />
+          )}
           <p className="text-[11px] text-slate-400 mb-2">
             <span style={{ color: EMAIL_KINDS[kind].color }} className="font-medium">
               {EMAIL_KINDS[kind].label}
@@ -253,26 +298,6 @@ export function EmailActivityRow({
                 {downloading === name && <span className="text-slate-400">…</span>}
               </button>
             ))}
-            {onReply && (
-              <button
-                onClick={onReply}
-                className="text-xs font-medium text-brand-600 border border-slate-200 rounded-md px-3 py-1.5 bg-white hover:bg-slate-50"
-              >
-                Reply
-              </button>
-            )}
-            {isIncoming && !isUnread && (
-              <button
-                onClick={() => {
-                  updateActivity(activity.id, { isRead: false })
-                  setOpen(false)
-                }}
-                title="Put this back on the unread list to follow up later"
-                className="inline-flex items-center gap-1.5 text-xs text-slate-500 border border-slate-200 rounded-md px-3 py-1.5 bg-white hover:bg-slate-50"
-              >
-                <Mail size={12} /> Mark unread
-              </button>
-            )}
           </div>
           {downloadError && <p className="text-xs text-red-600 mt-2">{downloadError}</p>}
         </div>
@@ -288,12 +313,16 @@ export function EmailActivityRow({
  */
 export function EmailActivityList({
   activities,
-  onReply,
+  onAnswer,
+  mine,
   showDeal,
   focusId,
 }: {
   activities: Activity[]
-  onReply?: (activity: Activity) => void
+  /** Reply, reply all or forward. The page turns the mode into what the composer opens with. */
+  onAnswer?: (activity: Activity, mode: AnswerMode) => void
+  /** Every address that is us — see the same prop on the row. */
+  mine?: string[]
   showDeal?: boolean
   /**
    * A specific message to open and scroll to, named in the URL by whatever linked here.
@@ -331,7 +360,7 @@ export function EmailActivityList({
         </EmailLegend>
         {/*
           The pane shows the REAL row on the right, forced open, so the body, the attachment
-          downloads and Reply all behave exactly as they do in the list. Only the left-hand
+          downloads and the action bar behave exactly as they do in the list. Only the left-hand
           summary is written separately, and only because a row cannot be a button inside a
           button.
         */}
@@ -348,8 +377,8 @@ export function EmailActivityList({
           renderRow={(a) => <EmailPaneRow activity={a} />}
           renderDetail={(a) => (
             <div className="px-1">
-              <EmailActivityRow activity={a} open showDeal={showDeal}
-                onReply={onReply ? () => onReply(a) : undefined} />
+              <EmailActivityRow activity={a} open showDeal={showDeal} mine={mine}
+                onAnswer={onAnswer ? (mode) => onAnswer(a, mode) : undefined} />
             </div>
           )}
         />
@@ -375,7 +404,8 @@ export function EmailActivityList({
               )}
               <EmailActivityRow
                 activity={a}
-                onReply={onReply ? () => onReply(a) : undefined}
+                onAnswer={onAnswer ? (mode) => onAnswer(a, mode) : undefined}
+                mine={mine}
                 showDeal={showDeal}
                 open={openId === a.id}
                 onToggleOpen={(next) => setOpenId(next ? a.id : null)}

@@ -4862,3 +4862,33 @@ as $$
 $$;
 
 grant execute on function public.mail_recipient_history(integer) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- WHO ELSE WAS ON THE MESSAGE, on a record's copy of it.
+-- ---------------------------------------------------------------------------
+-- user_emails has carried these since reply-all was built for the mailbox. The record's copies --
+-- a debtor account's correspondence, and a lead/deal/client's email activity -- did not, so
+-- answering from the account it belongs to could only ever reply to one person. A client who
+-- copies two of their own people, or a debtor whose attorney is on the thread, arrived looking
+-- like a private message.
+--
+-- Whole lists with names, as the message carried them: a reply-all has to reach exactly the
+-- people the original did, and a name is what lets somebody check that before they send.
+alter table public.account_emails add column if not exists to_recipients jsonb not null default '[]'::jsonb;
+alter table public.account_emails add column if not exists cc_recipients jsonb not null default '[]'::jsonb;
+
+comment on column public.account_emails.to_recipients is
+  'Everyone on To, as [{name, address}] in the order the message carried them. Empty on rows '
+  'filed before this column existed, which reads as "nobody else known" and hides reply-all.';
+comment on column public.account_emails.cc_recipients is
+  'Everyone on Cc. Bcc is deliberately absent: it is not in the message we received, and a list '
+  'that looked complete while missing people would be worse than no list.';
+
+alter table public.activities add column if not exists email_to_recipients jsonb not null default '[]'::jsonb;
+alter table public.activities add column if not exists email_cc_recipients jsonb not null default '[]'::jsonb;
+
+comment on column public.activities.email_to_recipients is
+  'Everyone on To of a synced Email activity, as [{name, address}]. Prefixed email_ because '
+  'activities covers calls, notes and meetings too, and only an Email row ever fills these.';
+comment on column public.activities.email_cc_recipients is
+  'Everyone on Cc of a synced Email activity. Bcc is absent for the same reason as above.';

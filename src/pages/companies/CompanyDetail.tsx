@@ -25,10 +25,11 @@ import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { AddDealModal, QuickLogModal, ScheduleFollowUpModal, ScheduleMeetingModal } from '../../components/QuickModals'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
+import { WriteButton } from '../../components/email/MessageActions'
 import { EditContactModal } from '../../components/contacts/EditContactModal'
 import { AddContactModal } from '../../components/contacts/AddContactModal'
 import { formatCurrency, formatDate, leadClassifications } from '../../data/mockData'
-import { parseEmailActivity } from '../../lib/emailActivity'
+import { openingFor, type ComposeOpening } from '../../lib/emailActivity'
 import { buildDrilldownUrl } from '../../lib/drilldown'
 import { RowLimitSelect, applyRowLimitKeeping, type RowLimit } from '../../components/ui/RowLimitSelect'
 import { useFocusedEmailId } from '../../lib/focusedEmail'
@@ -53,6 +54,15 @@ export function CompanyDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { currentUser } = useAuth()
+  /*
+   * Every address that is US, so a reply-all never copies the sender back into their own thread.
+   * A list rather than one address: mail reaches an agent at their own address and at whatever
+   * the firm forwards to them.
+   */
+  const mine = useMemo(
+    () => [currentUser?.email].filter((a): a is string => !!a),
+    [currentUser?.email],
+  )
   const {
     companies,
     contacts,
@@ -94,7 +104,15 @@ export function CompanyDetail() {
   const [editContact, setEditContact] = useState<Contact | null>(null)
   const [editCompanyOpen, setEditCompanyOpen] = useState(false)
   const [addContactOpen, setAddContactOpen] = useState(false)
-  const [replyTarget, setReplyTarget] = useState<{ to: string; subject: string; contactId?: string } | null>(null)
+  /**
+   * The composer's opening, for whichever of the three answers was pressed.
+   *
+   * One state for reply, reply-all and forward rather than three: they open the same modal with
+   * different fields, and three states is how a forward ends up carrying a reply's Cc line.
+   */
+  const [replyTarget, setReplyTarget] = useState<
+    (ComposeOpening & { contactId?: string }) | null
+  >(null)
   const [emailLimit, setEmailLimit] = useState<RowLimit>(5)
   const [noteLimit, setNoteLimit] = useState<RowLimit>(5)
   const [composeOpen, setComposeOpen] = useState(false)
@@ -325,12 +343,7 @@ export function CompanyDetail() {
         subtitle={`${emailActivities.length} message${emailActivities.length === 1 ? '' : 's'}`}
         action={
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setComposeOpen(true)}
-              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-            >
-              <Mail size={12} /> Compose
-            </button>
+            <WriteButton onClick={() => setComposeOpen(true)} />
             <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
           </div>
         }
@@ -342,13 +355,28 @@ export function CompanyDetail() {
           activities={applyRowLimitKeeping(emailActivities, emailLimit, focusedEmailId)}
             focusId={focusedEmailId}
           showDeal
-          onReply={(a) => {
-            const replyToAddress = a.contactId ? contacts.find((c) => c.id === a.contactId)?.email : company.email
-            if (!replyToAddress) return
-            const rawSubject = parseEmailActivity(a.subject)?.subject ?? a.subject
+          mine={mine}
+          onAnswer={(a, mode) => {
+            const theirAddress = a.contactId
+              ? contacts.find((c) => c.id === a.contactId)?.email
+              : company.email
+            /* A forward needs no address — it is going to somebody who was not on the thread. */
+            if (!theirAddress && mode !== 'forward') return
             setReplyTarget({
-              to: replyToAddress,
-              subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}`,
+              ...openingFor(
+                {
+                  rawSubject: a.subject,
+                  fromName: null,
+                  fromAddress: theirAddress ?? null,
+                  to: a.emailToRecipients ?? [],
+                  cc: a.emailCcRecipients ?? [],
+                  body: a.notes ?? '',
+                  occurredAt: a.activityDate,
+                  messageId: a.emailMessageId ?? null,
+                },
+                mode,
+                mine,
+              ),
               contactId: a.contactId,
             })
           }}
@@ -772,7 +800,10 @@ export function CompanyDetail() {
       {replyTarget && (
         <ComposeEmailModal
           to={replyTarget.to}
+          initialCc={replyTarget.cc}
           initialSubject={replyTarget.subject}
+          initialBody={replyTarget.body}
+          inReplyTo={replyTarget.inReplyTo}
           onClose={() => setReplyTarget(null)}
           onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, contactId: replyTarget.contactId, companyId: company.id })}
         />
@@ -949,7 +980,7 @@ function ChooseRecipientModal({
   ]
 
   return (
-    <Modal title="Compose Email" onClose={onClose} width={400}>
+    <Modal title="Write to them" onClose={onClose} width={400}>
       {recipients.length === 0 ? (
         <p className="text-sm text-slate-400">No one here has an email address on file yet.</p>
       ) : (
