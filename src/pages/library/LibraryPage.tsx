@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, BookOpen, Loader2, Pencil, Plus } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
+import { Modal } from '../../components/ui/Modal'
 import { useAuth } from '../../store/AuthContext'
 import { canEditLibrary } from '../../lib/permissions'
 import {
-  createTemplate, fetchLibrary, saveTemplate, type LibraryTemplate, type TemplateDraft,
+  createTemplate, deleteTemplate, fetchLibrary, saveTemplate, templateUsage,
+  type LibraryTemplate, type TemplateDraft,
 } from '../../lib/templateLibrary'
 import { TemplateEditor } from './TemplateEditor'
 import {
-  KINDS_FOR_SCOPE, TEMPLATE_KINDS, TEMPLATE_SCOPES, fieldsUsed, forecastSms, renderTemplate,
-  sampleValues, unknownFields, type TemplateKind, type TemplateScope,
+  KINDS_FOR_SCOPE, TEMPLATE_KINDS, TEMPLATE_SCOPES, deleteRefusal, deleteWarning, fieldsUsed,
+  forecastSms, renderTemplate, sampleValues, unknownFields,
+  type TemplateKind, type TemplateScope,
 } from '../../lib/messageTemplates'
 import { DESK_POSITIONS } from '../../lib/clientPosition'
 
@@ -50,6 +53,18 @@ export function LibraryPage() {
   const [editing, setEditing] = useState<{ id: string | null; draft: TemplateDraft } | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  /**
+   * The delete somebody has asked for and not yet confirmed.
+   *
+   * ASKED OF THE DATABASE BEFORE IT IS OFFERED, because the damage is silent: the workflow step's
+   * template_id is `on delete set null`, so a delete that breaks a running workflow succeeds
+   * quietly. `refusal` is why it may not happen at all; `warning` is what somebody should know
+   * before it does.
+   */
+  const [confirming, setConfirming] = useState<
+    { template: LibraryTemplate; refusal: string | null; warning: string | null } | null
+  >(null)
+  const [checking, setChecking] = useState(false)
 
   const load = useCallback(async (next: TemplateScope) => {
     setRows(null)
@@ -80,6 +95,41 @@ export function LibraryPage() {
       await load(scope)
       /* Land on what was just written, which for a new one is the only way to find it. */
       setOpenId(id)
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  /** Look up where it is used, then ask. Never the other way round. */
+  async function askToDelete(template: LibraryTemplate) {
+    setChecking(true)
+    setSaveError(null)
+    try {
+      const usage = await templateUsage(template.id)
+      setConfirming({
+        template,
+        refusal: deleteRefusal(usage),
+        warning: deleteWarning(usage, template.seedKey),
+      })
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  async function reallyDelete() {
+    if (!confirming || confirming.refusal) return
+    setSaving(true)
+    setSaveError(null)
+    try {
+      await deleteTemplate(confirming.template.id)
+      setConfirming(null)
+      setEditing(null)
+      setOpenId(null)
+      await load(scope)
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -144,6 +194,65 @@ export function LibraryPage() {
         </div>
       </Card>
 
+      {/*
+        THE CONFIRM, WHICH IS ALSO WHERE A REFUSAL LANDS.
+        
+        One box for both answers rather than a refusal somewhere else, because the question the
+        person asked is the same either way — "can I throw this away?" — and an answer that
+        appears in a different place from the question reads as something having gone wrong.
+      */}
+      {confirming && (
+        <Modal title="Delete this template?" width={520}
+          onClose={() => setConfirming(null)}>
+          <p className="text-sm text-slate-700">
+            <span className="font-medium">{confirming.template.name}</span>
+            {' '}&mdash; {TEMPLATE_KINDS[confirming.template.kind].label.toLowerCase()} on the
+            {' '}{TEMPLATE_SCOPES[confirming.template.scope].label.toLowerCase()} side.
+          </p>
+
+          {confirming.refusal ? (
+            <p className="mt-3 text-sm text-negative-700 border-l-2 border-negative-300 pl-3">
+              {confirming.refusal}
+            </p>
+          ) : (
+            <>
+              {confirming.warning && (
+                <p className="mt-3 text-sm text-slate-600 border-l-2 border-gold-400 pl-3">
+                  {confirming.warning}
+                </p>
+              )}
+              {/*
+                THE ALTERNATIVE, OFFERED EVERY TIME AND NOT ONLY WHEN DELETE IS REFUSED. Retiring
+                takes it out of circulation exactly as deleting does -- the resolver only reads
+                active templates -- and keeps the words for the day somebody asks what was sent.
+              */}
+              <p className="mt-3 text-xs text-slate-400">
+                Retiring it instead takes it out of use just as completely, and keeps the wording
+                for the day somebody asks what the firm used to send.
+              </p>
+            </>
+          )}
+
+          {saveError && <p className="mt-3 text-sm text-negative-700">{saveError}</p>}
+
+          <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+            <button type="button" onClick={() => setConfirming(null)} disabled={saving}
+              className="text-sm font-medium px-3 py-2 rounded-lg border border-slate-200
+                text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+              {confirming.refusal ? 'Close' : 'Keep it'}
+            </button>
+            {!confirming.refusal && (
+              <button type="button" onClick={() => void reallyDelete()} disabled={saving}
+                className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2
+                  rounded-lg border border-negative-600 bg-negative-600 text-white
+                  hover:bg-negative-700 disabled:opacity-40">
+                {saving && <Loader2 size={14} className="animate-spin" />} Delete permanently
+              </button>
+            )}
+          </div>
+        </Modal>
+      )}
+
       {error && <Card><p className="text-sm text-negative-700">{error}</p></Card>}
 
       {rows === null && !error && (
@@ -184,7 +293,10 @@ export function LibraryPage() {
                 <TemplateEditor scope={scope} draft={editing.draft}
                   onChange={(draft) => setEditing({ ...editing, draft })}
                   onSave={() => void save()} onCancel={() => { setEditing(null); setSaveError(null) }}
-                  saving={saving} error={saveError} />
+                  saving={saving || checking} error={saveError}
+                  onDelete={editing.id && open
+                    ? () => void askToDelete(open)
+                    : null} />
               </div>
             ) : open ? (
               <>

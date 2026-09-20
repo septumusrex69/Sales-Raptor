@@ -58,12 +58,37 @@ const handlersFor = (profile) => [
     (u, req) => {
       /* A write comes back as the row PostgREST would have returned, and is recorded so the
          check can assert on what actually left the browser rather than on what the form shows. */
+      if (req.method() === 'DELETE') {
+        written.push({ method: 'DELETE', url: u, body: '' })
+        return { body: [] }
+      }
       if (req.method() === 'PATCH' || req.method() === 'POST') {
         written.push({ method: req.method(), url: u, body: req.postData() ?? '' })
         return { body: [{ ...LIBRARY[0], id: 'cccccccc-0000-4000-8000-00000000000f' }] }
       }
       const scope = /scope=eq\.(\w+)/.exec(u)?.[1]
       return { body: scope ? LIBRARY.filter((r) => r.scope === scope) : LIBRARY }
+    },
+  ],
+  /*
+   * WHERE A TEMPLATE IS USED, which is what decides whether it may be deleted.
+   *
+   * The handover email is wired into a step of a PUBLISHED workflow and must be refused; every
+   * other template is used by nobody and may go. One fixture answering both cases is what stops
+   * the check passing whichever answer the page happens to give.
+   */
+  [
+    (u) => u.includes('/rest/v1/workflow_nodes'),
+    (u) => {
+      const id = /template_id=eq\.([0-9a-f-]+)/.exec(u)?.[1]
+      return {
+        body: id === LIBRARY[1].id
+          ? [{
+            id: 'node-1',
+            workflow_versions: { state: 'active', workflows: { name: 'Standard Collections' } },
+          }]
+          : [],
+      }
     },
   ],
 ]
@@ -278,6 +303,69 @@ try {
   await page.waitForTimeout(600)
   t.check(`...and comes back to its full width`,
     Math.round((await rail.boundingBox())?.width ?? 0), Math.round(wide))
+
+  /* ---------- deleting one ---------- */
+
+  /*
+   * REFUSED WHERE A PUBLISHED WORKFLOW SENDS IT. workflow_nodes.template_id is `on delete set
+   * null`, so the delete would succeed and the step would survive saying "send an email" with
+   * nothing to send. Nobody would find out until the day it ran.
+   */
+  await page.getByText('Handover notice').first().click()
+  await page.waitForTimeout(400)
+  await page.getByRole('button', { name: 'Edit' }).click()
+  await page.waitForTimeout(400)
+  await page.getByRole('button', { name: 'Delete' }).click()
+  await page.waitForTimeout(900)
+  t.ok('deleting asks first', await page.getByText('Delete this template?').first().isVisible())
+  t.ok('...and refuses one a published workflow sends',
+    await page.getByText(/published or archived workflow step/).first().isVisible())
+  t.ok('...naming the workflow to go and look at',
+    await page.getByText(/Standard Collections/).first().isVisible())
+  t.ok('...and offering to retire it instead',
+    await page.getByText(/Retire it instead/).first().isVisible())
+  /*
+   * A confirm that refuses and still offers the button is not a refusal.
+   *
+   * WHAT THIS DOES AND DOES NOT COVER. reallyDelete carries its own guard as well, and that one
+   * is unreachable from here by design — with the button absent there is nothing to click. Both
+   * were broken together and this line fires, so the pair holds; the second is defence in depth
+   * against a future caller, not something a browser can exercise on its own.
+   */
+  t.check('...with no way to go ahead anyway',
+    await page.getByRole('button', { name: 'Delete permanently' }).count(), 0)
+  const refusedAt = written.filter((w) => w.method === 'DELETE').length
+  await page.getByRole('button', { name: 'Close' }).click()
+  await page.waitForTimeout(400)
+  t.check('...and nothing was deleted',
+    written.filter((w) => w.method === 'DELETE').length, refusedAt)
+  await t.shot(page, '63-library-delete-refused')
+
+  /* ---------- and allowed where nothing depends on it ---------- */
+
+  await page.getByText('First contact').first().click()
+  await page.waitForTimeout(400)
+  await page.getByRole('button', { name: 'Edit' }).click()
+  await page.waitForTimeout(400)
+  await page.getByRole('button', { name: 'Delete' }).click()
+  await page.waitForTimeout(900)
+  t.check('a template nothing uses is not refused',
+    await page.getByText(/published or archived workflow step/).count(), 0)
+  /* Offered every time, not only when delete is refused: retiring takes it out of use just as
+     completely and keeps the words. */
+  t.ok('...but retiring is still offered as the safer answer',
+    await page.getByText(/keeps the wording for the day somebody asks/).first().isVisible())
+  t.ok('...and a seeded one says it would come back on a replay',
+    await page.getByText(/sms-first-contact/).first().isVisible())
+
+  const beforeDelete = written.filter((w) => w.method === 'DELETE').length
+  await page.getByRole('button', { name: 'Delete permanently' }).click()
+  await page.waitForTimeout(1000)
+  const deletes = written.filter((w) => w.method === 'DELETE')
+  t.ok(`the delete reached the database (${deletes.length - beforeDelete} sent)`,
+    deletes.length > beforeDelete)
+  t.ok(`...naming the one that was asked for (${(deletes[deletes.length - 1]?.url ?? '').slice(-50)})`,
+    (deletes[deletes.length - 1]?.url ?? '').includes(LIBRARY[0].id))
 
   const real = errors.filter((e) => !/favicon|404 \(Not Found\)/i.test(e))
   t.check('no console errors', real.length, 0)

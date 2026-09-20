@@ -551,3 +551,74 @@ export function resolveNote(resolved: Resolved, position: DeskPosition | null): 
       return null
   }
 }
+
+/* ---------------------------------------------------------------- throwing one away */
+
+/**
+ * Where a template is already being used, as far as deleting it is concerned.
+ *
+ * Counted rather than listed, plus the names, because the question a person is answering is "is
+ * this safe to throw away" and a list of twelve step ids does not help them answer it.
+ */
+export interface TemplateUsage {
+  /** Workflow steps that send this template. */
+  steps: number
+  /**
+   * How many of those sit in a version that is FROZEN — active or archived.
+   *
+   * Active is the one running against live accounts. Archived matters just as much and is easier
+   * to overlook: accounts ran on it, and what they were sent is the firm's record of what it
+   * said. Deleting the wording out from under either is rewriting history.
+   */
+  frozenSteps: number
+  /** The workflows those steps belong to, named so somebody can go and look. */
+  workflows: string[]
+}
+
+/**
+ * Why this template may NOT be deleted, or null where it may.
+ *
+ * THE DANGER IS SILENT, which is the whole reason this exists. workflow_nodes.template_id is
+ * `on delete set null`, so deleting a template does not fail and does not warn: the step survives
+ * saying "send an email" with nothing to send, and nobody finds out until the day it runs.
+ *
+ * Retiring is the answer offered instead, and it is a better one than it looks: the resolver only
+ * reads active templates, so a retired template is out of circulation exactly as a deleted one
+ * is — and the words are still there to read the day somebody asks what was sent.
+ */
+export function deleteRefusal(usage: TemplateUsage): string | null {
+  if (usage.frozenSteps === 0) return null
+  const where = usage.workflows.length > 0 ? ` (${usage.workflows.join(', ')})` : ''
+  return usage.frozenSteps === 1
+    ? `A published or archived workflow step sends this${where}. Retire it instead — the step `
+      + 'would be left sending nothing, and accounts that already ran on it are the record of '
+      + 'what the firm said.'
+    : `${usage.frozenSteps} published or archived workflow steps send this${where}. Retire it `
+      + 'instead — they would be left sending nothing, and accounts that already ran on them are '
+      + 'the record of what the firm said.'
+}
+
+/**
+ * What somebody should know before deleting one they ARE allowed to delete.
+ *
+ * Not a refusal. A draft workflow is being written and losing a template from it is an edit, not
+ * damage — but it is an edit somebody should make on purpose rather than discover later.
+ */
+export function deleteWarning(usage: TemplateUsage, seedKey: string | null): string | null {
+  const notes: string[] = []
+  const draftSteps = usage.steps - usage.frozenSteps
+  if (draftSteps > 0) {
+    notes.push(draftSteps === 1
+      ? 'A step in a draft workflow sends this, and would be left sending nothing.'
+      : `${draftSteps} steps in draft workflows send this, and would be left sending nothing.`)
+  }
+  /*
+   * A seeded row comes back. seed_key is what makes seeding idempotent, so the migration that
+   * put this here will put it back the next time the schema is replayed — deleting it is not
+   * permanent and somebody should know that before they are surprised by it.
+   */
+  if (seedKey) {
+    notes.push(`This one was seeded as ${seedKey}, so replaying the schema would bring it back.`)
+  }
+  return notes.length > 0 ? notes.join(' ') : null
+}

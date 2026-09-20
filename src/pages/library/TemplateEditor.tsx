@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Loader2, Plus } from 'lucide-react'
+import { Loader2, Plus, Trash2 } from 'lucide-react'
 import {
   DESK_POSITIONS, type DeskPosition,
 } from '../../lib/clientPosition'
@@ -24,7 +24,9 @@ import { inputClass } from '../../components/ui/Modal'
  * somebody then has to cut and paste into the sentence it belongs in, and the reason to offer the
  * button at all was to save exactly that.
  */
-export function TemplateEditor({ scope, draft, onChange, onSave, onCancel, saving, error }: {
+export function TemplateEditor({
+  scope, draft, onChange, onSave, onCancel, saving, error, onDelete,
+}: {
   scope: TemplateScope
   draft: TemplateDraft
   onChange: (next: TemplateDraft) => void
@@ -32,6 +34,13 @@ export function TemplateEditor({ scope, draft, onChange, onSave, onCancel, savin
   onCancel: () => void
   saving: boolean
   error: string | null
+  /**
+   * Null on a template that does not exist yet.
+   *
+   * There is nothing to delete before the first save, and offering the button anyway would be a
+   * button whose only possible meaning is Cancel — which is already beside it.
+   */
+  onDelete: (() => void) | null
 }) {
   const body = useRef<HTMLTextAreaElement>(null)
   const subject = useRef<HTMLInputElement>(null)
@@ -182,7 +191,19 @@ export function TemplateEditor({ scope, draft, onChange, onSave, onCancel, savin
             hover:bg-slate-50 disabled:opacity-40">
           Cancel
         </button>
-        <label className="ml-auto inline-flex items-center gap-2 text-xs text-slate-500">
+        {onDelete && (
+          /*
+            LAST, AND APART. The one action here that cannot be undone sits at the far end of the
+            row from Save, so a hurried hand does not find it on the way.
+          */
+          <button type="button" onClick={onDelete} disabled={saving}
+            className="ml-auto inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2
+              rounded-lg border border-negative-200 text-negative-700 hover:bg-negative-50
+              disabled:opacity-40">
+            <Trash2 size={13} /> Delete
+          </button>
+        )}
+        <label className={`${onDelete ? '' : 'ml-auto'} inline-flex items-center gap-2 text-xs text-slate-500`}>
           <input type="checkbox" checked={draft.active}
             onChange={(e) => onChange({ ...draft, active: e.target.checked })} />
           {/* Retired rather than deleted: "what did we used to send?" is the question asked the

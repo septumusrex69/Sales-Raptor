@@ -7,7 +7,9 @@
  */
 import { supabase } from './supabase'
 import type { DeskPosition } from './clientPosition.ts'
-import type { MessageTemplate, TemplateKind, TemplateScope } from './messageTemplates.ts'
+import type {
+  MessageTemplate, TemplateKind, TemplateScope, TemplateUsage,
+} from './messageTemplates.ts'
 
 /** Named by hand, like every mapper here. See the warning about silent drops in CLAUDE.md. */
 const COLUMNS = 'id, scope, kind, name, subject, body, position, language, active, seed_key, updated_at'
@@ -143,4 +145,49 @@ function friendly(message: string): string {
     return 'Only an administrator may change the library.'
   }
   return message
+}
+
+/**
+ * Where this template is already wired in, before anybody throws it away.
+ *
+ * ASKED OF THE DATABASE RATHER THAN ASSUMED, because the damage is silent: the foreign key is
+ * `on delete set null`, so deleting a template that a workflow step sends does not fail and does
+ * not warn. The step survives saying "send an email" with nothing to send.
+ *
+ * One query with the version and workflow joined, so the answer can name where rather than only
+ * count. A library with a dozen templates and a workflow with a dozen steps does not need paging.
+ */
+export async function templateUsage(id: string): Promise<TemplateUsage> {
+  const { data, error } = await supabase
+    .from('workflow_nodes')
+    .select('id, workflow_versions!inner(state, workflows!inner(name))')
+    .eq('template_id', id)
+  if (error) throw new Error(friendly(error.message))
+
+  const rows = (data ?? []) as unknown as {
+    workflow_versions: { state: string; workflows: { name: string } }
+  }[]
+  const names = new Set<string>()
+  let frozenSteps = 0
+  for (const r of rows) {
+    /* active = running against live accounts; archived = accounts already ran on it. Both are
+       frozen, and both are a reason to retire rather than delete. See deleteRefusal. */
+    if (r.workflow_versions.state === 'active' || r.workflow_versions.state === 'archived') {
+      frozenSteps += 1
+    }
+    if (r.workflow_versions.workflows?.name) names.add(r.workflow_versions.workflows.name)
+  }
+  return { steps: rows.length, frozenSteps, workflows: [...names] }
+}
+
+/**
+ * Throw one away for good.
+ *
+ * The caller checks deleteRefusal first — this does not, because the rule is worth stating in a
+ * pure function the check scripts can reach, and restating it here would be two copies of it.
+ * The database's own last word is the delete policy, which is Administrator only.
+ */
+export async function deleteTemplate(id: string): Promise<void> {
+  const { error } = await supabase.from('message_templates').delete().eq('id', id)
+  if (error) throw new Error(friendly(error.message))
 }

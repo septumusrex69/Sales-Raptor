@@ -22,7 +22,8 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  MERGE_FIELDS, SMS_RAND_PER_SEGMENT, addressAs, fieldsUsed, forecastSms, longDate,
+  MERGE_FIELDS, SMS_RAND_PER_SEGMENT, addressAs, deleteRefusal, deleteWarning, fieldsUsed,
+  forecastSms, longDate,
   mergeValuesFor, renderTemplate, resolveNote, resolveTemplate, sampleValues, templateProblems,
   unknownFields,
 } from '../../src/lib/messageTemplates.ts'
@@ -433,6 +434,52 @@ ok('the rule is written down where the next person will read it',
 /* Pure: no database, no clock, no network. The wording has to be testable without any of them. */
 ok('nothing here fetches', !/\bfetch\(|supabase/.test(src))
 ok('...and nothing reads a clock', !/new Date\(\)|Date\.now\(\)/.test(src))
+
+/* ---------- throwing one away ---------- */
+
+/*
+ * THE DANGER IS SILENT, which is the only reason these rules exist at all.
+ * workflow_nodes.template_id is `on delete set null`, so deleting a template a workflow step
+ * sends does not fail and does not warn: the step survives saying "send an email" with nothing to
+ * send, and nobody finds out until the day it runs.
+ */
+const usage = (over = {}) => ({ steps: 0, frozenSteps: 0, workflows: [], ...over })
+
+check('an unused template may be deleted', deleteRefusal(usage()), null)
+check('...and so may one only a draft workflow uses',
+  deleteRefusal(usage({ steps: 2, workflows: ['Standard Collections'] })), null)
+
+/*
+ * ACTIVE AND ARCHIVED BOTH REFUSE, and archived is the one that is easy to get wrong. Active is
+ * running against live accounts; archived means accounts ALREADY RAN on it, and what they were
+ * sent is the firm's record of what it said. Deleting the wording out from under either is
+ * rewriting history.
+ */
+ok('a template a published step sends may not be deleted',
+  deleteRefusal(usage({ steps: 1, frozenSteps: 1 })) !== null)
+ok('...and the refusal says where to go and look',
+  (deleteRefusal(usage({ steps: 1, frozenSteps: 1, workflows: ['Standard Collections'] })) ?? '')
+    .includes('Standard Collections'))
+ok('...and offers retiring instead of just saying no',
+  /[Rr]etire it instead/.test(deleteRefusal(usage({ steps: 1, frozenSteps: 1 })) ?? ''))
+ok('...counting them where there is more than one',
+  (deleteRefusal(usage({ steps: 4, frozenSteps: 3 })) ?? '').includes('3'))
+
+/* A draft workflow losing a template is an edit, not damage — but an edit made on purpose. */
+ok('a draft step is a warning, not a refusal',
+  deleteRefusal(usage({ steps: 1 })) === null
+  && (deleteWarning(usage({ steps: 1 }), null) ?? '').includes('draft'))
+check('...and nothing to say about a template nothing uses',
+  deleteWarning(usage(), null), null)
+/*
+ * A SEEDED ROW COMES BACK. seed_key is what makes seeding idempotent, so the migration that put
+ * it there puts it back the next time the schema is replayed. Somebody deleting one should know
+ * that before they are surprised by it.
+ */
+ok('a seeded template says it would come back',
+  (deleteWarning(usage(), 'sms-first-contact') ?? '').includes('sms-first-contact'))
+ok('...and one written here says nothing of the sort',
+  !/come back/.test(deleteWarning(usage({ steps: 1 }), null) ?? ''))
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
