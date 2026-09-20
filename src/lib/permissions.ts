@@ -102,3 +102,20 @@ export function useDefaultOwnerFilter(
   }, [currentUser])
   return [owner, setOwner]
 }
+
+/**
+ * Whether this person may open the template library.
+ *
+ * ADMINISTRATOR ONLY, at the firm's instruction and more tightly than most things here: "collectors
+ * can't see the library because collectors don't build it. That's only basically administrators.
+ * Team leaders neither."
+ *
+ * THIS IS NOT THE SAME AS SEEING A CALL SCRIPT. A collector still needs the words in front of them
+ * while the phone is ringing — those reach them on the account and through a campaign runner,
+ * already resolved against the debtor in question. What is closed is the place the wording is
+ * WRITTEN. The difference matters: a library is the firm's position in writing, and a sentence
+ * the attorney would not have approved goes out four hundred times rather than once.
+ */
+export function canEditLibrary(role: Pick<User, 'role'>['role'] | undefined): boolean {
+  return role === 'Administrator'
+}

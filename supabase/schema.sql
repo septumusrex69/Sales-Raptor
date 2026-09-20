@@ -4892,3 +4892,50 @@ comment on column public.activities.email_to_recipients is
   'activities covers calls, notes and meetings too, and only an Email row ever fills these.';
 comment on column public.activities.email_cc_recipients is
   'Everyone on Cc of a synced Email activity. Bcc is absent for the same reason as above.';
+
+-- ---------------------------------------------------------------------------
+-- WHICH SIDE OF THE BUSINESS A TEMPLATE IS FOR.
+-- ---------------------------------------------------------------------------
+-- Not a folder. The scope decides three things at once, and getting it wrong is not untidy, it is
+-- unsendable or it mischarges:
+--   - which merge fields exist. {{balance}} and {{arrears_amount}} mean nothing on a lead;
+--     {{service_interested}} means nothing on an account.
+--   - whether sending raises a fee. Collections raises Annexure B item 1(a)/1(c); the sales side
+--     raises nothing, and fees are charged on ACCOUNTS ONLY.
+--   - which workflow clock applies -- days since handover on one side, days since last contact on
+--     the other.
+--
+-- Two values, not four. A deal hangs off a lead OR a client, so it is a stage of one relationship
+-- rather than a party of its own: the firm's own answer, and the reason there is no 'deals'.
+-- Clients get a broadcast channel rather than a library; see the campaigns work.
+alter table public.message_templates
+  add column if not exists scope text not null default 'collections';
+
+alter table public.message_templates drop constraint if exists message_templates_scope_check;
+alter table public.message_templates add constraint message_templates_scope_check
+  check (scope in ('collections', 'sales'));
+
+comment on column public.message_templates.scope is
+  'collections = written against a debtor account; sales = written against a lead, deal or '
+  'prospect. Decides the merge fields offered, whether sending raises a fee, and which library '
+  'the template appears in. Everything seeded before this column existed is collections.';
+
+-- LETTERS ARE A KIND, and the constraint already allows them on this database -- widened by
+-- another session on 20 September 2026 without reaching the checked-in schema. Restated here so
+-- that replaying this file produces the database that actually exists.
+alter table public.message_templates drop constraint if exists message_templates_kind_check;
+alter table public.message_templates add constraint message_templates_kind_check
+  check (kind in ('sms', 'email', 'call_script', 'letter'));
+
+-- A POSITION IS A COLLECTIONS IDEA. The 13 rungs describe a debtor account; a sales template
+-- carrying one would be filed against a state its side of the business does not have.
+alter table public.message_templates drop constraint if exists message_templates_position_scope;
+alter table public.message_templates add constraint message_templates_position_scope
+  check (position is null or scope = 'collections');
+
+-- The resolver reads live templates of one kind on one side. Replaces the kind-only index, which
+-- would have every sales template scanned on the way to a collections one.
+drop index if exists message_templates_kind_idx;
+create index if not exists message_templates_scope_kind_idx
+  on public.message_templates (scope, kind, position, language)
+  where active;

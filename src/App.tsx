@@ -38,6 +38,7 @@ import { ActivitiesPage } from './pages/activities/ActivitiesPage'
  * the app fetches before it can show anything.
  */
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })))
+const LibraryPage = lazy(() => import('./pages/library/LibraryPage').then((m) => ({ default: m.LibraryPage })))
 const SettingsPage = lazy(() => import('./pages/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 import { RepDetailPage } from './pages/reps/RepDetailPage'
 
@@ -88,6 +89,10 @@ function App() {
               <Route path="/tasks" element={<TasksPage />} handle={{ title: 'Tasks' }} />
               <Route path="/calendar" element={<CalendarPage />} handle={{ title: 'Calendar' }} />
               <Route path="/activities" element={<ActivitiesPage />} handle={{ title: 'Activities' }} />
+              {/* The firm's own wording, kept apart from the machinery that sends it. Its own
+                  route rather than a Settings tab: a library is working content somebody
+                  maintains, not a setting somebody configures once. */}
+              <Route path="/library" element={<LibraryPage />} handle={{ title: 'Library' }} />
               <Route path="/reports" element={<ReportsPage />} handle={{ title: 'Reports' }} />
               <Route path="/settings" element={<SettingsPage />} handle={{ title: 'Settings' }} />
               <Route path="/reps/:id" element={<RepDetailPage />} handle={{ title: 'Rep Performance' }} />

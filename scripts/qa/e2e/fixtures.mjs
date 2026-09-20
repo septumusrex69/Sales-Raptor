@@ -520,3 +520,55 @@ export const LEAD_EMAIL_ACTIVITY = {
   email_to_recipients: [{ name: 'Stephan', address: 'stephan@bredellferreira.co.za' }],
   email_cc_recipients: [LEAD_CC],
 }
+
+/* ------------------------------------------------------------------ *
+ * The library.
+ * ------------------------------------------------------------------ */
+
+/**
+ * FOUR TEMPLATES THAT MAKE THE PAGE PROVE SOMETHING.
+ *
+ * Chosen so no two rows exercise the same thing — a fixture where every row looks alike cannot
+ * tell a working library from a broken one:
+ *
+ *  - a sound collections SMS, one segment, every field answerable;
+ *  - a collections email carrying two fields NOTHING can fill, which is the page's whole reason
+ *    for existing: renderTemplate leaves an unresolved placeholder standing, so as things are
+ *    that message reaches a debtor with the braces still in it;
+ *  - a LETTER, because letters exist on the collections side and must not appear on sales;
+ *  - one SALES template, so switching side changes the list rather than filtering one.
+ */
+export const LIBRARY = [
+  {
+    id: 'cccccccc-0000-4000-8000-000000000001',
+    scope: 'collections', kind: 'sms', name: 'First contact',
+    subject: null,
+    body: '{{firm_name}}: account {{reference}} is overdue. Call {{agent_phone}}.',
+    position: 'new', language: 'en', active: true,
+    seed_key: 'sms-first-contact', updated_at: MAIL_AT(900),
+  },
+  {
+    id: 'cccccccc-0000-4000-8000-000000000002',
+    scope: 'collections', kind: 'email', name: 'Handover notice',
+    subject: 'Account {{reference}}',
+    body: 'Dear {{debtor_name}}\n\nPay {{balance}} into {{bank_account_number}} at {{bank_name}}.',
+    position: null, language: 'en', active: true,
+    seed_key: 'email-handover', updated_at: MAIL_AT(800),
+  },
+  {
+    id: 'cccccccc-0000-4000-8000-000000000003',
+    scope: 'collections', kind: 'letter', name: 'Section 129 notice',
+    subject: null,
+    body: 'NOTICE IN TERMS OF SECTION 129(1)(a)\n\n{{debtor_name}}, account {{reference}}.',
+    position: null, language: 'en', active: false,
+    seed_key: 'letter-s129', updated_at: MAIL_AT(700),
+  },
+  {
+    id: 'cccccccc-0000-4000-8000-000000000004',
+    scope: 'sales', kind: 'email', name: 'Quotation follow-up',
+    subject: 'Your quotation from {{firm_name}}',
+    body: 'Dear {{contact_name}}\n\nFollowing up on {{service_interested}} for {{company_name}}.',
+    position: null, language: 'en', active: true,
+    seed_key: null, updated_at: MAIL_AT(600),
+  },
+]

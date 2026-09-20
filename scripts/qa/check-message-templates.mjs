@@ -39,11 +39,36 @@ const ok = (name, actual) => check(name, actual, true)
 
 /* ---------- the fields are a closed list ---------- */
 
-ok('there are fields to use', MERGE_FIELDS.length >= 8)
-check('every field is named once',
-  MERGE_FIELDS.length, new Set(MERGE_FIELDS.map((f) => f.key)).size)
-ok('every field has a sample to preview with',
-  MERGE_FIELDS.every((f) => f.sample.trim() !== '' && f.label.trim() !== ''))
+/*
+ * TWO LISTS, ONE PER SIDE, because the sides do not share a vocabulary. {{balance}} means nothing
+ * on a lead and {{service_interested}} means nothing on a debtor account — and the firm's own
+ * reason for there being exactly two: "a client can make a deal or a lead can make a deal", so a
+ * deal is a stage of one relationship rather than a library of its own.
+ */
+check('there is a library for each side', Object.keys(MERGE_FIELDS).sort(), ['collections', 'sales'])
+for (const scope of ['collections', 'sales']) {
+  const fields = MERGE_FIELDS[scope]
+  ok(`${scope} has fields to use`, fields.length >= 8)
+  check(`${scope} names every field once`, fields.length, new Set(fields.map((f) => f.key)).size)
+  ok(`${scope} gives every field a sample to preview with`,
+    fields.every((f) => f.sample.trim() !== '' && f.label.trim() !== ''))
+}
+/*
+ * AND THE TWO ARE GENUINELY DIFFERENT. Identical lists would mean the split is decoration — the
+ * whole point is that a writer on one side is not offered fields that render as nothing there.
+ */
+ok('the two sides do not offer the same fields',
+  MERGE_FIELDS.collections.map((f) => f.key).join() !== MERGE_FIELDS.sales.map((f) => f.key).join())
+ok('...a debtor balance is not on offer to a lead',
+  !MERGE_FIELDS.sales.some((f) => f.key === 'balance'))
+ok('...nor a lead\u2019s service to a debtor',
+  !MERGE_FIELDS.collections.some((f) => f.key === 'service_interested'))
+/* The three that mean the same thing everywhere must be on both, or one side cannot sign off. */
+for (const key of ['agent_name', 'agent_phone', 'firm_name', 'today']) {
+  ok(`both sides can say ${key}`,
+    MERGE_FIELDS.collections.some((f) => f.key === key)
+      && MERGE_FIELDS.sales.some((f) => f.key === key))
+}
 /*
  * THE SAMPLES ARE AWKWARD ON PURPOSE. A template previewed against "Mr Dube" and "R1 000" looks
  * fine and then costs three segments on a real account. The long surname is the point of it.
@@ -60,10 +85,20 @@ check('...and each is reported once however often it appears',
 check('...across the subject and the body together',
   fieldsUsed('Account {{reference}}', 'Dear {{debtor_name}}'), ['reference', 'debtor_name'])
 check('spaces inside the braces are still a field', fieldsUsed('{{ balance }}'), ['balance'])
-check('a misspelling is not a field', unknownFields('the amount of {{ballance}}'), ['ballance'])
-check('...while the real ones are left alone', unknownFields('{{balance}} on {{reference}}'), [])
+check('a misspelling is not a field',
+  unknownFields('collections', 'the amount of {{ballance}}'), ['ballance'])
+check('...while the real ones are left alone',
+  unknownFields('collections', '{{balance}} on {{reference}}'), [])
+/*
+ * AND A FIELD BORROWED FROM THE OTHER SIDE IS UNKNOWN TOO. This is the case a single flat list
+ * could not see: {{balance}} is a real field, and on a sales template it is a message that goes
+ * to a prospect reading "the amount of  is now due".
+ */
+check('a collections field on a sales template is not a field',
+  unknownFields('sales', 'the amount of {{balance}}'), ['balance'])
+check('...and the reverse', unknownFields('collections', '{{service_interested}}'), ['service_interested'])
 
-const base = { kind: 'sms', name: 'First demand', subject: null, body: 'Hello' }
+const base = { scope: 'collections', kind: 'sms', name: 'First demand', subject: null, body: 'Hello' }
 check('a sound template has nothing wrong with it', templateProblems(base), [])
 check('an unnamed one cannot be saved',
   templateProblems({ ...base, name: '  ' }).map((p) => p.field), ['name'])
@@ -82,7 +117,9 @@ check('nor a call script',
   templateProblems({ ...base, kind: 'call_script', subject: 'Overdue' }).map((p) => p.field), ['subject'])
 /* A typo in an email's SUBJECT is just as sendable as one in its body. */
 check('a field that does not exist in the subject is caught too',
-  templateProblems({ kind: 'email', name: 'x', subject: 'Account {{referance}}', body: 'Hello' })
+  templateProblems({
+    scope: 'collections', kind: 'email', name: 'x', subject: 'Account {{referance}}', body: 'Hello',
+  })
     .map((p) => p.field), ['subject'])
 
 /* ---------- a gap must look like a gap ---------- */
@@ -162,8 +199,8 @@ check('a balance that is not known answers nothing rather than nought',
 check('the date is written out, never ISO', values.today, '18 September 2026')
 check('longDate leaves a date it cannot read alone', longDate('not a date'), 'not a date')
 /* Every field in the catalogue must be answerable, or a template can use one nothing ever fills. */
-check('every field in the list can be answered',
-  MERGE_FIELDS.filter((f) => !(f.key in values)).map((f) => f.key), [])
+check('every collections field can be answered',
+  MERGE_FIELDS.collections.filter((f) => !(f.key in values)).map((f) => f.key), [])
 
 /* ---------- what an SMS costs ---------- */
 
@@ -279,14 +316,16 @@ check('all three kinds are drafted',
  * are inserted by a migration that never goes near it.
  */
 for (const d of seeded) {
-  const bad = unknownFields(d.body, d.subject)
+  const bad = unknownFields('collections', d.body, d.subject)
   check(`${d.key} uses only fields that exist`, bad, [])
 }
 
 /* Each draft would pass the form it bypassed. */
 for (const d of seeded) {
   check(`${d.key} would save through the form`,
-    templateProblems({ kind: d.kind, name: d.name, subject: d.subject, body: d.body }), [])
+    templateProblems({
+      scope: 'collections', kind: d.kind, name: d.name, subject: d.subject, body: d.body,
+    }), [])
 }
 
 /*

@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useNavCounts, type NavCounts } from '../../lib/navCounts'
 import {
-  Activity, BarChart3, BookOpen, Building2, Calendar, CalendarClock, CheckSquare, ChevronDown, Handshake, Inbox, LayoutDashboard, LogOut, MessageCircleQuestion, Settings, Target, TrendingUp, Users, type LucideIcon,
+  Activity, BarChart3, BookOpen, Building2, Calendar, CalendarClock, CheckSquare, ChevronDown, Handshake, Inbox, LayoutDashboard, Library, LogOut, MessageCircleQuestion, Settings, Target, TrendingUp, Users, type LucideIcon,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../store/AuthContext'
 import { UserAvatar } from '../ui/Avatar'
 import { useTheme } from '../../store/ThemeContext'
-import { canViewClients } from '../../lib/permissions'
+import { canEditLibrary, canViewClients } from '../../lib/permissions'
 
 /**
  * The navigation, and the three items that carry a count.
@@ -46,6 +46,13 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean; badge?:
   { to: '/tasks', label: 'Tasks', icon: CheckSquare, badge: 'tasks' },
   { to: '/calendar', label: 'Calendar', icon: Calendar },
   { to: '/activities', label: 'Activities', icon: Activity },
+  // Everything the firm SAYS -- the SMS, emails, call scripts and letters, and the workflows that
+  // schedule them. Administrators only (canEditLibrary), so most people never see this entry.
+  //
+  // Its own item rather than a Settings tab, where the workflow builder currently hides: a
+  // library is content a person maintains and comes back to, not a switch they set once. It sits
+  // by Reports because both are reference rather than a queue somebody works down.
+  { to: '/library', label: 'Library', icon: Library },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
@@ -72,7 +79,13 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
-        {NAV.filter((n) => n.to !== '/companies' || canViewClients(currentUser?.role)).map(({ to, label, icon: Icon, end, badge }) => {
+        {NAV
+          .filter((n) => n.to !== '/companies' || canViewClients(currentUser?.role))
+          /* A menu item that always refuses is worse than no menu item: it advertises a room
+             nobody may enter and teaches people that the sidebar lies. The page keeps its own
+             guard for anyone who types the address. */
+          .filter((n) => n.to !== '/library' || canEditLibrary(currentUser?.role))
+          .map(({ to, label, icon: Icon, end, badge }) => {
           const count = badge ? counts[badge] : 0
           return (
           <NavLink

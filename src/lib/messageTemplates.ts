@@ -23,16 +23,60 @@
 import { smsCost } from './smsSegments.ts'
 import type { DeskPosition } from './clientPosition.ts'
 
-export type TemplateKind = 'sms' | 'email' | 'call_script'
+/**
+ * WHICH SIDE OF THE BUSINESS A TEMPLATE IS FOR.
+ *
+ * Two, not four. The firm's own reasoning, in their words: "a client can make a deal or a lead
+ * can make a deal" — so a deal is a STAGE of one relationship rather than a party of its own, and
+ * a separate deals library would be a third copy of the same editor over the same fields.
+ *
+ * Clients are absent for a different reason: what the firm wants for clients is a bulk newsletter
+ * rather than reusable wording, and a broadcast has exactly one audience and one send date. That
+ * is a campaign, not a library entry.
+ *
+ * This is not a folder. It decides which merge fields exist, whether sending raises a fee, and
+ * which workflow clock applies — see the column comment in schema.sql.
+ */
+export type TemplateScope = 'collections' | 'sales'
+
+export const TEMPLATE_SCOPES: Record<TemplateScope, { label: string; hint: string }> = {
+  collections: {
+    label: 'Collections',
+    hint: 'Written against a debtor account. Sending raises an Annexure B fee.',
+  },
+  sales: {
+    label: 'Sales',
+    hint: 'Written against a lead, a deal or a prospect. Nothing is charged.',
+  },
+}
+
+export type TemplateKind = 'sms' | 'email' | 'call_script' | 'letter'
 
 export const TEMPLATE_KINDS: Record<TemplateKind, { label: string; plural: string }> = {
   sms: { label: 'SMS', plural: 'SMS templates' },
   email: { label: 'Email', plural: 'Email templates' },
   call_script: { label: 'Call script', plural: 'Call scripts' },
+  letter: { label: 'Letter', plural: 'Letters' },
+}
+
+/**
+ * Which kinds each side actually has.
+ *
+ * A LETTER IS A COLLECTIONS THING. The letters here are statutory notices — a section 129 demand
+ * goes by registered post because the Act says where and how it must be delivered. Nothing on the
+ * sales side is posted. Offering an empty "Letters" section on the sales library for ever is the
+ * furniture problem: a heading that never has anything under it teaches people to stop reading
+ * the ones that do.
+ */
+export const KINDS_FOR_SCOPE: Record<TemplateScope, TemplateKind[]> = {
+  collections: ['sms', 'email', 'call_script', 'letter'],
+  sales: ['sms', 'email', 'call_script'],
 }
 
 export interface MessageTemplate {
   id: string
+  /** Which library it is in, and therefore which fields it may use. See TemplateScope. */
+  scope: TemplateScope
   kind: TemplateKind
   /** What the firm calls it on a list: "First demand", "Broken promise follow-up". */
   name: string
@@ -45,6 +89,9 @@ export interface MessageTemplate {
    * NULLABLE ON PURPOSE. Fourteen positions times three kinds is forty-two pieces of wording, and
    * a library that does nothing until all forty-two exist is a library nobody ever finishes
    * filling. A null position is the general version, and resolveTemplate falls back to it.
+   *
+   * COLLECTIONS ONLY. The database refuses a position on a sales template: the 13 rungs describe
+   * a debtor account, and the sales side does not have them.
    */
   position: DeskPosition | null
   /**
@@ -79,20 +126,61 @@ export interface MergeField {
   sample: string
 }
 
-export const MERGE_FIELDS: MergeField[] = [
-  { key: 'debtor_name', label: 'How the debtor is addressed', sample: 'Mr Van Der Westhuizen' },
-  { key: 'debtor_first_name', label: 'First name', sample: 'Johannes' },
-  { key: 'reference', label: 'The reference the debtor knows', sample: 'GPS3/10103' },
-  { key: 'client_name', label: 'The client whose book it is', sample: 'Gauteng Property Services' },
-  { key: 'balance', label: 'Balance outstanding', sample: 'R 48,250.00' },
-  { key: 'capital', label: 'Capital outstanding', sample: 'R 31,900.00' },
+/**
+ * Shared by both sides — who is writing, from where, on what date.
+ *
+ * Pulled out so the two lists cannot drift on the three fields that mean the same thing
+ * everywhere. An agent's name is an agent's name whether the account is a debtor's or a lead's.
+ */
+const EVERYWHERE: MergeField[] = [
   { key: 'agent_name', label: 'Who is dealing with it', sample: 'Stephan Bredell' },
   { key: 'agent_phone', label: 'The number to call back on', sample: '012 111 2222' },
   { key: 'firm_name', label: 'The firm', sample: 'Bredell Ferreira' },
   { key: 'today', label: "Today's date, written out", sample: '18 September 2026' },
 ]
 
-const FIELD_KEYS = new Set(MERGE_FIELDS.map((f) => f.key))
+/**
+ * THE FIELDS EACH SIDE MAY USE, per scope, and nothing else.
+ *
+ * Split because the sides genuinely do not share a vocabulary: {{balance}} has no meaning on a
+ * lead and {{service_interested}} has none on a debtor account. One combined list would offer
+ * every writer half a list of fields that render as nothing on their side — and a field that
+ * silently renders as nothing is the failure this whole closed-list idea exists to stop.
+ */
+export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
+  collections: [
+    { key: 'debtor_name', label: 'How the debtor is addressed', sample: 'Mr Van Der Westhuizen' },
+    { key: 'debtor_first_name', label: 'First name', sample: 'Johannes' },
+    { key: 'reference', label: 'The reference the debtor knows', sample: 'GPS3/10103' },
+    { key: 'client_name', label: 'The client whose book it is', sample: 'Gauteng Property Services' },
+    { key: 'balance', label: 'Balance outstanding', sample: 'R 48,250.00' },
+    { key: 'capital', label: 'Capital outstanding', sample: 'R 31,900.00' },
+    ...EVERYWHERE,
+  ],
+  sales: [
+    { key: 'contact_name', label: 'How the person is addressed', sample: 'Mr Van Der Westhuizen' },
+    { key: 'contact_first_name', label: 'First name', sample: 'Johannes' },
+    { key: 'company_name', label: 'Their business', sample: 'Gauteng Property Services' },
+    { key: 'service_interested', label: 'What they asked about', sample: 'Debt collecting' },
+    { key: 'deal_name', label: 'The piece of business', sample: 'GPS collections mandate' },
+    { key: 'deal_value', label: 'What it is worth', sample: 'R 120,000.00' },
+    ...EVERYWHERE,
+  ],
+}
+
+/** Every field either side may use. What a reader of a template needs, before it is filed. */
+export const ALL_FIELD_KEYS = new Set(
+  Object.values(MERGE_FIELDS).flatMap((list) => list.map((f) => f.key)),
+)
+
+/*
+ * An unrecognised scope yields NO known fields, rather than throwing.
+ *
+ * The type stops it and so does the check constraint, but a template is a database row and a row
+ * is data: a library page that throws on one bad row shows nothing at all, where one that reports
+ * every field on that row as unanswerable shows the reader exactly which row to go and fix.
+ */
+const keysFor = (scope: TemplateScope) => new Set((MERGE_FIELDS[scope] ?? []).map((f) => f.key))
 
 /**
  * `{{field}}`, with optional spaces inside the braces.
@@ -119,8 +207,19 @@ export function fieldsUsed(...parts: (string | null | undefined)[]): string[] {
 }
 
 /** The ones that are not fields at all. A typo, every time. */
-export function unknownFields(...parts: (string | null | undefined)[]): string[] {
-  return fieldsUsed(...parts).filter((k) => !FIELD_KEYS.has(k))
+/**
+ * The ones this side cannot answer. A typo, or a field borrowed from the other library.
+ *
+ * SCOPED, because "unknown" only means anything relative to a side. `{{balance}}` is a real field
+ * on a debtor account and nothing at all on a lead — and a sales template carrying it would
+ * render "the amount of  is now due" to a prospect. The old version took no scope and therefore
+ * could not tell those two cases apart.
+ */
+export function unknownFields(
+  scope: TemplateScope, ...parts: (string | null | undefined)[]
+): string[] {
+  const known = keysFor(scope)
+  return fieldsUsed(...parts).filter((k) => !known.has(k))
 }
 
 export interface Rendered {
@@ -155,9 +254,18 @@ export function renderTemplate(
   return { text, missing }
 }
 
-/** Every field filled with its sample, for previewing a template with no account in front of you. */
+/**
+ * Every field filled with its sample, for previewing with no account in front of you.
+ *
+ * Both sides at once, deliberately. A preview's job is to show what the words look like filled
+ * in; refusing to fill a field because it belongs to the other library would make a
+ * mis-scoped template preview as if it were fine, which is the one thing a preview must not do.
+ * templateProblems is what says the field does not belong here.
+ */
 export function sampleValues(): Record<string, string> {
-  return Object.fromEntries(MERGE_FIELDS.map((f) => [f.key, f.sample]))
+  return Object.fromEntries(
+    Object.values(MERGE_FIELDS).flatMap((list) => list.map((f) => [f.key, f.sample] as const)),
+  )
 }
 
 /* ---------------------------------------------------------------- what the account answers with */
@@ -259,6 +367,8 @@ export interface TemplateProblem {
  * screen is about money.
  */
 export function templateProblems(input: {
+  /** Which library it is being filed in, which is what decides whether a field is known. */
+  scope: TemplateScope
   kind: TemplateKind
   name: string
   subject: string | null
@@ -288,10 +398,12 @@ export function templateProblems(input: {
     })
   }
 
-  const unknown = unknownFields(input.body, input.kind === 'email' ? input.subject : null)
+  const unknown = unknownFields(
+    input.scope, input.body, input.kind === 'email' ? input.subject : null,
+  )
   if (unknown.length > 0) {
     problems.push({
-      field: unknownFields(input.body).length > 0 ? 'body' : 'subject',
+      field: unknownFields(input.scope, input.body).length > 0 ? 'body' : 'subject',
       message: unknown.length === 1
         ? `There is no field called ${unknown[0]}. Check the list of fields beside the box.`
         : `These are not fields: ${unknown.join(', ')}. Check the list beside the box.`,
