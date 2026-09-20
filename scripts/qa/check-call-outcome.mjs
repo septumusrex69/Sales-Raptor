@@ -138,6 +138,13 @@ for (const [key, meta] of Object.entries(CALL_OUTCOMES)) {
 for (const file of ['CompleteDiaryModal', 'DiaryWorkBar']) {
   const src = readFileSync(new URL(`../../src/components/diary/${file}.tsx`, import.meta.url), 'utf8')
   ok(`${file} asks what came of it`, /<OutcomePicker/.test(src))
+  /*
+   * PRESENCE BEFORE ORDER. indexOf returns -1 for something that is not there, so an order-only
+   * assertion goes green the day the thing it orders is deleted: -1 is less than everything.
+   * Deleting the whole outcome-recording block from CompleteDiaryModal left this line passing.
+   */
+  ok(`${file} records it at all`, src.includes('recordOutcome({'))
+  ok(`${file} books the next date at all`, src.includes('await workEntry({'))
   ok(`${file} records it before booking the next date`,
     src.indexOf('recordOutcome({') < src.indexOf('await workEntry({'))
   ok(`${file} will not save a half-answered outcome`, /!outcomeReady\(came, /.test(src))

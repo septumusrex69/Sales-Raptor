@@ -176,12 +176,39 @@ try {
   console.log('  scope line:', JSON.stringify((await page.locator('text=/Showing .* of /').first().innerText().catch(() => '(none)'))))
   t.check('all seven views are offered', await views.count(), 7)
 
+  /*
+   * THE DIGITS, COMPARED EXACTLY, not looked for as a substring.
+   *
+   * `.includes('40')` is satisfied by 1 040, by 400 and by 4 011. The page-size assertion twenty
+   * lines below already extracts and compares; these three were left as substrings, and the one
+   * that matters most -- broken promises -- is a two-digit number, which is the easiest of all to
+   * find inside a bigger one.
+   */
+  const countIn = async (name) => {
+    const text = await page.getByRole('button', { name }).innerText()
+    /* en-ZA groups thousands with a NON-BREAKING space, so stripping ordinary spaces alone
+       leaves "736" as "7 36". See CLAUDE.md. */
+    return (text.replace(/[\s\u00a0]/g, '').match(/\d+/g) ?? []).map(Number)
+  }
   const bookBtn = page.getByRole('button', { name: /Whole book/ })
-  t.ok('the whole book shows its count', (await bookBtn.innerText()).includes('736'))
+  t.ok(`the whole book shows its count (${(await countIn(/Whole book/)).join(',')})`,
+    (await countIn(/Whole book/)).includes(736))
   t.ok('broken promises shows its count',
-    (await page.getByRole('button', { name: /Broken promises/ }).innerText()).includes('40'))
+    (await countIn(/Broken promises/)).includes(VIEW_COUNTS.broken_promises))
   t.ok('gone quiet shows its count',
-    (await page.getByRole('button', { name: /Gone quiet/ }).innerText()).includes('557'))
+    (await countIn(/Gone quiet/)).includes(557))
+  /*
+   * AND THE BADGE AGREES WITH THE LIST IT OPENS.
+   *
+   * An audit suggested making the view count and the Failed PTPs facet differ, on the grounds
+   * that two equal numbers can hide a badge reading the wrong one. They cannot be made to differ:
+   * accountViews.ts defines this view AS that bucket, so they count the same accounts and a
+   * fixture where they disagree models a state the app cannot produce.
+   *
+   * The invariant that IS worth asserting is that pressing the badge lands on a list of exactly
+   * that many -- which catches the mis-wiring the audit was reaching for, without falsifying the
+   * fixture to do it. Asserted below, where the view is actually clicked.
+   */
 
   /* ---------- the scope line ---------- */
 
@@ -224,8 +251,16 @@ try {
 
   /* ---------- clicking a view narrows, visibly ---------- */
 
+  const promised = VIEW_COUNTS.broken_promises
   await page.getByRole('button', { name: /Broken promises/ }).click()
-  await page.waitForFunction(() => /Showing \d+ of 40/.test(document.body.innerText), { timeout: 15000 })
+  await page.waitForFunction(
+    (n) => new RegExp(`Showing \\d+ of ${n}`).test(document.body.innerText),
+    promised, { timeout: 15000 },
+  )
+  /* The badge said one number; the list it opened says the same one. A badge reading the wrong
+     count is invisible until these two are compared. */
+  t.ok(`the badge and the list it opens agree (${promised})`,
+    new RegExp(`Showing \\d+ of ${promised}`).test(await page.locator('body').innerText()))
   await t.shot(page, '02-accounts-broken-promises')
 
   t.ok('the URL says what is on screen', page.url().includes('bucket=Failed+PTPs'))

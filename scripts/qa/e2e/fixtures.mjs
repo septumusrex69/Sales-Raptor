@@ -104,7 +104,17 @@ export const VIEW_COUNTS = {
   my_desk: 12,
   unallocated: 730,
   adrift: 2,
+  /*
+   * EQUAL TO THE 'Failed PTPs' FACET BELOW, AND IT MUST BE.
+   *
+   * An audit of this suite flagged the two as "counts that happen to be equal" and suggested
+   * making them differ. They cannot: accountViews.ts defines the Broken promises view AS the
+   * Failed PTPs bucket, so the view count and the facet count the same population. Two different
+   * numbers here would model a state the app cannot produce, and the e2e asserts the agreement
+   * instead -- which is the check that actually catches a badge wired to the wrong count.
+   */
   broken_promises: 40,
+  /* Likewise the Promise To Pay sub-status facet. Same population, same number. */
   promises_due: 58,
   gone_quiet: 557,
 }

@@ -153,7 +153,9 @@ ok('there is a history of who held what', /create table if not exists public\.ac
 ok('the payment is matched to the holder at the time',
   /dh\.effective_from <= p\.received_at/.test(fn.slice(0, 5000)))
 ok('...taking the latest such row', /order by dh\.effective_from desc\s*\n\s*limit 1/.test(fn.slice(0, 5000)))
-ok('...and not to whoever holds it now', !/select d\.assigned_to as uid/.test(fn.slice(0, 5000)))
+/* Absence over the whole function, for the same reason: a window is a guess that is right until
+   somebody adds a line above it. `fn` is already bounded by the function's own terminator. */
+ok('...and not to whoever holds it now', !/select d\.assigned_to as uid/.test(fn))
 
 /*
  * A payment on an account that was on NOBODY's desk that day belongs to nobody. Falling back to
@@ -180,7 +182,16 @@ ok('null means unallocated, not missing', /null MEANS SOMETHING: unallocated/.te
  * EVENT ROWS, NOT SPANS. A span has two ends that can disagree and a closing write that can fail,
  * leaving an account held by two people at once. One row per change cannot.
  */
-ok('no span end to fall out of step', !/\bto_at\b/.test(history.slice(0, 2500)))
+/*
+ * SEARCHED OVER THE WHOLE FILE, not over a window of it.
+ *
+ * This read `history.slice(0, 2500)`, and schema.sql is APPEND-ONLY -- so the migration that
+ * would add this column lands at the END of the file, hundreds of lines past any window. Adding
+ * `alter table public.account_desk_history add column to_at timestamptz` left this passing, and
+ * the ledger it guards is what commission is counted off.
+ */
+ok('no span end to fall out of step',
+  !/\bto_at\b/.test(history) && !/account_desk_history[^;]*\bto_at\b/is.test(sql))
 
 /*
  * WRITABLE BY NOBODY. The trigger is security definer and is the only writer — a ledger deciding

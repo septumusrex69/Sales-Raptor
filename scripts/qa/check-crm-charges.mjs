@@ -103,6 +103,19 @@ if (problems.length > 0) {
   process.exit(1)
 }
 
+/*
+ * A FLOOR, for the same reason. Emptying src/components/record/ made this print "PASS — 0 shared
+ * record component(s) reach 0 module(s)" and exit 0: the check that nothing on the sales side can
+ * raise a fee was satisfied by there being nothing on the sales side to look at.
+ */
+const FLOOR = 4
+if (entryPoints.length < FLOOR) {
+  console.error(`\nFAIL — only ${entryPoints.length} shared record components were found, which is`)
+  console.error(`fewer than the ${FLOOR} this codebase has. Nothing was traced, so "none of them`)
+  console.error('can raise a fee" is a statement about an empty list.\n')
+  process.exit(1)
+}
+
 console.log(
   `PASS — ${entryPoints.length} shared record component(s) reach ${seen.size} module(s),`
   + ' and none of them can raise a fee',

@@ -293,6 +293,27 @@ if (problems.length > 0) {
   process.exit(1)
 }
 
+/*
+ * A FLOOR ON WHAT WAS ACTUALLY LOOKED AT.
+ *
+ * Breaking findSelects's regex made this file print "PASS — 0 column references across 288 files
+ * exist in schema.sql" and exit 0. A check that examines nothing passes every time, and it passes
+ * loudest on the day somebody changes how selects are written -- which is precisely the day the
+ * column references stop being checked.
+ *
+ * The number is a floor rather than an exact count, so adding a query does not fail the build;
+ * it is set well under the current total and only trips when the parser has plainly stopped
+ * finding things. The codebase has 355 today -- a suggested floor of 500 was a guess that would
+ * have failed the build on the day it was added, which is its own kind of broken check.
+ */
+const FLOOR = 250
+if (checked < FLOOR) {
+  console.error(`\nFAIL — only ${checked} column references were found, which is fewer than the`)
+  console.error(`${FLOOR} this codebase has. The select parser has stopped finding them, so the`)
+  console.error('columns are no longer being checked at all.\n')
+  process.exit(1)
+}
+
 console.log(
   `PASS — ${checked} column references across ${files.length} files exist in schema.sql,`
   + ' and every unnamed embed resolves through exactly one foreign key',

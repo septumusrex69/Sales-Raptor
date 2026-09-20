@@ -77,8 +77,21 @@ ok(`...within a minute or two, not an hour (${seconds}s)`, seconds > 0 && second
  * would put a red banner over a mailbox where nothing is wrong.
  */
 ok('being second in the queue is not an error', /alreadyRunning: true/.test(sync))
-const skip = sync.slice(sync.indexOf('if (!claimed)'), sync.indexOf('if (!claimed)') + 500)
-ok('...and it answers 200', /res\.status\(200\)/.test(skip))
+/*
+ * BOUNDED BY ITS OWN CLOSING BRACE, not by a character count.
+ *
+ * This read `+ 500` and the block ends 358 characters in, so the window ran 142 characters into
+ * the `try` that follows -- whose SUCCESS path has its own res.status(200). Changing the skip
+ * branch to answer 503 left this passing, which is exactly the red banner over a healthy mailbox
+ * that the comment above says it exists to prevent. The next section of this file already bounds
+ * its slice this way and says why; this one had been left as a guess.
+ */
+const skipAt = sync.indexOf('if (!claimed)')
+const skip = sync.slice(skipAt, sync.indexOf('\n  }', skipAt))
+ok(`...and it answers 200 (${skip.length} chars, not a fixed window)`,
+  /res\.status\(200\)/.test(skip))
+/* And it is not reported as a failure, which is the thing that would surface as the banner. */
+ok('...rather than an error status', !/res\.status\((4|5)\d\d\)/.test(skip))
 
 /* ---------- 2. one body fetch per message ---------- */
 
