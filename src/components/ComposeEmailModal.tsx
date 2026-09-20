@@ -2,6 +2,10 @@ import { useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { Paperclip, Plus, X } from 'lucide-react'
 import { Modal, FormField, inputClass } from './ui/Modal'
 import { AttachLetter } from './letters/AttachLetter'
+import { UseTemplate } from './library/UseTemplate'
+import { buildLetterAttachment } from '../lib/letterAttachment.ts'
+import { fetchLibrary } from '../lib/templateLibrary.ts'
+import { missingFieldsNote } from '../lib/messageTemplates'
 import { RecipientField } from './RecipientField'
 import { DictateButton } from './ui/Dictate'
 import { DICTATION_LANGUAGES, storedLanguage } from '../lib/dictation'
@@ -134,6 +138,14 @@ export function ComposeEmailModal({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [files, setFiles] = useState<Attached[]>([])
+  /* Named once, when the template lands — not recomputed as the writer edits, because they may
+     well be typing the missing figure in by hand and a warning that will not go away is one
+     people learn to look past. */
+  const [missing, setMissing] = useState<string[]>([])
+  /* Non-null while the letter a chosen template carries is being drawn into a PDF. The pick is
+     not finished until it is: a covering email that says "please find attached" and attaches
+     nothing is worse than no template at all. */
+  const [attaching, setAttaching] = useState<string | null>(null)
   /*
    * The language this person dictates in, which is also the one their spelling is checked against.
    * Read once on open: DictateButton owns the picker and remembers the choice, so re-reading it
@@ -178,6 +190,79 @@ export function ComposeEmailModal({
       setFiles((list) => [...list, ...read])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That file could not be read.')
+    }
+  }
+
+  /**
+   * One attachment onto the message, through the one size gate.
+   *
+   * SHARED, because a letter can now arrive two ways — chosen by hand from Attach a letter, or
+   * brought along by the email template that carries it. Written twice, one of them would
+   * eventually forget the ceiling, and the failure is a 413 from the platform that arrives as
+   * "Could not reach the server" after the wait.
+   *
+   * Returns whether it went on, so a caller that has more to say can tell.
+   */
+  function addAttachment(file: Attached): boolean {
+    /* A two-page notice with a letterhead in it is around 70 KB, but a letterhead somebody
+       exported at photographic resolution is not, and the message either goes with its
+       attachments or does not go. */
+    const already = files.reduce((n, f) => n + f.size, 0)
+    if (already + file.size > MAX_ATTACHMENT_BYTES) {
+      setError(`That is more than ${fileSize(MAX_ATTACHMENT_BYTES)} of attachments, `
+        + 'which is as much as one message can carry.')
+      return false
+    }
+    setError(null)
+    setFiles((list) => [...list, file])
+    return true
+  }
+
+  /**
+   * A template chosen from the library: its words, and the letter it posts.
+   *
+   * THE ATTACHMENT IS THE HALF THAT MATTERS. `message_templates.attachment_id` is what makes a
+   * covering email's claim true — the library marks these on the list precisely because an email
+   * that says "please find the enclosed notice" and encloses nothing is a worse message than one
+   * that says nothing at all. Picking it here has to bring the letter with it, or the link the
+   * firm built in the library stops meaning anything the moment it is used.
+   *
+   * THE WORDS LAND EVEN IF THE LETTER WILL NOT DRAW. The error is shown and the subject and body
+   * are kept: somebody who can see what went wrong can attach the letter by hand, and throwing
+   * away their wording as well would help nobody.
+   */
+  /* Named `apply`, not `use`: a function whose name starts with "use" is read as a React hook by
+     the rules-of-hooks lint, which then refuses to let it be called from a callback. */
+  async function applyEmailTemplate(picked: {
+    template: { id: string; name: string; attachmentId: string | null }
+    subject: string | null
+    body: string
+    missing: string[]
+  }) {
+    setSubject(picked.subject ?? '')
+    setBody(picked.body)
+    setMissing(picked.missing)
+    if (!picked.template.attachmentId || !letterContext) return
+
+    setAttaching(picked.template.id)
+    try {
+      /* Read back rather than carried on the row: `attachment_id` is an id, and the letter it
+         points at is a whole other template with its own body to parse. */
+      const letter = (await fetchLibrary('collections'))
+        .find((r) => r.id === picked.template.attachmentId)
+      if (!letter) {
+        setError(`${picked.template.name} posts a letter that is no longer in the library.`)
+        return
+      }
+      addAttachment(await buildLetterAttachment({
+        template: letter,
+        values: letterContext.values,
+        reference: letterContext.reference,
+      }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAttaching(null)
     }
   }
 
@@ -309,23 +394,21 @@ export function ComposeEmailModal({
             about an account: a letter is merged against a debtor, a balance and a date, and a
             quotation follow-up to a lead has none of those.
           */}
+          {/*
+            THE FIRM'S OWN WORDING. Only where the message is about an account: the merge fields
+            on the sales side are a different set entirely, and a quotation follow-up to a lead
+            has no debtor to merge against.
+          */}
+          {letterContext && (
+            <UseTemplate scope="collections" kind="email" values={letterContext.values}
+              disabled={attaching !== null}
+              label={attaching ? 'Drawing the letter\u2026' : 'Use a template'}
+              onPick={(p) => void applyEmailTemplate(p)} />
+          )}
           {letterContext && (
             <AttachLetter values={letterContext.values} reference={letterContext.reference}
               onError={setError}
-              onAttached={(file) => {
-                /* Through the same size gate as a picked file. A two-page notice with a
-                   letterhead in it is around 70 KB, but a letterhead somebody exported at
-                   photographic resolution is not, and the message either goes with its
-                   attachments or does not go. */
-                const already = files.reduce((n, f) => n + f.size, 0)
-                if (already + file.size > MAX_ATTACHMENT_BYTES) {
-                  setError(`That is more than ${fileSize(MAX_ATTACHMENT_BYTES)} of attachments, `
-                    + 'which is as much as one message can carry.')
-                  return
-                }
-                setError(null)
-                setFiles((list) => [...list, file])
-              }} />
+              onAttached={addAttachment} />
           )}
           {files.length > 0 && (
             <div className="mt-2 basis-full flex flex-wrap gap-1.5">
@@ -366,6 +449,16 @@ export function ComposeEmailModal({
           </div>
         )}
         {contextNote && <p className="text-[11.5px] text-slate-400 mb-3 -mt-1">{contextNote}</p>}
+        {/*
+          ONLY WHEN THERE IS SOMETHING THIS ACCOUNT COULD NOT ANSWER. renderTemplate leaves the
+          placeholder standing in the box, so the fault is already visible -- but it is visible as
+          "{{respond_by}}" in the middle of a sentence, which reads as a mistake somebody made
+          rather than as a field the app could not fill. Naming it is what turns it into an
+          instruction. And a warning that fired when nothing was wrong would be one nobody reads.
+        */}
+        {missingFieldsNote(missing) && (
+          <p className="text-xs text-[var(--c-rust-deep)] mb-3">{missingFieldsNote(missing)}</p>
+        )}
         {error && <p className="text-xs text-red-600 mb-3">{error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="text-sm font-medium px-4 py-2 rounded-lg text-slate-500 hover:bg-slate-100">

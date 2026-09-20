@@ -95,6 +95,11 @@ you type in may not.
 - **Stored generated columns** (`is_settled`, `diary_entries.priority`, `commission_drift`) are
   computed on write. Changing the function does not recompute existing rows; an UPDATE does.
 - `en-ZA` groups thousands with a **non-breaking space** and renders September as **"Sept"**.
+  The non-breaking space **costs money in an SMS**: U+00A0 is not in the GSM alphabet, so one
+  merged `{{balance}}` drops the whole message to UCS-2 and cuts every segment from 160 characters
+  to 70 — a 94-character message going from R3.50 to R7.00, priced per segment under item 1(c).
+  `SmsModal` strips it out of the values **the app merged in**, and only those: the box still
+  *warns* about a curly apostrophe somebody typed rather than rewriting their words.
 
 ---
 

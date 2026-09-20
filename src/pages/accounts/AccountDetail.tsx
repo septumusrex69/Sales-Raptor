@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle, ArrowLeft, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2,
-  Mail, MapPin, MessageCircle, MessageSquare, Phone, Plus, Printer, Search, ShieldAlert, StickyNote,
+  Mail, MapPin, MessageCircle, MessageSquare, Phone, Plus, Printer, ScrollText, Search, ShieldAlert, StickyNote,
   User, Users, X, XCircle,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
@@ -54,6 +54,7 @@ import { TraceUploadModal } from './TraceUploadModal'
 import { PractitionerModal } from './PractitionerModal'
 import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
+import { CallScriptModal } from './CallScriptModal'
 import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
 import { DiariseModal } from '../../components/diary/DiariseModal'
 import { fetchQueries, type AccountQuery } from '../../lib/accountQueries'
@@ -176,6 +177,7 @@ export function AccountDetail() {
   const [freezing, setFreezing] = useState(false)
   const [askingClient, setAskingClient] = useState(false)
   const [smsOpen, setSmsOpen] = useState(false)
+  const [scriptOpen, setScriptOpen] = useState(false)
   /*
    * THE FIRM'S OWN HALF OF A LETTER — its trust account, who signs, its name.
    *
@@ -324,6 +326,69 @@ export function AccountDetail() {
     const schedule = scheduleFor(account.lastActionAt ?? account.handoverDate ?? new Date().toISOString())
     return { limit: feeCeiling(account.capitalHandedOver, schedule) }
   }, [account])
+
+  /*
+   * WHAT THE FIRM'S WORDING IS MERGED AGAINST, resolved here because this is the only place that
+   * holds all of it: the account, the balance struck from the three ledgers, the client whose
+   * book it is, and who is sending.
+   *
+   * HOISTED OUT OF THE COMPOSER, because it is no longer only a letter that needs it. At the
+   * firm's instruction -- "everything that we have in the library, to be in the account as well
+   * as an option" -- the SMS box and the email box both pick from the library now, and all three
+   * have to merge against THE SAME VALUES. Computed in two places they would drift, and the
+   * drift would be a debtor sent a balance by SMS that does not match the one in the letter
+   * posted the same day.
+   *
+   * mergeValuesFor had no caller at all until the composer. It was written, exported and checked,
+   * and nothing in the app had ever asked it a question -- which is worth knowing, because a
+   * resolver nobody calls is a resolver nobody notices is wrong.
+   *
+   * THE FIRM'S OWN DETAILS COME FROM THE DATABASE. They were fields nothing on earth could fill
+   * -- `firmName` was a string literal typed in here, and the trust account and the signatory
+   * were passed as literal null -- so a section 129 told the debtor to pay and did not say where.
+   * Library -> The firm is where they are set.
+   *
+   * WHAT IS STILL NULL IS STILL NULL, and deliberately: the debtor's postal address and the date
+   * to respond by are not the firm's details and do not belong on that screen. Passed as null
+   * rather than as an empty string, and then DROPPED from the map below -- renderTemplate treats
+   * a missing key and an empty string differently, and only the first leaves {{respond_by}}
+   * standing where somebody can see it. One of those gets caught; the other gets posted.
+   */
+  const letterContext = useMemo(() => ({
+    reference: account?.clientReference ?? account?.accountNumber ?? null,
+    values: account
+      ? Object.fromEntries(
+        Object.entries(mergeValuesFor({
+          account: {
+            debtorKind: account.debtorKind,
+            debtorTitle: account.debtorTitle,
+            debtorFirstName: account.debtorFirstName,
+            debtorSurname: account.debtorSurname,
+            accountNumber: account.accountNumber,
+            clientReference: account.clientReference,
+            capitalOutstanding: account.capitalOutstanding,
+            preferredLanguage: account.preferredLanguage,
+          },
+          balance: statement?.breakdown?.balance ?? null,
+          clientName: client?.name ?? null,
+          agentName: currentUser?.name ?? null,
+          agentPhone: currentUser?.phone ?? null,
+          firmName: firm.firmName,
+          today: dayKey(new Date()),
+          money: formatMoney,
+          debtorIdMasked: account.debtorIdNumber,
+          positionAsAt: dayKey(new Date()),
+          firmBank: firm.trustBank,
+          firmBankAccount: firm.trustAccountNumber,
+          signatoryName: firm.signatoryName,
+          signatoryTitle: firm.signatoryTitle,
+        })).filter((entry): entry is [string, string] => entry[1] !== null),
+      )
+      : {},
+  /* Before the early returns below, because a hook cannot run conditionally -- which is also why
+     it reads `statement` rather than the `b` shorthand, which is only defined past them. */
+  }), [account, statement?.breakdown?.balance, client?.name, currentUser?.name, currentUser?.phone, firm])
+
 
   if (loading) return <div className="p-10 grid place-items-center text-slate-400"><Loader2 size={20} className="animate-spin" /></div>
   if (error) return <Card className="border-negative-100 bg-negative-50"><p className="text-sm text-negative-700">{error}</p></Card>
@@ -674,6 +739,7 @@ export function AccountDetail() {
         onPromise={() => { setTab('Overview'); setPromiseOpen(true) }}
         onDispute={() => setDisputing(true)}
         onSms={() => setSmsOpen(true)}
+        onScript={() => setScriptOpen(true)}
         onDiarise={() => setDiariseOpen(true)}
         accountId={account.id}
         actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
@@ -842,7 +908,8 @@ export function AccountDetail() {
       )}
 
       {smsOpen && (
-        <SmsModal accountId={account.id} numbers={smsNumbers} onClose={() => setSmsOpen(false)} onDone={reload} />
+        <SmsModal accountId={account.id} numbers={smsNumbers} values={letterContext.values}
+          onClose={() => setSmsOpen(false)} onDone={reload} />
       )}
 
       {/*
@@ -915,58 +982,14 @@ export function AccountDetail() {
         />
       )}
 
+      {scriptOpen && (
+        <CallScriptModal values={letterContext.values} onClose={() => setScriptOpen(false)} />
+      )}
+
       {composeTo !== null && (
         <ComposeEmailModal
           to={composeTo}
-          /*
-           * WHAT A LETTER WOULD BE MERGED AGAINST, resolved here because this is the only place
-           * that holds all of it: the account, the balance struck from the three ledgers, the
-           * client whose book it is, and who is sending.
-           *
-           * mergeValuesFor had no caller at all until this one. It was written, exported and
-           * checked, and nothing in the app had ever asked it a question -- which is worth
-           * knowing, because a resolver nobody calls is a resolver nobody notices is wrong.
-           *
-           * THE FIRM'S OWN DETAILS NOW COME FROM THE DATABASE. They were nine fields nothing on
-           * earth could fill -- `firmName` was a string literal typed in here, and the trust
-           * account and the signatory were passed as literal null -- so a section 129 told the
-           * debtor to pay and did not say where. Library -> The firm is where they are set.
-           *
-           * WHAT IS STILL NULL IS STILL NULL, and deliberately: the debtor's postal address and
-           * the date to respond by are not the firm's details and do not belong on that screen.
-           * Passed as null rather than as an empty string, so the notice shows {{respond_by}}
-           * standing rather than a blank line that reads as finished. One of those gets caught.
-           */
-          letterContext={{
-            reference: account.clientReference ?? account.accountNumber ?? null,
-            values: Object.fromEntries(
-              Object.entries(mergeValuesFor({
-                account: {
-                  debtorKind: account.debtorKind,
-                  debtorTitle: account.debtorTitle,
-                  debtorFirstName: account.debtorFirstName,
-                  debtorSurname: account.debtorSurname,
-                  accountNumber: account.accountNumber,
-                  clientReference: account.clientReference,
-                  capitalOutstanding: account.capitalOutstanding,
-                  preferredLanguage: account.preferredLanguage,
-                },
-                balance: b?.balance ?? null,
-                clientName: client?.name ?? null,
-                agentName: currentUser?.name ?? null,
-                agentPhone: currentUser?.phone ?? null,
-                firmName: firm.firmName,
-                today: dayKey(new Date()),
-                money: formatMoney,
-                debtorIdMasked: account.debtorIdNumber,
-                positionAsAt: dayKey(new Date()),
-                firmBank: firm.trustBank,
-                firmBankAccount: firm.trustAccountNumber,
-                signatoryName: firm.signatoryName,
-                signatoryTitle: firm.signatoryTitle,
-              })).filter((entry): entry is [string, string] => entry[1] !== null),
-            ),
-          }}
+          letterContext={letterContext}
           recipients={(workspace?.contacts ?? [])
             .filter((c) => c.kind === 'email' && !c.retiredAt)
             .map((c) => ({ email: c.value, label: c.label ?? undefined }))}
@@ -1060,7 +1083,7 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onDiarise, accountId, actor, idNumber, debtorKind, onTraced, onUpload }: {
+function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onScript, onDiarise, accountId, actor, idNumber, debtorKind, onTraced, onUpload }: {
   /** Copied to the clipboard when XDS opens, once it is checked — see TraceButton. */
   idNumber: string | null
   /** Which number that field is meant to hold: an ID, or a registration number. */
@@ -1074,6 +1097,9 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
   onPromise: () => void
   onDispute: () => void
   onSms: () => void
+  /** The firm's wording for the call, merged against this debtor. Charges nothing: it is read,
+      not sent, and Annexure B prices actions rather than reading. */
+  onScript: () => void
   /** Put the account in somebody's diary. Charges nothing — it is a note about when, not an action. */
   onDiarise: () => void
   /** The account being worked, and who is working it — Call and Trace both charge fees. */
@@ -1102,6 +1128,9 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
             className={`${ACTION_BASE} ${ACTION_ENABLED}`} onDone={onTraced} />
         )
         : <Action icon={Phone} label="Call" title="No phone number on this account yet" />}
+      {/* Beside Call, because it is what somebody opens on their way into one. */}
+      <Action icon={ScrollText} label="Call script" onClick={onScript}
+        title="The firm's wording, with this debtor's figures in it" />
       <Action icon={MessageCircle} label="WhatsApp" title={soon} />
       {/* The number the SMS goes to is the same one Call rings: one number on file, one thing
           that happens when you reach for it. */}

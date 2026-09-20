@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Loader2, MessageSquare } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { useAuth } from '../../store/AuthContext'
 import { recordSentSms, sendAccountSms } from '../../lib/accountSms'
 import { smsCost } from '../../lib/smsSegments'
 import { scheduleFor } from '../../lib/annexureB'
+import { missingFieldsNote } from '../../lib/messageTemplates'
+import { UseTemplate } from '../../components/library/UseTemplate'
 
 /**
  * Write a debtor an SMS.
@@ -14,10 +16,19 @@ import { scheduleFor } from '../../lib/annexureB'
  * Word costs more than that again. A collector who can see "2 messages, R6.90" before they press
  * send will shorten it; one who finds out on the statement will not.
  */
-export function SmsModal({ accountId, numbers, onClose, onDone }: {
+export function SmsModal({ accountId, numbers, values, onClose, onDone }: {
   accountId: string
   /** Every number on the account, primary first. The collector picks; the app does not guess. */
   numbers: { label: string; value: string }[]
+  /**
+   * What the firm's wording is merged against, resolved by the page that opened this.
+   *
+   * At the firm's instruction: "everything that we have in the library, to be in the account as
+   * well as an option." Before this, an SMS template could only be read in the library and typed
+   * out again from memory -- which is how a message the firm priced at R3.50 goes out at R7.00
+   * because somebody's retyping ran to 161 characters.
+   */
+  values: Record<string, string>
   onClose: () => void
   onDone: () => Promise<void>
 }) {
@@ -27,6 +38,35 @@ export function SmsModal({ accountId, numbers, onClose, onDone }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sent, setSent] = useState<{ segments: number; charged: string } | null>(null)
+  /* Named once, when the template lands. Not recomputed as the collector edits: they may well be
+     typing the missing figure in by hand, and a warning that will not go away is one people learn
+     to look past. */
+  const [missing, setMissing] = useState<string[]>([])
+
+  /*
+   * THE APP'S OWN FORMATTING, MADE SAFE FOR THIS CHANNEL — and this is a money fix, not tidiness.
+   *
+   * en-ZA groups thousands with a NON-BREAKING SPACE (CLAUDE.md says so, and formatMoney obliges),
+   * so a merged {{balance}} arrives carrying U+00A0. That character is not in the GSM alphabet, so
+   * ONE of them drops the whole message to UCS-2 and cuts every segment from 160 characters to 70.
+   * Measured on the real thing: "Good day Mhlongo. Your account REF/0 is R 180,000.00 in arrears.
+   * Please telephone Test Leader." is 94 characters — one segment at R3.50 with an ordinary space,
+   * TWO at R7.00 with the non-breaking one. Every templated SMS carrying a balance cost the firm
+   * double, and the warning it produced named the offending character as " ", which nobody could
+   * act on.
+   *
+   * ONLY THE VALUES THE APP MERGED IN, never what the collector typed. The warning beside the box
+   * deliberately tells a writer about a curly apostrophe rather than silently rewriting their
+   * words, and that stays true. But the firm should not be charged twice for a space Raptor chose
+   * to put there itself.
+   *
+   * A non-breaking space means nothing in an SMS that an ordinary one does not: there is no line
+   * to break.
+   */
+  const smsValues = useMemo(
+    () => Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.replace(/\u00a0/g, ' ')])),
+    [values],
+  )
 
   const cost = smsCost(text)
   const rate = scheduleFor(new Date()).items.find((i) => i.id === '1c')?.amount ?? 0
@@ -96,6 +136,19 @@ export function SmsModal({ accountId, numbers, onClose, onDone }: {
               </select>
             </label>
           )}
+          {/*
+            THE FIRM'S OWN WORDING, ABOVE THE BOX. The cost line below updates as soon as it
+            lands, so a template that runs to two segments says so before it is sent rather than
+            on the statement.
+          */}
+          <div className="flex items-center justify-between gap-2">
+            <UseTemplate scope="collections" kind="sms" values={smsValues}
+              onPick={(p) => { setText(p.body); setMissing(p.missing) }} />
+            {text && (
+              <button type="button" onClick={() => { setText(''); setMissing([]) }}
+                className="text-[11px] text-slate-400 hover:text-slate-600">Clear</button>
+            )}
+          </div>
           <textarea
             rows={5}
             autoFocus
@@ -120,6 +173,11 @@ export function SmsModal({ accountId, numbers, onClose, onDone }: {
               </span>
             )}
           </div>
+
+          {/* Only when there IS something this account could not answer. */}
+          {missingFieldsNote(missing) && (
+            <p className="text-[11px] text-[var(--c-rust-deep)]">{missingFieldsNote(missing)}</p>
+          )}
 
           {error && <p className="text-sm text-negative-700">{error}</p>}
 

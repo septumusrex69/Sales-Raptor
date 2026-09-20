@@ -3,17 +3,10 @@ import { FileText, Loader2, Paperclip } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { fetchLibrary, type LibraryTemplate } from '../../lib/templateLibrary.ts'
 import { defaultOf, fetchLetterheads, type Letterhead } from '../../lib/letterheads.ts'
-import {
-  canUseLetter, letterProblems, parseLetter, A4_LETTERHEAD,
-} from '../../lib/letterDocument.ts'
-import { letterFilename, letterToPdf, toBase64 } from '../../lib/letterPdf.ts'
+import { canUseLetter, letterProblems, parseLetter } from '../../lib/letterDocument.ts'
+import { buildLetterAttachment, type AttachedFile } from '../../lib/letterAttachment.ts'
 
-export interface AttachedFile {
-  filename: string
-  contentType: string
-  size: number
-  content: string
-}
+export type { AttachedFile }
 
 /**
  * ATTACHING THE FIRM'S OWN LETTER TO AN EMAIL, AS A PDF.
@@ -65,40 +58,16 @@ export function AttachLetter({ values, reference, onAttached, onError }: {
     return () => { cancelled = true }
   }, [open, rows, onError])
 
+  /*
+   * THE BYTES ARE MADE IN buildLetterAttachment, not here. An email template in the library can
+   * carry a letter, so the template picker inside an account has to be able to turn one into a
+   * PDF too — and two implementations of "draw the firm's notice" would eventually disagree
+   * about which one is the letter the firm approved.
+   */
   async function attach(row: LibraryTemplate) {
-    const doc = parseLetter(row.body)
-    if (!doc) { onError('That letter could not be read back, so nothing was attached.'); return }
     setBusy(row.id)
     try {
-      /*
-       * THE LETTERHEAD IS FETCHED AS BYTES, not pointed at. A PDF embeds its images; a URL in a
-       * PDF is a picture that is only there while the reader is online, which a posted notice
-       * cannot rely on and an emailed one should not.
-       */
-      let head: { bytes: Uint8Array; type: 'png' | 'jpg' } | null = null
-      if (letterhead) {
-        const res = await fetch(letterhead.url)
-        if (res.ok) {
-          head = {
-            bytes: new Uint8Array(await res.arrayBuffer()),
-            type: /\.jpe?g($|\?)/i.test(letterhead.url) ? 'jpg' : 'png',
-          }
-        }
-      }
-      const bytes = await letterToPdf({
-        doc,
-        page: letterhead?.page ?? A4_LETTERHEAD,
-        /* Always filled. A notice posted with {{balance}} in it is not a notice. */
-        filled: true,
-        values,
-        letterhead: head,
-      })
-      onAttached({
-        filename: letterFilename(row.name, reference),
-        contentType: 'application/pdf',
-        size: bytes.length,
-        content: toBase64(bytes),
-      })
+      onAttached(await buildLetterAttachment({ template: row, values, reference, letterhead }))
       setOpen(false)
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e))

@@ -349,6 +349,21 @@ export function sampleValues(): Record<string, string> {
   )
 }
 
+/**
+ * The sentence to show when a template asked for something this account could not answer.
+ *
+ * NULL WHEN THERE IS NOTHING WRONG, which is the whole contract. CLAUDE.md: a warning that fires
+ * when nothing is wrong is worse than no warning, because people stop reading it — and this one
+ * has to still be read on the day it matters.
+ */
+export function missingFieldsNote(missing: string[]): string | null {
+  if (missing.length === 0) return null
+  const names = missing.map((f) => `{{${f}}}`).join(', ')
+  return missing.length === 1
+    ? `${names} could not be filled from this account, and will send with the braces in it.`
+    : `${names} could not be filled from this account, and will send with the braces in them.`
+}
+
 /* ---------------------------------------------------------------- what the account answers with */
 
 /** Just enough of an account to write to its debtor. Passed in, so this file fetches nothing. */
