@@ -517,6 +517,90 @@ try {
     spans.map((x) => `${x.text}${x.bold ? '*' : ''}`).join('|'),
     '{{reference}}Read this |carefully*')
 
+  /* ---------- pasting a whole notice in ---------- */
+
+  /*
+   * THE FIRM'S OWN WORKFLOW: "I try to paste something like this, you know, copy and paste. I
+   * think this is much easier than just writing everything from scratch. So if someone, for
+   * example, makes something in Claude, write something and you can just copy and paste it into
+   * the letterhead on the system."
+   *
+   * WHY THIS NEEDS A BROWSER AND NOT ONLY check-letter-paste.mjs. That file asserts the
+   * conversion; what it cannot tell you is what Chromium DOES with the result. The page is parsed
+   * as ONE string by topLevelBlocks, which only sees elements at depth zero -- and a paste lands
+   * where the caret is, which is inside a paragraph. If execCommand('insertHTML') nested the
+   * whole notice inside that <p> instead of splitting it, every pasted heading and table would
+   * come back as one paragraph of run-together words. That is a browser behaviour, so only a
+   * browser can answer it.
+   */
+  /* The Save above closed the editor, so the letter is opened again for this. */
+  await page.getByText('Section 129 notice', { exact: true }).first().click()
+  await page.waitForTimeout(600)
+  await page.getByRole('button', { name: 'Edit' }).click()
+  await page.waitForTimeout(800)
+
+  const pasteSheet = page.locator('.ltr-page [contenteditable="true"]').first()
+  await pasteSheet.click()
+  /* At the very end, so what lands is added to the letter rather than over the middle of it. */
+  await pasteSheet.evaluate((el) => {
+    const r = document.createRange()
+    r.selectNodeContents(el)
+    r.collapse(false)
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r)
+  })
+  await page.waitForTimeout(200)
+
+  /*
+   * A REAL PASTE EVENT, carrying both flavours exactly as a clipboard does. Not a call into the
+   * component: the handler reads clipboardData, and a test that bypassed that would be testing
+   * something the browser never runs.
+   */
+  const pastedBlocks = await pasteSheet.evaluate((el) => {
+    const dt = new DataTransfer()
+    dt.setData('text/html',
+      '<h2>HOW TO PAY</h2>'
+      + '<p>Pay the <strong>full amount</strong> into the trust account below.</p>'
+      + '<table><tr><th>Account name</th><th>Bredell Ferreira Trust</th></tr>'
+      + '<tr><td>Account number</td><td>01 234 5678</td></tr></table>'
+      + '<ul><li>Quote the reference.</li><li>Send proof on the day you pay.</li></ul>')
+    dt.setData('text/plain', 'HOW TO PAY Pay the full amount into the trust account below.')
+    el.dispatchEvent(new ClipboardEvent('paste', {
+      clipboardData: dt, bubbles: true, cancelable: true,
+    }))
+    return el.innerHTML
+  })
+  await page.waitForTimeout(500)
+
+  /*
+   * THE FOUR SHAPES, AT THE TOP LEVEL OF THE SHEET. Asserted on the sheet's own HTML rather than
+   * on the saved document, because this is the question about the browser: did the paste end up
+   * nested inside the paragraph the caret was in?
+   */
+  for (const [what, re] of [
+    ['a heading', /<h[123][^>]*>\s*HOW TO PAY/],
+    ['a table', /<table[\s\S]*?01 234 5678/],
+    ['a list', /<ul>[\s\S]*?Quote the reference/],
+    ['the bold run', /<b>full amount<\/b>|<strong>full amount<\/strong>/],
+  ]) {
+    t.ok(`a pasted notice keeps ${what}`, re.test(pastedBlocks))
+  }
+  /* AND NONE OF THE MARKUP IT ARRIVED IN. <th> is kept; class= and style= are not ours. */
+  t.check('...and brings no foreign markup with it',
+    /MsoNormal|mso-|<o:p|<span style/.test(pastedBlocks), false)
+
+  /*
+   * THEN READ BACK AS A DOCUMENT, which is the half that decides what SAVES. A heading nested
+   * inside a paragraph renders almost correctly and parses as one run-together paragraph.
+   */
+  const afterPaste = await page.evaluate(() => {
+    const el = document.querySelector('.ltr-page [contenteditable="true"]')
+    return el ? el.innerHTML : ''
+  })
+  t.ok(`the pasted heading is at the top level, not nested in a paragraph (${afterPaste.length} chars)`,
+    /<(h[123]|table|ul)\b/.test(afterPaste.replace(/<p\b[^>]*>[\s\S]*?<\/p>/g, '')))
+
+  await t.shot(page, '66-library-letter-paste')
+
   /* ---------- editing, and the merge field you press ---------- */
 
   await page.getByRole('button', { name: 'Collections', exact: true }).click()

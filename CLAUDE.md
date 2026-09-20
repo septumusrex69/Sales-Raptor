@@ -86,6 +86,16 @@ the rest of the notice with it — and **the sheet is never `transform: scale()`
 browser hit-tests the caret in unscaled coordinates. A preview may be photographed down; a thing
 you type in may not.
 
+**A paste keeps its shape and still not its markup.** `clipboardToLetterHtml`
+(`src/lib/letterPaste.ts`) converts what is on the clipboard **into** the same closed tag set —
+rich text through a sanitiser, Markdown through a converter, and an ordinary sentence not at all
+(it returns null and the caller inserts plain text). This replaced a plain-text paste, which was
+the wrong trade for the way the firm works: a whole section 129 pasted in arrived as forty lines
+of body text with "1 YOUR DEFAULT" in the middle of one. **The honesty was never in the plain
+text, it was in the closed set** — so do not "fix" this back. Two things it must keep doing:
+a `<span class="ltr-n">` copied out of the editor carries the **drawn** section number, which has
+to be dropped while the numbering itself survives; and `<style>` contents are not text.
+
 **Things that bite:**
 - `protect_closed_diary_entries` **silently reverts** edits to `done`/`moved` entries. It does
   not raise.

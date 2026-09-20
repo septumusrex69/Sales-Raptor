@@ -8,6 +8,7 @@ import {
   type LetterDocument, type PageSetup,
 } from '../../lib/letterDocument.ts'
 import { defaultOf, fetchLetterheads } from '../../lib/letterheads'
+import { clipboardToLetterHtml } from '../../lib/letterPaste.ts'
 
 /**
  * TYPING ON THE PAGE.
@@ -222,15 +223,37 @@ export function LetterPageEditor({ doc, onChange, readOnly, insertRef }: {
               data-letter-sheet
               onInput={() => { remember(); read() }}
               /*
-               * PLAIN TEXT ON PASTE. documentHtmlToBlocks would survive the markup either way —
-               * it drops what it does not recognise — but this keeps what is IN the page honest
-               * too, so what somebody sees while typing is what they will get. A copy out of Word
-               * arrives as words rather than as a stylesheet.
+               * A PASTE KEEPS ITS SHAPE, AND STILL NOT ITS MARKUP.
+               *
+               * The firm: "I try to paste something like this... I think this is much easier than
+               * just writing everything from scratch. So if someone, for example, makes something
+               * in Claude, write something and you can just copy and paste it into the letterhead
+               * on the system."
+               *
+               * This used to insert PLAIN TEXT, on the reasoning that keeping the page honest
+               * mattered more than keeping the markup. That was the wrong trade for the way the
+               * firm works: a whole section 129 pasted in arrived as forty lines of body text
+               * with "1 YOUR DEFAULT" in the middle of it, both tables flattened into loose
+               * lines, and the consequences reading as one grey paragraph.
+               *
+               * clipboardToLetterHtml converts INTO the same closed tag set documentHtmlToBlocks
+               * reads back, so the honesty is kept where it actually lived — in the closed set,
+               * not in the plain text. A paste out of Word still arrives as words rather than as
+               * a stylesheet; it just arrives as words that kept their shape.
+               *
+               * NULL FOR AN ORDINARY SENTENCE, which is most pastes, and then this behaves
+               * exactly as it did before.
                */
               onPaste={(e) => {
                 if (readOnly) return
                 e.preventDefault()
-                document.execCommand('insertText', false, e.clipboardData.getData('text/plain'))
+                const text = e.clipboardData.getData('text/plain')
+                const structured = clipboardToLetterHtml({
+                  html: e.clipboardData.getData('text/html'),
+                  text,
+                })
+                if (structured) document.execCommand('insertHTML', false, structured)
+                else document.execCommand('insertText', false, text)
                 remember()
                 read()
               }}

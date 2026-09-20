@@ -106,9 +106,11 @@ ok('a stylesheet pasted in does not become words of the letter',
 /* ------------------------------------------------------------------ what a browser emits */
 
 /*
- * WORD. The firm writes in Word and pastes. The editor pastes as plain text, so this is the belt
- * to that brace: if a route into the page ever carries markup, forty tags of Office markup must
- * still arrive as four paragraphs of words and nothing else.
+ * WORD. The firm writes in Word and pastes. clipboardToLetterHtml now converts a paste into this
+ * model's own tag set before it reaches the page, so Office markup should never get this far --
+ * which is exactly why it is asserted here too. This is the belt to that brace: whatever route
+ * markup arrives by, forty tags of it must still come out as paragraphs of words and nothing
+ * else. See check-letter-paste.mjs for the conversion itself.
  */
 const WORD = '<p class=MsoNormal><span style=\'font-family:"Calibri",sans-serif\'>'
   + 'Dear Mr Van Der Westhuizen<o:p></o:p></span></p>'
@@ -316,8 +318,22 @@ ok('the document is built by the parse and never from the browser’s own markup
   /documentHtmlToBlocks\(sheet\.current\.innerHTML\)/.test(editor)
   && !/onChange\(\s*\{[^}]*innerHTML/.test(editor))
 
-/* A paste arrives as words. insertText, not insertHTML. */
-ok('a paste is inserted as text', /onPaste[\s\S]{0,400}?insertText/.test(editor))
+/*
+ * A PASTE KEEPS ITS SHAPE AND STILL NOT ITS MARKUP.
+ *
+ * This used to assert the opposite -- that a paste was inserted as plain TEXT -- and that was the
+ * wrong trade for the way the firm works: a whole section 129 pasted in arrived as forty lines of
+ * body text with "1 YOUR DEFAULT" in the middle of one. The honesty was never in the plain text,
+ * it was in the closed tag set, so the paste now goes through clipboardToLetterHtml, which
+ * converts INTO that set. check-letter-paste.mjs is where the conversion itself is asserted.
+ *
+ * THE FALLBACK STAYS, and is the half worth naming here: most pastes are a sentence, and for
+ * those clipboardToLetterHtml returns null and the text is inserted unchanged.
+ */
+ok('a paste is converted into the letter\u2019s own tag set',
+  /onPaste[\s\S]{0,900}?clipboardToLetterHtml\(\{/.test(editor))
+ok('...and an ordinary sentence still arrives as text',
+  /onPaste[\s\S]{0,900}?else document\.execCommand\('insertText'/.test(editor))
 
 /*
  * AND THE SELECTION IS WATCHED RATHER THAN SAMPLED. The first cut of this remembered the caret
