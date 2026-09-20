@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Italic, List, ListOrdered,
   PenLine, SquareSplitVertical, Table as TableIcon, Underline,
@@ -9,6 +9,7 @@ import {
 } from '../../lib/letterDocument.ts'
 import { defaultOf, fetchLetterheads } from '../../lib/letterheads'
 import { clipboardToLetterHtml } from '../../lib/letterPaste.ts'
+import { planPageBreaks } from '../../lib/pageBreaks.ts'
 
 /**
  * TYPING ON THE PAGE.
@@ -30,10 +31,15 @@ import { clipboardToLetterHtml } from '../../lib/letterPaste.ts'
  * print at the mercy of whatever Chrome felt like emitting, and a defective statutory demand is
  * one the credit provider cannot go to court on.
  *
- * WHAT IS NOT HERE YET, said plainly rather than left to be discovered: live page breaks. The
- * sheet scrolls as one continuous page, so where page two starts is shown by the PDF and not
- * here. Running the layout engine on every keystroke is the way to do it and it is the next
- * piece; holding this back for it would have been the wrong trade.
+ * THE PAGE BREAKS ARE LIVE. They were not, and the firm said so: "I don't think that page breaks
+ * are there. I think the page should break automatically." The sheet is still one box — see
+ * `repaginate` below for why that is deliberate and how the breaks are made without splitting it.
+ *
+ * WHAT IS STILL NOT EXACT, said plainly rather than left to be discovered: where this breaks is
+ * measured in the BROWSER, in the face the screen is using, while the PDF paginates with its own
+ * engine in the fonts a PDF has. Near a boundary the two can differ by a line. The PDF is what
+ * prints; this is what you are typing on, and a break shown where the browser actually broke is
+ * the honest thing to show on it.
  */
 export function LetterPageEditor({ doc, onChange, readOnly, insertRef }: {
   doc: LetterDocument
@@ -170,15 +176,127 @@ export function LetterPageEditor({ doc, onChange, readOnly, insertRef }: {
     tick((n) => n + 1)
   }
 
-  /** Put an element where the caret is, then re-read. Used for the things execCommand cannot do. */
+  /**
+   * Put a BLOCK where the caret is — a table, a signature, a page break, or a whole notice off
+   * the clipboard — and then re-read.
+   *
+   * NOT execCommand('insertHTML'), AND THIS COST A BUG. execCommand inserts at the caret and
+   * leaves the result wherever the caret happened to be: paste with the cursor at the end of a
+   * bulleted list and Chromium nests the entire thing INSIDE the <ul>. The page still showed it,
+   * because a browser will draw a heading inside a list quite happily — but topLevelBlocks only
+   * sees elements at depth zero, so the parse came back with the six blocks it started with, the
+   * save wrote those six, and the next render drew them. The paste vanished with nothing on
+   * screen to say why. The firm's report of a paste "not working" is exactly this.
+   *
+   * So the block is placed AFTER the top-level block the caret is in, by hand. A paste of whole
+   * sections is not something anybody wants cut into the middle of a sentence anyway.
+   *
+   * THE COST, said rather than discovered: a hand-placed node is not on the browser's undo stack,
+   * so Ctrl+Z will not take a pasted notice back out. Selecting it and deleting does. That is a
+   * worse undo and a correct document, and for a statutory demand it is the right way round.
+   */
   const insert = (html: string) => {
-    if (readOnly || !sheet.current) return
+    const root = sheet.current
+    if (readOnly || !root) return
     restore()
-    document.execCommand('insertHTML', false, html)
+    insertAtTopLevel(root, html)
     remember()
     read()
     tick((n) => n + 1)
   }
+
+  /*
+   * WHERE THE PAGE ENDS, MEASURED OFF THE PAGE ITSELF.
+   *
+   * The firm, pointing at the letterhead's footer block printed across a paragraph: "I don't
+   * think that page breaks are there. I think the page should break automatically."
+   *
+   * THE SHEET STAYS ONE CONTENTEDITABLE. One box per page is the obvious shape and it is a trap:
+   * a sentence typed at the foot of page one has to flow onto page two as it is typed, which
+   * means moving the caret between boxes mid-keystroke. Instead each block that would straddle a
+   * boundary is given padding above it, so it starts at the top of the next page.
+   *
+   * PUSHED WITH A MARGIN IN PIXELS, and both halves of that are load-bearing.
+   *
+   * A MARGIN, not padding: padding grows a block downward from the same top edge, so the text
+   * moves onto the next page while the block's BOX still starts on the previous one. Invisible on
+   * a paragraph and plainly wrong on a bordered table, whose rule would be drawn across the
+   * letterhead's footer -- the very thing being fixed.
+   *
+   * IN PIXELS, because documentHtmlToBlocks reads `margin-top` off a block as the letter's OWN
+   * spacing -- but only in MILLIMETRES; `mmOf` refuses every other unit, which
+   * check-page-editor.mjs already asserts in as many words. So a pixel margin moves the box and
+   * is invisible to the parse, and the page layout never gets written into the saved document. A
+   * letter that stored its page breaks would carry last week's onto a different letterhead.
+   *
+   * AND THE GAP IS ADDED BACK, which is the part that looks like a detail and is not: CSS
+   * collapses a block's top margin against the one above it, so setting the push alone gives a
+   * shift of max(gap, push) rather than gap + push, and every break lands a few millimetres
+   * short. The natural gap is measured and included.
+   *
+   * MEASURED IN THE BROWSER rather than planned from the model. The PDF paginates with its own
+   * engine in its own font metrics; this measures what is actually on the screen, in the face the
+   * screen is using. Near a boundary the two can differ by a line, and the PDF is the one that
+   * prints -- but a break shown where the browser has actually broken is the honest thing for a
+   * page you are typing on.
+   */
+  const [pages, setPages] = useState(1)
+  const [overlong, setOverlong] = useState(0)
+
+  const repaginate = useCallback(() => {
+    const el = sheet.current
+    if (!el) return
+    const kids = [...el.children] as HTMLElement[]
+    /* Pixels per millimetre, taken off the sheet's own width rather than assumed: the browser
+       decides what a millimetre is, and at some zoom levels it is not 3.7795. */
+    const perMm = el.getBoundingClientRect().width / (sheetPage.widthMm - sheetPage.marginLeftMm
+      - sheetPage.marginRightMm)
+    if (!(perMm > 0)) return
+
+    /* Cleared first, or every measurement is of the PREVIOUS plan's positions and the pushes
+       compound a page at a time. */
+    for (const kid of kids) kid.style.marginTop = ''
+
+    /*
+     * Measured ONCE, with nothing pushed, and used for both the plan and the gaps below. Read
+     * again after the first margin is set, every later number would be of a page half re-laid.
+     *
+     * getBoundingClientRect, NOT offsetTop. offsetTop is rounded to whole pixels, so a block
+     * pushed to exactly one page down measures back a fraction short of the boundary, is read as
+     * being on the page above, and is pushed a second time. The rect is fractional.
+     */
+    const origin = el.getBoundingClientRect().top
+    const rects = kids.map((k) => k.getBoundingClientRect())
+    const tops = rects.map((r) => r.top - origin)
+    const heights = rects.map((r) => r.height)
+
+    const plan = planPageBreaks({
+      tops,
+      heights,
+      pageHeight: sheetPage.heightMm * perMm,
+      marginTop: sheetPage.marginTopMm * perMm,
+      marginBottom: sheetPage.marginBottomMm * perMm,
+      /* One pixel. Everything here is measured off a browser mid-layout, and a block that lands
+         a hair short of a boundary must not be pushed round to the next page for it. */
+      tolerance: 1,
+    })
+    kids.forEach((kid, i) => {
+      const push = plan.pushes[i] ?? 0
+      if (push <= 0) { kid.style.marginTop = ''; return }
+      /* The gap this block already had above it, which the collapse would otherwise swallow. */
+      const gap = i === 0 ? tops[0] : tops[i] - (tops[i - 1] + heights[i - 1])
+      kid.style.marginTop = `${push + Math.max(0, gap)}px`
+    })
+    setPages(plan.pages)
+    setOverlong(plan.overlong.length)
+  }, [sheetPage])
+
+  /*
+   * BEFORE THE BROWSER PAINTS, so the page never shows one frame with the text lying across the
+   * letterhead's footer and then jumping. And on every edit, because a single character can be
+   * the one that tips a paragraph over a boundary.
+   */
+  useLayoutEffect(() => { repaginate() })
 
   /*
    * THE HANDLE THE MERGE-FIELD BUTTONS REACH THROUGH. They live outside this component, beside
@@ -209,9 +327,18 @@ export function LetterPageEditor({ doc, onChange, readOnly, insertRef }: {
         photographed down (see LetterPage); a thing you type in may not.
       */}
       <div className="rounded-xl bg-slate-200/70 p-5 overflow-auto max-h-[calc(100vh-18rem)]">
-        <div className="mx-auto shadow-lg" style={{ width: `${sheetPage.widthMm}mm` }}>
+        <div className="mx-auto shadow-lg relative" style={{ width: `${sheetPage.widthMm}mm` }}>
           <style>{letterCss(doc, sheetPage)}</style>
-          <div className="ltr-page">
+          {/*
+            THE LETTERHEAD ON EVERY PAGE, not once at the top. This is the fault the firm circled:
+            painted once, the footer block with the phone number and the VAT number sat across the
+            middle of a two-page notice, and everything below it was on blank paper. Repeated down
+            the sheet, each page gets its own — which is what the printer does.
+          */}
+          <div className="ltr-page" style={{
+            minHeight: `${sheetPage.heightMm * pages}mm`,
+            backgroundRepeat: sheetPage.backgroundUrl ? 'repeat-y' : 'no-repeat',
+          }}>
             <div
               ref={sheet}
               className="ltr-body outline-none"
@@ -252,20 +379,82 @@ export function LetterPageEditor({ doc, onChange, readOnly, insertRef }: {
                   html: e.clipboardData.getData('text/html'),
                   text,
                 })
-                if (structured) document.execCommand('insertHTML', false, structured)
-                else document.execCommand('insertText', false, text)
-                remember()
-                read()
+                /* Structured content is placed at the top level -- see `insert` above for the
+                   bug that taught us execCommand will not. Plain text stays on execCommand,
+                   which keeps it on the browser's undo stack where it belongs. */
+                if (structured) insert(structured)
+                else {
+                  document.execCommand('insertText', false, text)
+                  remember()
+                  read()
+                }
               }}
             />
-            {/* Not editable: the running line is page furniture and is set in the bar above. */}
-            <div contentEditable={false}
-              dangerouslySetInnerHTML={{
-                __html: runningFootHtml(doc, { filled: false, values: {}, page: 1, pages: 1 }),
-              }} />
+          </div>
+
+          {/*
+            WHERE EACH PAGE ENDS, DRAWN OVER THE SHEET.
+            
+            OUTSIDE THE CONTENTEDITABLE and pointer-events:none, so none of it can be typed into,
+            selected, or read back by documentHtmlToBlocks. Anything inside that box is the letter;
+            this is furniture.
+
+            THE BAND IS THE DEAD ZONE, not a hairline: it covers one page's bottom margin and the
+            next page's top margin together, which is the strip the letterhead draws its own
+            footer and logo into. Shown as the space it is, so it reads as "nothing goes here"
+            rather than as a line somebody has to interpret.
+          */}
+          <div aria-hidden className="absolute inset-0 pointer-events-none">
+            {Array.from({ length: Math.max(0, pages - 1) }, (_, i) => (
+              <div key={i} className="absolute left-0 right-0 flex items-center justify-end"
+                style={{
+                  top: `${(i + 1) * sheetPage.heightMm - sheetPage.marginBottomMm}mm`,
+                  height: `${sheetPage.marginBottomMm + sheetPage.marginTopMm}mm`,
+                  background: 'repeating-linear-gradient(135deg,'
+                    + ' rgba(148,163,184,.10) 0 6px, rgba(148,163,184,.02) 6px 12px)',
+                  borderTop: '1px dashed rgba(100,116,139,.45)',
+                  borderBottom: '1px dashed rgba(100,116,139,.45)',
+                }}>
+                <span className="text-[9px] uppercase tracking-widest text-slate-500 pr-3">
+                  Page {i + 2}
+                </span>
+              </div>
+            ))}
+            {/*
+              THE RUNNING LINE, ONCE PER PAGE AND NUMBERED. It was drawn once under the whole
+              letter reading "Page 1 of 1", which on a three-page notice was simply untrue. Laid
+              in the bottom margin of each page, where the printer puts it.
+            */}
+            {Array.from({ length: pages }, (_, i) => (
+              <div key={`f${i}`} className="absolute"
+                style={{
+                  top: `${(i + 1) * sheetPage.heightMm - sheetPage.marginBottomMm}mm`,
+                  left: `${sheetPage.marginLeftMm}mm`,
+                  right: `${sheetPage.marginRightMm}mm`,
+                }}
+                dangerouslySetInnerHTML={{
+                  __html: runningFootHtml(doc, {
+                    filled: false, values: {}, page: i + 1, pages,
+                  }),
+                }} />
+            ))}
           </div>
         </div>
       </div>
+
+      {/*
+        SAID ONLY WHEN IT IS TRUE. A block taller than a whole page cannot be pushed anywhere that
+        helps -- pushing it leaves a blank page and the same overflow underneath. The layout engine
+        that makes the PDF splits a long table by its rows; the editor cannot split a live element,
+        so it says so rather than quietly drawing something wrong.
+      */}
+      {overlong > 0 && (
+        <p className="text-xs text-[var(--c-rust-deep)]">
+          {overlong === 1
+            ? 'One block is taller than a page, so it runs over the foot of one. It will be split across pages when the letter is printed.'
+            : `${overlong} blocks are taller than a page, so they run over the foot of one. They will be split across pages when the letter is printed.`}
+        </p>
+      )}
     </div>
   )
 }
@@ -448,4 +637,48 @@ function Btn({ title, label, on, disabled, onClick, children }: {
       {children}
     </button>
   )
+}
+
+/**
+ * Put block-level HTML in at the TOP LEVEL of the sheet, after whatever block the caret is in.
+ *
+ * WHY THIS EXISTS. `document.execCommand('insertHTML')` puts the markup wherever the caret is,
+ * and a caret at the end of a letter is inside its last block. Pasting a notice with the cursor
+ * in a bulleted list nested the whole thing inside the `<ul>` — drawn correctly, parsed as
+ * nothing, and gone on the next render. topLevelBlocks reads elements at depth zero and nothing
+ * below, which is what keeps the document a closed set of shapes; the price is that anything put
+ * INTO it has to arrive at that depth.
+ *
+ * AFTER THE BLOCK, NEVER INSIDE IT. Splitting a paragraph around a pasted table is not something
+ * anybody asks for, and the browsers that try do it differently from each other.
+ */
+function insertAtTopLevel(root: HTMLElement, html: string): void {
+  const fragment = document.createRange().createContextualFragment(html)
+  /* Held before the insert, because a fragment is emptied by it and this is how the caret finds
+     its way to the end of what just arrived. */
+  const last = fragment.lastChild
+
+  /* Up from the caret to the child of the sheet that contains it. Null when the selection is not
+     in the sheet at all, and then the block goes at the end, which is where somebody who has not
+     clicked into the page would expect it. */
+  const selection = window.getSelection()
+  let node: Node | null = selection && selection.rangeCount > 0
+    ? selection.getRangeAt(0).endContainer
+    : null
+  let top: Node | null = null
+  while (node && node !== root) {
+    if (node.parentNode === root) { top = node; break }
+    node = node.parentNode
+  }
+
+  if (top?.nextSibling) root.insertBefore(fragment, top.nextSibling)
+  else root.appendChild(fragment)
+
+  if (last && selection) {
+    const range = document.createRange()
+    range.setStartAfter(last)
+    range.collapse(true)
+    selection.removeAllRanges()
+    selection.addRange(range)
+  }
 }

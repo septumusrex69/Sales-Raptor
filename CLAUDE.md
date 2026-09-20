@@ -86,6 +86,22 @@ the rest of the notice with it — and **the sheet is never `transform: scale()`
 browser hit-tests the caret in unscaled coordinates. A preview may be photographed down; a thing
 you type in may not.
 
+**The page breaks are live, and the push is a pixel margin.** `planPageBreaks`
+(`src/lib/pageBreaks.ts`) is measured against the rendered sheet on every edit, and any block that
+would cross a boundary is given a top margin **in pixels** so its whole box starts on the next
+page. Three things there are load-bearing: **a margin, not padding** (padding moves the text and
+leaves the box — a bordered table then prints its rule across the letterhead's footer); **pixels,
+not millimetres**, because `mmOf` reads only `mm`, which is what keeps the page layout out of the
+saved document; and **the collapsed gap added back**, or CSS collapses the push into the existing
+margin and every break lands short. The letterhead is `repeat-y`, once per page.
+
+**Anything inserted into the sheet goes in at the TOP LEVEL** —
+`insertAtTopLevel`, never `execCommand('insertHTML')`. execCommand leaves the result where the
+caret was, so pasting with the cursor in a list nested a whole notice inside the `<ul>`: drawn
+correctly, parsed as nothing (`topLevelBlocks` reads depth zero), saved as the blocks it started
+with, and gone on the next render. **A string search of the sheet's innerHTML cannot see this** —
+assert on the sheet's `children`.
+
 **A paste keeps its shape and still not its markup.** `clipboardToLetterHtml`
 (`src/lib/letterPaste.ts`) converts what is on the clipboard **into** the same closed tag set —
 rich text through a sanitiser, Markdown through a converter, and an ordinary sentence not at all

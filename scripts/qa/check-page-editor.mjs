@@ -302,13 +302,23 @@ if (seeded) {
 const editor = readFileSync(
   new URL('../../src/pages/library/LetterPageEditor.tsx', import.meta.url), 'utf8')
 
+/**
+ * The same file with its comments taken out, for the absence assertions.
+ *
+ * NEEDED, NOT TIDINESS. That file explains at length why a block must NOT go in with
+ * execCommand('insertHTML') -- and the assertion written to check it read that very sentence and
+ * reported the fault it exists to prevent. check-silent-triggers records the same trap in its own
+ * words, and check-account-templates carries the same helper for the same reason: prose
+ * explaining an absence must not be able to satisfy it.
+ */
+const code = editor.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+
 /*
  * THE SHEET IS NEVER TRANSFORM-SCALED. A preview may be photographed down; a thing you TYPE in
  * may not, because the browser hit-tests the caret in unscaled coordinates and the cursor lands
  * a growing distance from the pointer the further down the page you click.
  */
-ok('the page you type on is drawn at 1:1',
-  !/transform:\s*`?scale/.test(editor.slice(editor.indexOf('contentEditable'), editor.indexOf('runningFootHtml('))))
+ok('the page you type on is drawn at 1:1', !/transform:\s*`?scale/.test(code))
 
 /*
  * WHAT IS STORED IS THE PARSE, NEVER THE MARKUP. If innerHTML were ever handed to onChange, a
@@ -331,9 +341,72 @@ ok('the document is built by the parse and never from the browser’s own markup
  * those clipboardToLetterHtml returns null and the text is inserted unchanged.
  */
 ok('a paste is converted into the letter\u2019s own tag set',
-  /onPaste[\s\S]{0,900}?clipboardToLetterHtml\(\{/.test(editor))
+  /onPaste[\s\S]{0,900}?clipboardToLetterHtml\(\{/.test(code))
 ok('...and an ordinary sentence still arrives as text',
-  /onPaste[\s\S]{0,900}?else document\.execCommand\('insertText'/.test(editor))
+  /onPaste[\s\S]{0,1200}?execCommand\('insertText'/.test(code))
+
+/* ------------------------------------------------------------------ the page breaks */
+
+/*
+ * THE PUSH IS A MARGIN, IN PIXELS, AND BOTH HALVES MATTER.
+ *
+ * A MARGIN, not padding: padding grows a block downward from the same top edge, so the text moves
+ * onto the next page while the block's BOX still starts on the previous one. Invisible on a
+ * paragraph and plainly wrong on a bordered table, whose rule is then drawn across the
+ * letterhead's footer -- the very thing being fixed. This was built with padding first and the
+ * browser check caught it.
+ *
+ * IN PIXELS, because documentHtmlToBlocks reads `margin-top` as the letter's OWN spacing -- but
+ * only in millimetres, which is asserted a few lines above. A pixel margin moves the box and is
+ * invisible to the parse, so the page layout never reaches the saved document. A letter that
+ * stored its page breaks would carry last week's onto a different letterhead.
+ */
+ok('a block is pushed onto the next page with a margin, not padding',
+  /\.style\.marginTop = `\$\{[^`]*\}px`/.test(code) && !/\.style\.paddingTop\s*=/.test(code))
+ok('...and the margin it clears between plans is the same one',
+  /for \(const kid of kids\) kid\.style\.marginTop = ''/.test(editor))
+/*
+ * THE COLLAPSED GAP IS ADDED BACK. CSS collapses a block's top margin against the one above it,
+ * so setting the push alone shifts by max(gap, push) rather than gap + push and every break lands
+ * a few millimetres short -- which looks like the feature working and is not.
+ */
+ok('...and the gap the browser would collapse is added back',
+  /tops\[i\] - \(tops\[i - 1\] \+ heights\[i - 1\]\)/.test(editor))
+/*
+ * MEASURED WITH FRACTIONAL RECTS. offsetTop is rounded to whole pixels, so a block pushed to
+ * exactly one page down measures back short of the boundary, is read as being on the page above,
+ * and is pushed a second time.
+ */
+ok('positions are measured to better than a whole pixel',
+  /getBoundingClientRect\(\)/.test(code) && !/offsetTop/.test(code))
+
+/*
+ * THE LETTERHEAD IS DRAWN ON EVERY PAGE. Painted once at the top -- which is what it did -- the
+ * footer block with the phone number and the VAT number sits across the middle of a two-page
+ * notice, and everything below it is on blank paper. That is the fault the firm circled.
+ */
+ok('the letterhead repeats down the sheet', /backgroundRepeat: [^\n]*'repeat-y'/.test(editor))
+/* And the sheet is a whole number of pages, or the last one is a torn-off strip. */
+ok('...and the sheet is a whole number of pages',
+  /minHeight: `\$\{sheetPage\.heightMm \* pages\}mm`/.test(editor))
+
+/*
+ * A BLOCK IS PUT IN AT THE TOP LEVEL, NOT AT THE CARET.
+ *
+ * THE BUG THIS COST. execCommand('insertHTML') leaves the result wherever the caret was: paste
+ * with the cursor at the end of a bulleted list and Chromium nests the whole notice INSIDE the
+ * <ul>. The page drew it happily, but topLevelBlocks reads depth zero and nothing below -- so the
+ * parse returned the blocks it started with, the save wrote those, and the next render drew them.
+ * The paste vanished with nothing on screen to say why, which is precisely what was reported.
+ */
+ok('a pasted or inserted block is placed at the top level of the sheet',
+  /insertAtTopLevel\(root, html\)/.test(code)
+  && !/execCommand\('insertHTML'/.test(code))
+ok('...after the block the caret is in, never inside it',
+  /root\.insertBefore\(fragment, top\.nextSibling\)/.test(editor))
+/* Plain text stays on execCommand, which is what keeps it on the browser's undo stack. */
+ok('...while plain text still goes in the way the browser can undo',
+  /execCommand\('insertText'/.test(editor))
 
 /*
  * AND THE SELECTION IS WATCHED RATHER THAN SAMPLED. The first cut of this remembered the caret

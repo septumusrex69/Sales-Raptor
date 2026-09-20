@@ -539,7 +539,8 @@ try {
   await page.getByRole('button', { name: 'Edit' }).click()
   await page.waitForTimeout(800)
 
-  const pasteSheet = page.locator('.ltr-page [contenteditable="true"]').first()
+  const sheetSel = '.ltr-page [contenteditable="true"]'
+  const pasteSheet = page.locator(sheetSel).first()
   await pasteSheet.click()
   /* At the very end, so what lands is added to the letter rather than over the middle of it. */
   await pasteSheet.evaluate((el) => {
@@ -572,34 +573,121 @@ try {
   await page.waitForTimeout(500)
 
   /*
-   * THE FOUR SHAPES, AT THE TOP LEVEL OF THE SHEET. Asserted on the sheet's own HTML rather than
-   * on the saved document, because this is the question about the browser: did the paste end up
-   * nested inside the paragraph the caret was in?
+   * AT THE TOP LEVEL OF THE SHEET, WHICH IS THE ONLY DEPTH THAT COUNTS.
+   *
+   * THE FIRST CUT OF THIS SEARCHED THE SHEET'S innerHTML FOR THE TAGS, and passed while the
+   * feature was broken. Chromium had nested the whole paste INSIDE the trailing <ul> -- the tags
+   * were all present in the string, and the page drew them, but topLevelBlocks reads depth zero
+   * and nothing below. So the parse came back with the six blocks it started with, the save wrote
+   * those six, and the next render drew them: the paste vanished with nothing on screen to say
+   * why. That IS the firm's report, and a string search could not see it.
+   *
+   * So this counts the sheet's own CHILDREN. It is the difference between "the markup is
+   * somewhere in there" and "the document has these blocks in it".
    */
-  for (const [what, re] of [
-    ['a heading', /<h[123][^>]*>\s*HOW TO PAY/],
-    ['a table', /<table[\s\S]*?01 234 5678/],
-    ['a list', /<ul>[\s\S]*?Quote the reference/],
-    ['the bold run', /<b>full amount<\/b>|<strong>full amount<\/strong>/],
+  const top = await page.locator(sheetSel).first()
+    .evaluate((el) => [...el.children].map((k) => k.tagName).join(','))
+  t.check(`a pasted notice lands at the top level, not inside the block the caret was in (${top})`,
+    top, 'H1,P,H2,TABLE,H2,UL,H2,P,TABLE,UL')
+  /* And the words came with the shapes, in the blocks that should hold them. */
+  for (const [what, sel] of [
+    ['its heading', 'h2:has-text("HOW TO PAY")'],
+    ['its table', 'table:has-text("01 234 5678")'],
+    ['its list', 'ul:has-text("Quote the reference")'],
+    ['the bold run', 'b:has-text("full amount")'],
   ]) {
-    t.ok(`a pasted notice keeps ${what}`, re.test(pastedBlocks))
+    t.ok(`...keeping ${what}`, await page.locator(`${sheetSel} > ${sel}`).first().isVisible()
+      || await page.locator(`${sheetSel} ${sel}`).first().isVisible())
   }
   /* AND NONE OF THE MARKUP IT ARRIVED IN. <th> is kept; class= and style= are not ours. */
   t.check('...and brings no foreign markup with it',
     /MsoNormal|mso-|<o:p|<span style/.test(pastedBlocks), false)
 
-  /*
-   * THEN READ BACK AS A DOCUMENT, which is the half that decides what SAVES. A heading nested
-   * inside a paragraph renders almost correctly and parses as one run-together paragraph.
-   */
-  const afterPaste = await page.evaluate(() => {
-    const el = document.querySelector('.ltr-page [contenteditable="true"]')
-    return el ? el.innerHTML : ''
-  })
-  t.ok(`the pasted heading is at the top level, not nested in a paragraph (${afterPaste.length} chars)`,
-    /<(h[123]|table|ul)\b/.test(afterPaste.replace(/<p\b[^>]*>[\s\S]*?<\/p>/g, '')))
-
   await t.shot(page, '66-library-letter-paste')
+
+  /* ---------- and the page breaks where the paper does ---------- */
+
+  /*
+   * THE FIRM, POINTING AT THE LETTERHEAD'S FOOTER PRINTED ACROSS A PARAGRAPH: "I don't think that
+   * page breaks are there. I think the page should break automatically. I don't think it works."
+   *
+   * WHY THIS CANNOT BE CHECKED ANYWHERE BUT HERE. check-page-breaks.mjs asserts the arithmetic
+   * against numbers somebody typed. What no unit check can answer is whether the numbers being
+   * fed to it are the REAL ones -- whether the editor measures the rendered blocks, in the right
+   * unit, against the right margins, and actually moves anything. A planner that is perfect and
+   * wired to nothing is the exact shape of the bug the firm reported.
+   */
+  /* Enough text to need three pages. Typed as paragraphs through the paste road, because that is
+     how a notice this long gets into the editor in the first place. */
+  const long = Array.from({ length: 40 }, (_, i) =>
+    `<p>Paragraph ${i + 1}. The full outstanding balance has become due and payable in terms of `
+    + 'your agreement with the credit provider, and remains unpaid as at the date of this notice.</p>')
+    .join('')
+  await page.locator(sheetSel).first().click()
+  await page.locator(sheetSel).first().evaluate((el, html) => {
+    const dt = new DataTransfer()
+    dt.setData('text/html', html)
+    dt.setData('text/plain', 'x')
+    const r = document.createRange()
+    r.selectNodeContents(el); r.collapse(false)
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r)
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+  }, long)
+  await page.waitForTimeout(900)
+
+  /*
+   * THE ONE ASSERTION THAT IS THE WHOLE FEATURE: no block's foot passes the bottom of the page it
+   * starts on. That band is where the letterhead draws its phone number and its VAT number, and a
+   * paragraph lying across it is precisely what was circled.
+   *
+   * MEASURED OFF THE RENDERED PAGE, in the browser's own pixels, against the same margins the
+   * letterhead carries -- not off the plan. Reading the plan back would only prove the planner
+   * agrees with itself.
+   */
+  const straddle = await page.locator(sheetSel).first().evaluate((el) => {
+    const pageEl = el.closest('.ltr-page')
+    const cs = getComputedStyle(pageEl)
+    const mm = (v) => parseFloat(v)
+    const probe = document.createElement('div')
+    probe.style.height = '100mm'
+    probe.style.position = 'absolute'
+    pageEl.appendChild(probe)
+    const perMm = probe.getBoundingClientRect().height / 100
+    probe.remove()
+
+    const H = 297 * perMm
+    const usable = H - mm(cs.paddingTop) - mm(cs.paddingBottom)
+    /* Fractional rects, not offsetTop, which is rounded to whole pixels -- the same measurement
+       the editor itself has to make, and for the same reason. */
+    const origin = el.getBoundingClientRect().top
+    const bad = []
+    for (const kid of [...el.children]) {
+      const r = kid.getBoundingClientRect()
+      const top = r.top - origin
+      const p = Math.floor((top + 1) / H)
+      if (top + r.height > p * H + usable + 1) {
+        bad.push({ text: (kid.textContent || '').slice(0, 40), top: Math.round(top / perMm) })
+      }
+    }
+    return { bad, blocks: el.children.length, sheetMm: Math.round(pageEl.offsetHeight / perMm) }
+  })
+
+  t.check(`nothing is left lying across the letterhead\u2019s footer (${straddle.blocks} blocks, ${JSON.stringify(straddle.bad).slice(0, 160)})`,
+    straddle.bad.length, 0)
+  /*
+   * AND THE SHEET GREW TO WHOLE PAGES. A sheet that never grew would satisfy the line above by
+   * having nothing to straddle -- the vacuous pass this file has been bitten by before.
+   */
+  t.ok(`...on a sheet that is now several whole pages (${straddle.sheetMm}mm)`,
+    straddle.sheetMm >= 297 * 3 && straddle.sheetMm % 297 === 0)
+  /* The boundary is drawn, and numbered, so somebody can see where page two starts. */
+  t.ok('the page boundary is shown on the sheet',
+    await page.getByText('Page 2', { exact: true }).first().isVisible())
+  /* The running line counts the real total rather than saying "of 1" on a three-page notice. */
+  t.ok('...and the running line counts the pages it actually has',
+    await page.getByText(/Page 1 of [3-9]/).first().isVisible())
+
+  await t.shot(page, '67-library-letter-pages')
 
   /* ---------- editing, and the merge field you press ---------- */
 
