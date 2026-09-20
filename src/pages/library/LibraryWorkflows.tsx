@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { AlertTriangle, ChevronRight, Loader2, Play, Plus, Upload } from 'lucide-react'
-import { Card, CardHeader } from '../ui/Card'
-import { inputClass } from '../ui/Modal'
-import { WorkflowCanvas } from '../workflows/WorkflowCanvas'
-import { StepDrawer } from '../workflows/StepDrawer'
+import { Card, CardHeader } from '../../components/ui/Card'
+import { inputClass } from '../../components/ui/Modal'
+import { WorkflowCanvas } from '../../components/workflows/WorkflowCanvas'
+import { StepDrawer } from '../../components/workflows/StepDrawer'
+import { useAuth } from '../../store/AuthContext'
+import { canEditLibrary, canViewLibrary } from '../../lib/permissions'
+import { LibraryHeader } from './LibraryHeader'
 import {
   canSave, workflowFacts, workflowProblems, NODE_KINDS,
   type NodeKind, type Workflow, type WorkflowNode,
@@ -12,32 +16,63 @@ import {
   addNode, deleteNode, fetchWorkflow, fetchWorkflows, publish, saveNode, setNextNode, takeDraft,
   type WorkflowSummary,
 } from '../../lib/workflowStore.ts'
+import { fetchLibrary, type LibraryTemplate } from '../../lib/templateLibrary.ts'
 
 /**
- * Settings &rarr; Workflows.
+ * Library &rarr; Workflows.
+ *
+ * MOVED HERE FROM SETTINGS, at the firm's instruction. A workflow is not a setting: a setting is
+ * configured once and forgotten, and a workflow is content somebody writes, argues about and
+ * publishes a version of. It belongs beside the wording it sends, and it now has a URL of its own
+ * so a draft can be linked to rather than described.
  *
  * ONE WORKFLOW FOR NOW, and that is the design rather than a shortcut. The branch-heavy version
  * that hung payment arrangements, disputes, sequestration and liquidation underneath the main line
  * made the main line look like the exception; each of those becomes a workflow of its own, entered
  * from this one through a connection that already has somewhere to point.
  */
-export function WorkflowsTab() {
+export function LibraryWorkflows() {
+  const { currentUser } = useAuth()
+  const mayEdit = canEditLibrary(currentUser?.role)
+  const mayView = canViewLibrary(currentUser?.role)
+  /* The open workflow is in the ADDRESS, not in state. That is the whole reason this is a page
+     and no longer a settings tab: a workflow being argued about can be sent to somebody. */
+  const { key: openKey } = useParams<{ key: string }>()
+  const navigate = useNavigate()
   const [list, setList] = useState<WorkflowSummary[] | null>(null)
-  const [openKey, setOpenKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!mayView || openKey) return
     let cancelled = false
     fetchWorkflows()
       .then((rows) => { if (!cancelled) setList(rows) })
       .catch((e) => { if (!cancelled) setError((e as Error).message) })
     return () => { cancelled = true }
-  }, [])
+  }, [mayView, openKey])
 
-  if (openKey) return <WorkflowBuilder workflowKey={openKey} onBack={() => setOpenKey(null)} />
+  if (!mayView) {
+    return (
+      <Card>
+        <p className="text-sm text-slate-600">The library is not open to you.</p>
+      </Card>
+    )
+  }
+
+  if (openKey) {
+    return (
+      <div className="space-y-4">
+        <LibraryHeader mayEdit={mayEdit} />
+        <WorkflowBuilder workflowKey={openKey} mayEdit={mayEdit}
+          onBack={() => navigate('/library/workflows')} />
+      </div>
+    )
+  }
 
   return (
-    <Card>
+    <div className="space-y-4">
+      <LibraryHeader mayEdit={mayEdit} />
+      <Card>
       <CardHeader title="Workflows"
         subtitle="What happens to an account, and when. A published workflow is superseded rather than edited." />
       {error && <p className="text-sm text-rose-700">{error}</p>}
@@ -51,7 +86,7 @@ export function WorkflowsTab() {
             const live = w.versions.find((v) => v.state === 'active') ?? w.versions[0]
             return (
               <li key={w.id}>
-                <button type="button" onClick={() => setOpenKey(w.key)}
+                <button type="button" onClick={() => navigate(`/library/workflows/${w.key}`)}
                   className="w-full flex items-center gap-3 py-3 text-left hover:bg-slate-50 -mx-2 px-2 rounded-lg">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-slate-800">{w.name}</p>
@@ -68,7 +103,8 @@ export function WorkflowsTab() {
           })}
         </ul>
       )}
-    </Card>
+      </Card>
+    </div>
   )
 }
 
@@ -87,8 +123,30 @@ function StateBadge({ state }: { state: string }) {
 
 const TABS = ['Builder', 'Overview', 'Rules', 'Notifications', 'Templates', 'History'] as const
 
-function WorkflowBuilder({ workflowKey, onBack }: { workflowKey: string; onBack: () => void }) {
+function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
+  workflowKey: string
+  /**
+   * Whether this person may change anything here.
+   *
+   * SEPARATE FROM `readOnly`, which is about the VERSION rather than the person: a published
+   * version is frozen for everybody, including an administrator, and that is the point of
+   * publishing. This one is the library's own rule -- everyone reads, an administrator writes.
+   * Both have to be true before a control appears.
+   */
+  mayEdit: boolean
+  onBack: () => void
+}) {
   const [workflow, setWorkflow] = useState<Workflow | null>(null)
+  /*
+   * THE LIBRARY, FETCHED ONCE FOR THE WHOLE BUILDER rather than per step drawer. Opening ten
+   * steps in a row is ordinary work and would otherwise be ten round trips for a list that does
+   * not change while you are looking at it.
+   *
+   * Collections only: a workflow runs on a debtor account, and the sales library's fields do not
+   * resolve against one. The database says the same thing -- a sales template has no position and
+   * the merge fields are a different set.
+   */
+  const [templates, setTemplates] = useState<LibraryTemplate[] | null>(null)
   const [tab, setTab] = useState<(typeof TABS)[number]>('Builder')
   const [selected, setSelected] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -100,11 +158,22 @@ function WorkflowBuilder({ workflowKey, onBack }: { workflowKey: string; onBack:
   }, [workflowKey])
 
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    let cancelled = false
+    /* A library that will not load is not a reason to refuse the builder: every other field on a
+       step still works, and the picker says it is still reading. */
+    fetchLibrary('collections')
+      .then((rows) => { if (!cancelled) setTemplates(rows) })
+      .catch(() => { if (!cancelled) setTemplates([]) })
+    return () => { cancelled = true }
+  }, [])
 
   const problems = useMemo(() => (workflow ? workflowProblems(workflow) : []), [workflow])
   const facts = useMemo(() => (workflow ? workflowFacts(workflow) : null), [workflow])
   const node = workflow?.nodes.find((n) => n.id === selected) ?? null
-  const readOnly = workflow?.version.state !== 'draft'
+  /* Frozen because the version is published, OR because this person does not write the library.
+     Folded into one flag so no control can be reached through only one of the two. */
+  const readOnly = workflow?.version.state !== 'draft' || !mayEdit
 
   if (workflow === null) {
     return (
@@ -149,7 +218,7 @@ function WorkflowBuilder({ workflowKey, onBack }: { workflowKey: string; onBack:
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-400 cursor-not-allowed">
             <Play size={13} /> Test
           </button>
-          {readOnly ? (
+          {!mayEdit ? null : workflow.version.state !== 'draft' ? (
             <button type="button" disabled={busy}
               onClick={() => { void act(async () => { const id = await takeDraft(workflow.version.id); await load(id) }) }}
               className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50">
@@ -196,7 +265,14 @@ function WorkflowBuilder({ workflowKey, onBack }: { workflowKey: string; onBack:
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            <AddStep disabled={readOnly || busy} workflow={workflow}
+            {/*
+              GONE FOR A READER, merely DISABLED for an administrator on a published version —
+              and the difference is the point. "Add step" greyed out on a frozen version is
+              information: it has an answer, which is Edit beside it. The same control greyed out
+              for somebody who will never be allowed to press it is a dead control plus two dead
+              dropdowns, and it teaches people to stop reading disabled things.
+            */}
+            {mayEdit && <AddStep disabled={readOnly || busy} workflow={workflow}
               onAdd={(kind, phaseId) => act(async () => {
                 const id = await addNode({
                   versionId: workflow.version.id,
@@ -209,10 +285,12 @@ function WorkflowBuilder({ workflowKey, onBack }: { workflowKey: string; onBack:
                   ordinal: workflow.nodes.length + 1,
                 })
                 setSelected(id)
-              })} />
+              })} />}
             {readOnly && (
               <p className="text-xs text-slate-400">
-                Published versions are frozen. Press Edit to take a draft.
+                {!mayEdit
+                  ? 'An administrator writes the workflows. This is what it does today.'
+                  : 'Published versions are frozen. Press Edit to take a draft.'}
               </p>
             )}
           </div>
@@ -223,7 +301,7 @@ function WorkflowBuilder({ workflowKey, onBack }: { workflowKey: string; onBack:
                 onSelect={setSelected} problems={problems} />
             </div>
             {node && (
-              <StepDrawer workflow={workflow} node={node} readOnly={readOnly}
+              <StepDrawer workflow={workflow} node={node} readOnly={readOnly} templates={templates}
                 problems={problems.filter((p) => p.nodeId === node.id)}
                 onClose={() => setSelected(null)}
                 onSave={async (next: WorkflowNode) => { await act(() => saveNode(next)) }}

@@ -1,5 +1,10 @@
 /**
- * Settings → Workflows, in a real browser.
+ * Library → Workflows, in a real browser.
+ *
+ * MOVED OUT OF SETTINGS at the firm's instruction — "if we are building a workflow, currently it
+ * lives in the accounts section. I think it should live in the library section." It is not a
+ * setting: a setting is configured once, and a workflow is content somebody writes, argues about
+ * and publishes a version of. It now has a URL, so a draft can be linked to rather than described.
  *
  * WHY THE BROWSER AND NOT JUST THE RULES. The rules beside this folder are checked to the day;
  * none of that can tell you the drawer never opened, or that the form is disabled on a draft, or
@@ -11,7 +16,7 @@
 import {
   OUT, PORT, chromium, makeRunner, signedInPage, startServer, stopServer,
 } from './harness.mjs'
-import { PROFILE } from './fixtures.mjs'
+import { LIBRARY, PROFILE } from './fixtures.mjs'
 
 const t = makeRunner('workflow-builder')
 
@@ -55,6 +60,19 @@ const WORKFLOW = {
 /** Every PATCH the page sends, so the test can prove an edit actually left the browser. */
 const patched = []
 
+/**
+ * The signed-in person, which this file did not need until now.
+ *
+ * Settings had no role check on its Workflows tab at all — the boundary was RLS and nothing else,
+ * so a browser with no profile loaded still drew the builder. The library HAS one, so a run
+ * without a profile now lands on "the library is not open to you" rather than on the canvas.
+ * That is the boundary working; it just has to be stubbed.
+ */
+const asRole = (role) => [
+  [(u) => u.includes('/auth/v1/user'), () => ({ body: { id: PROFILE.id, email: PROFILE.email } })],
+  [(u) => u.includes('/rest/v1/profiles'), () => ({ body: [{ ...PROFILE, role }] })],
+]
+
 const handlers = [
   [(u, r) => /\/rest\/v1\/workflow_nodes/.test(u) && r.method() === 'PATCH',
     (u, r) => { patched.push({ url: u, body: r.postData() }); return { body: [] } }],
@@ -62,25 +80,40 @@ const handlers = [
   [(u) => /\/rest\/v1\/workflow_phases/.test(u), () => ({ body: PHASES })],
   [(u) => /\/rest\/v1\/workflow_nodes/.test(u), () => ({ body: NODES })],
   [(u) => /\/rest\/v1\/workflow_connections/.test(u), () => ({ body: CONNECTIONS })],
+  /* THE LIBRARY, which the builder now reads so a step can be told what to send. The stub honours
+     the scope clause: answering both sides out of the whole fixture would put sales wording in a
+     collections picker, which is exactly the bug the clause exists to prevent. */
+  [(u) => /\/rest\/v1\/message_templates/.test(u), (u) => {
+    const scope = /scope=eq\.(\w+)/.exec(u)?.[1]
+    return { body: scope ? LIBRARY.filter((r) => r.scope === scope) : LIBRARY }
+  }],
 ]
 
 const server = await startServer()
 let browser
 try {
   browser = await chromium.launch()
-  const { page } = await signedInPage(browser, { ...PROFILE, role: 'Administrator' }, handlers, [])
+  const admin = { ...PROFILE, role: 'Administrator' }
+  const { page } = await signedInPage(browser, admin, [...asRole('Administrator'), ...handlers], [])
 
   let up = false
   for (let i = 0; i < 60; i += 1) {
-    try { await page.goto(`http://localhost:${PORT}/settings`, { timeout: 2000 }); up = true; break }
+    try { await page.goto(`http://localhost:${PORT}/library/workflows`, { timeout: 2000 }); up = true; break }
     catch { await new Promise((r) => setTimeout(r, 500)) }
   }
   t.ok('the dev server answers', up)
 
-  /* ---------- Settings → Workflows ---------- */
-  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
+  /* ---------- Library → Workflows ---------- */
   await page.getByText('Standard Collections – Non-Paying Debtor').waitFor({ timeout: 20000 })
-  t.ok('the workflow is listed under Settings', true)
+  t.ok('the workflow is listed in the library', true)
+  /* SETTINGS NO LONGER OFFERS IT. A tab left behind after a move is a second door onto the same
+     room, and the one people keep using is whichever they found first. */
+  await page.goto(`http://localhost:${PORT}/settings`)
+  await page.getByRole('button', { name: 'Profile', exact: true }).waitFor({ timeout: 20000 })
+  t.check('...and Settings no longer has a Workflows tab',
+    await page.getByRole('button', { name: 'Workflows', exact: true }).count(), 0)
+  await page.goto(`http://localhost:${PORT}/library/workflows`)
+  await page.getByText('Standard Collections – Non-Paying Debtor').waitFor({ timeout: 20000 })
   /*
    * THE BADGE TELLS THE TRUTH. The firm's mockup shows "Active"; this version is a draft, and a
    * workflow labelled active that anybody can still edit would contradict the trigger underneath
@@ -92,6 +125,13 @@ try {
   await page.getByText('Standard Collections – Non-Paying Debtor').click()
   /* The phase name is also an option in the Add-step picker, so the BAR is named. */
   await page.locator('p', { hasText: /^Phase 1 · Notice$/ }).first().waitFor({ timeout: 10000 })
+  /*
+   * AND THE WORKFLOW IS IN THE ADDRESS. The whole reason this moved out of a settings tab: the
+   * builder used to be reached by clicking twice, with nothing to send anybody. A draft being
+   * argued about now has a link.
+   */
+  t.ok(`opening one puts it in the URL (${new URL(page.url()).pathname})`,
+    new URL(page.url()).pathname === '/library/workflows/standard-collections')
   await t.shot(page, '10-builder')
 
   /* ---------- the canvas ---------- */
@@ -182,8 +222,62 @@ try {
   t.ok('...and not the card’s position, which this form does not own',
     !/"x"|"y"/.test(patched[0]?.body ?? ''))
 
+  /* ---------- the step is told what to send ---------- */
+
+  /*
+   * THE COLUMN NOTHING COULD SET. workflow_nodes.template_id has existed since this table was
+   * written, and while the builder lived in Settings and the library lived somewhere else there
+   * was no control for it anywhere: a step could be created saying "send an email" with nothing
+   * to send, the builder COUNTED those under "Notices to write", and no screen could fix one.
+   * This is the reason the workflows moved into the library at all.
+   */
+  await page.getByRole('button', { name: /day 60 Court Process Explained/i }).click()
+  await page.getByText('Step details').waitFor({ timeout: 10000 })
+  const sends = page.locator('aside').filter({ hasText: 'Step details' })
+    .locator('select').filter({ hasText: 'Not written yet' }).first()
+  t.ok('a communication step is asked what it sends', await sends.isVisible())
+  /*
+   * NARROWED TO WHAT THE CHANNEL CAN CARRY. Day 60 goes by email, so it is offered the emails and
+   * nothing else — a picker showing forty rows of which four are usable is a picker people stop
+   * reading, and choosing a letter for an email step is a save the database would take and a
+   * message that would never make sense.
+   */
+  const offered = (await sends.locator('option').allInnerTexts()).map((o) => o.trim())
+  t.check(`an email step is offered the emails (${offered.join(' | ')})`,
+    offered.join(' | '),
+    'Not written yet | Handover notice | Section 129 covering email')
+
+  /* And a step that goes by REGISTERED POST is offered the letters instead, which is the half
+     that proves the list is narrowed by channel rather than merely short. */
+  await page.getByRole('button', { name: /day 1 Demand \+ Section 129/i }).click()
+  await page.waitForTimeout(500)
+  const posts = page.locator('aside').filter({ hasText: 'Step details' })
+    .locator('select').filter({ hasText: 'Not written yet' }).first()
+  const postOffered = (await posts.locator('option').allInnerTexts()).map((o) => o.trim())
+  t.check(`a registered-post step is offered the letters (${postOffered.join(' | ')})`,
+    postOffered.join(' | '), 'Not written yet | Section 129 notice (retired)')
+  /*
+   * AND THE UNWRITTEN STATUTORY NOTICE IS SAID IN RED. An unwritten notice is ordinary early in a
+   * draft. An unwritten notice the ACT REQUIRES, on a workflow about to be published, is the firm
+   * failing to make a demand it must make — and this one is the section 129.
+   */
+  t.ok('...and an unwritten statutory notice says the Act requires it',
+    await page.getByText(/required by the Act and there is nothing written/).first().isVisible())
+
+  /* Choosing one leaves the browser, against the column that could not be set before. */
+  const beforePick = patched.length
+  await posts.selectOption({ label: 'Section 129 notice (retired)' })
+  await page.waitForTimeout(300)
+  await page.getByRole('button', { name: 'Save changes' }).click()
+  await page.waitForTimeout(700)
+  const picked = patched[patched.length - 1]
+  t.ok(`the wording reaches the database (${(picked?.body ?? '').slice(0, 70)})`,
+    patched.length > beforePick && (picked?.body ?? '').includes(LIBRARY[2].id))
+
   /* ---------- nothing pretends to work ---------- */
-  const test = await page.getByRole('button', { name: /Test/ }).isDisabled()
+  /* `exact`, because the profile is loaded now and the sidebar's account button reads "Test
+     Leader" — a loose /Test/ matches that first and asks whether the AVATAR is disabled. */
+  const test = await page.getByRole('button', { name: 'Test', exact: true }).isDisabled()
   t.ok('the Test button is visibly disabled rather than faking a dry run', test)
   t.ok('the conditions tab says it is not built',
     await page.getByRole('button', { name: 'conditions' }).isVisible())
@@ -198,6 +292,72 @@ try {
     await page.getByText('Pre-legal').first().isVisible())
   t.ok('...and the notices still to write are counted, statutory apart',
     await page.getByText(/7 · 4 statutory/).isVisible())
+
+  /* ---------- a reader, under the library's rule ---------- */
+
+  /*
+   * EVERYONE READS, AN ADMINISTRATOR WRITES — the firm's rule for the whole library, and the
+   * workflows are in the library now. This is a boundary that DID NOT EXIST before the move:
+   * Settings had no role check on the tab at all, so anybody who could reach Settings could open
+   * the builder and be refused by RLS only after they had typed.
+   *
+   * A team leader is the right person to check it with. They freeze accounts and set targets, so
+   * "management can" is the wrong instinct — and the write policy was narrowed to Administrator
+   * alone in the same migration, which took the workflow write away from them.
+   */
+  const reader = await signedInPage(
+    browser, { ...PROFILE, role: 'Pre-legal Team Leader' },
+    [...asRole('Pre-legal Team Leader'), ...handlers], [],
+  )
+  await reader.page.goto(`http://localhost:${PORT}/library/workflows/standard-collections`)
+  await reader.page.locator('p', { hasText: /^Phase 1 · Notice$/ }).first().waitFor({ timeout: 20000 })
+  t.ok('a team leader reads the workflow', true)
+  /* The whole thing, not a stub of it: the canvas is what says what happens to their file. */
+  t.ok('...the whole canvas, which is what says what happens to their file',
+    await reader.page.getByRole('button', { name: /day 35 Final Notice/i }).isVisible())
+
+  t.check('...and is offered no way to take a draft',
+    await reader.page.getByRole('button', { name: /takes a draft/ }).count(), 0)
+  t.check('...nor to publish', await reader.page.getByRole('button', { name: 'Publish' }).count(), 0)
+  t.check('...nor to add a step',
+    await reader.page.getByRole('button', { name: 'Add step' }).count(), 0)
+
+  /*
+   * AND THE DRAWER OPENS, LOCKED. Not hidden — a collector has to be able to read what a step
+   * does, including the wording it sends. Every field in it is disabled, which is asserted over
+   * the form rather than over a class name.
+   */
+  await reader.page.getByRole('button', { name: /day 35 Final Notice/i }).click()
+  await reader.page.getByText('Step details').waitFor({ timeout: 10000 })
+  const locked = await reader.page.evaluate(() => {
+    const aside = [...document.querySelectorAll('aside')]
+      .find((a) => /step details/i.test(a.innerText))
+    const fields = [...aside.querySelectorAll('input, select, textarea')]
+    return { total: fields.length, open: fields.filter((f) => !f.disabled).length }
+  })
+  t.ok(`the drawer still opens (${locked.total} fields)`, locked.total > 5)
+  t.check('...with every field of it locked', locked.open, 0)
+  t.ok('...and says who writes these rather than leaving it to be guessed',
+    await reader.page.getByText(/An administrator writes the workflows/).first().isVisible())
+  const beforeRead = patched.length
+  await reader.page.waitForTimeout(400)
+  t.check('...and nothing was written', patched.length, beforeRead)
+  await t.shot(reader.page, '25-workflow-read-only')
+  await reader.context.close()
+} catch (e) {
+  /*
+   * A THROW IS A FAILURE, REPORTED AS ONE.
+   *
+   * Without this the file died on the first timeout and printed nothing at all — not the results
+   * of the thirty checks that had already run, not which line stopped it. A suite whose failure
+   * mode is an uncaught TimeoutError forty lines from the cause is a suite people stop reading.
+   * Found by breaking the template picker and watching a red run print no red.
+   */
+  t.ok(`the run finished without throwing (${String(e).split('\n')[0].slice(0, 140)})`, false)
+  try {
+    const pages = browser ? browser.contexts().flatMap((c) => c.pages()) : []
+    if (pages[0]) await t.shot(pages[0], '29-where-it-stopped')
+  } catch { /* nothing more to learn */ }
 } finally {
   if (browser) await browser.close()
   stopServer(server)

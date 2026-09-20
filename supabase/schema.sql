@@ -5043,3 +5043,37 @@ set attachment_id = l.id
 from public.message_templates l
 where e.seed_key = 'email-s129-covering' and l.seed_key = 'letter-s129'
   and e.attachment_id is null;
+
+-- ---------------------------------------------------------------------------
+-- ONE RULE FOR THE WHOLE LIBRARY: everyone reads it, an administrator writes it.
+--
+-- At the firm's instruction, reversing an earlier one: "perhaps everyone can view everything in
+-- the library. Only [an administrator] can edit." The earlier rule kept collectors out of the
+-- library altogether; the newer one is better, because a collector reading a script on a live
+-- call benefits from seeing the whole ladder it sits on, and the risk a library carries is in
+-- WRITING it rather than in reading it.
+--
+-- message_templates already read this way. The workflow tables did not: writing was open to a
+-- Pre-legal Team Leader and a Liaison Manager as well. Now that a workflow is built IN the
+-- library, it has to follow the library's rule -- and a workflow is the firm's wording in another
+-- form, because it decides WHEN a statutory notice goes out.
+-- ---------------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  foreach t in array array['workflows', 'workflow_versions', 'workflow_phases', 'workflow_nodes', 'workflow_connections']
+  loop
+    -- Reading stays open to every authenticated user, unchanged: a collector has to be able to
+    -- see what is going to happen to the file they are holding, and a workflow nobody can read
+    -- is a workflow nobody checks.
+    execute format('drop policy if exists %1$s_select on public.%1$s', t);
+    execute format(
+      'create policy %1$s_select on public.%1$s for select to authenticated using (auth.uid() is not null)', t);
+
+    execute format('drop policy if exists %1$s_write on public.%1$s', t);
+    execute format(
+      'create policy %1$s_write on public.%1$s for all to authenticated
+         using (public.current_user_role() = ''Administrator'')
+         with check (public.current_user_role() = ''Administrator'')', t);
+  end loop;
+end $$;

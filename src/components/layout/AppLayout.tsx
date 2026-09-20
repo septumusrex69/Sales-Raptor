@@ -35,6 +35,10 @@ const TITLES: { test: RegExp; title: string }[] = [
   { test: /^\/accounts\/[^/]+$/, title: 'Account' },
   { test: /^\/accounts/, title: 'Accounts' },
   { test: /^\/queries/, title: 'Disputes' },
+  /* The workflows first: /library/workflows would otherwise be titled "Library", which is the
+     same mistake /accounts/workflows was written to avoid one section up. */
+  { test: /^\/library\/workflows/, title: 'Workflows' },
+  { test: /^\/library/, title: 'Library' },
 ]
 
 export function AppLayout() {

@@ -13,8 +13,15 @@
  * firm's letterhead. A library that lists such a template without saying so is worse than no
  * library, because it looks like sign-off.
  *
- * AND THE DOOR. "Collectors can't see the library because collectors don't build it. That's only
- * basically administrators. Team leaders neither." Checked by signing in as each.
+ * AND THE DOOR, WHICH IS NOW A WINDOW. "Perhaps everyone can view everything in the library. Only
+ * [an administrator] can edit." That reverses an earlier instruction to keep collectors out
+ * altogether, so the check reverses with it: a team leader must be able to READ every word here
+ * and must not be offered a single control that writes one.
+ *
+ * THE INTERESTING HALF IS THE SECOND ONE. "Can they see it" fails loudly — the page is blank.
+ * "Can they change it" fails silently, because RLS refuses the write and the person is left
+ * looking at a form that appeared to work. Every one of Edit, New template, Delete and the
+ * attachment picker is asserted absent for the reader, one by one, rather than by screenshot.
  *
  * Run: node scripts/qa/e2e/library.mjs
  */
@@ -24,9 +31,9 @@ import {
 import { COMPANY, LIBRARY, PROFILE, TEAM } from './fixtures.mjs'
 
 /*
- * PROFILE is a team leader, which is the person this page must turn away. The administrator is
- * the same person with the one field that decides it changed, so the two runs differ by exactly
- * the thing under test and nothing else.
+ * PROFILE is a team leader: the person who may read every word here and change none of it. The
+ * administrator is the same person with the one field that decides it changed, so the two runs
+ * differ by exactly the thing under test and nothing else.
  */
 const ADMIN = { ...PROFILE, role: 'Administrator' }
 
@@ -108,8 +115,11 @@ try {
   /* ---------- the door ---------- */
 
   /*
-   * A TEAM LEADER IS TURNED AWAY, and this is the stricter half of the rule — team leaders can
-   * freeze accounts and set targets, so "management can" is the wrong instinct here.
+   * A TEAM LEADER READS EVERY WORD AND CHANGES NONE.
+   *
+   * The silent half is the one worth a browser: hiding a control is not a permission, RLS is —
+   * and a reader offered an Edit button would fill in a form, press Save, and be told nothing,
+   * because the database refuses the write after the app has already taken the typing.
    */
   {
     const leader = PROFILE
@@ -120,22 +130,44 @@ try {
       catch { await new Promise((r) => setTimeout(r, 500)) }
     }
     t.ok('the dev server answers', up)
-    await page.getByText('The library is not open to you').waitFor({ timeout: 20000 })
-    t.ok('a team leader is turned away', true)
+    await page.getByText('First contact', { exact: true }).first().waitFor({ timeout: 20000 })
+    t.ok('a team leader reads the library', true)
+    /* The whole library, not a subset: the scope switch and both sides still work for them. */
+    t.ok('...including the letters',
+      await page.getByText('Section 129 notice', { exact: true }).first().isVisible())
+    await page.getByText('Handover notice', { exact: true }).first().click()
+    await page.waitForTimeout(600)
+    t.ok('...and the words themselves',
+      (await page.locator('pre').first().innerText()).includes('{{balance}}'))
+    /* The finding the page exists for reaches them too. A reader who cannot see that a template
+       is broken cannot report it, and they are the ones who meet it on a live account. */
+    t.ok('...and is told when one asks for a field nothing can fill',
+      await page.getByText(/fields? with nothing behind/).first().isVisible())
+
+    /* ---------- and changes nothing ---------- */
+    t.check('no Edit is offered', await page.getByRole('button', { name: 'Edit' }).count(), 0)
+    t.check('...no New template', await page.getByRole('button', { name: 'New template' }).count(), 0)
+    t.check('...no Delete', await page.getByRole('button', { name: 'Delete' }).count(), 0)
+    /* Said once at the top rather than guessed at from four absences. */
+    t.ok('...and the rule is stated rather than left to be inferred',
+      await page.getByText(/An administrator writes these/).first().isVisible())
     /*
-     * REFUSED, NOT BLANK. A blank page where a menu item led is indistinguishable from one that
-     * failed to load, and the person reports a bug rather than learning the rule.
+     * NOTHING LEFT THE BROWSER, taken over the whole visit rather than by looking at buttons: a
+     * write fired on load would not be caught by counting controls. Read off `seen`, which the
+     * harness fills for EVERY request, so a write to a table this file never stubbed still shows
+     * up. RPCs are excluded because nav_counts is a POST and reads nothing but counts.
      */
-    t.ok('...and told why, rather than shown an empty page',
-      await page.getByText(/Only an administrator writes/).first().isVisible())
-    t.check('...and no template reaches them', await page.getByText('First contact').count(), 0)
-    /*
-     * AND THE SIDEBAR DOES NOT ADVERTISE IT. A menu item that always refuses teaches people the
-     * sidebar lies. The page keeps its guard for anyone who types the address, which is what the
-     * refusal above is.
-     */
-    t.check('...and the sidebar does not offer it either',
-      await page.getByRole('link', { name: /^Library/ }).count(), 0)
+    const wrote = seen.filter((r) =>
+      /^(POST|PATCH|PUT|DELETE) \/rest\/v1\//.test(r) && !r.includes('/rest/v1/rpc/'))
+    t.check(`...and nothing was written (${wrote.slice(0, 2).join('; ') || 'nothing'})`,
+      wrote.length, 0)
+
+    /* AND THE SIDEBAR OFFERS IT, which is the half that changed: a library everyone may read is
+       a library everyone must be able to find. The workflows half of the same rule is checked in
+       e2e/workflow-builder.mjs, which already holds a whole workflow to read. */
+    t.ok('the sidebar offers the library to them',
+      await page.getByRole('link', { name: /^Library/ }).first().isVisible())
+    await t.shot(page, '59-library-read-only')
     await context.close()
   }
 
@@ -147,7 +179,9 @@ try {
   page.on('pageerror', (e) => errors.push(String(e)))
 
   await page.goto(`http://localhost:${PORT}/library`)
-  await page.getByRole('heading', { name: 'Library', exact: true }).waitFor({ timeout: 20000 })
+  /* `.first()`: the page's own heading and the top bar's now both say Library, which is right —
+     the bar names where you are and the card names what it holds. */
+  await page.getByRole('heading', { name: 'Library', exact: true }).first().waitFor({ timeout: 20000 })
   t.ok('an administrator is offered it in the sidebar',
     await page.getByRole('link', { name: /^Library/ }).first().isVisible())
   await page.getByText('First contact').first().waitFor({ timeout: 20000 })

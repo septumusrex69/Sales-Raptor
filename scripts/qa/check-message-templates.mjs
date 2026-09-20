@@ -24,9 +24,9 @@ import { readFileSync } from 'node:fs'
 import {
   KINDS_FOR_SCOPE,
   MERGE_FIELDS, SMS_RAND_PER_SEGMENT, addressAs, deleteRefusal, deleteWarning, fieldsUsed,
-  forecastSms, longDate,
+  forecastSms, kindForChannel, longDate,
   mergeValuesFor, renderTemplate, resolveNote, resolveTemplate, sampleValues, templateProblems,
-  unknownFields,
+  unknownFields, usageNote,
 } from '../../src/lib/messageTemplates.ts'
 
 let pass = 0
@@ -510,6 +510,55 @@ check('collections reads SMS, email, letters, then call scripts',
   KINDS_FOR_SCOPE.collections, ['sms', 'email', 'letter', 'call_script'])
 /* No letters on the sales side: the firm posts nothing to a lead. */
 check('the sales side has no letters', KINDS_FOR_SCOPE.sales, ['sms', 'email', 'call_script'])
+
+/* ---------- the step and the words it sends ---------- */
+
+/*
+ * THE COLUMN NOTHING COULD SET. workflow_nodes.template_id has pointed at message_templates since
+ * that table was written, and while the builder lived in Settings and the library lived somewhere
+ * else there was no picker for it at all: a step could be created saying "send an email" with
+ * nothing to send, and the builder counted those without being able to fix one.
+ */
+check('an email step is offered emails', kindForChannel('email'), 'email')
+check('an SMS step is offered SMS wording', kindForChannel('sms'), 'sms')
+check('a call step is offered call scripts', kindForChannel('call'), 'call_script')
+/* Post, registered post and by hand are three ways of delivering the same written thing. */
+check('post takes a letter', kindForChannel('post'), 'letter')
+check('registered post takes a letter', kindForChannel('registered_post'), 'letter')
+check('and so does by hand', kindForChannel('hand'), 'letter')
+/*
+ * WHATSAPP TAKES THE SMS WORDING, which is a judgement rather than an equivalence: it is the only
+ * short-text kind there is. What must not follow is the price -- Annexure B item 1(c) prices an
+ * SMS and nothing in the tariff prices a WhatsApp, so a segment cost shown against a WhatsApp
+ * step would be a wrong number on screen, which is worse than no number.
+ */
+check('whatsapp borrows the SMS wording', kindForChannel('whatsapp'), 'sms')
+check('a step with no channel is offered nothing', kindForChannel(null), null)
+check('...and so is a channel nobody has written for', kindForChannel('carrier_pigeon'), null)
+
+/* ---------- what is already sending these words ---------- */
+
+/*
+ * ASKED BEFORE AN EDIT, NOT BEFORE A DELETE. deleteWarning exists to stop damage. This answers
+ * the question somebody has before they rewrite a sentence -- is anything sending this right
+ * now? -- and the answer changes whether they rewrite it at all.
+ */
+check('a template nothing uses says nothing', usageNote(usage()), null)
+ok('one a workflow sends says so, and where',
+  (usageNote(usage({ steps: 2, workflows: ['Standard Collections'] })) ?? '')
+    .includes('Sent by 2 steps in Standard Collections'))
+ok('a letter an email posts says so too',
+  (usageNote(usage({ attachedTo: ['Section 129 covering email'] })) ?? '')
+    .includes('Posted with Section 129 covering email'))
+/*
+ * THE PART THAT CHANGES BEHAVIOUR. Editing wording a PUBLISHED workflow sends does not change
+ * what already went out -- but it does change what the next account on that workflow receives,
+ * with no new version and nobody approving it. A draft step carries no such warning.
+ */
+ok('a published step warns that the next account gets the new words',
+  /next account receives/.test(usageNote(usage({ steps: 1, frozenSteps: 1 })) ?? ''))
+ok('...and a draft step does not',
+  !/next account/.test(usageNote(usage({ steps: 1 })) ?? ''))
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)

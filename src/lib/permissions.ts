@@ -104,17 +104,33 @@ export function useDefaultOwnerFilter(
 }
 
 /**
- * Whether this person may open the template library.
+ * Whether this person may open the library at all.
  *
- * ADMINISTRATOR ONLY, at the firm's instruction and more tightly than most things here: "collectors
- * can't see the library because collectors don't build it. That's only basically administrators.
- * Team leaders neither."
+ * EVERYONE, at the firm's instruction: "perhaps everyone can view everything in the library. Only
+ * [an administrator] can edit." That reverses an earlier instruction to keep collectors out of it
+ * altogether, and the newer one is the better rule — a collector reading a script on a live call
+ * benefits from seeing the whole ladder it sits on, and the risk a library carries is in WRITING
+ * it, not in reading it.
  *
- * THIS IS NOT THE SAME AS SEEING A CALL SCRIPT. A collector still needs the words in front of them
- * while the phone is ringing — those reach them on the account and through a campaign runner,
- * already resolved against the debtor in question. What is closed is the place the wording is
- * WRITTEN. The difference matters: a library is the firm's position in writing, and a sentence
- * the attorney would not have approved goes out four hundred times rather than once.
+ * Here as a function rather than as `true` written into the page, so the one place that decides
+ * this stays findable the day it narrows again. It mirrors message_templates_select, which has
+ * always been open to every authenticated user.
+ */
+export function canViewLibrary(role: Pick<User, 'role'>['role'] | undefined): boolean {
+  return role !== undefined
+}
+
+/**
+ * Whether this person may CHANGE what the library says.
+ *
+ * ADMINISTRATOR ONLY, and this is the half that was never in question: "only [an administrator]
+ * can edit." The wording is the firm's legal position, the attorney signs it off, and a sentence
+ * nobody approved goes out four hundred times rather than once. A workflow is the same thing in
+ * another form — it decides WHEN a statutory notice is sent.
+ *
+ * Mirrors message_templates_insert/update/delete and the workflow_* write policies in
+ * supabase/schema.sql. RLS is the real boundary; this stops the app offering a button the
+ * database would refuse.
  */
 export function canEditLibrary(role: Pick<User, 'role'>['role'] | undefined): boolean {
   return role === 'Administrator'

@@ -3,15 +3,16 @@ import { AlertTriangle, BookOpen, Loader2, Paperclip, Pencil, Plus, X } from 'lu
 import { Card } from '../../components/ui/Card'
 import { Modal } from '../../components/ui/Modal'
 import { useAuth } from '../../store/AuthContext'
-import { canEditLibrary } from '../../lib/permissions'
+import { canEditLibrary, canViewLibrary } from '../../lib/permissions'
 import {
   createTemplate, deleteTemplate, fetchLibrary, saveTemplate, templateUsage,
   type LibraryTemplate, type TemplateDraft,
 } from '../../lib/templateLibrary'
 import { TemplateEditor } from './TemplateEditor'
+import { LibraryHeader } from './LibraryHeader'
 import {
   KINDS_FOR_SCOPE, TEMPLATE_KINDS, TEMPLATE_SCOPES, deleteRefusal, deleteWarning, fieldsUsed,
-  forecastSms, renderTemplate, sampleValues, unknownFields,
+  forecastSms, renderTemplate, sampleValues, unknownFields, usageNote,
   type TemplateKind, type TemplateScope,
 } from '../../lib/messageTemplates'
 import { DESK_POSITIONS } from '../../lib/clientPosition'
@@ -37,6 +38,7 @@ import { DESK_POSITIONS } from '../../lib/clientPosition'
 export function LibraryPage() {
   const { currentUser } = useAuth()
   const mayEdit = canEditLibrary(currentUser?.role)
+  const mayView = canViewLibrary(currentUser?.role)
 
   const [scope, setScope] = useState<TemplateScope>('collections')
   const [rows, setRows] = useState<LibraryTemplate[] | null>(null)
@@ -65,6 +67,18 @@ export function LibraryPage() {
     { template: LibraryTemplate; refusal: string | null; warning: string | null } | null
   >(null)
   const [checking, setChecking] = useState(false)
+  /**
+   * What is already sending the open template, in one line above its words.
+   *
+   * THE OTHER HALF OF MOVING THE WORKFLOWS IN HERE. A person about to rewrite a sentence needs to
+   * know whether a published workflow is sending it to every new account tomorrow — that changes
+   * whether they edit it at all, and there was nowhere in Raptor that said so. Asked when a
+   * template is OPENED rather than when delete is pressed, because by then the edit is made.
+   *
+   * Silent on failure. This is a nicety beside the wording itself; an error banner over a
+   * template somebody is trying to read would be the tail wagging the dog.
+   */
+  const [usedBy, setUsedBy] = useState<string | null>(null)
 
   const load = useCallback(async (next: TemplateScope) => {
     setRows(null)
@@ -74,9 +88,9 @@ export function LibraryPage() {
   }, [])
 
   useEffect(() => {
-    if (!mayEdit) return
+    if (!mayView) return
     void load(scope)
-  }, [scope, mayEdit, load])
+  }, [scope, mayView, load])
 
   const open = useMemo(
     () => rows?.find((r) => r.id === openId) ?? null,
@@ -98,6 +112,16 @@ export function LibraryPage() {
     () => (rows ?? []).filter((r) => r.kind === 'letter'),
     [rows],
   )
+
+  useEffect(() => {
+    setUsedBy(null)
+    if (!openId) return
+    let cancelled = false
+    templateUsage(openId)
+      .then((u) => { if (!cancelled) setUsedBy(usageNote(u)) })
+      .catch(() => { /* see above: never in the way of reading the words */ })
+    return () => { cancelled = true }
+  }, [openId])
 
   async function save() {
     if (!editing) return
@@ -154,19 +178,19 @@ export function LibraryPage() {
   }
 
   /*
-   * REFUSED, NOT HIDDEN. A blank page where a menu item led is indistinguishable from a page that
-   * failed to load, and the person seeing it reports a bug rather than learning the rule.
+   * REFUSED, NOT HIDDEN — for the only person this can still happen to, which is somebody with no
+   * profile loaded at all. A blank page where a menu item led is indistinguishable from a page
+   * that failed to load, and the person seeing it reports a bug rather than learning the rule.
    */
-  if (!mayEdit) {
+  if (!mayView) {
     return (
       <Card>
         <div className="py-12 text-center">
           <BookOpen size={22} className="mx-auto text-slate-300" />
           <p className="text-sm text-slate-600 mt-3 font-medium">The library is not open to you.</p>
           <p className="text-xs text-slate-400 mt-1.5 max-w-md mx-auto">
-            Only an administrator writes the firm&rsquo;s wording. The scripts and templates
-            themselves still reach you on an account and in a campaign, filled in for the debtor
-            you are working.
+            The scripts and templates still reach you on an account and in a campaign, filled in
+            for the debtor you are working.
           </p>
         </div>
       </Card>
@@ -175,15 +199,9 @@ export function LibraryPage() {
 
   return (
     <div className="space-y-4">
-      <Card padded={false}>
-        <div className="px-5 py-4 border-b border-slate-100">
-          <h2 className="text-lg font-semibold text-navy-950">Library</h2>
-          <p className="text-sm text-slate-500 mt-0.5 max-w-3xl">
-            Every message the firm sends, written once and used everywhere &mdash; by a collector on
-            an account, by a workflow on a day, and by a campaign across a list.
-          </p>
-        </div>
+      <LibraryHeader mayEdit={mayEdit} />
 
+      <Card padded={false}>
         {/*
           THE SIDE COMES FIRST, above everything, because it decides what the kinds even are and
           which fields a writer may use. It is not a filter over one list; it is two libraries.
@@ -201,12 +219,24 @@ export function LibraryPage() {
             ))}
           </div>
           <p className="text-xs text-slate-400 flex-1 min-w-0">{TEMPLATE_SCOPES[scope].hint}</p>
-          <button type="button"
-            onClick={() => { setOpenId(null); setEditing({ id: null, draft: blankDraft(scope) }) }}
-            className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
-              border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
-            <Plus size={14} /> New template
-          </button>
+          {/*
+            EVERYONE READS, AN ADMINISTRATOR WRITES — the firm's rule, and the reason the whole
+            page is not gated. What is hidden is the controls that change something, never the
+            words themselves: a collector on a live call benefits from seeing the ladder a script
+            sits on, and the risk a library carries is in writing it.
+
+            Gone rather than disabled. A greyed-out "New template" is an invitation to keep
+            clicking; the rule itself is stated once, in the header, where it is read and
+            understood instead of guessed at from an absence.
+          */}
+          {mayEdit && (
+            <button type="button"
+              onClick={() => { setOpenId(null); setEditing({ id: null, draft: blankDraft(scope) }) }}
+              className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
+                border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+              <Plus size={14} /> New template
+            </button>
+          )}
         </div>
       </Card>
 
@@ -302,7 +332,9 @@ export function LibraryPage() {
           </div>
 
           <Card padded={false}>
-            {editing ? (
+            {/* `mayEdit &&` as well as the hidden buttons: hiding a control is not a permission,
+                and this is the one place a stale state could still put a form on screen. */}
+            {mayEdit && editing ? (
               <div className="p-5">
                 <h3 className="text-sm font-semibold text-navy-950 mb-3">
                   {editing.id ? 'Editing' : `New ${TEMPLATE_SCOPES[scope].label.toLowerCase()} template`}
@@ -352,13 +384,20 @@ export function LibraryPage() {
                       )}
                     </div>
                   </div>
-                  <button type="button"
-                    onClick={() => { setSaveError(null); setEditing({ id: open.id, draft: draftOf(open) }) }}
-                    className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5
-                      rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
-                    <Pencil size={13} /> Edit
-                  </button>
+                  {mayEdit && (
+                    <button type="button"
+                      onClick={() => { setSaveError(null); setEditing({ id: open.id, draft: draftOf(open) }) }}
+                      className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5
+                        rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+                      <Pencil size={13} /> Edit
+                    </button>
+                  )}
                 </div>
+                {usedBy && (
+                  <p className="px-5 py-2 border-b border-slate-100 bg-navy-50/40 text-[11px] text-slate-500">
+                    {usedBy}
+                  </p>
+                )}
                 <Reading template={open}
                   attaches={open.attachmentId ? byId.get(open.attachmentId) ?? null : null} />
               </>

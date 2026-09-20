@@ -8,7 +8,7 @@ import clsx from 'clsx'
 import { useAuth } from '../../store/AuthContext'
 import { UserAvatar } from '../ui/Avatar'
 import { useTheme } from '../../store/ThemeContext'
-import { canEditLibrary, canViewClients } from '../../lib/permissions'
+import { canViewClients, canViewLibrary } from '../../lib/permissions'
 import { useSidebarCollapsed } from '../../lib/sidebarCollapsed'
 
 /**
@@ -48,7 +48,9 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean; badge?:
   { to: '/calendar', label: 'Calendar', icon: Calendar },
   { to: '/activities', label: 'Activities', icon: Activity },
   // Everything the firm SAYS -- the SMS, emails, call scripts and letters, and the workflows that
-  // schedule them. Administrators only (canEditLibrary), so most people never see this entry.
+  // schedule them. OPEN TO EVERYONE, at the firm's instruction: "perhaps everyone can view
+  // everything in the library. Only [an administrator] can edit." A collector reading a script on
+  // a live call benefits from seeing the ladder it sits on; the risk is in writing it, not reading.
   //
   // Its own item rather than a Settings tab, where the workflow builder currently hides: a
   // library is content a person maintains and comes back to, not a switch they set once. It sits
@@ -102,7 +104,7 @@ export function Sidebar() {
           /* A menu item that always refuses is worse than no menu item: it advertises a room
              nobody may enter and teaches people that the sidebar lies. The page keeps its own
              guard for anyone who types the address. */
-          .filter((n) => n.to !== '/library' || canEditLibrary(currentUser?.role))
+          .filter((n) => n.to !== '/library' || canViewLibrary(currentUser?.role))
           .map(({ to, label, icon: Icon, end, badge }) => {
           const count = badge ? counts[badge] : 0
           return (

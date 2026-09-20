@@ -226,6 +226,34 @@ export function fieldsUsed(...parts: (string | null | undefined)[]): string[] {
 
 /** The ones that are not fields at all. A typo, every time. */
 /**
+ * Which kind of wording a workflow step's channel needs.
+ *
+ * THE REASON THIS EXISTS. workflow_nodes.template_id points at message_templates, and until the
+ * two lived on one screen the builder had no way to set it: a communication step could be created
+ * saying "send an email" with nothing to send, and the builder could COUNT those ("Notices to
+ * write") without being able to fix one. The step drawer now offers the wording, and this is what
+ * decides which wording it may offer.
+ *
+ * Null where the channel is not a thing the firm writes in advance. "By hand" is a delivery
+ * method for something already written, so it takes a letter; a telephone call takes a script.
+ *
+ * WHATSAPP TAKES THE SMS WORDING and that is a judgement, not an equivalence: it is the only
+ * short-text kind there is, and writing the same sentence twice is how the two drift apart. What
+ * must NOT follow from it is the segment cost — Annexure B item 1(c) prices an SMS, and nothing
+ * in the tariff prices a WhatsApp. A segment figure shown against a WhatsApp step would be a
+ * wrong number on screen, which is worse than no number.
+ */
+export function kindForChannel(channel: string | null): TemplateKind | null {
+  switch (channel) {
+    case 'email': return 'email'
+    case 'sms': case 'whatsapp': return 'sms'
+    case 'post': case 'registered_post': case 'hand': return 'letter'
+    case 'call': return 'call_script'
+    default: return null
+  }
+}
+
+/**
  * The ones this side cannot answer. A typo, or a field borrowed from the other library.
  *
  * SCOPED, because "unknown" only means anything relative to a side. `{{balance}}` is a real field
@@ -599,6 +627,43 @@ export interface TemplateUsage {
    * nothing attached. A defective delivery that reads as a correct one.
    */
   attachedTo: string[]
+}
+
+/**
+ * Where this template is already wired in, said in one line for the person reading it.
+ *
+ * NOT THE DELETE WARNING. That one exists to stop damage and only speaks when something would
+ * break; this one answers "is anything sending these words right now?", which is the question
+ * somebody has before they edit a sentence -- and the answer changes whether they edit it at all.
+ *
+ * Null where nothing uses it, because a line reading "used by nothing" on twenty rows out of
+ * twenty-two is furniture, and furniture is what teaches people to stop reading the line that
+ * matters.
+ */
+export function usageNote(usage: TemplateUsage): string | null {
+  const parts: string[] = []
+  if (usage.steps > 0) {
+    const where = usage.workflows.length > 0 ? ` in ${usage.workflows.join(', ')}` : ''
+    parts.push(usage.steps === 1
+      ? `Sent by one step${where}.`
+      : `Sent by ${usage.steps} steps${where}.`)
+  }
+  if (usage.attachedTo.length > 0) {
+    parts.push(usage.attachedTo.length === 1
+      ? `Posted with ${usage.attachedTo[0]}.`
+      : `Posted with ${usage.attachedTo.join(', ')}.`)
+  }
+  /*
+   * THE FROZEN COUNT IS THE PART THAT CHANGES BEHAVIOUR. Editing wording a published workflow
+   * sends does not change what already went out -- but it does change what the NEXT account on
+   * that workflow receives, without a new version and without anybody approving it.
+   */
+  if (usage.frozenSteps > 0) {
+    parts.push(usage.frozenSteps === 1
+      ? 'One of those is in a published workflow, so an edit here changes what the next account receives.'
+      : `${usage.frozenSteps} of those are in published workflows, so an edit here changes what the next accounts receive.`)
+  }
+  return parts.length > 0 ? parts.join(' ') : null
 }
 
 /**

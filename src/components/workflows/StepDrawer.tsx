@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AlertTriangle, Trash2, X } from 'lucide-react'
 import { inputClass } from '../ui/Modal'
 import {
   CHANNELS, NODE_KINDS, orderedNodes, type Channel, type DeadlineUnit, type NodeKind,
   type Workflow, type WorkflowNode, type WorkflowProblem,
 } from '../../lib/workflowBuilder.ts'
+import { TEMPLATE_KINDS, kindForChannel } from '../../lib/messageTemplates.ts'
+import type { LibraryTemplate } from '../../lib/templateLibrary.ts'
 
 /**
  * Editing one step.
@@ -22,11 +25,20 @@ import {
  * which kind of day it counts in — because twenty calendar days and twenty business days are a
  * month apart and on a statutory notice that is one to be served again.
  */
-export function StepDrawer({ workflow, node, problems, readOnly, onSave, onDelete, onClose, onNext }: {
+export function StepDrawer({
+  workflow, node, problems, readOnly, templates, onSave, onDelete, onClose, onNext,
+}: {
   workflow: Workflow
   node: WorkflowNode
   problems: WorkflowProblem[]
   readOnly: boolean
+  /**
+   * The collections library, so a step can be told what to send.
+   *
+   * Null while it is still loading, which is not the same as an empty library: "nothing written
+   * yet" and "not read yet" would otherwise look identical, and the second one resolves itself.
+   */
+  templates: LibraryTemplate[] | null
   onSave: (next: WorkflowNode) => Promise<void>
   onDelete: () => Promise<void>
   onClose: () => void
@@ -136,6 +148,62 @@ export function StepDrawer({ workflow, node, problems, readOnly, onSave, onDelet
             </Field>
           )}
 
+          {/*
+            WHAT IT ACTUALLY SENDS, and the reason the workflows moved into the library at all.
+
+            workflow_nodes.template_id has existed since this table was written and nothing could
+            set it: a step could be created saying "send an email" with nothing to send, and the
+            builder counted those under "Notices to write" without being able to fix one. Nobody
+            would have found out until the day it ran.
+
+            The list is narrowed to the wording the CHANNEL can carry -- an email step cannot post
+            a letter -- because a picker offering forty rows of which four are usable is a picker
+            people stop reading.
+          */}
+          {draft.kind === 'communication' && (
+            <Field label="What it sends">
+              {templates === null ? (
+                <p className="text-xs text-slate-400">Reading the library&hellip;</p>
+              ) : (
+                <>
+                  <select className={inputClass} value={draft.templateId ?? ''} disabled={readOnly}
+                    onChange={(e) => set('templateId', e.target.value || null)}>
+                    <option value="">Not written yet</option>
+                    {forChannel(templates, draft.channel).map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.active ? t.name : `${t.name} (retired)`}
+                      </option>
+                    ))}
+                  </select>
+                  {/*
+                    A WARNING THAT ONLY FIRES WHEN SOMETHING IS WRONG. An unwritten notice is
+                    ordinary early in a draft; an unwritten STATUTORY notice on a workflow about
+                    to be published is the firm failing to make a demand the Act requires.
+                  */}
+                  {draft.templateId === null && (
+                    <p className={`mt-1.5 text-[11px] ${
+                      draft.statutory ? 'text-rose-700' : 'text-slate-400'}`}>
+                      {draft.statutory
+                        ? 'This notice is required by the Act and there is nothing written for it.'
+                        : 'This step sends nothing until wording is chosen.'}
+                    </p>
+                  )}
+                  {templates !== null && forChannel(templates, draft.channel).length === 0 && (
+                    <p className="mt-1.5 text-[11px] text-slate-400">
+                      Nothing in the library is written as{' '}
+                      {kindForChannel(draft.channel)
+                        ? TEMPLATE_KINDS[kindForChannel(draft.channel)!].plural.toLowerCase()
+                        : 'anything this channel can carry'}.{' '}
+                      <Link to="/library" className="underline hover:text-slate-600">
+                        Write one
+                      </Link>.
+                    </p>
+                  )}
+                </>
+              )}
+            </Field>
+          )}
+
           <fieldset className="rounded-lg border border-slate-200 p-3">
             <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-400">When</legend>
             <Field label="Workflow day">
@@ -229,6 +297,19 @@ export function StepDrawer({ workflow, node, problems, readOnly, onSave, onDelet
       )}
     </aside>
   )
+}
+
+/**
+ * The wording this channel can carry, retired ones included.
+ *
+ * RETIRED ONES STAY ON THE LIST for the same reason they stay in the library: a step already
+ * pointing at one has to keep showing what it points at, and dropping it here would silently
+ * reset the picker to "Not written yet" the next time somebody saved the step.
+ */
+function forChannel(templates: LibraryTemplate[], channel: Channel | null): LibraryTemplate[] {
+  const kind = kindForChannel(channel)
+  if (kind === null) return []
+  return templates.filter((t) => t.kind === kind)
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

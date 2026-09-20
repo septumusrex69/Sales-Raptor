@@ -22,6 +22,7 @@ import { AccountsList } from './pages/accounts/AccountsList'
 import { AccountDetail } from './pages/accounts/AccountDetail'
 import { DisputesBoard } from './pages/accounts/DisputesBoard'
 import { WorkflowsPage } from './pages/accounts/WorkflowsPage'
+import { LibraryWorkflows } from './pages/library/LibraryWorkflows'
 import { CollectorDashboard } from './pages/CollectorDashboard'
 import { CollectorProfile } from './pages/CollectorProfile'
 import { DiaryPage } from './pages/diary/DiaryPage'
@@ -93,6 +94,16 @@ function App() {
                   route rather than a Settings tab: a library is working content somebody
                   maintains, not a setting somebody configures once. */}
               <Route path="/library" element={<LibraryPage />} handle={{ title: 'Library' }} />
+              {/* The workflows, moved out of Settings at the firm's instruction: "if we are
+                  building a workflow, currently it lives in the accounts section. I think it
+                  should live in the library section." A workflow is content somebody writes, not
+                  a setting -- and it belongs beside the wording it sends, because
+                  workflow_nodes.template_id points straight at message_templates.
+
+                  The open workflow is a route parameter rather than component state, so a draft
+                  being argued about can be linked to. In Settings it had no address at all. */}
+              <Route path="/library/workflows" element={<LibraryWorkflows />} handle={{ title: 'Workflows' }} />
+              <Route path="/library/workflows/:key" element={<LibraryWorkflows />} handle={{ title: 'Workflows' }} />
               <Route path="/reports" element={<ReportsPage />} handle={{ title: 'Reports' }} />
               <Route path="/settings" element={<SettingsPage />} handle={{ title: 'Settings' }} />
               <Route path="/reps/:id" element={<RepDetailPage />} handle={{ title: 'Rep Performance' }} />
