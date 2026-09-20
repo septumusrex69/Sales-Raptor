@@ -94,10 +94,10 @@ export function LetterEditor({ doc, onChange, readOnly }: {
           account's — nothing but a printer knows them — so they are legal here and refused in the
           body, where a paragraph cannot know which page it landed on.
         */}
-        <Field label="Running header — {{page}} and {{pages}} allowed here only">
-          <input className={`${sel} w-[22rem]`} disabled={readOnly} value={doc.runningHeader ?? ''}
-            placeholder="Nothing repeated at the top of each page"
-            onChange={(e) => onChange({ ...doc, runningHeader: e.target.value || undefined })} />
+        <Field label="Foot of every page — {{page}} and {{pages}} allowed here only">
+          <input className={`${sel} w-[22rem]`} disabled={readOnly} value={doc.runningFoot ?? ''}
+            placeholder="Nothing repeated at the foot of each page"
+            onChange={(e) => onChange({ ...doc, runningFoot: e.target.value || undefined })} />
         </Field>
       </div>
 
@@ -347,6 +347,14 @@ function BlockBody({ block, onChange, readOnly }: {
       )
     case 'spacer':
       return <div className="text-[11px] text-slate-400">{block.mm} mm of space.</div>
+    case 'signature':
+      return (
+        <div>
+          <div className="h-8 border-b border-slate-400 mb-1.5" style={{ width: `${block.widthMm ?? 70}mm`, maxWidth: '100%' }} />
+          <RichText spans={block.spans} readOnly={readOnly}
+            onChange={(spans) => onChange({ ...block, spans })} />
+        </div>
+      )
     case 'pagebreak':
       return (
         <div className="flex items-center gap-2 text-[11px] text-slate-400">
@@ -509,6 +517,7 @@ function newBlock(kind: Block['kind']): Block {
       borders: 'rows',
     }
     case 'spacer': return { kind, mm: 6 }
+    case 'signature': return { kind, widthMm: 70, spans: [{ text: '' }] }
     case 'pagebreak': return { kind }
     default: return { kind: 'paragraph', spans: [{ text: '' }] }
   }

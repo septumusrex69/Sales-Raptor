@@ -19,7 +19,7 @@
  * margins are already expressed. PDF's own coordinate system is bottom-left in points; converting
  * once, at the drawing edge, beats carrying two systems through the arithmetic.
  */
-import type { LetterDocument, PageSetup, Span } from './letterDocument.ts'
+import type { Block, LetterDocument, PageSetup, Span } from './letterDocument.ts'
 import { renderTemplate } from './messageTemplates.ts'
 
 /** A run of text on a line, already positioned. */
@@ -173,8 +173,8 @@ function wrap(ps: Piece[], widthMm: number, lineHeight: number): Line[] {
 
 export interface LetterPlan {
   pages: PlannedPage[]
-  /** Where the running header goes on every page, if there is one. */
-  runningHeader: { text: string; xMm: number; yMm: number; sizePt: number; colour: string } | null
+  /** Where the running line goes at the FOOT of every page, if there is one. */
+  runningFoot: { text: string; xMm: number; yMm: number; sizePt: number; colour: string } | null
 }
 
 /**
@@ -197,11 +197,16 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
   const base = { sizePt: doc.defaults.size, colour: doc.defaults.colour }
   const lineHeight = doc.defaults.lineHeight
 
-  /* The running header sits in the TOP MARGIN, above the text frame, which is where the
-     letterhead leaves room for it. Inside the frame it would push page one's first paragraph
-     down a line and no other page's, so the two would not start at the same height. */
-  const headerSize = doc.defaults.size * 0.78
-  const headerY = Math.max(ptToMm(headerSize), page.marginTopMm - 8)
+  /*
+   * THE RUNNING LINE SITS BELOW THE TEXT, in the bottom margin, at the firm's instruction. At the
+   * top it competed with the letterhead's logo and pushed the date block down the page.
+   *
+   * Placed between the text frame and the letterhead's own footer block: 6mm under the last line
+   * the text may reach, which on the firm's letterhead leaves it clear of the contact details
+   * drawn at 279.8mm.
+   */
+  const footSize = doc.defaults.size * 0.78
+  const footY = page.heightMm - page.marginBottomMm + 6
   const top = page.marginTopMm
 
   const pages: PlannedPage[] = [{ ops: [] }]
@@ -251,9 +256,31 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
     }
   }
 
+  /**
+   * How much of a block has to fit for it not to be stranded — its first line, or for a signature
+   * the air above the rule plus the rule plus the first line under it.
+   *
+   * Measured rather than guessed at a fixed number of millimetres: a signature block is three
+   * times the height of a paragraph line, so one constant would either strand signatures or push
+   * paragraphs onto a new page for no reason.
+   */
+  const firstUnitOf = (b: Block | undefined): number => {
+    if (!b) return 0
+    const oneLine = ptToMm(doc.defaults.size) * lineHeight
+    /* The gap ABOVE it counts. Reserving the block's own height and forgetting the space it sits
+       under leaves the reservation short by exactly that gap -- which is three millimetres, and
+       three millimetres is the whole difference in the marginal case this exists for. */
+    const before = ('spacing' in b ? b.spacing?.before : undefined) ?? 0
+    if (b.kind === 'signature') return before + 10 + 2 + oneLine
+    if (b.kind === 'spacer') return before + b.mm
+    if (b.kind === 'pagebreak') return 0
+    return before + oneLine
+  }
+
   let counter = 0
 
-  for (const block of doc.blocks) {
+  for (const [at_, block] of doc.blocks.entries()) {
+    const next = doc.blocks[at_ + 1]
     const spacing = 'spacing' in block ? block.spacing : undefined
     y += spacing?.before ?? 0
 
@@ -264,9 +291,21 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
         const space = HEADING_SPACE[block.level]
         y += spacing?.before === undefined ? space.before : 0
         const spans = fill(block.spans).map((s) => ({ ...s, bold: true, size: s.size ?? size }))
-        const number = block.numbered ? `${++counter}` : null
+        /* "1." rather than "1", at the firm's request -- what makes a numbered section read as
+           numbering rather than as a stray digit beside a heading. */
+        const number = block.numbered ? `${++counter}.` : null
         const indent = number === null ? 0 : NUMBER_GUTTER_MM
         const lines = wrap(pieces(spans, { ...base, sizePt: size }, measure), textWidth - indent, lineHeight)
+        /*
+         * A HEADING IS NOT LEFT ALONE AT THE FOOT OF A PAGE.
+         *
+         * The firm found this on their own notice: "how to resolve this kind of was at the bottom
+         * of the page and it just said the one thing". A heading that keeps company with nothing
+         * reads as the end of the letter, and the reader turns the page having decided there is
+         * nothing under it. Room is asked for the heading PLUS two lines of whatever follows.
+         */
+        room(lines.reduce((n, l) => n + l.heightMm, 0)
+          + (spacing?.after ?? HEADING_SPACE[block.level].after) + firstUnitOf(next) * 2)
         if (number !== null && lines.length > 0) {
           room(lines[0].heightMm)
           at().ops.push({
@@ -280,6 +319,12 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
       }
       case 'paragraph': {
         const lines = wrap(pieces(fill(block.spans), base, measure), textWidth, lineHeight)
+        /* KEPT WITH WHAT FOLLOWS, where it says so: "Yours faithfully" at the foot of a page with
+           its signature overleaf reads as a letter that ends without being signed. */
+        if (block.keepWithNext) {
+          room(lines.reduce((n, l) => n + l.heightMm, 0)
+            + (spacing?.after ?? PARA_AFTER_MM) + firstUnitOf(next))
+        }
         drawLines(lines, left, textWidth, block.align ?? 'left')
         y += spacing?.after ?? PARA_AFTER_MM
         break
@@ -355,6 +400,25 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
       case 'spacer':
         y += block.mm
         break
+      case 'signature': {
+        /*
+         * A RULE TO SIGN ABOVE, then the name under it. Its own block rather than a row of
+         * underscores, which wrap, break across a page and print at whatever width the font gives
+         * them. 10mm of air above the rule is room for a pen.
+         */
+        const lines = wrap(pieces(fill(block.spans), base, measure), textWidth, lineHeight)
+        const ruleW = block.widthMm ?? 70
+        room(10 + 2 + lines.reduce((n, l) => n + l.heightMm, 0))
+        y += 10
+        at().ops.push({
+          op: 'line', x1Mm: left, y1Mm: y, x2Mm: left + ruleW, y2Mm: y,
+          widthMm: 0.3, colour: '#4b5563',
+        })
+        y += 2
+        drawLines(lines, left, textWidth, 'left')
+        y += spacing?.after ?? PARA_AFTER_MM
+        break
+      }
       case 'pagebreak':
         /* Only if something is already on this page. A page break as the first block would open
            the letter with a blank sheet, which is the trailing-blank-page bug in reverse. */
@@ -365,14 +429,8 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
 
   return {
     pages,
-    runningHeader: doc.runningHeader
-      ? {
-        text: doc.runningHeader,
-        xMm: left,
-        yMm: headerY,
-        sizePt: headerSize,
-        colour: '#6b7280',
-      }
+    runningFoot: doc.runningFoot
+      ? { text: doc.runningFoot, xMm: left, yMm: footY, sizePt: footSize, colour: '#6b7280' }
       : null,
   }
 }
@@ -383,14 +441,14 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
  * `{{page}}` and `{{pages}}` are answered here and nowhere else, because nothing but a printer
  * knows them — which is exactly why letterProblems refuses them in the body.
  */
-export function headerTextFor(plan: LetterPlan, input: {
+export function footTextFor(plan: LetterPlan, input: {
   page: number
   pages: number
   filled: boolean
   values: Record<string, string>
 }): string | null {
-  if (!plan.runningHeader) return null
-  const withPages = plan.runningHeader.text
+  if (!plan.runningFoot) return null
+  const withPages = plan.runningFoot.text
     .replace(/\{\{page\}\}/g, String(input.page))
     .replace(/\{\{pages\}\}/g, String(input.pages))
   return input.filled ? renderTemplate(withPages, input.values).text : withPages

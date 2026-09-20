@@ -81,6 +81,16 @@ export interface ParagraphBlock {
   spans: Span[]
   align?: Align
   spacing?: Spacing
+  /**
+   * Do not leave this paragraph at the foot of a page with what follows it overleaf.
+   *
+   * "Yours faithfully" is the reason it exists: it landed at the bottom of page two with the
+   * signature on page three, which reads as a letter that ends without being signed. The firm
+   * found the same fault one block earlier, on a heading — headings keep with what follows them
+   * always, because a heading alone at the foot of a page tells the reader there is nothing
+   * under it. A paragraph only does so when it is asked to.
+   */
+  keepWithNext?: boolean
 }
 
 export interface ListBlock {
@@ -123,13 +133,31 @@ export interface SpacerBlock {
   mm: number
 }
 
+/**
+ * A ruled line to sign on, with what goes under it.
+ *
+ * At the firm's request: "signature has a small line in it, so you can like put a line in there."
+ * Its own block rather than an underscored paragraph, because a row of underscores is a row of
+ * characters that wraps, breaks across a page and prints at whatever width the font happens to
+ * give it.
+ */
+export interface SignatureBlock {
+  kind: 'signature'
+  /** How wide the rule is, in millimetres. */
+  widthMm?: number
+  /** The lines under it: the name, the title, who they sign for. */
+  spans: Span[]
+  spacing?: Spacing
+}
+
 /** A hard page break. The section 129 does not force one; a two-page annexure would. */
 export interface PageBreakBlock {
   kind: 'pagebreak'
 }
 
 export type Block =
-  | HeadingBlock | ParagraphBlock | ListBlock | TableBlock | SpacerBlock | PageBreakBlock
+  | HeadingBlock | ParagraphBlock | ListBlock | TableBlock | SpacerBlock | SignatureBlock
+  | PageBreakBlock
 
 export const BLOCK_KINDS: Record<Block['kind'], { label: string; hint: string }> = {
   heading: { label: 'Heading', hint: 'A section title, numbered or not' },
@@ -137,6 +165,7 @@ export const BLOCK_KINDS: Record<Block['kind'], { label: string; hint: string }>
   list: { label: 'List', hint: 'Bullets or numbers' },
   table: { label: 'Table', hint: 'Rows and columns' },
   spacer: { label: 'Space', hint: 'A gap, in millimetres' },
+  signature: { label: 'Signature line', hint: 'A ruled line to sign above' },
   pagebreak: { label: 'Page break', hint: 'Start a new page here' },
 }
 
@@ -159,14 +188,18 @@ export interface LetterDocument {
     lineHeight: number
   }
   /**
-   * The line that repeats at the top of every page: "Section 129 notice · Ref ... · Page 1 of 2".
+   * The line that repeats at the FOOT of every page: "Section 129 notice · Ref ... · Page 1 of 2".
+   *
+   * AT THE BOTTOM, at the firm's instruction — "you can put that at the bottom like somewhere on
+   * every page". It was at the top, where it competed with the letterhead's own logo for the eye
+   * and pushed the date block down.
    *
    * NOT A BLOCK, because it is page furniture rather than content — it appears once in the
    * document and many times on paper, and a block that multiplied itself would have to know how
    * the text broke. `{{page}}` and `{{pages}}` are filled by the renderer, not by the merge
    * vocabulary, because nothing but a printer knows them.
    */
-  runningHeader?: string
+  runningFoot?: string
   blocks: Block[]
 }
 
@@ -225,6 +258,11 @@ export function parseLetter(body: string): LetterDocument | null {
   const doc = raw as Partial<LetterDocument>
   if (!Array.isArray(doc.blocks)) return null
   if (!doc.defaults || typeof doc.defaults !== 'object') return null
+  /* A document written before the running line moved to the foot carries it under the old key.
+     Accepted and renamed rather than dropped -- losing a page's reference line silently is worse
+     than carrying one legacy name. */
+  const legacy = (raw as { runningHeader?: string }).runningHeader
+  if (legacy && !doc.runningFoot) doc.runningFoot = legacy
   /* Every block has to be a kind we can draw. One unknown block is a letter with a hole in it,
      and a hole in a statutory notice is not something to render around quietly. */
   for (const b of doc.blocks) {
@@ -252,6 +290,7 @@ export function lettersText(doc: LetterDocument): string {
   for (const b of doc.blocks) {
     if (b.kind === 'heading' || b.kind === 'paragraph') out.push(spansText(b.spans))
     else if (b.kind === 'list') for (const item of b.items) out.push(spansText(item))
+    else if (b.kind === 'signature') out.push(spansText(b.spans))
     else if (b.kind === 'table') for (const row of b.rows) for (const c of row) out.push(spansText(c.spans))
   }
   return out.join('\n')
@@ -282,7 +321,7 @@ export function letterProblems(doc: LetterDocument, scope: TemplateScope): Lette
      unknowns rather than added to the vocabulary, so a paragraph asking for {{page}} is still
      caught -- which is the fault worth catching, because it renders in the editor and is wrong on
      paper. */
-  const headerUnknown = unknownFields(scope, doc.runningHeader ?? '', null)
+  const headerUnknown = unknownFields(scope, doc.runningFoot ?? '', null)
     .filter((f) => !(PRINTER_FIELDS as readonly string[]).includes(f))
   const unknown = [...new Set([...unknownFields(scope, lettersText(doc), null), ...headerUnknown])]
   if (unknown.length > 0) {
@@ -400,7 +439,9 @@ export function letterToHtml(doc: LetterDocument, input: {
       case 'heading': {
         const n = b.numbered ? `${++counter}` : null
         const tag = `h${b.level}`
-        const number = n === null ? '' : `<span class="ltr-n">${n}</span>`
+        /* "1." rather than "1", at the firm's request -- it is what makes a numbered section
+           read as numbering rather than as a stray digit beside a heading. */
+        const number = n === null ? '' : `<span class="ltr-n">${n}.</span>`
         out.push(`<${tag} class="ltr-h${b.level}"${attr}>${number}${inline(b.spans)}</${tag}>`)
         break
       }
@@ -430,6 +471,11 @@ export function letterToHtml(doc: LetterDocument, input: {
       case 'spacer':
         out.push(`<div style="height:${b.mm}mm"></div>`)
         break
+      case 'signature':
+        out.push(`<div class="ltr-sig"${attr}>`
+          + `<div class="ltr-rule" style="width:${b.widthMm ?? 70}mm"></div>`
+          + `<div>${inline(b.spans)}</div></div>`)
+        break
       case 'pagebreak':
         /* break-before on the NEXT thing rather than break-after on this one: an empty div with
            break-after produces a trailing blank page in every browser that has ever printed. */
@@ -446,14 +492,14 @@ export function letterToHtml(doc: LetterDocument, input: {
  * Separate from letterToHtml because it is drawn once per PAGE and the body is drawn once per
  * DOCUMENT — the caller that knows how the text broke is the only thing that can say "2 of 3".
  */
-export function runningHeaderHtml(doc: LetterDocument, input: {
+export function runningFootHtml(doc: LetterDocument, input: {
   filled: boolean
   values: Record<string, string>
   page: number
   pages: number
 }): string {
-  if (!doc.runningHeader) return ''
-  const withPages = doc.runningHeader
+  if (!doc.runningFoot) return ''
+  const withPages = doc.runningFoot
     .replace(/\{\{page\}\}/g, String(input.page))
     .replace(/\{\{pages\}\}/g, String(input.pages))
   const text = input.filled ? renderTemplate(withPages, input.values).text : withPages
@@ -504,11 +550,12 @@ export function letterCss(doc: LetterDocument, page: PageSetup): string {
 .ltr-b-rows td, .ltr-b-rows th { border-bottom: 0.2mm solid #d8dee6; padding-left: 0; }
 .ltr-b-all td, .ltr-b-all th { border: 0.2mm solid #d8dee6; padding: 1.4mm 2mm; }
 .ltr-break { break-before: page; page-break-before: always; }
-/* The running line sits ABOVE the text frame, in the top margin, which is where the letterhead
-   leaves room for it. Inside the frame it would push the first paragraph down a line on page one
-   and nowhere else, and the two pages would not start at the same height. */
+.ltr-sig { margin: 0 0 3mm; }
+.ltr-rule { border-bottom: 0.3mm solid #4b5563; height: 10mm; margin-bottom: 1.5mm; }
+/* The running line sits BELOW the text, in the bottom margin, clear of the letterhead's own
+   footer block. At the top it competed with the logo and pushed the date block down the page. */
 .ltr-running { font-size: ${(d.size * 0.78).toFixed(1)}pt; color: #6b7280; letter-spacing: .02em;
-  margin-top: -${Math.max(0, page.marginTopMm - 30).toFixed(1)}mm; margin-bottom: 6mm; }
+  margin-top: 8mm; }
 `.trim()
 }
 

@@ -581,7 +581,7 @@ export const LIBRARY = [
     format: 'document',
     body: JSON.stringify({
       defaults: { font: 'Georgia, serif', size: 10.5, colour: '#1f2937', lineHeight: 1.45 },
-      runningHeader: 'Section 129 notice · Ref {{reference}} · Page {{page}} of {{pages}}',
+      runningFoot: 'Section 129 notice · Ref {{reference}} · Page {{page}} of {{pages}}',
       blocks: [
         { kind: 'heading', level: 1, spans: [{ text: 'NOTICE IN TERMS OF SECTION 129(1)(a)' }] },
         { kind: 'paragraph', spans: [

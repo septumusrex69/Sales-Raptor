@@ -21,7 +21,7 @@
 import { readFileSync } from 'node:fs'
 import {
   A4_LETTERHEAD, blankLetter, canUseLetter, editableHtmlToSpans, letterCss, letterProblems,
-  letterToHtml, lettersText, parseLetter, runningHeaderHtml, serialiseLetter, spansToEditableHtml,
+  letterToHtml, lettersText, parseLetter, runningFootHtml, serialiseLetter, spansToEditableHtml,
 } from '../../src/lib/letterDocument.ts'
 import { sampleValues } from '../../src/lib/messageTemplates.ts'
 
@@ -80,14 +80,22 @@ ok('a collections field is unknown on the sales side',
  * cannot know which page it landed on, and one that asks renders in the editor and is wrong on
  * the second page.
  */
-const header = { ...blankLetter(), runningHeader: 'Ref {{reference}} · Page {{page}} of {{pages}}', blocks: [p('x')] }
-check('the running header may count pages', letterProblems(header, 'collections'), [])
+const header = { ...blankLetter(), runningFoot: 'Ref {{reference}} · Page {{page}} of {{pages}}', blocks: [p('x')] }
+check('the running line may count pages', letterProblems(header, 'collections'), [])
 ok('...and the body may not',
   letterProblems({ ...blankLetter(), blocks: [p('see page {{page}}')] }, 'collections')
     .some((x) => x.level === 'refuse'))
-ok('...while a real typo in the header is still caught',
-  letterProblems({ ...blankLetter(), runningHeader: '{{nonsense}}', blocks: [p('x')] }, 'collections')
+ok('...while a real typo in it is still caught',
+  letterProblems({ ...blankLetter(), runningFoot: '{{nonsense}}', blocks: [p('x')] }, 'collections')
     .some((x) => x.level === 'refuse'))
+/*
+ * AND A DOCUMENT WRITTEN BEFORE IT MOVED TO THE FOOT still carries its line. Losing a page's
+ * reference line silently, on a letter somebody wrote months ago, is worse than carrying one
+ * legacy key name.
+ */
+check('a letter using the old key keeps its running line',
+  parseLetter(JSON.stringify({ defaults: blankLetter().defaults, runningHeader: 'Ref x', blocks: [] }))?.runningFoot,
+  'Ref x')
 
 /*
  * A RAGGED TABLE renders as a page that looks fine and is missing a cell. Refused rather than
@@ -148,10 +156,12 @@ const numbered = {
     { kind: 'heading', level: 2, spans: [{ text: 'THREE' }], numbered: true },
   ],
 }
-check('headings number themselves',
-  [...draw(numbered).matchAll(/class="ltr-n">(\d+)</g)].map((m) => m[1]).join(','), '1,2,3')
+/* "1." rather than "1", at the firm's request -- the full stop is what makes it read as
+   numbering rather than as a digit beside a heading. */
+check('headings number themselves, with a full stop',
+  [...draw(numbered).matchAll(/class="ltr-n">([\d.]+)</g)].map((m) => m[1]).join(' '), '1. 2. 3.')
 ok('...and an unnumbered heading takes no number and consumes none',
-  /ltr-n">3<\/span>THREE/.test(draw(numbered)))
+  /ltr-n">3\.<\/span>THREE/.test(draw(numbered)))
 
 /* Merge fields stand or resolve, and the toggle is what decides which. */
 ok('unfilled shows the fields', draw(sound, false).includes('{{balance}}'))
@@ -160,8 +170,8 @@ ok('...and filled shows the values', draw(sound, true).includes('R 48,250.00'))
 /* A newline inside a span is a real break: an address is one paragraph on four lines. */
 ok('a newline becomes a line break', draw({ ...blankLetter(), blocks: [p('a\nb')] }).includes('a<br>b'))
 
-check('the running header counts the pages',
-  runningHeaderHtml(header, { filled: true, values, page: 2, pages: 3 }).includes('Page 2 of 3'), true)
+check('the running line counts the pages',
+  runningFootHtml(header, { filled: true, values, page: 2, pages: 3 }).includes('Page 2 of 3'), true)
 
 /* The stylesheet is driven by the page, or the preview and the print disagree about the frame. */
 ok('the stylesheet uses the page it is given',
@@ -250,10 +260,10 @@ if (s129) {
    * is the thing that breaks silently when somebody inserts a section.
    */
   check('...and four numbered sections',
-    [...draw(s129).matchAll(/class="ltr-n">(\d+)</g)].map((m) => m[1]).join(','), '1,2,3,4')
-  ok('...with the legal-process heading unnumbered between the third and the fourth',
-    /THE LEGAL PROCESS WE FOLLOW FOR NON-PAYMENT/.test(draw(s129))
-    && /ltr-n">4<\/span>HOW TO PAY/.test(draw(s129)))
+    [...draw(s129).matchAll(/class="ltr-n">([\d.]+)</g)].map((m) => m[1]).join(' '), '1. 2. 3. 4.')
+  ok('...with the plain-words heading unnumbered between the third and the fourth',
+    /WHAT HAPPENS NEXT IF YOU DO NOT/.test(draw(s129))
+    && /ltr-n">4\.<\/span>HOW TO PAY/.test(draw(s129)))
   /* The three tables the firm's document has: the date strip, the reference block and the banking
      details, plus the legal-process grid. */
   ok(`...and its tables (${s129.blocks.filter((b) => b.kind === 'table').length})`,

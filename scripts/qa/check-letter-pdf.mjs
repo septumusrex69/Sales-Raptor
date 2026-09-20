@@ -16,7 +16,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  HEADING_SCALE, headerTextFor, mmToPt, planLetter, ptToMm,
+  HEADING_SCALE, footTextFor, mmToPt, planLetter, ptToMm,
 } from '../../src/lib/letterLayout.ts'
 import { hexToRgb, letterFilename, standardFamilyFor, toBase64 } from '../../src/lib/letterPdf.ts'
 import { A4_LETTERHEAD, blankLetter, letterCss, parseLetter } from '../../src/lib/letterDocument.ts'
@@ -50,6 +50,18 @@ const plan = (doc, page = A4_LETTERHEAD) =>
 const p = (text, o = {}) => ({ kind: 'paragraph', spans: [{ text }], ...o })
 const cell = (t) => ({ spans: [{ text: t }] })
 const texts = (pl) => pl.pages.flatMap((pg) => pg.ops.filter((o) => o.op === 'text'))
+
+/**
+ * The x of a run, or NaN if there is no such run.
+ *
+ * READ DEFENSIVELY. CLAUDE.md names this trap and this file walked into it twice: indexing the
+ * result of a `find` that matched nothing throws a TypeError several lines below the check that
+ * should have reported it, so a real failure is reported as a crash in the test. Found by
+ * dropping the full stop from the section numbering and watching the file die instead of fail.
+ * NaN compares false against everything, which is exactly what a missing run should do.
+ */
+const xOf = (ops, text) => ops.find((o) => o.text === text)?.xMm ?? NaN
+const firstX = (ops) => ops[0]?.xMm ?? NaN
 
 /* ---------- millimetres, not points ---------- */
 
@@ -92,9 +104,9 @@ const long = { ...blankLetter(), blocks: [p('word '.repeat(2000).trim())] }
  * followed its last word centres half a space to the left, on every line, down the page.
  */
 {
-  const centred = (text) => texts(plan({
+  const centred = (text) => firstX(texts(plan({
     ...blankLetter(), blocks: [{ kind: 'paragraph', spans: [{ text }], align: 'center' }],
-  }))[0].xMm
+  })))
   check('a trailing space does not push a centred line off centre',
     near(centred('word word'), centred('word word   ')), true)
   /* And the leading space that followed the word which ended the previous line is swallowed, or
@@ -120,7 +132,7 @@ const long = { ...blankLetter(), blocks: [p('word '.repeat(2000).trim())] }
   const afterBreak = texts(plan({ ...blankLetter(), blocks: [p('14 Protea Street\n   Wonderboom')] }))
   check('a space after a hard break does not indent the next line',
     [...new Set(afterBreak.map((o) => Math.round(o.xMm * 10) / 10))].includes(A4_LETTERHEAD.marginLeftMm)
-      && afterBreak.filter((o) => o.text === 'Wonderboom')[0].xMm === A4_LETTERHEAD.marginLeftMm,
+      && xOf(afterBreak, 'Wonderboom') === A4_LETTERHEAD.marginLeftMm,
     true)
 }
 
@@ -174,18 +186,24 @@ check('...and one at the very start does not leave a blank sheet',
 
 const withHeader = {
   ...blankLetter(),
-  runningHeader: 'Ref {{reference}} · Page {{page}} of {{pages}}',
+  runningFoot: 'Ref {{reference}} · Page {{page}} of {{pages}}',
   blocks: [p('word '.repeat(2000).trim())],
 }
 {
   const pl = plan(withHeader)
-  check('the header counts this page and the total',
-    headerTextFor(pl, { page: 2, pages: pl.pages.length, filled: true, values }),
+  check('the running line counts this page and the total',
+    footTextFor(pl, { page: 2, pages: pl.pages.length, filled: true, values }),
     `Ref ${values.reference} · Page 2 of ${pl.pages.length}`)
-  ok('...and sits in the top margin, above the text frame',
-    pl.runningHeader.yMm < A4_LETTERHEAD.marginTopMm)
-  check('a letter with no running header has none',
-    plan({ ...blankLetter(), blocks: [p('x')] }).runningHeader, null)
+  /*
+   * AT THE FOOT, at the firm's instruction, and BELOW the text frame -- inside it, it would push
+   * the last line of every page up by its own height. It also has to stay clear of the
+   * letterhead's own footer block, which on the firm's sheet starts at 279.8mm.
+   */
+  ok(`...below the text frame (${pl.runningFoot.yMm.toFixed(1)}mm)`,
+    pl.runningFoot.yMm > A4_LETTERHEAD.heightMm - A4_LETTERHEAD.marginBottomMm)
+  ok('...and clear of the letterhead\u2019s own footer', pl.runningFoot.yMm < 279.8)
+  check('a letter with no running line has none',
+    plan({ ...blankLetter(), blocks: [p('x')] }).runningFoot, null)
 }
 
 /* ---------- headings ---------- */
@@ -199,14 +217,15 @@ const withHeader = {
   const h = (text, numbered) => ({ kind: 'heading', level: 2, spans: [{ text }], numbered })
   const pl = plan({ ...blankLetter(), blocks: [h('ONE', true), h('ASIDE', false), h('TWO', true)] })
   const ops = texts(pl)
-  check('headings number themselves', ops.filter((o) => /^\d+$/.test(o.text)).map((o) => o.text), ['1', '2'])
+  check('headings number themselves, with a full stop',
+    ops.filter((o) => /^\d+\.$/.test(o.text)).map((o) => o.text), ['1.', '2.'])
   /* The number sits in the margin gutter, at the left margin, with its heading indented past it
      -- so a heading that wraps keeps its second line under its first rather than under the digit. */
-  const one = ops.find((o) => o.text === '1')
-  const word = ops.find((o) => o.text === 'ONE')
-  check('...in the gutter at the left margin', near(one.xMm, A4_LETTERHEAD.marginLeftMm), true)
-  ok(`...with the heading indented past it (${word.xMm.toFixed(1)}mm)`, word.xMm > one.xMm + 5)
-  ok('a heading is drawn bold', word.bold)
+  const oneX = xOf(ops, '1.')
+  const wordX = xOf(ops, 'ONE')
+  check('...in the gutter at the left margin', near(oneX, A4_LETTERHEAD.marginLeftMm), true)
+  ok(`...with the heading indented past it (${wordX}mm)`, wordX > oneX + 5)
+  ok('a heading is drawn bold', ops.find((o) => o.text === 'ONE')?.bold === true)
 }
 
 /*
@@ -229,7 +248,7 @@ const withHeader = {
 
 {
   const line = 'word word word'
-  const at = (align) => texts(plan({ ...blankLetter(), blocks: [p(line, { align })] }))[0].xMm
+  const at = (align) => firstX(texts(plan({ ...blankLetter(), blocks: [p(line, { align })] })))
   const width = A4_LETTERHEAD.widthMm - A4_LETTERHEAD.marginLeftMm - A4_LETTERHEAD.marginRightMm
   const used = measure(line, blankLetter().defaults.size)
   check('left is at the margin', near(at('left'), A4_LETTERHEAD.marginLeftMm), true)
@@ -286,6 +305,83 @@ check('...and survives having none', letterFilename('Final notice', null), 'Fina
 ok('...and a name of nothing but punctuation still names a file',
   letterFilename('///', null) === 'letter.pdf')
 
+/* ---------- nothing is stranded at the foot of a page ---------- */
+
+/*
+ * A HEADING ALONE AT THE FOOT OF A PAGE tells the reader there is nothing under it, and they turn
+ * the page having decided the letter is over. The firm found this on their own notice: "how to
+ * resolve this kind of was at the bottom of the page and it just said the one thing."
+ */
+{
+  /* A paragraph sized to leave just enough room for a heading and nothing else. */
+  /*
+   * SIZED SO THAT WITHOUT THE GUARD THE HEADING IS ACTUALLY STRANDED -- found by removing the
+   * guard and sweeping lengths, not guessed. 1 300 words does NOT strand it, so the first version
+   * of this check passed on an implementation with no widow control at all. 1 316 sits in the
+   * middle of a 32-word band that does.
+   */
+  const filler = 'word '.repeat(1316).trim()
+  const doc = {
+    ...blankLetter(),
+    blocks: [
+      p(filler),
+      { kind: 'heading', level: 2, spans: [{ text: 'STRANDED' }], numbered: true },
+      p('The body that belongs under it.'),
+    ],
+  }
+  const pl = plan(doc)
+  const pageOf = (needle) => pl.pages.findIndex((pg) =>
+    pg.ops.some((o) => o.op === 'text' && o.text === needle))
+  ok(`the letter runs over pages (${pl.pages.length})`, pl.pages.length > 1)
+  check('a heading is not left at the foot of a page without its body',
+    pageOf('STRANDED') === pageOf('The'), true)
+}
+
+/*
+ * AND "YOURS FAITHFULLY" IS NOT LEFT WITHOUT ITS SIGNATURE, which is the same fault one block
+ * later: a letter that appears to end without being signed. A paragraph only keeps with what
+ * follows it when it says so, because most paragraphs should break freely.
+ */
+{
+  /* Sized so that WITHOUT the flag the two land on different pages -- found by sweeping lengths
+     rather than guessed, because a filler that does not actually strand it makes the assertion
+     below pass on any implementation. 1 300 is the middle of a 64-word-wide band that does. */
+  const filler = 'word '.repeat(1300).trim()
+  const sig = (keep) => plan({
+    ...blankLetter(),
+    blocks: [
+      p(filler),
+      { kind: 'paragraph', spans: [{ text: 'Yours faithfully' }], keepWithNext: keep },
+      { kind: 'signature', widthMm: 70, spans: [{ text: 'J Bredell' }] },
+    ],
+  })
+  const sigPage = (pl) => pl.pages.findIndex((pg) =>
+    pg.ops.some((o) => o.op === 'line' && near(o.y1Mm, o.y2Mm, 0.01) && near(o.x2Mm - o.x1Mm, 70, 1)))
+  const yoursPage = (pl) => pl.pages.findIndex((pg) =>
+    pg.ops.some((o) => o.op === 'text' && o.text === 'faithfully'))
+  const kept = sig(true)
+  check('a paragraph that keeps with the next stays with its signature',
+    yoursPage(kept) === sigPage(kept), true)
+  /* And without the flag it breaks freely, or every paragraph in the letter would drag the next
+     one around with it. */
+  const loose = sig(false)
+  check('...and one that does not, does not',
+    yoursPage(loose) === sigPage(loose), false)
+}
+
+/* A signature block draws a rule to sign above, and the words under it. */
+{
+  const pl = plan({
+    ...blankLetter(),
+    blocks: [{ kind: 'signature', widthMm: 70, spans: [{ text: 'J Bredell' }] }],
+  })
+  const rules = pl.pages[0].ops.filter((o) => o.op === 'line')
+  check('a signature block draws one rule', rules.length, 1)
+  check('...70mm wide', near((rules[0]?.x2Mm ?? 0) - (rules[0]?.x1Mm ?? 0), 70), true)
+  const name = pl.pages[0].ops.find((o) => o.op === 'text')
+  ok('...with the name under it, not over it', (name?.yMm ?? -1) > (rules[0]?.y1Mm ?? 0))
+}
+
 /* ---------- the firm's own section 129, laid out ---------- */
 
 /*
@@ -314,9 +410,9 @@ if (s129) {
    * bold in the gutter.
    */
   check('its four sections are numbered',
-    ops.filter((o) => /^\d+$/.test(o.text) && o.bold && near(o.xMm, A4_LETTERHEAD.marginLeftMm))
+    ops.filter((o) => /^\d+\.$/.test(o.text) && o.bold && near(o.xMm, A4_LETTERHEAD.marginLeftMm))
       .map((o) => o.text),
-    ['1', '2', '3', '4'])
+    ['1.', '2.', '3.', '4.'])
   /* Every merge field resolved. A field left standing is braces posted on the firm's letterhead
      over a director's name -- which is exactly what the unfilled toggle is FOR, and exactly what
      must never survive into a sent one. */

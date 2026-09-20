@@ -514,7 +514,16 @@ function NameSlot({ account, name, onSave, busy }: {
   return (
     <SlotShell icon="name" label="Full Name">
       <span className="grid grid-cols-2 gap-1.5 mt-0.5">
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" aria-label="Title"
+        {/*
+          SUGGESTED, NOT LOCKED. A letter that opens "Dear buitendag" is what a blank title looks
+          like on paper, and the firm found exactly that on their own section 129 -- addressAs
+          falls back to the surname alone when there is none. A datalist offers the ones anybody
+          types without refusing Adv, Rev or a title nobody thought of.
+        */}
+        <datalist id="debtor-titles">
+          {['Mr', 'Mrs', 'Ms', 'Miss', 'Dr', 'Prof', 'Adv', 'Rev'].map((x) => <option key={x} value={x} />)}
+        </datalist>
+        <input list="debtor-titles" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" aria-label="Title"
           className="text-sm rounded-lg border border-slate-200 px-2 py-1" />
         <input value={initials} onChange={(e) => setInitials(e.target.value)} placeholder="Initials" aria-label="Initials"
           className="text-sm rounded-lg border border-slate-200 px-2 py-1" />

@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import {
-  A4_LETTERHEAD, letterCss, letterToHtml, runningHeaderHtml,
+  A4_LETTERHEAD, letterCss, letterToHtml, runningFootHtml,
   type LetterDocument, type PageSetup,
 } from '../../lib/letterDocument.ts'
 
@@ -35,8 +35,8 @@ export function LetterPage({ doc, page = A4_LETTERHEAD, filled, values, scale = 
   pages?: number
 }) {
   const html = useMemo(() => letterToHtml(doc, { filled, values }), [doc, filled, values])
-  const header = useMemo(
-    () => runningHeaderHtml(doc, { filled, values, page: pageNumber, pages }),
+  const foot = useMemo(
+    () => runningFootHtml(doc, { filled, values, page: pageNumber, pages }),
     [doc, filled, values, pageNumber, pages],
   )
   const css = useMemo(() => letterCss(doc, page), [doc, page])
@@ -54,8 +54,8 @@ export function LetterPage({ doc, page = A4_LETTERHEAD, filled, values, scale = 
     >
       <style>{css}</style>
       <div className="ltr-page" style={{ transform: `scale(${scale})`, transformOrigin: 'top left' }}>
-        <div dangerouslySetInnerHTML={{ __html: header }} />
         <div className="ltr-body" dangerouslySetInnerHTML={{ __html: html }} />
+        <div dangerouslySetInnerHTML={{ __html: foot }} />
       </div>
     </div>
   )

@@ -24,7 +24,7 @@
  * the line breaks in the PDF are the PDF's own, so nothing wraps differently from what it shows.
  */
 import {
-  headerTextFor, mmToPt, planLetter, type DrawOp, type LetterPlan, type Measure,
+  footTextFor, mmToPt, planLetter, type DrawOp, type LetterPlan, type Measure,
 } from './letterLayout.ts'
 import type { LetterDocument, PageSetup } from './letterDocument.ts'
 
@@ -113,15 +113,15 @@ export async function letterToPdf(input: LetterPdfInput): Promise<Uint8Array> {
        gets one: page two of a two-page notice on plain paper is a page that looks forged. */
     if (image) sheet.drawImage(image, { x: 0, y: 0, width: wPt, height: hPt })
 
-    const header = headerTextFor(plan, {
+    const foot = footTextFor(plan, {
       page: i + 1, pages: plan.pages.length, filled: input.filled, values: input.values,
     })
-    if (header && plan.runningHeader) {
-      const c = hexToRgb(plan.runningHeader.colour)
-      sheet.drawText(header, {
-        x: mmToPt(plan.runningHeader.xMm),
-        y: yPt(plan.runningHeader.yMm),
-        size: plan.runningHeader.sizePt,
+    if (foot && plan.runningFoot) {
+      const c = hexToRgb(plan.runningFoot.colour)
+      sheet.drawText(foot, {
+        x: mmToPt(plan.runningFoot.xMm),
+        y: yPt(plan.runningFoot.yMm),
+        size: plan.runningFoot.sizePt,
         font: faces.regular,
         color: rgb(c.r, c.g, c.b),
       })

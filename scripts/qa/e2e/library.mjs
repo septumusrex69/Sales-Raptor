@@ -341,13 +341,16 @@ try {
    * screen can only have been counted — which is the thing that stops a section inserted in the
    * middle leaving three headings with the wrong numbers on them.
    */
-  t.check('the sections number themselves',
-    (await page.locator('.ltr-page .ltr-n').allInnerTexts()).map((x) => x.trim()).join(','), '1,2')
+  /* "1." rather than "1", at the firm's request: the full stop is what makes it read as
+     numbering rather than as a digit that wandered in beside a heading. */
+  t.check('the sections number themselves, with a full stop',
+    (await page.locator('.ltr-page .ltr-n').allInnerTexts()).map((x) => x.trim()).join(' '), '1. 2.')
   t.ok('the table is a real table', await page.locator('.ltr-page table td').first().isVisible())
   t.ok('...and the bullet a real bullet', await page.locator('.ltr-page ul li').first().isVisible())
   /* The running header is the printer's line, and {{page}} is filled by the renderer rather than
      from the account — nothing but a printer knows it. */
-  t.ok('the running header counts the pages',
+  /* At the FOOT now, at the firm's instruction -- it competed with the logo at the top. */
+  t.ok('the running line counts the pages',
     await page.getByText(/Page 1 of 2/).first().isVisible())
   /* Merge fields still toggle, exactly as they do for the wording of an SMS. */
   t.ok('a letter shows its fields', (await page.locator('.ltr-page').first().innerText()).includes('{{balance}}'))
