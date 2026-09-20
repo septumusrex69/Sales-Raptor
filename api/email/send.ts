@@ -81,13 +81,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * unrelated rows, and run one after the other they were the first two of five waits a person
    * sat through before the message even started going out. Nothing here depends on the other.
    */
-  const [{ data: conn }, { data: profile }] = await Promise.all([
+  const [{ data: conn }, { data: profile }, { data: firm }] = await Promise.all([
     admin.from('email_connections').select('*').eq('user_id', caller.id).maybeSingle(),
     admin
       .from('profiles')
       .select('email_signature, email_signature_image_url, email_signature_image_width, email_signature_image_align')
       .eq('id', caller.id)
       .maybeSingle(),
+    /* The firm's font. One row, read alongside the other two rather than after them -- see the
+       note above; this costs nothing because it waits inside a wait that was already happening. */
+    admin.from('firm_settings').select('email_font, email_size_pt').maybeSingle(),
   ])
   if (!conn) {
     res.status(400).json({ error: 'Connect your email account in Settings before sending email.' })
@@ -141,7 +144,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ...files,
   ]
 
-  const fullHtml = composeBody(bodyHtml, signatureHtml(signatureText, image, imageSrc))
+  /*
+   * THE FIRM'S FONT, AROUND THE WHOLE MESSAGE.
+   *
+   * Number() on the size because numeric(4,1) comes back from PostgREST as the STRING "10.5" --
+   * the silent-drop trap CLAUDE.md names. Concatenated into a CSS font-size it reads correctly,
+   * which is exactly why nobody would notice it was not a number.
+   *
+   * Falls back to nothing rather than to a guess: if the row cannot be read, the message goes out
+   * the way it always did instead of in a face nobody chose.
+   */
+  const emailStyle = firm?.email_font
+    ? `font-family:${firm.email_font as string};`
+      + `font-size:${Number(firm.email_size_pt ?? 10.5)}pt;line-height:1.5;color:#1f2937`
+    : null
+  const fullHtml = composeBody(bodyHtml, signatureHtml(signatureText, image, imageSrc), emailStyle)
 
   /* Built once and used for both the outgoing message and the Sent copy, so what the organiser
      got and what the sender can see afterwards are the same bytes. */

@@ -70,6 +70,7 @@ import { CallButton } from './CallButton'
 import { feeCeiling, scheduleFor } from '../../lib/annexureB'
 import { formatMoney, formatDate } from '../../data/mockData'
 import { mergeValuesFor } from '../../lib/messageTemplates'
+import { FIRM_UNSET, fetchFirmSettings, type FirmSettings } from '../../lib/firmSettings'
 import { dayKey } from '../../lib/collectionPace'
 
 type Tab = 'Overview' | 'Transactions' | 'Emails' | 'Documents'
@@ -175,6 +176,16 @@ export function AccountDetail() {
   const [freezing, setFreezing] = useState(false)
   const [askingClient, setAskingClient] = useState(false)
   const [smsOpen, setSmsOpen] = useState(false)
+  /*
+   * THE FIRM'S OWN HALF OF A LETTER — its trust account, who signs, its name.
+   *
+   * Read once per account rather than per message: it is one row and it changes about never, and
+   * fetching it again for every compose would put a round trip in front of a button somebody
+   * presses fifty times a day. FIRM_UNSET while it is in flight, so a compose opened in the first
+   * moment shows {{firm_bank}} standing rather than a blank line that reads as finished.
+   */
+  const [firm, setFirm] = useState<FirmSettings>(FIRM_UNSET)
+  useEffect(() => { void fetchFirmSettings().then(setFirm) }, [])
   const [diariseOpen, setDiariseOpen] = useState(false)
   const [tracing, setTracing] = useState(false)
   /** Null = closed. A kind inside it is the office the trace's status line implied. */
@@ -916,9 +927,15 @@ export function AccountDetail() {
            * checked, and nothing in the app had ever asked it a question -- which is worth
            * knowing, because a resolver nobody calls is a resolver nobody notices is wrong.
            *
-           * The nine fields Raptor cannot yet fill -- the debtor's address, the firm's trust
-           * account, who signs -- are passed as null rather than as an empty string, so the
-           * notice shows {{firm_bank}} standing rather than a blank line that reads as finished.
+           * THE FIRM'S OWN DETAILS NOW COME FROM THE DATABASE. They were nine fields nothing on
+           * earth could fill -- `firmName` was a string literal typed in here, and the trust
+           * account and the signatory were passed as literal null -- so a section 129 told the
+           * debtor to pay and did not say where. Library -> The firm is where they are set.
+           *
+           * WHAT IS STILL NULL IS STILL NULL, and deliberately: the debtor's postal address and
+           * the date to respond by are not the firm's details and do not belong on that screen.
+           * Passed as null rather than as an empty string, so the notice shows {{respond_by}}
+           * standing rather than a blank line that reads as finished. One of those gets caught.
            */
           letterContext={{
             reference: account.clientReference ?? account.accountNumber ?? null,
@@ -938,11 +955,15 @@ export function AccountDetail() {
                 clientName: client?.name ?? null,
                 agentName: currentUser?.name ?? null,
                 agentPhone: currentUser?.phone ?? null,
-                firmName: 'Bredell Ferreira',
+                firmName: firm.firmName,
                 today: dayKey(new Date()),
                 money: formatMoney,
                 debtorIdMasked: account.debtorIdNumber,
                 positionAsAt: dayKey(new Date()),
+                firmBank: firm.trustBank,
+                firmBankAccount: firm.trustAccountNumber,
+                signatoryName: firm.signatoryName,
+                signatoryTitle: firm.signatoryTitle,
               })).filter((entry): entry is [string, string] => entry[1] !== null),
             ),
           }}

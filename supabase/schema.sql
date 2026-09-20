@@ -5333,3 +5333,91 @@ update public.message_templates
        updated_at = now()
  where seed_key = 'letter-s129';
 
+
+-- ---------------------------------------------------------------------------
+-- THE FIRM'S OWN DETAILS -- the other half of every letter.
+--
+-- At the firm's question: "where are we going to store all the data, for example, the firm's
+-- data, like bank account details, and that stuff."
+--
+-- WHY IT IS A TABLE AND NOT A CONSTANT. Nine merge fields were written, checked and exported
+-- with nothing on earth able to fill them, and mergeValuesFor has been passing null for the
+-- firm's trust account since it was written. Null is the honest answer -- renderTemplate leaves
+-- {{firm_bank}} STANDING on the page rather than printing a blank line that reads as finished --
+-- but it means a section 129 cannot actually be posted, because the debtor is told to pay and
+-- not told where.
+--
+-- ONE ROW, AND THE DATABASE IS WHAT SAYS SO. `id` is a boolean that must be true, so a second
+-- row is refused by the primary key rather than by a convention somebody has to remember. Two
+-- rows of firm settings is a letter carrying whichever trust account the query happened to
+-- return first -- correct in testing and wrong in production, because the ordering changes.
+--
+-- THIS IS THE TRUST ACCOUNT, WHICH IS WHERE A DEBTOR PAYS IN. It is deliberately NOT
+-- companies.banking_details: that is where REMITTANCE GOES OUT, to the client whose book it is.
+-- Opposite directions. Paying one into the other is a debtor's money sitting in a client's
+-- account, and the firm finding out at month end.
+--
+-- NOTHING REAL IS SEEDED HERE. This repo is public. The row is created empty and the figures are
+-- typed in through Library -> The firm, so no account number is ever committed.
+-- ---------------------------------------------------------------------------
+create table if not exists public.firm_settings (
+  -- The one-row guard: boolean, must be true, so `id` has exactly one legal value.
+  id boolean primary key default true,
+  constraint firm_settings_one_row check (id),
+
+  -- What the firm calls itself on a letter. Was a string literal in AccountDetail.tsx.
+  firm_name text not null default 'Bredell Ferreira',
+
+  -- The trust account, as a debtor reads it off a notice. Bank and branch code together in one
+  -- field on purpose: that is how it is written on a page ("Standard Bank - 051001"), and split
+  -- into two the letter would need to know how to join them again.
+  trust_bank text,
+  trust_account_number text,
+
+  -- Who signs a statutory demand, and in what capacity. The firm's own correction, in their
+  -- words: not "authorised agent" -- "a legal representative", "duly authorised".
+  signatory_name text,
+  signatory_title text,
+
+  -- ------------------------------------------------------------------ the email font
+  --
+  -- AT THE FIRM'S QUESTION: "which font is it put into the emails?" The answer today is NONE.
+  -- composeBody concatenates the body and the signature and sends raw HTML with no wrapper, so
+  -- every recipient's mail client picks its own default -- Gmail draws it in Arial, Outlook in
+  -- Calibri, Apple Mail in Helvetica. The firm's letters are Georgia and its emails are whatever
+  -- the reader happens to run.
+  --
+  -- A STACK, NOT A FONT, and web-safe only. A mail client cannot fetch a webfont, so a face the
+  -- reader does not already have silently becomes Times New Roman. Stored as the full CSS stack
+  -- so the fallback travels with the choice.
+  email_font text not null default 'Georgia, "Times New Roman", Times, serif',
+  -- Points, like the letter. Mail clients respect pt in inline styles; px is rewritten by some.
+  email_size_pt numeric(4,1) not null default 10.5,
+
+  updated_at timestamptz not null default now(),
+  updated_by uuid references public.profiles(id) on delete set null
+);
+
+alter table public.firm_settings enable row level security;
+grant select, insert, update on public.firm_settings to authenticated;
+-- No delete, and that is the point: the row is not somebody's to remove. A firm with no settings
+-- row is a firm whose letters silently lose their trust account.
+revoke delete on public.firm_settings from authenticated;
+
+-- The library's rule, because this is the same kind of thing as the letterhead: everyone reads it
+-- -- a collector previewing a notice has to see what the debtor will be told to pay into -- and
+-- an administrator writes it.
+drop policy if exists firm_settings_select on public.firm_settings;
+create policy firm_settings_select on public.firm_settings
+  for select to authenticated using (auth.uid() is not null);
+
+drop policy if exists firm_settings_write on public.firm_settings;
+create policy firm_settings_write on public.firm_settings
+  for all to authenticated
+  using (public.current_user_role() = 'Administrator')
+  with check (public.current_user_role() = 'Administrator');
+
+-- The row itself, empty but for the name. Everything a debtor would be asked to pay into is left
+-- null so that a notice built before somebody fills this in shows {{firm_bank}} standing on the
+-- page -- which gets caught -- rather than a blank line, which gets posted.
+insert into public.firm_settings (id) values (true) on conflict (id) do nothing;

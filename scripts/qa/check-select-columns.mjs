@@ -240,9 +240,25 @@ let checked = 0
 for (const file of files) {
   const source = readFileSync(file, 'utf8')
 
+  /*
+   * A column list held in a const, in either of the two ways this codebase writes one.
+   *
+   * THE SECOND FORM WAS MISSING AND COST REAL COVERAGE. Only backticked consts were resolved, so
+   * a list written as single-quoted strings joined with + -- which is how `letterheads.ts` and
+   * `firmSettings.ts` both write theirs -- fell through the `continue` in findSelects and was
+   * never checked at all. Silently: the count went up by nothing and the suite stayed green,
+   * which is the worst possible way for a check to not run. Found by putting a column that does
+   * not exist into one of them and watching this file say PASS.
+   */
   const consts = new Map()
   for (const [, name, body] of source.matchAll(/const ([A-Z_][A-Z0-9_]*)\s*=\s*`([\s\S]*?)`/g)) {
     consts.set(name, body)
+  }
+  for (const [, name, body] of source.matchAll(
+    /const ([A-Z_][A-Z0-9_]*)\s*=\s*((?:'[^']*'\s*(?:\+\s*)?)+)/g)) {
+    /* The pieces of `'a, b, ' + 'c'` joined back into one list. Nothing is inserted between them:
+       the strings are already written with the separator inside them. */
+    consts.set(name, [...body.matchAll(/'([^']*)'/g)].map((q) => q[1]).join(''))
   }
 
   for (const { table, select, index } of findSelects(source, consts)) {
@@ -302,11 +318,17 @@ if (problems.length > 0) {
  * column references stop being checked.
  *
  * The number is a floor rather than an exact count, so adding a query does not fail the build;
- * it is set well under the current total and only trips when the parser has plainly stopped
- * finding things. The codebase has 355 today -- a suggested floor of 500 was a guess that would
- * have failed the build on the day it was added, which is its own kind of broken check.
+ * it is set under the current total and only trips when the parser has plainly stopped finding
+ * things. A suggested floor of 500 was once a guess that would have failed the build on the day
+ * it was added, which is its own kind of broken check.
+ *
+ * RAISED FROM 250 TO 400, and the reason is a gap this number failed to catch. Column lists held
+ * in single-quoted consts were never resolved at all -- two whole modules' worth -- and the total
+ * sat at 355. Which cleared a floor of 250 comfortably, so nothing said a word. The floor guarded
+ * "the parser found NOTHING"; it did not guard "the parser found less than it should". 400 is
+ * under today's 464 and above that 355, so the same regression would now be caught.
  */
-const FLOOR = 250
+const FLOOR = 400
 if (checked < FLOOR) {
   console.error(`\nFAIL — only ${checked} column references were found, which is fewer than the`)
   console.error(`${FLOOR} this codebase has. The select parser has stopped finding them, so the`)

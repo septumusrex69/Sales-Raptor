@@ -43,9 +43,11 @@ export function LibraryHeader({ mayEdit }: { mayEdit: boolean }) {
       <div className="px-5 flex gap-5 border-b border-slate-100">
         {/* The letterhead is here and not in Settings for the reason the workflows are: it is
             content the firm maintains, not a switch somebody sets once, and it belongs beside the
-            letters that print on it. */}
+            letters that print on it. The firm's own details are here for the same reason, and for
+            a sharper one: the trust account and the signatory are the half of a section 129 that
+            is not about the debtor, and they are read off the page next door. */}
         {[['/library', 'Templates'], ['/library/workflows', 'Workflows'],
-          ['/library/letterhead', 'Letterhead']].map(([to, label]) => (
+          ['/library/letterhead', 'Letterhead'], ['/library/firm', 'The firm']].map(([to, label]) => (
           <NavLink key={to} to={to} end={to === '/library'}
             className={({ isActive }) => `py-2.5 text-sm border-b-2 -mb-px transition-colors ${
               isActive

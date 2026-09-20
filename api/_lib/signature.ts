@@ -49,9 +49,30 @@ export function signatureHtml(
   return html
 }
 
-/** Body and signature, with the two blank lines a person expects between them. */
-export function composeBody(bodyHtml: string, signature: string): string {
-  return signature ? `${bodyHtml}<br><br>${signature}` : bodyHtml
+/**
+ * Body and signature, with the two blank lines a person expects between them — and the firm's
+ * font around the pair of them.
+ *
+ * AT THE FIRM'S QUESTION: "which font is it put into the emails?" Until `style` existed the
+ * answer was NONE. This function concatenated two strings of HTML and `send.ts` handed the result
+ * to nodemailer, so the message went out unstyled and every reader's mail client picked its own
+ * default — Gmail draws unstyled HTML in Arial, Outlook in Calibri, Apple Mail in Helvetica. The
+ * firm's letters are Georgia and its emails were whatever the reader happened to run.
+ *
+ * AN INLINE STYLE ON A WRAPPER, not a <style> block, because Gmail strips <head> and every
+ * stylesheet in it before it draws anything. An inline style on a containing element is the only
+ * thing every mail client honours, which is why every newsletter in the world is built this way.
+ *
+ * THE SIGNATURE IS INSIDE THE WRAPPER, deliberately. Styling only the body would leave the
+ * sender's name and numbers in the reader's default face — the two halves of one message set in
+ * two different fonts, which looks like a fault rather than a choice.
+ *
+ * Empty `style` leaves the HTML exactly as it was. A send must never fail, or change shape, over
+ * a font.
+ */
+export function composeBody(bodyHtml: string, signature: string, style?: string | null): string {
+  const joined = signature ? `${bodyHtml}<br><br>${signature}` : bodyHtml
+  return style ? `<div style="${style}">${joined}</div>` : joined
 }
 
 /**

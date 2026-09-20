@@ -135,7 +135,46 @@ ok('the guard is a ref, so it is true at once', /const fetchingBody = useRef<Set
 
 /* ---------- 3. the send does its waiting in parallel ---------- */
 
-ok('the two lookups happen at once', /const \[\{ data: conn \}, \{ data: profile \}\] = await Promise\.all\(/.test(send))
+/*
+ * EVERY ROW THE SEND NEEDS IS FETCHED AT ONCE.
+ *
+ * WRITTEN AS A PROPERTY, NOT AS A SHAPE. This used to pin the exact destructuring of two lookups,
+ * and the day a third was added -- the firm's email font -- it failed on a change that was
+ * correct: the new row went INTO the same Promise.all. A check that has to be edited every time
+ * the thing it guards is extended correctly is a check people learn to edit without reading.
+ *
+ * So: the lookups are destructured out of one Promise.all, there are at least the three the send
+ * needs, and -- the half that actually matters -- no query is awaited on its own line before the
+ * message goes out. That last one is the regression worth catching, because serialising them
+ * costs a round trip each and nothing about the code would look wrong.
+ */
+const lookups = /const \[([\s\S]*?)\] = await Promise\.all\(\[([\s\S]*?)\n  \]\)/.exec(send)
+ok('the lookups happen at once, in one Promise.all', lookups !== null)
+if (lookups) {
+  /*
+   * AS MANY QUERIES AS THERE ARE NAMES TO PUT THEM IN.
+   *
+   * COUNTED ON BOTH SIDES, because counting one side measures nothing. The first cut of this
+   * counted `data:` in the destructuring pattern alone -- so deleting a QUERY from the array left
+   * the pattern three long, the count still said three, and the check stayed green while `firm`
+   * became undefined for ever. Which is the silent-drop failure CLAUDE.md opens with: nothing
+   * throws, nothing logs, and the message simply goes out in the wrong font.
+   *
+   * Found by break-testing this line, which is the only way it would have been found.
+   */
+  const names = (lookups[1].match(/data:/g) ?? []).length
+  const queries = (lookups[2].match(/admin\s*\n?\s*\.from\(|admin\.from\(/g) ?? []).length
+  ok(`...at least the three the send needs (${names} names)`, names >= 3)
+  check(`...and every name has a query behind it (${names} names, ${queries} queries)`,
+    queries, names)
+}
+/*
+ * NONE OF THEM AWAITED ON ITS OWN. `await admin.from(...)` outside the Promise.all is a round
+ * trip in series -- which is exactly what this section of the file exists to prevent, and the
+ * only way the assertion above can be satisfied while the send is still slow.
+ */
+check('no lookup is awaited on its own line',
+  (send.match(/await\s+admin\s*\n?\s*\.from\(|await admin\.from\(/g) ?? []).length, 0)
 
 /*
  * THE SENT FOLDER IS OPENED WHILE THE MESSAGE IS GOING OUT. Connecting, negotiating TLS, logging
