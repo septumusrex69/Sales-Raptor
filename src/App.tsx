@@ -1,5 +1,5 @@
 import { Suspense, lazy } from 'react'
-import { Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppStoreProvider } from './store/AppStore'
 import { AuthProvider } from './store/AuthContext'
 import { ThemeProvider } from './store/ThemeContext'
@@ -21,7 +21,6 @@ import { CompanyDetail } from './pages/companies/CompanyDetail'
 import { AccountsList } from './pages/accounts/AccountsList'
 import { AccountDetail } from './pages/accounts/AccountDetail'
 import { DisputesBoard } from './pages/accounts/DisputesBoard'
-import { WorkflowsPage } from './pages/accounts/WorkflowsPage'
 import { LibraryWorkflows } from './pages/library/LibraryWorkflows'
 import { CollectorDashboard } from './pages/CollectorDashboard'
 import { CollectorProfile } from './pages/CollectorProfile'
@@ -75,10 +74,22 @@ function App() {
               <Route path="/companies/:id" element={<RequireClientAccess><CompanyDetail /></RequireClientAccess>} handle={{ title: 'Client Details' }} />
               <Route path="/mail" element={<MailPage />} handle={{ title: 'Mail' }} />
               <Route path="/accounts" element={<AccountsList />} handle={{ title: 'Accounts' }} />
-              {/* Before the :id route in the file, though React Router would rank the static
-                  segment above the dynamic one either way. Kept in this order so that reading the
-                  table does not suggest an account could ever be called "workflows". */}
-              <Route path="/accounts/workflows" element={<WorkflowsPage />} handle={{ title: 'Workflows' }} />
+              {/*
+                THE OLD WAY IN, KEPT AS A REDIRECT. The read-only page that lived here showed the
+                firm's 160-day chart transcribed from paper; the workflow is now stored, editable
+                and in the library, so the page is retired rather than kept as a second copy of a
+                process that would drift from the first.
+
+                The two things that page was FOR did not go with it — dating every step against a
+                handover you pick, and the warning that the fourth clerk is never reached — both
+                moved onto the builder, which is the only reason retiring it was safe.
+
+                Before the :id route in the file, though React Router would rank the static
+                segment above the dynamic one either way. Kept in this order so that reading the
+                table does not suggest an account could ever be called "workflows".
+              */}
+              <Route path="/accounts/workflows"
+                element={<Navigate to="/library/workflows/standard-collections" replace />} />
               <Route path="/accounts/:id" element={<AccountDetail />} handle={{ title: 'Account' }} />
               <Route path="/diary" element={<DiaryPage />} handle={{ title: 'Diary' }} />
               <Route path="/performance" element={<CollectorDashboard />} handle={{ title: 'Collections' }} />

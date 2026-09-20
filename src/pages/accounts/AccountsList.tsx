@@ -238,12 +238,15 @@ export function AccountsList() {
   return (
     <div className="space-y-4">
       {/*
-        THE WAY IN TO THE WORKFLOWS, here rather than in the sidebar. A workflow is a property of
-        the book — it is what happens to an account after it is handed over — and the sidebar is
-        already fifteen items long. Somebody looking for it is looking at accounts.
+        THE WAY IN TO THE WORKFLOWS, KEPT, but pointing at the library where they now live.
+
+        It stays on this page rather than moving wholly to the sidebar because the instinct it
+        serves is real: a workflow IS what happens to an account after it is handed over, and
+        somebody wondering about it is looking at the book. The link follows the thing; it does
+        not become a second place the thing lives.
       */}
       <div className="flex justify-end">
-        <Link to="/accounts/workflows"
+        <Link to="/library/workflows"
           className="text-xs text-slate-500 hover:text-slate-800 inline-flex items-center gap-1.5">
           <GitBranch size={13} /> Workflows
         </Link>

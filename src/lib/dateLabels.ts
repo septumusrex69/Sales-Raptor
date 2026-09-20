@@ -107,3 +107,23 @@ export function timeOfDay(iso?: string): string {
   if (Number.isNaN(date.getTime())) return ''
   return date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false })
 }
+
+/**
+ * "14 Mar 2026" — a date short enough to sit on a workflow card.
+ *
+ * HAND-ROLLED, LIKE longDate, AND FOR THE SAME REASON. `toLocaleDateString('en-ZA')` renders
+ * September as "Sept" — four letters where every other month gets three — so a column of dates
+ * comes out visibly ragged one month in twelve. It also groups with a non-breaking space
+ * elsewhere in that locale, which is the other half of the same trap. Twelve strings written out
+ * are cheaper than either.
+ *
+ * The year is kept. A 160-day workflow dated from November closes in April, and a card reading
+ * "12 Apr" beside one reading "3 Nov" invites exactly the wrong reading.
+ */
+export function shortDate(date: string): string {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const [y, m, d] = date.split('-').map(Number)
+  if (!y || !m || !d || m < 1 || m > 12) return date
+  return `${d} ${months[m - 1]} ${y}`
+}

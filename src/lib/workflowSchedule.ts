@@ -223,6 +223,51 @@ export function rotationSchedule(
   return out
 }
 
+/**
+ * HOW MANY CLERKS A FILE ACTUALLY REACHES BEFORE THE WORKFLOW CLOSES.
+ *
+ * NOT A PROPERTY OF THE WORKFLOW. A property of the DATE it was handed over, which is exactly why
+ * it is worth computing rather than stating once: rotation is anchored to the 5th, two months on,
+ * so a file handed over on the 6th gets nearly two extra months with its first clerk and a file
+ * handed over on the 4th gets barely one. On some handover dates all four clerks are reached and
+ * on others the file closes on the second desk.
+ *
+ * THIS IS THE FIRM'S OPEN QUESTION, carried here from the read-only page it was found on so that
+ * retiring that page does not retire the finding with it. The pre-legal chart staffs the workflow
+ * with four clerks and its notice spine closes around day 160; two months per clerk means the
+ * fourth is reached only when the sequence runs past about day 180. Either the sequence runs
+ * longer than it does, or it is a three-clerk workflow. Nobody at the firm has answered that yet,
+ * and the app says so rather than quietly picking one.
+ */
+export function clerksReached(input: {
+  /** The day the file was handed over, which is what rotation is anchored from. */
+  handoverOn: string
+  /** The last day of the workflow, counted in calendar days from the handover. */
+  lastDay: number
+  /** How many clerks the chart staffs it with. */
+  staffedWith: number
+  holidays?: Record<string, string>
+}): { reached: number; closesOn: string; rotations: string[]; short: number } {
+  const closesOn = shiftCalendarDays(input.handoverOn, Math.max(0, input.lastDay))
+  /*
+   * One fewer rotation than there are clerks: the first clerk is given the file rather than
+   * rotated to it. Asking for `staffedWith` rotations and counting them would report a file that
+   * reaches every clerk as reaching one more than exists.
+   */
+  const rotations = rotationSchedule(
+    input.handoverOn, Math.max(0, input.staffedWith - 1), input.holidays ?? {},
+  )
+  /* Strictly before: a rotation ON the closing day hands the file to somebody who has no work
+     left to do with it, which is not reaching a clerk in any sense the firm means. */
+  const reached = 1 + rotations.filter((r) => r < closesOn).length
+  return {
+    reached,
+    closesOn,
+    rotations,
+    short: Math.max(0, input.staffedWith - reached),
+  }
+}
+
 /* ---------------------------------------------------------------- where a file is on the spine */
 
 /**

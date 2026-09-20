@@ -30,8 +30,8 @@ const TITLES: { test: RegExp; title: string }[] = [
    */
   { test: /^\/performance\/[^/]+$/, title: 'Collector' },
   { test: /^\/performance/, title: 'Collections' },
-  /* The static route first: /accounts/workflows would otherwise be titled "Account". */
-  { test: /^\/accounts\/workflows$/, title: 'Workflows' },
+  /* /accounts/workflows now redirects into the library, so it needs no title of its own -- but
+     the static-before-dynamic ordering below still matters for anything added later. */
   { test: /^\/accounts\/[^/]+$/, title: 'Account' },
   { test: /^\/accounts/, title: 'Accounts' },
   { test: /^\/queries/, title: 'Disputes' },

@@ -25,7 +25,7 @@
  */
 import {
   ROTATION_DAY_OF_MONTH, ROTATION_MONTHS, calendarDaysBetween, daysInMonth, dueDate,
-  monthEndsGiven, resumeDate, rotationDate, rotationSchedule, spineDay,
+  clerksReached, monthEndsGiven, resumeDate, rotationDate, rotationSchedule, spineDay,
 } from '../../src/lib/workflowSchedule.ts'
 import { isWorkingDay } from '../../src/lib/workingDays.ts'
 
@@ -247,6 +247,53 @@ check('...and the time away is what pauses it',
 check('...so the two agree',
   spineDay({ startedOn: '2026-09-18', asAt: '2027-01-08', pausedFor: [excursion.pausedFor] }),
   excursion.spineDay)
+
+/* ---------- who actually gets the file ---------- */
+
+/*
+ * THE FIRM'S OPEN QUESTION, and the reason it is a function rather than a note: it is a property
+ * of the HANDOVER DATE, not of the workflow. Rotation is anchored to the 5th two months on, so a
+ * file handed over on the 6th keeps its first clerk nearly two months longer than one handed over
+ * on the 4th. The pre-legal chart staffs the workflow with four and its spine closes around day
+ * 160 — on most dates the fourth clerk is never reached.
+ *
+ * Carried here from the read-only page it was found on, so that retiring that page did not retire
+ * the finding with it.
+ */
+const reach = (on, lastDay, staffed = 4) =>
+  clerksReached({ handoverOn: on, lastDay, staffedWith: staffed })
+
+check('a 160-day workflow handed over on the 18th reaches three clerks',
+  reach('2026-09-18', 160).reached, 3)
+check('...and is one short of the four the chart staffs it with',
+  reach('2026-09-18', 160).short, 1)
+/*
+ * AND ON SOME DATES ALL FOUR ARE REACHED, which is the half that makes the warning worth
+ * computing rather than stating. Handed over on the 6th, the first rotation is nearly two months
+ * out and every later one shifts with it.
+ */
+ok('...but a longer sequence reaches all four',
+  reach('2026-09-18', 240).reached === 4 && reach('2026-09-18', 240).short === 0)
+check('a sequence that closes before the first rotation stays on one desk',
+  reach('2026-09-18', 5).reached, 1)
+
+/*
+ * A ROTATION ON THE CLOSING DAY IS NOT A CLERK REACHED. Handing the file to somebody on the day
+ * the workflow ends gives them nothing to do with it, and counting them would report four clerks
+ * on a workflow three people actually worked.
+ */
+{
+  const first = rotationSchedule('2026-09-18', 1)[0]
+  const days = calendarDaysBetween('2026-09-18', first)
+  check(`a rotation on the closing day itself does not count (${first})`,
+    reach('2026-09-18', days).reached, 1)
+  check('...and one day later does', reach('2026-09-18', days + 1).reached, 2)
+}
+
+/* One fewer rotation than clerks: the first clerk is GIVEN the file rather than rotated to it.
+   Asking for four rotations and counting them reports five clerks on a four-clerk chart. */
+check('a file that reaches every clerk never reports more than there are',
+  reach('2026-09-18', 10000).reached, 4)
 
 check('days between two dates', calendarDaysBetween('2026-09-18', '2026-09-28'), 10)
 check('...and backwards is negative', calendarDaysBetween('2026-09-28', '2026-09-18'), -10)

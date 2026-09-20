@@ -23,9 +23,20 @@ const t = makeRunner('workflow-builder')
 /* ---------- the firm's workflow, as the database would hand it back ---------- */
 
 const VERSION = 'v1111111-1111-4111-8111-111111111111'
+
+/*
+ * THE FIRM'S CORRECTED SPINE, which is what the database now holds.
+ *
+ * It used to be the mockup's day 1 to 80 version, with "Rotate to Clerk 2" and "Rotate to Clerk
+ * 3" as spine steps. The firm took rotation OUT of the spine -- it is a calendar rule now, the
+ * 5th two months on -- so that no allocation decision can move the date of a section 129, and the
+ * sequence runs to day 160 and ends in a recommendation back to the client. A fixture still
+ * drawing the old one would be a test passing against a process nobody runs.
+ */
 const PHASES = [
-  { id: 'p1', ordinal: 1, name: 'Phase 1 · Notice', subtitle: 'Initial notices and engagement', from_day: 0, to_day: 40 },
-  { id: 'p2', ordinal: 2, name: 'Phase 2 · Legal', subtitle: 'Legal process and preparation', from_day: 40, to_day: 80 },
+  { id: 'p1', ordinal: 1, name: 'Phase 1 · Notice', subtitle: 'Demand, listing and the final notice', from_day: 0, to_day: 40 },
+  { id: 'p2', ordinal: 2, name: 'Phase 2 · Legal', subtitle: 'Mora, the court process and the summons', from_day: 40, to_day: 80 },
+  { id: 'p3', ordinal: 3, name: 'Phase 3 · Open', subtitle: 'Strategy, viability and the recommendation', from_day: 80, to_day: 160 },
 ]
 const n = (key, kind, label, day, phase, over = {}) => ({
   id: key, phase_id: phase, key, kind, label, description: `${label} description.`, day,
@@ -33,18 +44,21 @@ const n = (key, kind, label, day, phase, over = {}) => ({
   assign_to: 'Current clerk', x: null, y: null, ordinal: 0, ...over,
 })
 const NODES = [
-  n('handover-received', 'action', 'Handover Received', 0, 'p1', { ordinal: 1 }),
-  n('demand-129', 'communication', 'Demand + Section 129', 1, 'p1', { ordinal: 2, channel: 'registered_post', statutory: true }),
-  n('intention-to-list', 'communication', 'Intention to List', 10, 'p1', { ordinal: 3, channel: 'registered_post', statutory: true, deadline_days: 20, deadline_unit: 'business' }),
-  n('follow-up-offer', 'communication', 'Follow-up + Offer', 21, 'p1', { ordinal: 4, channel: 'email' }),
-  n('final-notice', 'communication', 'Final Notice', 35, 'p1', { ordinal: 5, channel: 'registered_post', statutory: true, deadline_days: 7, deadline_unit: 'calendar' }),
-  n('rotate-clerk-2', 'assignment', 'Rotate to Clerk 2', 40, 'p1', { ordinal: 6, assign_to: 'Clerk 2' }),
-  n('listing-confirmed', 'action', 'Listing Confirmed', 42, 'p2', { ordinal: 7 }),
-  n('intended-legal-action', 'communication', 'Intended Legal Action', 50, 'p2', { ordinal: 8, channel: 'registered_post', statutory: true }),
-  n('court-process-explained', 'communication', 'Court Process Explained', 60, 'p2', { ordinal: 9, channel: 'email' }),
-  n('final-settlement-window', 'communication', 'Final Settlement Window', 70, 'p2', { ordinal: 10, channel: 'email' }),
-  n('draft-summons', 'document', 'Draft Summons', 75, 'p2', { ordinal: 11, assign_to: 'Team leader' }),
-  n('rotate-clerk-3', 'assignment', 'Rotate to Clerk 3', 80, 'p2', { ordinal: 12, assign_to: 'Clerk 3' }),
+  n('handover-notice', 'communication', 'Handover notice', 0, 'p1', { ordinal: 1, channel: 'post' }),
+  /* Wired, like the stored one, so the picker has a step that is already answered to read back. */
+  n('demand-129', 'communication', 'Demand and section 129', 1, 'p1', { ordinal: 2, channel: 'registered_post', statutory: true, template_id: 'cccccccc-0000-4000-8000-000000000003' }),
+  n('intention-to-list', 'communication', 'Intention to list', 10, 'p1', { ordinal: 3, channel: 'registered_post', statutory: true, deadline_days: 20, deadline_unit: 'business' }),
+  n('follow-up-offer', 'communication', 'Follow-up and offer', 21, 'p1', { ordinal: 4, channel: 'email' }),
+  n('final-notice', 'communication', 'Final notice', 35, 'p1', { ordinal: 5, channel: 'registered_post', statutory: true, deadline_days: 7, deadline_unit: 'calendar' }),
+  n('listing-confirmed', 'action', 'Listing confirmed', 42, 'p2', { ordinal: 6 }),
+  n('intended-legal-action', 'communication', 'Intended legal action', 50, 'p2', { ordinal: 7, channel: 'registered_post', statutory: true }),
+  n('court-process-explained', 'communication', 'Court process explained', 60, 'p2', { ordinal: 8, channel: 'email' }),
+  n('final-settlement-window', 'communication', 'Final settlement window', 70, 'p2', { ordinal: 9, channel: 'email' }),
+  n('draft-summons', 'task', 'Draft summons', 75, 'p2', { ordinal: 10, assign_to: 'Team leader' }),
+  n('open-strategy', 'task', 'Open strategy', 80, 'p3', { ordinal: 11 }),
+  n('viability-review', 'task', 'Viability review', 110, 'p3', { ordinal: 12 }),
+  n('closure-report', 'task', 'Closure report', 155, 'p3', { ordinal: 13 }),
+  n('recommendation', 'task', 'Recommendation', 160, 'p3', { ordinal: 14, assign_to: 'Team leader' }),
 ]
 const CONNECTIONS = NODES.slice(0, -1).map((a, i) => ({
   id: `e${i}`, from_node_id: a.id, to_node_id: NODES[i + 1].id, to_workflow_id: null, label: null,
@@ -106,6 +120,16 @@ try {
   /* ---------- Library → Workflows ---------- */
   await page.getByText('Standard Collections – Non-Paying Debtor').waitFor({ timeout: 20000 })
   t.ok('the workflow is listed in the library', true)
+  /*
+   * THE OLD ADDRESS STILL WORKS. /accounts/workflows held a read-only page showing this chart
+   * transcribed from paper; it is retired, but a bookmark to it must not land on a blank page.
+   */
+  await page.goto(`http://localhost:${PORT}/accounts/workflows`)
+  await page.locator('p', { hasText: /^Phase 1 · Notice$/ }).first().waitFor({ timeout: 20000 })
+  t.check(`the old accounts address lands on the builder (${new URL(page.url()).pathname})`,
+    new URL(page.url()).pathname, '/library/workflows/standard-collections')
+  /* Replaced, not pushed: Back should go where the person came from, not round the redirect. */
+
   /* SETTINGS NO LONGER OFFERS IT. A tab left behind after a move is a second door onto the same
      room, and the one people keep using is whichever they found first. */
   await page.goto(`http://localhost:${PORT}/settings`)
@@ -144,17 +168,25 @@ try {
     [...document.querySelectorAll('button')]
       .map((b) => b.innerText.replace(/\s+/g, ' ').trim())
       .filter((s) => /^day \d+/i.test(s)))
-  t.check(`all twelve steps are drawn (${cards.length})`, cards.length, 12)
-  t.ok('day 1 is the section 129', cards.some((c) => /^day 1 Demand \+ Section 129/i.test(c)))
+  t.check(`all fourteen steps are drawn (${cards.length})`, cards.length, 14)
+  t.ok('day 1 is the section 129', cards.some((c) => /^day 1\b[\s\S]*Demand and section 129/i.test(c)))
   t.ok('...and it says it goes by registered post',
-    cards.some((c) => /Demand \+ Section 129 Registered post/i.test(c)))
+    cards.some((c) => /Demand and section 129[\s\S]*Registered post/i.test(c)))
   t.ok('day 35 is the final notice with the debtor’s seven days',
-    cards.some((c) => /day 35 Final Notice Registered post · 7 days to respond/i.test(c)))
+    cards.some((c) => /day 35\b[\s\S]*Final notice[\s\S]*Registered post · 7 days to respond/i.test(c)))
   t.ok('...and day 10 counts its twenty in BUSINESS days',
-    cards.some((c) => /day 10 Intention to List Registered post · 20 business days to respond/i.test(c)))
-  t.ok('both phases are drawn',
-    await page.locator('p', { hasText: /^Phase 2 · Legal$/ }).first().isVisible())
-  t.ok('...with their day ranges', await page.getByText(/day 40 – 80/i).first().isVisible())
+    cards.some((c) => /day 10\b[\s\S]*Intention to list[\s\S]*Registered post · 20 business days to respond/i.test(c)))
+  /*
+   * ROTATION IS NOT A STEP ANY MORE. The firm took it out of the spine so that no allocation
+   * decision can move the date of a section 129; a card called "Rotate to Clerk 2" on day 40
+   * would mean the old version is still being drawn.
+   */
+  t.ok('rotation is not drawn as a step', !cards.some((c) => /rotate to clerk/i.test(c)))
+  t.ok('...and the sequence runs to the recommendation on day 160',
+    cards.some((c) => /^day 160\b[\s\S]*Recommendation/i.test(c)))
+  t.ok('all three phases are drawn',
+    await page.locator('p', { hasText: /^Phase 3 · Open$/ }).first().isVisible())
+  t.ok('...with their day ranges', await page.getByText(/day 80 – 160/i).first().isVisible())
 
   /*
    * THE BRANCHES ARE NOT HERE, which is the firm's instruction and a design decision rather than
@@ -171,7 +203,7 @@ try {
   }
 
   /* ---------- the drawer, and it is editable ---------- */
-  await page.getByRole('button', { name: /day 35 Final Notice/i }).click()
+  await page.getByRole('button', { name: /day 35 .*Final notice/is }).click()
   await page.getByText('Step details').waitFor({ timeout: 10000 })
   await t.shot(page, '20-drawer')
 
@@ -188,7 +220,7 @@ try {
       })),
     }
   })
-  t.ok('the drawer names the step', /Final Notice/i.test(drawer.text))
+  t.ok('the drawer names the step', /Final notice/i.test(drawer.text))
 
   /*
    * ONE "WHEN", AND THE DEBTOR'S PERIOD SEPARATELY. The firm's mockup had three ways of saying
@@ -209,7 +241,7 @@ try {
     /skip weekends and South African public holidays/i.test(drawer.text))
   t.ok('a statutory notice is marked as one', /Required by the Act or the mandate/i.test(drawer.text))
   /* Next step is an edge, offered as a step rather than as a second day field. */
-  t.ok('the next step is chosen by name', /Day 40 – Rotate to Clerk 2/.test(drawer.text))
+  t.ok('the next step is chosen by name', /Day 42 – Listing confirmed/.test(drawer.text))
 
   /* ---------- an edit actually leaves the browser ---------- */
   const name = page.locator('aside').filter({ hasText: 'Step details' }).locator('input').first()
@@ -231,7 +263,7 @@ try {
    * to send, the builder COUNTED those under "Notices to write", and no screen could fix one.
    * This is the reason the workflows moved into the library at all.
    */
-  await page.getByRole('button', { name: /day 60 Court Process Explained/i }).click()
+  await page.getByRole('button', { name: /day 60 .*Court process explained/is }).click()
   await page.getByText('Step details').waitFor({ timeout: 10000 })
   const sends = page.locator('aside').filter({ hasText: 'Step details' })
     .locator('select').filter({ hasText: 'Not written yet' }).first()
@@ -249,7 +281,7 @@ try {
 
   /* And a step that goes by REGISTERED POST is offered the letters instead, which is the half
      that proves the list is narrowed by channel rather than merely short. */
-  await page.getByRole('button', { name: /day 1 Demand \+ Section 129/i }).click()
+  await page.getByRole('button', { name: /day 50 .*Intended legal action/is }).click()
   await page.waitForTimeout(500)
   const posts = page.locator('aside').filter({ hasText: 'Step details' })
     .locator('select').filter({ hasText: 'Not written yet' }).first()
@@ -287,11 +319,80 @@ try {
 
   /* ---------- what the workflow adds up to ---------- */
   t.ok('the duration is counted from the steps',
-    await page.getByText('80 days').first().isVisible())
+    await page.getByText('160 days').first().isVisible())
   t.ok('...and the team it belongs to is named',
     await page.getByText('Pre-legal').first().isVisible())
   t.ok('...and the notices still to write are counted, statutory apart',
     await page.getByText(/7 · 4 statutory/).isVisible())
+
+  /* ---------- what the old read-only page was for ---------- */
+
+  /*
+   * TWO THINGS MOVED ONTO THIS SCREEN when /accounts/workflows was retired, and retiring it was
+   * only safe because they did. A workflow written in day numbers is unreadable against a
+   * calendar — "day 110" tells nobody whether the viability review lands in the December
+   * shutdown — and that is the kind of error somebody spots in a second and never spots in a
+   * day number.
+   */
+  const handover = page.locator('input[type="date"]').first()
+  t.ok('the builder asks what handover to date this against', await handover.isVisible())
+  await handover.fill('2026-09-18')
+  await page.waitForTimeout(600)
+  /* Day 35 from 18 September 2026 is 23 October 2026. Asserted as a real date rather than as
+     "some date appeared", which is what makes it a check rather than a screenshot. */
+  t.ok('...and every card carries the day it actually lands on',
+    await page.getByText('23 Oct 2026', { exact: true }).first().isVisible())
+  /* Moving the handover moves them. A date that did not move would be today's, formatted. */
+  await handover.fill('2026-09-19')
+  await page.waitForTimeout(600)
+  t.check('...which moves when the handover does',
+    await page.getByText('23 Oct 2026', { exact: true }).count(), 0)
+  t.ok('...to the day after',
+    await page.getByText('24 Oct 2026', { exact: true }).first().isVisible())
+  /*
+   * SEPTEMBER IS "Sep", NOT "Sept". en-ZA renders it with four letters where every other month
+   * gets three, so a column of dates comes out ragged one month in twelve — which is why the
+   * month names are written out by hand rather than formatted by the locale.
+   */
+  await handover.fill('2026-09-01')
+  await page.waitForTimeout(600)
+  t.ok('...spelling September in three letters, as every other month is',
+    await page.getByText('1 Sep 2026', { exact: true }).first().isVisible())
+  t.check('...and never as "Sept"', await page.getByText(/\bSept\b/).count(), 0)
+
+  /*
+   * AND THE FIRM'S OPEN QUESTION, which the retired page raised and nobody has answered: the
+   * chart staffs this workflow with four clerks and the spine closes before the fourth is ever
+   * reached. It is computed for the date on screen rather than written once, because on some
+   * handover dates all four ARE reached — a warning that fires when nothing is wrong is worse
+   * than no warning.
+   */
+  await handover.fill('2026-09-18')
+  await page.waitForTimeout(600)
+  t.ok('the fourth clerk never receiving the file is still said',
+    await page.getByText(/Clerk 4 never receives this file/).first().isVisible())
+  t.ok('...naming the day it closes and the rotation that comes too late',
+    await page.getByText(/closes on 2027-02-25/).first().isVisible())
+  /*
+   * AND THE NUMBERS ARE THE CHART'S, not whatever arithmetic produced the banner. Written first
+   * as "Clerk 4 never receives this file" alone, this check stayed green when the staffing number
+   * was changed from four to eight — the banner still said Clerk 4, because that is reached + 1.
+   * It is the pair that pins it: four staffed, three reached.
+   */
+  const banner = (await page.getByText(/never receives this file/).first()
+    .locator('xpath=ancestor::div[1]').innerText()).replace(/\s+/g, ' ')
+  t.ok(`...and says the chart staffs it with four (${banner.slice(-110)})`,
+    /staffs this workflow with 4\b/.test(banner))
+  t.ok('...against the three it actually reaches', /this is a 3-clerk workflow/.test(banner))
+
+  /*
+   * WHAT THIS DOES NOT COVER, said plainly rather than left to be assumed. The banner is supposed
+   * to be SILENT when all four clerks are reached, and no handover date reaches four on a
+   * 160-day spine — three rotations need about 180 days — so a browser cannot exercise that half
+   * with this workflow. It is checked where it can be: check-workflow-schedule.mjs asserts
+   * short === 0 on a 240-day sequence.
+   */
+  await t.shot(page, '22-workflow-dated')
 
   /* ---------- a reader, under the library's rule ---------- */
 
@@ -314,7 +415,7 @@ try {
   t.ok('a team leader reads the workflow', true)
   /* The whole thing, not a stub of it: the canvas is what says what happens to their file. */
   t.ok('...the whole canvas, which is what says what happens to their file',
-    await reader.page.getByRole('button', { name: /day 35 Final Notice/i }).isVisible())
+    await reader.page.getByRole('button', { name: /day 35 .*Final notice/is }).isVisible())
 
   t.check('...and is offered no way to take a draft',
     await reader.page.getByRole('button', { name: /takes a draft/ }).count(), 0)
@@ -327,7 +428,7 @@ try {
    * does, including the wording it sends. Every field in it is disabled, which is asserted over
    * the form rather than over a class name.
    */
-  await reader.page.getByRole('button', { name: /day 35 Final Notice/i }).click()
+  await reader.page.getByRole('button', { name: /day 35 .*Final notice/is }).click()
   await reader.page.getByText('Step details').waitFor({ timeout: 10000 })
   const locked = await reader.page.evaluate(() => {
     const aside = [...document.querySelectorAll('aside')]
@@ -364,7 +465,7 @@ try {
 }
 
 const good = t.finish(`
-Settings → Workflows draws the firm's day 0 to 80 line from data, with the branch cards gone to
+Library → Workflows draws the firm's corrected day 0 to 160 line from data, with the branch cards gone to
 workflows of their own. The step drawer carries ONE way of saying when and keeps the debtor's
 period as its own field, which is the fault in the mockup it replaces. Nothing on it pretends to
 work: Test is disabled and the empty tabs say so. Screenshots in ${OUT}.`)

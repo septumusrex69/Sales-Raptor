@@ -17,6 +17,8 @@ import {
   type WorkflowSummary,
 } from '../../lib/workflowStore.ts'
 import { fetchLibrary, type LibraryTemplate } from '../../lib/templateLibrary.ts'
+import { clerksReached } from '../../lib/workflowSchedule.ts'
+import { dayKey } from '../../lib/collectionPace.ts'
 
 /**
  * Library &rarr; Workflows.
@@ -123,6 +125,16 @@ function StateBadge({ state }: { state: string }) {
 
 const TABS = ['Builder', 'Overview', 'Rules', 'Notifications', 'Templates', 'History'] as const
 
+/**
+ * How many clerks the firm's chart staffs the pre-legal workflow with.
+ *
+ * A CONSTANT RATHER THAN A FIELD, honestly: nothing in the database records how many clerks a
+ * workflow is meant to pass through, and inventing a column for one workflow's footnote would be
+ * worse than naming the number here where it can be found. It exists to make the rotation
+ * warning below say something specific rather than "some clerks".
+ */
+const STAFFED_WITH = 4
+
 function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
   workflowKey: string
   /**
@@ -147,6 +159,15 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
    * the merge fields are a different set.
    */
   const [templates, setTemplates] = useState<LibraryTemplate[] | null>(null)
+  /**
+   * The handover this workflow is being read against.
+   *
+   * CARRIED IN FROM THE READ-ONLY PAGE THIS REPLACES, because it is the thing that page was for.
+   * A workflow written in day numbers is unreadable against a calendar — "day 110" tells nobody
+   * whether the viability review lands in the December shutdown — and the picker is here rather
+   * than fixed at today so the firm can try the dates that worry them.
+   */
+  const [from, setFrom] = useState<string>(() => dayKey(new Date()))
   const [tab, setTab] = useState<(typeof TABS)[number]>('Builder')
   const [selected, setSelected] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -170,6 +191,20 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
 
   const problems = useMemo(() => (workflow ? workflowProblems(workflow) : []), [workflow])
   const facts = useMemo(() => (workflow ? workflowFacts(workflow) : null), [workflow])
+  /*
+   * WHO ACTUALLY GETS THE FILE, for the date on screen. Computed rather than stated once, because
+   * it is a property of the handover date and not of the workflow: rotation is anchored to the
+   * 5th, two months on, so on some dates all four clerks are reached and on others the file
+   * closes on the second desk. STAFFED_WITH is the chart's number.
+   */
+  const rotation = useMemo(() => {
+    if (!workflow || workflow.nodes.length === 0) return null
+    return clerksReached({
+      handoverOn: from,
+      lastDay: Math.max(...workflow.nodes.map((n) => n.day)),
+      staffedWith: STAFFED_WITH,
+    })
+  }, [workflow, from])
   const node = workflow?.nodes.find((n) => n.id === selected) ?? null
   /* Frozen because the version is published, OR because this person does not write the library.
      Folded into one flag so no control can be reached through only one of the two. */
@@ -208,7 +243,12 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
           </h2>
           {workflow.description && <p className="text-sm text-slate-500">{workflow.description}</p>}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="text-xs text-slate-500 flex items-center gap-2 mr-1">
+            Dated from a handover on
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value || from)}
+              className={`${inputClass} w-auto py-1`} />
+          </label>
           {/*
             TEST IS DISABLED AND SAYS WHY. The brief is explicit that nothing may fake working
             functionality, and a Test button that runs nothing is the most expensive kind of lie on
@@ -255,6 +295,37 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
         </p></Card>
       ) : (
         <>
+          {/*
+            THE FIRM'S OPEN QUESTION, carried in from the page this replaces rather than lost with
+            it. The chart staffs this workflow with four clerks; on most handover dates the notice
+            spine closes before the fourth is ever reached. Either the sequence runs longer than
+            it does, or it is a three-clerk workflow — and nobody has answered that yet.
+
+            IT ONLY FIRES WHEN IT IS TRUE. On a handover date where all four are reached there is
+            no banner, which is the whole reason it is computed for the date on screen instead of
+            written once as a note. A warning that appears when nothing is wrong is worse than no
+            warning, because people stop reading it.
+          */}
+          {rotation && rotation.short > 0 && (
+            <Card className="border-amber-200 bg-amber-50">
+              <div className="flex items-start gap-3">
+                <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+                <div className="text-sm text-amber-900">
+                  <p className="font-semibold">
+                    Clerk {rotation.reached + 1} never receives this file.
+                  </p>
+                  <p className="text-amber-800 mt-1">
+                    Handed over on {from}, the sequence closes on {rotation.closesOn} and the next
+                    rotation is {rotation.rotations[rotation.reached - 1] ?? '—'}. The file closes
+                    on clerk {rotation.reached}&rsquo;s desk. The chart staffs this workflow with{' '}
+                    {STAFFED_WITH}. Either the sequence runs longer than it does, or this is a{' '}
+                    {rotation.reached}-clerk workflow.
+                  </p>
+                </div>
+              </div>
+            </Card>
+          )}
+
           {problems.some((p) => p.level === 'refuse') && (
             <Card className="border-rose-200 bg-rose-50/60">
               <p className="flex items-start gap-2 text-sm text-rose-800">
@@ -297,7 +368,7 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
 
           <div className="flex flex-col xl:flex-row gap-4 items-start">
             <div className="flex-1 min-w-0">
-              <WorkflowCanvas workflow={workflow} selected={selected}
+              <WorkflowCanvas workflow={workflow} selected={selected} from={from}
                 onSelect={setSelected} problems={problems} />
             </div>
             {node && (

@@ -5077,3 +5077,115 @@ begin
          with check (public.current_user_role() = ''Administrator'')', t);
   end loop;
 end $$;
+
+-- ---------------------------------------------------------------------------
+-- THE STORED WORKFLOW WAS AN EARLIER TRANSCRIPTION OF THE SAME CHART.
+--
+-- workflows/standard-collections held a day 1 to 80 version of "BF · PRE-LEGAL COLLECTIONS --
+-- 160 DAY WORKFLOW", taken from the mockup. src/lib/preLegalWorkflow.ts holds the reviewed one,
+-- with the two corrections the firm asked for -- and the two disagreed in exactly those places,
+-- which is the worst way for two copies of a process to differ:
+--
+--   1. ROTATION WAS STILL IN THE SPINE ("Rotate to Clerk 2" on day 40, "Clerk 3" on day 80).
+--      The firm moved it out: rotation is a calendar rule -- the 5th, two months on, in
+--      workflowSchedule.ts -- so that no allocation decision can move the date of a section 129.
+--      A notice stays anchored to the FILE and goes out on its day whoever is holding it.
+--   2. IT STOPPED AT DAY 80. The corrected spine runs to day 160 and ends in a recommendation
+--      back to the client; open strategy, viability review, closure report and the
+--      recommendation itself were all missing.
+--
+-- Also gone: "Handover received / validate file". The firm took it out -- "we don't upload files
+-- that are not collectible" -- because a step every file passes is a step nobody reads. What that
+-- moves upstream is prescription (NCA s126B), which is now a flag set at import and is NOT
+-- re-checked anywhere in this workflow.
+--
+-- TWO PLACES THE BUILDER CANNOT YET SAY WHAT THE DEFINITION SAYS, recorded rather than papered
+-- over:
+--
+--   - "Listing confirmed" is twenty BUSINESS days after the intention to list, not a fixed day.
+--     workflow_nodes.day is an absolute calendar day, so 42 is stored -- that sum in an ordinary
+--     month. The rule itself is not lost: it is the 20 business days on the intention step, which
+--     is where the statutory period actually belongs.
+--   - The chart ends in a DECISION diamond and workflow_nodes has no decision kind. It is stored
+--     as the task of making the recommendation, and the description says so.
+--
+-- Written against the DRAFT version, which the freeze trigger allows. demand-129 keeps the
+-- section 129 letter it is already wired to, because the upsert is keyed on (version_id, key)
+-- and never touches template_id.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v uuid;
+  p_notice uuid; p_legal uuid; p_open uuid;
+begin
+  select id into v from workflow_versions
+   where workflow_id = (select id from workflows where key = 'standard-collections')
+     and state = 'draft';
+  if v is null then
+    raise notice 'No draft version of standard-collections here; nothing to bring up to date.';
+    return;
+  end if;
+
+  -- A third phase, which the 80-day version had no need of.
+  insert into workflow_phases (version_id, ordinal, name, subtitle, from_day, to_day)
+  values (v, 1, 'Phase 1 · Notice', 'Demand, listing and the final notice', 0, 40),
+         (v, 2, 'Phase 2 · Legal', 'Mora, the court process and the summons', 40, 80),
+         (v, 3, 'Phase 3 · Open', 'Strategy, viability and the recommendation', 80, 160)
+  on conflict (version_id, ordinal) do update
+    set name = excluded.name, subtitle = excluded.subtitle,
+        from_day = excluded.from_day, to_day = excluded.to_day;
+
+  select id into p_notice from workflow_phases where version_id = v and ordinal = 1;
+  select id into p_legal  from workflow_phases where version_id = v and ordinal = 2;
+  select id into p_open   from workflow_phases where version_id = v and ordinal = 3;
+
+  insert into workflow_nodes
+    (version_id, phase_id, key, kind, label, description, day, deadline_days, deadline_unit,
+     channel, statutory, assign_to, ordinal)
+  values
+    (v, p_notice, 'handover-notice', 'communication', 'Handover notice', 'Tells the debtor the account has been handed to us, and by whom.', 0, null, null, 'post', false, 'Current clerk', 1),
+    (v, p_notice, 'demand-129', 'communication', 'Demand and section 129', 'Registered post. Section 129 is the statutory demand BEFORE court - this file is in progress, not legal.', 1, null, null, 'registered_post', true, 'Current clerk', 2),
+    (v, p_notice, 'intention-to-list', 'communication', 'Intention to list', 'Gives the debtor 20 business days to respond before the listing is confirmed.', 10, 20, 'business', 'registered_post', true, 'Current clerk', 3),
+    (v, p_notice, 'follow-up-offer', 'communication', 'Follow-up and offer', null, 21, null, null, 'email', false, 'Current clerk', 4),
+    (v, p_notice, 'final-notice', 'communication', 'Final notice', 'Seven days to settle.', 35, 7, 'calendar', 'registered_post', true, 'Current clerk', 5),
+    (v, p_legal, 'listing-confirmed', 'action', 'Listing confirmed', 'Twenty BUSINESS days after the intention to list. The 42 stored here is that sum in an ordinary month; the rule itself is the 20 business days on the intention step.', 42, null, null, null, false, 'Current clerk', 6),
+    (v, p_legal, 'intended-legal-action', 'communication', 'Intended legal action', 'Debtor placed in mora.', 50, null, null, 'registered_post', true, 'Current clerk', 7),
+    (v, p_legal, 'court-process-explained', 'communication', 'Court process explained', null, 60, null, null, 'email', false, 'Current clerk', 8),
+    (v, p_legal, 'final-settlement-window', 'communication', 'Final settlement window', null, 70, null, null, 'email', false, 'Current clerk', 9),
+    (v, p_legal, 'draft-summons', 'task', 'Draft summons', 'Draft the summons and put it up for attorney sign-off.', 75, null, null, null, false, 'Team leader', 10),
+    (v, p_open, 'open-strategy', 'task', 'Open strategy', 'Set the open strategy for this file.', 80, null, null, null, false, 'Current clerk', 11),
+    (v, p_open, 'viability-review', 'task', 'Viability review', 'Review whether this file is still worth working.', 110, null, null, null, false, 'Current clerk', 12),
+    (v, p_open, 'closure-report', 'task', 'Closure report', 'Write the closure report for the client.', 155, null, null, null, false, 'Current clerk', 13),
+    (v, p_open, 'recommendation', 'task', 'Recommendation', 'Returned to the client with a recommendation: litigate, trace and hold, or write off. The builder has no decision step yet, so the chart''s final diamond is stored as the job of making it.', 160, null, null, null, false, 'Team leader', 14)
+  on conflict (version_id, key) do update
+    set phase_id = excluded.phase_id, kind = excluded.kind, label = excluded.label,
+        description = excluded.description, day = excluded.day,
+        deadline_days = excluded.deadline_days, deadline_unit = excluded.deadline_unit,
+        channel = excluded.channel, statutory = excluded.statutory,
+        assign_to = excluded.assign_to, ordinal = excluded.ordinal;
+
+  -- The rotations and the validate-file step. Deleted by ABSENCE from the list above rather than
+  -- by name, so this stays true the next time a step leaves the chart.
+  delete from workflow_nodes
+   where version_id = v
+     and key not in ('handover-notice','demand-129','intention-to-list','follow-up-offer',
+                     'final-notice','listing-confirmed','intended-legal-action',
+                     'court-process-explained','final-settlement-window','draft-summons',
+                     'open-strategy','viability-review','closure-report','recommendation');
+
+  -- Rebuilt rather than patched: an edge left pointing at a deleted step is the one failure that
+  -- does not show on the canvas, because nothing is drawn where the other end used to be.
+  delete from workflow_connections where version_id = v;
+  insert into workflow_connections (version_id, from_node_id, to_node_id)
+  select v, a.id, b.id
+    from workflow_nodes a
+    join workflow_nodes b on b.version_id = v and b.ordinal = a.ordinal + 1
+   where a.version_id = v;
+end $$;
+
+-- The firm's own title for the chart, rather than the mockup's. The key does not change, so
+-- nothing that links to this workflow breaks.
+update public.workflows
+   set name = 'Pre-legal collections',
+       description = 'Handover to a recommendation, with five ways a file can leave the sequence and come back.'
+ where key = 'standard-collections';

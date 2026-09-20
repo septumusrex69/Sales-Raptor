@@ -4,6 +4,7 @@ import {
 import {
   nodesOfPhase, type Workflow, type WorkflowNode, type WorkflowPhase, type WorkflowProblem,
 } from '../../lib/workflowBuilder.ts'
+import { shortDate } from '../../lib/dateLabels.ts'
 
 /**
  * The workflow, drawn.
@@ -17,28 +18,38 @@ import {
  * DRIVEN BY DATA, ENTIRELY. Nothing here knows what day 35 is: it is handed nodes and draws them.
  * That is what makes the thing editable rather than a picture of an edit.
  */
-export function WorkflowCanvas({ workflow, selected, onSelect, problems }: {
+export function WorkflowCanvas({ workflow, selected, onSelect, problems, from }: {
   workflow: Workflow
   selected: string | null
   onSelect: (id: string) => void
   problems: WorkflowProblem[]
+  /**
+   * The handover the card dates are counted from.
+   *
+   * WHY A DATE AT ALL. "Day 110" is unreadable against a calendar — it tells nobody whether the
+   * viability review lands in the December shutdown, and that is the kind of error somebody spots
+   * in a second and never spots in a day number. Carried in from the read-only page this canvas
+   * replaced, which existed for exactly this.
+   */
+  from: string
 }) {
   return (
     <div className="space-y-6">
       {workflow.phases.map((phase) => (
         <PhaseRow key={phase.id} phase={phase} nodes={nodesOfPhase(workflow, phase.id)}
-          selected={selected} onSelect={onSelect} problems={problems} />
+          selected={selected} onSelect={onSelect} problems={problems} from={from} />
       ))}
     </div>
   )
 }
 
-function PhaseRow({ phase, nodes, selected, onSelect, problems }: {
+function PhaseRow({ phase, nodes, selected, onSelect, problems, from }: {
   phase: WorkflowPhase
   nodes: WorkflowNode[]
   selected: string | null
   onSelect: (id: string) => void
   problems: WorkflowProblem[]
+  from: string
 }) {
   return (
     <section>
@@ -69,7 +80,7 @@ function PhaseRow({ phase, nodes, selected, onSelect, problems }: {
           {nodes.map((node, i) => (
             <div key={node.id} className="flex items-center gap-2">
               <NodeCard node={node} selected={node.id === selected} onSelect={() => onSelect(node.id)}
-                problems={problems.filter((p) => p.nodeId === node.id)} />
+                problems={problems.filter((p) => p.nodeId === node.id)} from={from} />
               {i < nodes.length - 1 && <ArrowRight size={15} className="shrink-0 text-slate-300" />}
             </div>
           ))}
@@ -91,11 +102,12 @@ const ICONS = {
   wait: CalendarClock,
 }
 
-function NodeCard({ node, selected, onSelect, problems }: {
+function NodeCard({ node, selected, onSelect, problems, from }: {
   node: WorkflowNode
   selected: boolean
   onSelect: () => void
   problems: WorkflowProblem[]
+  from: string
 }) {
   const Icon = ICONS[node.kind]
   const refused = problems.some((p) => p.level === 'refuse')
@@ -109,7 +121,12 @@ function NodeCard({ node, selected, onSelect, problems }: {
             : 'border-slate-200'
       }`}>
       <Icon size={16} className={refused ? 'text-rose-500' : selected ? 'text-gold-500' : 'text-brand-500'} />
-      <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Day {node.day}</p>
+      {/* The day number and the date it lands on, together. The number is what the step IS; the
+          date is what makes it checkable against a calendar. Neither on its own does both. */}
+      <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+        Day {node.day}
+      </p>
+      <p className="text-[11px] text-slate-400 tabular-nums">{shortDate(dayPlus(from, node.day))}</p>
       <p className="text-[13px] font-medium text-slate-800 leading-snug mt-0.5">{node.label}</p>
       {/*
         The one line under the label is the step's own second fact — "Registered post", "7 days to
@@ -132,6 +149,19 @@ function secondLine(node: WorkflowNode): string {
   }
   if (node.kind === 'assignment' && node.assignTo) parts.push(node.assignTo)
   return parts.join(' · ')
+}
+
+/**
+ * `from` plus N calendar days, as a yyyy-mm-dd key.
+ *
+ * UTC, deliberately. Local-time date arithmetic moves by an hour across a daylight-saving
+ * boundary, which is enough to land a step on the day before — South Africa has no DST, but the
+ * browser reading this screen might not be in South Africa.
+ */
+function dayPlus(from: string, days: number): string {
+  const d = new Date(`${from}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
 }
 
 const CHANNEL_WORDS: Record<string, string> = {

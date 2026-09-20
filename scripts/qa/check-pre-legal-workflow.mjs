@@ -287,6 +287,62 @@ ok('the section 129 is one of them',
 ok('...and it is not described as legal action',
   /statutory demand BEFORE court/.test(PRE_LEGAL_160.spine.find((s) => s.id === 'demand-129').note ?? ''))
 
+/* ---------- the definition and the stored workflow are two copies now ---------- */
+
+/*
+ * AND TWO COPIES OF A PROCESS DRIFT. That is not a theory here: the stored workflow spent months
+ * as the mockup's day 1 to 80 version, with "Rotate to Clerk 2" still a spine step, while this
+ * file held the corrected one — and the two disagreed in exactly the places the firm had
+ * corrected. Nothing said so, because nothing compared them.
+ *
+ * THEY CANNOT BE MADE ONE. This file is the SPECIFICATION and says things workflow_nodes cannot:
+ * relative timing ("20 business days after the intention to list"), steps that move off a
+ * weekend, and the five branch exits. The database holds the EDITABLE copy, which is what the
+ * builder reads and what a run will read. So the guard is not "they are identical" — it is that
+ * the same steps exist in both, on the same days, which is the part that can silently diverge.
+ *
+ * Read out of schema.sql rather than out of the database, like check-select-columns.mjs: the
+ * checks run with no network and no credentials, and schema.sql is the checked-in record.
+ */
+const seedBlock = schema.slice(schema.indexOf('THE STORED WORKFLOW WAS AN EARLIER TRANSCRIPTION'))
+ok('the migration that seeds the workflow is in schema.sql', seedBlock.length > 0)
+
+/* (v, p_x, 'step-key', 'kind', 'Label', ..., <day>, ... */
+const storedDays = Object.fromEntries(
+  [...seedBlock.matchAll(/\(v, p_\w+, '([a-z0-9-]+)', '\w+', '[^']*', (?:'(?:[^']|'')*'|null), (\d+),/g)]
+    .map((m) => [m[1], Number(m[2])]))
+ok(`the migration writes the spine (${Object.keys(storedDays).length} steps)`,
+  Object.keys(storedDays).length >= 14)
+
+/*
+ * EVERY STEP IN THE SPECIFICATION IS STORED. Asserted as the missing LIST rather than as a count,
+ * so a failure names the step somebody forgot rather than saying 14 is not 13.
+ */
+check('every step of the definition is in the stored workflow',
+  PRE_LEGAL_160.spine.map((s) => s.id).filter((id) => !(id in storedDays)), [])
+/* And nothing is stored that the definition no longer has -- which is how the rotations survived
+   in the database for months after the firm took them off the chart. */
+check('...and nothing is stored that the definition dropped',
+  Object.keys(storedDays).filter((k) => !PRE_LEGAL_160.spine.some((s) => s.id === k)), [])
+
+/*
+ * ON THE SAME DAYS, with one known exception recorded rather than excused. "Listing confirmed" is
+ * twenty BUSINESS days after the intention to list; workflow_nodes.day is an absolute calendar
+ * day, so the stored 42 is that sum in an ordinary month while the definition resolves it to 38
+ * from a September handover. The rule itself is not lost -- it is the 20 business days on the
+ * intention step -- but the two numbers will not match and must not be asserted equal.
+ */
+const RELATIVE = new Set(['listing-confirmed'])
+const disagree = PRE_LEGAL_160.spine
+  .filter((s) => !RELATIVE.has(s.id) && s.id in storedDays && storedDays[s.id] !== dayOf[s.id])
+  .map((s) => `${s.id}: definition ${dayOf[s.id]}, stored ${storedDays[s.id]}`)
+check('the stored days are the definition\u2019s days', disagree, [])
+/* The exception is real, not a hole: the two genuinely differ, and if they ever stop differing
+   the list above should shrink rather than this line quietly guarding nothing. */
+ok(`...except the one the schema cannot express (stored ${storedDays['listing-confirmed']}, `
+  + `resolves to ${dayOf['listing-confirmed']})`,
+  storedDays['listing-confirmed'] !== dayOf['listing-confirmed'])
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')
