@@ -118,6 +118,13 @@ export interface MessageTemplate {
    * check constraint cannot read the row being pointed at.
    */
   attachmentId: string | null
+  /**
+   * 'document' where the body is a letterDocument JSON rather than the words themselves.
+   *
+   * Letters only -- message_templates_format_kind says so. An SMS holding a JSON blob would be
+   * charged by the segment for its own punctuation and nothing would have said so.
+   */
+  format: 'text' | 'document'
 }
 
 /* ---------------------------------------------------------------- merge fields */
@@ -173,6 +180,34 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
     { key: 'client_name', label: 'The client whose book it is', sample: 'Gauteng Property Services' },
     { key: 'balance', label: 'Balance outstanding', sample: 'R 48,250.00' },
     { key: 'capital', label: 'Capital outstanding', sample: 'R 31,900.00' },
+    /*
+     * THE FIELDS A LETTER NEEDS AND AN SMS NEVER DID.
+     *
+     * A section 129 notice has to identify the debtor, the agreement and the creditor well enough
+     * to be a valid statutory demand -- an address to post it to, the account number the credit
+     * provider knows it by, the date the ten business days run to. None of that fits in 160
+     * characters, so none of it existed until letters did.
+     *
+     * NOTHING FILLS SOME OF THESE YET, and they are here rather than left out for exactly that
+     * reason: the library already marks a template that asks for a field nothing can answer, so
+     * putting them in the vocabulary turns "the notice is missing things" into a precise list on
+     * the row. Leaving them out would let the letter look finished with the facts typed in by
+     * hand, which is how one debtor's address ends up on another debtor's demand.
+     */
+    { key: 'debtor_address', label: 'Where the notice is posted, on its own lines', sample: '14 Protea Street\nWonderboom\nPretoria, 0182' },
+    { key: 'debtor_id_masked', label: 'Identity number, masked', sample: '850312 XXXX 08 X' },
+    { key: 'account_number', label: "The creditor's own account number", sample: '92322880' },
+    { key: 'respond_by', label: 'The date the debtor must answer by, written out', sample: '5 October 2026' },
+    { key: 'position_as_at', label: 'The date the balance was struck', sample: '18 September 2026' },
+    /*
+     * AND THE FIRM'S OWN DETAILS, which are not the agent's and not the client's. Raptor has no
+     * table for them -- companies.banking_details is where REMITTANCE GOES, which is the opposite
+     * direction from where a debtor pays -- so these resolve to nothing until it has one.
+     */
+    { key: 'firm_bank', label: 'Trust account, bank and branch code', sample: 'Standard Bank · 051001' },
+    { key: 'firm_bank_account', label: 'Trust account number', sample: '01 234 5678' },
+    { key: 'signatory_name', label: 'Who signs the letter', sample: 'J Bredell' },
+    { key: 'signatory_title', label: 'Their title', sample: 'Director' },
     ...EVERYWHERE,
   ],
   sales: [
@@ -376,8 +411,28 @@ export function mergeValuesFor(input: {
   firmName: string
   today: string
   money: (amount: number) => string
+  /**
+   * WHAT A LETTER NEEDS AND A TEXT MESSAGE NEVER DID, all optional and all defaulting to null.
+   *
+   * NULL IS THE HONEST ANSWER while nothing fills them, and it is not the same as an empty
+   * string: renderTemplate leaves an unresolved placeholder STANDING rather than printing a gap,
+   * so a notice built before Raptor has the firm's trust account shows {{firm_bank}} on the page
+   * instead of a blank line that reads as finished. One of those gets caught; the other gets
+   * posted.
+   */
+  debtorAddress?: string | null
+  debtorIdMasked?: string | null
+  respondBy?: string | null
+  positionAsAt?: string | null
+  /* The firm's own details. companies.banking_details is where REMITTANCE GOES, which is the
+     opposite direction from where a debtor pays, so it is deliberately not read here. */
+  firmBank?: string | null
+  firmBankAccount?: string | null
+  signatoryName?: string | null
+  signatoryTitle?: string | null
 }): Record<string, string | null> {
   const a = input.account
+  const some = (v: string | null | undefined): string | null => (v ?? '').trim() || null
   return {
     debtor_name: addressAs(a),
     debtor_first_name: (a.debtorFirstName ?? '').trim() || null,
@@ -390,6 +445,17 @@ export function mergeValuesFor(input: {
     agent_phone: (input.agentPhone ?? '').trim() || null,
     firm_name: input.firmName,
     today: longDate(input.today),
+    /* The creditor's own number, which is NOT the reference above: the client's reference is what
+       appears on the debtor's paperwork, and a section 129 has to identify the agreement. */
+    account_number: some(a.accountNumber),
+    debtor_address: some(input.debtorAddress),
+    debtor_id_masked: some(input.debtorIdMasked),
+    respond_by: input.respondBy ? longDate(input.respondBy) : null,
+    position_as_at: input.positionAsAt ? longDate(input.positionAsAt) : null,
+    firm_bank: some(input.firmBank),
+    firm_bank_account: some(input.firmBankAccount),
+    signatory_name: some(input.signatoryName),
+    signatory_title: some(input.signatoryTitle),
   }
 }
 
@@ -413,6 +479,19 @@ export interface TemplateProblem {
  * screen is about money.
  */
 export function templateProblems(input: {
+  /**
+   * 'document' where the body is a letterDocument JSON rather than prose.
+   *
+   * THE FIELD SCAN BELOW IS SKIPPED FOR ONE, and this was found by the letter refusing to save:
+   * a document's JSON contains its running header, the running header legally contains {{page}}
+   * and {{pages}}, and those are the PRINTER's fields rather than the account's. Scanning the
+   * JSON as prose reported them as typos and disabled Save on a perfectly good notice.
+   *
+   * letterProblems in letterDocument.ts owns that check for a document, and it owns it properly
+   * — header and body have different vocabularies. Two validators disagreeing about the same
+   * document is worse than one of them not answering.
+   */
+  format?: 'text' | 'document'
   /** Which library it is being filed in, which is what decides whether a field is known. */
   scope: TemplateScope
   kind: TemplateKind
@@ -444,9 +523,9 @@ export function templateProblems(input: {
     })
   }
 
-  const unknown = unknownFields(
-    input.scope, input.body, input.kind === 'email' ? input.subject : null,
-  )
+  const unknown = input.format === 'document'
+    ? []
+    : unknownFields(input.scope, input.body, input.kind === 'email' ? input.subject : null)
   if (unknown.length > 0) {
     problems.push({
       field: unknownFields(input.scope, input.body).length > 0 ? 'body' : 'subject',

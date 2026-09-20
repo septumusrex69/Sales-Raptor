@@ -10,6 +10,10 @@ import {
 } from '../../lib/messageTemplates'
 import type { TemplateDraft } from '../../lib/templateLibrary'
 import { inputClass } from '../../components/ui/Modal'
+import { LetterEditor } from './LetterEditor'
+import {
+  blankLetter, parseLetter, serialiseLetter, letterProblems, canUseLetter, lettersText,
+} from '../../lib/letterDocument.ts'
 
 /**
  * Writing one piece of the firm's wording.
@@ -57,8 +61,21 @@ export function TemplateEditor({
   /** Which box the cursor was last in, so a field lands where the writer was working. */
   const [last, setLast] = useState<'body' | 'subject'>('body')
 
+  /*
+   * READ ONCE PER KEYSTROKE ON THE BODY, and null where it will not parse. Null is not an empty
+   * document: a letter that cannot be read back must show the raw text and refuse to edit, or
+   * somebody opens a broken template in an empty editor and saves over the top of it.
+   */
+  const letterDoc = draft.kind === 'letter' && draft.format === 'document'
+    ? parseLetter(draft.body)
+    : null
+  const letterProblems_ = letterDoc ? letterProblems(letterDoc, scope) : []
   const problems = templateProblems(draft)
-  const unknown = unknownFields(scope, draft.body, draft.subject)
+  /* Empty for a laid-out letter: letterProblems reads the document properly, header and body
+     apart, and this one would read its JSON as prose. See templateProblems. */
+  const unknown = draft.format === 'document'
+    ? []
+    : unknownFields(scope, draft.body, draft.subject)
   const sms = draft.kind === 'sms'
     ? forecastSms(renderTemplate(draft.body, sampleValues()).text)
     : null
@@ -98,10 +115,24 @@ export function TemplateEditor({
               /* A subject belongs to email and to nothing else, and so does an attachment — the
                  database says both (message_templates_attachment_kind). Either one left behind on
                  a change of kind is a refused save with no obvious cause. */
+              /* A letter that has never been laid out starts as a blank document rather than
+                 as the old plain text: the text is kept where it is if somebody switches back,
+                 and message_templates_format_kind refuses a document on anything else. */
+              const becomingLetter = kind === 'letter' && draft.format !== 'document'
+              const laidOut = draft.format === 'document' ? parseLetter(draft.body) : null
               onChange({
                 ...draft, kind,
                 subject: kind === 'email' ? (draft.subject ?? '') : null,
                 attachmentId: kind === 'email' ? draft.attachmentId : null,
+                format: kind === 'letter' ? 'document' : 'text',
+                body: becomingLetter && parseLetter(draft.body) === null
+                  ? serialiseLetter(blankLetter())
+                  /* AND THE OTHER WAY: a laid-out letter turned into an SMS keeps its words and
+                     loses its layout, rather than leaving a JSON blob in the body to be charged
+                     by the segment for its own punctuation. Nobody's writing is thrown away. */
+                  : kind !== 'letter' && laidOut !== null
+                    ? lettersText(laidOut)
+                    : draft.body,
               })
             }}>
             {KINDS_FOR_SCOPE[scope].map((k) => (
@@ -163,6 +194,38 @@ export function TemplateEditor({
         </label>
       )}
 
+      {/*
+        A LETTER IS LAID OUT; EVERYTHING ELSE IS TYPED.
+        
+        The same body column holds both, and `format` says which -- so the box you get is decided
+        by what the thing IS rather than by a switch somebody has to remember to flick. An SMS
+        will never be laid out, and a section 129 cannot be written in a textarea: it has four
+        numbered sections, three tables and a running header.
+      */}
+      {draft.kind === 'letter' && draft.format === 'document' ? (
+        <div>
+          <span className="flex items-baseline justify-between mb-1">
+            <span className="text-[11px] uppercase tracking-wide text-slate-400">The letter</span>
+            {letterDoc === null && (
+              <span className="text-[11px] text-negative-700">
+                This letter could not be read back. Nothing has been changed.
+              </span>
+            )}
+          </span>
+          {letterDoc !== null && (
+            <LetterEditor doc={letterDoc} readOnly={false}
+              onChange={(next) => onChange({ ...draft, body: serialiseLetter(next) })} />
+          )}
+          {/*
+            REFUSALS FROM THE DOCUMENT ITSELF, which templateProblems cannot see -- a ragged
+            table renders as a page that looks fine and is missing a cell.
+          */}
+          {letterProblems_.map((p) => (
+            <p key={p.message} className={`mt-2 text-xs ${
+              p.level === 'refuse' ? 'text-negative-700' : 'text-slate-500'}`}>{p.message}</p>
+          ))}
+        </div>
+      ) : (
       <label className="block">
         <span className="flex items-baseline justify-between mb-1">
           <span className="text-[11px] uppercase tracking-wide text-slate-400">The words</span>
@@ -182,6 +245,7 @@ export function TemplateEditor({
           onFocus={() => setLast('body')}
           onChange={(e) => onChange({ ...draft, body: e.target.value })} />
       </label>
+      )}
 
       {/* ---------- the fields ---------- */}
 
@@ -217,8 +281,9 @@ export function TemplateEditor({
       {error && <p className="text-sm text-negative-700">{error}</p>}
 
       <div className="flex flex-wrap items-center gap-2 pt-1">
-        <button type="button" onClick={onSave} disabled={saving || problems.length > 0}
-          title={problems[0]?.message}
+        <button type="button" onClick={onSave}
+          disabled={saving || problems.length > 0 || !canUseLetter(letterProblems_)}
+          title={problems[0]?.message ?? letterProblems_.find((p) => p.level === 'refuse')?.message}
           className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
             border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500
             disabled:opacity-40 disabled:hover:bg-gold-400">

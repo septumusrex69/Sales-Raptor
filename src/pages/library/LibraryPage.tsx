@@ -16,6 +16,9 @@ import {
   type TemplateKind, type TemplateScope,
 } from '../../lib/messageTemplates'
 import { DESK_POSITIONS } from '../../lib/clientPosition'
+import { A4_LETTERHEAD, parseLetter } from '../../lib/letterDocument.ts'
+import { LetterPage } from '../../components/letters/LetterPage'
+import { defaultOf, fetchLetterheads, type Letterhead } from '../../lib/letterheads.ts'
 
 /**
  * Everything the firm says, in one place, kept apart from the machinery that says it.
@@ -79,6 +82,21 @@ export function LibraryPage() {
    * template somebody is trying to read would be the tail wagging the dog.
    */
   const [usedBy, setUsedBy] = useState<string | null>(null)
+  /**
+   * The paper a letter is shown on.
+   *
+   * ONE FETCH FOR THE WHOLE LIBRARY, and null is a real answer rather than a loading state: a
+   * firm that has not uploaded a letterhead writes on plain paper, and the preview should show
+   * plain paper rather than wait for something that is never coming.
+   */
+  const [letterhead, setLetterhead] = useState<Letterhead | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    fetchLetterheads()
+      .then((rows) => { if (!cancelled) setLetterhead(defaultOf(rows)) })
+      .catch(() => { /* plain paper is a correct fallback, and not worth a banner */ })
+    return () => { cancelled = true }
+  }, [])
 
   const load = useCallback(async (next: TemplateScope) => {
     setRows(null)
@@ -398,7 +416,7 @@ export function LibraryPage() {
                     {usedBy}
                   </p>
                 )}
-                <Reading template={open}
+                <Reading template={open} letterhead={letterhead}
                   attaches={open.attachmentId ? byId.get(open.attachmentId) ?? null : null} />
               </>
             ) : (
@@ -494,10 +512,12 @@ function ListRow({ template, current, onOpen, attaches }: {
  * other's question — a letter that scans beautifully with {{balance}} in it can read as nonsense
  * once the number is there, and a preview alone cannot tell you which words are the template's.
  */
-function Reading({ template, attaches }: {
+function Reading({ template, attaches, letterhead }: {
   template: LibraryTemplate
   /** The letter it carries, already looked up. Null where it carries none. */
   attaches: LibraryTemplate | null
+  /** The paper it prints on. Null prints on plain paper, which is what a firm without one has. */
+  letterhead: Letterhead | null
 }) {
   const [filled, setFilled] = useState(false)
   /** The letter, opened over the email. Closed again with one press — see the firm's own words. */
@@ -508,6 +528,11 @@ function Reading({ template, attaches }: {
   const sms = template.kind === 'sms'
     ? forecastSms(renderTemplate(template.body, values).text)
     : null
+  /* Null on anything that is not a laid-out letter, and also on one that will not parse -- which
+     is shown as its raw text rather than as an empty page pretending to be the letter. */
+  const doc = template.format === 'document' ? parseLetter(template.body) : null
+  const attachedDoc = attaches?.format === 'document' ? parseLetter(attaches.body) : null
+  const page = letterhead?.page ?? A4_LETTERHEAD
 
   const show = (text: string | null) => {
     if (!text) return null
@@ -574,10 +599,18 @@ function Reading({ template, attaches }: {
               <X size={13} /> Close
             </button>
           }>
-          <pre className="px-5 py-4 whitespace-pre-wrap break-words font-sans text-[13px]
-            leading-relaxed text-slate-700 max-h-[70vh] overflow-y-auto">{
-            filled ? renderTemplate(attaches.body, values).text : attaches.body
-          }</pre>
+          {/* The attached letter is a laid-out letter too, so it opens as the page it posts as
+              rather than as the JSON it is stored as. */}
+          {attachedDoc !== null ? (
+            <div className="px-5 py-5 bg-slate-100 flex justify-center max-h-[72vh] overflow-y-auto">
+              <LetterPage doc={attachedDoc} page={page} filled={filled} values={values} scale={0.72} />
+            </div>
+          ) : (
+            <pre className="px-5 py-4 whitespace-pre-wrap break-words font-sans text-[13px]
+              leading-relaxed text-slate-700 max-h-[70vh] overflow-y-auto">{
+              filled ? renderTemplate(attaches.body, values).text : attaches.body
+            }</pre>
+          )}
         </Modal>
       )}
 
@@ -588,9 +621,22 @@ function Reading({ template, attaches }: {
         </div>
       )}
 
-      <pre className={`px-5 py-4 whitespace-pre-wrap break-words text-slate-700
-        ${template.kind === 'call_script' ? 'font-mono text-[12.5px]' : 'font-sans text-[13.5px]'}
-        leading-relaxed`}>{show(template.body)}</pre>
+      {/*
+        A LETTER IS SHOWN ON THE PAGE IT PRINTS ON, at real millimetres and scaled to fit.
+        
+        The thing that goes wrong with a letter is never the words: it is the last paragraph
+        sitting on top of the letterhead's footer block, or the address falling under the logo.
+        Neither is visible in a text box, so a text box is the wrong way to read one.
+      */}
+      {doc !== null ? (
+        <div className="px-5 py-5 bg-slate-100 flex justify-center">
+          <LetterPage doc={doc} page={page} filled={filled} values={values} scale={0.62} pages={2} />
+        </div>
+      ) : (
+        <pre className={`px-5 py-4 whitespace-pre-wrap break-words text-slate-700
+          ${template.kind === 'call_script' ? 'font-mono text-[12.5px]' : 'font-sans text-[13.5px]'}
+          leading-relaxed`}>{show(template.body)}</pre>
+      )}
 
       <div className="px-5 py-3 border-t border-slate-100 bg-slate-50">
         <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1.5">Fields used</p>
@@ -625,10 +671,14 @@ function blankDraft(scope: TemplateScope): TemplateDraft {
     position: null,
     active: true,
     attachmentId: null,
+    /* A new letter starts as a document, because that is what a letter is here. Everything else
+       starts as words. The kind picker moves it if the writer changes their mind. */
+    format: scope === 'collections' && KINDS_FOR_SCOPE[scope][0] === 'letter' ? 'document' : 'text',
   }
 }
 
 const draftOf = (t: LibraryTemplate): TemplateDraft => ({
   scope: t.scope, kind: t.kind, name: t.name, subject: t.subject,
   body: t.body, position: t.position, active: t.active, attachmentId: t.attachmentId,
+  format: t.format,
 })

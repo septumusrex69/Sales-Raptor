@@ -547,7 +547,7 @@ export const LIBRARY = [
     scope: 'collections', kind: 'sms', name: 'First contact',
     subject: null,
     body: '{{firm_name}}: account {{reference}} is overdue. Call {{agent_phone}}.',
-    position: 'new', language: 'en', active: true, attachment_id: null,
+    position: 'new', language: 'en', active: true, attachment_id: null, format: 'text',
     seed_key: 'sms-first-contact', updated_at: MAIL_AT(900),
   },
   {
@@ -555,14 +555,41 @@ export const LIBRARY = [
     scope: 'collections', kind: 'email', name: 'Handover notice',
     subject: 'Account {{reference}}',
     body: 'Dear {{debtor_name}}\n\nPay {{balance}} into {{bank_account_number}} at {{bank_name}}.',
-    position: null, language: 'en', active: true, attachment_id: null,
+    position: null, language: 'en', active: true, attachment_id: null, format: 'text',
     seed_key: 'email-handover', updated_at: MAIL_AT(800),
   },
+  /*
+   * A LAID-OUT LETTER, which is what a letter is here now: headings that number themselves, a
+   * table and a bullet, stored as a letterDocument. Small on purpose -- the firm's real section
+   * 129 is checked as data in check-letter-document.mjs, and this one exists to prove the SCREEN
+   * draws a document rather than the JSON it is stored as.
+   */
   {
     id: 'cccccccc-0000-4000-8000-000000000003',
     scope: 'collections', kind: 'letter', name: 'Section 129 notice',
     subject: null,
-    body: 'NOTICE IN TERMS OF SECTION 129(1)(a)\n\n{{debtor_name}}, account {{reference}}.',
+    format: 'document',
+    body: JSON.stringify({
+      defaults: { font: 'Georgia, serif', size: 10.5, colour: '#1f2937', lineHeight: 1.45 },
+      runningHeader: 'Section 129 notice · Ref {{reference}} · Page {{page}} of {{pages}}',
+      blocks: [
+        { kind: 'heading', level: 1, spans: [{ text: 'NOTICE IN TERMS OF SECTION 129(1)(a)' }] },
+        { kind: 'paragraph', spans: [
+          { text: 'Dear {{debtor_name}}, you owe ' },
+          { text: '{{balance}}', bold: true },
+          { text: ' on account {{reference}}.' },
+        ] },
+        { kind: 'heading', level: 2, spans: [{ text: 'YOUR DEFAULT' }], numbered: true },
+        { kind: 'table', borders: 'rows', widths: [40, 60], rows: [
+          [{ spans: [{ text: 'Creditor' }] }, { spans: [{ text: '{{client_name}}' }] }],
+          [{ spans: [{ text: 'Balance' }] }, { spans: [{ text: '{{balance}}' }] }],
+        ] },
+        { kind: 'heading', level: 2, spans: [{ text: 'HOW TO PAY' }], numbered: true },
+        { kind: 'list', ordered: false, items: [
+          [{ text: 'Pay in full. ', bold: true }, { text: 'Our banking details are below.' }],
+        ] },
+      ],
+    }),
     position: null, language: 'en', active: false, attachment_id: null,
     seed_key: 'letter-s129', updated_at: MAIL_AT(700),
   },
@@ -577,7 +604,7 @@ export const LIBRARY = [
     scope: 'collections', kind: 'email', name: 'Section 129 covering email',
     subject: 'Section 129 notice - account {{reference}}',
     body: 'Dear {{debtor_name}}\n\nAttached is a notice issued in terms of section 129(1)(a).',
-    position: null, language: 'en', active: true,
+    position: null, language: 'en', active: true, format: 'text',
     attachment_id: 'cccccccc-0000-4000-8000-000000000003',
     seed_key: 'email-s129-covering', updated_at: MAIL_AT(650),
   },
@@ -592,7 +619,7 @@ export const LIBRARY = [
     scope: 'collections', kind: 'call_script', name: 'Opening the call',
     subject: null,
     body: 'Good day, may I speak to {{debtor_name}}? This is {{agent_name}} from {{firm_name}}.',
-    position: null, language: 'en', active: true, attachment_id: null,
+    position: null, language: 'en', active: true, attachment_id: null, format: 'text',
     seed_key: 'call-opening', updated_at: MAIL_AT(640),
   },
   {
@@ -600,7 +627,7 @@ export const LIBRARY = [
     scope: 'sales', kind: 'email', name: 'Quotation follow-up',
     subject: 'Your quotation from {{firm_name}}',
     body: 'Dear {{contact_name}}\n\nFollowing up on {{service_interested}} for {{company_name}}.',
-    position: null, language: 'en', active: true, attachment_id: null,
+    position: null, language: 'en', active: true, attachment_id: null, format: 'text',
     seed_key: null, updated_at: MAIL_AT(600),
   },
 ]

@@ -41,7 +41,11 @@ export function LibraryHeader({ mayEdit }: { mayEdit: boolean }) {
         )}
       </div>
       <div className="px-5 flex gap-5 border-b border-slate-100">
-        {[['/library', 'Templates'], ['/library/workflows', 'Workflows']].map(([to, label]) => (
+        {/* The letterhead is here and not in Settings for the reason the workflows are: it is
+            content the firm maintains, not a switch somebody sets once, and it belongs beside the
+            letters that print on it. */}
+        {[['/library', 'Templates'], ['/library/workflows', 'Workflows'],
+          ['/library/letterhead', 'Letterhead']].map(([to, label]) => (
           <NavLink key={to} to={to} end={to === '/library'}
             className={({ isActive }) => `py-2.5 text-sm border-b-2 -mb-px transition-colors ${
               isActive

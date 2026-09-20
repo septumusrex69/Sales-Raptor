@@ -13,7 +13,7 @@ import type {
 
 /** Named by hand, like every mapper here. See the warning about silent drops in CLAUDE.md. */
 const COLUMNS = 'id, scope, kind, name, subject, body, position, language, active, '
-  + 'attachment_id, seed_key, updated_at'
+  + 'attachment_id, format, seed_key, updated_at'
 
 interface Row {
   id: string
@@ -26,6 +26,7 @@ interface Row {
   language: string
   active: boolean
   attachment_id: string | null
+  format: string
   seed_key: string | null
   updated_at: string
 }
@@ -49,6 +50,7 @@ function toTemplate(r: Row): LibraryTemplate {
     language: r.language,
     active: r.active,
     attachmentId: r.attachment_id,
+    format: r.format === 'document' ? 'document' : 'text',
     seedKey: r.seed_key,
     updatedAt: r.updated_at,
   }
@@ -87,6 +89,15 @@ export interface TemplateDraft {
   active: boolean
   /** The letter an email attaches. Null on everything else, and the database says so. */
   attachmentId: string | null
+  /**
+   * Whether `body` is what it looks like, or a letterDocument JSON.
+   *
+   * Only a letter may be a document -- message_templates_format_kind says so -- and the save
+   * forces it back to 'text' for anything else rather than trusting the form, because a kind
+   * changed from letter to SMS with the format left behind is a refused save with no obvious
+   * cause.
+   */
+  format: 'text' | 'document'
 }
 
 /**
@@ -109,6 +120,7 @@ export async function saveTemplate(id: string, draft: TemplateDraft): Promise<vo
       /* Cleared on anything that is not an email, because the constraint refuses one there and a
          subject left behind on a change of kind is a refused save with no obvious cause. */
       attachment_id: draft.kind === 'email' ? draft.attachmentId : null,
+      format: draft.kind === 'letter' ? draft.format : 'text',
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
@@ -129,6 +141,7 @@ export async function createTemplate(draft: TemplateDraft): Promise<string> {
       language: 'en',
       active: draft.active,
       attachment_id: draft.kind === 'email' ? draft.attachmentId : null,
+      format: draft.kind === 'letter' ? draft.format : 'text',
     })
     .select('id')
     .single()
@@ -152,6 +165,9 @@ function friendly(message: string): string {
   if (message.includes('message_templates_kind_check')) return 'That is not a kind of message.'
   if (message.includes('message_templates_attachment_kind')) {
     return 'Only an email can carry an attachment.'
+  }
+  if (message.includes('message_templates_format_kind')) {
+    return 'Only a letter is laid out as a document. Everything else is plain words.'
   }
   /* The trigger raises in its own words, which already name the mistake — see
      check_template_attachment. Passed through rather than replaced with something vaguer. */

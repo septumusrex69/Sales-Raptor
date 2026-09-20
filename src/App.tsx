@@ -22,6 +22,7 @@ import { AccountsList } from './pages/accounts/AccountsList'
 import { AccountDetail } from './pages/accounts/AccountDetail'
 import { DisputesBoard } from './pages/accounts/DisputesBoard'
 import { LibraryWorkflows } from './pages/library/LibraryWorkflows'
+import { LibraryLetterhead } from './pages/library/LibraryLetterhead'
 import { CollectorDashboard } from './pages/CollectorDashboard'
 import { CollectorProfile } from './pages/CollectorProfile'
 import { DiaryPage } from './pages/diary/DiaryPage'
@@ -115,6 +116,9 @@ function App() {
                   being argued about can be linked to. In Settings it had no address at all. */}
               <Route path="/library/workflows" element={<LibraryWorkflows />} handle={{ title: 'Workflows' }} />
               <Route path="/library/workflows/:key" element={<LibraryWorkflows />} handle={{ title: 'Workflows' }} />
+              {/* The paper the letters print on. Beside them rather than in Settings, because the
+                  margins are what keep the words off the logo -- that is typography, not config. */}
+              <Route path="/library/letterhead" element={<LibraryLetterhead />} handle={{ title: 'Letterhead' }} />
               <Route path="/reports" element={<ReportsPage />} handle={{ title: 'Reports' }} />
               <Route path="/settings" element={<SettingsPage />} handle={{ title: 'Settings' }} />
               <Route path="/reps/:id" element={<RepDetailPage />} handle={{ title: 'Rep Performance' }} />

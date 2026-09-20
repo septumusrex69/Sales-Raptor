@@ -147,7 +147,8 @@ try {
     /* ---------- and changes nothing ---------- */
     t.check('no Edit is offered', await page.getByRole('button', { name: 'Edit' }).count(), 0)
     t.check('...no New template', await page.getByRole('button', { name: 'New template' }).count(), 0)
-    t.check('...no Delete', await page.getByRole('button', { name: 'Delete' }).count(), 0)
+    t.check('...no Delete',
+      await page.getByRole('button', { name: 'Delete', exact: true }).count(), 0)
     /* Said once at the top rather than guessed at from four absences. */
     t.ok('...and the rule is stated rather than left to be inferred',
       await page.getByText(/An administrator writes these/).first().isVisible())
@@ -310,6 +311,125 @@ try {
     (await headings()).filter((h) => /LETTERS/i.test(h)).length, 0)
   await t.shot(page, '61-library-sales')
 
+  /* ---------- a letter is a page, not a paragraph ---------- */
+
+  /*
+   * THE FAULT THIS GUARDS. A letter is stored as a letterDocument JSON in the same body column an
+   * SMS uses plain text in. If the pane does not notice, the firm's section 129 opens as four
+   * thousand characters of JSON — which is not subtle, but the version of it that IS subtle is a
+   * table or a bullet quietly rendering as its raw text while everything around it looks fine.
+   */
+  /* Back to the collections side: the block above left the sales library showing, and letters
+     live only on this one. */
+  await page.getByRole('button', { name: 'Collections', exact: true }).click()
+  await page.waitForTimeout(700)
+  await page.getByText('Section 129 notice', { exact: true }).first().click()
+  await page.waitForTimeout(700)
+  t.check('a letter never shows the JSON it is stored as',
+    await page.getByText(/"kind":"heading"/).count(), 0)
+  t.ok('...it is drawn as the page it prints on',
+    await page.locator('.ltr-page').first().isVisible())
+  /* Real millimetres. A page laid out in pixels is a page that is right on one screen. */
+  {
+    const box = await page.locator('.ltr-page').first().boundingBox()
+    const ratio = box ? box.height / box.width : 0
+    t.ok(`...at A4 proportions (${box ? Math.round(box.width) : 0}x${box ? Math.round(box.height) : 0}px)`,
+      Math.abs(ratio - 297 / 210) < 0.02)
+  }
+  /*
+   * AND THE SECTIONS NUMBER THEMSELVES. The fixture types no digits at all, so a "1" and a "2" on
+   * screen can only have been counted — which is the thing that stops a section inserted in the
+   * middle leaving three headings with the wrong numbers on them.
+   */
+  t.check('the sections number themselves',
+    (await page.locator('.ltr-page .ltr-n').allInnerTexts()).map((x) => x.trim()).join(','), '1,2')
+  t.ok('the table is a real table', await page.locator('.ltr-page table td').first().isVisible())
+  t.ok('...and the bullet a real bullet', await page.locator('.ltr-page ul li').first().isVisible())
+  /* The running header is the printer's line, and {{page}} is filled by the renderer rather than
+     from the account — nothing but a printer knows it. */
+  t.ok('the running header counts the pages',
+    await page.getByText(/Page 1 of 2/).first().isVisible())
+  /* Merge fields still toggle, exactly as they do for the wording of an SMS. */
+  t.ok('a letter shows its fields', (await page.locator('.ltr-page').first().innerText()).includes('{{balance}}'))
+  await page.getByRole('button', { name: 'Example data' }).click()
+  await page.waitForTimeout(400)
+  t.ok('...and fills them in against the sample',
+    (await page.locator('.ltr-page').first().innerText()).includes('R 48,250.00'))
+  await t.shot(page, '65-library-letter')
+
+  /* ---------- and it is edited as one ---------- */
+
+  await page.getByRole('button', { name: 'Edit' }).click()
+  await page.waitForTimeout(700)
+  t.check('a letter is not edited in a textarea',
+    await page.locator('textarea').count(), 0)
+  /* Blocks, with the controls that belong to each kind. */
+  t.ok('...it opens as blocks',
+    await page.locator('[contenteditable="true"]').first().isVisible())
+  t.ok('...with a bold button', await page.getByRole('button', { name: 'Bold' }).first().isVisible())
+  t.ok('...a way to add a table',
+    await page.getByRole('button', { name: 'Table' }).first().isVisible())
+  t.ok('...and the page\u2019s own typography',
+    await page.getByText('Line spacing', { exact: true }).first().isVisible())
+
+  /*
+   * THE ROUND TRIP, IN A REAL BROWSER. editableHtmlToSpans is checked to the character beside
+   * this folder; what a browser cannot be told is whether pressing Bold on a selection actually
+   * reaches the stored document. Typed, selected, bolded, saved, and read off the wire.
+   */
+  /* The contenteditable blocks, not `getByRole('textbox')` — the running-header input is a
+     textbox too and it comes first in the document. */
+  const firstBox = page.locator('[contenteditable="true"]').first()
+  await firstBox.click()
+  await page.keyboard.press('ControlOrMeta+A')
+  await page.keyboard.type('Read this carefully')
+  await page.waitForTimeout(300)
+  /*
+   * THE LAST NINE CHARACTERS ONLY. Bolding the whole box would make the assertion below pass on
+   * an implementation that ignores the selection entirely and bolds everything — which is exactly
+   * the bug worth catching, because the writer would see one word bold and the debtor a whole
+   * paragraph.
+   */
+  await firstBox.evaluate((el) => {
+    const node = [...el.childNodes].find((n) => n.nodeType === 3 && n.textContent.length >= 9)
+      ?? el.firstChild
+    if (!node) throw new Error(`nothing to select in: ${el.innerHTML}`)
+    const r = document.createRange()
+    r.setStart(node, node.textContent.length - 9)
+    r.setEnd(node, node.textContent.length)
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r)
+  })
+  await page.getByRole('button', { name: 'Bold' }).first().click()
+  await page.waitForTimeout(400)
+  const beforeLetter = written.length
+  await page.getByRole('button', { name: 'Save' }).click()
+  await page.waitForTimeout(1000)
+  const sentLetter = written[written.length - 1]
+  t.ok(`the letter reached the database (${written.length - beforeLetter} write)`,
+    written.length > beforeLetter)
+  t.check('...still as a document', /"format":"document"/.test(sentLetter?.body ?? ''), true)
+
+  /*
+   * READ BACK AS THE DOCUMENT IT IS, rather than pattern-matched against the escaped JSON of a
+   * PATCH. The first version of this was a regex over the wire format and it was unreadable and
+   * wrong; parsing says exactly what the letter now contains.
+   */
+  const savedDoc = (() => {
+    try { return JSON.parse(JSON.parse(sentLetter?.body ?? '{}').body ?? 'null') }
+    catch { return null }
+  })()
+  t.ok('...and the first block is still a heading', savedDoc?.blocks?.[0]?.kind === 'heading')
+  const spans = savedDoc?.blocks?.[0]?.spans ?? []
+  t.check('...carrying the words that were typed',
+    spans.map((x) => x.text).join(''), 'Read this carefully')
+  /*
+   * THE HALF THAT MATTERS: the mark is on PART of it. A document where the whole paragraph came
+   * back bold, or none of it did, passes a looser check and is a letter the writer saw one way
+   * and the debtor another.
+   */
+  t.check(`...with the selected words bold and the rest not (${JSON.stringify(spans)})`,
+    spans.map((x) => `${x.text}${x.bold ? '*' : ''}`).join('|'), 'Read this |carefully*')
+
   /* ---------- editing, and the merge field you press ---------- */
 
   await page.getByRole('button', { name: 'Collections', exact: true }).click()
@@ -467,7 +587,9 @@ try {
   await page.waitForTimeout(400)
   await page.getByRole('button', { name: 'Edit' }).click()
   await page.waitForTimeout(400)
-  await page.getByRole('button', { name: 'Delete' }).click()
+  /* `exact`, because the letter editor's per-block bin is called "Delete this block" and
+     getByRole matches a name by substring unless told otherwise. */
+  await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await page.waitForTimeout(900)
   t.ok('deleting asks first', await page.getByText('Delete this template?').first().isVisible())
   t.ok('...and refuses one a published workflow sends',
@@ -505,7 +627,7 @@ try {
   await page.waitForTimeout(400)
   await page.getByRole('button', { name: 'Edit' }).click()
   await page.waitForTimeout(400)
-  await page.getByRole('button', { name: 'Delete' }).click()
+  await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await page.waitForTimeout(900)
   t.ok('deleting a letter says which email would be left attaching nothing',
     await page.getByText(/would be left attaching nothing/).first().isVisible())
@@ -525,7 +647,7 @@ try {
   await page.waitForTimeout(400)
   await page.getByRole('button', { name: 'Edit' }).click()
   await page.waitForTimeout(400)
-  await page.getByRole('button', { name: 'Delete' }).click()
+  await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await page.waitForTimeout(900)
   t.check('a template nothing uses is not refused',
     await page.getByText(/published or archived workflow step/).count(), 0)
@@ -549,7 +671,7 @@ try {
   t.check('no console errors', real.length, 0)
   if (real.length) console.log('  console:', real.slice(0, 5))
 } catch (e) {
-  t.ok(`the run finished without throwing (${String(e).split('\n')[0].slice(0, 140)})`, false)
+  t.ok(`the run finished without throwing (${String(e).split('\n').slice(0, 6).join(' | ').slice(0, 400)})`, false)
   try {
     const pages = browser ? browser.contexts().flatMap((c) => c.pages()) : []
     if (pages[0]) await t.shot(pages[0], '69-where-it-stopped')

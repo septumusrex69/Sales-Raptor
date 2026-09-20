@@ -5189,3 +5189,137 @@ update public.workflows
    set name = 'Pre-legal collections',
        description = 'Handover to a recommendation, with five ways a file can leave the sequence and come back.'
  where key = 'standard-collections';
+
+-- ---------------------------------------------------------------------------
+-- THE FIRM'S LETTERHEAD, AND LETTERS THAT ARE MORE THAN A PARAGRAPH.
+--
+-- At the firm's instruction: "I think there needs to be a place where you upload your letterhead,
+-- no?" Yes -- and it has to carry the PAGE SETUP with it, not just the picture. BF_Letterhead_Aug
+-- _2026 is a full-page A4 image with no text of its own; everything it says is drawn, so the only
+-- thing that keeps body text off the logo and out of the footer block is the margins. A letterhead
+-- stored without them is a letterhead somebody has to re-measure every time.
+-- ---------------------------------------------------------------------------
+create table if not exists public.letterheads (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  -- The image in the 'letterheads' bucket. A full-page background, which is what a designed
+  -- letterhead is: the logo, the rule down the side and the footer block are all one picture.
+  storage_path text not null,
+  -- A4 in millimetres. Held per row rather than assumed, because a letterhead is sometimes drawn
+  -- for Letter when a client is overseas, and a page that silently renders at the wrong size is
+  -- a notice with its margins in the wrong place.
+  width_mm numeric(6,2) not null default 210,
+  height_mm numeric(6,2) not null default 297,
+  -- MEASURED FROM THE FIRM'S OWN FILE, not guessed. Its Word page setup is 37.5mm top and 20mm on
+  -- the other three. The bottom is the one number changed: the footer block -- phone, email,
+  -- company and VAT numbers -- starts at 279.8mm, so a 20mm bottom margin lets body text run
+  -- about three millimetres into it. Invisible until a paragraph reaches the foot of the page,
+  -- which on a two-page notice is most of the time.
+  margin_top_mm numeric(6,2) not null default 37.5,
+  margin_right_mm numeric(6,2) not null default 20,
+  margin_bottom_mm numeric(6,2) not null default 24,
+  margin_left_mm numeric(6,2) not null default 20,
+  -- The one a new letter opens on. Exactly one, enforced below.
+  is_default boolean not null default false,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- ONE DEFAULT, AND THE DATABASE IS WHAT SAYS SO. Two rows both claiming to be the default is a
+-- letter that prints on whichever one the query happened to return first -- which is the kind of
+-- fault that is correct in testing and wrong in production, because the ordering changes.
+create unique index if not exists letterheads_one_default
+  on public.letterheads ((true)) where is_default;
+
+alter table public.letterheads enable row level security;
+grant select, insert, update, delete on public.letterheads to authenticated;
+
+-- The library's rule, because a letterhead is part of what the firm says: everyone reads it --
+-- a collector previewing a notice has to see the page it prints on -- and an administrator
+-- writes it.
+drop policy if exists letterheads_select on public.letterheads;
+create policy letterheads_select on public.letterheads
+  for select to authenticated using (auth.uid() is not null);
+
+drop policy if exists letterheads_write on public.letterheads;
+create policy letterheads_write on public.letterheads
+  for all to authenticated
+  using (public.current_user_role() = 'Administrator')
+  with check (public.current_user_role() = 'Administrator');
+
+-- PUBLIC BUCKET, like email-signatures and for the same reason: the page is drawn with the
+-- letterhead as a CSS background, and a signed URL that expires mid-preview is a letter that
+-- loses its letterhead while somebody is reading it. This is not a secret -- it is printed on
+-- every letter the firm posts.
+insert into storage.buckets (id, name, public)
+values ('letterheads', 'letterheads', true)
+on conflict (id) do nothing;
+
+drop policy if exists "letterheads_read" on storage.objects;
+create policy "letterheads_read" on storage.objects
+  for select using (bucket_id = 'letterheads');
+
+drop policy if exists "letterheads_write" on storage.objects;
+create policy "letterheads_write" on storage.objects
+  for all to authenticated
+  using (bucket_id = 'letterheads' and public.current_user_role() = 'Administrator')
+  with check (bucket_id = 'letterheads' and public.current_user_role() = 'Administrator');
+
+-- ---------------------------------------------------------------------------
+-- A TEMPLATE'S BODY IS NOT ALWAYS A PARAGRAPH ANY MORE.
+--
+-- An SMS body is text and always will be. A letter body is a document -- headings, numbered
+-- sections, three tables, bullets -- and it is stored as JSON in the same column, because a
+-- second body column would mean every reader has to know which one to look in and one of them
+-- would eventually be the wrong one.
+--
+-- The column says which it is. Defaulting to 'text' means every row that exists now is correct
+-- without being touched.
+-- ---------------------------------------------------------------------------
+alter table public.message_templates
+  add column if not exists format text not null default 'text';
+
+alter table public.message_templates
+  drop constraint if exists message_templates_format_check;
+alter table public.message_templates
+  add constraint message_templates_format_check check (format in ('text', 'document'));
+
+-- Only a letter carries a document. An SMS holding a JSON blob would be charged by the segment
+-- for its own punctuation, and nothing would have said so.
+alter table public.message_templates
+  drop constraint if exists message_templates_format_kind;
+alter table public.message_templates
+  add constraint message_templates_format_kind
+  check (format = 'text' or kind = 'letter');
+
+comment on column public.message_templates.format is
+  'text = the body is what it looks like. document = the body is a letterDocument JSON, which '
+  'only a letter may be.';
+-- ---------------------------------------------------------------------------
+-- THE FIRM'S SECTION 129, AS A DOCUMENT.
+--
+-- Transcribed from BF-Section-129-v9, which the firm supplied as the template to work to. Every
+-- fact in it is a MERGE FIELD and not a value: this repository is public, and a notice with a
+-- real debtor's name, identity number and address written into it is the one thing that must
+-- never be committed. It is also simply how a template works.
+--
+-- FOUR NUMBERED SECTIONS, AND THE NUMBERS ARE NOT TYPED. The renderer counts them, so the
+-- unnumbered "THE LEGAL PROCESS WE FOLLOW FOR NON-PAYMENT" heading sits between sections 3 and 4
+-- without taking a number or consuming one -- which is exactly what the firm's own document does,
+-- and exactly the thing that goes wrong when somebody inserts a section into typed numbering.
+--
+-- THE NINE FIELDS NOTHING FILLS YET are deliberate and visible: debtor_address, debtor_id_masked,
+-- respond_by, position_as_at, firm_bank, firm_bank_account, signatory_name and signatory_title
+-- resolve to nothing until Raptor has somewhere to keep them. renderTemplate leaves an unresolved
+-- placeholder STANDING rather than printing a gap, so the notice shows {{firm_bank}} on the page
+-- instead of a blank line that reads as finished. The library marks the row. That is a to-do
+-- list, not a bug -- and the alternative, typing the firm's trust account into a template in a
+-- public repository, is not an alternative.
+-- ---------------------------------------------------------------------------
+update public.message_templates
+   set format = 'document',
+       body = '{"defaults":{"font":"Georgia, \"Times New Roman\", serif","size":10.5,"colour":"#1f2937","lineHeight":1.45},"runningHeader":"Section 129 notice · Ref {{reference}} · Page {{page}} of {{pages}}","blocks":[{"kind":"table","borders":"none","widths":[34,33,33],"headerRow":true,"spacing":{"after":6},"rows":[[{"spans":[{"text":"DATE","size":8,"colour":"#6b7280"}]},{"spans":[{"text":"OUR REF","size":8,"colour":"#6b7280"}]},{"spans":[{"text":"ACCOUNT","size":8,"colour":"#6b7280"}]}],[{"spans":[{"text":"{{today}}"}]},{"spans":[{"text":"{{reference}}"}]},{"spans":[{"text":"{{account_number}}"}]}]]},{"kind":"paragraph","spans":[{"text":"{{debtor_name}}\nIdentity number: {{debtor_id_masked}}\n{{debtor_address}}"}],"spacing":{"after":6}},{"kind":"paragraph","spans":[{"text":"Dear {{debtor_name}}"}]},{"kind":"heading","level":1,"spans":[{"text":"NOTICE IN TERMS OF SECTION 129(1)(a) READ WITH SECTION 130 OF THE NATIONAL CREDIT ACT 34 OF 2005"}]},{"kind":"paragraph","spans":[{"text":"We act on behalf of {{client_name}}, the creditor, and are duly authorised to issue this notice. "},{"text":"This is a formal legal notice. Please read it.","bold":true}]},{"kind":"heading","level":2,"spans":[{"text":"YOUR DEFAULT"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"You are in default. In terms of your agreement with the creditor the full outstanding balance has become due and payable."}]},{"kind":"table","borders":"rows","widths":[42,58],"spacing":{"after":2},"rows":[[{"spans":[{"text":"Creditor"}]},{"spans":[{"text":"{{client_name}}"}]}],[{"spans":[{"text":"Account number"}]},{"spans":[{"text":"{{account_number}}"}]}],[{"spans":[{"text":"Our case reference"}]},{"spans":[{"text":"{{reference}}"}]}],[{"spans":[{"text":"Position as at"}]},{"spans":[{"text":"{{position_as_at}}"}]}],[{"spans":[{"text":"Total outstanding balance","bold":true}]},{"spans":[{"text":"{{balance}}","bold":true}]}]]},{"kind":"paragraph","spans":[{"text":"Interest and permitted charges continue to accrue. A settlement figure calculated to your intended date of payment is available on request.","size":9,"colour":"#6b7280"}]},{"kind":"heading","level":2,"spans":[{"text":"YOUR RIGHTS UNDER SECTION 129(1)(a)"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"You have the right to refer this agreement to a debt counsellor, an alternative dispute resolution agent, an ombud with jurisdiction or a consumer court, so that the parties may resolve any dispute or agree a plan to bring the payments up to date. You may also raise a dispute with us directly, in writing. It costs you nothing to do either."}]},{"kind":"paragraph","spans":[{"text":"You must do so within 10 (ten) business days of the date this notice is delivered to you.","bold":true}]},{"kind":"paragraph","spans":[{"text":"To find a registered debt counsellor, contact the National Credit Regulator on 0860 627 627 or at www.ncr.org.za."}]},{"kind":"heading","level":2,"spans":[{"text":"HOW TO RESOLVE THIS WITH US"}],"numbered":true},{"kind":"list","ordered":false,"spacing":{"after":3},"items":[[{"text":"Pay in full. ","bold":true},{"text":"Payment of {{balance}} settles the account. Our banking details are below."}],[{"text":"Propose an arrangement. ","bold":true},{"text":"Tell us in writing what you can afford and when. We will consider any reasonable proposal. Please include proof of income for the last three months and a breakdown of your monthly expenses."}],[{"text":"Dispute it. ","bold":true},{"text":"If the amount is wrong, or you are not liable, tell us in writing with your reasons and any supporting documents. We will investigate and give you a written finding."}]]},{"kind":"heading","level":2,"spans":[{"text":"THE LEGAL PROCESS WE FOLLOW FOR NON-PAYMENT"}]},{"kind":"paragraph","spans":[{"text":"If we have not heard from you by {{respond_by}}, the process may include the following steps."}]},{"kind":"table","borders":"all","widths":[28,72],"spacing":{"after":3},"rows":[[{"spans":[{"text":"Credit bureau listing","bold":true}]},{"spans":[{"text":"Your default is reported to the registered credit bureaux and appears on your credit profile, where every other credit provider who assesses you can see it."}]}],[{"spans":[{"text":"Summons","bold":true}]},{"spans":[{"text":"Issued and served on you at your home or your place of work."}]}],[{"spans":[{"text":"Judgment","bold":true}]},{"spans":[{"text":"Granted against you for the full {{balance}}, plus interest, and recorded against your name."}]}],[{"spans":[{"text":"Your possessions","bold":true}]},{"spans":[{"text":"A warrant of execution allows the sheriff to attach and sell your movable or immovable property."}]}],[{"spans":[{"text":"Your salary","bold":true}]},{"spans":[{"text":"An emoluments attachment order requires your employer to deduct before you are paid."}]}],[{"spans":[{"text":"Legal costs","bold":true}]},{"spans":[{"text":"Added to what you already owe, on the attorney-and-client scale."}]}]]},{"kind":"paragraph","spans":[{"text":"You can still avoid this. Contact us on {{agent_phone}} before {{respond_by}}, quoting reference {{reference}}. We would rather agree something workable with you than litigate."}]},{"kind":"heading","level":2,"spans":[{"text":"HOW TO PAY"}],"numbered":true},{"kind":"table","borders":"rows","widths":[34,66],"spacing":{"after":4},"rows":[[{"spans":[{"text":"Account name"}]},{"spans":[{"text":"{{firm_name}}"}]}],[{"spans":[{"text":"Bank / branch code"}]},{"spans":[{"text":"{{firm_bank}}"}]}],[{"spans":[{"text":"Account number"}]},{"spans":[{"text":"{{firm_bank_account}}"}]}],[{"spans":[{"text":"Payment reference"}]},{"spans":[{"text":"{{reference}}"},{"text":" — payments without this reference cannot be allocated","size":9,"colour":"#6b7280"}]}]]},{"kind":"paragraph","spans":[{"text":"Yours faithfully"}],"spacing":{"before":6}},{"kind":"paragraph","spans":[{"text":"{{signatory_name}}","bold":true},{"text":"\n{{signatory_title}}\nfor and on behalf of {{firm_name}}\nduly authorised agent of {{client_name}}"}],"spacing":{"before":10}},{"kind":"paragraph","spans":[{"text":"Delivery. Sent by registered post to the address you chose in the credit agreement, in accordance with section 129(5). Copies by email and SMS as a courtesy. Proof of dispatch is retained on our file.","size":8.5,"colour":"#6b7280"}],"spacing":{"before":8}}]}',
+       updated_at = now()
+ where seed_key = 'letter-s129';
+
