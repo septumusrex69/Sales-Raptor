@@ -25,10 +25,20 @@ import { inputClass } from '../../components/ui/Modal'
  * button at all was to save exactly that.
  */
 export function TemplateEditor({
-  scope, draft, onChange, onSave, onCancel, saving, error, onDelete,
+  scope, draft, onChange, onSave, onCancel, saving, error, onDelete, letters,
 }: {
   scope: TemplateScope
   draft: TemplateDraft
+  /**
+   * The letters on this side, offered as the thing an email can carry.
+   *
+   * Only letters, and only this side's: the database enforces both (check_template_attachment
+   * refuses a non-letter, a cross-scope attachment and an email attached to itself), and a
+   * dropdown that offers what the save will refuse is a dropdown that teaches people the app is
+   * broken. Retired ones stay on the list — an email already carrying one must still be able to
+   * show what it carries.
+   */
+  letters: { id: string; name: string; active: boolean }[]
   onChange: (next: TemplateDraft) => void
   onSave: () => void
   onCancel: () => void
@@ -85,9 +95,14 @@ export function TemplateEditor({
           <select className={inputClass} value={draft.kind}
             onChange={(e) => {
               const kind = e.target.value as TemplateKind
-              /* A subject belongs to email and to nothing else — the database says so too, and a
-                 subject left behind on a change of kind is a refused save with no obvious cause. */
-              onChange({ ...draft, kind, subject: kind === 'email' ? (draft.subject ?? '') : null })
+              /* A subject belongs to email and to nothing else, and so does an attachment — the
+                 database says both (message_templates_attachment_kind). Either one left behind on
+                 a change of kind is a refused save with no obvious cause. */
+              onChange({
+                ...draft, kind,
+                subject: kind === 'email' ? (draft.subject ?? '') : null,
+                attachmentId: kind === 'email' ? draft.attachmentId : null,
+              })
             }}>
             {KINDS_FOR_SCOPE[scope].map((k) => (
               <option key={k} value={k}>{TEMPLATE_KINDS[k].label}</option>
@@ -122,6 +137,29 @@ export function TemplateEditor({
           <input ref={subject} className={inputClass} value={draft.subject ?? ''}
             onFocus={() => setLast('subject')}
             onChange={(e) => onChange({ ...draft, subject: e.target.value })} />
+        </label>
+      )}
+
+      {/*
+        WHAT IT POSTS WITH.
+
+        On the email and not on the letter, because that is the direction the firm works in: you
+        write the covering email for a notice, not a notice for an email. The Section 129 pair is
+        the reason this exists at all — the email's own words say a notice is attached, and until
+        now nothing in Raptor recorded which notice that was.
+      */}
+      {draft.kind === 'email' && letters.length > 0 && (
+        <label className="block">
+          <span className="block text-[11px] uppercase tracking-wide text-slate-400 mb-1">
+            Sends with
+          </span>
+          <select className={inputClass} value={draft.attachmentId ?? ''}
+            onChange={(e) => onChange({ ...draft, attachmentId: e.target.value || null })}>
+            <option value="">Nothing attached</option>
+            {letters.map((l) => (
+              <option key={l.id} value={l.id}>{l.active ? l.name : `${l.name} (retired)`}</option>
+            ))}
+          </select>
         </label>
       )}
 

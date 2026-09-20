@@ -68,8 +68,14 @@ export const TEMPLATE_KINDS: Record<TemplateKind, { label: string; plural: strin
  * furniture problem: a heading that never has anything under it teaches people to stop reading
  * the ones that do.
  */
+/*
+ * AND IN THIS ORDER, which is the firm's: "SMS templates, email templates, letters, and then call
+ * scripts." The three things that leave the building come first and in the order they escalate —
+ * a text, then an email, then something posted — and the script somebody reads aloud comes last,
+ * because it is the one that never goes anywhere.
+ */
 export const KINDS_FOR_SCOPE: Record<TemplateScope, TemplateKind[]> = {
-  collections: ['sms', 'email', 'call_script', 'letter'],
+  collections: ['sms', 'email', 'letter', 'call_script'],
   sales: ['sms', 'email', 'call_script'],
 }
 
@@ -100,6 +106,18 @@ export interface MessageTemplate {
    */
   language: string
   active: boolean
+  /**
+   * The letter this email attaches, where it attaches one.
+   *
+   * The section 129 covering email is the reason this exists: its own words say "attached is a
+   * notice issued in terms of section 129(1)(a)", and nothing connected the two rows. An email
+   * whose text promises an attachment the system knows nothing about reads as finished and is
+   * not — which is the shape of gap this library was built to show.
+   *
+   * Only an email may carry one and only a letter may be carried; a trigger says so, because a
+   * check constraint cannot read the row being pointed at.
+   */
+  attachmentId: string | null
 }
 
 /* ---------------------------------------------------------------- merge fields */
@@ -573,6 +591,14 @@ export interface TemplateUsage {
   frozenSteps: number
   /** The workflows those steps belong to, named so somebody can go and look. */
   workflows: string[]
+  /**
+   * Emails that attach this letter, by name.
+   *
+   * The same silent shape as the workflow step: the foreign key is `on delete set null`, so
+   * deleting a letter leaves the covering email intact, still saying "attached is a notice", with
+   * nothing attached. A defective delivery that reads as a correct one.
+   */
+  attachedTo: string[]
 }
 
 /**
@@ -606,6 +632,17 @@ export function deleteRefusal(usage: TemplateUsage): string | null {
  */
 export function deleteWarning(usage: TemplateUsage, seedKey: string | null): string | null {
   const notes: string[] = []
+  /*
+   * AN EMAIL LEFT CLAIMING AN ATTACHMENT IT NO LONGER HAS. Warned rather than refused: replacing
+   * a letter with a better one is ordinary work, and the fix is one field away. What must not
+   * happen is that nobody is told.
+   */
+  if (usage.attachedTo.length > 0) {
+    notes.push(usage.attachedTo.length === 1
+      ? `${usage.attachedTo[0]} attaches this letter and would be left attaching nothing.`
+      : `${usage.attachedTo.length} emails attach this letter `
+        + `(${usage.attachedTo.join(', ')}) and would be left attaching nothing.`)
+  }
   const draftSteps = usage.steps - usage.frozenSteps
   if (draftSteps > 0) {
     notes.push(draftSteps === 1

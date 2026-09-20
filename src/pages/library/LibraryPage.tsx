@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, BookOpen, Loader2, Pencil, Plus } from 'lucide-react'
+import { AlertTriangle, BookOpen, Loader2, Paperclip, Pencil, Plus, X } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal } from '../../components/ui/Modal'
 import { useAuth } from '../../store/AuthContext'
@@ -81,6 +81,22 @@ export function LibraryPage() {
   const open = useMemo(
     () => rows?.find((r) => r.id === openId) ?? null,
     [rows, openId],
+  )
+  /* One lookup for the whole page: a row names the letter it attaches, and so does the pane. */
+  const byId = useMemo(
+    () => new Map((rows ?? []).map((r) => [r.id, r])),
+    [rows],
+  )
+  /**
+   * What an email on this side may be given to carry.
+   *
+   * Retired letters stay in: an email already carrying one has to keep showing what it carries,
+   * and dropping it from the list would silently reset the picker to "Nothing attached" on the
+   * next save. Self-attachment is excluded at the call site, where the id being edited is known.
+   */
+  const letters = useMemo(
+    () => (rows ?? []).filter((r) => r.kind === 'letter'),
+    [rows],
   )
 
   async function save() {
@@ -275,6 +291,7 @@ export function LibraryPage() {
             {KINDS_FOR_SCOPE[scope].map((kind) => (
               <KindGroup key={kind} kind={kind}
                 rows={rows.filter((r) => r.kind === kind)}
+                byId={byId}
                 openId={openId} onOpen={(id) => { setOpenId(id); setEditing(null) }} />
             ))}
             {rows.length === 0 && (
@@ -291,6 +308,7 @@ export function LibraryPage() {
                   {editing.id ? 'Editing' : `New ${TEMPLATE_SCOPES[scope].label.toLowerCase()} template`}
                 </h3>
                 <TemplateEditor scope={scope} draft={editing.draft}
+                  letters={letters.filter((l) => l.id !== editing.id)}
                   onChange={(draft) => setEditing({ ...editing, draft })}
                   onSave={() => void save()} onCancel={() => { setEditing(null); setSaveError(null) }}
                   saving={saving || checking} error={saveError}
@@ -317,6 +335,12 @@ export function LibraryPage() {
                           Retired
                         </span>
                       )}
+                      {open.attachmentId && (
+                        <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5
+                          rounded-full bg-gold-50 text-[var(--c-gold-deep)]">
+                          <Paperclip size={10} /> Carries a letter
+                        </span>
+                      )}
                       {unknownFields(open.scope, open.body, open.subject).length > 0 && (
                         <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5
                           rounded-full bg-negative-50 text-negative-700">
@@ -335,7 +359,8 @@ export function LibraryPage() {
                     <Pencil size={13} /> Edit
                   </button>
                 </div>
-                <Reading template={open} />
+                <Reading template={open}
+                  attaches={open.attachmentId ? byId.get(open.attachmentId) ?? null : null} />
               </>
             ) : (
               <div className="py-16 text-center">
@@ -351,11 +376,13 @@ export function LibraryPage() {
 }
 
 /** One kind of wording, as a heading over its rows in the left column. */
-function KindGroup({ kind, rows, openId, onOpen }: {
+function KindGroup({ kind, rows, openId, onOpen, byId }: {
   kind: TemplateKind
   rows: LibraryTemplate[]
   openId: string | null
   onOpen: (id: string) => void
+  /** Every template on this side, so a row can name the letter it attaches. */
+  byId: Map<string, LibraryTemplate>
 }) {
   if (rows.length === 0) return null
   return (
@@ -367,17 +394,26 @@ function KindGroup({ kind, rows, openId, onOpen }: {
         <span className="text-[10px] text-slate-400 tabular-nums">{rows.length}</span>
       </div>
       {rows.map((t) => (
-        <ListRow key={t.id} template={t} current={openId === t.id} onOpen={() => onOpen(t.id)} />
+        <ListRow key={t.id} template={t} current={openId === t.id} onOpen={() => onOpen(t.id)}
+          attaches={t.attachmentId ? byId.get(t.attachmentId) ?? null : null} />
       ))}
     </div>
   )
 }
 
 /** One row down the left. A name, what it is filed under, and whether it is sound. */
-function ListRow({ template, current, onOpen }: {
+function ListRow({ template, current, onOpen, attaches }: {
   template: LibraryTemplate
   current: boolean
   onOpen: () => void
+  /**
+   * The letter this one carries, where it carries one.
+   *
+   * On the LIST, not only on the opened message, at the firm's instruction: "it should be clear
+   * which email templates are accompanied by a letter." Which ones post something is a property
+   * of the set, and answering it should not need twenty clicks.
+   */
+  attaches: LibraryTemplate | null
 }) {
   const broken = unknownFields(template.scope, template.body, template.subject).length > 0
   return (
@@ -394,6 +430,14 @@ function ListRow({ template, current, onOpen }: {
         <span className={`text-[13px] truncate ${current ? 'text-navy-950 font-semibold' : 'text-slate-700 font-medium'}`}>
           {template.name}
         </span>
+        {/* The clip is on a span, not on the <svg> itself: an aria-label on a bare SVG is not
+            reliably announced, and the span is also what carries the hover title. */}
+        {attaches && (
+          <span data-attaches="yes" title={`Sends with ${attaches.name}`}
+            aria-label={`Sends with ${attaches.name}`} className="shrink-0 inline-flex">
+            <Paperclip size={11} className="text-slate-400" />
+          </span>
+        )}
         {!template.active && <span className="text-[9px] text-slate-400 shrink-0">retired</span>}
       </span>
       <span className="block text-[10px] font-mono text-slate-400 mt-0.5 truncate">
@@ -411,8 +455,14 @@ function ListRow({ template, current, onOpen }: {
  * other's question — a letter that scans beautifully with {{balance}} in it can read as nonsense
  * once the number is there, and a preview alone cannot tell you which words are the template's.
  */
-function Reading({ template }: { template: LibraryTemplate }) {
+function Reading({ template, attaches }: {
+  template: LibraryTemplate
+  /** The letter it carries, already looked up. Null where it carries none. */
+  attaches: LibraryTemplate | null
+}) {
   const [filled, setFilled] = useState(false)
+  /** The letter, opened over the email. Closed again with one press — see the firm's own words. */
+  const [showing, setShowing] = useState(false)
   const unknown = unknownFields(template.scope, template.body, template.subject)
   const used = fieldsUsed(template.body, template.subject)
   const values = sampleValues()
@@ -447,6 +497,50 @@ function Reading({ template }: { template: LibraryTemplate }) {
           </span>
         )}
       </div>
+
+      {/*
+        THE ATTACHMENT, ON BOTH VIEWS.
+        
+        Deliberately above the subject rather than below the body: an email whose own words say
+        "attached is a notice issued in terms of section 129(1)(a)" is only correct if something
+        is attached, and that is the first thing to check, not the last. It survives the Merge
+        fields / Example data toggle because it is a fact about the message either way.
+      */}
+      {attaches && (
+        <div className="px-5 py-2.5 border-b border-slate-100 bg-gold-50/60">
+          <span className="text-[10px] uppercase tracking-wide text-slate-400 block mb-1">
+            Attached
+          </span>
+          <button type="button" data-attachment-open onClick={() => setShowing(true)}
+            className="inline-flex items-center gap-1.5 text-[13px] font-medium text-navy-950
+              hover:underline">
+            <Paperclip size={13} className="text-slate-400" />
+            {attaches.name}
+            {!attaches.active && <span className="text-[10px] text-slate-400">(retired)</span>}
+          </button>
+        </div>
+      )}
+
+      {/* Read over the email rather than instead of it: the question being answered is whether
+          the two go together, and losing your place in the email to answer it is a poor trade. */}
+      {showing && attaches && (
+        <Modal title={attaches.name}
+          subtitle={`Attached to ${template.name}`}
+          width={760}
+          onClose={() => setShowing(false)}
+          padded={false}
+          headerRight={
+            <button type="button" onClick={() => setShowing(false)}
+              className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700">
+              <X size={13} /> Close
+            </button>
+          }>
+          <pre className="px-5 py-4 whitespace-pre-wrap break-words font-sans text-[13px]
+            leading-relaxed text-slate-700 max-h-[70vh] overflow-y-auto">{
+            filled ? renderTemplate(attaches.body, values).text : attaches.body
+          }</pre>
+        </Modal>
+      )}
 
       {template.subject !== null && (
         <div className="px-5 py-3 border-b border-slate-100 bg-navy-50/40">
@@ -491,10 +585,11 @@ function blankDraft(scope: TemplateScope): TemplateDraft {
     body: '',
     position: null,
     active: true,
+    attachmentId: null,
   }
 }
 
 const draftOf = (t: LibraryTemplate): TemplateDraft => ({
   scope: t.scope, kind: t.kind, name: t.name, subject: t.subject,
-  body: t.body, position: t.position, active: t.active,
+  body: t.body, position: t.position, active: t.active, attachmentId: t.attachmentId,
 })

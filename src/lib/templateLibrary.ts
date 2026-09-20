@@ -12,7 +12,8 @@ import type {
 } from './messageTemplates.ts'
 
 /** Named by hand, like every mapper here. See the warning about silent drops in CLAUDE.md. */
-const COLUMNS = 'id, scope, kind, name, subject, body, position, language, active, seed_key, updated_at'
+const COLUMNS = 'id, scope, kind, name, subject, body, position, language, active, '
+  + 'attachment_id, seed_key, updated_at'
 
 interface Row {
   id: string
@@ -24,6 +25,7 @@ interface Row {
   position: string | null
   language: string
   active: boolean
+  attachment_id: string | null
   seed_key: string | null
   updated_at: string
 }
@@ -46,6 +48,7 @@ function toTemplate(r: Row): LibraryTemplate {
     position: (r.position as DeskPosition | null) ?? null,
     language: r.language,
     active: r.active,
+    attachmentId: r.attachment_id,
     seedKey: r.seed_key,
     updatedAt: r.updated_at,
   }
@@ -82,6 +85,8 @@ export interface TemplateDraft {
   body: string
   position: DeskPosition | null
   active: boolean
+  /** The letter an email attaches. Null on everything else, and the database says so. */
+  attachmentId: string | null
 }
 
 /**
@@ -101,6 +106,9 @@ export async function saveTemplate(id: string, draft: TemplateDraft): Promise<vo
       body: draft.body,
       position: draft.position,
       active: draft.active,
+      /* Cleared on anything that is not an email, because the constraint refuses one there and a
+         subject left behind on a change of kind is a refused save with no obvious cause. */
+      attachment_id: draft.kind === 'email' ? draft.attachmentId : null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
@@ -120,6 +128,7 @@ export async function createTemplate(draft: TemplateDraft): Promise<string> {
       position: draft.position,
       language: 'en',
       active: draft.active,
+      attachment_id: draft.kind === 'email' ? draft.attachmentId : null,
     })
     .select('id')
     .single()
@@ -141,6 +150,14 @@ function friendly(message: string): string {
     return 'A position belongs to a debtor account, so only a collections template may have one.'
   }
   if (message.includes('message_templates_kind_check')) return 'That is not a kind of message.'
+  if (message.includes('message_templates_attachment_kind')) {
+    return 'Only an email can carry an attachment.'
+  }
+  /* The trigger raises in its own words, which already name the mistake — see
+     check_template_attachment. Passed through rather than replaced with something vaguer. */
+  if (message.includes('can be attached') || message.includes('cannot attach')) {
+    return message.replace(/^.*?ERROR:\s*/i, '')
+  }
   if (message.includes('row-level security')) {
     return 'Only an administrator may change the library.'
   }
@@ -167,6 +184,17 @@ export async function templateUsage(id: string): Promise<TemplateUsage> {
   const rows = (data ?? []) as unknown as {
     workflow_versions: { state: string; workflows: { name: string } }
   }[]
+  /*
+   * EMAILS THAT ATTACH THIS LETTER. Asked in the same breath as the workflow steps, because it is
+   * the same silent shape: `on delete set null` leaves the covering email intact and attaching
+   * nothing, still saying "attached is a notice issued in terms of section 129(1)(a)".
+   */
+  const { data: attachers, error: attachError } = await supabase
+    .from('message_templates')
+    .select('name')
+    .eq('attachment_id', id)
+  if (attachError) throw new Error(friendly(attachError.message))
+
   const names = new Set<string>()
   let frozenSteps = 0
   for (const r of rows) {
@@ -177,7 +205,12 @@ export async function templateUsage(id: string): Promise<TemplateUsage> {
     }
     if (r.workflow_versions.workflows?.name) names.add(r.workflow_versions.workflows.name)
   }
-  return { steps: rows.length, frozenSteps, workflows: [...names] }
+  return {
+    steps: rows.length,
+    frozenSteps,
+    workflows: [...names],
+    attachedTo: ((attachers ?? []) as { name: string }[]).map((a) => a.name),
+  }
 }
 
 /**

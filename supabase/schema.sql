@@ -4965,3 +4965,81 @@ create policy message_templates_update on public.message_templates
   for update to authenticated
   using (public.current_user_role() = 'Administrator')
   with check (public.current_user_role() = 'Administrator');
+
+-- ---------------------------------------------------------------------------
+-- AN EMAIL THAT CARRIES A LETTER.
+-- ---------------------------------------------------------------------------
+-- The section 129 covering email says "attached is a notice issued in terms of section
+-- 129(1)(a)" -- and until now nothing in Raptor connected those two rows. The wording claimed an
+-- attachment the system had no idea about, which is the worst kind of gap: it reads as finished.
+--
+-- The firm: "it should be clear which email templates are accompanied by a letter... it should
+-- show that there's an attachment, and if you click on it, it basically opens the letter that is
+-- attached to it and then you can close it again. Just to ensure that these things are correct."
+--
+-- `on delete set null` rather than cascade or restrict: deleting the letter must not delete the
+-- email that sent it. The silent half of that -- an email quietly left claiming an attachment it
+-- no longer has -- is caught in the library before the delete, not here. See templateUsage.
+alter table public.message_templates
+  add column if not exists attachment_id uuid references public.message_templates (id) on delete set null;
+
+comment on column public.message_templates.attachment_id is
+  'The letter this email attaches, where it attaches one. Only an email may carry one and only a '
+  'letter may be carried — enforced by the trigger below, because a check constraint cannot read '
+  'the referenced row.';
+
+-- ONLY AN EMAIL MAY CARRY ONE. This half a plain check can express: it reads one column of one
+-- row. The other half cannot, which is what the trigger is for.
+alter table public.message_templates drop constraint if exists message_templates_attachment_kind;
+alter table public.message_templates add constraint message_templates_attachment_kind
+  check (attachment_id is null or kind = 'email');
+
+-- AND THE THING CARRIED MUST BE A LETTER, ON THE SAME SIDE.
+--
+-- A trigger rather than a constraint because it has to read the row being pointed AT: no check
+-- constraint can. Enforced here and not only in the form, for the reason the library's own write
+-- policy was narrowed this morning -- a form is not a boundary, and the same write goes through
+-- PostgREST with a token anybody signed in has.
+create or replace function public.check_template_attachment()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare
+  attached record;
+begin
+  if new.attachment_id is null then
+    return new;
+  end if;
+  if new.attachment_id = new.id then
+    raise exception 'A template cannot attach itself.';
+  end if;
+  select kind, scope into attached from public.message_templates where id = new.attachment_id;
+  if attached.kind is distinct from 'letter' then
+    raise exception 'Only a letter can be attached to an email (tried to attach a %).', attached.kind;
+  end if;
+  if attached.scope is distinct from new.scope then
+    raise exception 'A % email cannot attach a % letter.', new.scope, attached.scope;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists check_template_attachment on public.message_templates;
+create trigger check_template_attachment
+  before insert or update of attachment_id, kind, scope on public.message_templates
+  for each row execute function public.check_template_attachment();
+
+-- The one query the library makes of it: "which emails attach this letter?", asked before the
+-- letter is deleted. Partial, because almost every row has no attachment.
+create index if not exists message_templates_attachment_idx
+  on public.message_templates (attachment_id) where attachment_id is not null;
+
+-- The covering email carries the notice it says is attached. Idempotent on seed_key, like every
+-- other seed here, so replaying this file does not undo a later change the firm made.
+update public.message_templates e
+set attachment_id = l.id
+from public.message_templates l
+where e.seed_key = 'email-s129-covering' and l.seed_key = 'letter-s129'
+  and e.attachment_id is null;

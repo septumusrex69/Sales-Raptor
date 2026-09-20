@@ -22,6 +22,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
+  KINDS_FOR_SCOPE,
   MERGE_FIELDS, SMS_RAND_PER_SEGMENT, addressAs, deleteRefusal, deleteWarning, fieldsUsed,
   forecastSms, longDate,
   mergeValuesFor, renderTemplate, resolveNote, resolveTemplate, sampleValues, templateProblems,
@@ -443,7 +444,7 @@ ok('...and nothing reads a clock', !/new Date\(\)|Date\.now\(\)/.test(src))
  * sends does not fail and does not warn: the step survives saying "send an email" with nothing to
  * send, and nobody finds out until the day it runs.
  */
-const usage = (over = {}) => ({ steps: 0, frozenSteps: 0, workflows: [], ...over })
+const usage = (over = {}) => ({ steps: 0, frozenSteps: 0, workflows: [], attachedTo: [], ...over })
 
 check('an unused template may be deleted', deleteRefusal(usage()), null)
 check('...and so may one only a draft workflow uses',
@@ -480,6 +481,35 @@ ok('a seeded template says it would come back',
   (deleteWarning(usage(), 'sms-first-contact') ?? '').includes('sms-first-contact'))
 ok('...and one written here says nothing of the sort',
   !/come back/.test(deleteWarning(usage({ steps: 1 }), null) ?? ''))
+
+/*
+ * A LETTER SOMETHING POSTS WITH. message_templates.attachment_id is `on delete set null` — the
+ * same silent shape as the workflow step — so deleting the Section 129 notice leaves its covering
+ * email intact, still saying "attached is a notice issued in terms of section 129(1)(a)", with
+ * nothing attached. That is a defective statutory demand that looks like a correct one.
+ */
+ok('deleting a letter warns about the email that posts it',
+  (deleteWarning(usage({ attachedTo: ['Section 129 notice - covering email'] }), null) ?? '')
+    .includes('Section 129 notice - covering email'))
+ok('...and names all of them where there is more than one',
+  ['Covering email', 'Second demand'].every((n) =>
+    (deleteWarning(usage({ attachedTo: ['Covering email', 'Second demand'] }), null) ?? '')
+      .includes(n)))
+ok('...and it is a warning, not a refusal',
+  deleteRefusal(usage({ attachedTo: ['Covering email'] })) === null)
+
+/* ---------- the order the firm reads them in ---------- */
+
+/*
+ * THE FIRM'S OWN ORDER, and it is not alphabetical or arbitrary: "SMS templates, email templates,
+ * letters, and then call scripts." It runs cheapest-and-first-contact to most involved, which is
+ * the order an account actually escalates in, and a letter sits beside the email because the
+ * email is what posts it.
+ */
+check('collections reads SMS, email, letters, then call scripts',
+  KINDS_FOR_SCOPE.collections, ['sms', 'email', 'letter', 'call_script'])
+/* No letters on the sales side: the firm posts nothing to a lead. */
+check('the sales side has no letters', KINDS_FOR_SCOPE.sales, ['sms', 'email', 'call_script'])
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)

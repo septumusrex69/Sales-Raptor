@@ -526,7 +526,7 @@ export const LEAD_EMAIL_ACTIVITY = {
  * ------------------------------------------------------------------ */
 
 /**
- * FOUR TEMPLATES THAT MAKE THE PAGE PROVE SOMETHING.
+ * SIX TEMPLATES THAT MAKE THE PAGE PROVE SOMETHING.
  *
  * Chosen so no two rows exercise the same thing — a fixture where every row looks alike cannot
  * tell a working library from a broken one:
@@ -536,6 +536,9 @@ export const LEAD_EMAIL_ACTIVITY = {
  *    for existing: renderTemplate leaves an unresolved placeholder standing, so as things are
  *    that message reaches a debtor with the braces still in it;
  *  - a LETTER, because letters exist on the collections side and must not appear on sales;
+ *  - the covering EMAIL THAT POSTS THAT LETTER, which is the pair the firm pointed at: its own
+ *    words claim a notice is attached, so the page has to be able to show which notice;
+ *  - a CALL SCRIPT, so the section order the firm asked for is visible on screen at all;
  *  - one SALES template, so switching side changes the list rather than filtering one.
  */
 export const LIBRARY = [
@@ -544,7 +547,7 @@ export const LIBRARY = [
     scope: 'collections', kind: 'sms', name: 'First contact',
     subject: null,
     body: '{{firm_name}}: account {{reference}} is overdue. Call {{agent_phone}}.',
-    position: 'new', language: 'en', active: true,
+    position: 'new', language: 'en', active: true, attachment_id: null,
     seed_key: 'sms-first-contact', updated_at: MAIL_AT(900),
   },
   {
@@ -552,7 +555,7 @@ export const LIBRARY = [
     scope: 'collections', kind: 'email', name: 'Handover notice',
     subject: 'Account {{reference}}',
     body: 'Dear {{debtor_name}}\n\nPay {{balance}} into {{bank_account_number}} at {{bank_name}}.',
-    position: null, language: 'en', active: true,
+    position: null, language: 'en', active: true, attachment_id: null,
     seed_key: 'email-handover', updated_at: MAIL_AT(800),
   },
   {
@@ -560,15 +563,44 @@ export const LIBRARY = [
     scope: 'collections', kind: 'letter', name: 'Section 129 notice',
     subject: null,
     body: 'NOTICE IN TERMS OF SECTION 129(1)(a)\n\n{{debtor_name}}, account {{reference}}.',
-    position: null, language: 'en', active: false,
+    position: null, language: 'en', active: false, attachment_id: null,
     seed_key: 'letter-s129', updated_at: MAIL_AT(700),
+  },
+  /*
+   * THE COVERING EMAIL. Its body claims an attachment, and attachment_id is what makes the claim
+   * true — which is the only reason the field exists. Deliberately points at the RETIRED letter
+   * above, so the pane also has to say the letter it carries is retired rather than quietly
+   * showing it as current.
+   */
+  {
+    id: 'cccccccc-0000-4000-8000-000000000005',
+    scope: 'collections', kind: 'email', name: 'Section 129 covering email',
+    subject: 'Section 129 notice - account {{reference}}',
+    body: 'Dear {{debtor_name}}\n\nAttached is a notice issued in terms of section 129(1)(a).',
+    position: null, language: 'en', active: true,
+    attachment_id: 'cccccccc-0000-4000-8000-000000000003',
+    seed_key: 'email-s129-covering', updated_at: MAIL_AT(650),
+  },
+  /*
+   * A CALL SCRIPT, whose only job here is to make the section ORDER visible. The firm asked for
+   * "SMS templates, email templates, letters, and then call scripts", and with nothing under the
+   * last heading the screen cannot show that letters come before it — the assertion would pass
+   * over any order at all.
+   */
+  {
+    id: 'cccccccc-0000-4000-8000-000000000006',
+    scope: 'collections', kind: 'call_script', name: 'Opening the call',
+    subject: null,
+    body: 'Good day, may I speak to {{debtor_name}}? This is {{agent_name}} from {{firm_name}}.',
+    position: null, language: 'en', active: true, attachment_id: null,
+    seed_key: 'call-opening', updated_at: MAIL_AT(640),
   },
   {
     id: 'cccccccc-0000-4000-8000-000000000004',
     scope: 'sales', kind: 'email', name: 'Quotation follow-up',
     subject: 'Your quotation from {{firm_name}}',
     body: 'Dear {{contact_name}}\n\nFollowing up on {{service_interested}} for {{company_name}}.',
-    position: null, language: 'en', active: true,
+    position: null, language: 'en', active: true, attachment_id: null,
     seed_key: null, updated_at: MAIL_AT(600),
   },
 ]

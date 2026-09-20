@@ -66,6 +66,13 @@ const handlersFor = (profile) => [
         written.push({ method: req.method(), url: u, body: req.postData() ?? '' })
         return { body: [{ ...LIBRARY[0], id: 'cccccccc-0000-4000-8000-00000000000f' }] }
       }
+      /*
+       * THE ATTACHER LOOKUP, answered separately. templateUsage asks this same table for the
+       * emails carrying a letter; answering it out of the whole fixture would name every template
+       * in the library as an attacher, which looks exactly like a working warning.
+       */
+      const attaching = /attachment_id=eq\.([0-9a-f-]+)/.exec(u)?.[1]
+      if (attaching) return { body: LIBRARY.filter((r) => r.attachment_id === attaching) }
       const scope = /scope=eq\.(\w+)/.exec(u)?.[1]
       return { body: scope ? LIBRARY.filter((r) => r.scope === scope) : LIBRARY }
     },
@@ -157,7 +164,75 @@ try {
   t.ok(`collections has letters (${(await kinds()).join(' | ')})`,
     (await kinds()).some((h) => /LETTERS/i.test(h)))
   t.ok('...and the section shows the one there is',
-    await page.getByText('Section 129 notice').first().isVisible())
+    await page.getByText('Section 129 notice', { exact: true }).first().isVisible())
+
+  /*
+   * THE ORDER THE FIRM READS THEM IN: "SMS templates, email templates, letters, and then call
+   * scripts." Cheapest and first contact through to the most involved, which is the order an
+   * account escalates in — and the letter sits beside the email because the email is what posts
+   * it.
+   *
+   * PRESENCE BEFORE ORDER. indexOf returns -1 for something that is not there, so an order-only
+   * assertion goes green the day a heading disappears: -1 < everything.
+   */
+  {
+    const on = await kinds()
+    const want = ['SMS TEMPLATES', 'EMAIL TEMPLATES', 'LETTERS', 'CALL SCRIPTS']
+    t.ok(`all four sections are on screen (${on.join(' | ')})`,
+      want.every((w) => on.includes(w)))
+    /* Joined, not compared as arrays: this runner's check is Object.is, under which two equal
+       arrays are never equal — a difference that reads on screen as "expected X, got X". */
+    t.check('...in the firm\'s order',
+      on.filter((h) => want.includes(h)).join(' > '), want.join(' > '))
+  }
+
+  /* ---------- the letter an email posts with ---------- */
+
+  /*
+   * THE PAIR THE FIRM POINTED AT. The covering email's own words say "attached is a notice issued
+   * in terms of section 129(1)(a)". If nothing is attached, that is a defective statutory demand
+   * that reads as a correct one — so which emails carry a letter has to be visible on the LIST,
+   * at the firm's instruction, and not only once the message is open.
+   */
+  const carrier = page.getByText('Section 129 covering email', { exact: true }).first()
+  t.ok('an email that posts a letter is marked on the list itself',
+    await carrier.locator('xpath=ancestor::button[1]').locator('[data-attaches]').isVisible())
+  /* And one that posts nothing is not, or the marker says nothing at all. */
+  t.check('...and one that posts nothing is not marked',
+    await page.getByText('Handover notice', { exact: true }).first()
+      .locator('xpath=ancestor::button[1]').locator('[data-attaches]').count(), 0)
+
+  await carrier.click()
+  await page.waitForTimeout(500)
+  t.ok('...and opening it says there is an attachment',
+    await page.getByText('Attached', { exact: true }).first().isVisible())
+  /* Scoped to the band, not to the page: the LEFT COLUMN also holds a button called "Section
+     129 notice", and a page-wide lookup finds that one first — which reads as a working
+     attachment and is actually the list row. */
+  const clip = page.locator('[data-attachment-open]').first()
+  t.check('...naming which letter it is',
+    (await clip.innerText()).replace(/\s+/g, ' ').trim(), 'Section 129 notice (retired)')
+
+  /*
+   * PRESSING IT OPENS THE LETTER, AND IT CLOSES AGAIN — the firm's own words. Read OVER the email
+   * rather than instead of it: the question is whether the two go together, and losing your place
+   * in the email to answer it is a poor trade.
+   */
+  t.check('the letter is not showing until it is asked for',
+    await page.getByText(/NOTICE IN TERMS OF SECTION 129/).count(), 0)
+  await clip.click()
+  await page.waitForTimeout(600)
+  t.ok('pressing the attachment opens the letter',
+    await page.getByText(/NOTICE IN TERMS OF SECTION 129/).first().isVisible())
+  t.ok('...over the email, which is still there underneath',
+    await page.getByText(/Attached to Section 129 covering email/).first().isVisible())
+  await t.shot(page, '64-library-attachment')
+  await page.getByRole('button', { name: 'Close' }).click()
+  await page.waitForTimeout(500)
+  t.check('...and it closes again',
+    await page.getByText(/NOTICE IN TERMS OF SECTION 129/).count(), 0)
+  t.ok('...leaving the email where it was',
+    await page.getByText(/Attached is a notice issued in terms/).first().isVisible())
 
   /*
    * THE FINDING THE PAGE EXISTS FOR. The handover email asks for two fields nothing can fill, and
@@ -271,6 +346,49 @@ try {
   await page.getByRole('button', { name: 'Cancel' }).click()
   await page.waitForTimeout(300)
 
+  /* ---------- choosing the letter an email posts ---------- */
+
+  /*
+   * THE PICKER OFFERS LETTERS AND ONLY LETTERS. check_template_attachment refuses a non-letter,
+   * a cross-scope attachment and an email attached to itself — a dropdown offering what the save
+   * will refuse teaches people the app is broken.
+   */
+  await page.getByText('Section 129 covering email', { exact: true }).first().click()
+  await page.waitForTimeout(400)
+  await page.getByRole('button', { name: 'Edit' }).click()
+  await page.waitForTimeout(500)
+  const picker = page.locator('select').filter({ hasText: 'Nothing attached' }).first()
+  t.ok('an email is asked what it posts with', await picker.isVisible())
+  t.check('...opening on the letter it already carries',
+    await picker.locator('option:checked').innerText(), 'Section 129 notice (retired)')
+  const offered = (await picker.locator('option').allInnerTexts()).map((o) => o.trim())
+  t.check('...and offering the letters, and nothing else',
+    offered.join(' | '), 'Nothing attached | Section 129 notice (retired)')
+
+  /* Changed to nothing, and the change has to reach the database as a null rather than be
+     dropped by the mapper — which is the silent failure CLAUDE.md warns about by name. */
+  const beforeClear = written.length
+  await picker.selectOption('')
+  await page.waitForTimeout(300)
+  await page.getByRole('button', { name: 'Save' }).click()
+  await page.waitForTimeout(900)
+  const cleared = written[written.length - 1]
+  t.ok(`clearing it reaches the database (${(cleared?.body ?? '').slice(0, 70)})`,
+    written.length > beforeClear && /"attachment_id":null/.test(cleared?.body ?? ''))
+
+  /*
+   * AND A KIND THAT CANNOT CARRY ONE IS NOT ASKED. message_templates_attachment_kind allows an
+   * attachment on an email and on nothing else.
+   */
+  await page.getByText('First contact', { exact: true }).first().click()
+  await page.waitForTimeout(400)
+  await page.getByRole('button', { name: 'Edit' }).click()
+  await page.waitForTimeout(500)
+  t.check('an SMS is not asked what it posts with',
+    await page.locator('select').filter({ hasText: 'Nothing attached' }).count(), 0)
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  await page.waitForTimeout(300)
+
   /* ---------- the sidebar folds, and comes back ---------- */
 
   /*
@@ -340,6 +458,32 @@ try {
   t.check('...and nothing was deleted',
     written.filter((w) => w.method === 'DELETE').length, refusedAt)
   await t.shot(page, '63-library-delete-refused')
+
+  /* ---------- throwing away a letter something posts ---------- */
+
+  /*
+   * WARNED, NOT REFUSED. message_templates.attachment_id is `on delete set null`, the same silent
+   * shape as the workflow step: deleting the notice leaves the covering email intact, still
+   * saying "attached is a notice issued in terms of section 129(1)(a)", with nothing attached.
+   * Replacing a letter with a better one is ordinary work; nobody being told is not.
+   */
+  await page.getByText('Section 129 notice', { exact: true }).first().click()
+  await page.waitForTimeout(400)
+  await page.getByRole('button', { name: 'Edit' }).click()
+  await page.waitForTimeout(400)
+  await page.getByRole('button', { name: 'Delete' }).click()
+  await page.waitForTimeout(900)
+  t.ok('deleting a letter says which email would be left attaching nothing',
+    await page.getByText(/would be left attaching nothing/).first().isVisible())
+  t.ok('...naming it',
+    await page.getByText(/Section 129 covering email attaches this letter/).first().isVisible())
+  t.ok('...and still lets it happen, because it is a warning and not a refusal',
+    await page.getByRole('button', { name: 'Delete permanently' }).isVisible())
+  const heldAt = written.filter((w) => w.method === 'DELETE').length
+  await page.getByRole('button', { name: 'Keep it' }).click()
+  await page.waitForTimeout(400)
+  t.check('...and keeping it deletes nothing',
+    written.filter((w) => w.method === 'DELETE').length, heldAt)
 
   /* ---------- and allowed where nothing depends on it ---------- */
 
