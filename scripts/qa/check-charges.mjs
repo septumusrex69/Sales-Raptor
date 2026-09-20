@@ -142,47 +142,94 @@ function check(name, ok, detail) {
  * Read off each gazette PDF, one row per schedule, so a figure cannot be changed on one of them
  * quietly.
  */
+/*
+ * EVERY AMOUNT, READ OFF THE GAZETTE ITSELF.
+ *
+ * The firm supplied the four notices and every figure below was taken from the PDF, item by item,
+ * not copied out of the code. That distinction is the whole point: a check written from the code
+ * pins the code to itself and protects a typo as faithfully as it protects the truth. These four
+ * tables are the gazettes, and the code is now held against them.
+ *
+ *   2026  GN 6435, GG 53683 — ceiling R1225,00
+ *   2020  GN R.580, GG 43343, 22 May 2020 — ceiling R1023,00
+ *   2017  GN R.1141, 27 October 2017 — ceiling R965,00
+ *   2015  GN R.1272, GG 39552, 23 December 2015 — ceiling R870,00
+ *
+ * Items 1(b), 4(a) and 9 carry no amount of their own: 1(b) and 4(a) point at the Magistrates'
+ * Courts rules, and 9 is the percentage below rather than a flat fee. They are null in the code
+ * and absent here for the same reason.
+ */
 const SCHEDULES = [
-  { schedule: ANNEXURE_B_2026, year: '2026', ceiling: 1225, receiptMax: 610, rate: 0.1, sms: 3.5 },
-  { schedule: ANNEXURE_B_2020, year: '2020', ceiling: 1023, receiptMax: 509, rate: 0.1, sms: 3 },
-  { schedule: ANNEXURE_B_2017, year: '2017', ceiling: 965, receiptMax: 480, rate: 0.1, sms: 2.8 },
-  { schedule: ANNEXURE_B_2015, year: '2015', ceiling: 870, receiptMax: 435, rate: 0.1, sms: 2.5 },
+  {
+    schedule: ANNEXURE_B_2026, year: '2026', ceiling: 1225, receiptMax: 610, rate: 0.1,
+    items: { '1a': 25, '1c': 3.5, 2: 25, 3: 25, '4b': 250, '4c': 16, 5: 50, 6: 13, 7: 60, 8: 98 },
+  },
+  {
+    schedule: ANNEXURE_B_2020, year: '2020', ceiling: 1023, receiptMax: 509, rate: 0.1,
+    items: { '1a': 21, '1c': 3, 2: 21, 3: 21, '4b': 210, '4c': 14, 5: 41, 6: 11, 7: 52, 8: 82 },
+  },
+  {
+    schedule: ANNEXURE_B_2017, year: '2017', ceiling: 965, receiptMax: 480, rate: 0.1,
+    items: { '1a': 20, '1c': 2.8, 2: 20, 3: 20, '4b': 198, '4c': 13, 5: 39, 6: 10, 7: 49, 8: 78 },
+  },
+  {
+    schedule: ANNEXURE_B_2015, year: '2015', ceiling: 870, receiptMax: 435, rate: 0.1,
+    items: { '1a': 18, '1c': 2.5, 2: 18, 3: 18, '4b': 178, '4c': 12, 5: 35, 6: 9, 7: 44, 8: 70 },
+  },
 ]
-for (const { schedule, year, ceiling, receiptMax, rate, sms } of SCHEDULES) {
-  check(`the items 1-7 ceiling is R${ceiling} on the ${year} schedule`,
+
+/* The monthly allowances are worded identically in all four gazettes: ten electronic
+   communications, four credit bureau searches. */
+const MONTHLY = { '1c': 10, '4c': 4 }
+
+for (const { schedule, year, ceiling, receiptMax, rate, items } of SCHEDULES) {
+  check(`the items 1-7 ceiling is R${ceiling} on the ${year} gazette`,
     schedule.itemsOneToSevenCeiling === ceiling,
     `got ${schedule.itemsOneToSevenCeiling}`)
-  check(`the receipt fee is capped at R${receiptMax} on the ${year} schedule`,
+  check(`the receipt fee is capped at R${receiptMax} on the ${year} gazette`,
     schedule.receiptFeeMaximum === receiptMax, `got ${schedule.receiptFeeMaximum}`)
-  check(`the receipt fee rate is ${rate * 100}% on the ${year} schedule`,
+  check(`the receipt fee rate is ${rate * 100}% on the ${year} gazette`,
     schedule.receiptFeeRate === rate, `got ${schedule.receiptFeeRate}`)
+
   /*
-   * AND THE RATE IS EXERCISED BELOW THE CAP. Every existing test of the 2020 receipt fee uses an
+   * AND THE RATE IS EXERCISED BELOW THE CAP. Every existing test of the 2020 receipt fee used an
    * instalment ABOVE the cap, so the ten per cent was never reached on any schedule but the
    * current one -- the arithmetic could have been any number at all. R1 000 is below every cap
    * in the table, so this is the multiplication and not the minimum.
    */
   const belowCap = receiptFeeInclVat(1000, 0.15, schedule)
-  check(`10% of R1 000 plus VAT is R115 on the ${year} schedule`,
+  check(`10% of R1 000 plus VAT is R115 on the ${year} gazette`,
     near(belowCap, 115), `got ${belowCap}`)
-  /* Above the cap it is the cap, which is the other half of the same Math.min. */
   const aboveCap = receiptFeeInclVat(receiptMax * 20, 0.15, schedule)
-  check(`a large instalment is capped at R${receiptMax} plus VAT on the ${year} schedule`,
+  check(`a large instalment is capped at R${receiptMax} plus VAT on the ${year} gazette`,
     near(aboveCap, receiptMax * 1.15), `got ${aboveCap}`)
+
+  /* EVERY PRICED ITEM, not the two or three that happened to be on somebody's mind. */
+  for (const [id, amount] of Object.entries(items)) {
+    const got = schedule.items.find((i) => i.id === id)?.amount
+    check(`item ${id} is R${amount.toFixed(2)} on the ${year} gazette`, got === amount, `got ${got}`)
+  }
+  /* And nothing has been invented that the gazette does not price. */
+  const priced = schedule.items.filter((i) => i.amount !== null && i.amount !== undefined).map((i) => i.id).sort()
+  check(`the ${year} gazette prices exactly these items`,
+    priced.join(),
+    Object.keys(items).sort().join(),
+    `got ${priced.join()}`)
+
+  for (const [id, cap] of Object.entries(MONTHLY)) {
+    check(`item ${id} is capped at ${cap} a month on the ${year} gazette`,
+      schedule.items.find((i) => i.id === id)?.maxPerMonth === cap)
+  }
+
   /*
-   * ITEM 1(c), THE SMS, ON EVERY GAZETTE. A live charging path: accountSms.ts sets
-   * SMS_ITEM = '1c' and the SMS box shows a collector the cost before they send. Until this line
-   * the amount was pinned by nothing at all -- doubling what every SMS charges a debtor left the
-   * whole suite green -- and CLAUDE.md names item 1(c) beside the email and the consultation.
+   * ITEM 1(c), THE SMS, IS PER SEGMENT. A live charging path -- accountSms.ts sets
+   * SMS_ITEM = '1c' and the SMS box shows a collector the cost before they send. A template that
+   * fits 160 characters against a short name and spills at 161 against a long one charges the
+   * second debtor twice for the same words.
    */
-  check(`item 1c is R${sms.toFixed(2)} a segment on the ${year} schedule`,
-    near(itemTotalRemaining('1c', 0, schedule), sms),
-    `got ${itemTotalRemaining('1c', 0, schedule)}`)
-  /* PER SEGMENT, not per message: a template that fits 160 characters against a short name and
-     spills at 161 against a long one charges the second debtor twice for the same words. */
-  check(`...and a second segment is charged again on the ${year} schedule`,
-    near(itemTotalRemaining('1c', sms, schedule), sms))
-  check(`...and it counts towards the items 1-7 ceiling on the ${year} schedule`,
+  check(`...and a second segment of item 1c is charged again on the ${year} gazette`,
+    near(itemTotalRemaining('1c', items['1c'], schedule), items['1c']))
+  check(`...and item 1c counts towards the items 1-7 ceiling on the ${year} gazette`,
     schedule.items.find((i) => i.id === '1c')?.countsTowardCap === true)
 }
 
