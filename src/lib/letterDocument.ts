@@ -403,8 +403,17 @@ function cssColour(value: string): string {
   return /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(value) ? value : 'inherit'
 }
 
+/**
+ * Spacing as CSS.
+ *
+ * ZERO IS EMITTED, not skipped. `after: 0` means "no gap here" and an ABSENT after means "the
+ * usual gap" — three millimetres for a paragraph. Writing only truthy values made the two
+ * identical on the way out, so a block deliberately set tight re-read as a block with default
+ * spacing, and the letter grew three millimetres every time somebody opened it.
+ */
 const spacingStyle = (s?: Spacing): string =>
-  [s?.before ? `margin-top:${s.before}mm` : '', s?.after ? `margin-bottom:${s.after}mm` : '']
+  [s?.before !== undefined ? `margin-top:${s.before}mm` : '',
+    s?.after !== undefined ? `margin-bottom:${s.after}mm` : '']
     .filter(Boolean).join(';')
 
 /**
@@ -446,7 +455,13 @@ export function letterToHtml(doc: LetterDocument, input: {
         break
       }
       case 'paragraph':
-        out.push(`<p${attr}>${inline(b.spans)}</p>`)
+        /*
+         * `keepWithNext` TRAVELS AS DATA, because it has no appearance to be read back from. A
+         * flag that only exists in the model is a flag that is lost the first time the page is
+         * edited — "Yours faithfully" would quietly stop keeping with its signature, and nothing
+         * would say so until a letter printed with the two on different pages.
+         */
+        out.push(`<p${attr}${b.keepWithNext ? ' data-keep="1"' : ''}>${inline(b.spans)}</p>`)
         break
       case 'list': {
         const tag = b.ordered ? 'ol' : 'ul'
@@ -696,4 +711,253 @@ export function editableHtmlToSpans(html: string): Span[] {
   }
   if (muted === null) push(unesc(html.slice(at)))
   return out.length > 0 ? out : [{ text: '' }]
+}
+
+/* ------------------------------------------------------------------ editing the whole page */
+
+/**
+ * READING A WHOLE EDITED PAGE BACK INTO BLOCKS.
+ *
+ * WHY THIS IS THE PIECE EVERYTHING ELSE HANGS ON. The firm asked to type on the page rather than
+ * fill in a stack of block cards: "can't it be just like one page which you immediately see how
+ * it would look like". That is the right shape — but the page must stay an INPUT SURFACE and not
+ * become the stored document. If the browser's markup were what we kept, the letter would be
+ * whatever Chrome felt like emitting that day, and a statutory demand would print at the mercy of
+ * a rendering engine nobody controls.
+ *
+ * So the same bargain as `editableHtmlToSpans`, one level up: the page is drawn from the model,
+ * edited freely, and read back against a closed list of shapes. Anything the browser invents that
+ * this does not recognise contributes its TEXT and nothing else — which is what a paste from Word
+ * should do, and what a stray `<font>` tag from a 2003 template should do too.
+ *
+ * HAND-ROLLED, like the sanitiser beside it, so the parse is identical in Node and in a browser.
+ * A round trip that can only be exercised in a browser is a round trip that gets exercised once.
+ */
+
+/** Tags that never have a closing partner, so they must not open a depth. */
+const VOID_TAGS = new Set(['br', 'img', 'hr', 'col', 'input', 'wbr', 'source'])
+
+interface RawBlock { tag: string; attrs: string; inner: string }
+
+/**
+ * Split HTML into its TOP-LEVEL elements, each with its attributes and its inner HTML.
+ *
+ * Text sitting loose between elements — which is what a browser leaves when somebody presses
+ * Return at the very end of a document — comes back as a synthetic `p`, so a sentence typed
+ * outside any block is kept rather than dropped.
+ */
+function topLevelBlocks(html: string): RawBlock[] {
+  const out: RawBlock[] = []
+  const re = /<(\/?)([a-z0-9]+)((?:[^>"']|"[^"]*"|'[^']*')*?)(\/?)>/gi
+  let depth = 0
+  let openAt = -1
+  let openTag = ''
+  let openAttrs = ''
+  let textFrom = 0
+  let m: RegExpExecArray | null
+
+  const loose = (upTo: number) => {
+    const text = html.slice(textFrom, upTo)
+    if (text.trim() !== '') out.push({ tag: 'p', attrs: '', inner: text })
+  }
+
+  while ((m = re.exec(html)) !== null) {
+    const closing = m[1] === '/'
+    const tag = m[2].toLowerCase()
+    const selfClosing = m[4] === '/' || VOID_TAGS.has(tag)
+    if (selfClosing) continue
+    if (!closing) {
+      if (depth === 0) {
+        loose(m.index)
+        openAt = m.index + m[0].length
+        openTag = tag
+        openAttrs = m[3]
+      }
+      depth += 1
+    } else {
+      depth -= 1
+      if (depth === 0 && openAt !== -1) {
+        out.push({ tag: openTag, attrs: openAttrs, inner: html.slice(openAt, m.index) })
+        textFrom = m.index + m[0].length
+        openAt = -1
+      }
+      /*
+       * A closing tag with nothing open is a browser leaving debris. Ignored rather than allowed
+       * to drive the depth negative, which would swallow everything after it — and CONSUMED, so
+       * the tag itself is not later collected as loose text. Any real words before it still are:
+       * `words</div>` is a sentence somebody typed followed by rubbish, not rubbish.
+       */
+      if (depth < 0) {
+        depth = 0
+        loose(m.index)
+        textFrom = m.index + m[0].length
+      }
+    }
+  }
+  loose(html.length)
+  return out
+}
+
+/** One CSS property out of a style attribute. */
+function styleProp(attrs: string, prop: string): string | null {
+  const style = /style\s*=\s*"([^"]*)"|style\s*=\s*'([^']*)'/i.exec(attrs)?.slice(1).find(Boolean) ?? ''
+  const re = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`, 'i')
+  return re.exec(style)?.[1]?.trim() ?? null
+}
+
+const classOf = (attrs: string): string =>
+  (/class\s*=\s*"([^"]*)"|class\s*=\s*'([^']*)'/i.exec(attrs)?.slice(1).find(Boolean) ?? '')
+
+function alignOf(attrs: string): Align | undefined {
+  const a = styleProp(attrs, 'text-align')
+  return a === 'center' || a === 'right' || a === 'justify' || a === 'left' ? a : undefined
+}
+
+/** "6mm" out of a margin, in millimetres. Browsers hand these back in px, which is not ours. */
+function mmOf(value: string | null): number | undefined {
+  if (!value) return undefined
+  const m = /^([\d.]+)\s*mm$/i.exec(value.trim())
+  return m ? Number(m[1]) : undefined
+}
+
+function spacingOf(attrs: string): Spacing | undefined {
+  const before = mmOf(styleProp(attrs, 'margin-top'))
+  const after = mmOf(styleProp(attrs, 'margin-bottom'))
+  if (before === undefined && after === undefined) return undefined
+  const out: Spacing = {}
+  if (before !== undefined) out.before = before
+  if (after !== undefined) out.after = after
+  return out
+}
+
+/** The `<li>` elements of a list, or the `<tr>`/`<td>` of a table — one level down. */
+const childrenOf = (inner: string, tags: string[]): RawBlock[] =>
+  topLevelBlocks(inner).filter((b) => tags.includes(b.tag))
+
+/**
+ * A whole edited page, back as blocks.
+ *
+ * NEVER RETURNS AN EMPTY DOCUMENT FOR A NON-EMPTY PAGE. An empty result would be saved over a
+ * notice the attorney settled, so a page that parses to nothing comes back as one empty
+ * paragraph and the caller can tell the difference between that and a real edit.
+ */
+export function documentHtmlToBlocks(html: string): Block[] {
+  const out: Block[] = []
+
+  for (const raw of topLevelBlocks(html)) {
+    const cls = classOf(raw.attrs)
+    const align = alignOf(raw.attrs)
+    const spacing = spacingOf(raw.attrs)
+
+    /*
+     * WHAT IS INSIDE <script> AND <style> IS NOT TEXT, and dropping only the TAG is worse than
+     * useless: the contents are then loose words, so a block copied off a web page drops a
+     * stylesheet into the middle of a statutory notice. editableHtmlToSpans guards this for a run
+     * of text; the element has to be refused a block of its own here, before it gets one.
+     */
+    if (raw.tag === 'script' || raw.tag === 'style') continue
+
+    /* A hard page break, which the renderer draws as an empty div. */
+    if (cls.includes('ltr-break')) { out.push({ kind: 'pagebreak' }); continue }
+
+    /* A spacer is an empty div with a height. Anything else empty is debris and is dropped. */
+    if (raw.tag === 'div' && !cls.includes('ltr-sig')) {
+      const h = mmOf(styleProp(raw.attrs, 'height'))
+      if (h !== undefined && raw.inner.trim() === '') { out.push({ kind: 'spacer', mm: h }); continue }
+    }
+
+    if (cls.includes('ltr-sig')) {
+      const rule = topLevelBlocks(raw.inner).find((b) => classOf(b.attrs).includes('ltr-rule'))
+      const rest = topLevelBlocks(raw.inner).filter((b) => !classOf(b.attrs).includes('ltr-rule'))
+      const widthPc = styleProp(rule?.attrs ?? '', 'width')
+      out.push({
+        kind: 'signature',
+        widthMm: mmOf(widthPc) ?? 70,
+        spans: editableHtmlToSpans(rest.map((b) => b.inner).join('')),
+        ...(spacing ? { spacing } : {}),
+      })
+      continue
+    }
+
+    const heading = /^h([123])$/i.exec(raw.tag)
+    if (heading) {
+      /*
+       * THE SECTION NUMBER IS DRAWN BY THE RENDERER, so it comes back as a span in the text and
+       * must be taken OUT again — otherwise every save bakes the current number into the words,
+       * and inserting a section leaves the old digits behind for ever. Its presence is what says
+       * the heading is numbered.
+       */
+      const numbered = /class="ltr-n"/.test(raw.inner)
+      const inner = raw.inner.replace(/<span class="ltr-n">[\s\S]*?<\/span>/g, '')
+      out.push({
+        kind: 'heading',
+        level: Number(heading[1]) as 1 | 2 | 3,
+        spans: editableHtmlToSpans(inner),
+        ...(numbered ? { numbered: true } : {}),
+        ...(align ? { align } : {}),
+        ...(spacing ? { spacing } : {}),
+      })
+      continue
+    }
+
+    if (raw.tag === 'ul' || raw.tag === 'ol') {
+      out.push({
+        kind: 'list',
+        ordered: raw.tag === 'ol',
+        items: childrenOf(raw.inner, ['li']).map((li) => editableHtmlToSpans(li.inner)),
+        ...(spacing ? { spacing } : {}),
+      })
+      continue
+    }
+
+    if (raw.tag === 'table') {
+      const widths: number[] = []
+      for (const col of raw.inner.matchAll(/<col\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi)) {
+        const pc = /^([\d.]+)%$/.exec(styleProp(col[1], 'width') ?? '')
+        if (pc) widths.push(Number(pc[1]))
+      }
+      /* The rows may sit inside a tbody or not, depending on what the browser decided. Found by
+         asking for `tr` at whatever depth rather than assuming either shape. */
+      const body = topLevelBlocks(raw.inner).find((b) => b.tag === 'tbody')
+      const rows = childrenOf(body ? body.inner : raw.inner, ['tr']).map((tr) =>
+        childrenOf(tr.inner, ['td', 'th']).map((cell) => ({
+          spans: editableHtmlToSpans(cell.inner),
+          ...(alignOf(cell.attrs) ? { align: alignOf(cell.attrs)! } : {}),
+        })))
+      const borders = /ltr-b-(none|rows|all)/.exec(cls)?.[1] as TableBlock['borders'] | undefined
+      const headerRow = /<th\b/i.test(raw.inner)
+      out.push({
+        kind: 'table',
+        rows,
+        ...(widths.length > 0 ? { widths } : {}),
+        ...(headerRow ? { headerRow: true } : {}),
+        ...(borders ? { borders } : {}),
+        ...(spacing ? { spacing } : {}),
+      })
+      continue
+    }
+
+    /*
+     * Everything else is a paragraph, including anything the browser invented. Its text survives;
+     * its tag does not.
+     *
+     * AN EMPTY PARAGRAPH IS KEPT, and that is a change of mind worth recording. The block editor
+     * dropped them as debris, which was right when a block was a card in a form — nobody adds an
+     * empty card. On a page you type on it is wrong: pressing Return twice IS how a blank line is
+     * made, and it arrives as exactly the same <p><br></p>. Dropped, the line stays on screen
+     * (nothing redraws the sheet under a cursor) and is gone when the letter is next opened —
+     * the page and the document quietly disagreeing, which is the one thing this model exists to
+     * prevent. A stray blank line is visible and costs a keystroke; a lost one is not.
+     */
+    const spans = editableHtmlToSpans(raw.inner)
+    out.push({
+      kind: 'paragraph',
+      spans,
+      ...(align ? { align } : {}),
+      ...(spacing ? { spacing } : {}),
+      ...(/\bdata-keep\b/.test(raw.attrs) ? { keepWithNext: true } : {}),
+    })
+  }
+
+  return out.length > 0 ? out : [{ kind: 'paragraph', spans: [{ text: '' }] }]
 }

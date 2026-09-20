@@ -76,6 +76,16 @@ fails. `diary_capacity` sat in that state for months.
 list and every bulk action go through it. Written twice they drift, and the failure is not a
 wrong list — it is changing accounts nobody saw.
 
+**A letter is typed on the page, and the page is not what is stored.** `LetterPageEditor` is one
+contenteditable A4 sheet with the firm's letterhead behind it — the firm asked for the page rather
+than a stack of blocks, and there is deliberately no separate preview. `letterToHtml` draws the
+model onto it and `documentHtmlToBlocks` reads it back against a closed list of shapes; the
+browser's markup is never stored. Two rules follow and neither is optional: **the parse must be
+total** — every top-level element contributes a block, so an element nobody recognises cannot take
+the rest of the notice with it — and **the sheet is never `transform: scale()`d**, because a
+browser hit-tests the caret in unscaled coordinates. A preview may be photographed down; a thing
+you type in may not.
+
 **Things that bite:**
 - `protect_closed_diary_entries` **silently reverts** edits to `done`/`moved` entries. It does
   not raise.

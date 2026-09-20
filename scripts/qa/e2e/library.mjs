@@ -360,50 +360,115 @@ try {
     (await page.locator('.ltr-page').first().innerText()).includes('R 48,250.00'))
   await t.shot(page, '65-library-letter')
 
-  /* ---------- and it is edited as one ---------- */
+  /* ---------- and it is edited on the page itself ---------- */
 
+  /*
+   * THE FIRM ASKED FOR THIS IN SO MANY WORDS: "can't it be just like one page which you
+   * immediately see how it would look like... and then you don't even have a preview." So the
+   * shape of the screen is itself the requirement, and is asserted as one: ONE editable surface,
+   * and it is the sheet -- not a stack of boxes with a picture of the page beside it.
+   */
   await page.getByRole('button', { name: 'Edit' }).click()
   await page.waitForTimeout(700)
   t.check('a letter is not edited in a textarea',
     await page.locator('textarea').count(), 0)
-  /* Blocks, with the controls that belong to each kind. */
-  t.ok('...it opens as blocks',
-    await page.locator('[contenteditable="true"]').first().isVisible())
-  t.ok('...with a bold button', await page.getByRole('button', { name: 'Bold' }).first().isVisible())
+  t.check('...nor in a stack of boxes: there is one thing to type in',
+    await page.locator('[contenteditable="true"]').count(), 1)
+  t.ok('...and the thing you type in IS the sheet it prints on',
+    await page.locator('.ltr-page [contenteditable="true"].ltr-body').first().isVisible())
+  /* And no second page beside it. A preview would be the old shape wearing the new one's clothes. */
+  t.check('...with no separate preview beside it',
+    await page.locator('.ltr-page').count(), 1)
+  {
+    const box = await page.locator('.ltr-page').first().boundingBox()
+    const ratio = box ? box.height / box.width : 0
+    t.ok(`...still at A4 proportions while being typed on (${box ? Math.round(box.width) : 0}px wide)`,
+      Math.abs(ratio - 297 / 210) < 0.02)
+  }
+  t.ok('...with a bold button', await page.getByRole('button', { name: 'Bold', exact: true }).first().isVisible())
   t.ok('...a way to add a table',
-    await page.getByRole('button', { name: 'Table' }).first().isVisible())
-  t.ok('...and the page\u2019s own typography',
-    await page.getByText('Line spacing', { exact: true }).first().isVisible())
+    await page.getByRole('button', { name: 'Insert a table' }).first().isVisible())
+  t.ok('...and the page’s own typography',
+    await page.getByRole('combobox', { name: 'Line spacing' }).first().isVisible())
+
+  const sheet = page.locator('.ltr-page [contenteditable="true"]').first()
 
   /*
-   * THE ROUND TRIP, IN A REAL BROWSER. editableHtmlToSpans is checked to the character beside
-   * this folder; what a browser cannot be told is whether pressing Bold on a selection actually
-   * reaches the stored document. Typed, selected, bolded, saved, and read off the wire.
+   * BOLD IS REFUSED INSIDE A HEADING, and the reason is worth the assertion. letterCss draws
+   * headings at font-weight 700, so a browser reports the selection as already bold and
+   * execCommand('bold') can only take it OFF -- emitting font-weight:normal, which the model has
+   * no room for and the parse drops. The page would then show a word gone light that prints bold.
    */
-  /* The contenteditable blocks, not `getByRole('textbox')` — the running-header input is a
-     textbox too and it comes first in the document. */
-  const firstBox = page.locator('[contenteditable="true"]').first()
-  await firstBox.click()
-  await page.keyboard.press('ControlOrMeta+A')
+  await sheet.click()
+  await sheet.evaluate((el) => {
+    const h = el.querySelector('h1, h2, h3')
+    if (!h) throw new Error(`no heading on the sheet: ${el.innerHTML.slice(0, 200)}`)
+    const r = document.createRange()
+    r.selectNodeContents(h)
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r)
+  })
+  await page.waitForTimeout(250)
+  t.check('bold is refused inside a heading, which is already bold',
+    await page.getByRole('button', { name: 'Bold', exact: true }).first().isDisabled(), true)
+
+  /*
+   * THE ROUND TRIP, IN A REAL BROWSER. editableHtmlToSpans and documentHtmlToBlocks are both
+   * checked to the character beside this folder; what a browser cannot be told is whether typing
+   * on the sheet and pressing Bold on a selection actually reaches the stored document.
+   *
+   * ON THE PARAGRAPH, not the heading -- see above; the heading cannot take a bold and the button
+   * is disabled there on purpose.
+   */
+  await sheet.evaluate((el) => {
+    const p = el.querySelector('p')
+    if (!p) throw new Error(`no paragraph on the sheet: ${el.innerHTML.slice(0, 200)}`)
+    const r = document.createRange()
+    r.selectNodeContents(p)
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r)
+  })
   await page.keyboard.type('Read this carefully')
   await page.waitForTimeout(300)
   /*
-   * THE LAST NINE CHARACTERS ONLY. Bolding the whole box would make the assertion below pass on
-   * an implementation that ignores the selection entirely and bolds everything — which is exactly
-   * the bug worth catching, because the writer would see one word bold and the debtor a whole
-   * paragraph.
+   * THE LAST NINE CHARACTERS ONLY. Bolding the whole paragraph would make the assertion below
+   * pass on an implementation that ignores the selection entirely and bolds everything -- which
+   * is exactly the bug worth catching, because the writer would see one word bold and the debtor
+   * a whole paragraph.
    */
-  await firstBox.evaluate((el) => {
-    const node = [...el.childNodes].find((n) => n.nodeType === 3 && n.textContent.length >= 9)
-      ?? el.firstChild
-    if (!node) throw new Error(`nothing to select in: ${el.innerHTML}`)
+  await sheet.evaluate((el) => {
+    const p = el.querySelector('p')
+    const node = [...p.childNodes].find((n) => n.nodeType === 3 && n.textContent.length >= 9)
+      ?? p.firstChild
+    if (!node) throw new Error(`nothing to select in: ${p.innerHTML}`)
     const r = document.createRange()
     r.setStart(node, node.textContent.length - 9)
     r.setEnd(node, node.textContent.length)
     const s = window.getSelection(); s.removeAllRanges(); s.addRange(r)
   })
-  await page.getByRole('button', { name: 'Bold' }).first().click()
+  await page.getByRole('button', { name: 'Bold', exact: true }).first().click()
   await page.waitForTimeout(400)
+
+  /*
+   * AND A MERGE FIELD, PRESSED RATHER THAN TYPED. The buttons live outside the editor, beside the
+   * other kinds of template, and before the page editor lent them a caret they pressed and
+   * nothing happened -- on the one kind of template with the most fields in it.
+   */
+  /*
+   * AT THE START OF THE PARAGRAPH, chosen rather than convenient. The caret has to be put
+   * somewhere first, because the bold above left the word SELECTED and a field dropped on a
+   * selection replaces it. The START is the useful place to put it: it proves the field lands AT
+   * THE CARET rather than being appended to the end, which is the whole reason the buttons were
+   * wired through to the page, and it keeps the field clear of the bold run so the split below
+   * still says which words carry the mark. (Put at the END it would come back bold, because the
+   * caret is inside the bold run -- correct, and a weaker thing to assert.)
+   */
+  await sheet.locator('p').first().click()
+  await page.keyboard.press('Home')
+  await page.waitForTimeout(200)
+  await page.getByRole('button', { name: '{{reference}}', exact: true }).first().click()
+  await page.waitForTimeout(400)
+  t.ok('a merge field pressed outside the page lands inside it',
+    (await sheet.innerText()).includes('{{reference}}'))
+
   const beforeLetter = written.length
   await page.getByRole('button', { name: 'Save' }).click()
   await page.waitForTimeout(1000)
@@ -421,17 +486,36 @@ try {
     try { return JSON.parse(JSON.parse(sentLetter?.body ?? '{}').body ?? 'null') }
     catch { return null }
   })()
-  t.ok('...and the first block is still a heading', savedDoc?.blocks?.[0]?.kind === 'heading')
-  const spans = savedDoc?.blocks?.[0]?.spans ?? []
+  const savedBlocks = savedDoc?.blocks ?? []
+  /*
+   * THE WHOLE LETTER CAME BACK, and this is the failure the single sheet introduces that the old
+   * stack of boxes could not have: the page is parsed as ONE piece of HTML, so a parse that gives
+   * up at the first thing it does not recognise silently drops everything below the caret. The
+   * writer edits one paragraph and saves a letter missing its table.
+   */
+  t.check(`...with every part of the letter still on it (${savedBlocks.map((b) => b.kind).join(',')})`,
+    savedBlocks.map((b) => b.kind).join(','),
+    'heading,paragraph,heading,table,heading,list')
+  t.ok('...the first block still a heading, untouched',
+    savedBlocks[0]?.kind === 'heading'
+    && (savedBlocks[0]?.spans ?? []).map((x) => x.text).join('') === 'NOTICE IN TERMS OF SECTION 129(1)(a)')
+  /* The numbering is counted, not stored -- so it must NOT have come back as typed-in digits. */
+  t.check('...and the numbered sections still number themselves',
+    savedBlocks.filter((b) => b.kind === 'heading' && b.numbered).length, 2)
+  t.ok('...the table still a table with its two columns',
+    savedBlocks[3]?.kind === 'table' && (savedBlocks[3]?.rows ?? []).every((r) => r.length === 2))
+
+  const spans = savedBlocks[1]?.spans ?? []
   t.check('...carrying the words that were typed',
-    spans.map((x) => x.text).join(''), 'Read this carefully')
+    spans.map((x) => x.text).join(''), '{{reference}}Read this carefully')
   /*
    * THE HALF THAT MATTERS: the mark is on PART of it. A document where the whole paragraph came
    * back bold, or none of it did, passes a looser check and is a letter the writer saw one way
    * and the debtor another.
    */
   t.check(`...with the selected words bold and the rest not (${JSON.stringify(spans)})`,
-    spans.map((x) => `${x.text}${x.bold ? '*' : ''}`).join('|'), 'Read this |carefully*')
+    spans.map((x) => `${x.text}${x.bold ? '*' : ''}`).join('|'),
+    '{{reference}}Read this |carefully*')
 
   /* ---------- editing, and the merge field you press ---------- */
 

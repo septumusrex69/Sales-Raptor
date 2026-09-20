@@ -10,7 +10,7 @@ import {
 } from '../../lib/messageTemplates'
 import type { TemplateDraft } from '../../lib/templateLibrary'
 import { inputClass } from '../../components/ui/Modal'
-import { LetterEditor } from './LetterEditor'
+import { LetterPageEditor } from './LetterPageEditor'
 import {
   blankLetter, parseLetter, serialiseLetter, letterProblems, canUseLetter, lettersText,
 } from '../../lib/letterDocument.ts'
@@ -58,6 +58,13 @@ export function TemplateEditor({
 }) {
   const body = useRef<HTMLTextAreaElement>(null)
   const subject = useRef<HTMLInputElement>(null)
+  /*
+   * THE SAME BUTTONS, INTO A DIFFERENT KIND OF BOX. A laid-out letter has no textarea to put a
+   * caret in, so the page editor lends this one a "drop it here" and the field buttons below reach
+   * through it. Before this they pressed and nothing happened, on the one kind of template with
+   * the most fields in it.
+   */
+  const letterInsert = useRef<((text: string) => void) | null>(null)
   /** Which box the cursor was last in, so a field lands where the writer was working. */
   const [last, setLast] = useState<'body' | 'subject'>('body')
 
@@ -82,6 +89,7 @@ export function TemplateEditor({
 
   function insert(key: string) {
     const token = `{{${key}}}`
+    if (letterInsert.current) { letterInsert.current(token); return }
     const el = last === 'subject' && draft.kind === 'email' ? subject.current : body.current
     if (!el) return
     const at = el.selectionStart ?? el.value.length
@@ -213,7 +221,7 @@ export function TemplateEditor({
             )}
           </span>
           {letterDoc !== null && (
-            <LetterEditor doc={letterDoc} readOnly={false}
+            <LetterPageEditor doc={letterDoc} readOnly={false} insertRef={letterInsert}
               onChange={(next) => onChange({ ...draft, body: serialiseLetter(next) })} />
           )}
           {/*
