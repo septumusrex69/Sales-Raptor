@@ -1,6 +1,7 @@
 import { useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { Paperclip, Plus, X } from 'lucide-react'
 import { Modal, FormField, inputClass } from './ui/Modal'
+import { AttachLetter } from './letters/AttachLetter'
 import { RecipientField } from './RecipientField'
 import { DictateButton } from './ui/Dictate'
 import { DICTATION_LANGUAGES, storedLanguage } from '../lib/dictation'
@@ -32,6 +33,7 @@ function fileSize(bytes: number): string {
 export function ComposeEmailModal({
   to,
   recipients,
+  letterContext,
   initialSubject,
   initialBody,
   contextNote,
@@ -52,6 +54,14 @@ export function ComposeEmailModal({
    * stop and create a contact record is how a CRM gets worked around instead of used.
    */
   recipients?: { email: string; label?: string }[]
+  /**
+   * What a letter would be merged against, where this message is about an account.
+   *
+   * ABSENT EVERYWHERE ELSE, and that is the rule rather than an oversight: a letter is written
+   * against a debtor account, and the merge fields on the sales side are a different set
+   * entirely. A quotation follow-up to a lead has nothing to attach a section 129 to.
+   */
+  letterContext?: { values: Record<string, string>; reference: string | null }
   /**
    * Where this message will end up, said before it is sent rather than discovered afterwards.
    *
@@ -287,15 +297,38 @@ export function ComposeEmailModal({
           the client, or a mandate to the attorney, meant opening Outlook -- and mail managed in
           two places is mail managed in neither.
         */}
-        <div className="-mt-1 mb-3">
+        <div className="-mt-1 mb-3 flex flex-wrap items-center gap-2">
           <input ref={fileInput} type="file" multiple className="hidden"
             onChange={(e) => void attach(e)} />
           <button type="button" onClick={() => fileInput.current?.click()}
             className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
             <Paperclip size={13} /> Attach a file
           </button>
+          {/*
+            THE FIRM'S OWN LETTER, AS A PDF, MADE HERE AND KEPT NOWHERE. Only where the message is
+            about an account: a letter is merged against a debtor, a balance and a date, and a
+            quotation follow-up to a lead has none of those.
+          */}
+          {letterContext && (
+            <AttachLetter values={letterContext.values} reference={letterContext.reference}
+              onError={setError}
+              onAttached={(file) => {
+                /* Through the same size gate as a picked file. A two-page notice with a
+                   letterhead in it is around 70 KB, but a letterhead somebody exported at
+                   photographic resolution is not, and the message either goes with its
+                   attachments or does not go. */
+                const already = files.reduce((n, f) => n + f.size, 0)
+                if (already + file.size > MAX_ATTACHMENT_BYTES) {
+                  setError(`That is more than ${fileSize(MAX_ATTACHMENT_BYTES)} of attachments, `
+                    + 'which is as much as one message can carry.')
+                  return
+                }
+                setError(null)
+                setFiles((list) => [...list, file])
+              }} />
+          )}
           {files.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
+            <div className="mt-2 basis-full flex flex-wrap gap-1.5">
               {files.map((f, i) => (
                 <span key={`${f.filename}-${i}`}
                   className="inline-flex items-center gap-1.5 max-w-full text-xs px-2 py-1 rounded-md border border-slate-200 text-slate-600">

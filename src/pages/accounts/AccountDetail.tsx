@@ -69,6 +69,8 @@ import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { CallButton } from './CallButton'
 import { feeCeiling, scheduleFor } from '../../lib/annexureB'
 import { formatMoney, formatDate } from '../../data/mockData'
+import { mergeValuesFor } from '../../lib/messageTemplates'
+import { dayKey } from '../../lib/collectionPace'
 
 type Tab = 'Overview' | 'Transactions' | 'Emails' | 'Documents'
 
@@ -905,6 +907,45 @@ export function AccountDetail() {
       {composeTo !== null && (
         <ComposeEmailModal
           to={composeTo}
+          /*
+           * WHAT A LETTER WOULD BE MERGED AGAINST, resolved here because this is the only place
+           * that holds all of it: the account, the balance struck from the three ledgers, the
+           * client whose book it is, and who is sending.
+           *
+           * mergeValuesFor had no caller at all until this one. It was written, exported and
+           * checked, and nothing in the app had ever asked it a question -- which is worth
+           * knowing, because a resolver nobody calls is a resolver nobody notices is wrong.
+           *
+           * The nine fields Raptor cannot yet fill -- the debtor's address, the firm's trust
+           * account, who signs -- are passed as null rather than as an empty string, so the
+           * notice shows {{firm_bank}} standing rather than a blank line that reads as finished.
+           */
+          letterContext={{
+            reference: account.clientReference ?? account.accountNumber ?? null,
+            values: Object.fromEntries(
+              Object.entries(mergeValuesFor({
+                account: {
+                  debtorKind: account.debtorKind,
+                  debtorTitle: account.debtorTitle,
+                  debtorFirstName: account.debtorFirstName,
+                  debtorSurname: account.debtorSurname,
+                  accountNumber: account.accountNumber,
+                  clientReference: account.clientReference,
+                  capitalOutstanding: account.capitalOutstanding,
+                  preferredLanguage: account.preferredLanguage,
+                },
+                balance: b?.balance ?? null,
+                clientName: client?.name ?? null,
+                agentName: currentUser?.name ?? null,
+                agentPhone: currentUser?.phone ?? null,
+                firmName: 'Bredell Ferreira',
+                today: dayKey(new Date()),
+                money: formatMoney,
+                debtorIdMasked: account.debtorIdNumber,
+                positionAsAt: dayKey(new Date()),
+              })).filter((entry): entry is [string, string] => entry[1] !== null),
+            ),
+          }}
           recipients={(workspace?.contacts ?? [])
             .filter((c) => c.kind === 'email' && !c.retiredAt)
             .map((c) => ({ email: c.value, label: c.label ?? undefined }))}
