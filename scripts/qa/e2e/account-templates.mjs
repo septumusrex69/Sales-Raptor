@@ -259,12 +259,54 @@ try {
   t.ok('...and is named, rather than left to be spotted',
     await page.getByText(/\{\{respond_by\}\} could not be filled from this account/).first().isVisible())
   await t.shot(page, '81-account-call-script')
+  await page.locator('button[aria-label="Close"]').first().click()
+  await page.waitForTimeout(400)
+
+  /* ---------- the email, and the letter its template carries ---------- */
+
+  /*
+   * THE FIRM: "if I save the email template and have an attachment to the email template, it
+   * should also replicate that when I'm in the account and I want to send something."
+   *
+   * WHY THIS NEEDS THE BROWSER AND WAS NOT COVERED BEFORE. check-account-templates asserts the
+   * wiring by reading source; the SMS box and the call script are driven here. The EMAIL path --
+   * the one that has to draw a PDF, size it and hang it on the message -- was asserted only by
+   * source-reading. That is the half with a round trip and a PDF library in it.
+   */
+  await page.getByRole('button', { name: 'Email', exact: true }).first().click()
+  await page.waitForTimeout(800)
+
+  const pick = page.getByRole('button', { name: 'Use a template' }).first()
+  t.ok('the email composer offers the firm\u2019s templates', await pick.isVisible())
+  await pick.click()
+  await page.waitForTimeout(600)
+
+  /* The covering email, which carries the section 129. The list says so before it is picked. */
+  t.ok('...marking the one that posts a letter',
+    await page.getByText('posts a letter').first().isVisible())
+  await page.getByRole('button', { name: /Section 129 covering email/ }).first().click()
+  await page.waitForTimeout(2500)
+
+  t.check('picking it fills the subject',
+    await page.getByLabel(/Subject/).first().inputValue(),
+    'Section 129 notice - account REF/0')
+  t.ok('...and the body, merged against this debtor',
+    (await page.locator('textarea').first().inputValue()).includes('Mhlongo'))
+  /*
+   * AND THE LETTER CAME WITH IT. message_templates.attachment_id is what makes "please find the
+   * enclosed notice" true; an email that says it and encloses nothing is a worse message than one
+   * that says nothing at all.
+   */
+  const attached = await page.getByText(/\.pdf/).first().innerText().catch(() => '')
+  t.ok(`the letter it carries is attached as a PDF (${attached})`, /\.pdf/.test(attached))
+  await t.shot(page, '82-account-email-template')
 } finally {
   await browser.close()
   stopServer(server)
 }
 
-const good = t.finish(`The firm's wording, reached from the account it is about: offered in the SMS box
-and as a call script, merged against this debtor rather than against the library's samples, priced
-the moment it lands, and honest about the one field nothing could fill.`)
+const good = t.finish(`The firm's wording, reached from the account it is about: offered in the SMS
+box, in the email composer and as a call script, merged against this debtor rather than against the
+library's samples, priced the moment it lands, honest about the one field nothing could fill -- and
+a covering email brings the letter it posts with it, drawn and attached.`)
 process.exit(good ? 0 : 1)
