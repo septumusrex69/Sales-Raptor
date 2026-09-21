@@ -158,8 +158,19 @@ export interface MergeField {
  * everywhere. An agent's name is an agent's name whether the account is a debtor's or a lead's.
  */
 const EVERYWHERE: MergeField[] = [
-  { key: 'agent_name', label: 'Who is dealing with it', sample: 'Stephan Bredell' },
-  { key: 'agent_phone', label: 'The number to call back on', sample: '012 111 2222' },
+  /*
+   * WHOEVER IS SENDING THIS, which is not always whoever is assigned to it.
+   *
+   * These resolve to the SIGNED-IN person, and they always have -- so a team leader previewing a
+   * letter on somebody else's account sees their own name here. That is right for "reply to this
+   * and you reach me" and wrong for "the collector handling your account is", and the firm asked
+   * for the second one. It is a separate set of fields (collector_*, below) rather than a change
+   * of meaning here, because a template already written means what it said when it was written.
+   */
+  { key: 'agent_name', label: 'Who is sending this', sample: 'Stephan Bredell' },
+  { key: 'agent_phone', label: 'Their number', sample: '012 111 2222' },
+  { key: 'agent_email', label: 'Their email address', sample: 'stephan@bredellferreira.co.za' },
+  { key: 'agent_whatsapp', label: 'Their WhatsApp number', sample: '082 123 4567' },
   { key: 'firm_name', label: 'The firm', sample: 'Bredell Ferreira' },
   { key: 'today', label: "Today's date, written out", sample: '18 September 2026' },
   /*
@@ -197,6 +208,32 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
     { key: 'debtor_first_name', label: 'First name', sample: 'Johannes' },
     { key: 'reference', label: 'The reference the debtor knows', sample: 'GPS3/10103' },
     { key: 'client_name', label: 'The client whose book it is', sample: 'Gauteng Property Services' },
+    /*
+     * THE COLLECTOR THE ACCOUNT IS ASSIGNED TO, which is the answer to "who is handling my
+     * account" -- a question a debtor asks and a letter should be able to answer without knowing
+     * who happened to press send. Read from debtor_accounts.assigned_to, so it follows the
+     * account when it is handed to somebody else; {{agent_*}} above follows the person composing.
+     *
+     * NULL WHERE NOBODY HOLDS IT, and null leaves the placeholder standing rather than printing a
+     * gap -- an unassigned account naming nobody is caught before it is posted.
+     */
+    { key: 'collector_name', label: 'The collector this account is assigned to', sample: 'Rinda Ferreira' },
+    { key: 'collector_phone', label: "The collector's number", sample: '012 348 2156' },
+    { key: 'collector_email', label: "The collector's email address", sample: 'rinda@bredellferreira.co.za' },
+    { key: 'collector_whatsapp', label: "The collector's WhatsApp number", sample: '082 123 4567' },
+    /*
+     * THE LIAISON ON THE CLIENT, which is the firm's own word -- Liaison and Liaison Manager are
+     * roles in profiles.role. Read from companies.account_owner_id: the person who looks after
+     * the client whose book this account is on, not the client's own contact person.
+     *
+     * A DEBTOR NEVER READS THIS. It is here for what the firm writes TO a client about an
+     * account -- a handover acknowledgement, a monthly report -- where "your liaison is" is the
+     * useful sentence and the collector's name is not.
+     */
+    { key: 'liaison_name', label: 'The liaison who looks after this client', sample: 'Camile Bredell' },
+    { key: 'liaison_phone', label: "The liaison's number", sample: '012 348 2157' },
+    { key: 'liaison_email', label: "The liaison's email address", sample: 'camile@bredellferreira.co.za' },
+    { key: 'liaison_whatsapp', label: "The liaison's WhatsApp number", sample: '082 987 6543' },
     { key: 'balance', label: 'Balance outstanding', sample: 'R 48,250.00' },
     { key: 'capital', label: 'Capital outstanding', sample: 'R 31,900.00' },
     /*
@@ -311,7 +348,15 @@ export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
   { title: 'The client', keys: ['client_name'] },
   /* Named for what it does rather than for a role: the same two fields are the collector on a
      debtor account and the consultant on a lead, and one group cannot be called both. */
-  { title: 'Whoever is dealing with it', keys: ['agent_name', 'agent_phone'] },
+  { title: 'Whoever is sending it', keys: ['agent_name', 'agent_phone', 'agent_email', 'agent_whatsapp'] },
+  {
+    title: 'The collector on the account',
+    keys: ['collector_name', 'collector_phone', 'collector_email', 'collector_whatsapp'],
+  },
+  {
+    title: 'The liaison on the client',
+    keys: ['liaison_name', 'liaison_phone', 'liaison_email', 'liaison_whatsapp'],
+  },
   {
     title: 'Paying us',
     keys: ['payment_instruction', 'firm_bank', 'firm_bank_name', 'firm_bank_branch',
@@ -546,6 +591,21 @@ export function longDate(date: string): string {
 }
 
 /**
+ * Somebody a letter can name, structurally.
+ *
+ * Written out rather than imported from types.ts for the same reason FirmSettings' shape is: this
+ * file is pure, every QA check imports it directly, and a type from a module that reaches the
+ * database would drag supabase in behind it. Every field optional -- a person with no WhatsApp
+ * number is ordinary, and null leaves the placeholder standing.
+ */
+export interface Person {
+  name?: string | null
+  phone?: string | null
+  email?: string | null
+  whatsapp?: string | null
+}
+
+/**
  * The values this account answers the merge fields with.
  *
  * Balance is passed in rather than computed: it is capital plus interest plus fees less payments,
@@ -558,6 +618,20 @@ export function mergeValuesFor(input: {
   clientName: string | null
   agentName: string | null
   agentPhone: string | null
+  /**
+   * The three people a letter can name, each passed whole for the reason the firm's own details
+   * are: a list of fields here is a list to fall behind.
+   *
+   * `agent` is WHOEVER IS SENDING -- the signed-in person. `collector` is whoever the ACCOUNT is
+   * assigned to, which follows the account when it is handed out. `liaison` is whoever looks
+   * after the CLIENT. On a quiet day they are the same person and the distinction looks like
+   * pedantry; the day an account is reassigned it is the difference between a debtor reaching
+   * somebody and reaching nobody.
+   */
+  agentEmail?: string | null
+  agentWhatsapp?: string | null
+  collector?: Person | null
+  liaison?: Person | null
   today: string
   money: (amount: number) => string
   /**
@@ -622,6 +696,16 @@ export function mergeValuesFor(input: {
     capital: input.money(a.capitalOutstanding),
     agent_name: (input.agentName ?? '').trim() || null,
     agent_phone: (input.agentPhone ?? '').trim() || null,
+    agent_email: some(input.agentEmail),
+    agent_whatsapp: some(input.agentWhatsapp),
+    collector_name: some(input.collector?.name),
+    collector_phone: some(input.collector?.phone),
+    collector_email: some(input.collector?.email),
+    collector_whatsapp: some(input.collector?.whatsapp),
+    liaison_name: some(input.liaison?.name),
+    liaison_phone: some(input.liaison?.phone),
+    liaison_email: some(input.liaison?.email),
+    liaison_whatsapp: some(input.liaison?.whatsapp),
     firm_name: input.firm.firmName,
     firm_phone: some(input.firm.phone),
     firm_email: some(input.firm.email),

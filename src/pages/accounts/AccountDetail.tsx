@@ -373,6 +373,21 @@ export function AccountDetail() {
           clientName: client?.name ?? null,
           agentName: currentUser?.name ?? null,
           agentPhone: currentUser?.phone ?? null,
+          agentEmail: currentUser?.email ?? null,
+          agentWhatsapp: currentUser?.whatsapp ?? null,
+          /*
+           * THE THREE PEOPLE A LETTER CAN NAME, and they are not the same person.
+           *
+           * `agent` is whoever is composing. `collector` is whoever the ACCOUNT is assigned to --
+           * which is the answer to "who is handling my account", and it follows the account when
+           * it is handed on. `liaison` is whoever looks after the CLIENT whose book it is.
+           *
+           * Both come out of `users`, which AppStore already holds, so naming them costs no
+           * request. Undefined where nobody is assigned, which merges as a placeholder left
+           * standing rather than a blank line -- caught here rather than posted.
+           */
+          collector: users.find((u) => u.id === account.assignedTo),
+          liaison: users.find((u) => u.id === client?.accountOwnerId),
           today: dayKey(new Date()),
           money: formatMoney,
           debtorIdMasked: account.debtorIdNumber,
@@ -385,7 +400,11 @@ export function AccountDetail() {
       : {},
   /* Before the early returns below, because a hook cannot run conditionally -- which is also why
      it reads `statement` rather than the `b` shorthand, which is only defined past them. */
-  }), [account, statement?.breakdown?.balance, client?.name, currentUser?.name, currentUser?.phone, firm])
+  /* `users` and client.accountOwnerId are in here because the collector and the liaison are read
+     out of them: left off, a letter keeps naming whoever held the account before it was handed
+     on, which is the one failure these fields exist to prevent. */
+  }), [account, statement?.breakdown?.balance, client?.name, client?.accountOwnerId, users,
+    currentUser?.name, currentUser?.phone, currentUser?.email, currentUser?.whatsapp, firm])
 
 
   if (loading) return <div className="p-10 grid place-items-center text-slate-400"><Loader2 size={20} className="animate-spin" /></div>

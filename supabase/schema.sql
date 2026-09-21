@@ -5519,3 +5519,12 @@ alter table public.firm_settings add column if not exists trust_account_type tex
 -- OFFERED TO THE COLLECTIONS SIDE ONLY. It tells a debtor where to pay; a sales template has no
 -- business with it, and the closed merge list is what keeps it off one. See MERGE_FIELDS.
 alter table public.firm_settings add column if not exists payment_instruction text;
+
+-- A WhatsApp number on the person, at the firm's request: "the email address, telephone number,
+-- WhatsApp number" for the person assigned to the account and the person assigned to the client.
+--
+-- ITS OWN COLUMN, NOT `phone`. A collector's desk line and the number a debtor may message are
+-- routinely different, and the firm sends on both channels -- workflowBuilder has had 'whatsapp'
+-- as a step channel since it was written. Merging them would put a landline into a WhatsApp
+-- message and nothing would report it.
+alter table public.profiles add column if not exists whatsapp text;

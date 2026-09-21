@@ -10,6 +10,7 @@ interface ProfileRow {
   email: string
   role: UserRole
   team_id: string | null
+  whatsapp: string | null
   status: 'Active' | 'Inactive'
   phone: string | null
   avatar_color: string
@@ -34,6 +35,7 @@ function mapProfileRow(row: ProfileRow): User {
     teamId: row.team_id ?? undefined,
     status: row.status,
     phone: row.phone ?? undefined,
+    whatsapp: row.whatsapp ?? undefined,
     avatarColor: row.avatar_color,
     emailSignature: row.email_signature ?? undefined,
     emailSignatureImageUrl: row.email_signature_image_url ?? undefined,

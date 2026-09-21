@@ -451,6 +451,8 @@ export interface User {
   teamId?: ID
   status: 'Active' | 'Inactive'
   phone?: string
+  /** A number a debtor may be messaged on, which is routinely not the desk line above. */
+  whatsapp?: string
   avatarColor: string
   /** Appended under the body of any email sent from Romulus via this person's connected inbox. */
   emailSignature?: string

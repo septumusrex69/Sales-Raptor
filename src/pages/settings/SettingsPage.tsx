@@ -70,6 +70,7 @@ function ProfileTab() {
     fullName: currentUser?.name ?? '',
     email: currentUser?.email ?? '',
     phone: currentUser?.phone ?? '',
+    whatsapp: currentUser?.whatsapp ?? '',
     emailSignature: currentUser?.emailSignature ?? '',
     emailSignatureImageUrl: currentUser?.emailSignatureImageUrl,
     emailSignatureImageWidth: currentUser?.emailSignatureImageWidth,
@@ -98,6 +99,7 @@ function ProfileTab() {
             const patch = {
               name: form.fullName,
               phone: form.phone || undefined,
+              whatsapp: form.whatsapp || undefined,
               emailSignature: form.emailSignature || undefined,
               emailSignatureImageUrl: form.emailSignatureImageUrl,
               emailSignatureImageWidth: form.emailSignatureImageWidth,
@@ -121,6 +123,14 @@ function ProfileTab() {
             </FormField>
             <FormField label="Phone">
               <input className={inputClass} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            </FormField>
+            {/* ITS OWN NUMBER, NOT THE DESK LINE. A debtor messaged on a landline is a message
+                nobody receives, and workflows have had a WhatsApp channel since they were built.
+                Fills {{collector_whatsapp}} on an account this person holds. */}
+            <FormField label="WhatsApp">
+              <input className={inputClass} value={form.whatsapp}
+                placeholder="Only if it differs from the number above"
+                onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} />
             </FormField>
             <FormField label="Role">
               <input className={inputClass} value={currentUser?.role ?? ''} disabled />

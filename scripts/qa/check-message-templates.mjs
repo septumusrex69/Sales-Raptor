@@ -187,6 +187,11 @@ const money = (n) => `R ${n.toFixed(2)}`
 const values = mergeValuesFor({
   account: person, balance: 48250, clientName: 'Gauteng Property Services',
   agentName: 'Stephan Bredell', agentPhone: '012 111 2222',
+  agentEmail: 'stephan@bredellferreira.co.za', agentWhatsapp: '082 000 0001',
+  /* DELIBERATELY THREE DIFFERENT PEOPLE. The whole point of the new fields is that they are not
+     the same person, and a fixture where they were would prove nothing. */
+  collector: { name: 'Rinda Ferreira', phone: '012 348 2156', email: 'rinda@bf.co.za', whatsapp: '082 000 0002' },
+  liaison: { name: 'Camile Bredell', phone: '012 348 2157', email: 'camile@bf.co.za', whatsapp: '082 000 0003' },
   today: '2026-09-18', money,
   /* PASSED WHOLE, the way AccountDetail passes it: mergeValuesFor takes FirmSettings' own shape
      so that no list of the firm's fields exists in between to fall behind the ones it grew. */
@@ -334,6 +339,49 @@ check('neither reaches a sales template',
 ok('...and both are offered to a debtor notice',
   keys('collections').includes('payment_instruction')
   && keys('collections').includes('firm_bank_type'))
+
+/* ---------- three people, and they are not the same person ---------- */
+
+/*
+ * THE FIRM: "fields for the user ... the user that's assigned to the account or the user that's
+ * assigned to the client ... email address, telephone number, WhatsApp number."
+ *
+ * {{agent_*}} has always resolved to whoever is SIGNED IN, so a team leader previewing a letter
+ * on somebody else's account sees their own name. That is right for "reply and you reach me" and
+ * wrong for "the collector handling your account is". So the account's collector and the client's
+ * liaison are their own fields, and this is what keeps the three apart: every value below comes
+ * from a different person in the fixture, so any two of them wired to one source fails.
+ */
+check('the sender is whoever is composing',
+  [values.agent_name, values.agent_phone, values.agent_email, values.agent_whatsapp],
+  ['Stephan Bredell', '012 111 2222', 'stephan@bredellferreira.co.za', '082 000 0001'])
+check('the collector is whoever the ACCOUNT is assigned to',
+  [values.collector_name, values.collector_phone, values.collector_email, values.collector_whatsapp],
+  ['Rinda Ferreira', '012 348 2156', 'rinda@bf.co.za', '082 000 0002'])
+check('the liaison is whoever looks after the CLIENT',
+  [values.liaison_name, values.liaison_phone, values.liaison_email, values.liaison_whatsapp],
+  ['Camile Bredell', '012 348 2157', 'camile@bf.co.za', '082 000 0003'])
+
+/*
+ * NOBODY ASSIGNED IS NULL, NOT A BLANK. An unassigned account merging as an empty line would read
+ * as a finished letter naming nobody; left standing, {{collector_name}} is caught before it is
+ * posted. The same rule as every other unfillable field in this file.
+ */
+const orphan = mergeValuesFor({
+  account: person, balance: 1, clientName: 'x', agentName: 'y', agentPhone: 'z',
+  firm: { firmName: 'f' }, today: '2026-09-18', money,
+})
+check('an account nobody holds names nobody, rather than a gap',
+  [orphan.collector_name, orphan.liaison_name, orphan.agent_email], [null, null, null])
+
+/*
+ * THE LIAISON IS A COLLECTIONS IDEA. It is for what the firm writes TO a client about an account;
+ * a lead has no liaison because it has no client yet.
+ */
+check('the liaison is not offered on the sales side',
+  keys('sales').filter((k) => k.startsWith('liaison_')), [])
+ok('...while the sender travels with both sides',
+  keys('sales').includes('agent_email') && keys('collections').includes('agent_email'))
 
 /* ---------- the fields, in groups ---------- */
 
