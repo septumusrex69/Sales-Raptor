@@ -683,7 +683,7 @@ export function CompanyDetail() {
             <RecordAction icon={StickyNote} label="Add Note" onClick={() => setNoteOpen(true)}
               title="Write on the timeline" />
             {isClient && (
-              <RecordAction icon={Inbox} label="Import Handover" onClick={() => setHandoverOpen(true)} primary
+              <RecordAction icon={Inbox} label="Record a batch" onClick={() => setHandoverOpen(true)} primary
                 title="Bring a batch of accounts into the book" />
             )}
 

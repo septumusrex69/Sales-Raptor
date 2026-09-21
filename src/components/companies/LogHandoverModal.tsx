@@ -5,6 +5,18 @@ import type { Handover } from '../../types'
 /**
  * Records one batch a client actually sent.
  *
+ * "RECORD A BATCH", NOT "IMPORT HANDOVER", and both halves of that were wrong.
+ *
+ * THE FIRM'S WORD: "an endeavour file can have many handovers, but each handover is an account.
+ * If I refer to accounts or I refer to handovers, I'm referring to the same thing." So a HANDOVER
+ * is one account, and this screen is about the batch they arrived in — calling it "Handover"
+ * singular named the wrong thing entirely. CLAUDE.md's first rule: the vocabulary is the firm's.
+ *
+ * And it never imported anything. It takes the capital, the count and the date; no file, no
+ * accounts. With a real handover import now being built, a button labelled "Import Handover" next
+ * to one that actually imports handovers is the kind of confusion that gets a batch typed in
+ * twice.
+ *
  * Handovers used to be logged as a line of free text, which meant the app knew a handover had
  * happened but never how much — so a client who signed for a million and sent fifty thousand
  * looked identical to one who sent the lot. These are the numbers everything real about a
@@ -40,7 +52,7 @@ export function LogHandoverModal({
   }
 
   return (
-    <Modal title="Import Handover" onClose={onClose} width={480}>
+    <Modal title="Record a batch" onClose={onClose} width={480}>
       <form onSubmit={submit}>
         <p className="text-sm text-slate-500 mb-4">
           One batch from {companyName}. Capital only — Annex B fees and interest are added as the accounts are worked,

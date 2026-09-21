@@ -29,6 +29,14 @@ day for everybody; a junior and an elite carry the same volume. Per-person overr
 **A routine review is the LAST rung, below even a trace.** It is the only kind with no event
 behind it.
 
+**A HANDOVER IS ONE ACCOUNT.** The firm, asked directly: *"an endeavour file can have many
+handovers, but each handover is an account. If I refer to accounts or I refer to handovers, I'm
+referring to the same thing."* Raptor's `handovers` TABLE is the **batch** they arrived in — the
+same word for a different thing, which is fine in the database and not on a screen. So a screen
+about the batch says **batch**; a screen about one account may say handover. "Import Handover" on
+the client page meant "record the numbers for a batch", was singular where the firm means one
+account, and imported nothing at all.
+
 ---
 
 ## Rules that are law, not preference

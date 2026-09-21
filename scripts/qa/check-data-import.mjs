@@ -132,6 +132,36 @@ ok('...and still offers people, because it is setting an owner', /u\.name/.test(
 
 /* ---------- 3. nothing here belongs to the other side ---------- */
 
+/* ---------- 4. one word, one meaning ---------- */
+
+/*
+ * A HANDOVER IS ONE ACCOUNT. The firm, asked directly: "an endeavour file can have many
+ * handovers, but each handover is an account. If I refer to accounts or I refer to handovers,
+ * I'm referring to the same thing."
+ *
+ * Raptor's `handovers` TABLE is the batch they arrived in, which is a different thing wearing the
+ * same word — fine in the database, not fine on a screen. CLAUDE.md's first rule is that the
+ * vocabulary is the firm's, and three controls said "Import Handover" when they meant "record the
+ * numbers for a batch": singular where the firm means one account, and "import" where nothing is
+ * imported at all. With a real handover import being built, that is the confusion that gets a
+ * batch typed in twice.
+ */
+/* `code` above is this screen's source already stripped; these are other files, so they need
+   stripping of their own -- the explanation of the rule sits in a comment beside the code that
+   keeps it, and read as written every assertion below is answered by its own explanation. */
+const tsx = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+const batchScreens = [
+  ['../../src/components/companies/LogHandoverModal.tsx', 'the modal that records a batch'],
+  ['../../src/components/companies/HandoverBook.tsx', 'the handover book'],
+  ['../../src/pages/companies/CompanyDetail.tsx', 'the client page'],
+]
+for (const [path, what] of batchScreens) {
+  const src = tsx(path)
+  ok(`${what} no longer offers to "Import Handover"`, !/Import Handover/.test(src))
+  ok(`...and says it records a batch instead`, /Record a batch/.test(src))
+}
+
 /* ---------------------------------------------------------------- report */
 
 if (failures.length) {
