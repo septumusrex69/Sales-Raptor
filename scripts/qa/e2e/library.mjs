@@ -134,6 +134,10 @@ const FIRM = [{
   phone_alt: null,
   email: 'info@bredellferreira.co.za',
   physical_address: '25 Kerk Street\nPolokwane\n0699',
+  /* POST GOES SOMEWHERE ELSE, which is the whole reason it is a second field: a section 129 is
+     delivered to a chosen address, and the street the firm sits in need not be it. */
+  postal_address: 'PO Box 1234\nPolokwane\n0700',
+  office_hours: 'Monday to Friday, 08:00 \u2013 16:30',
   /* APART, which is the change: the firm asked for the branch code to be a field of its own. */
   trust_bank: 'Standard Bank',
   trust_branch_code: '051001',
@@ -1061,9 +1065,16 @@ try {
     !boxes.some((v) => v.includes('\u00b7')))
   t.ok('the office has a number of its own, which is not the collector\u2019s',
     boxes.includes('015 291 1234'))
-  /* The address is typed on the lines it is merged on, so it is a textarea and not an input. */
-  t.check('the address is typed on its own lines',
-    await page.locator('textarea').count(), 1)
+  /* Each address is typed on the lines it is merged on, so both are textareas and not inputs --
+     and there are TWO, because where the firm sits and where its post arrives are different
+     questions and a notice may need either. */
+  const addresses = await page.$$eval('textarea', (els) => els.map((e) => e.value))
+  t.check('both addresses are typed on their own lines', addresses.length, 2)
+  t.ok(`...the street and the box, kept apart (${addresses.map((a) => a.split('\n')[0]).join(' | ')})`,
+    addresses.some((a) => a.startsWith('25 Kerk Street'))
+    && addresses.some((a) => a.startsWith('PO Box 1234')))
+  t.ok('the office\u2019s hours are written out rather than picked as a time',
+    boxes.includes('Monday to Friday, 08:00 \u2013 16:30'))
 
   /*
    * THE WARNING NAMES WHAT IS MISSING AND STAYS QUIET ABOUT WHAT IS NOT.

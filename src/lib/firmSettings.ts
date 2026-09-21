@@ -39,7 +39,7 @@ import { supabase } from './supabase'
  * that reads `undefined` for ever.
  */
 const COLUMNS = 'firm_name, registration_number, vat_number, council_number, '
-  + 'phone, phone_alt, email, physical_address, '
+  + 'phone, phone_alt, email, physical_address, postal_address, office_hours, '
   + 'trust_bank, trust_branch_code, trust_account_name, trust_account_number, '
   + 'business_bank, business_branch_code, business_account_name, business_account_number, '
   + 'signatory_name, signatory_title, '
@@ -54,6 +54,8 @@ interface Row {
   phone_alt: string | null
   email: string | null
   physical_address: string | null
+  postal_address: string | null
+  office_hours: string | null
   trust_bank: string | null
   trust_branch_code: string | null
   trust_account_name: string | null
@@ -82,6 +84,10 @@ export interface FirmSettings {
   email: string | null
   /** Multi-line and merged as typed: an address is written on its own lines on a letterhead. */
   physicalAddress: string | null
+  /** Where post is received, which is not always where the firm sits. Multi-line, like above. */
+  postalAddress: string | null
+  /** One free-text line, written the way it should read. Nothing in the app acts on it. */
+  officeHours: string | null
   /** Where a DEBTOR pays in. Bank and branch code apart — the firm's own correction. */
   trustBank: string | null
   trustBranchCode: string | null
@@ -118,6 +124,8 @@ export const FIRM_UNSET: FirmSettings = {
   phoneAlt: null,
   email: null,
   physicalAddress: null,
+  postalAddress: null,
+  officeHours: null,
   trustBank: null,
   trustBranchCode: null,
   trustAccountName: null,
@@ -150,6 +158,8 @@ function toSettings(r: Row): FirmSettings {
     phoneAlt: some(r.phone_alt),
     email: some(r.email),
     physicalAddress: some(r.physical_address),
+    postalAddress: some(r.postal_address),
+    officeHours: some(r.office_hours),
     trustBank: some(r.trust_bank),
     trustBranchCode: some(r.trust_branch_code),
     trustAccountName: some(r.trust_account_name),
@@ -193,6 +203,8 @@ export async function saveFirmSettings(next: Omit<FirmSettings, 'updatedAt'>): P
     phone_alt: some(next.phoneAlt),
     email: some(next.email),
     physical_address: some(next.physicalAddress),
+    postal_address: some(next.postalAddress),
+    office_hours: some(next.officeHours),
     trust_bank: some(next.trustBank),
     trust_branch_code: some(next.trustBranchCode),
     trust_account_name: some(next.trustAccountName),

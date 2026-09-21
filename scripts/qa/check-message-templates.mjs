@@ -193,6 +193,8 @@ const values = mergeValuesFor({
     firmName: 'Bredell Ferreira',
     phone: '015 291 1234', email: 'info@bredellferreira.co.za',
     physicalAddress: '25 Kerk Street\nPolokwane\n0699',
+    postalAddress: 'PO Box 1234\nPolokwane\n0700',
+    officeHours: 'Monday to Friday, 08:00 \u2013 16:30',
     trustBank: 'Standard Bank', trustBranchCode: '051001',
     trustAccountName: 'Bredell Ferreira Trust', trustAccountNumber: '01 234 5678',
     businessBank: 'Nedbank', businessBranchCode: '198765',
@@ -238,6 +240,22 @@ check('the office number is the firm\u2019s, not the collector\u2019s',
   [values.firm_phone, values.agent_phone], ['015 291 1234', '012 111 2222'])
 check('the address is merged on the lines it was typed on',
   values.firm_address, '25 Kerk Street\nPolokwane\n0699')
+/*
+ * WHERE THE FIRM SITS AND WHERE ITS POST ARRIVES ARE DIFFERENT ANSWERS. A section 129 is
+ * delivered to a chosen address; a firm working from a street it does not receive post at would
+ * have replies going nowhere. One "address" field would make a template author pick which
+ * meaning it had, silently and differently each time.
+ */
+check('post goes to its own address, not the street',
+  values.firm_postal_address, 'PO Box 1234\nPolokwane\n0700')
+/* Free text: "telephone this office" is only useful with the hours attached, and nothing in the
+   app reads this as a time -- no queue closes because this box says half past four. */
+check('the office\u2019s hours are merged as written',
+  values.firm_hours, 'Monday to Friday, 08:00 \u2013 16:30')
+/* The en dash the firm would naturally type between two times is in Windows-1252 at 0x96; one
+   that is not would refuse the build of every notice carrying this field. */
+ok('every character of the hours can be printed on a notice',
+  [...(values.firm_hours ?? '')].every((ch) => isPrintable(ch.codePointAt(0))))
 
 /*
  * {{firm_bank}} STILL PRINTS WHAT IT USED TO. The firm asked for the bank and the branch code to

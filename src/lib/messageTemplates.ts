@@ -171,6 +171,12 @@ const EVERYWHERE: MergeField[] = [
   { key: 'firm_phone', label: "The office's telephone number", sample: '012 111 2222' },
   { key: 'firm_email', label: "The office's email address", sample: 'info@bredellferreira.co.za' },
   { key: 'firm_address', label: 'The firm’s address, on its own lines', sample: '25 Kerk Street\nPolokwane, 0699' },
+  /* NOT THE SAME ADDRESS, and on a statutory notice the difference is the point: a firm that
+     works from a street it does not receive post at would have replies going nowhere. Offered
+     separately rather than one "address" field somebody has to choose the meaning of. */
+  { key: 'firm_postal_address', label: 'Where post to the firm is sent, on its own lines', sample: 'PO Box 1234\nPolokwane, 0700' },
+  /* "Telephone this office" is only useful with the hours attached. */
+  { key: 'firm_hours', label: 'When the office is open', sample: 'Monday to Friday, 08:00 – 16:30' },
 ]
 
 /**
@@ -497,6 +503,8 @@ export function mergeValuesFor(input: {
     phone?: string | null
     email?: string | null
     physicalAddress?: string | null
+    postalAddress?: string | null
+    officeHours?: string | null
     trustBank?: string | null
     trustBranchCode?: string | null
     trustAccountName?: string | null
@@ -525,6 +533,8 @@ export function mergeValuesFor(input: {
     firm_phone: some(input.firm.phone),
     firm_email: some(input.firm.email),
     firm_address: some(input.firm.physicalAddress),
+    firm_postal_address: some(input.firm.postalAddress),
+    firm_hours: some(input.firm.officeHours),
     today: longDate(input.today),
     /* The creditor's own number, which is NOT the reference above: the client's reference is what
        appears on the debtor's paperwork, and a section 129 has to identify the agreement. */

@@ -169,9 +169,19 @@ export function FirmSettingsPage() {
           {text('phoneAlt', 'Second number', 'Not merged on its own \u2014 kept here so it is in one place.',
             '015 291 5678')}
           {text('email', 'Email address', 'Fills {{firm_email}}.', 'info@bredellferreira.co.za')}
+          {/* Free text, written the way it should read on a letter. Nothing in Raptor acts on it:
+              no queue closes at half past four because this box says so. */}
+          {text('officeHours', 'Office hours',
+            'Fills {{firm_hours}}. Written out \u2014 nothing in the app reads it as a time.',
+            'Monday to Friday, 08:00 \u2013 16:30')}
+          {/* THE TWO ADDRESSES SIDE BY SIDE, because that is the only way the difference between
+              them reads as deliberate rather than as one of them being the spare. */}
           {lines('physicalAddress', 'Physical address',
-            'Fills {{firm_address}}, on the lines you type it in.',
+            'Where the firm sits. Fills {{firm_address}}, on the lines you type it in.',
             '25 Kerk Street\nPolokwane\n0699')}
+          {lines('postalAddress', 'Postal address',
+            'Where post is received, if it is not the street above. Fills {{firm_postal_address}}.',
+            'PO Box 1234\nPolokwane\n0700')}
         </div>
       </Card>
 

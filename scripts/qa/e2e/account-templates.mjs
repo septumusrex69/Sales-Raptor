@@ -99,6 +99,8 @@ const FIRM = [{
   phone: '015 291 1234',
   email: 'info@bredellferreira.co.za',
   physical_address: '25 Kerk Street\nPolokwane\n0699',
+  postal_address: 'PO Box 1234\nPolokwane\n0700',
+  office_hours: 'Monday to Friday, 08:00 \u2013 16:30',
   signatory_name: 'J Bredell',
   signatory_title: 'Duly authorised legal representative',
   email_font: 'Georgia, "Times New Roman", Times, serif',

@@ -5477,3 +5477,16 @@ alter table public.firm_settings add column if not exists registration_number te
 alter table public.firm_settings add column if not exists vat_number text;
 -- The Council for Debt Collectors number, where the firm shows it on correspondence.
 alter table public.firm_settings add column if not exists council_number text;
+
+-- A postal address and the office's hours, at the firm's request, alongside the physical address.
+--
+-- A POSTAL ADDRESS IS NOT THE PHYSICAL ONE, and on a section 129 the difference is the point: the
+-- Act has the notice delivered to a chosen address, and a firm that works from a street it does
+-- not receive post at would have replies going nowhere. Multi-line, like the physical address and
+-- like debtor_address, and merged on the lines it is typed on.
+alter table public.firm_settings add column if not exists postal_address text;
+
+-- "Please telephone this office" is only useful with the hours attached. One free-text line
+-- rather than open/close times: the firm writes it the way it should read on a letter, and no
+-- part of the app decides anything from it -- nothing here closes the switchboard at 16:30.
+alter table public.firm_settings add column if not exists office_hours text;
