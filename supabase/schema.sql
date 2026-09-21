@@ -5498,3 +5498,24 @@ alter table public.firm_settings add column if not exists office_hours text;
 -- and which of those is right is the firm's decision per template, not this column's. Nothing in
 -- the app fetches it, so there is nothing for a malformed one to break.
 alter table public.firm_settings add column if not exists website text;
+
+-- Where a debtor pays, said once and said everywhere.
+--
+-- The firm: "all payments that you make need to be paid over to our trust account. It's a legal
+-- practitioner trust account ... we need to move them and motivate them to pay into our trust
+-- account." That is a thing said in a letter, in an email, in an SMS and out loud on a call, and
+-- until now it would have been retyped into each of them -- which is how nine templates end up
+-- describing the same account four different ways.
+
+-- What kind of account it is, in the bank's own words. FNB's confirmation letter calls it a
+-- LEGAL PRACTITIONER TRUST ACCOUNT, and that phrase is doing work on a notice: it tells a debtor
+-- the money is not the firm's to spend. A fact about the account, so it lives beside the account.
+alter table public.firm_settings add column if not exists trust_account_type text;
+
+-- The standing paragraph that asks for payment into that account. Free text, multi-line, merged
+-- as typed -- the firm's words, not the app's, because this is the part a debtor reads and argues
+-- with.
+--
+-- OFFERED TO THE COLLECTIONS SIDE ONLY. It tells a debtor where to pay; a sales template has no
+-- business with it, and the closed merge list is what keeps it off one. See MERGE_FIELDS.
+alter table public.firm_settings add column if not exists payment_instruction text;

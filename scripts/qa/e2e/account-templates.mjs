@@ -96,6 +96,8 @@ const FIRM = [{
   trust_branch_code: '051001',
   trust_account_name: 'Bredell Ferreira Trust',
   trust_account_number: '01 234 5678',
+  trust_account_type: 'Legal Practitioner Trust Account',
+  payment_instruction: 'Payment must be made into our trust account.',
   phone: '015 291 1234',
   email: 'info@bredellferreira.co.za',
   website: 'www.bredellferreira.co.za',

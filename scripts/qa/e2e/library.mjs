@@ -144,6 +144,8 @@ const FIRM = [{
   trust_branch_code: '051001',
   trust_account_name: null,
   trust_account_number: '01 234 5678',
+  trust_account_type: 'Legal Practitioner Trust Account',
+  payment_instruction: 'Payment must be made into our trust account.',
   business_bank: null,
   business_branch_code: null,
   business_account_name: null,
@@ -1066,14 +1068,23 @@ try {
     !boxes.some((v) => v.includes('\u00b7')))
   t.ok('the office has a number of its own, which is not the collector\u2019s',
     boxes.includes('015 291 1234'))
-  /* Each address is typed on the lines it is merged on, so both are textareas and not inputs --
-     and there are TWO, because where the firm sits and where its post arrives are different
-     questions and a notice may need either. */
-  const addresses = await page.$$eval('textarea', (els) => els.map((e) => e.value))
+  /*
+   * The ADDRESS boxes, named by their placeholders rather than counted.
+   *
+   * This was `$$eval('textarea')` and a count of two, which broke the day the standing payment
+   * ask became a third textarea on the same screen -- a check reporting a real failure about the
+   * wrong thing. Both addresses are textareas because each is merged on the lines it is typed on,
+   * and there are two because where the firm sits and where its post arrives are different
+   * questions a notice may need either answer to.
+   */
+  const areas = () => page.$$eval(
+    'textarea[placeholder^="25 Kerk Street"], textarea[placeholder^="PO Box"]',
+    (els) => els.map((e) => ({ v: e.value, off: e.disabled })))
+  const addresses = await areas()
   t.check('both addresses are typed on their own lines', addresses.length, 2)
-  t.ok(`...the street and the box, kept apart (${addresses.map((a) => a.split('\n')[0]).join(' | ')})`,
-    addresses.some((a) => a.startsWith('25 Kerk Street'))
-    && addresses.some((a) => a.startsWith('PO Box 1234')))
+  t.ok(`...the street and the box, kept apart (${addresses.map((a) => a.v.split('\n')[0]).join(' | ')})`,
+    addresses.some((a) => a.v.startsWith('25 Kerk Street'))
+    && addresses.some((a) => a.v.startsWith('PO Box 1234')))
   t.ok('the office\u2019s hours are written out rather than picked as a time',
     boxes.includes('Monday to Friday, 08:00 \u2013 16:30'))
   /* As typed: no scheme added on the way in either, or the box would argue with whoever filled
@@ -1093,6 +1104,18 @@ try {
     warning.includes('the account name'))
   t.ok('...and the three that are filled in are not mentioned',
     !/the bank|the branch code|the account number/.test(warning))
+
+  /*
+   * THE ASK, WRITTEN ONCE AND ON THE CARD IT BELONGS TO. The firm: "we need to move them and
+   * motivate them to pay into our trust account. It's a legal practitioner trust account." Both
+   * sit under "Where a debtor pays" rather than in nine templates, which is the only way the same
+   * account gets described the same way twice.
+   */
+  t.ok('the trust card says what kind of account it is',
+    boxes.includes('Legal Practitioner Trust Account'))
+  t.check('...and the standing ask is typed on its own lines, not squeezed into a box',
+    (await page.$$eval('textarea', (els) => els.map((e) => e.value)))
+      .filter((v) => v.startsWith('Payment must be made')).length, 1)
 
   /* The second account, empty and offered -- a client's commission, never a debtor's payment. */
   t.ok('the business account is a separate card with its own boxes',
@@ -1132,11 +1155,11 @@ try {
    * The state is clean here: the save above reloaded the row, so both boxes are back to the
    * stub's -- which deliberately has a street address and a PO box, two different things.
    */
-  const areas = () => page.$$eval('textarea', (els) => els.map((e) => ({ v: e.value, off: e.disabled })))
   const tick = page.getByRole('checkbox').first()
   t.ok('the card offers to keep the two addresses the same', await tick.isVisible())
   t.check('...and it is not ticked while they differ', await tick.isChecked(), false)
-  t.check('...so both boxes can be typed in', (await areas()).filter((a) => a.off).length, 0)
+  t.check('...so both address boxes can be typed in',
+    (await areas()).filter((a) => a.off).length, 0)
 
   await tick.check()
   await page.waitForTimeout(400)

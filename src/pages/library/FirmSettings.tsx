@@ -281,6 +281,27 @@ export function FirmSettingsPage() {
             'Bredell Ferreira Trust')}
           {text('trustAccountNumber', 'Account number',
             'Fills {{firm_bank_account}}.', '01 234 5678')}
+          {/* The bank's own words. "Legal practitioner trust account" is doing work on a notice:
+              it tells a debtor the money is not the firm's to spend. */}
+          {text('trustAccountType', 'What kind of account it is',
+            'As the bank calls it. Fills {{firm_bank_type}}.',
+            'Legal Practitioner Trust Account')}
+        </div>
+        {/*
+          THE ASK, WRITTEN ONCE. The firm: "we need to move them and motivate them to pay into our
+          trust account." Retyped into each template instead, the same account gets described four
+          different ways and the one a debtor happens to be holding is the one that counts.
+
+          THE COST WARNING IS NOT DECORATION. This merges into an SMS as readily as into a letter,
+          and Annexure B item 1(c) is priced per SEGMENT -- a paragraph here is several messages
+          there. The SMS box prices it live while you type, which is where it will be noticed.
+        */}
+        <div className="mt-4">
+          {lines('paymentInstruction', 'What a debtor is told about paying',
+            'Your words, merged wherever payment is discussed \u2014 letter, email, SMS, call '
+            + 'script. Fills {{payment_instruction}}. Long enough to matter in an SMS, which is '
+            + 'priced per segment.',
+            'Payment must be made into our trust account, the details of which appear below.')}
         </div>
         {/*
           A WARNING THAT ONLY FIRES WHEN SOMETHING IS WRONG, and that NAMES what is missing rather

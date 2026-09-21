@@ -41,6 +41,7 @@ import { supabase } from './supabase'
 const COLUMNS = 'firm_name, registration_number, vat_number, council_number, '
   + 'phone, phone_alt, email, website, physical_address, postal_address, office_hours, '
   + 'trust_bank, trust_branch_code, trust_account_name, trust_account_number, '
+  + 'trust_account_type, payment_instruction, '
   + 'business_bank, business_branch_code, business_account_name, business_account_number, '
   + 'signatory_name, signatory_title, '
   + 'email_font, email_size_pt, updated_at'
@@ -61,6 +62,8 @@ interface Row {
   trust_branch_code: string | null
   trust_account_name: string | null
   trust_account_number: string | null
+  trust_account_type: string | null
+  payment_instruction: string | null
   business_bank: string | null
   business_branch_code: string | null
   business_account_name: string | null
@@ -97,6 +100,13 @@ export interface FirmSettings {
   /** The beneficiary name. An account number on its own is not enough to pay into. */
   trustAccountName: string | null
   trustAccountNumber: string | null
+  /** The bank's own words for it: "Legal Practitioner Trust Account". Printed, never acted on. */
+  trustAccountType: string | null
+  /**
+   * The standing paragraph asking a debtor to pay into that account rather than the client.
+   * The firm's words, merged as typed, and offered to collections templates only.
+   */
+  paymentInstruction: string | null
   /** Where a CLIENT pays the firm what it still owes. Never where a debtor pays. */
   businessBank: string | null
   businessBranchCode: string | null
@@ -134,6 +144,8 @@ export const FIRM_UNSET: FirmSettings = {
   trustBranchCode: null,
   trustAccountName: null,
   trustAccountNumber: null,
+  trustAccountType: null,
+  paymentInstruction: null,
   businessBank: null,
   businessBranchCode: null,
   businessAccountName: null,
@@ -169,6 +181,8 @@ function toSettings(r: Row): FirmSettings {
     trustBranchCode: some(r.trust_branch_code),
     trustAccountName: some(r.trust_account_name),
     trustAccountNumber: some(r.trust_account_number),
+    trustAccountType: some(r.trust_account_type),
+    paymentInstruction: some(r.payment_instruction),
     businessBank: some(r.business_bank),
     businessBranchCode: some(r.business_branch_code),
     businessAccountName: some(r.business_account_name),
@@ -215,6 +229,8 @@ export async function saveFirmSettings(next: Omit<FirmSettings, 'updatedAt'>): P
     trust_branch_code: some(next.trustBranchCode),
     trust_account_name: some(next.trustAccountName),
     trust_account_number: some(next.trustAccountNumber),
+    trust_account_type: some(next.trustAccountType),
+    payment_instruction: some(next.paymentInstruction),
     business_bank: some(next.businessBank),
     business_branch_code: some(next.businessBranchCode),
     business_account_name: some(next.businessAccountName),

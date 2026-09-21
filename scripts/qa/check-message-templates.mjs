@@ -198,6 +198,8 @@ const values = mergeValuesFor({
     officeHours: 'Monday to Friday, 08:00 \u2013 16:30',
     trustBank: 'Standard Bank', trustBranchCode: '051001',
     trustAccountName: 'Bredell Ferreira Trust', trustAccountNumber: '01 234 5678',
+    trustAccountType: 'Legal Practitioner Trust Account',
+    paymentInstruction: 'Payment must be made into our trust account.',
     businessBank: 'Nedbank', businessBranchCode: '198765',
     businessAccountName: 'Bredell Ferreira', businessAccountNumber: '02 345 6789',
     signatoryName: 'J Bredell', signatoryTitle: 'Duly authorised legal representative',
@@ -275,6 +277,16 @@ check('bank and branch code are joined the way they read on a page',
   values.firm_bank, 'Standard Bank \u00b7 051001')
 check('...and are each answerable on their own',
   [values.firm_bank_name, values.firm_bank_branch], ['Standard Bank', '051001'])
+/*
+ * WHERE A DEBTOR PAYS, SAID ONCE. The firm: "we need to move them and motivate them to pay into
+ * our trust account. It's a legal practitioner trust account." Both of these are the firm's own
+ * words merged as typed -- retyped into each template instead, the same account gets described
+ * four different ways and the one a debtor happens to be holding is the one that counts.
+ */
+check('the account type is merged in the bank\u2019s own words',
+  values.firm_bank_type, 'Legal Practitioner Trust Account')
+check('the standing ask is merged as the firm wrote it',
+  values.payment_instruction, 'Payment must be made into our trust account.')
 check('half an answer is still an answer', bankLine('Standard Bank', null), 'Standard Bank')
 check('...from either half', bankLine(null, '051001'), '051001')
 check('...and neither is nothing, not a stray separator', bankLine(null, null), null)
@@ -310,6 +322,17 @@ check('no debtor notice can name the business account',
   keys('collections').filter((k) => k.startsWith('firm_business')), [])
 check('and no sales template can name the trust account',
   keys('sales').filter((k) => k.startsWith('firm_bank')), [])
+
+/*
+ * AND NEITHER IS OFFERED TO THE SALES SIDE. Both describe where a DEBTOR pays; a template to a
+ * lead or a client has no business asking for either, and templateProblems refuses a field that
+ * is not in the template's scope, so one that does will not save.
+ */
+check('neither reaches a sales template',
+  keys('sales').filter((k) => k === 'payment_instruction' || k === 'firm_bank_type'), [])
+ok('...and both are offered to a debtor notice',
+  keys('collections').includes('payment_instruction')
+  && keys('collections').includes('firm_bank_type'))
 
 /* ---------- what an SMS costs ---------- */
 

@@ -237,6 +237,21 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
        name, and the receiving bank may send it back. */
     { key: 'firm_bank_holder', label: 'The name on the trust account', sample: 'Bredell Ferreira Trust' },
     { key: 'firm_bank_account', label: 'Trust account number', sample: '01 234 5678' },
+    /*
+     * WHAT KIND OF ACCOUNT IT IS, in the bank's own words, and it is doing work on a notice: a
+     * legal practitioner trust account tells a debtor the money is not the firm's to spend.
+     */
+    { key: 'firm_bank_type', label: 'What kind of account it is', sample: 'Legal Practitioner Trust Account' },
+    /*
+     * THE ASK ITSELF, written once by the firm and merged wherever payment is discussed -- a
+     * letter, an email, an SMS, a call script. THE FIRM: "we need to move them and motivate them
+     * to pay into our trust account." Retyped into each template instead, the same account ends
+     * up described four different ways, and the one a debtor happens to hold is the one that
+     * counts.
+     *
+     * COLLECTIONS ONLY. It tells a DEBTOR where to pay; a sales template has no business with it.
+     */
+    { key: 'payment_instruction', label: 'The standing ask to pay into the trust account', sample: 'Payment must be made into our trust account, details below.' },
     { key: 'signatory_name', label: 'Who signs the letter', sample: 'J Bredell' },
     { key: 'signatory_title', label: 'Their title', sample: 'Director' },
     ...EVERYWHERE,
@@ -514,6 +529,8 @@ export function mergeValuesFor(input: {
     trustBranchCode?: string | null
     trustAccountName?: string | null
     trustAccountNumber?: string | null
+    trustAccountType?: string | null
+    paymentInstruction?: string | null
     businessBank?: string | null
     businessBranchCode?: string | null
     businessAccountName?: string | null
@@ -554,6 +571,8 @@ export function mergeValuesFor(input: {
     firm_bank_branch: some(input.firm.trustBranchCode),
     firm_bank_holder: some(input.firm.trustAccountName),
     firm_bank_account: some(input.firm.trustAccountNumber),
+    firm_bank_type: some(input.firm.trustAccountType),
+    payment_instruction: some(input.firm.paymentInstruction),
     /* The other direction a client's money comes from. Offered only to sales templates -- see
        MERGE_FIELDS -- but resolved here, because one function answers every scope. */
     firm_business_bank: bankLine(input.firm.businessBank, input.firm.businessBranchCode),
