@@ -65,6 +65,30 @@ export function FirmSettingsPage() {
      would be posted in, and a half-typed box is neither. */
   const trustGaps = missingTrust(row)
 
+  /*
+   * "SAME AS THE PHYSICAL ADDRESS" IS DERIVED, NOT STORED, and that is the whole design.
+   *
+   * The obvious build is a boolean column. It would be wrong here: {{firm_postal_address}} would
+   * then have to know about the flag, and so would the PDF, and so would anything that ever reads
+   * this row -- and the day the flag says "same" while the column says something else, every one
+   * of them answers differently. Derived from the two values being equal, the STORED postal
+   * address is always the real answer and nothing downstream has to interpret anything.
+   *
+   * Both null is NOT "the same". A firm that has filled in neither would otherwise open this
+   * screen to a ticked box and a postal address it cannot type into.
+   *
+   * The cost, and it is the honest one: unticking has to CLEAR the box, because the tick IS the
+   * equality -- leaving the words behind would tick it straight back on. Said on the screen.
+   */
+  const sameAddress = draft.physicalAddress !== null
+    && draft.postalAddress === draft.physicalAddress
+
+  /* Typing the street address carries the postal one with it while the two are held together. */
+  const setPhysical = (v: string | null) => {
+    setDraft({ ...draft, physicalAddress: v, ...(sameAddress ? { postalAddress: v } : {}) })
+    setSaved(false)
+  }
+
   async function save() {
     if (!draft) return
     setBusy(true)
@@ -117,12 +141,21 @@ export function FirmSettingsPage() {
 
   /* An address is written on its own lines and merged as typed, so it is typed on its own lines
      too. Flattening it to one box prints a street and a city in a single run. */
-  const lines = (k: TextKey, label: string, help: string, placeholder: string) => (
+  const lines = (k: TextKey, label: string, help: string, placeholder: string,
+    opts?: { locked?: boolean; onChange?: (v: string | null) => void }) => (
     <label className="block">
       <span className="block text-[11px] uppercase tracking-wide text-slate-400 mb-1">{label}</span>
-      <textarea className={`${inputClass} min-h-[5.5rem]`} disabled={!mayEdit} rows={3}
+      {/* A locked box is greyed as well as disabled: a box you cannot type in that looks exactly
+          like one you can is read as the app having stopped working. */}
+      <textarea
+        className={`${inputClass} min-h-[5.5rem] disabled:bg-slate-50 disabled:text-slate-500`}
+        disabled={!mayEdit || opts?.locked === true} rows={3}
         placeholder={placeholder} value={draft[k] ?? ''}
-        onChange={(e) => set(k, (e.target.value || null) as FirmSettings[typeof k])} />
+        onChange={(e) => {
+          const v = e.target.value || null
+          if (opts?.onChange) opts.onChange(v)
+          else set(k, v as FirmSettings[typeof k])
+        }} />
       <span className="block text-[11px] text-slate-400 mt-1">{help}</span>
     </label>
   )
@@ -198,10 +231,29 @@ export function FirmSettingsPage() {
               them reads as deliberate rather than as one of them being the spare. */}
           {lines('physicalAddress', 'Physical address',
             'Where the firm sits. Fills {{firm_address}}, on the lines you type it in.',
-            '25 Kerk Street\nPolokwane\n0699')}
-          {lines('postalAddress', 'Postal address',
-            'Where post is received, if it is not the street above. Fills {{firm_postal_address}}.',
-            'PO Box 1234\nPolokwane\n0700')}
+            '25 Kerk Street\nPolokwane\n0699', { onChange: setPhysical })}
+          <div>
+            {lines('postalAddress', 'Postal address',
+              'Where post is received. Fills {{firm_postal_address}}.',
+              'PO Box 1234\nPolokwane\n0700', { locked: sameAddress })}
+            {/*
+              THE TICK IS THE TWO BOXES BEING EQUAL, not a setting. Ticking copies the street
+              address across; untying CLEARS the box, because leaving the words there would be the
+              two boxes equal again and the tick would come straight back on. Said on the label so
+              nobody loses an address they had typed and is surprised.
+            */}
+            <label className={`mt-2 flex items-center gap-2 text-[11px]
+              ${draft.physicalAddress === null ? 'text-slate-300' : 'text-slate-500'}`}>
+              <input type="checkbox" className="rounded border-slate-300"
+                checked={sameAddress}
+                disabled={!mayEdit || draft.physicalAddress === null}
+                onChange={(e) => set('postalAddress',
+                  e.target.checked ? draft.physicalAddress : null)} />
+              {sameAddress
+                ? 'Same as the physical address \u2014 untick to type a different one'
+                : 'Same as the physical address'}
+            </label>
+          </div>
         </div>
       </Card>
 

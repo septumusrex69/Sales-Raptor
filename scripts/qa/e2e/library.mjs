@@ -1120,6 +1120,51 @@ try {
   t.ok('...and the bank and the branch code as separate columns, not one joined string',
     /"trust_bank":"Standard Bank"/.test(body) && /"trust_branch_code":"051001"/.test(body))
 
+  /* ---------- "same as the physical address" ---------- */
+
+  /*
+   * THE TICK IS DERIVED FROM THE TWO VALUES BEING EQUAL, not stored as a flag -- so what there is
+   * to check is behaviour, and behaviour is what only a browser can answer. A boolean column
+   * would have to be read by {{firm_postal_address}}, by the PDF and by everything else that ever
+   * touches this row, and the day it disagreed with the column each of them would answer
+   * differently. Derived, the stored address is always the real answer.
+   *
+   * The state is clean here: the save above reloaded the row, so both boxes are back to the
+   * stub's -- which deliberately has a street address and a PO box, two different things.
+   */
+  const areas = () => page.$$eval('textarea', (els) => els.map((e) => ({ v: e.value, off: e.disabled })))
+  const tick = page.getByRole('checkbox').first()
+  t.ok('the card offers to keep the two addresses the same', await tick.isVisible())
+  t.check('...and it is not ticked while they differ', await tick.isChecked(), false)
+  t.check('...so both boxes can be typed in', (await areas()).filter((a) => a.off).length, 0)
+
+  await tick.check()
+  await page.waitForTimeout(400)
+  const tied = await areas()
+  t.check('ticking copies the street address across',
+    tied[1]?.v, '25 Kerk Street\nPolokwane\n0699')
+  t.ok('...and locks the box rather than leaving two that disagree', tied[1]?.off === true)
+
+  /* The half that a copy-once implementation gets wrong: editing the street address afterwards. */
+  await page.getByPlaceholder('25 Kerk Street\nPolokwane\n0699').first()
+    .fill('1 Church Square\nPretoria, 0002')
+  await page.waitForTimeout(400)
+  const moved = await areas()
+  t.check('...and the postal address follows the street address when it changes',
+    moved[1]?.v, '1 Church Square\nPretoria, 0002')
+
+  /*
+   * UNTICKING CLEARS THE BOX, and that is not a bug to fix: the tick IS the two boxes being
+   * equal, so leaving the words behind would tick it straight back on. The label says so.
+   */
+  await tick.uncheck()
+  await page.waitForTimeout(400)
+  const apart = await areas()
+  t.check('unticking empties the postal box rather than ticking itself back on', apart[1]?.v, '')
+  t.check('...and hands it back to be typed in', apart[1]?.off, false)
+  t.check('...leaving the street address alone', apart[0]?.v, '1 Church Square\nPretoria, 0002')
+  await t.shot(page, '68b-library-firm-postal')
+
   const real = errors.filter((e) => !/favicon|404 \(Not Found\)/i.test(e))
   t.check('no console errors', real.length, 0)
   if (real.length) console.log('  console:', real.slice(0, 5))
