@@ -18,8 +18,31 @@ import { formatCurrency } from '../../data/mockData'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
-/** The columns worth showing in the table. The rest are reached by opening a row. */
-const SHOWN = ['client_reference', 'name', 'capital', 'default_date', 'cell_1', 'id_number']
+/**
+ * EVERY COLUMN OF THE SHEET, IN THE SHEET'S OWN ORDER.
+ *
+ * THE FIRM: "I can see only limited information, not all the information that was on the sheet.
+ * It should show me all of the information ... if there are missing fields like an address ...
+ * there should just be nothing in there. All the fields of the handover sheet should pretty much
+ * be in there. And it should show which data is wrong. So you should be able to scroll it."
+ *
+ * Six columns were shown and the other thirty-four were unreachable, so a row warned about an
+ * empty address with nowhere on the screen to type one. An empty box says "nothing here" better
+ * than a sentence under the table does, and it can be filled in.
+ */
+const SHOWN = HANDOVER_COLUMNS.map((c) => c.key)
+
+/*
+ * NOTHING IS PINNED WHILE IT SCROLLS, and that is a retreat from something that looked better on
+ * paper. Holding the row number and the reference still with `position: sticky` needs each pinned
+ * cell's left offset to equal the measured width of everything before it; given a fixed offset it
+ * drifts, and the pinned headings render ON TOP of the scrolled ones -- "ROW :LIACCOUNT NUMBER"
+ * across the top of the table, which is what the first attempt actually drew. A plain scroll is
+ * legible; a broken freeze is not.
+ */
+
+/** Marked with a star in the header, the same way the .xlsx marks them. */
+const required = new Set(HANDOVER_COLUMNS.filter((c) => c.required).map((c) => c.key))
 
 /**
  * The sheet as a GRID, header row and all.
@@ -419,7 +442,11 @@ function DraftTable({ judged, busy, error, onEdit, onExclude, onApprove, onBack,
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
               <th className="py-2 pr-2 font-medium">Row</th>
-              {SHOWN.map((k) => <th key={k} className="py-2 pr-2 font-medium">{label(k)}</th>)}
+              {SHOWN.map((k) => (
+                <th key={k} className="py-2 pr-2 font-medium whitespace-nowrap">
+                  {label(k)}{required.has(k) && <span className="text-gold-600"> *</span>}
+                </th>
+              ))}
               <th className="py-2 pr-2 font-medium">PDF</th>
               <th className="py-2 font-medium" />
             </tr>
@@ -430,24 +457,39 @@ function DraftTable({ judged, busy, error, onEdit, onExclude, onApprove, onBack,
                 <tr key={row.id}
                   className={`border-t border-slate-100 align-top ${row.excluded ? 'opacity-40' : ''}`}>
                   <td className="py-2 pr-2 text-slate-400 tabular-nums">{row.line}</td>
-                  {SHOWN.map((k) => (
-                    <td key={k} className="py-1.5 pr-2">
-                      {/*
-                        EDITED IN PLACE, on blur rather than on every keystroke: each save re-reads
-                        the whole draft to re-judge it, and doing that per character would be a
-                        request a letter.
-                      */}
-                      <input
-                        defaultValue={row.values[k] ?? ''}
-                        disabled={!!busy || row.excluded}
-                        onBlur={(e) => {
-                          if (e.target.value.trim() === (row.values[k] ?? '')) return
-                          void onEdit(row.id, k, e.target.value)
-                        }}
-                        className="w-full min-w-[7rem] rounded border border-transparent px-1.5 py-1
-                          text-[13px] hover:border-slate-200 focus:border-brand-500 focus:outline-none" />
-                    </td>
-                  ))}
+                  {SHOWN.map((k) => {
+                    /*
+                      THE CELL SAYS WHICH DATA IS WRONG, at the firm's asking. A problem carries
+                      the column it is about, so the box itself is marked -- a refusal in red, a
+                      warning in gold -- and the sentence under the table stops being the only
+                      way to find out which of forty boxes it meant.
+                    */
+                    const worst = (row.planned?.problems ?? []).filter((pr) => pr.key === k)
+                    const bad = worst.some((pr) => pr.level === 'refuse')
+                    const iffy = !bad && worst.length > 0
+                    return (
+                      <td key={k} className="py-1.5 pr-2">
+                        {/*
+                          EDITED IN PLACE, on blur rather than on every keystroke: each save
+                          re-reads the whole draft to re-judge it, and doing that per character
+                          would be a request a letter.
+                        */}
+                        <input
+                          defaultValue={row.values[k] ?? ''}
+                          disabled={!!busy || row.excluded}
+                          title={worst.map((pr) => pr.message).join(' ') || undefined}
+                          onBlur={(e) => {
+                            if (e.target.value.trim() === (row.values[k] ?? '')) return
+                            void onEdit(row.id, k, e.target.value)
+                          }}
+                          className={`w-full min-w-[7rem] rounded border px-1.5 py-1 text-[13px]
+                            focus:border-brand-500 focus:outline-none ${
+                            bad ? 'border-negative-400 bg-negative-50'
+                              : iffy ? 'border-gold-400 bg-gold-50'
+                                : 'border-transparent hover:border-slate-200'}`} />
+                      </td>
+                    )
+                  })}
                   <td className="py-2 pr-2 text-[11px] text-slate-400 truncate max-w-[9rem]">
                     {row.documentFilename ?? '—'}
                   </td>
@@ -480,6 +522,10 @@ function DraftTable({ judged, busy, error, onEdit, onExclude, onApprove, onBack,
               {(row.planned?.problems ?? []).map((p, i) => (
                 <span key={i} className={`block ${p.level === 'refuse' ? 'text-negative-700' : 'text-slate-500'}`}>
                   {p.level === 'refuse' && <AlertTriangle size={11} className="inline mr-1 -mt-0.5" />}
+                  {/* The column, so a sentence can be traced to one of forty boxes without
+                      reading it twice. The cell is marked as well; this is for the person
+                      scanning the list rather than the table. */}
+                  {p.key && <span className="text-slate-400">{label(p.key)}: </span>}
                   {p.message}
                 </span>
               ))}

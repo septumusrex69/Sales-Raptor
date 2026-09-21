@@ -50,16 +50,69 @@ const slowly = (body) => async () => {
   return { body }
 }
 
+/*
+ * A DRAFT THAT SURVIVES BEING WRITTEN AND READ BACK, in memory.
+ *
+ * The table under test only exists after a sheet has been held, and holding it writes two tables
+ * and then reads them again. Answered with an empty array, as an unstubbed table is, the save
+ * appears to work and the read comes back with nothing — so the screen under test never renders.
+ * Small enough to be a fixture; the verdicts are still computed by the real planHandover.
+ */
+const DRAFT_ID = '44444444-4444-4444-8444-444444444444'
+const draftRows = []
+let nextRowId = 0
+
 const handlers = [
   [(u) => /\/rest\/v1\/companies/.test(u), slowly([CLIENT])],
   [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN] })],
   [(u) => /\/rest\/v1\/teams/.test(u), () => ({ body: [TEAM] })],
+
+  [(u, r) => /handover_draft_rows/.test(u) && r.method() === 'POST', (u, r) => {
+    for (const row of JSON.parse(r.postData() ?? '[]')) {
+      nextRowId += 1
+      draftRows.push({
+        id: `row-${nextRowId}`, draft_id: DRAFT_ID, line: row.line, values: row.values,
+        document_filename: row.document_filename, excluded: false,
+        created_at: '2026-09-21T00:00:00Z', updated_at: '2026-09-21T00:00:00Z',
+      })
+    }
+    return { body: [] }
+  }],
+  /* An edit: PATCH ...?id=eq.row-N, merged into the stored row so the next read re-judges it. */
+  [(u, r) => /handover_draft_rows/.test(u) && r.method() === 'PATCH', (u, r) => {
+    const id = decodeURIComponent(new URL(u).searchParams.get('id') ?? '').replace('eq.', '')
+    const patch = JSON.parse(r.postData() ?? '{}')
+    const row = draftRows.find((x) => x.id === id)
+    if (row) Object.assign(row, patch)
+    return { body: [] }
+  }],
+  [(u) => /handover_draft_rows/.test(u), () => ({ body: draftRows })],
+
+  [(u, r) => /handover_drafts/.test(u) && r.method() === 'POST', () => ({ body: { id: DRAFT_ID } })],
+  [(u) => /handover_drafts/.test(u), () => ({
+    body: {
+      id: DRAFT_ID, company_id: COMPANY_ID, filename: 'handover.csv', sheet_kind: 'raptor',
+      date_order: 'day-first', state: 'open', handover_id: null, approved_at: null,
+      approved_by: null, created_by: PROFILE.id, created_at: '2026-09-21T00:00:00Z',
+      updated_at: '2026-09-21T00:00:00Z',
+    },
+  })],
 ]
 
 /* The smallest sheet the planner accepts: the five required columns and one debtor. */
 const SHEET = [
   'Your reference,Handover amount,Date of default,Person or business,Surname',
   'GPS3/10103,48250.00,18/03/2026,Person,Van Der Westhuizen',
+].join('\n')
+
+/*
+ * A fuller sheet for the table: one good row, one with an amount that is not a number, and no
+ * street address anywhere -- which is the shape of the file the firm actually sent.
+ */
+const FULL_SHEET = [
+  'Your reference,Handover amount,Date of default,Person or business,Surname,Email address',
+  'GPS3/10103,48250.00,18/03/2026,Person,Van Der Westhuizen,jvdw@example.co.za',
+  'GPS3/10104,not money,18/03/2026,Person,Buitendag,',
 ].join('\n')
 
 const server = await startServer()
@@ -167,6 +220,80 @@ try {
 
   await page.goto(`http://localhost:${PORT}/settings?tab=Data+Import&client=${COMPANY_ID}`)
   await page.locator('select').first().waitFor({ timeout: 15000 })
+
+  /*
+   * THE WHOLE SHEET IS ON THE SCREEN, at the firm's asking: "I can see only limited information,
+   * not all the information that was on the sheet ... all the fields of the handover sheet should
+   * pretty much be in there. And it should show which data is wrong."
+   */
+  await page.goto(`http://localhost:${PORT}/settings?tab=Data+Import&client=${COMPANY_ID}`)
+  await page.waitForFunction(
+    () => (document.querySelector('select')?.options.length ?? 0) > 1, null, { timeout: 15000 },
+  )
+  await page.setInputFiles('input[type="file"]', {
+    name: 'handover.csv', mimeType: 'text/csv', buffer: Buffer.from(FULL_SHEET),
+  })
+  await page.getByRole('button', { name: 'Read the sheet' }).click()
+  await page.getByRole('button', { name: 'Hold it in Raptor' }).click()
+  await page.getByRole('button', { name: /Approve \d+ handover/ }).waitFor({ timeout: 20000 })
+
+  /* The rows have to be ACCEPTED for this to be testing the table somebody actually uses. The
+     first version of this fixture used a heading the importer did not know, so every row refused
+     for having no name and the screen under test was a table of empty boxes. */
+  t.ok('the good row is accepted',
+    /1 ready/.test(await page.locator('body').innerText()))
+
+  const headers = await page.locator('table thead th').allTextContents()
+  t.ok('every column of the sheet is on the screen', headers.length >= 40)
+  for (const col of ['Street address 1', 'Email address', 'Employer', 'Next of kin']) {
+    t.ok(`${col} is one of them`, headers.some((h) => h.trim().startsWith(col)))
+  }
+  /*
+   * READ DEFENSIVELY FROM HERE. findIndex returns -1 for a column that is not on the screen, and
+   * Playwright reads .nth(-1) as .last() -- so every assertion below would wait thirty seconds on
+   * the wrong cell and then THROW, killing the run before the failure that caused it was ever
+   * printed. Reverting the table to its old six columns did exactly that: a stack trace with no
+   * failing assertion in it. CLAUDE.md names this one; this is it in a browser.
+   */
+  const columnAt = (heading) => {
+    const i = headers.findIndex((h) => h.trim().startsWith(heading))
+    t.ok(`there is a "${heading}" column to look at`, i >= 0)
+    return i
+  }
+  const cell = (rowIndex, column) => (column < 0
+    ? null
+    : page.locator('table tbody tr').nth(rowIndex).locator('td').nth(column).locator('input'))
+
+  /* An empty column is an empty BOX somebody can type in, which is what was missing: a row warned
+     about an address with nowhere on the screen to put one. */
+  const street = columnAt('Street address 1')
+  const streetCell = cell(0, street)
+  t.check('a column the sheet left empty is an empty box, not a missing one',
+    streetCell ? await streetCell.inputValue() : '(no such column)', '')
+  if (streetCell) {
+    await streetCell.fill('14 Protea Street')
+    await streetCell.blur()
+  }
+
+  /* AND THE WRONG CELL IS MARKED. The second row's amount is not a number. */
+  const amount = columnAt('Handover amount')
+  const badCell = cell(1, amount)
+  const cls = badCell ? (await badCell.getAttribute('class')) ?? '' : ''
+  t.ok('a cell that is wrong is marked on the cell', /negative|gold/.test(cls))
+  t.ok('...and says why when you rest on it',
+    badCell ? ((await badCell.getAttribute('title')) ?? '').includes('not a number') : false)
+  /* A cell with nothing wrong is not marked, or the marking means nothing. */
+  const okCell = cell(0, amount)
+  t.ok('...and a cell that is fine is not marked',
+    okCell ? !/negative|gold/.test((await okCell.getAttribute('class')) ?? '') : false)
+
+  await t.shot(page, 'upload-a-batch-table')
+
+  /* NOTHING ON THIS SCREEN SAYS ANYTHING IS POSTED. The firm: "we will never be posting
+     something. Never ever we will post a letter. We will send everything via email." */
+  const onScreen = (await page.locator('body').innerText()) ?? ''
+  t.ok('nothing on the screen says a notice is posted', !/\bpost(ed|ing)\b/i.test(onScreen))
+  t.ok('...and a missing email is what it warns about', /sent by email/.test(onScreen))
 
   /* Clicking away clears the client from the URL: it means nothing to any other tab, and a stale
      company id in the address of the Teams screen is a puzzle for whoever sees it next. */

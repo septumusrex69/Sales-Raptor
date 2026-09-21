@@ -199,9 +199,22 @@ check('every old heading either maps to a column or is deliberately not carried'
 check('nothing is both mapped and dropped',
   [...NOT_CARRIED].filter((h) => index.has(headingKey(h))), [])
 
-/* The address is the one that matters most and it was empty in every row of the old sheet. */
+/*
+ * THE ADDRESS IS NOT FOR POSTING, AND NOTHING ON THIS SHEET MAY SAY IT IS.
+ *
+ * THE FIRM: "we will never be posting something. Never ever we will post a letter. We will send
+ * everything via email." The note here used to say a section 129 is posted to an address, which
+ * was the app telling a client something untrue about how the firm works -- on the document the
+ * client fills in, which is the worst place to be wrong about it.
+ *
+ * The column stays: a summons is served at a physical address and a trace starts from one.
+ */
 ok('a street address column exists', by('street_1') !== undefined)
-ok('...and says why it is wanted', /section 129/i.test(by('street_1')?.note ?? ''))
+ok('...and says what it is actually for', /summons|trace/i.test(by('street_1')?.note ?? ''))
+const noteText = HANDOVER_COLUMNS.map((c) => c.note).join(' ')
+ok('...and no column tells a client we post anything', !/\bpost(ed|ing)?\b/i.test(noteText))
+/* The email is what a notice goes out on, so a client has to be asked for it plainly. */
+ok('an email column exists', by('email_1') !== undefined)
 
 /* ---------- 4. every column can be explained to a client ---------- */
 

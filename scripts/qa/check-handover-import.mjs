@@ -243,18 +243,24 @@ check('...naming every required column it lacks', nonsense.missingRequired.lengt
 
 /* ---------- 5. refuse and warn are different things ---------- */
 
+/*
+ * The last column is the EMAIL, not the street address, and that is the change rather than a
+ * tidy-up. THE FIRM: "we will never be posting something. Never ever we will post a letter. We
+ * will send everything via email." So an email address is what a row needs to be free of
+ * warnings, and 'x' in an address column no longer buys one anything.
+ */
 const rows = (...data) => planHandover({
   rows: [['Your reference', 'Handover amount', 'Date of default', 'Person or business',
-    'Surname, or the business name', 'ID number', 'Cell number 1', 'Street address 1'], ...data],
+    'Surname, or the business name', 'ID number', 'Cell number 1', 'Email address'], ...data],
   today: TODAY,
 })
 
 /* REFUSALS: nothing here can open a correct ledger. */
-const noName = rows(['A1', '100', '2026-01-01', 'Person', '', '', '082 123 4567', 'x'])
+const noName = rows(['A1', '100', '2026-01-01', 'Person', '', '', '082 123 4567', 'a@b.co.za'])
 ok('a row with no name is refused', noName.refused.length === 1)
-const noMoney = rows(['A1', '', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'x'])
+const noMoney = rows(['A1', '', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
 ok('a row with no handover amount is refused', noMoney.refused.length === 1)
-const badDate = rows(['A1', '100', '31/02/2026', 'Person', 'Dube', '', '082 123 4567', 'x'])
+const badDate = rows(['A1', '100', '31/02/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
 ok('a row whose date does not exist is refused', badDate.refused.length === 1)
 ok(`...and names the order it was read in (${firstMessage(badDate.rows[0])})`,
   /day\/month\/year/.test(firstMessage(badDate.rows[0])))
@@ -290,7 +296,7 @@ ok('a file written both ways round says so instead of picking one',
  * of the 45 rows in the client's own file had a telephone number in it, so refusing would have
  * refused the whole book, and a check that refuses a whole book gets turned off.
  */
-const dodgyId = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '0821234567', '082 123 4567', 'x'])
+const dodgyId = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '0821234567', '082 123 4567', 'a@b.co.za'])
 check('an ID that is not an ID warns rather than refuses',
   [dodgyId.refused.length, problemsOf(dodgyId.ready[0]).filter((p) => p.level === 'warn').length], [0, 1])
 ok('...and says what will happen to it', /rather than guessed at/.test(firstMessage(dodgyId.ready[0])))
@@ -299,10 +305,10 @@ ok('...and says what will happen to it', /rather than guessed at/.test(firstMess
  * transposed pair is something a person can find and correct, where the wrong column is not.
  * The checksum is isValidSaId, the same one the by-hand form uses, so the two cannot drift.
  */
-const transposed = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '8503125009098', '082 123 4567', 'x'])
+const transposed = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '8503125009098', '082 123 4567', 'a@b.co.za'])
 ok(`a transposed ID is named as one (${firstMessage(transposed.ready[0])})`,
   /transposed pair/.test(firstMessage(transposed.ready[0])))
-const goodId = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '8503125009089', '082 123 4567', 'x'])
+const goodId = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '8503125009089', '082 123 4567', 'a@b.co.za'])
 check('...and a real ID says nothing at all', problemsOf(goodId.ready[0]).length, 0)
 
 /*
@@ -331,12 +337,51 @@ ok('...and one with a plus in it', looksLikeEmail('sue+accounts@firm.com'))
 ok('a name is not an address', !looksLikeEmail('Johannes van der Westhuizen'))
 ok('...nor two addresses crammed into one cell', !looksLikeEmail('a@b.co.za, c@d.co.za'))
 ok('...nor one with no dot after the @', !looksLikeEmail('johannes@work'))
-const noAddress = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', ''])
-ok('no street address warns, because a section 129 cannot be posted',
-  problemsOf(noAddress.ready[0]).some((p) => p.level === 'warn' && /section 129/.test(p.message)))
-const noContact = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '', 'x'])
+/*
+ * NO EMAIL IS THE WARNING NOW, AND NO STREET ADDRESS IS NOT.
+ *
+ * THE FIRM: "we will never be posting something. Never ever we will post a letter. We will send
+ * everything via email." This warned about the street address and said a section 129 could not be
+ * POSTED -- wrong about the channel, and pointed at the wrong empty box.
+ *
+ * It was also noise. The street address was empty in all 45 rows of the file the firm sent, so
+ * the screen printed the same sentence forty-five times under the table. CLAUDE.md: a warning
+ * that fires when nothing is wrong is worse than no warning.
+ */
+const noEmail = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', ''])
+ok('no email address warns, because that is what a notice goes out on',
+  problemsOf(noEmail.ready[0]).some((p) => p.level === 'warn' && /sent by email/.test(p.message)))
+ok('...against the email column, so the screen can point at the box',
+  problemsOf(noEmail.ready[0]).some((p) => p.key === 'email_1'))
+/* Nothing anywhere may tell somebody a notice is posted. */
+const everyMessage = [...noEmail.ready, ...noEmail.refused]
+  .flatMap((r) => problemsOf(r).map((p) => p.message)).join(' ')
+ok('...and nothing says anything is posted', !/\bpost(ed|ing)?\b/i.test(everyMessage))
+
+/* An address that is missing is now shown as an empty box in the table, not said in a sentence. */
+const noStreet = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('an empty street address is not a problem at all', problemsOf(noStreet.ready[0]).length, 0)
+
+const noContact = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '', ''])
 ok('a debtor nobody can reach warns',
   problemsOf(noContact.ready[0]).some((p) => /nobody can be contacted/.test(p.message)))
+
+/*
+ * EVERY PROBLEM SAYS WHICH COLUMN IT IS ABOUT, where it is about one. THE FIRM: "it should show
+ * which data is wrong." A sentence under a forty-column table cannot be traced back to a cell.
+ */
+const wrong = rows(['A1', 'not money', '2026-01-01', 'Person', '', '', '082 123 4567', 'a@b.co.za'])
+const keyed = problemsOf(wrong.rows[0])
+ok('the amount problem points at the amount', keyed.some((p) => p.key === 'capital'))
+ok('the name problem points at the name', keyed.some((p) => p.key === 'name'))
+/* Null where it belongs to the row rather than to one box -- a duplicated reference is about the
+   file, not about a cell anybody can correct on its own. */
+const sameRefTwice = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'],
+  ['A1', '100', '2026-01-01', 'Person', 'Mokoena', '', '082 123 4567', 'a@b.co.za'])
+ok('a repeated reference points at the reference',
+  problemsOf(sameRefTwice.rows[1]).some((p) => p.key === 'client_reference'))
+ok('...and a problem about the whole row names no column',
+  problemsOf(noContact.ready[0]).some((p) => p.key === null))
 
 /* ---------- 6. one debt, one ledger ---------- */
 

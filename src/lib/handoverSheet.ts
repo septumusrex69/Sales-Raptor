@@ -10,7 +10,7 @@
  * one of these is a column defined below to stop it happening again:
  *
  *   - THE SURNAME WAS IN "DEBTOR INITIALS", all 45 rows, and "Debtor Surname" was empty. Raptor
- *     addresses a debtor by surname, so that is 45 notices posted to "Dear Sir". The new sheet has
+ *     addresses a debtor by surname, so that is 45 notices addressed "Dear Sir". The new sheet has
  *     ONE name column that is required, and `initials` is plainly optional beside it.
  *   - "DEBTOR ID" HELD A CELL PHONE, all 45 rows, identical to Cell Phone 1. Not one value was
  *     13 digits. {{debtor_id_masked}} would have printed a telephone number on a statutory demand.
@@ -23,8 +23,11 @@
  *   - TWO UNLABELLED PERCENTAGES: "Interest Rate" 24 and "Percentage" 0.25. A percent and a
  *     fraction with nothing saying which was which. Neither is asked for now, at the firm's
  *     instruction -- the rate is in the agreement the firm already holds.
- *   - 31 OF 55 COLUMNS WERE EMPTY IN EVERY ROW, including every address line -- which is
- *     {{debtor_address}}, without which a section 129 cannot be posted at all. The rarely-used
+ *   - 31 OF 55 COLUMNS WERE EMPTY IN EVERY ROW, including every address line and, in three rows,
+ *     the email address -- and THE EMAIL IS THE ONE THAT STOPS A NOTICE. The firm: "we will never
+ *     be posting something. Never ever we will post a letter. We will send everything via email."
+ *     The street address is still asked for, because a summons is served at one, but nothing
+ *     waits on it. The rarely-used
  *     ones are not deleted, because one client's file is evidence about that client; they are
  *     moved to the end and marked as what they are.
  */
@@ -137,7 +140,10 @@ export const HANDOVER_COLUMNS: HandoverColumn[] = [
   },
   {
     key: 'name', label: 'Surname, or the business name', group: 'The debtor', kind: 'text',
-    required: true, was: ['Debtor Surname', 'Debtor Initials'],
+    /* 'Surname' plain is here because it is what somebody types when they shorten our own
+       heading, and it went unrecognised -- which on the required name column means every row
+       refused for having no name. Found by a test fixture that had done exactly that. */
+    required: true, was: ['Debtor Surname', 'Debtor Initials', 'Surname'],
     note: 'REQUIRED. Every letter is addressed from this. A business puts its registered name here.',
   },
   {
@@ -182,13 +188,20 @@ export const HANDOVER_COLUMNS: HandoverColumn[] = [
   {
     key: 'street_1', label: 'Street address 1', group: 'Reaching them', kind: 'text',
     was: ['Street Address line 1'],
-    note: 'A SECTION 129 IS POSTED TO AN ADDRESS. Without one the notice cannot go out at all.',
+    /* NOT FOR POSTING. The firm: "we will never be posting something. Never ever we will post a
+       letter. We will send everything via email." What an address is actually for here is a
+       sheriff serving a summons and a tracer knocking on a door, so it says that instead. */
+    note: 'Where they live or trade. A summons is served at a physical address, and it is where '
+      + 'a trace starts.',
   },
   { key: 'street_2', label: 'Street address 2', group: 'Reaching them', kind: 'text', was: ['Street Address line 2'], note: 'Complex, unit number, farm name.' },
   { key: 'suburb', label: 'Suburb', group: 'Reaching them', kind: 'text', was: ['Street Address line 3'], note: '' },
   { key: 'city', label: 'Town or city', group: 'Reaching them', kind: 'text', was: ['Street Address line 4'], note: '' },
   { key: 'street_code', label: 'Code', group: 'Reaching them', kind: 'text', was: ['Street postal code'], note: 'Four digits, leading zero and all.' },
-  { key: 'postal_1', label: 'Postal address 1', group: 'Reaching them', kind: 'text', was: ['Postal Address line 1'], note: 'Only if post goes somewhere else.' },
+  /* THE FIRM DOES NOT POST, so this cannot be introduced as where their post goes. It is kept
+     because it is a fact about the debtor a client already holds, and because the old sheet's
+     four postal columns have to keep being readable -- not because anything is sent to it. */
+  { key: 'postal_1', label: 'Postal address 1', group: 'Reaching them', kind: 'text', was: ['Postal Address line 1'], note: 'Only if it differs from the street address.' },
   { key: 'postal_2', label: 'Postal address 2', group: 'Reaching them', kind: 'text', was: ['Postal Address line 2'], note: '' },
   { key: 'postal_city', label: 'Postal town or city', group: 'Reaching them', kind: 'text', was: ['Postal Address line 3', 'Postal Address line 4'], note: '' },
   { key: 'postal_code', label: 'Postal code', group: 'Reaching them', kind: 'text', was: ['Postal code'], note: 'Four digits.' },

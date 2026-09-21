@@ -86,6 +86,15 @@ export interface ColumnMatch {
 export interface RowProblem {
   level: 'refuse' | 'warn'
   message: string
+  /**
+   * The column it is about, where it is about one.
+   *
+   * THE FIRM: "it should show which data is wrong." A list of sentences under a forty-column
+   * table is a list nobody can trace back to a cell — the row number says which line and nothing
+   * says which box. Null where the problem belongs to the row rather than to a field, such as a
+   * reference that appears twice.
+   */
+  key: string | null
 }
 
 export interface PlannedRow {
@@ -395,42 +404,48 @@ function readRow(
   ctx: { seen: Set<string>; existing?: Set<string>; today: string; order: DateOrder },
 ): PlannedRow {
   const problems: RowProblem[] = []
-  const refuse = (message: string) => problems.push({ level: 'refuse', message })
-  const warn = (message: string) => problems.push({ level: 'warn', message })
+  const refuse = (key: string | null, message: string) =>
+    problems.push({ level: 'refuse', message, key })
+  const warn = (key: string | null, message: string) =>
+    problems.push({ level: 'warn', message, key })
 
-  if (!values.name) refuse('No surname or business name — every letter is addressed from it.')
+  if (!values.name) refuse('name', 'No surname or business name — every letter is addressed from it.')
 
   const capital = parseMoney(values.capital)
   if (capital === null) {
-    refuse(values.capital ? `Handover amount "${values.capital}" is not a number.` : 'No handover amount.')
+    refuse('capital', values.capital
+      ? `Handover amount "${values.capital}" is not a number.` : 'No handover amount.')
   } else if (capital <= 0) {
-    refuse('The handover amount is nought or less.')
+    refuse('capital', 'The handover amount is nought or less.')
   }
 
   const defaulted = parseSheetDate(values.default_date, ctx.order)
   if (!defaulted) {
-    refuse(values.default_date
+    refuse('default_date', values.default_date
       /* Named as the ambiguity it is, because "invalid date" sends somebody to check a date that
          is perfectly valid and merely means two things. */
       ? `Date of default "${values.default_date}" is not a date this file's order can account `
         + `for — it is being read ${ctx.order === 'day-first' ? 'day/month/year' : 'month/day/year'}.`
       : 'No date of default — in duplum runs from it.')
   } else if (defaulted > ctx.today) {
-    warn('The date of default is in the future.')
+    warn('default_date', 'The date of default is in the future.')
   }
 
   const ref = values.client_reference
   if (!ref) {
-    refuse('No reference. It is what the debtor is told to quote when they pay.')
+    refuse('client_reference', 'No reference. It is what the debtor is told to quote when they pay.')
   } else if (ctx.seen.has(ref)) {
-    refuse(`Reference ${ref} appears twice in this file.`)
+    refuse('client_reference', `Reference ${ref} appears twice in this file.`)
   } else {
     ctx.seen.add(ref)
-    if (ctx.existing?.has(ref)) refuse(`Reference ${ref} is already on this client's book.`)
+    if (ctx.existing?.has(ref)) {
+      refuse('client_reference', `Reference ${ref} is already on this client's book.`)
+    }
   }
 
   if (values.debtor_kind && !/^(person|business)$/i.test(values.debtor_kind)) {
-    warn(`"${values.debtor_kind}" is neither Person nor Business; it will be read as a person.`)
+    warn('debtor_kind',
+      `"${values.debtor_kind}" is neither Person nor Business; it will be read as a person.`)
   }
 
   /*
@@ -444,7 +459,7 @@ function readRow(
    */
   const id = (values.id_number ?? '').replace(/\s/g, '')
   if (id && !isValidSaId(id)) {
-    warn(/^\d{13}$/.test(id)
+    warn('id_number', /^\d{13}$/.test(id)
       ? `"${values.id_number}" is thirteen digits but not a valid ID number — check for a `
         + 'transposed pair.'
       : `"${values.id_number}" is not an ID number. Left empty rather than guessed at.`)
@@ -463,26 +478,43 @@ function readRow(
     if (!v) continue
     const verdict = checkPhone(v)
     if (verdict === 'lost-leading-zero') {
-      warn(`${label} "${v}" is missing its leading zero — Excel read it as a number. It cannot be `
-        + 'dialled as it stands.')
+      warn(key, `${label} "${v}" is missing its leading zero — Excel read it as a number. It `
+        + 'cannot be dialled as it stands.')
     } else if (verdict === 'wrong') {
-      warn(`${label} "${v}" is not a telephone number.`)
+      warn(key, `${label} "${v}" is not a telephone number.`)
     }
   }
 
   for (const [key, label] of [['email_1', 'Email address'], ['email_2', 'Second email address'],
     ['other_email', 'Another email address']] as const) {
     const v = values[key]
-    if (v && !looksLikeEmail(v)) warn(`${label} "${v}" is not an email address.`)
+    if (v && !looksLikeEmail(v)) warn(key, `${label} "${v}" is not an email address.`)
   }
 
   const paid = values.last_payment_date
-  if (paid && !parseSheetDate(paid, ctx.order)) warn(`Last date of payment "${paid}" could not be read.`)
+  if (paid && !parseSheetDate(paid, ctx.order)) {
+    warn('last_payment_date', `Last date of payment "${paid}" could not be read.`)
+  }
 
   if (!values.cell_1 && !values.home_phone && !values.work_phone && !values.email_1) {
-    warn('No telephone number and no email address — nobody can be contacted.')
+    warn(null, 'No telephone number and no email address — nobody can be contacted.')
   }
-  if (!values.street_1) warn('No street address — a section 129 cannot be posted.')
+  /*
+   * THE NOTICE GOES BY EMAIL, SO THE EMAIL ADDRESS IS THE ONE THAT MATTERS.
+   *
+   * THE FIRM: "we will never be posting something. Never ever we will post a letter. We will send
+   * everything via email." This warned about a missing STREET address instead, and said a section
+   * 129 could not be POSTED -- wrong about the channel, and wrong about which empty box to name.
+   *
+   * The street address is no longer warned about at all. It was empty in all 45 rows of the file
+   * the firm sent, so the screen printed the same sentence forty-five times under the table:
+   * a warning that fires when nothing is wrong, which is what teaches people to stop reading
+   * them. An empty box is now visible in the table itself, which says it better than a sentence.
+   */
+  if (!values.email_1 && !values.email_2) {
+    warn('email_1', 'No email address — a section 129 is sent by email, so there is nowhere to '
+      + 'send it.')
+  }
 
   return { line, values, capital, problems, refused: problems.some((p) => p.level === 'refuse') }
 }
