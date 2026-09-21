@@ -5678,3 +5678,34 @@ drop trigger if exists protect_approved_handover_draft_row on public.handover_dr
 create trigger protect_approved_handover_draft_row
   before update on public.handover_draft_rows
   for each row execute function public.protect_approved_handover_draft_row();
+
+-- A client loaded directly, rather than converted from a lead.
+--
+-- THE FIRM: "this isn't the traditional way of converting a lead to a client, this is just
+-- loading a client directly." The lead path learns the services on the way -- they are on the
+-- lead and the deal -- and a client loaded straight in has no lead behind it to have learned
+-- them from.
+alter table public.companies add column if not exists services text[];
+
+comment on column public.companies.services is
+  'What this client has signed for, where the client was loaded directly rather than converted '
+  'from a lead. A converted client has them on the won deal instead.';
+
+-- THE CODE IS A TOP-LEVEL CLIENT'S IDENTITY, so two of THOSE may not share one.
+--
+-- It is not decoration: suggestReference builds a client's next account number off their existing
+-- series, and the references on a debtor's own paperwork are the prefix and a number --
+-- GPS3/10103, ACF10085, APM20097. Two clients on one prefix is two books whose accounts cannot be
+-- told apart on a remittance.
+--
+-- NOT GLOBALLY UNIQUE, AND THE DATA IS WHY. Adowa Property Managers and its own Ellis Park
+-- property both carry APM: in Swordfish the accounts under that prefix belong to both, and the
+-- import reproduced it faithfully. That is imported history and imported history is frozen --
+-- account references already on clients' paperwork were built on it. A blanket unique index
+-- either refuses to build (which is how this was found) or invites somebody to "tidy" a prefix
+-- that a remittance depends on.
+--
+-- So the constraint is what the code actually identifies: one top-level client. A child sharing
+-- its parent's prefix is Swordfish's arrangement, left alone.
+create unique index if not exists companies_client_code_unique
+  on public.companies (code) where code is not null and parent_company_id is null;

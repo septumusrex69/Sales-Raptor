@@ -64,3 +64,59 @@ export function checkRate(capital: number, actual: number, schedule: CommissionS
   const agrees = Math.round(expected * 10000) === Math.round(actual * 10000)
   return { expected, actual, agrees, differenceInPoints: (actual - expected) * 100 }
 }
+
+/**
+ * What is wrong with a scale somebody is typing, in the order they would meet it.
+ *
+ * THE FIRM: "it can either be a fixed commission rate or a sliding scale ... accounts between
+ * zero rand and a hundred thousand rand is on a specific commission, then the next tier, then the
+ * next tier, and then above the last tier would be another one."
+ *
+ * THREE WAYS A SCALE IS WRONG AND ONLY ONE OF THEM IS OBVIOUS:
+ *
+ *   - NO TOP BAND. rateForCapital falls through every band and an account above the last
+ *     boundary gets the last band's rate anyway — right by luck, and wrong the day somebody
+ *     reorders them. "And above" has to be written down.
+ *   - BOUNDARIES OUT OF ORDER. The bands are read in order and the first that fits wins, so
+ *     100000 before 25000 means every account under R100k is billed at the first band's rate and
+ *     the R25k band is never reached at all. Nothing fails; the invoices are simply wrong.
+ *   - A RATE AS A PERCENTAGE. Commission is a FRACTION everywhere in Raptor — 0.3 is thirty
+ *     percent — and 30 typed in here is three thousand percent. CompanyDetail already carries a
+ *     comment saying this is what made one account read as 2300%.
+ */
+export function scheduleProblems(bands: CommissionBand[]): string[] {
+  const problems: string[] = []
+  if (bands.length === 0) return ['A sliding scale needs at least one tier.']
+
+  const tops = bands.filter((b) => b.upTo === null)
+  if (tops.length === 0) {
+    problems.push('The last tier has no upper limit to it. Leave the amount empty on the final '
+      + 'tier to mean "and above", or an account over the top boundary is priced by accident.')
+  }
+  if (tops.length > 1) problems.push('Only the last tier may be "and above".')
+  if (tops.length === 1 && bands[bands.length - 1].upTo !== null) {
+    problems.push('The "and above" tier has to be the last one.')
+  }
+
+  const bounded = bands.filter((b) => b.upTo !== null).map((b) => b.upTo as number)
+  for (let i = 1; i < bounded.length; i += 1) {
+    if (bounded[i] <= bounded[i - 1]) {
+      problems.push('The tiers have to climb: each upper limit above the one before it.')
+      break
+    }
+  }
+  if (bounded.some((n) => n <= 0)) problems.push('A tier cannot end at nought or below.')
+
+  for (const b of bands) {
+    if (!Number.isFinite(b.rate) || b.rate <= 0) {
+      problems.push('Every tier needs a commission rate.')
+      break
+    }
+    if (b.rate > 1) {
+      problems.push('Commission is a fraction, not a percentage \u2014 0.3 is thirty percent. '
+        + 'A rate above 1 would bill the client many times the debt.')
+      break
+    }
+  }
+  return problems
+}
