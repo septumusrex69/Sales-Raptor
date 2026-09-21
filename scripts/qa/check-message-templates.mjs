@@ -360,7 +360,7 @@ const company = {
 }
 const asPerson = mergeValuesFor({
   account: person, balance: 1, clientName: 'x', agentName: 'y', agentPhone: 'z',
-  firm: { firmName: 'f' }, today: '2026-09-18', money, debtorIdMasked: '8503125009087',
+  firm: { firmName: 'f' }, today: '2026-09-18', money, debtorIdMasked: '8503125009089',
 })
 const asCompany = mergeValuesFor({
   account: company, balance: 1, clientName: 'x', agentName: 'y', agentPhone: 'z',
@@ -376,11 +376,11 @@ check('...and a person with an identity number, and no registration number',
  * nothing masked anything -- AccountDetail passed the whole thirteen digits through. A field
  * whose name promises a mask and prints the number is worse than one that never claimed to.
  */
-check('the four digits that encode sex are covered', maskSaId('8503125009087'), '850312 XXXX 08 X')
-check('...and so is the check digit', maskSaId('8503125009087').slice(-1), 'X')
+check('the four digits that encode sex are covered', maskSaId('8503125009089'), '850312 XXXX 08 X')
+check('...and so is the check digit', maskSaId('8503125009089').slice(-1), 'X')
 /* The date of birth is deliberately left: it is what lets a debtor recognise their own number. */
 ok('...while the date of birth is left, so a debtor recognises it',
-  maskSaId('8503125009087').startsWith('850312'))
+  maskSaId('8503125009089').startsWith('850312'))
 /*
  * ANYTHING THAT IS NOT THIRTEEN DIGITS IS RETURNED UNTOUCHED. 45 rows of the firm's own import
  * file had a telephone number in this column, and "0746 XXXX 63" would look deliberate.

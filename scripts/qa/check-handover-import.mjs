@@ -12,7 +12,7 @@
  * debtor has to come out of both.
  */
 import {
-  detectDateOrder, parseMoney, parseSheetDate, planHandover,
+  checkPhone, detectDateOrder, looksLikeEmail, parseMoney, parseSheetDate, planHandover,
 } from '../../src/lib/handoverImport.ts'
 
 let pass = 0
@@ -112,7 +112,7 @@ const NEW_SHEET = [
   ['Your reference', 'Handover amount', 'Date of default', 'Person or business',
     'Surname, or the business name', 'First name', 'ID number', 'Cell number 1', 'Street address 1'],
   ['GPS3/10103', '48250.00', '2026-03-18', 'Person', 'Van Der Westhuizen', 'Johannes',
-    '8503125009087', '082 123 4567', '14 Protea Street'],
+    '8503125009089', '082 123 4567', '14 Protea Street'],
 ]
 
 /**
@@ -126,7 +126,7 @@ const OLD_SHEET = [
   ['Client Reference', 'Capital on Default', 'Date of Default', 'Debtor Initials',
     'Debtor Firstname', 'Debtor ID', 'Cell Phone 1', 'Street Address line 1'],
   ['GPS3/10103', '48250.00', '2026-03-18', 'Van Der Westhuizen', 'Johannes',
-    '8503125009087', '082 123 4567', '14 Protea Street'],
+    '8503125009089', '082 123 4567', '14 Protea Street'],
 ]
 
 const fresh = planHandover({ rows: NEW_SHEET, today: TODAY })
@@ -153,7 +153,7 @@ ok('...and says so in words somebody can act on', /older sheet/.test(legacy.note
  */
 for (const [key, expected] of [
   ['name', 'Van Der Westhuizen'], ['first_name', 'Johannes'],
-  ['client_reference', 'GPS3/10103'], ['id_number', '8503125009087'],
+  ['client_reference', 'GPS3/10103'], ['id_number', '8503125009089'],
   ['cell_1', '082 123 4567'], ['street_1', '14 Protea Street'],
 ]) {
   check(`both sheets give the same ${key}`,
@@ -191,11 +191,11 @@ const rows = (...data) => planHandover({
 })
 
 /* REFUSALS: nothing here can open a correct ledger. */
-const noName = rows(['A1', '100', '2026-01-01', 'Person', '', '', '082 1', 'x'])
+const noName = rows(['A1', '100', '2026-01-01', 'Person', '', '', '082 123 4567', 'x'])
 ok('a row with no name is refused', noName.refused.length === 1)
-const noMoney = rows(['A1', '', '2026-01-01', 'Person', 'Dube', '', '082 1', 'x'])
+const noMoney = rows(['A1', '', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'x'])
 ok('a row with no handover amount is refused', noMoney.refused.length === 1)
-const badDate = rows(['A1', '100', '31/02/2026', 'Person', 'Dube', '', '082 1', 'x'])
+const badDate = rows(['A1', '100', '31/02/2026', 'Person', 'Dube', '', '082 123 4567', 'x'])
 ok('a row whose date does not exist is refused', badDate.refused.length === 1)
 ok(`...and names the order it was read in (${firstMessage(badDate.rows[0])})`,
   /day\/month\/year/.test(firstMessage(badDate.rows[0])))
@@ -231,11 +231,48 @@ ok('a file written both ways round says so instead of picking one',
  * of the 45 rows in the client's own file had a telephone number in it, so refusing would have
  * refused the whole book, and a check that refuses a whole book gets turned off.
  */
-const dodgyId = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '0821234567', '082 1', 'x'])
+const dodgyId = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '0821234567', '082 123 4567', 'x'])
 check('an ID that is not an ID warns rather than refuses',
   [dodgyId.refused.length, problemsOf(dodgyId.ready[0]).filter((p) => p.level === 'warn').length], [0, 1])
 ok('...and says what will happen to it', /rather than guessed at/.test(firstMessage(dodgyId.ready[0])))
-const noAddress = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 1', ''])
+/*
+ * THIRTEEN DIGITS THAT FAIL THE CHECKSUM ARE A DIFFERENT WRONG, and worth saying differently: a
+ * transposed pair is something a person can find and correct, where the wrong column is not.
+ * The checksum is isValidSaId, the same one the by-hand form uses, so the two cannot drift.
+ */
+const transposed = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '8503125009098', '082 123 4567', 'x'])
+ok(`a transposed ID is named as one (${firstMessage(transposed.ready[0])})`,
+  /transposed pair/.test(firstMessage(transposed.ready[0])))
+const goodId = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '8503125009089', '082 123 4567', 'x'])
+check('...and a real ID says nothing at all', problemsOf(goodId.ready[0]).length, 0)
+
+/*
+ * THE NUMBER EXCEL BROKE. 40 of 42 "Cell Phone 2" values in the firm's own import file were nine
+ * digits, because Excel read 0129403445 as a number and dropped the zero. Those cannot be
+ * dialled. Reported as the missing zero rather than as "invalid": the person has to know what to
+ * put back, and "invalid" sends them looking for a typo that is not there.
+ */
+check('a good number is a good number', checkPhone('082 123 4567'), 'ok')
+check('...in international form too', checkPhone('+27821234567'), 'ok')
+check('...and with the brackets and dashes people type', checkPhone('(012) 348-2156'), 'ok')
+check('nine digits is the leading zero Excel ate', checkPhone('821234567'), 'lost-leading-zero')
+check('...and is reported as that, not as invalid',
+  /missing its leading zero/.test(firstMessage(
+    rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '821234567', 'x']).ready[0])), true)
+check('a word is not a telephone number', checkPhone('no number'), 'wrong')
+check('...nor is a number too short to be one', checkPhone('0821234'), 'wrong')
+
+/*
+ * AN EMAIL ADDRESS, checked for what stops it being deliverable rather than against the RFC. A
+ * pattern strict enough to be correct rejects addresses that work, and an address rejected here
+ * is a debtor the firm then cannot email at all.
+ */
+ok('an ordinary address passes', looksLikeEmail('j.vdwesthuizen@work.co.za'))
+ok('...and one with a plus in it', looksLikeEmail('sue+accounts@firm.com'))
+ok('a name is not an address', !looksLikeEmail('Johannes van der Westhuizen'))
+ok('...nor two addresses crammed into one cell', !looksLikeEmail('a@b.co.za, c@d.co.za'))
+ok('...nor one with no dot after the @', !looksLikeEmail('johannes@work'))
+const noAddress = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', ''])
 ok('no street address warns, because a section 129 cannot be posted',
   problemsOf(noAddress.ready[0]).some((p) => p.level === 'warn' && /section 129/.test(p.message)))
 const noContact = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '', 'x'])
@@ -245,8 +282,8 @@ ok('a debtor nobody can reach warns',
 /* ---------- 6. one debt, one ledger ---------- */
 
 const twice = rows(
-  ['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 1', 'x'],
-  ['A1', '200', '2026-01-01', 'Person', 'Dube', '', '082 1', 'x'],
+  ['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'x'],
+  ['A1', '200', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'x'],
 )
 check('the same reference twice in one file opens one ledger, not two',
   [twice.ready.length, twice.refused.length], [1, 1])
@@ -260,7 +297,7 @@ ok(`a reference the client has already handed over is refused (${firstMessage(al
   already.refused.length === 1 && /already on this client/.test(firstMessage(already.refused[0])))
 
 /* Blank rows under the data are the template's formatting, not debtors with nothing filled in. */
-const padded = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 1', 'x'],
+const padded = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'x'],
   ['', '', '', '', '', '', '', ''], ['', '', '', '', '', '', '', ''])
 check('the blank rows the template carries are not read as debtors', padded.rows.length, 1)
 

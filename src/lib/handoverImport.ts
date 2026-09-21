@@ -21,6 +21,44 @@
  * act. That is the same shape as the Swordfish migration and for the same reason.
  */
 import { HANDOVER_COLUMNS, aliasIndex, headingKey } from './handoverSheet.ts'
+/* The same ID check the by-hand form uses. Two implementations of a Luhn checksum eventually
+   disagree, and the one that disagrees is whichever a person is not looking at. */
+import { isValidSaId } from './newDebtor.ts'
+
+/* ---------------------------------------------------------------- what a field should look like */
+
+/**
+ * AN EMAIL ADDRESS, checked for the shape that stops it being deliverable rather than against
+ * the RFC.
+ *
+ * A pattern strict enough to be correct rejects addresses that work, and an address rejected here
+ * is a debtor the firm then cannot email at all. So: something, an @, something with a dot in it,
+ * no spaces. What that catches is the real failure -- two addresses in one cell, a name where an
+ * address should be, a trailing comma from a copy-paste.
+ */
+export const looksLikeEmail = (v: string): boolean =>
+  /^[^\s@,;]+@[^\s@,;]+\.[a-z]{2,}$/i.test(v.trim())
+
+/**
+ * A South African telephone number.
+ *
+ * NINE DIGITS IS THE INTERESTING CASE and it is why this exists: 40 of 42 "Cell Phone 2" values in
+ * the firm's own import file were nine digits, because Excel read 0129403445 as a number and
+ * dropped the leading zero. Those numbers cannot be dialled, and nothing said so. A nine-digit
+ * number is reported as exactly that rather than as "invalid", because the fix is to put the zero
+ * back and the person needs to be told which zero.
+ */
+export type PhoneVerdict = 'ok' | 'lost-leading-zero' | 'wrong'
+
+export function checkPhone(raw: string): PhoneVerdict {
+  const s = raw.replace(/[\s()\-.]/g, '')
+  if (/^\+27\d{9}$/.test(s)) return 'ok'
+  if (/^0\d{9}$/.test(s)) return 'ok'
+  /* Nine digits and no leading zero: Excel ate it. The first digit of a South African number
+     after the zero is 1-8, which is what separates this from a short number typed wrong. */
+  if (/^[1-8]\d{8}$/.test(s)) return 'lost-leading-zero'
+  return 'wrong'
+}
 
 export type SheetKind = 'raptor' | 'swordfish' | 'mixed' | 'unknown'
 
@@ -356,10 +394,43 @@ function readRow(
    * THE ID IS A WARNING AND NOT A REFUSAL, and the old sheet is the argument. Every one of its 45
    * rows had a cell phone in the ID column: refusing would have refused the whole book, and the
    * firm would have turned the check off. Named on the row, it gets fixed.
+   *
+   * TWO DIFFERENT WRONGS, SAID DIFFERENTLY. Thirteen digits that fail the checksum is a
+   * transposed pair somebody can find and correct; anything else is not an ID at all and is the
+   * wrong column. The same isValidSaId the by-hand form uses, so the two cannot drift.
    */
-  const id = values.id_number
-  if (id && !/^\d{13}$/.test(id.replace(/\s/g, ''))) {
-    warn(`"${id}" is not a 13-digit ID number. Left empty rather than guessed at.`)
+  const id = (values.id_number ?? '').replace(/\s/g, '')
+  if (id && !isValidSaId(id)) {
+    warn(/^\d{13}$/.test(id)
+      ? `"${values.id_number}" is thirteen digits but not a valid ID number — check for a `
+        + 'transposed pair.'
+      : `"${values.id_number}" is not an ID number. Left empty rather than guessed at.`)
+  }
+
+  /*
+   * EVERY NUMBER, AND THE ONE EXCEL BROKE. 40 of 42 "Cell Phone 2" values in the firm's own file
+   * were nine digits because Excel read 0129403445 as a number. Reported as the missing zero it
+   * is, not as "invalid" — the person needs to know what to put back.
+   */
+  for (const [key, label] of [['cell_1', 'Cell number 1'], ['cell_2', 'Cell number 2'],
+    ['cell_3', 'Cell number 3'], ['home_phone', 'Home number'], ['work_phone', 'Work number'],
+    ['next_of_kin_phone', 'Next of kin number'], ['next_of_kin_2_phone', 'Second next of kin number'],
+    ['other_phone', 'Another number'], ['other_phone_2', 'Another number']] as const) {
+    const v = values[key]
+    if (!v) continue
+    const verdict = checkPhone(v)
+    if (verdict === 'lost-leading-zero') {
+      warn(`${label} "${v}" is missing its leading zero — Excel read it as a number. It cannot be `
+        + 'dialled as it stands.')
+    } else if (verdict === 'wrong') {
+      warn(`${label} "${v}" is not a telephone number.`)
+    }
+  }
+
+  for (const [key, label] of [['email_1', 'Email address'], ['email_2', 'Second email address'],
+    ['other_email', 'Another email address']] as const) {
+    const v = values[key]
+    if (v && !looksLikeEmail(v)) warn(`${label} "${v}" is not an email address.`)
   }
 
   const paid = values.last_payment_date
