@@ -21,8 +21,8 @@
  *   - "AMOUNT" AND "CAPITAL ON DEFAULT" were identical in all 45 rows. One number, two names,
  *     and one day they disagree. There is one capital column here.
  *   - TWO UNLABELLED PERCENTAGES: "Interest Rate" 24 and "Percentage" 0.25. A percent and a
- *     fraction with nothing saying which was which. One rate column, and its label carries the
- *     unit.
+ *     fraction with nothing saying which was which. Neither is asked for now, at the firm's
+ *     instruction -- the rate is in the agreement the firm already holds.
  *   - 31 OF 55 COLUMNS WERE EMPTY IN EVERY ROW, including every address line -- which is
  *     {{debtor_address}}, without which a section 129 cannot be posted at all. The rarely-used
  *     ones are not deleted, because one client's file is evidence about that client; they are
@@ -84,20 +84,24 @@ export const HANDOVER_COLUMNS: HandoverColumn[] = [
     required: true, was: ['Date of Default'],
     note: 'The day the account fell into default. In duplum runs from here, so it matters.',
   },
+  /*
+   * THE LAST PAYMENT, NOT "THE INTERRUPTOR". At the firm's instruction: "remove the things about
+   * interest and the interruptor -- call it the last date of payment."
+   *
+   * The old sheet asked for an "Interruptor Before Handover Date", which is the right idea in the
+   * wrong words: what actually interrupts prescription, nine times out of ten, is the debtor
+   * paying something. A client's bookkeeper knows when they last received money. Nobody outside a
+   * law firm knows what an interruptor is, and a column nobody understands is a column filled in
+   * with a guess.
+   *
+   * Interest came out with it: the rate is in the agreement the firm already holds, and the old
+   * sheet asked for it twice in two different units -- "Interest Rate" 24 and "Percentage" 0.25,
+   * a percent and a fraction with nothing saying which was which.
+   */
   {
-    key: 'interest_rate', label: 'Interest rate (% a year)', group: 'The account', kind: 'number',
-    was: ['Interest Rate', 'Percentage'],
-    note: 'As a percent a year: write 24 for 24%, not 0.24. Leave empty if no interest is charged.',
-  },
-  {
-    key: 'interest_from', label: 'Interest runs from', group: 'The account', kind: 'date',
-    was: ['Interest Date'],
-    note: 'Only if interest runs from a different day than the default.',
-  },
-  {
-    key: 'interrupted_on', label: 'Prescription last interrupted on', group: 'The account',
+    key: 'last_payment_date', label: 'Last date of payment', group: 'The account',
     kind: 'date', was: ['Interruptor Before Handover Date'],
-    note: 'The last acknowledgement of debt or payment, if you have one. It resets prescription.',
+    note: 'The last time they paid anything, even a small amount. Leave empty if they never have.',
   },
 
   /* ---------------------------------------------------------------- the debtor */
@@ -173,8 +177,8 @@ export const HANDOVER_COLUMNS: HandoverColumn[] = [
    */
   { key: 'employer', label: 'Employer', group: 'Useful if you have it', kind: 'text', note: 'The single most useful thing for tracing somebody who has moved.' },
   { key: 'occupation', label: 'Occupation', group: 'Useful if you have it', kind: 'text', was: ['Occupation'], note: '' },
-  { key: 'next_of_kin', label: 'Next of kin', group: 'Useful if you have it', kind: 'text', note: 'A name.' },
-  { key: 'next_of_kin_phone', label: 'Next of kin number', group: 'Useful if you have it', kind: 'text', was: ['Next of Kin Number 1'], note: 'With the leading zero.' },
+  { key: 'next_of_kin', label: 'Next of kin', group: 'Useful if you have it', kind: 'text', note: 'A relative or partner, e.g. Maria Buitendag.' },
+  { key: 'next_of_kin_phone', label: 'Next of kin number', group: 'Useful if you have it', kind: 'text', was: ['Next of Kin Number 1'], note: 'e.g. 082 123 4567.' },
   { key: 'notes', label: 'Anything we should know', group: 'Useful if you have it', kind: 'text', note: 'A dispute already raised, an arrangement already broken, a debtor who has died.' },
 ]
 

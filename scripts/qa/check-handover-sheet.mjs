@@ -69,8 +69,27 @@ check('the default date is a date', by('default_date')?.kind, 'date')
 check('the two old capital headings both land on one column',
   [index.get(headingKey('Amount'))?.key, index.get(headingKey('Capital on Default'))?.key],
   ['capital', 'capital'])
-/* One rate column. The old sheet had a percent and a fraction with nothing saying which. */
-ok('the rate column carries its unit in its label', /% a year/.test(by('interest_rate')?.label ?? ''))
+/*
+ * INTEREST IS NOT ASKED FOR AT ALL, at the firm's instruction, and the old sheet is the argument
+ * for it: "Interest Rate" 24 and "Percentage" 0.25 in the same row, a percent and a fraction with
+ * nothing saying which was which. The rate is in the agreement the firm already holds.
+ */
+check('no column asks a client for interest',
+  HANDOVER_COLUMNS.filter((c) => /interest/i.test(c.label) || /interest/i.test(c.key)).map((c) => c.key),
+  [])
+
+/*
+ * AND THE INTERRUPTOR IS NOW THE LAST PAYMENT. The firm: "remove the things about interest and
+ * the interruptor -- call it the last date of payment." Same fact, in words a client's bookkeeper
+ * can answer; the old heading still maps to it, so a client who has not switched sheets yet is
+ * still understood.
+ */
+ok('the last payment is asked for in plain words',
+  by('last_payment_date')?.label === 'Last date of payment')
+check('...and the old interruptor heading still lands on it',
+  index.get(headingKey('Interruptor Before Handover Date'))?.key, 'last_payment_date')
+ok('...with no jargon left in the label or the note',
+  !/interrupt|prescri/i.test(`${by('last_payment_date')?.label} ${by('last_payment_date')?.note}`))
 
 /* ---------- 2. nothing collides, nothing is duplicated ---------- */
 
@@ -133,6 +152,9 @@ const NOT_CARRIED = new Set([
   'Next of Kin Number 2', 'Next of Kin Number 3',
   /* A person's name in the client's office, not a fact about the account. */
   'Client Division',
+  /* Interest, dropped at the firm's instruction -- and the old sheet asked for it twice, in two
+     different units, which is the argument for not asking at all. */
+  'Interest Rate', 'Interest Date', 'Percentage',
 ])
 const unmapped = OLD_SHEET.filter((h) => !index.has(headingKey(h)) && !NOT_CARRIED.has(h))
 check('every old heading either maps to a column or is deliberately not carried', unmapped, [])
