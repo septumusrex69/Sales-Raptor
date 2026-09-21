@@ -20,7 +20,7 @@
  * NOTHING HERE WRITES. This plans; the screen shows the plan; writing is a separate, deliberate
  * act. That is the same shape as the Swordfish migration and for the same reason.
  */
-import { HANDOVER_COLUMNS, aliasIndex, headingKey } from './handoverSheet.ts'
+import { HANDOVER_COLUMNS, aliasIndex, headingKey, type HandoverColumn } from './handoverSheet.ts'
 /* The same ID check the by-hand form uses. Two implementations of a Luhn checksum eventually
    disagree, and the one that disagrees is whichever a person is not looking at. */
 import { isValidSaId, type NewDebtorInput } from './newDebtor.ts'
@@ -191,6 +191,13 @@ export function detectDateOrder(samples: (string | null | undefined)[]): {
  * serial is the ordinary case, because a date-formatted cell stores a number and the dd/mm/yyyy
  * the person sees is only how it is drawn.
  *
+ * A YEAR-FIRST DATE IS TAKEN WITH ANY SEPARATOR, and this is not a nicety. `readXlsxRows` — the
+ * reader this importer's own screen feeds it from — renders every date cell as yyyy/mm/dd,
+ * "the shape Swordfish's own exports use". Matching only the hyphen refused every date in every
+ * .xlsx that reached it: on the client sheet we were sent, 45 accounts out of 45 refused on a
+ * date of default that had been read correctly out of the file and then not recognised. Nothing
+ * about a four-digit leading component is ambiguous, so no order question arises.
+ *
  * A slash date is TEXT, which happens when a sheet is saved as CSV or when somebody types into a
  * column that is not formatted as a date. It is read in the order the FILE uses — see
  * detectDateOrder — which is day-first for South Africa unless the file proves otherwise.
@@ -200,7 +207,13 @@ export function parseSheetDate(
 ): string | null {
   const s = (raw ?? '').trim()
   if (!s) return null
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return Number.isNaN(Date.parse(s)) ? null : s
+  const ymd = /^(\d{4})[/.-](\d{2})[/.-](\d{2})$/.exec(s)
+  if (ymd) {
+    const iso = `${ymd[1]}-${ymd[2]}-${ymd[3]}`
+    if (Number.isNaN(Date.parse(iso))) return null
+    /* 2026-02-31 parses and rolls into March, same as the slash branch below. */
+    return iso.slice(8) === String(new Date(iso).getUTCDate()).padStart(2, '0') ? iso : null
+  }
   /* An Excel serial. Bounded so a reference number of six digits is not read as a date in 4500. */
   if (/^\d{1,5}(\.\d+)?$/.test(s)) {
     const n = Math.floor(Number(s))
@@ -246,13 +259,43 @@ export function planHandover(input: {
   /** heading position -> column key, so a row is read by position and named by key. */
   const at = new Map<number, string>()
 
+  const claims: { i: number; heading: string; col: HandoverColumn }[] = []
   header.forEach((heading, i) => {
     if (!heading) return
     const col = index.get(headingKey(heading))
     if (!col) { unrecognised.push(heading); return }
-    /* First heading wins a column: a sheet carrying both "Capital on Default" and "Handover
-       amount" would otherwise have the second silently overwrite the first. */
-    if (matched.some((m) => m.key === col.key)) { unrecognised.push(heading); return }
+    claims.push({ i, heading, col })
+  })
+
+  /*
+   * WHEN TWO HEADINGS CLAIM ONE COLUMN, THE ONE WITH DATA IN IT WINS.
+   *
+   * Only one can be used — a sheet carrying both "Capital on Default" and "Handover amount" would
+   * otherwise have the second silently overwrite the first — and this was decided by position
+   * first, which is the wrong test and quietly the worst possible one.
+   *
+   * The client sheet we were sent carries "Debtor Surname" at column 15 and "Debtor Initials" at
+   * column 16. Both map to the name. "Debtor Surname" is EMPTY in all 45 rows and "Debtor
+   * Initials" holds all 45 surnames — so position-first took the empty column, and every account
+   * refused for having no name while the names sat one column to the right. The same pair sits on
+   * "Client Prefix" (empty) and "Client Reference" (BF-001…), which took the references with it.
+   *
+   * Counting is over the body, not the header, because the header is exactly what is lying.
+   * A TIE KEEPS THE FIRST, which is the old behaviour and the right one when there is nothing to
+   * choose on: two columns with the same amount of data are a question for a person, and the
+   * loser is reported by name rather than dropped.
+   */
+  const body = input.rows.slice(1)
+  const filled = (i: number) => body.reduce((n, row) => n + ((row[i] ?? '').trim() ? 1 : 0), 0)
+  const winners = new Set<number>()
+  for (const key of new Set(claims.map((c) => c.col.key))) {
+    const group = claims.filter((c) => c.col.key === key)
+    const best = group.reduce((a, b) => (filled(b.i) > filled(a.i) ? b : a))
+    winners.add(best.i)
+  }
+
+  for (const { i, heading, col } of claims) {
+    if (!winners.has(i)) { unrecognised.push(heading); continue }
     at.set(i, col.key)
     const k = headingKey(heading)
     matched.push({
@@ -267,7 +310,7 @@ export function planHandover(input: {
         return isLabel ? 'label' : isWas ? 'was' : 'either'
       })(),
     })
-  })
+  }
 
   const viaWas = matched.filter((m) => m.via === 'was').length
   const viaLabel = matched.filter((m) => m.via === 'label').length

@@ -383,10 +383,10 @@ ok('...while the date of birth is left, so a debtor recognises it',
   maskSaId('8503125009089').startsWith('850312'))
 /*
  * ANYTHING THAT IS NOT THIRTEEN DIGITS IS RETURNED UNTOUCHED. 45 rows of the firm's own import
- * file had a telephone number in this column, and "0746 XXXX 63" would look deliberate.
+ * file had a telephone number in this column, and "0821 XXXX 67" would look deliberate.
  */
 check('a telephone number in the ID column is not dressed up as an ID',
-  maskSaId('0746013863'), '0746013863')
+  maskSaId('0821234567'), '0821234567')
 check('nothing stays nothing', maskSaId(''), null)
 
 /* ---------- three people, and they are not the same person ---------- */

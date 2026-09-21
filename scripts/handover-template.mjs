@@ -26,9 +26,26 @@
  *     The example is on the notes sheet, NOT as a row in the data, because an example row left in
  *     by accident is a fictional debtor in the book.
  *
- * Run: node scripts/handover-template.mjs [output.xlsx]
+ * IT ALSO FILLS THE SHEET IN, which is what converts a client off their old one.
+ *
+ * THE FIRM: "some clients could possibly take it some time to change the import sheet." A client
+ * who has been sent the blank sheet still has a book in the old shape, and the one thing that
+ * actually moves them across is being handed their own accounts back in the new columns. So the
+ * rows can be supplied, and they are written through the same column list and the same cell
+ * formats as the blank file -- there is no second writer to drift from this one.
+ *
+ * A CONVERSION SHIPS WITH ITS OWN ACCOUNT OF ITSELF. Reading an old sheet is never a pure rename:
+ * a column lands somewhere different, a leading zero is put back, a value is left out because it
+ * was not what its heading claimed. `notes` writes those onto a third sheet inside the workbook,
+ * beside the data they describe, because a conversion explained in an email is a conversion
+ * nobody can check a year later.
+ *
+ * Run: node scripts/handover-template.mjs [output.xlsx] [--rows rows.json]
+ *
+ * rows.json is { "rows": [ { <column key>: value } ], "notes": [ [heading, text] ] }. A date is
+ * an ISO day, money is a number, everything else is a string; an absent key is an empty cell.
  */
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { deflateRawSync, crc32 } from 'node:zlib'
 import { HANDOVER_COLUMNS, HANDOVER_GROUPS } from '../src/lib/handoverSheet.ts'
 
@@ -149,6 +166,59 @@ function inlineCell(ref, style, text) {
   return `<c r="${ref}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${esc(text)}</t></is></c>`
 }
 
+/*
+ * A DATE CELL HOLDS A NUMBER, not the letters "17/09/2026". Excel's epoch is 1899-12-30 -- two
+ * days behind the obvious one, because Lotus 1-2-3 believed in a 29 February 1900 and every
+ * spreadsheet since has agreed to keep believing it. Written as text instead, the cell would
+ * carry the same dd/mm/yyyy ambiguity into the importer that the date format exists to remove.
+ */
+const EXCEL_EPOCH = Date.UTC(1899, 11, 30)
+function excelSerial(iso) {
+  const t = Date.parse(`${String(iso).slice(0, 10)}T00:00:00Z`)
+  if (Number.isNaN(t)) return null
+  return Math.round((t - EXCEL_EPOCH) / 86400000)
+}
+
+/** One filled cell, in the format its column is declared as. */
+function valueCell(ref, column, value) {
+  const style = bodyStyle(column.kind)
+  if (value === null || value === undefined || value === '') return `<c r="${ref}" s="${style}"/>`
+  if (column.kind === 'date') {
+    const serial = excelSerial(value)
+    return serial === null
+      /* An unparseable date is written as what it says rather than dropped: the importer reports
+         it, and a person can see what was in the old file. Silently emptying a cell is the one
+         outcome nobody can investigate. */
+      ? inlineCell(ref, 4, value)
+      : `<c r="${ref}" s="${style}"><v>${serial}</v></c>`
+  }
+  if (column.kind === 'money' || column.kind === 'number') {
+    const n = typeof value === 'number' ? value : Number(String(value).replace(/[^0-9.-]/g, ''))
+    return Number.isFinite(n) ? `<c r="${ref}" s="${style}"><v>${n}</v></c>` : inlineCell(ref, 4, value)
+  }
+  /* Everything else inline, never as a number -- this is the whole point of the text format, and
+     a phone written as <v>129403445</v> would be exactly the bug the sheet was rewritten over. */
+  return inlineCell(ref, style, value)
+}
+
+/* ---------------------------------------------------------------- what to fill it with */
+
+const args = process.argv.slice(2)
+const rowsFlag = args.indexOf('--rows')
+const supplied = rowsFlag === -1 ? { rows: [], notes: [] }
+  : JSON.parse(readFileSync(args[rowsFlag + 1], 'utf8'))
+const DATA = supplied.rows ?? []
+const NOTES = supplied.notes ?? []
+/* A key that matches no column would be written nowhere and noticed by nobody. */
+{
+  const known = new Set(HANDOVER_COLUMNS.map((c) => c.key))
+  const stray = [...new Set(DATA.flatMap((r) => Object.keys(r)))].filter((k) => !known.has(k))
+  if (stray.length) {
+    console.error(`No such column: ${stray.join(', ')}`)
+    process.exit(1)
+  }
+}
+
 /* ---------------------------------------------------------------- sheet 1: the accounts */
 
 const N = HANDOVER_COLUMNS.length
@@ -165,9 +235,15 @@ const headerRow = `<row r="1" ht="30" customHeight="1">${HANDOVER_COLUMNS.map((c
  * version of Excel once a cell has been typed into, so the first few hundred rows are written out
  * with the style and no value. It costs a few kilobytes and it is what keeps 082... as 082...
  */
-const blankRows = Array.from({ length: FORMATTED_ROWS }, (_, r) =>
+const dataRows = DATA.map((row, r) =>
   `<row r="${r + 2}">${HANDOVER_COLUMNS.map((c, i) =>
-    `<c r="${colName(i)}${r + 2}" s="${bodyStyle(c.kind)}"/>`).join('')}</row>`).join('')
+    valueCell(`${colName(i)}${r + 2}`, c, row[c.key])).join('')}</row>`).join('')
+
+/* The formatted-but-empty rows carry on BELOW whatever was filled in, so a converted file is
+   still a file the client adds to -- the next account they type keeps its leading zero too. */
+const blankRows = Array.from({ length: FORMATTED_ROWS }, (_, r) => r + 2 + DATA.length).map((n) =>
+  `<row r="${n}">${HANDOVER_COLUMNS.map((c, i) =>
+    `<c r="${colName(i)}${n}" s="${bodyStyle(c.kind)}"/>`).join('')}</row>`).join('')
 
 const cols = HANDOVER_COLUMNS.map((c, i) => {
   const width = Math.min(38, Math.max(13, c.label.length + 4))
@@ -183,20 +259,20 @@ const validations = HANDOVER_COLUMNS
   .map((c, i) => [c, i])
   .filter(([c]) => c.kind === 'choice')
   .map(([c, i]) => `<dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1"`
-    + ` sqref="${colName(i)}2:${colName(i)}${FORMATTED_ROWS + 1}">`
+    + ` sqref="${colName(i)}2:${colName(i)}${FORMATTED_ROWS + DATA.length + 1}">`
     + `<formula1>"${c.choices.join(',')}"</formula1></dataValidation>`).join('')
 
 const sheet1 = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <sheetPr><tabColor rgb="FF1B2A4A"/></sheetPr>
-<dimension ref="A1:${LAST}${FORMATTED_ROWS + 1}"/>
+<dimension ref="A1:${LAST}${FORMATTED_ROWS + DATA.length + 1}"/>
 <sheetViews><sheetView tabSelected="1" workbookViewId="0">
 <pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>
 <selection pane="bottomLeft" activeCell="A2" sqref="A2"/>
 </sheetView></sheetViews>
 <sheetFormatPr defaultRowHeight="15"/>
 <cols>${cols}</cols>
-<sheetData>${headerRow}${blankRows}</sheetData>
+<sheetData>${headerRow}${dataRows}${blankRows}</sheetData>
 ${validations ? `<dataValidations count="${(validations.match(/<dataValidation /g) || []).length}">${validations}</dataValidations>` : ''}
 </worksheet>`
 
@@ -249,9 +325,44 @@ const sheet2 = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <sheetData>${rows2.join('')}</sheetData>
 </worksheet>`
 
+/* ---------------------------------------------------------------- sheet 3: what was changed */
+
+/*
+ * ONLY WHEN THERE IS SOMETHING TO SAY. A blank sheet has no conversion behind it, and a tab
+ * headed "What we changed" on a file nobody converted invites somebody to go looking for the
+ * change. CLAUDE.md: a warning that fires when nothing is wrong is worse than no warning.
+ */
+let r3 = 0
+const rows3 = []
+const put3 = (cells, height) => {
+  r3 += 1
+  rows3.push(`<row r="${r3}"${height ? ` ht="${height}" customHeight="1"` : ''}>${cells}</row>`)
+}
+if (NOTES.length) {
+  put3(inlineCell('A1', 1, 'What we changed reading your old sheet'))
+  put3(inlineCell('A2', 8, 'Every difference between the file you sent and this one. Nothing here '
+    + 'was corrected on your behalf \u2014 where a value looked wrong it was left as it was and '
+    + 'written down.'), 30)
+  put3('')
+  for (const [heading, text] of NOTES) {
+    put3(inlineCell(`A${r3 + 1}`, 7, heading) + inlineCell(`B${r3 + 1}`, 7, ''))
+    put3(inlineCell(`A${r3 + 1}`, 8, '') + inlineCell(`B${r3 + 1}`, 8, text), 46)
+  }
+}
+
+const sheet3 = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<dimension ref="A1:B${Math.max(r3, 1)}"/>
+<sheetViews><sheetView workbookViewId="0"/></sheetViews>
+<sheetFormatPr defaultRowHeight="15"/>
+<cols><col min="1" max="1" width="40" customWidth="1"/><col min="2" max="2" width="104" customWidth="1"/></cols>
+<sheetData>${rows3.join('')}</sheetData>
+</worksheet>`
+
 /* ---------------------------------------------------------------- the workbook */
 
-const out = process.argv[2] ?? 'Bredell Ferreira - handover sheet.xlsx'
+const out = args.find((a) => !a.startsWith('--') && args[args.indexOf(a) - 1] !== '--rows')
+  ?? 'Bredell Ferreira - handover sheet.xlsx'
 writeFileSync(out, zip([
   ['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -259,7 +370,8 @@ writeFileSync(out, zip([
 <Default Extension="xml" ContentType="application/xml"/>
 <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
 <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>${NOTES.length ? `
+<Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>` : ''}
 <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
 </Types>`],
   ['_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -270,21 +382,26 @@ writeFileSync(out, zip([
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <sheets>
 <sheet name="Accounts" sheetId="1" r:id="rId1"/>
-<sheet name="How to fill it in" sheetId="2" r:id="rId2"/>
+<sheet name="How to fill it in" sheetId="2" r:id="rId2"/>${NOTES.length ? `
+<sheet name="What we changed" sheetId="3" r:id="rId4"/>` : ''}
 </sheets>
 </workbook>`],
   ['xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
 <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
-<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${NOTES.length ? `
+<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"/>` : ''}
 </Relationships>`],
   ['xl/styles.xml', STYLES],
   ['xl/worksheets/sheet1.xml', sheet1],
   ['xl/worksheets/sheet2.xml', sheet2],
+  ...(NOTES.length ? [['xl/worksheets/sheet3.xml', sheet3]] : []),
 ]))
 
 const required = HANDOVER_COLUMNS.filter((c) => c.required).length
 console.log(`${out}`)
 console.log(`${N} columns, ${required} of them required, across ${HANDOVER_GROUPS.length} groups.`)
 console.log(`${HANDOVER_COLUMNS.filter((c) => c.kind === 'text').length} formatted as text, so no leading zero is eaten.`)
+if (DATA.length) console.log(`${DATA.length} accounts filled in, and ${FORMATTED_ROWS} formatted rows below them.`)
+if (NOTES.length) console.log(`${NOTES.length} notes on "What we changed".`)

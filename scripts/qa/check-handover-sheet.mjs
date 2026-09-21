@@ -11,6 +11,11 @@
  * map to a column or be on the list of things deliberately not carried across. There is no third
  * answer, and "we forgot" cannot hide in either list.
  */
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { inflateRawSync } from 'node:zlib'
 import { HANDOVER_COLUMNS, aliasIndex, headingKey } from '../../src/lib/handoverSheet.ts'
 
 let pass = 0
@@ -204,6 +209,77 @@ check('every required column has a note saying what goes in it',
   HANDOVER_COLUMNS.filter((c) => c.required && !c.note.trim()).map((c) => c.key), [])
 check('every choice column offers choices',
   HANDOVER_COLUMNS.filter((c) => c.kind === 'choice' && !(c.choices ?? []).length).map((c) => c.key), [])
+
+/* ---------- 5. the file the generator actually writes ---------- */
+
+/*
+ * THE COLUMN TABLE BEING RIGHT IS NOT THE SAME AS THE FILE BEING RIGHT, and everything above this
+ * line only reads the table. A converted sheet goes to a client and comes back; if a cell number
+ * were written as a NUMBER rather than as text the leading zero would be gone again, which is the
+ * exact failure the whole sheet was rewritten over, and the table would still pass.
+ *
+ * So the generator is run, and the .xlsx it writes is unzipped and read.
+ */
+const dir = mkdtempSync(join(tmpdir(), 'handover-'))
+try {
+  const rowsPath = join(dir, 'rows.json')
+  const out = join(dir, 'filled.xlsx')
+  writeFileSync(rowsPath, JSON.stringify({
+    rows: [{
+      client_reference: 'GPS3/10103', capital: 48250.75, default_date: '2026-09-17',
+      debtor_kind: 'Person', name: 'Van Der Westhuizen', first_name: 'Johannes',
+      /* The leading zero is the point. */
+      cell_1: '0821234567',
+    }],
+    notes: [['A heading', 'Something we changed.']],
+  }))
+  execFileSync(process.execPath, ['scripts/handover-template.mjs', out, '--rows', rowsPath],
+    { cwd: new URL('../..', import.meta.url).pathname, stdio: 'pipe' })
+
+  /* Enough of a zip reader to find one entry: the local header is 30 bytes plus the name plus an
+     extra field, and the body is raw deflate. */
+  const buf = readFileSync(out)
+  const entry = (name) => {
+    for (let i = 0; i < buf.length - 4; i += 1) {
+      if (buf.readUInt32LE(i) !== 0x04034b50) continue
+      const nameLen = buf.readUInt16LE(i + 26)
+      const extraLen = buf.readUInt16LE(i + 28)
+      const at = i + 30
+      if (buf.toString('utf8', at, at + nameLen) !== name) continue
+      const from = at + nameLen + extraLen
+      return inflateRawSync(buf.subarray(from, from + buf.readUInt32LE(i + 18))).toString('utf8')
+    }
+    return null
+  }
+
+  const sheet = entry('xl/worksheets/sheet1.xml')
+  ok('the generator writes a first sheet', typeof sheet === 'string' && sheet.length > 0)
+  const body = (sheet ?? '').split('<row r="2">')[1]?.split('</row>')[0] ?? ''
+  ok('...with the account on row 2', body.includes('Van Der Westhuizen'))
+  /* PRESENCE BEFORE SHAPE: asserting only that the number is not in a <v> passes on a file that
+     does not contain the number at all. */
+  ok('the cell number is in the file', body.includes('0821234567'))
+  ok('...as text, not as a quantity', !/<v>0?821234567<\/v>/.test(body))
+  ok('...keeping its leading zero', /<t[^>]*>0821234567<\/t>/.test(body))
+  /* 46282 is 17 September 2026 counted from Excel's 1899-12-30 epoch -- the same serial
+     check-handover-import.mjs reads back as that day. A wrong epoch is two days out and looks
+     entirely plausible on screen. */
+  ok('a date is written as the serial the importer reads', body.includes('<v>46282</v>'))
+  ok('money is written as a number', body.includes('<v>48250.75</v>'))
+
+  const notes = entry('xl/worksheets/sheet3.xml')
+  ok('a conversion carries its own account of itself', (notes ?? '').includes('Something we changed.'))
+
+  /* And the blank sheet has no such tab -- a "What we changed" heading on a file nobody converted
+     sends somebody looking for a change that was never made. */
+  const plain = join(dir, 'blank.xlsx')
+  execFileSync(process.execPath, ['scripts/handover-template.mjs', plain],
+    { cwd: new URL('../..', import.meta.url).pathname, stdio: 'pipe' })
+  const blank = readFileSync(plain).toString('latin1')
+  ok('a blank sheet has no "what we changed" tab', !blank.includes('sheet3.xml'))
+} finally {
+  rmSync(dir, { recursive: true, force: true })
+}
 
 /* ---------------------------------------------------------------- report */
 

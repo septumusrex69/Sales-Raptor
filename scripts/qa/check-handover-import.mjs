@@ -59,6 +59,20 @@ check('an empty cell is not nought', parseMoney(''), null)
 /* ---------- 2. dates, and the one that means two days ---------- */
 
 check('an ISO date reads', parseSheetDate('2026-03-18'), '2026-03-18')
+/*
+ * THE SHAPE THE APP'S OWN READER PRODUCES, which is the one this file forgot.
+ *
+ * `readXlsxRows` renders every date cell as yyyy/mm/dd -- "the shape Swordfish's own exports
+ * use", says its comment -- and only the hyphen was matched here. So every date in every .xlsx
+ * that reached the importer through its own screen was refused: 45 of 45 accounts on the client
+ * sheet refused on a date of default that had been read correctly out of the file two functions
+ * earlier. Nothing about four leading digits is ambiguous, so the separator cannot matter.
+ */
+check('a year-first date with slashes reads', parseSheetDate('2026/09/17'), '2026-09-17')
+check('...and with dots', parseSheetDate('2026.09.17'), '2026-09-17')
+check('...and is not touched by the file order', parseSheetDate('2026/09/17', 'month-first'), '2026-09-17')
+/* The year-first branch owes the same refusal as the slash branch below it. */
+check('the 31st of February is not a date year-first either', parseSheetDate('2026/02/31'), null)
 /* Excel hands a date over as a serial. 46282 is 17 September 2026. */
 check('an Excel serial reads', parseSheetDate('46282'), '2026-09-17')
 /*
@@ -164,6 +178,51 @@ check('neither row is refused', [fresh.refused.length, legacy.refused.length], [
 /* The old sheet's initials column is read as the NAME, which is where its contents actually are. */
 check('the old sheet’s "Debtor Initials" is mapped to the name, not to initials',
   legacy.matched.find((m) => m.heading === 'Debtor Initials')?.key, 'name')
+
+/*
+ * TWO HEADINGS FOR ONE COLUMN, AND ONE OF THEM EMPTY.
+ *
+ * The fixture above is the client's old sheet TIDIED, and that is why it passed while the real
+ * file did not. The real sheet carries "Debtor Surname" AND "Debtor Initials" -- surname empty in
+ * all 45 rows, initials holding all 45 surnames -- and "Client Prefix" AND "Client Reference",
+ * prefix empty and reference holding the real ones. Only one heading can own a column, and that
+ * was decided by whichever came first, so the importer took both empty columns and refused every
+ * account for having no name and no reference while both sat one column to the right.
+ *
+ * The body decides it now. Asserted on a sheet shaped like the real one rather than the clean one.
+ */
+const DECOY_SHEET = [
+  ['Client Prefix', 'Client Reference', 'Amount', 'Date of Default',
+    'Debtor Surname', 'Debtor Initials', 'Debtor Firstname'],
+  ['', 'GPS3/10103', '48250.00', '2026/09/17', '', 'Van Der Westhuizen', 'Johannes'],
+  ['', 'GPS3/10104', '1550.60', '2026/09/17', '', 'Buitendag', 'Maria'],
+]
+const decoy = planHandover({ rows: DECOY_SHEET, today: TODAY })
+check('the column with the surnames in it wins, not the one that is named after them',
+  decoy.ready[0]?.values.name, 'Van Der Westhuizen')
+check('...and the reference comes from the column that has references',
+  decoy.ready[0]?.values.client_reference, 'GPS3/10103')
+check('...so nothing is refused', [decoy.refused.length, decoy.ready.length], [0, 2])
+/* The loser is NAMED. A column silently dropped is a column somebody spends an afternoon on. */
+ok('the empty heading that lost is reported rather than dropped',
+  decoy.unrecognised.includes('Debtor Surname') && decoy.unrecognised.includes('Client Prefix'))
+ok('...and the winner is the one in the mapping',
+  decoy.matched.some((m) => m.heading === 'Debtor Initials' && m.key === 'name'))
+
+/*
+ * A TIE KEEPS THE FIRST, which is the old behaviour and the right one where there is nothing to
+ * choose on: two columns equally full are a question for a person, not a coin toss that changes
+ * between two runs of the same file.
+ */
+const tied = planHandover({
+  rows: [
+    ['Capital on Default', 'Amount', 'Client Reference', 'Date of Default', 'Debtor Surname'],
+    ['48250.00', '99999.00', 'GPS3/10103', '2026/09/17', 'Van Der Westhuizen'],
+  ],
+  today: TODAY,
+})
+check('two equally full columns keep the first', tied.totalCapital, 48250)
+ok('...and the second is reported', tied.unrecognised.includes('Amount'))
 
 /* ---------- 4. a heading nobody knows is reported, never guessed ---------- */
 
