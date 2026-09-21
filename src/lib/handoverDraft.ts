@@ -21,7 +21,7 @@ import {
 } from './handoverImport.ts'
 import { HANDOVER_COLUMNS } from './handoverSheet.ts'
 import { toAccountRow, toContactRows } from './newDebtor.ts'
-import { createDebtorAccount } from './accountBook'
+import { createDebtorAccount, fetchExistingAccounts } from './accountBook'
 
 const DRAFT_COLUMNS = 'id, company_id, filename, sheet_kind, date_order, state, handover_id, '
   + 'approved_at, approved_by, created_by, created_at, updated_at'
@@ -138,19 +138,31 @@ export async function fetchDraft(id: string, today: string): Promise<JudgedDraft
     excluded: r.excluded as boolean,
   }))
 
+  /*
+   * THE BOOK IS READ AGAIN HERE, not carried over from when the file was read.
+   *
+   * The verdict is recomputed on every read, so every INPUT to it has to be present on every read
+   * too -- given the accounts only when the sheet was first read, the duplicate warning would
+   * appear once and then quietly vanish the next time somebody opened the draft, which is the
+   * same class of bug as a stored verdict and rather harder to see.
+   */
+  const draft = toDraft(d as unknown as Record<string, unknown>)
+  const existingAccounts = await fetchExistingAccounts(draft.companyId).catch(() => [])
+
   /* Rebuilt as a sheet -- header row and all -- so the judging goes through exactly the path a
      file does, including the file-wide date order. Two paths to a verdict would eventually
      disagree, and the one that disagreed would be the one nobody was looking at. */
   const keys = HANDOVER_COLUMNS.map((c) => c.key)
   const plan = planHandover({
     rows: [keys, ...stored.map((r) => keys.map((k) => r.values[k] ?? ''))],
+    existingAccounts,
     today,
   })
 
   const rows = stored.map((r, i) => ({ ...r, planned: plan.rows[i] }))
   const live = rows.filter((r) => !r.excluded)
   return {
-    draft: toDraft(d as unknown as Record<string, unknown>),
+    draft,
     rows,
     ready: live.filter((r) => !r.planned?.refused).length,
     refused: live.filter((r) => r.planned?.refused).length,

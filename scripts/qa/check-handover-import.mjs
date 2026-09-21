@@ -383,6 +383,95 @@ ok('a repeated reference points at the reference',
 ok('...and a problem about the whole row names no column',
   problemsOf(noContact.ready[0]).some((p) => p.key === null))
 
+/* ---------- 5b. possible duplicates ---------- */
+
+/*
+ * THE FIRM: "it's possible that a client can put the same data twice on the same sheet, or that
+ * the same data has already been handed over for the same amount. So it should flag it and tell
+ * you: here's a possible duplicate handover, accept or discard."
+ *
+ * NEITHER OF THEM REFUSES. A client can genuinely hand the same debtor over twice for two
+ * different debts, and "accept or discard" is a choice, not a rule.
+ */
+const ID_A = '8503125009089'
+
+/* Twice in one file, under DIFFERENT references, which is the case the existing duplicate-
+   reference refusal cannot see -- it is the same debt typed twice, not the same reference. */
+const twiceInFile = rows(
+  ['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'],
+  ['A2', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+ok('the same debtor and amount twice in one file is flagged',
+  problemsOf(twiceInFile.rows[1]).some((p) => /Possible duplicate of row 2/.test(p.message)))
+check('...as a warning, not a refusal', twiceInFile.refused.length, 0)
+ok('...and says what to do about it',
+  /Accept it if they genuinely owe twice/.test(firstMessage(twiceInFile.rows[1])))
+check('...and the first copy is not itself flagged', problemsOf(twiceInFile.rows[0]).length, 0)
+
+/* A THIRD COPY POINTS AT THE FIRST, not at the second: a chain of "row 4 duplicates row 3,
+   row 3 duplicates row 2" is one nobody unpicks. */
+const thrice = rows(
+  ['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'],
+  ['A2', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'],
+  ['A3', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+ok('a third copy points at the first, not at the second',
+  /row 2/.test(firstMessage(thrice.rows[2])))
+
+/* Same name, different amount, and the other way round: either half alone is worthless. In the
+   firm's own file fourteen accounts are for exactly R380 and three surnames appear twice. */
+const sameNameOtherAmount = rows(
+  ['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'],
+  ['A2', '250', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('the same surname for a different amount is not a duplicate',
+  problemsOf(sameNameOtherAmount.rows[1]).length, 0)
+const sameAmountOtherName = rows(
+  ['A1', '380', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'],
+  ['A2', '380', '2026-01-01', 'Person', 'Mokoena', '', '082 123 4567', 'a@b.co.za'])
+check('...nor the same amount for a different surname',
+  problemsOf(sameAmountOtherName.rows[1]).length, 0)
+
+/* THE ID IS THE STRONG SIGNAL and beats a different amount, because it is the same person and
+   there is no innocent reason for one ID to arrive twice in one batch. */
+const sameIdOtherAmount = rows(
+  ['A1', '100', '2026-01-01', 'Person', 'Dube', ID_A, '082 123 4567', 'a@b.co.za'],
+  ['A2', '999', '2026-01-01', 'Person', 'Mokoena', ID_A, '082 123 4567', 'a@b.co.za'])
+ok('the same ID number twice is flagged even for a different amount',
+  problemsOf(sameIdOtherAmount.rows[1]).some((p) => /Possible duplicate of row 2/.test(p.message)))
+
+/*
+ * AND THE ID COLUMN THAT HELD A TELEPHONE NUMBER MUST NOT MATCH. Every one of the 45 rows in the
+ * client's own file had a cell number there; matched on, it would have reported 45 duplicates of
+ * nothing and taught the firm to ignore the whole warning on its first use.
+ */
+const phoneInIdColumn = rows(
+  ['A1', '100', '2026-01-01', 'Person', 'Dube', '0821234567', '082 123 4567', 'a@b.co.za'],
+  ['A2', '250', '2026-01-01', 'Person', 'Mokoena', '0821234567', '082 123 4567', 'a@b.co.za'])
+ok('a telephone number in the ID column is never a duplicate signal',
+  !problemsOf(phoneInIdColumn.rows[1]).some((p) => /duplicate/i.test(p.message)))
+
+/* ALREADY ON THE BOOK, which is the other half of what the firm asked for. */
+const onBook = (data) => planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Person or business',
+    'Surname', 'ID number', 'Cell number 1', 'Email address'], data],
+  existingAccounts: [
+    { reference: 'ACF10085', idNumber: null, name: 'Dube', capital: 100 },
+    { reference: 'ACF10086', idNumber: ID_A, name: 'Ntuli', capital: 4200 },
+  ],
+  today: TODAY,
+})
+const onBookAlready = onBook(['A9', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+ok('a debt already on the book is flagged',
+  /already on this client's book/.test(firstMessage(onBookAlready.rows[0])))
+ok('...and names the account to go and look at',
+  /ACF10085/.test(firstMessage(onBookAlready.rows[0])))
+check('...still as a warning', onBookAlready.refused.length, 0)
+const byId = onBook(['A9', '77', '2026-01-01', 'Person', 'Someone', ID_A, '082 123 4567', 'a@b.co.za'])
+ok('...matched on the ID as well as on name and amount', /ACF10086/.test(firstMessage(byId.rows[0])))
+const notOnBook = onBook(['A9', '101', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('a rand different is not the same debt', problemsOf(notOnBook.rows[0]).length, 0)
+/* A book that could not be read is not a book full of duplicates. */
+const noBook = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('no book to compare against says nothing', problemsOf(noBook.rows[0]).length, 0)
+
 /* ---------- 6. one debt, one ledger ---------- */
 
 const twice = rows(

@@ -60,6 +60,34 @@ export function checkPhone(raw: string): PhoneVerdict {
   return 'wrong'
 }
 
+/** Case, spacing and punctuation removed, so "van der Westhuizen" and "Van Der Westhuizen" meet. */
+const fold = (v: string | null | undefined) => (v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+
+/**
+ * The two ways one debt is recognised as another, and why it is only ever a WARNING.
+ *
+ * AN ID NUMBER is the strong one: the same person, and there is no innocent reason for the same
+ * ID to arrive twice in one batch. A NAME AND AN AMOUNT TOGETHER is the weak one, and it is here
+ * because the sheet the firm sent has no ID numbers at all -- an ID-only rule would have found
+ * nothing on the only real file we have. Either on its own is worthless: in that same file
+ * fourteen accounts are for exactly R380, and three surnames appear twice.
+ *
+ * NEITHER REFUSES. A client can genuinely hand the same debtor over twice for two different
+ * debts, and the firm asked to be told, not stopped: "accept or discard".
+ */
+function signaturesOf(
+  values: { id_number?: string | null; name?: string | null }, capital: number | null,
+): string[] {
+  const out: string[] = []
+  const id = fold(values.id_number)
+  /* Thirteen digits, because on the old sheet this column held a telephone number in every row --
+     matching on those would report 45 duplicates of nothing. */
+  if (id.length === 13) out.push(`id:${id}`)
+  const name = fold(values.name)
+  if (name && capital !== null) out.push(`name:${name}:${capital.toFixed(2)}`)
+  return out
+}
+
 export type SheetKind = 'raptor' | 'swordfish' | 'mixed' | 'unknown'
 
 export interface ColumnMatch {
@@ -95,6 +123,20 @@ export interface RowProblem {
    * reference that appears twice.
    */
   key: string | null
+}
+
+/**
+ * An account already on this client's book, reduced to what a duplicate is recognised by.
+ *
+ * THE FIRM: "it's possible that a client can put the same data twice on the same sheet, or that
+ * the same data has already been handed over for the same amount. So it should flag it and tell
+ * you: here's a possible duplicate handover, accept or discard."
+ */
+export interface ExistingAccount {
+  reference: string | null
+  idNumber: string | null
+  name: string | null
+  capital: number | null
 }
 
 export interface PlannedRow {
@@ -259,6 +301,8 @@ const REQUIRED = HANDOVER_COLUMNS.filter((c) => c.required)
 export function planHandover(input: {
   rows: (string | null)[][]
   existingReferences?: Set<string>
+  /** What is already on this client's book, for the duplicate warning. */
+  existingAccounts?: ExistingAccount[]
   today: string
 }): HandoverPlan {
   const index = aliasIndex()
@@ -353,7 +397,20 @@ export function planHandover(input: {
   const dates = detectDateOrder(
     input.rows.slice(1).flatMap((row) => dateColumns.map((i) => row[i])))
 
+  /*
+   * WHAT IS ALREADY ON THE BOOK, keyed the same way the rows are, so "the same data has already
+   * been handed over" can be said with the reference somebody would go and look at.
+   */
+  const onBook = new Map<string, string>()
+  for (const a of input.existingAccounts ?? []) {
+    for (const sig of signaturesOf({ id_number: a.idNumber, name: a.name }, a.capital)) {
+      if (!onBook.has(sig)) onBook.set(sig, a.reference ?? 'an account with no reference')
+    }
+  }
+
   const seen = new Set<string>()
+  /** signature -> the line earlier in THIS file that already carried it. */
+  const seenSignatures = new Map<string, number>()
   const rows: PlannedRow[] = []
   for (let r = 1; r < input.rows.length; r += 1) {
     const raw = input.rows[r] ?? []
@@ -362,7 +419,8 @@ export function planHandover(input: {
     const values: Record<string, string | null> = {}
     for (const [i, key] of at) values[key] = (raw[i] ?? '').trim() || null
     rows.push(readRow(values, r + 1, {
-      seen, existing: input.existingReferences, today: input.today, order: dates.order,
+      seen, seenSignatures, onBook,
+      existing: input.existingReferences, today: input.today, order: dates.order,
     }))
   }
 
@@ -401,7 +459,16 @@ export function planHandover(input: {
 function readRow(
   values: Record<string, string | null>,
   line: number,
-  ctx: { seen: Set<string>; existing?: Set<string>; today: string; order: DateOrder },
+  ctx: {
+    seen: Set<string>
+    /** Signatures already met in this file, and the line each came from. */
+    seenSignatures: Map<string, number>
+    /** Signatures already on the client's book, and the reference each belongs to. */
+    onBook: Map<string, string>
+    existing?: Set<string>
+    today: string
+    order: DateOrder
+  },
 ): PlannedRow {
   const problems: RowProblem[] = []
   const refuse = (key: string | null, message: string) =>
@@ -515,6 +582,34 @@ function readRow(
     warn('email_1', 'No email address — a section 129 is sent by email, so there is nowhere to '
       + 'send it.')
   }
+
+  /*
+   * POSSIBLE DUPLICATES, LAST, AND ONLY EVER AS A WARNING.
+   *
+   * THE FIRM: "it's possible that a client can put the same data twice on the same sheet, or that
+   * the same data has already been handed over for the same amount. So it should flag it and tell
+   * you: here's a possible duplicate handover, accept or discard."
+   *
+   * Said once per row rather than once per signature: a row matching on both the ID and the
+   * name-and-amount is one duplicate, not two, and saying it twice reads as two different
+   * accounts. The row is named so somebody can go and look, which is the whole point -- the
+   * screen cannot know whether a debtor genuinely owes twice, and neither can we.
+   */
+  const signatures = signaturesOf(values, capital)
+  const earlier = signatures.map((sig) => ctx.seenSignatures.get(sig)).find((l) => l !== undefined)
+  if (earlier !== undefined) {
+    warn('client_reference', `Possible duplicate of row ${earlier} — the same debtor and the same `
+      + 'amount appear twice in this file. Accept it if they genuinely owe twice, or leave it out.')
+  } else {
+    const already = signatures.map((sig) => ctx.onBook.get(sig)).find((ref) => ref !== undefined)
+    if (already !== undefined) {
+      warn('client_reference', `Possible duplicate of ${already}, already on this client's book `
+        + '— the same debtor for the same amount. Accept it if it is a second debt, or leave it out.')
+    }
+  }
+  /* Recorded whether or not it was reported, so a third copy points at the FIRST one rather than
+     at the second: "row 4 duplicates row 3, row 3 duplicates row 2" is a chain nobody unpicks. */
+  for (const sig of signatures) if (!ctx.seenSignatures.has(sig)) ctx.seenSignatures.set(sig, line)
 
   return { line, values, capital, problems, refused: problems.some((p) => p.level === 'refuse') }
 }

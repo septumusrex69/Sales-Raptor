@@ -15,6 +15,7 @@ import { supabase } from './supabase'
 import type { FrozenBy } from './clientPosition.ts'
 import type { ViewCounts } from './accountViews.ts'
 import type { PractitionerKind } from './accountStanding.ts'
+import type { ExistingAccount } from './handoverImport.ts'
 
 export interface DebtorAccount {
   id: string
@@ -551,6 +552,38 @@ export async function fetchAccountReferences(companyId: string): Promise<string[
     .from('debtor_accounts').select('account_number').eq('company_id', companyId).limit(2000)
   if (error) throw new Error(error.message)
   return (data ?? []).map((r: { account_number: string | null }) => r.account_number).filter((r): r is string => !!r)
+}
+
+/**
+ * What is already on a client's book, reduced to what a duplicate is recognised by.
+ *
+ * THE FIRM: "the same data has already been handed over for the same amount. So it should flag
+ * it." Four columns rather than the account, because this is read every time a handover is judged
+ * and the book is hundreds of thousands of rows -- see CLAUDE.md on the two data paths. Scoped to
+ * the one client, which is the only place a duplicate of theirs can be.
+ *
+ * `debtor_surname` rather than a built name: the duplicate rule folds it to letters and digits
+ * and pairs it with the capital, and initials or a title would only add ways for two spellings of
+ * one person to miss each other.
+ */
+export async function fetchExistingAccounts(companyId: string): Promise<ExistingAccount[]> {
+  const { data, error } = await supabase
+    .from('debtor_accounts')
+    .select('account_number, debtor_id_number, debtor_surname, capital_handed_over')
+    .eq('company_id', companyId)
+    .limit(5000)
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r: {
+    account_number: string | null
+    debtor_id_number: string | null
+    debtor_surname: string | null
+    capital_handed_over: number | string | null
+  }) => ({
+    reference: r.account_number,
+    idNumber: r.debtor_id_number,
+    name: r.debtor_surname,
+    capital: r.capital_handed_over === null ? null : Number(r.capital_handed_over),
+  }))
 }
 
 /**

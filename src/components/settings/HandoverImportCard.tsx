@@ -13,7 +13,7 @@ import {
   approveDraft, discardDraft, fetchDraft, fetchOpenDrafts, saveDraft, updateDraftRow,
   type HandoverDraft, type JudgedDraft,
 } from '../../lib/handoverDraft'
-import { fetchClientCommissionRate } from '../../lib/accountBook'
+import { fetchClientCommissionRate, fetchExistingAccounts } from '../../lib/accountBook'
 import { formatCurrency } from '../../data/mockData'
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -121,6 +121,8 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
   const [draftId, setDraftId] = useState<string | null>(null)
   const [judged, setJudged] = useState<JudgedDraft | null>(null)
   const [done, setDone] = useState<string | null>(null)
+  /** The queued draft whose Discard has been pressed once. */
+  const [confirmDiscard, setConfirmDiscard] = useState<string | null>(null)
 
   const refreshDrafts = useCallback(async () => {
     setOpenDrafts(await fetchOpenDrafts().catch(() => []))
@@ -142,7 +144,17 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
     setBusy('Reading the sheet'); setError(null); setDone(null)
     try {
       const rows = await readSheet(sheet)
-      const p = planHandover({ rows, today: today() })
+      /*
+        THE CLIENT'S BOOK, so "the same data has already been handed over" can be said before the
+        sheet is held rather than after. Only where a client has been chosen -- the sheet can be
+        read without one, and a book comparison with no client is a comparison against nothing.
+        A failure to read it is not a failure to read the sheet: the duplicates within the file
+        are still worth having.
+      */
+      const existingAccounts = companyId
+        ? await fetchExistingAccounts(companyId).catch(() => [])
+        : []
+      const p = planHandover({ rows, existingAccounts, today: today() })
       setPlan(p)
       setDocs(pdfs.length
         ? matchDocuments({
@@ -220,15 +232,23 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
 
   /* ---------- the screen ---------- */
 
+  /* One discard for both the open table and the queue below it, so the two cannot come to mean
+     different things -- and so the list is refreshed either way. */
+  async function discard(id: string) {
+    setBusy('Discarding'); setError(null)
+    try {
+      await discardDraft(id)
+      if (draftId === id) { setJudged(null); setDraftId(null) }
+      await refreshDrafts()
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(null) }
+  }
+
   if (judged) return (
     <DraftTable
       judged={judged} busy={busy} error={error}
       onEdit={edit} onExclude={exclude} onApprove={approve}
       onBack={() => { setJudged(null); setDraftId(null) }}
-      onDiscard={async () => {
-        await discardDraft(judged.draft.id)
-        setJudged(null); setDraftId(null); await refreshDrafts()
-      }} />
+      onDiscard={() => discard(judged.draft.id)} />
   )
 
   return (
@@ -320,20 +340,48 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
           <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-2">
             Waiting to be approved
           </p>
+          {/*
+            A DIV HOLDING TWO BUTTONS, NOT ONE BUTTON HOLDING ANOTHER. This was a single <button>
+            wrapping the whole row; a discard inside it would be a button inside a button, which
+            no browser nests and which opens the draft on the way to throwing it away.
+          */}
           <div className="space-y-1.5">
             {openDrafts.map((d) => (
-              <button key={d.id} type="button" onClick={() => void load(d.id)}
-                className="w-full flex items-center gap-3 text-left px-3 py-2 rounded-lg
-                  border border-slate-200 hover:border-gold-400 hover:bg-gold-50">
-                <span className="flex-1 min-w-0">
+              <div key={d.id}
+                className="flex items-center gap-3 px-3 py-2 rounded-lg border border-slate-200">
+                <button type="button" onClick={() => void load(d.id)}
+                  className="flex-1 min-w-0 text-left">
                   <span className="block text-sm text-slate-700 truncate">{d.filename}</span>
                   <span className="block text-[11px] text-slate-400">
                     {clients.find((c) => c.id === d.companyId)?.name ?? 'Unknown client'}
                     {' · '}{new Date(d.createdAt).toLocaleDateString('en-ZA')}
                   </span>
-                </span>
-                <span className="text-xs font-medium text-brand-600">Open</span>
-              </button>
+                </button>
+                <button type="button" onClick={() => void load(d.id)}
+                  className="text-xs font-medium text-brand-600 hover:underline">Open</button>
+                {/*
+                  THE FIRM: "there's another sheet that was now queued for handover that I didn't
+                  import and complete. I should be able to delete that." Nothing on this list
+                  could be got rid of without opening it first.
+
+                  ASKED TWICE, IN PLACE. A window.confirm on an iPad is a system dialog over the
+                  app; the second press of the same button is the same gesture and stays on the
+                  screen somebody is looking at. Nothing is destroyed either way -- discarding
+                  marks the draft and leaves its rows, so a sheet thrown away by accident is a
+                  question for somebody with database access rather than a lost afternoon.
+                */}
+                <button type="button" disabled={!!busy}
+                  onClick={() => {
+                    if (confirmDiscard !== d.id) { setConfirmDiscard(d.id); return }
+                    setConfirmDiscard(null)
+                    void discard(d.id)
+                  }}
+                  onBlur={() => setConfirmDiscard((c) => (c === d.id ? null : c))}
+                  className={`text-xs font-medium ${confirmDiscard === d.id
+                    ? 'text-negative-700 underline' : 'text-slate-400 hover:text-negative-600'}`}>
+                  {confirmDiscard === d.id ? 'Sure?' : 'Discard'}
+                </button>
+              </div>
             ))}
           </div>
         </div>

@@ -61,6 +61,15 @@ const slowly = (body) => async () => {
 const DRAFT_ID = '44444444-4444-4444-8444-444444444444'
 const draftRows = []
 let nextRowId = 0
+/** What the screen asked to change about the draft itself, so a discard can be proved. */
+const draftPatches = []
+let discarded = false
+const DRAFT = {
+  id: DRAFT_ID, company_id: COMPANY_ID, filename: 'handover.csv', sheet_kind: 'raptor',
+  date_order: 'day-first', state: 'draft', handover_id: null, approved_at: null,
+  approved_by: null, created_by: PROFILE.id, created_at: '2026-09-21T00:00:00Z',
+  updated_at: '2026-09-21T00:00:00Z',
+}
 
 const handlers = [
   [(u) => /\/rest\/v1\/companies/.test(u), slowly([CLIENT])],
@@ -89,14 +98,19 @@ const handlers = [
   [(u) => /handover_draft_rows/.test(u), () => ({ body: draftRows })],
 
   [(u, r) => /handover_drafts/.test(u) && r.method() === 'POST', () => ({ body: { id: DRAFT_ID } })],
-  [(u) => /handover_drafts/.test(u), () => ({
-    body: {
-      id: DRAFT_ID, company_id: COMPANY_ID, filename: 'handover.csv', sheet_kind: 'raptor',
-      date_order: 'day-first', state: 'open', handover_id: null, approved_at: null,
-      approved_by: null, created_by: PROFILE.id, created_at: '2026-09-21T00:00:00Z',
-      updated_at: '2026-09-21T00:00:00Z',
-    },
-  })],
+  [(u, r) => /handover_drafts/.test(u) && r.method() === 'PATCH', (u, r) => {
+    draftPatches.push(r.postData() ?? '')
+    if ((r.postData() ?? '').includes('discarded')) discarded = true
+    return { body: [] }
+  }],
+  /*
+   * TWO SHAPES FROM ONE TABLE, and answering both the same way is what broke this first.
+   * fetchDraft asks for ONE row by id and reads it with .maybeSingle(), so PostgREST returns an
+   * object; fetchOpenDrafts asks for the whole queue and gets an ARRAY it calls .map on. Handed
+   * the object, the list threw and the queue never rendered at all.
+   */
+  [(u) => /handover_drafts/.test(u) && /id=eq\./.test(u), () => ({ body: DRAFT })],
+  [(u) => /handover_drafts/.test(u), () => ({ body: discarded ? [] : [DRAFT] })],
 ]
 
 /* The smallest sheet the planner accepts: the five required columns and one debtor. */
@@ -295,6 +309,48 @@ try {
   t.ok('nothing on the screen says a notice is posted', !/\bpost(ed|ing)\b/i.test(onScreen))
   t.ok('...and a missing email is what it warns about', /sent by email/.test(onScreen))
 
+  /*
+   * A QUEUED SHEET CAN BE THROWN AWAY WITHOUT OPENING IT.
+   *
+   * THE FIRM: "there's another sheet that was now queued for handover that I didn't import and
+   * complete. I should be able to delete that." Nothing on the waiting list could be got rid of
+   * except by opening it first and discarding from inside.
+   */
+  await page.goto(`http://localhost:${PORT}/settings?tab=Data+Import&client=${COMPANY_ID}`)
+  const queued = page.locator('text=Waiting to be approved')
+  await queued.waitFor({ timeout: 15000 })
+  /* COUNTED, NOT just .isVisible() on .first(). Asking whether the first match is visible says
+     nothing when there is no match to be first -- and an exact-name lookup that finds nothing
+     resolves to a locator that is simply never visible, which reads as a pass nowhere. */
+  const discard = page.getByRole('button', { name: 'Discard', exact: true })
+  t.check('a queued sheet offers to be discarded', await discard.count(), 1)
+
+  /*
+   * ASKED TWICE. One press must not throw anything away, or a mis-tap on an iPad does.
+   *
+   * WAITED OUT FIRST. Written as a bare check straight after the click this passed against code
+   * with the confirm step deleted, because the request it is asserting the absence of had not
+   * been made yet -- an absence checked too early is an absence of nothing.
+   */
+  if (await discard.count()) await discard.click()
+  await page.waitForTimeout(600)
+  t.check('one press only asks', draftPatches.length, 0)
+  const sure = page.getByRole('button', { name: 'Sure?', exact: true })
+  t.check('...and says it is asking', await sure.count(), 1)
+
+  /* GUARDED. Clicking a button that is not there throws, and a throw here kills the run before
+     t.finish() prints the two assertions above that had ALREADY failed -- which is how deleting
+     the confirm step came back as a stack trace with no failing check in it. */
+  if (await sure.count()) await sure.click()
+  await page.waitForTimeout(600)
+  t.check('the second press discards it', draftPatches.length, 1)
+  t.ok('...by marking it discarded rather than deleting it',
+    (draftPatches[0] ?? '').includes('discarded'))
+  /* And it leaves the queue, so the screen agrees with what was just done. */
+  await page.waitForTimeout(400)
+  t.check('...and it goes off the waiting list',
+    await page.getByRole('button', { name: 'Discard', exact: true }).count(), 0)
+
   /* Clicking away clears the client from the URL: it means nothing to any other tab, and a stale
      company id in the address of the Teams screen is a puzzle for whoever sees it next. */
   await page.getByRole('button', { name: 'Teams', exact: true }).first().click()
@@ -304,6 +360,16 @@ try {
     new URL(page.url()).searchParams.get('client'), null)
   t.check('...and names the tab it moved to',
     new URL(page.url()).searchParams.get('tab'), 'Teams')
+} catch (e) {
+  /*
+   * A THROW MUST NOT SWALLOW THE FAILURES THAT CAUSED IT.
+   *
+   * Playwright throws on a click or a waitFor that finds nothing, and an uncaught throw here
+   * ends the process before t.finish() prints anything -- so breaking the thing under test came
+   * back as a stack trace with no failing assertion in it, twice, and each time the assertions
+   * HAD already failed and been recorded. Caught and recorded, the run reports what it knew.
+   */
+  t.check('the run finished without throwing', String(e).split('\n')[0], 'no error')
 } finally {
   if (browser) await browser.close()
   stopServer(server)
