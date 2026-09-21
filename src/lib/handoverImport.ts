@@ -23,7 +23,7 @@
 import { HANDOVER_COLUMNS, aliasIndex, headingKey } from './handoverSheet.ts'
 /* The same ID check the by-hand form uses. Two implementations of a Luhn checksum eventually
    disagree, and the one that disagrees is whichever a person is not looking at. */
-import { isValidSaId } from './newDebtor.ts'
+import { isValidSaId, type NewDebtorInput } from './newDebtor.ts'
 
 /* ---------------------------------------------------------------- what a field should look like */
 
@@ -442,4 +442,39 @@ function readRow(
   if (!values.street_1) warn('No street address — a section 129 cannot be posted.')
 
   return { line, values, capital, problems, refused: problems.some((p) => p.level === 'refuse') }
+}
+
+/**
+ * A row as the by-hand form's input, so both ways of opening an account go through one path.
+ *
+ * PURE, AND HERE RATHER THAN BESIDE THE DRAFT, because the draft reaches the database and a check
+ * that imports it cannot run at all — which is how this ended up in the wrong file first. The
+ * mapping is the interesting part and it is the part worth testing.
+ */
+export function toDebtorInput(values: Record<string, string | null>): NewDebtorInput {
+  const v = (k: string) => (values[k] ?? '').trim()
+  return {
+    accountNumber: v('account_number'),
+    clientReference: v('client_reference'),
+    firstName: v('first_name'),
+    surname: v('name'),
+    idNumber: v('id_number'),
+    capital: v('capital'),
+    handoverDate: v('default_date'),
+    /* NOT ASKED FOR ON THE SHEET ANY MORE, at the firm's instruction -- the rate is in the
+       agreement the firm already holds. toAccountRow needs a number, and an account opened at
+       nought is one somebody notices; opened at a guessed 24% it is one nobody does. */
+    interestRateAnnual: '0',
+    mobile: v('cell_1'),
+    workPhone: v('work_phone'),
+    altNumber: v('cell_2'),
+    email: v('email_1'),
+    address: [v('street_1'), v('street_2'), v('suburb'), v('city'), v('street_code')]
+      .filter(Boolean).join('\n'),
+    employer: v('employer'),
+    kin1Name: v('next_of_kin'),
+    kin1Phone: v('next_of_kin_phone'),
+    kin2Name: v('next_of_kin_2'),
+    kin2Phone: v('next_of_kin_2_phone'),
+  }
 }

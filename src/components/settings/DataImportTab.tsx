@@ -15,6 +15,7 @@ import {
   applyEnrichment, fetchAccountRefs, planEnrichment, type EnrichPlan,
 } from '../../lib/accountEnrich'
 import { formatCurrency } from '../../data/mockData'
+import { HandoverImportCard } from './HandoverImportCard'
 import { LeadsImportCard } from './LeadsImportCard'
 
 /**
@@ -269,8 +270,19 @@ export function DataImportTab() {
 
       {/* A fragment: the migration is a card, its progress is a card and its plan is a third, and
           all three belong to this side. */}
+      {/*
+        THE HANDOVER IMPORT IS FIRST, at the firm's instruction: "on the very, very, very top I
+        need an import file in the data import. So a new handover import. Then bring the book
+        across from Swordfish, and then refresh the details of existing stuff."
+
+        Which is also the order of how often each is used: a handover arrives every week, the
+        Swordfish migration happens once, and the refresh is for a client who sends a corrected
+        contact list.
+      */}
       {side === 'collections' && (
       <>
+      <HandoverImportCard />
+
       <Card>
         <CardHeader
           title="Bring the book across from Swordfish"

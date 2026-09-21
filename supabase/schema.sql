@@ -5575,3 +5575,106 @@ alter table public.account_documents
 comment on column public.account_documents.source is
   'How the document came to be on this account. A filename match is a guess that a person can '
   'review; manual and generated are not.';
+
+-- ============================================================================================
+-- A handover sheet, read and waiting to be approved
+-- ============================================================================================
+--
+-- THE FIRM: "it will scan each handover to see if everything is fine ... if it does not, some
+-- handovers should not be accepted, and it should show why. Then you should be able to edit it in
+-- the handover state on Raptor, and when it's ready say approve handover."
+--
+-- IN THE DATABASE, NOT IN THE BROWSER, and that is the firm's own call after the trade was put to
+-- them. A two-hundred-row handover is an afternoon of corrections; held in a tab it is an
+-- afternoon lost to a closed laptop, and it cannot be handed to somebody else to finish.
+
+create table if not exists public.handover_drafts (
+  id uuid primary key default gen_random_uuid(),
+  -- WHICH CLIENT IS PICKED, NOT READ. The sheet says what the debtor owes, never whose book it
+  -- is: the firm chooses the client at import, which is the control they asked for.
+  company_id uuid not null references public.companies (id) on delete cascade,
+
+  filename text not null,
+  -- 'raptor' | 'swordfish' | 'mixed' -- detected from the headings, never declared by a person.
+  sheet_kind text,
+  -- 'day-first' | 'month-first', settled once for the whole file.
+  date_order text,
+
+  state text not null default 'draft' check (state in ('draft', 'approved', 'discarded')),
+  handover_id uuid references public.handovers (id) on delete set null,
+  approved_at timestamptz,
+  approved_by uuid references public.profiles (id) on delete set null,
+
+  created_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists handover_drafts_open_idx
+  on public.handover_drafts (company_id, created_at desc) where state = 'draft';
+
+-- One row of the sheet: one handover, which is one account in the firm's vocabulary.
+create table if not exists public.handover_draft_rows (
+  id uuid primary key default gen_random_uuid(),
+  draft_id uuid not null references public.handover_drafts (id) on delete cascade,
+  line integer not null,
+
+  -- THE VALUES, AND ONLY THE VALUES. What is wrong with a row is NOT stored: planHandover works
+  -- it out from these, and a stored verdict goes stale the moment somebody edits a cell or the
+  -- rules change. Recomputed on every read, it cannot disagree with the row it describes.
+  values jsonb not null default '{}'::jsonb,
+
+  document_filename text,
+  excluded boolean not null default false,
+
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists handover_draft_rows_draft_idx
+  on public.handover_draft_rows (draft_id, line);
+
+alter table public.handover_drafts enable row level security;
+alter table public.handover_draft_rows enable row level security;
+grant select, insert, update, delete on public.handover_drafts to authenticated;
+grant select, insert, update, delete on public.handover_draft_rows to authenticated;
+
+drop policy if exists handover_drafts_all on public.handover_drafts;
+create policy handover_drafts_all on public.handover_drafts for all
+  to authenticated using (true) with check (true);
+
+drop policy if exists handover_draft_rows_all on public.handover_draft_rows;
+create policy handover_draft_rows_all on public.handover_draft_rows for all
+  to authenticated using (true) with check (true);
+
+-- AN APPROVED DRAFT IS FROZEN. It is the record of what was imported and what was corrected on
+-- the way in -- the only place that says a capital figure was typed differently from the sheet.
+create or replace function public.protect_approved_handover_draft()
+returns trigger language plpgsql security invoker set search_path to 'public' as $$
+begin
+  if old.state = 'approved' then
+    return old;
+  end if;
+  new.updated_at := now();
+  return new;
+end $$;
+
+drop trigger if exists protect_approved_handover_draft on public.handover_drafts;
+create trigger protect_approved_handover_draft
+  before update on public.handover_drafts
+  for each row execute function public.protect_approved_handover_draft();
+
+create or replace function public.protect_approved_handover_draft_row()
+returns trigger language plpgsql security invoker set search_path to 'public' as $$
+begin
+  if (select state from public.handover_drafts where id = old.draft_id) = 'approved' then
+    return old;
+  end if;
+  new.updated_at := now();
+  return new;
+end $$;
+
+drop trigger if exists protect_approved_handover_draft_row on public.handover_draft_rows;
+create trigger protect_approved_handover_draft_row
+  before update on public.handover_draft_rows
+  for each row execute function public.protect_approved_handover_draft_row();
