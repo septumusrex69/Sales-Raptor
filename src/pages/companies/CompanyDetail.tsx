@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   UserPlus, ArrowLeft, ArrowRight, Mail, Phone, Globe, StickyNote, Pencil, Handshake,
-  CalendarClock, Users2, Link2, Unlink, Trash2, Inbox, MessageSquare, Plus,
+  CalendarClock, Users2, Link2, Unlink, Trash2, Upload, MessageSquare, Plus,
 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
@@ -38,8 +38,8 @@ import { HeroOwner } from '../../components/RecordOwner'
 import { ClientQueries } from './ClientQueries'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
-import { LogHandoverModal } from '../../components/companies/LogHandoverModal'
 import { AddDebtorModal } from '../../components/companies/AddDebtorModal'
+import { CommissionCard } from '../../components/companies/CommissionCard'
 import { createDebtorAccount, fetchAccountReferences, fetchClientCommissionRate } from '../../lib/accountBook'
 import { toAccountRow, toContactRows, type NewDebtorInput } from '../../lib/newDebtor'
 import { HandoverBook } from '../../components/companies/HandoverBook'
@@ -72,7 +72,6 @@ export function CompanyDetail() {
     tasks,
     users,
     addActivity,
-    addHandover,
     updateCompany,
     updateContact,
     addContact,
@@ -86,7 +85,6 @@ export function CompanyDetail() {
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const [noteOpen, setNoteOpen] = useState(false)
   const [courtesyCallOpen, setCourtesyCallOpen] = useState(false)
-  const [handoverOpen, setHandoverOpen] = useState(false)
   // Adding a debtor by hand. The references are fetched when the modal opens rather than on every
   // page load: they are only ever used to propose the next number in the client's series.
   const [debtorOpen, setDebtorOpen] = useState(false)
@@ -121,12 +119,6 @@ export function CompanyDetail() {
   const companyContacts = useMemo(() => contacts.filter((c) => c.companyId === id), [contacts, id])
   const companyLeads = useMemo(() => leads.filter((l) => l.companyId === id), [leads, id])
   const companyDeals = useMemo(() => deals.filter((d) => d.companyId === id), [deals, id])
-  // The signed mandate a batch arrives under, so a handover is tied to the agreement it came
-  // in on rather than floating against the client in general.
-  const mandateDeal = useMemo(
-    () => companyDeals.find((d) => d.stage === 'Won' && d.handoverAmount != null),
-    [companyDeals],
-  )
   const openDeals = companyDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected')
   const wonDeals = companyDeals.filter((d) => d.stage === 'Won')
   const subAccounts = useMemo(() => companies.filter((c) => c.parentCompanyId === id), [companies, id])
@@ -682,9 +674,28 @@ export function CompanyDetail() {
               title={company.email ? 'Send from your connected mailbox' : 'No email address on this client yet'} />
             <RecordAction icon={StickyNote} label="Add Note" onClick={() => setNoteOpen(true)}
               title="Write on the timeline" />
+            {/*
+              THE TWO WAYS AN ACCOUNT GETS ONTO THIS BOOK, both on the outside now.
+              THE FIRM: "if I record a batch, that is an absolutely useless exercise. You should
+              say upload a batch ... I see the add a debtor we can kind of put on the outside."
+
+              "Record a batch" typed a capital figure and a count and created nothing. It is gone;
+              a batch is now created by APPROVING an uploaded handover, with a capital figure
+              added up from the accounts rather than keyed by somebody.
+            */}
             {isClient && (
-              <RecordAction icon={Inbox} label="Record a batch" onClick={() => setHandoverOpen(true)} primary
-                title="Bring a batch of accounts into the book" />
+              <RecordAction icon={Upload} label="Upload a batch" primary
+                onClick={() => navigate('/settings?tab=Data%20Import')}
+                title="Read a handover sheet and its PDFs, and check it before anything is written" />
+            )}
+            {isClient && (
+              <RecordAction icon={UserPlus} label="Add debtor"
+                onClick={async () => {
+                  setDebtorError(null)
+                  setDebtorRefs(await fetchAccountReferences(company.id).catch(() => []))
+                  setDebtorOpen(true)
+                }}
+                title="The single account a client phones in" />
             )}
 
             {/*
@@ -693,22 +704,10 @@ export function CompanyDetail() {
               crowded row is not to take away the button somebody needs twice a month.
             */}
             <RecordActionsMore>
-              {/*
-                First in the menu, beside the import, because they are the two ways an account
-                gets into the book and a person looking for one will look for the other. The
-                import takes a batch; this takes the single account a client phones in.
-              */}
-              {isClient && (
-                <RecordMoreAction icon={UserPlus} label="Add debtor"
-                  onClick={async () => {
-                    setDebtorError(null)
-                    // Fetched BEFORE the modal opens, not alongside it. The reference it proposes
-                    // is worked out once when the form mounts, so references arriving a moment
-                    // later would leave the field blank — which is exactly what it did.
-                    setDebtorRefs(await fetchAccountReferences(company.id).catch(() => []))
-                    setDebtorOpen(true)
-                  }} />
-              )}
+              {/* "Add debtor" moved OUT of this menu, at the firm's asking. The references are
+                  still fetched before the modal opens rather than alongside it: the reference it
+                  proposes is worked out once when the form mounts, so ones arriving a moment
+                  later would leave the box blank — which is exactly what it did. */}
               {isClient && (
                 <RecordMoreAction icon={Phone} label="Log courtesy call" onClick={() => setCourtesyCallOpen(true)}
                   title="Record a call you made some other way" />
@@ -756,7 +755,7 @@ export function CompanyDetail() {
             <div className="space-y-5">
               {/* Above the deals: for a debt collection client this IS the relationship. What
                   they signed is one line on a deal; what they actually send is the work. */}
-              <HandoverBook company={company} onLog={() => setHandoverOpen(true)} />
+              <HandoverBook company={company} onUpload={() => navigate('/settings?tab=Data%20Import')} />
               {/* Notes in the middle, and still on their own tab — both places, at the firm's
                   asking. Here they are capped at five with a "show more"; the tab is where you
                   go for the lot. */}
@@ -766,6 +765,10 @@ export function CompanyDetail() {
             </div>
           )}
           side={[
+            /* THE FIRM: "I don't see anywhere where their collection commission is displayed.
+               They're signing what they're signed on." It was stored and never shown — the one
+               number every account on this book inherits. */
+            <CommissionCard key="commission" company={company} />,
             <ClientBookCard key="book" companyId={company.id} />,
             /* Beside the handover book, because these are the two things a liaison opens this
                page for: what came in, and what is stuck. */
@@ -869,6 +872,7 @@ export function CompanyDetail() {
         <AddDebtorModal
           companyName={company.name}
           existingReferences={debtorRefs}
+          clientCode={company.code}
           busy={debtorBusy}
           error={debtorError}
           onClose={() => setDebtorOpen(false)}
@@ -894,13 +898,6 @@ export function CompanyDetail() {
         />
       )}
 
-      {handoverOpen && (
-        <LogHandoverModal
-          companyName={company.name}
-          onClose={() => setHandoverOpen(false)}
-          onSave={(input) => addHandover({ ...input, companyId: company.id, dealId: mandateDeal?.id })}
-        />
-      )}
       {ownerOpen && (
         <EditOwnerModal
           currentOwnerId={company.accountOwnerId}

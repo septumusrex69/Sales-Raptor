@@ -194,6 +194,33 @@ ok('going back keeps what was typed', /setConfirming\(false\)/.test(modal))
 ok('a missing mandate is named on the confirmation',
   /no handover can be imported/i.test(modal))
 
+/* ------------------------------------------- what they signed, shown back to them */
+/*
+ * THE FIRM: "I don't see anywhere where their collection commission is displayed. They're signing
+ * what they're signed on." Signing it on the form and never seeing it again is the same gap the
+ * mandate had -- stored, enforced somewhere else, invisible on the page about the client.
+ */
+const card = src('../../src/components/companies/CommissionCard.tsx')
+const page = src('../../src/pages/companies/CompanyDetail.tsx')
+
+ok('the client page shows the commission', /<CommissionCard/.test(page))
+/* The element itself, not merely the two strings somewhere in the file: `company={company}`
+   appears on half the cards on this page, so matching it loose proves nothing. */
+ok('...handed the company rather than an account', /<CommissionCard[^>]*company=\{company\}/.test(page))
+ok('the card shows a fixed rate', /of everything collected/.test(card))
+ok('...and every tier of a scale', /bands\.map/.test(card))
+/* The SAME boundary the form uses. A card that drew its own "from" would be the second
+   implementation CLAUDE.md warns about, and the two would disagree by a rand. */
+ok('the tier a band starts at comes from tierStart', /tierStart\(/.test(card))
+ok('...imported, not rewritten here', /from '\.\.\/\.\.\/lib\/commission/.test(card))
+/* A fraction shown raw reads as a third of a percent. */
+ok('the stored fraction is turned back into a percentage', /fraction \* 100/.test(card))
+/* A warning that fires when nothing is wrong is worse than no warning -- so both of these sit
+   behind an absence. */
+ok('a client with nothing signed is told so', /Nothing signed/.test(card))
+ok('...and a missing mandate is named on the card too', /No mandate on record/.test(card))
+ok('the source of the scale is shown where there is one', /commissionBandsSource/.test(card))
+
 /* ---------------------------------------------------------------- report */
 
 if (failures.length) {

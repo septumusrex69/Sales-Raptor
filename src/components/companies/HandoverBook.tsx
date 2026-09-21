@@ -19,8 +19,14 @@ function daysSince(iso: string): number {
  *
  * The number actually worth acting on is the last one: a client with book outstanding who has
  * gone quiet is somebody to phone, and nothing else on the page says that.
+ *
+ * The action UPLOADS, it does not record. THE FIRM: "if I record a batch, that is an absolutely
+ * useless exercise. You should say upload a batch." Typing a capital figure and a count created
+ * no accounts, so the received figure below could disagree with the book it claimed to describe.
+ * A batch now exists only because a handover sheet was read and approved, and its capital is
+ * added up from the accounts that arrived in it.
  */
-export function HandoverBook({ company, onLog }: { company: Company; onLog: () => void }) {
+export function HandoverBook({ company, onUpload }: { company: Company; onUpload: () => void }) {
   const { handovers, deals } = useAppStore()
 
   const rows = handovers
@@ -47,8 +53,8 @@ export function HandoverBook({ company, onLog }: { company: Company; onLog: () =
         title="Handover Book"
         subtitle={rows.length === 1 ? '1 batch received' : `${rows.length} batches received`}
         action={
-          <button onClick={onLog} className="text-xs font-medium text-brand-600 hover:underline">
-            Record a batch
+          <button onClick={onUpload} className="text-xs font-medium text-brand-600 hover:underline">
+            Upload a batch
           </button>
         }
       />

@@ -10,17 +10,22 @@ import { suggestReference, validateNewDebtor, type NewDebtorInput, type Problem 
  * everything else about a debtor can be added on the account page afterwards, but capital, the
  * handover date and the rate cannot be got wrong and fixed later without the whole history moving.
  */
-export function AddDebtorModal({ companyName, existingReferences, busy, error, onClose, onSave }: {
+export function AddDebtorModal({ companyName, existingReferences, clientCode, busy, error, onClose, onSave }: {
   companyName: string
   /** This client's account numbers, so the next in their series can be proposed. */
   existingReferences: string[]
+  /** Their code, so a client with NOTHING on the book still gets a reference proposed. */
+  clientCode?: string | null
   busy: boolean
   error: string | null
   onClose: () => void
   onSave: (input: NewDebtorInput) => void
 }) {
   const today = new Date().toISOString().slice(0, 10)
-  const suggested = useMemo(() => suggestReference(existingReferences), [existingReferences])
+  const suggested = useMemo(
+    () => suggestReference(existingReferences, clientCode),
+    [existingReferences, clientCode],
+  )
 
   const [form, setForm] = useState<NewDebtorInput>({
     accountNumber: suggested ?? '',

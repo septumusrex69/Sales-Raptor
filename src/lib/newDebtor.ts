@@ -91,13 +91,28 @@ export function isValidSaId(id: string): boolean {
  *
  * Returns null where there is nothing to learn from, and the field stays free text.
  */
-export function suggestReference(existing: string[]): string | null {
+export function suggestReference(existing: string[], clientCode?: string | null): string | null {
   const parsed: { prefix: string; digits: string }[] = []
   for (const ref of existing) {
     const m = /^(.*?)(\d+)$/.exec(ref.trim())
     if (m && m[2]) parsed.push({ prefix: m[1], digits: m[2] })
   }
-  if (parsed.length === 0) return null
+  if (parsed.length === 0) {
+    /*
+     * A CLIENT'S FIRST ACCOUNT HAS NO SERIES TO CONTINUE, so it starts one from their code.
+     *
+     * THE FIRM: "our reference, shouldn't our reference automatically be loaded?" It was not, and
+     * this is why — with nothing on the book there was nothing to read a prefix off, so the box
+     * came up blank on exactly the clients where somebody is least likely to know the convention.
+     * Clients have a code now, which is what every later reference will be built on anyway.
+     *
+     * FIVE DIGITS FROM 00001, matching the shape already in the book — ACF10085, APM20097 — and
+     * starting at one rather than at ten thousand, because a first account numbered 10001 reads
+     * as ten thousand accounts that were never there.
+     */
+    const code = (clientCode ?? '').trim().toUpperCase()
+    return code ? `${code}00001` : null
+  }
 
   // The commonest prefix, not the first: a client with a stray legacy reference should not have
   // the whole series renamed after it.

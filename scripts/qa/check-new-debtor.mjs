@@ -45,6 +45,19 @@ const TODAY = '2026-09-10'
   check('the commonest prefix wins', suggestReference(['APM0007', 'APM0008', 'LEGACY99']), 'APM0009')
   check('nothing to learn from gives nothing', suggestReference([]), null)
   check('references with no number give nothing', suggestReference(['odd', 'other']), null)
+
+  /*
+   * A CLIENT'S FIRST ACCOUNT. THE FIRM: "our reference, shouldn't our reference automatically be
+   * loaded?" It could not be, on the one client where it matters most -- with nothing on the book
+   * there is no prefix to read. The client's code starts the series instead.
+   */
+  check('a first account starts the series off the client code', suggestReference([], 'ACF'), 'ACF00001')
+  check('the code is normalised', suggestReference([], ' acf '), 'ACF00001')
+  check('a client with no code still gives nothing', suggestReference([], ''), null)
+  check('a client with no code at all still gives nothing', suggestReference([], null), null)
+  // An existing series is the client's own convention and outranks the code, even where the two
+  // disagree -- imported history is frozen, so a book numbered GPS3/ stays numbered GPS3/.
+  check('an existing series beats the code', suggestReference(['GPS3/10103'], 'ACF'), 'GPS3/10104')
 }
 
 /* What stops a save. */

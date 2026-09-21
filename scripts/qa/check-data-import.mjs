@@ -21,7 +21,7 @@
  * Every one of those was fixed with WORDS, and words are what get tidied by the next person who
  * does not know why they were chosen. So the words are held here.
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 
 let pass = 0
 const failures = []
@@ -152,15 +152,24 @@ ok('...and still offers people, because it is setting an owner', /u\.name/.test(
 const tsx = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
   .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 const batchScreens = [
-  ['../../src/components/companies/LogHandoverModal.tsx', 'the modal that records a batch'],
   ['../../src/components/companies/HandoverBook.tsx', 'the handover book'],
   ['../../src/pages/companies/CompanyDetail.tsx', 'the client page'],
 ]
 for (const [path, what] of batchScreens) {
   const src = tsx(path)
   ok(`${what} no longer offers to "Import Handover"`, !/Import Handover/.test(src))
-  ok(`...and says it records a batch instead`, /Record a batch/.test(src))
+  /* THE FIRM, on the control that replaced it: "if I record a batch, I mean, that is an
+     absolutely useless exercise. You should say upload a batch." The modal it opened typed a
+     capital figure and an account count and created nothing, so the client page could report a
+     book that no account on it belonged to. Presence is asserted before absence, because
+     `!/Record a batch/` alone passes on a file with no button at all. */
+  ok(`${what} offers to upload a batch`, /Upload a batch/.test(src))
+  ok(`...and no longer offers to record one`, !/Record a batch/.test(src))
 }
+/* The modal itself is gone rather than hidden -- a screen nothing routes to is found months
+   later by somebody who wires it back up. */
+ok('the modal that recorded a batch by hand is deleted',
+  !existsSync(new URL('../../src/components/companies/LogHandoverModal.tsx', import.meta.url)))
 
 /* ---------------------------------------------------------------- report */
 
