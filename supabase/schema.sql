@@ -5542,3 +5542,36 @@ alter table public.profiles add column if not exists whatsapp text;
 -- debtor_id_number only where debtor_kind is 'company', and {{debtor_id_masked}} only where it is
 -- 'individual' -- which also fixes a company's registration number being masked as though it were
 -- an ID, on a letter, which is what it did before.
+
+-- Two columns for the handover import, on the table that already holds an account's paperwork.
+--
+-- account_documents was built with the private bucket, the signed URLs, the per-account index and
+-- the manager-only delete already right. Nothing about the firm's numbers changes that: asked
+-- about millions of PDFs, the answer came back as ~16,000 active cases at two or three documents
+-- each -- about 48,000 files, six to fourteen gigabytes. That is a size at which every document is
+-- simply KEPT, which is what this table already does.
+
+-- WHICH BATCH IT ARRIVED WITH. A client sends a sheet of two hundred accounts and a folder of two
+-- hundred PDFs; this is what says a given file came in on that Tuesday's handover rather than
+-- being attached by somebody in March. Without it, a batch imported wrongly cannot be found again
+-- to be undone.
+alter table public.account_documents
+  add column if not exists handover_id uuid references public.handovers (id) on delete set null;
+
+create index if not exists account_documents_handover_idx
+  on public.account_documents (handover_id) where handover_id is not null;
+
+-- HOW IT GOT HERE, because a filename match is a good guess and a person is a decision.
+--   manual          somebody attached it to this account deliberately
+--   filename-match  the import placed it by reading the reference out of its name
+--   generated       Raptor drew it -- a section 129 it posted
+--
+-- Told apart so that a document placed by a match can be reviewed as a class if a batch turns out
+-- to have been named badly, without touching the ones a person chose.
+alter table public.account_documents
+  add column if not exists source text not null default 'manual'
+    check (source in ('manual', 'filename-match', 'generated'));
+
+comment on column public.account_documents.source is
+  'How the document came to be on this account. A filename match is a guess that a person can '
+  'review; manual and generated are not.';
