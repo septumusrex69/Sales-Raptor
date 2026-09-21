@@ -2,7 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { codeProblem, proposeClientCode } from '../../lib/clientCode.ts'
-import { scheduleProblems } from '../../lib/commission.ts'
+import { scheduleProblems, tierStart } from '../../lib/commission.ts'
 import type { Company, ID, ProductService, User } from '../../types'
 
 const SERVICES: ProductService[] = [
@@ -11,6 +11,17 @@ const SERVICES: ProductService[] = [
 ]
 
 interface Tier { upTo: string; rate: string }
+
+const money = (n: number) => n.toLocaleString('en-ZA', {
+  style: 'currency', currency: 'ZAR', minimumFractionDigits: 2,
+})
+
+/** The label under a tier's row: where it starts, worked out by tierStart. */
+function startOf(tiers: Tier[], i: number): string {
+  const previous = i === 0 ? null : Number((tiers[i - 1]?.upTo ?? '').replace(/[\s,]/g, ''))
+  const from = tierStart(i === 0 ? null : previous)
+  return from === null ? 'From \u2014' : `From ${money(from)}`
+}
 
 /**
  * A client loaded straight in, rather than converted from a lead.
@@ -58,6 +69,18 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
   ])
   const [source, setSource] = useState('')
   const [shown, setShown] = useState<string[]>([])
+  /*
+   * THE LAST THING BEFORE IT IS SIGNED, at the firm's instruction: "when you click accept, then
+   * there should be a confirmation button -- you're about to sign this client on this sliding
+   * scale or on this collection commission, confirm."
+   *
+   * NOT A "ARE YOU SURE?", WHICH TEACHES PEOPLE TO CLICK THROUGH. It reads back the terms in
+   * words, because the thing worth a second look is the commission: every account this client
+   * ever hands over inherits it, and an account opened at the wrong rate is invoiced wrong for
+   * the rest of its life. A rate typed as 3 instead of 30 is invisible in a box and obvious in a
+   * sentence.
+   */
+  const [confirming, setConfirming] = useState(false)
 
   const proposed = useMemo(() => proposeClientCode(name, takenCodes), [name, takenCodes])
   const code = typedCode ?? proposed
@@ -98,6 +121,11 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
     const found = problems()
     setShown(found)
     if (found.length > 0) return
+    /* Everything is sound; the terms are read back before anything is written. */
+    setConfirming(true)
+  }
+
+  function save() {
     onSave({
       name: name.trim(),
       code: code.trim().toUpperCase(),
@@ -119,6 +147,77 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
         ? { commissionRate: asFraction(rate) }
         : { commissionBands: bands, commissionBandsSource: source.trim() || 'Signed mandate' }),
     })
+  }
+
+  /** The commission in words, which is the half of this worth reading twice. */
+  const terms = kind === 'fixed'
+    ? [`${rate}% of everything collected, on every account.`]
+    : tiers.map((t, i) => {
+      const from = startOf(tiers, i).replace('From ', '')
+      const to = t.upTo.trim() === '' ? 'and above' : `up to ${money(Number(t.upTo.replace(/[\s,]/g, '')))}`
+      return `${from} ${to} — ${t.rate}%`
+    })
+
+  if (confirming) {
+    return (
+      <Modal title="Sign this client?" onClose={onClose} width={560}>
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            You are about to sign <strong className="text-navy-950">{name.trim()}</strong>
+            {' '}as <span className="font-mono text-navy-950">{code.trim().toUpperCase()}</span>
+            {kind === 'fixed' ? ' on a single commission rate.' : ' on a sliding scale.'}
+          </p>
+
+          <div className="rounded-lg border border-gold-500 bg-gold-50 p-3.5">
+            <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">
+              {kind === 'fixed' ? 'Collection commission' : 'The sliding scale'}
+            </p>
+            <ul className="space-y-1 text-sm text-navy-950 tabular-nums">
+              {terms.map((t) => <li key={t}>{t}</li>)}
+            </ul>
+          </div>
+
+          {/*
+            SAID PLAINLY, because it is the reason this screen exists: every account this client
+            ever hands over inherits the rate, and existing accounts keep the rate they were
+            billed at. Getting it wrong is not a typo to fix later.
+          */}
+          <p className="text-xs text-slate-500">
+            Every account this client hands over will be billed on this. Accounts already opened
+            keep the rate they were opened at, so this is not something to correct afterwards.
+          </p>
+
+          {form.mandateSignedAt
+            ? (
+              <p className="text-xs text-slate-500">
+                Mandate signed {new Date(form.mandateSignedAt).toLocaleDateString('en-ZA')}.
+              </p>
+            )
+            : (
+              <p className="text-xs text-negative-700">
+                No mandate date yet — the client will be added, but no handover can be imported
+                for them until it is filled in.
+              </p>
+            )}
+
+          {error && <p className="text-sm text-negative-700">{error}</p>}
+
+          <div className="flex items-center gap-2 pt-1">
+            <button type="button" onClick={save} disabled={busy}
+              className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg
+                bg-gold-400 text-navy-950 border border-gold-500 disabled:opacity-40">
+              {busy ? 'Signing\u2026' : 'Confirm and sign'}
+            </button>
+            {/* Back to the form, not out of it: somebody who spots a wrong rate here should not
+                have to retype the address. */}
+            <button type="button" onClick={() => setConfirming(false)} disabled={busy}
+              className="text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600">
+              Go back and change it
+            </button>
+          </div>
+        </div>
+      </Modal>
+    )
   }
 
   return (
@@ -265,8 +364,20 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
             <div className="space-y-2">
               {tiers.map((t, i) => (
                 <div key={i} className="flex items-center gap-2">
-                  <span className="text-xs text-slate-400 w-14 shrink-0">
-                    {i === 0 ? 'Up to' : i === tiers.length - 1 ? 'Above' : 'Up to'}
+                  {/*
+                    WHERE EACH TIER STARTS IS SHOWN, NOT TYPED, at the firm's instruction: "if it's
+                    up to 100,000 for one tier, the next tier should start from 100,001
+                    automatically." Two numbers to keep in step is two numbers that drift, and the
+                    one nobody re-reads is the start.
+
+                    IT IS A CENT ABOVE, NOT A RAND. rateForCapital is `capital <= upTo`, so the
+                    boundary rand belongs to the LOWER band -- commission.ts says so in its own
+                    words, "an account handed over at exactly R25,000.00 is 25%, not 22.5%". An
+                    account at R100 000.50 is real and has to belong somewhere, and a label saying
+                    "From R100 001" would put it in neither tier.
+                  */}
+                  <span className="text-xs text-slate-400 w-28 shrink-0 tabular-nums">
+                    {startOf(tiers, i)}
                   </span>
                   <input className={`${inputClass} max-w-[9rem]`} value={t.upTo}
                     placeholder={i === tiers.length - 1 ? 'and above' : '100000'}
@@ -313,7 +424,7 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
           <button type="submit" disabled={busy}
             className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg
               bg-gold-400 text-navy-950 border border-gold-500 disabled:opacity-40">
-            {busy ? 'Adding…' : 'Add client'}
+            {busy ? 'Adding…' : 'Review and sign'}
           </button>
           <button type="button" onClick={onClose}
             className="text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600">

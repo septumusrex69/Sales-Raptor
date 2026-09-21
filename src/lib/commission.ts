@@ -120,3 +120,26 @@ export function scheduleProblems(bands: CommissionBand[]): string[] {
   }
   return problems
 }
+
+/**
+ * Where the tier above a boundary starts.
+ *
+ * THE FIRM: "if it's up to 100,000 for one tier, the next tier should start from 100,001
+ * automatically." Derived rather than typed, because two numbers that have to agree are two
+ * numbers that drift — and the one nobody re-reads afterwards is the start.
+ *
+ * A CENT ABOVE, NOT A RAND, and this file already says why in its own opening words: rateForCapital
+ * is `capital <= upTo`, so the boundary rand belongs to the LOWER band — "an account handed over
+ * at exactly R25,000.00 is 25%, not 22.5%". R100 000.50 is a real capital figure and a tier
+ * starting at R100 001 would leave it in no tier at all.
+ *
+ * Returns null where there is no boundary to count from, so a screen can say so rather than
+ * print a number it made up.
+ */
+export function tierStart(previousUpTo: number | null | undefined): number | null {
+  if (previousUpTo === null || previousUpTo === undefined) return 0
+  if (!Number.isFinite(previousUpTo) || previousUpTo <= 0) return null
+  /* Rounded to the cent: 100000 + 0.01 is 100000.01 in binary floating point only by luck, and
+     the label is money. */
+  return Math.round((previousUpTo + 0.01) * 100) / 100
+}

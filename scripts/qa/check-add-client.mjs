@@ -13,6 +13,7 @@
  * AND: "a client needs a mandate before handover can be imported." A refusal, not a warning.
  */
 import { readFileSync } from 'node:fs'
+import { tierStart } from '../../src/lib/commission.ts'
 
 let pass = 0
 const failures = []
@@ -132,6 +133,66 @@ ok('...with the save itself refusing too',
  */
 ok('the client form does not demand a mandate date',
   !/mandateSignedAt.*out\.push|out\.push.*mandate/i.test(modal))
+
+/* ---------- 5. where each tier starts, and the confirmation ---------- */
+
+/*
+ * THE FIRM: "if it's up to 100,000 for one tier, the next tier should start from 100,001
+ * automatically." Shown rather than typed, because two numbers that have to agree are two numbers
+ * that drift, and the one nobody re-reads afterwards is the start.
+ */
+check('the first tier starts at nothing', tierStart(null), 0)
+/*
+ * A CENT ABOVE THE BOUNDARY, NOT A RAND. rateForCapital is `capital <= upTo`, so the boundary
+ * rand belongs to the LOWER band -- commission.ts says it in its own words, "an account handed
+ * over at exactly R25,000.00 is 25%, not 22.5%". R100 000.50 is a real capital figure and
+ * "From R100 001" would leave it in no tier at all.
+ */
+check('the next starts a cent above the one before', tierStart(100000), 100000.01)
+check('...and not a rand above it', tierStart(100000) === 100001, false)
+check('...for any boundary', tierStart(250000), 250000.01)
+/*
+ * FLOATING POINT, ON A BOUNDARY THAT ACTUALLY SHOWS IT.
+ *
+ * This first asserted tierStart(12345.67), which proved nothing: that addition is exact in binary
+ * and the check stayed green with the rounding removed. A boundary of R20.14 is not -- naively,
+ * 20.14 + 0.01 is 20.150000000000002, and a commission scale is not the place to print that.
+ * Found by removing the rounding and looking for a value that changed.
+ */
+check('the cent survives the arithmetic', tierStart(20.14), 20.15)
+check('...on the other one that showed it too', tierStart(10.12), 10.13)
+/* A tier whose boundary has not been typed yet says so rather than showing a number. */
+check('an unfilled boundary has no start to show', tierStart(NaN), null)
+check('...nor a boundary of nought', tierStart(0), null)
+
+/* And the screen shows it rather than asking for it. */
+ok('the form shows where each tier starts', /startOf\(tiers, i\)/.test(modal))
+ok('...through the rule rather than its own arithmetic', /tierStart\(/.test(modal))
+
+/*
+ * AND A CONFIRMATION BEFORE IT IS SIGNED, at the firm's instruction: "when you click accept,
+ * there should be a confirmation button -- you're about to sign this client on this sliding scale
+ * or on this collection commission, confirm."
+ *
+ * NOT AN "ARE YOU SURE?", which teaches people to click through. It reads the terms back in
+ * words, because a rate typed as 3 instead of 30 is invisible in a box and obvious in a sentence
+ * -- and every account this client ever hands over inherits it.
+ */
+ok('signing is a second step, not the first button', /setConfirming\(true\)/.test(modal))
+ok('...and the first button says it is a review', /Review and sign/.test(modal))
+ok('...and the second says what it does', /Confirm and sign/.test(modal))
+/* The RENDERING, not the definition: this first asserted only that `terms` was computed, and
+   stayed green when the list stopped showing it. */
+ok('the terms are read back in words', /terms\.map\(\(t\) => <li key=\{t\}>\{t\}<\/li>\)/.test(modal))
+ok('...worked out from the scale rather than written out', /const terms = kind === 'fixed'/.test(modal))
+ok('...naming the client and the code', /You are about to sign/.test(modal))
+ok('...and saying every future account inherits it',
+  /Every account this client hands over will be billed on this/.test(modal))
+/* Back to the form, not out of it: somebody who spots a wrong rate should not retype the address. */
+ok('going back keeps what was typed', /setConfirming\(false\)/.test(modal))
+/* The mandate is not refused here, so the confirmation is where its absence is said out loud. */
+ok('a missing mandate is named on the confirmation',
+  /no handover can be imported/i.test(modal))
 
 /* ---------------------------------------------------------------- report */
 
