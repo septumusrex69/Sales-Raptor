@@ -240,14 +240,29 @@ export function DataImportTab() {
 
   return (
     <div className="space-y-4">
+      {/*
+        TWO SIDES, TWO SECTIONS, at the firm's instruction: "on a client level ... that'll go with
+        the collections. And then on the lead side, that's something different. Split them."
+
+        They were one flat list of six file pickers, and the list did not say which half of the
+        business any of them belonged to -- so the leads workbook sat above the book migration as
+        though they were steps in one procedure. They are not related at all: one brings a sales
+        pipeline in, the other brings a quarter of a million debtor accounts across.
+      */}
+      <Section
+        title="The sales side"
+        blurb="Leads, and the people behind them. Nothing here touches the book." />
       <LeadsImportCard />
 
-      <DebtorDetailsCard />
+      <Section
+        title="The collections side"
+        blurb={'The book. The first import brings it across from Swordfish; everything after that '
+          + 'updates accounts already in it.'} />
 
       <Card>
         <CardHeader
-          title="Import from Swordfish"
-          subtitle="Reading the exports shows what would change and writes nothing. Importing is a separate step."
+          title="Bring the book across from Swordfish"
+          subtitle="Once, at the start. Reading the exports shows what would change and writes nothing — importing is a separate step."
         />
 
         <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-slate-50 text-sm">
@@ -271,15 +286,32 @@ export function DataImportTab() {
         </div>
 
         <div className="grid sm:grid-cols-2 gap-4 mt-5">
+          {/*
+            NOT CLIENT ALLOCATION, and the old label said it was.
+            THE FIRM: "if I import a client, the client allocation doesn't work here."
+
+            They are right, and the label was the lie. The Swordfish register creates around three
+            hundred client records in one go, and companies.account_owner_id is NOT NULL-able in
+            practice -- something has to be written. So this is the name every one of those records
+            STARTS under, so that none of them arrives ownerless; who actually looks after a client
+            is a decision the firm makes one client at a time, on the client, afterwards.
+
+            The control the firm actually wants -- "you can choose which client does the handover
+            batch fall on" -- belongs to a different import, of one batch onto one existing client,
+            and a picker of PEOPLE could never have been it. That import does not exist yet.
+          */}
           <label className="block">
-            <span className="block text-xs font-medium text-slate-500 mb-1">Clients land on</span>
+            <span className="block text-xs font-medium text-slate-500 mb-1">
+              New client records start under
+            </span>
             <select className={inputClass} value={ownerId} onChange={(e) => { setOwnerId(e.target.value); setPlan(null) }}>
               {users.filter((u) => u.status === 'Active').map((u) => (
                 <option key={u.id} value={u.id}>{u.name}</option>
               ))}
             </select>
             <span className="block text-[11px] text-slate-400 mt-1">
-              Every imported client is assigned to this person. Reassign individually afterwards.
+              Not client allocation &mdash; a placeholder so no client arrives ownerless. Who looks
+              after a client is set on the client itself, one at a time.
             </span>
           </label>
           <label className="block">
@@ -400,6 +432,34 @@ export function DataImportTab() {
           </button>
         </Card>
       )}
+
+      {/*
+        BELOW THE MIGRATION, NOT ABOVE IT, and that is the whole answer to the firm's question:
+        "you have here the debtors per client report, which is in two places. Please clarify that."
+
+        It is the same export doing two different jobs. Up there it is one of six files that BUILD
+        the book, read once at the migration. Down here it is that one file on its own, applied to
+        accounts the book already has -- which is what happens every month afterwards. Sitting
+        above the migration it read as a duplicate of a step; sitting below it, in order, it reads
+        as what comes next. The card says so itself now rather than leaving it to the order.
+      */}
+      <DebtorDetailsCard />
+    </div>
+  )
+}
+
+/**
+ * A heading over a group of cards.
+ *
+ * The two sides of the business do not share an import between them, and the flat list did not
+ * say so -- the leads workbook sat above the book migration as though they were steps in one
+ * procedure.
+ */
+function Section({ title, blurb }: { title: string; blurb: string }) {
+  return (
+    <div className="pt-2">
+      <h2 className="text-sm font-semibold text-navy-950">{title}</h2>
+      <p className="text-xs text-slate-400 mt-0.5">{blurb}</p>
     </div>
   )
 }
@@ -464,8 +524,8 @@ function DebtorDetailsCard() {
   return (
     <Card>
       <CardHeader
-        title="Update debtor details"
-        subtitle="Debtors Per Client on its own, applied to accounts already in the book. Nothing is cleared."
+        title="Refresh debtor details from a new export"
+        subtitle="The same Debtors Per Client file as above, on its own, applied to accounts the book already has. Nothing is cleared. This is the one to run every month."
       />
 
       <FilePicker
