@@ -7,7 +7,10 @@
  *
  *   1. "On a client level ... that'll go with the collections. And then on the lead side, that's
  *      something different. SPLIT THEM." Six file pickers in one flat list, with nothing saying
- *      that the leads workbook and the book migration have nothing to do with each other.
+ *      that the leads workbook and the book migration have nothing to do with each other. Split
+ *      into two headings first, then -- drawn on a screenshot as two boxes side by side -- into
+ *      two TABS, because stacked, the sales half still sat above the collections half and read
+ *      as step one of it.
  *   2. "If I import a client, the client allocation doesn't work here." It never did. The control
  *      was labelled "Clients land on", which reads as allocating clients to collectors; what it
  *      sets is the owner every NEW client record starts under so that none arrives ownerless.
@@ -35,26 +38,52 @@ const src = readFileSync(new URL('../../src/components/settings/DataImportTab.ts
    so read as written, each of these checks would be answered by its own explanation. */
 const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 
-/* ---------- 1. the two sides are named, and named apart ---------- */
-
-ok('the screen has section headings at all', /function Section\(/.test(code))
-ok('...one for the sales side', /title="The sales side"/.test(code))
-ok('...and one for the collections side', /title="The collections side"/.test(code))
+/* ---------- 1. the two sides are tabs, and nothing crosses between them ---------- */
 
 /*
- * PRESENCE BEFORE ORDER. CLAUDE.md names this trap by name: indexOf returns -1, so an order-only
- * assertion passes vacuously the moment the thing it orders is deleted. Each marker is asserted
- * to EXIST above; only then is it worth asking where it sits.
+ * THE FIRM DREW THIS: two boxes side by side, "Collections | Sales", over a pair of stacked
+ * headings. The headings were the right split in the wrong shape -- stacked, the sales half sat
+ * above the collections half and read as step one of it, which is what the headings were added to
+ * stop. A person importing is on one side of the business that morning; the other side's cards
+ * are something to scroll past.
+ */
+ok('the screen has a side to pick', /function Sides\(/.test(code))
+ok('...offering Collections', /'collections', 'Collections'/.test(code))
+ok('...and Sales', /'sales', 'Sales'/.test(code))
+/* Collections first, because that is where the work is: the book is hundreds of thousands of
+   accounts and the leads workbook is a few hundred rows once a month. */
+ok('...opening on collections', /useState<'collections' \| 'sales'>\('collections'\)/.test(code))
+
+/*
+ * EVERY CARD IS BEHIND ITS OWN SIDE. A tab that changes a heading and leaves the cards where they
+ * were is worse than the stacked headings it replaced, because now the screen actively disagrees
+ * with itself. Each of the three is asserted to be guarded, by name.
+ */
+ok('the leads workbook only appears on the sales side',
+  /\{side === 'sales' && <LeadsImportCard \/>\}/.test(code))
+ok('the monthly refresh only appears on the collections side',
+  /\{side === 'collections' && <DebtorDetailsCard \/>\}/.test(code))
+ok('...and so does the migration', /\{side === 'collections' && \(/.test(code))
+
+/*
+ * PRESENCE BEFORE ORDER. CLAUDE.md names this trap: indexOf returns -1, so an order-only
+ * assertion passes vacuously the moment the thing it orders is deleted.
  */
 const at = (needle) => code.indexOf(needle)
-for (const marker of ['title="The sales side"', '<LeadsImportCard />', 'title="The collections side"',
-  'Bring the book across from Swordfish', '<DebtorDetailsCard />']) {
+for (const marker of ['<LeadsImportCard />', 'Bring the book across from Swordfish',
+  '<DebtorDetailsCard />', "{side === 'collections' && ("]) {
   ok(`the screen still has ${marker}`, at(marker) !== -1)
 }
-ok('the leads workbook sits under the sales heading',
-  at('title="The sales side"') < at('<LeadsImportCard />'))
-ok('...and above the collections heading, so it is not read as a step of the migration',
-  at('<LeadsImportCard />') < at('title="The collections side"'))
+
+/*
+ * THE COLLECTIONS BRANCH CARRIES THE BOOK AND NOTHING ELSE. Read as the actual span of the
+ * branch rather than as a slice between two headings, because the headings are gone -- and a
+ * leads card that drifted inside it would render on the wrong tab while still looking right in
+ * the source.
+ */
+const branch = code.slice(at("{side === 'collections' && ("), code.indexOf('</>'))
+ok('the collections side holds the migration', /Bring the book across from Swordfish/.test(branch))
+ok('...and nothing from the sales side', !/LeadsImportCard/.test(branch))
 
 /*
  * THE REFRESH COMES AFTER THE MIGRATION, which is the whole answer to "it is in two places".
@@ -70,6 +99,9 @@ ok('...and which of the two is the one to run every month',
   /the one to run every month/i.test(code))
 /* The migration says it is a once-only thing in its own subtitle, rather than by sitting first. */
 ok('the migration says it is once, at the start', /Once, at the start/.test(code))
+
+/* The sentence under the tabs describes the tab you are on, not the one you are not. */
+ok('the blurb follows the tab', /tabs\.find\(\(\[k\]\) => k === side\)/.test(code))
 
 /* ---------- 2. the control that is not client allocation ---------- */
 
@@ -100,15 +132,6 @@ ok('...and still offers people, because it is setting an owner', /u\.name/.test(
 
 /* ---------- 3. nothing here belongs to the other side ---------- */
 
-/*
- * A BOUNDARY, NOT A HEADING. The sales section must not grow a collections file under it by
- * somebody adding a card in the wrong place -- the headings are only true while the cards between
- * them are.
- */
-const sales = code.slice(at('title="The sales side"'), at('title="The collections side"'))
-ok('nothing under the sales heading touches the book',
-  !/Swordfish|DebtorDetailsCard/.test(sales))
-
 /* ---------------------------------------------------------------- report */
 
 if (failures.length) {
@@ -118,7 +141,8 @@ if (failures.length) {
 }
 console.log(`${pass} passed, 0 failed`)
 console.log(`
-The import screen read three ways it did not mean, and every fix was a word: the two sides named
-and kept apart, the owner picker saying it is not client allocation, and the monthly refresh
-sitting after the migration it follows and saying it is the same file. Words are what the next
-person tidies, so the words are held here.`)
+The import screen read three ways it did not mean. Two sides that are now tabs rather than stacked
+headings, with every card behind its own side so the screen cannot disagree with itself; an owner
+picker that says outright it is not client allocation; and the monthly refresh sitting after the
+migration it follows, saying it is the same file. Words and structure are what the next person
+tidies, so both are held here.`)

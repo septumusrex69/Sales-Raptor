@@ -227,6 +227,20 @@ export function DataImportTab() {
     }
   }, [plan, wipe])
 
+  /*
+   * TWO TABS, NOT TWO HEADINGS, at the firm's correction -- drawn on the screenshot as a pair of
+   * boxes side by side over the first heading.
+   *
+   * The headings were the right split and the wrong shape: stacked, the sales half sits above the
+   * collections half and is read as step one of it, which is the exact confusion the headings
+   * were added to end. A person doing an import is on ONE side of the business that morning, and
+   * the other side's cards are noise they have to scroll past.
+   *
+   * COLLECTIONS FIRST, because it is where the work is: the book is hundreds of thousands of
+   * accounts and the leads workbook is a few hundred rows once a month.
+   */
+  const [side, setSide] = useState<'collections' | 'sales'>('collections')
+
   if (!isAdmin) {
     return (
       <Card>
@@ -249,16 +263,14 @@ export function DataImportTab() {
         though they were steps in one procedure. They are not related at all: one brings a sales
         pipeline in, the other brings a quarter of a million debtor accounts across.
       */}
-      <Section
-        title="The sales side"
-        blurb="Leads, and the people behind them. Nothing here touches the book." />
-      <LeadsImportCard />
+      <Sides side={side} onPick={setSide} />
 
-      <Section
-        title="The collections side"
-        blurb={'The book. The first import brings it across from Swordfish; everything after that '
-          + 'updates accounts already in it.'} />
+      {side === 'sales' && <LeadsImportCard />}
 
+      {/* A fragment: the migration is a card, its progress is a card and its plan is a third, and
+          all three belong to this side. */}
+      {side === 'collections' && (
+      <>
       <Card>
         <CardHeader
           title="Bring the book across from Swordfish"
@@ -432,6 +444,8 @@ export function DataImportTab() {
           </button>
         </Card>
       )}
+      </>
+      )}
 
       {/*
         BELOW THE MIGRATION, NOT ABOVE IT, and that is the whole answer to the firm's question:
@@ -443,26 +457,50 @@ export function DataImportTab() {
         above the migration it read as a duplicate of a step; sitting below it, in order, it reads
         as what comes next. The card says so itself now rather than leaving it to the order.
       */}
-      <DebtorDetailsCard />
+      {side === 'collections' && <DebtorDetailsCard />}
     </div>
   )
 }
 
 /**
- * A heading over a group of cards.
+ * Which side of the business is being imported.
  *
- * The two sides of the business do not share an import between them, and the flat list did not
- * say so -- the leads workbook sat above the book migration as though they were steps in one
- * procedure.
+ * THE FIRM DREW THIS: two boxes side by side, "Collections | Sales", over a pair of stacked
+ * headings. Stacked, the sales half sat above the collections half and read as step one of it --
+ * which is what the headings were added to stop, so they were the right split in the wrong shape.
+ *
+ * Built to look like the library's tabs rather than to a new pattern: these are the same thing
+ * doing the same job two screens apart, and a person should not have to learn it twice.
  */
-function Section({ title, blurb }: { title: string; blurb: string }) {
+function Sides({ side, onPick }: {
+  side: 'collections' | 'sales'
+  onPick: (s: 'collections' | 'sales') => void
+}) {
+  const tabs: [typeof side, string, string][] = [
+    ['collections', 'Collections', 'The book. The first import brings it across from Swordfish; everything after that updates accounts already in it.'],
+    ['sales', 'Sales', 'Leads, and the people behind them. Nothing here touches the book.'],
+  ]
   return (
-    <div className="pt-2">
-      <h2 className="text-sm font-semibold text-navy-950">{title}</h2>
-      <p className="text-xs text-slate-400 mt-0.5">{blurb}</p>
-    </div>
+    <Card>
+      <div className="flex gap-5 border-b border-slate-100 -mt-1">
+        {tabs.map(([key, label]) => (
+          <button key={key} type="button" onClick={() => onPick(key)}
+            className={`py-2.5 text-sm border-b-2 -mb-px transition-colors ${
+              side === key
+                ? 'border-gold-400 font-medium text-navy-950'
+                : 'border-transparent text-slate-400 hover:text-slate-600'
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {/* The blurb belongs to the tab you are on, so the sentence describing the other side is
+          not sitting on the screen contradicting it. */}
+      <p className="text-xs text-slate-400 mt-3">{tabs.find(([k]) => k === side)?.[2]}</p>
+    </Card>
   )
 }
+
 
 /**
  * Updating debtor details on their own.
