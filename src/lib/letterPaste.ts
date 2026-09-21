@@ -318,6 +318,63 @@ export function markdownToLetterHtml(text: string): string {
   return out.join('')
 }
 
+/* ------------------------------------------------------------------ a table copied as text */
+
+/**
+ * Plain text that came out of a word processor's TABLE.
+ *
+ * WHERE THIS COMES FROM, and it is not a corner case. The firm works on an iPad, and copying out
+ * of a Word document there puts PLAIN TEXT on the clipboard and nothing else — no HTML flavour to
+ * read structure from. A table copied that way separates its cells with TABS, one line per row.
+ *
+ * So their whole section 129, which is five tables, arrived as flat lines with invisible tabs in
+ * them: the creditor block, the balance block and the banking details all reading as run-together
+ * sentences. And the tabs went on to stop the PDF being built at all — a standard PDF face cannot
+ * encode one. See winAnsi.ts.
+ *
+ * TWO CONSECUTIVE LINES, NOT ONE. A single line with a tab in it is somebody's stray keystroke;
+ * two in a row with the SAME number of cells is a table, and requiring the counts to match is
+ * what stops a paragraph that happens to contain a tab from swallowing the line after it.
+ *
+ * NULL WHEN THERE IS NO TABLE IN IT, so ordinary prose still goes in as text at the caret and
+ * behaves exactly as it did.
+ */
+export function tabbedTextToLetterHtml(text: string): string | null {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n')
+  /** How many cells this line would be, or 0 where it is not a row at all. */
+  const cells = lines.map((l) => (l.includes('\t') && l.trim() !== '' ? l.split('\t').length : 0))
+
+  const out: string[] = []
+  let para: string[] = []
+  const closePara = () => {
+    if (para.length > 0) { out.push(`<p>${para.join('<br>')}</p>`); para = [] }
+  }
+
+  let found = false
+  for (let i = 0; i < lines.length; i += 1) {
+    /* A run of rows all the same width. */
+    if (cells[i] > 1 && cells[i + 1] === cells[i]) {
+      closePara()
+      let j = i
+      const rows: string[] = []
+      while (j < lines.length && cells[j] === cells[i]) {
+        rows.push(`<tr>${lines[j].split('\t')
+          .map((c) => `<td>${inlineMarkdown(c.trim())}</td>`).join('')}</tr>`)
+        j += 1
+      }
+      out.push(`<table class="ltr-t ltr-b-rows"><tbody>${rows.join('')}</tbody></table>`)
+      found = true
+      i = j - 1
+      continue
+    }
+    if (lines[i].trim() === '') { closePara(); continue }
+    /* Not a row: whatever tabs it has were alignment in a document that no longer has columns. */
+    para.push(inlineMarkdown(lines[i].replace(/\t+/g, ' ').trim()))
+  }
+  closePara()
+  return found ? out.join('') : null
+}
+
 /* ------------------------------------------------------------------ the one the editor calls */
 
 /**
@@ -337,5 +394,11 @@ export function clipboardToLetterHtml(
     if (cleaned.replace(/<[^>]*>/g, '').trim() !== '') return cleaned
   }
   if (clip.text && looksLikeMarkdown(clip.text)) return markdownToLetterHtml(clip.text)
+  /*
+   * LAST, because it is the narrowest: it only answers when the text actually contains a table,
+   * and it exists for the one clipboard that carries no HTML at all — a word processor on a
+   * tablet. Anything else still falls through to being inserted as plain text.
+   */
+  if (clip.text) return tabbedTextToLetterHtml(clip.text)
   return null
 }

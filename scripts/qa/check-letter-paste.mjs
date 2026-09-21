@@ -27,6 +27,7 @@
  */
 import {
   clipboardToLetterHtml, looksLikeMarkdown, markdownToLetterHtml, sanitiseToLetterHtml,
+  tabbedTextToLetterHtml,
 } from '../../src/lib/letterPaste.ts'
 import { documentHtmlToBlocks } from '../../src/lib/letterDocument.ts'
 
@@ -285,6 +286,82 @@ for (const [what, html] of [['Word', word], ['Markdown', md]]) {
     back.length > 0 && back.every((b) => b.kind !== 'paragraph'
       || (b.spans ?? []).map((s) => s.text).join('').trim() !== ''))
 }
+
+/* ------------------------------------------------------------------ a table copied as text */
+
+/*
+ * THE CLIPBOARD A TABLET GIVES YOU. The firm works on an iPad, and copying out of a Word document
+ * there puts PLAIN TEXT on the clipboard and nothing else -- no HTML flavour to read structure
+ * from. A table copied that way separates its cells with TABS, one line per row.
+ *
+ * So their section 129, which is five tables, arrived as flat lines with invisible tabs in them.
+ * And the tabs went on to stop the PDF being built at all: "WinAnsi cannot encode ' ' (0x0009)".
+ */
+const TABLET = 'DATE\t{{today}}\tOUR REF\t{{reference}}\n\n'
+  + '1 YOUR DEFAULT\n\n'
+  + 'Creditor\t{{client_name}}\n'
+  + 'Account number\t{{account_number}}\n'
+  + 'Total outstanding balance\t{{balance}}\n\n'
+  + 'You are in default.'
+
+const tablet = clipboardToLetterHtml({ html: '', text: TABLET }) ?? ''
+check('a table copied as plain text comes back as a table',
+  kinds(tablet), 'paragraph,paragraph,table,paragraph')
+check('...with every row and both its columns',
+  documentHtmlToBlocks(tablet).find((b) => b.kind === 'table')?.rows
+    .map((r) => r.map((c) => c.spans.map((x) => x.text).join(''))),
+  [['Creditor', '{{client_name}}'],
+    ['Account number', '{{account_number}}'],
+    ['Total outstanding balance', '{{balance}}']])
+/*
+ * AND NOT ONE TAB SURVIVES. This is the half that stopped the letter being sent: a tab is
+ * invisible in the editor, because HTML collapses it, and fatal at the PDF.
+ */
+/*
+ * ASKED OF THE WORDS, NOT OF JSON.stringify's OUTPUT. The first cut of this tested the stringified
+ * document -- where a tab has already been escaped into a backslash and a "t", two ordinary
+ * characters -- so the regex could never match and the check passed with the fix deleted. Found by
+ * break-testing it.
+ */
+check('no tab reaches the document', /\t/.test(words(tablet)), false)
+check('...nor the raw HTML on its way there', /\t/.test(tablet), false)
+/* The merge fields are still whole -- a field cut in half posts braces to a debtor. */
+ok('...and the merge fields are still in one piece',
+  words(tablet).includes('{{client_name}}') && words(tablet).includes('{{balance}}'))
+
+/*
+ * TWO CONSECUTIVE ROWS, NOT ONE. A single line with a tab in it is somebody's stray keystroke,
+ * and turning it into a one-row table would invent a shape that was never there.
+ */
+check('one line with a tab is not a table', tabbedTextToLetterHtml('Pay\tin full.'), null)
+/* And the rows have to be the same width, or a paragraph containing a tab swallows the line
+   after it. */
+check('rows of different widths are not one table', tabbedTextToLetterHtml('a\tb\nc\td\te'), null)
+/*
+ * AND A ROW OF THE WRONG WIDTH ENDS THE TABLE rather than joining it ragged. A ragged table is the
+ * one structural fault that renders as a page which looks fine and is missing a cell --
+ * letterProblems refuses those, so a paste that made one could not be saved at all. The first cut
+ * of the check above could not see this: its rows differed at the FIRST line, so the run never
+ * started and the assertion passed without the width test doing anything.
+ */
+{
+  const ragged = documentHtmlToBlocks(tabbedTextToLetterHtml('a\tb\nc\td\ne\tf\tg') ?? '')
+  const table = ragged.find((b) => b.kind === 'table')
+  check('a row of the wrong width ends the table',
+    (table?.rows ?? []).map((r) => r.length), [2, 2])
+  ok('...and is kept, as its own block rather than dropped',
+    words(tabbedTextToLetterHtml('a\tb\nc\td\ne\tf\tg') ?? '').includes('g'))
+}
+
+/*
+ * AND ORDINARY PROSE IS STILL LEFT ALONE. This road is the narrowest of the three: it answers
+ * only when there is actually a table, so a pasted sentence still goes in as text at the caret
+ * and behaves exactly as it did.
+ */
+check('a pasted sentence is still just a sentence',
+  clipboardToLetterHtml({ html: '', text: 'Please telephone this office.' }), null)
+check('...and so are two of them', clipboardToLetterHtml({ html: '', text: 'One.\n\nTwo.' }), null)
+
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)

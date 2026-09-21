@@ -112,6 +112,22 @@ text, it was in the closed set** — so do not "fix" this back. Two things it mu
 a `<span class="ltr-n">` copied out of the editor carries the **drawn** section number, which has
 to be dropped while the numbering itself survives; and `<style>` contents are not text.
 
+**A PDF can only print Windows-1252.** `letterPdf` uses the 14 standard PDF faces on purpose — an
+embedded Unicode font would add a megabyte to every notice — so the repertoire is fixed, and
+`src/lib/winAnsi.ts` writes it out (check-win-ansi holds it against pdf-lib character by
+character). Two kinds of character it cannot draw, treated oppositely: **invisibles are fixed
+quietly** — a **tab** above all, because a Word table copied as plain text separates its cells
+with tabs, and that is what stopped the firm attaching a section 129 — while a character that is
+a **real word** is reported and the build refuses, because substituting would change what the
+debtor is told. The **soft hyphen is encodable and still dropped**: WinAnsi draws it as a real
+hyphen, mid-word. The **non-breaking space is kept**, so Rand amounts do not break across lines.
+
+**The PDF is the only page-accurate view, so there is a preview of it.** `PreviewPdf` draws it
+with **pdf.js onto a canvas, never an `<iframe>`** — Safari on iOS will not render a PDF in one
+and the firm works on an iPad. It reads the live draft, not the saved row. The editor's own
+pagination is measured in the browser's fonts and can differ from the PDF by a line near a
+boundary; this is the one that prints.
+
 **Things that bite:**
 - `protect_closed_diary_entries` **silently reverts** edits to `done`/`moved` entries. It does
   not raise.

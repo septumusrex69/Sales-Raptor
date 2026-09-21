@@ -27,6 +27,7 @@ import {
   footTextFor, mmToPt, planLetter, type DrawOp, type LetterPlan, type Measure,
 } from './letterLayout.ts'
 import type { LetterDocument, PageSetup } from './letterDocument.ts'
+import { printableForPdf, unprintableMessage } from './winAnsi.ts'
 
 /** Which of the fourteen standard faces a document's font stack is drawn in. */
 export function standardFamilyFor(fontStack: string): 'Times' | 'Helvetica' | 'Courier' {
@@ -89,12 +90,44 @@ export async function letterToPdf(input: LetterPdfInput): Promise<Uint8Array> {
    * is how a line that fits in the preview overruns the margin on paper -- and on a notice with a
    * right margin, an overrun is text running off the letterhead.
    */
+  /*
+   * MADE PRINTABLE BEFORE IT IS MEASURED, not only before it is drawn. The standard PDF faces
+   * speak Windows-1252 and nothing else, and a tab -- which is what a Word table copied as plain
+   * text puts between its cells -- throws here rather than at the draw. Measuring the original
+   * and drawing the cleaned text would also disagree about the width of every line with one in
+   * it, which is how a line that fit in the plan overruns the margin on paper.
+   */
   const measure: Measure = (text, sizePt, bold, italic) =>
-    faceFor(bold, italic).widthOfTextAtSize(text, sizePt) / (72 / 25.4)
+    faceFor(bold, italic).widthOfTextAtSize(printableForPdf(text).text, sizePt) / (72 / 25.4)
 
   const plan = planLetter(input.doc, input.page, {
     measure, filled: input.filled, values: input.values,
   })
+
+  /*
+   * AND REFUSED IF ANYTHING REAL CANNOT BE PRINTED.
+   *
+   * The firm met this as "WinAnsi cannot encode ' ' (0x0009)" -- a library talking to itself
+   * about a character nobody can see. A tab is now fixed quietly; what reaches here is a
+   * character that is a WORD -- an arrow, a >=, something from another alphabet -- and for those
+   * refusing is right. Substituting would change what the debtor is told, and a section 129 that
+   * says something the attorney did not approve is a defective demand.
+   *
+   * COLLECTED ACROSS THE WHOLE LETTER BEFORE ANY OF IT IS DRAWN, so the message names every
+   * offending character at once rather than sending somebody back four times.
+   */
+  const unprintable: string[] = []
+  const note = (text: string) => {
+    for (const ch of printableForPdf(text).unprintable) {
+      if (!unprintable.includes(ch)) unprintable.push(ch)
+    }
+  }
+  for (const sheet of plan.pages) {
+    for (const op of sheet.ops) if (op.op === 'text') note(op.text)
+  }
+  /* The running line is an op of its own shape, not a string — see LetterPlan. */
+  if (plan.runningFoot) note(plan.runningFoot.text)
+  if (unprintable.length > 0) throw new Error(unprintableMessage(unprintable))
 
   const image = input.letterhead
     ? input.letterhead.type === 'png'
@@ -149,7 +182,10 @@ function draw(sheet: Sheet, op: DrawOp, k: {
 }) {
   const c = hexToRgb(op.colour)
   if (op.op === 'text') {
-    sheet.drawText(op.text, {
+    /* Cleaned again at the draw rather than trusted to have been cleaned upstream: this is the
+       one place bytes are actually written, and an uncaught character here is an exception
+       thrown halfway through building a document. */
+    sheet.drawText(printableForPdf(op.text).text, {
       x: mmToPt(op.xMm),
       y: k.yPt(op.yMm),
       size: op.sizePt,

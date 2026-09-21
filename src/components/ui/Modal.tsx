@@ -47,7 +47,10 @@ export function Modal({ title, subtitle, onClose, children, width = 480, headerR
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {headerRight}
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100">
+            {/* NAMED, because an icon on its own has no name at all: a screen reader announced
+                this as "button", and nothing could find it by what it does. */}
+            <button onClick={onClose} aria-label="Close" title="Close"
+              className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100">
               <X size={18} />
             </button>
           </div>

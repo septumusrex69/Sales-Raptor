@@ -262,7 +262,9 @@ try {
   t.ok('...over the email, which is still there underneath',
     await page.getByText(/Attached to Section 129 covering email/).first().isVisible())
   await t.shot(page, '64-library-attachment')
-  await page.getByRole('button', { name: 'Close' }).click()
+  /* The one with the word on it. A modal's X is now named "Close" too, for the screen readers
+     that used to hear only "button", so the name alone no longer picks one out. */
+  await page.locator('button:has-text("Close")').first().click()
   await page.waitForTimeout(500)
   t.check('...and it closes again',
     await page.getByText(/NOTICE IN TERMS OF SECTION 129/).count(), 0)
@@ -689,6 +691,60 @@ try {
 
   await t.shot(page, '67-library-letter-pages')
 
+  /* ---------- and the PDF you can look at before you send it ---------- */
+
+  /*
+   * AT THE FIRM'S REQUEST: "I think we should have an option to preview what the PDF would look
+   * like. Um, you know, once you've done everything, like a, just a preview."
+   *
+   * WHY IT IS NOT THE EDITOR. The editor shows a BROWSER drawing the letter -- same millimetres,
+   * same margins, same letterhead, but the browser's measurement in the screen's own face. The
+   * PDF is laid out in the metrics of the standard PDF faces, and near a page boundary the two
+   * can differ by a line. This is the one that gets posted.
+   *
+   * AND IT IS BUILT FROM THE LIVE DRAFT. A preview that could only show the saved row would
+   * answer a question nobody has -- the edit you just made is the one you want to look at.
+   */
+  t.ok('a letter can be previewed as the PDF it will be',
+    await page.getByRole('button', { name: 'Preview the PDF' }).first().isVisible())
+  await page.getByRole('button', { name: 'Preview the PDF' }).first().click()
+  await page.waitForTimeout(2500)
+
+  /*
+   * THE BYTES ARE REAL AND ARE A PDF. Asserted on the blob the iframe was given rather than on
+   * the iframe rendering: whether a browser DRAWS a PDF inline is the browser's business -- Safari
+   * on the iPad the firm works on will not -- and a check that waited for a rendered page would be
+   * testing the viewer instead of the letter.
+   */
+  const pdf = await page.getByRole('link', { name: 'Open it' }).first()
+    .evaluate(async (el) => {
+      const res = await fetch(el.getAttribute('href'))
+      const buf = new Uint8Array(await res.arrayBuffer())
+      return { head: String.fromCharCode(...buf.slice(0, 5)), bytes: buf.length }
+    })
+  t.check(`the preview is a real PDF (${pdf.bytes} bytes)`, pdf.head, '%PDF-')
+  t.ok('...with a letter actually in it', pdf.bytes > 2000)
+
+  /*
+   * AND IT IS DRAWN, PAGE BY PAGE, rather than handed to an <iframe>. That was the obvious way
+   * and it is the wrong one: Safari on iOS refuses to render a PDF inside one, and the firm works
+   * on an iPad -- so the preview would have been a white rectangle on the only machine that
+   * matters. A headless Chromium has no PDF viewer either, which is how the screenshot showed it.
+   */
+  const drawn = await page.locator('[data-pdf-pages] canvas').count()
+  t.ok(`the pages are drawn onto the screen (${drawn})`, drawn >= 1)
+  t.ok('...at a size somebody can read',
+    ((await page.locator('[data-pdf-pages] canvas').first().boundingBox())?.width ?? 0) > 300)
+  /* Every page of a multi-page notice, not just the first. */
+  t.ok('...and every page of the letter, not only the first', drawn >= 2)
+  /* The way out that always works, because an iframe does not on every browser. */
+  t.ok('...and it can be opened in its own tab',
+    await page.getByRole('link', { name: 'Open it' }).first().isVisible())
+  await t.shot(page, '68-library-letter-pdf')
+  /* The modal's own close, not the "Close" elsewhere on the page behind it. */
+  await page.locator('button[aria-label="Close"]').first().click()
+  await page.waitForTimeout(400)
+
   /* ---------- editing, and the merge field you press ---------- */
 
   await page.getByRole('button', { name: 'Collections', exact: true }).click()
@@ -868,7 +924,9 @@ try {
   t.check('...with no way to go ahead anyway',
     await page.getByRole('button', { name: 'Delete permanently' }).count(), 0)
   const refusedAt = written.filter((w) => w.method === 'DELETE').length
-  await page.getByRole('button', { name: 'Close' }).click()
+  /* The one with the word on it. A modal's X is now named "Close" too, for the screen readers
+     that used to hear only "button", so the name alone no longer picks one out. */
+  await page.locator('button:has-text("Close")').first().click()
   await page.waitForTimeout(400)
   t.check('...and nothing was deleted',
     written.filter((w) => w.method === 'DELETE').length, refusedAt)

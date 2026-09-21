@@ -18,6 +18,7 @@ import {
 import { DESK_POSITIONS } from '../../lib/clientPosition'
 import { A4_LETTERHEAD, parseLetter } from '../../lib/letterDocument.ts'
 import { LetterPage } from '../../components/letters/LetterPage'
+import { PreviewPdf } from '../../components/letters/PreviewPdf'
 import { defaultOf, fetchLetterheads, type Letterhead } from '../../lib/letterheads.ts'
 
 /**
@@ -554,6 +555,15 @@ function Reading({ template, attaches, letterhead }: {
             </button>
           ))}
         </div>
+        {/*
+          AND THE PDF ITSELF, for a letter. The pane below draws ONE continuous sheet with the
+          letterhead painted once -- so on a two-page notice its footer block lands across the
+          middle of the text, which is what the firm sent a screenshot of. The PDF paginates
+          properly, and it is what gets posted.
+        */}
+        {doc && (
+          <PreviewPdf doc={doc} scope={template.scope} values={values} name={template.name} />
+        )}
         {sms && (
           <span className={`text-[11px] tabular-nums ${
             sms.segments > 1 ? 'text-negative-700' : 'text-slate-400'}`}>

@@ -16,7 +16,10 @@
  * regenerated against the same account.
  */
 import { defaultOf, fetchLetterheads, type Letterhead } from './letterheads'
-import { A4_LETTERHEAD, canUseLetter, letterProblems, parseLetter } from './letterDocument.ts'
+import {
+  A4_LETTERHEAD, canUseLetter, letterProblems, parseLetter, type LetterDocument,
+} from './letterDocument.ts'
+import type { TemplateScope } from './messageTemplates'
 import { letterFilename, letterToPdf, toBase64 } from './letterPdf.ts'
 import type { LibraryTemplate } from './templateLibrary.ts'
 
@@ -36,32 +39,47 @@ export interface AttachedFile {
  * letter asking for a field nothing on this account can fill. Silently attaching nothing would
  * send a covering email that says "please find attached" and attaches nothing.
  */
-export async function buildLetterAttachment({ template, values, reference, letterhead }: {
-  template: LibraryTemplate
-  /** Merge values resolved against the account. See mergeValuesFor. */
+/**
+ * The PDF bytes for a letter, letterhead and all.
+ *
+ * SEPARATE FROM THE ATTACHMENT because a letter is now drawn for two different reasons. One is to
+ * send it. The other is to LOOK at it: the firm asked for "an option to preview what the PDF
+ * would look like... once you've done everything, just a preview" — and that has to work on a
+ * draft in the editor that has never been saved, so it cannot take a template row.
+ *
+ * TAKES A DOCUMENT, NOT A TEMPLATE, for exactly that reason.
+ */
+export async function letterPdfBytes({ doc, scope, values, filled, letterhead, name }: {
+  doc: LetterDocument
+  scope: TemplateScope
   values: Record<string, string>
-  /** What the debtor knows the account by. Goes in the filename, not in the letter. */
-  reference: string | null
   /**
-   * The paper, where the caller already has it. Fetched here when it does not — so a caller with
-   * one letterhead in hand does not pay for the round trip twice.
+   * Whether the merge fields are filled in.
+   *
+   * FALSE IS FOR LOOKING AT, TRUE IS FOR SENDING. A preview of the wording wants to show
+   * {{balance}} standing so somebody can see which words are the template's; a notice going to a
+   * debtor with {{balance}} in it is not a notice.
    */
+  filled: boolean
   letterhead?: Letterhead | null
-}): Promise<AttachedFile> {
-  const doc = parseLetter(template.body)
-  if (!doc) throw new Error(`${template.name} could not be read back, so nothing was attached.`)
-
+  /** Only for the message when it is refused, so it names the letter. */
+  name?: string
+}): Promise<Uint8Array> {
   /*
    * REFUSED BEFORE IT IS DRAWN, not after. canUseLetter is what says a letter's merge fields can
    * all be filled from this side; a notice that posts "{{firm_bank}}" over a director's name is
    * a defective statutory demand, and the cost of catching it is one sentence on screen.
+   *
+   * ONLY WHEN IT IS BEING SENT. An unfilled preview is somebody looking at their own wording, and
+   * refusing to show it because a field is not yet fillable would be refusing to show them the
+   * thing they are trying to fix.
    */
-  const problems = letterProblems(doc, template.scope)
-  if (!canUseLetter(problems)) {
-    /* The reason, not a shrug. "It could not be attached" sends somebody hunting; naming the
-       field they have to go and fill in tells them where to go. */
-    const why = problems.find((p) => p.level === 'refuse')?.message ?? 'it is not fit to send'
-    throw new Error(`${template.name} was not attached: ${why}`)
+  if (filled) {
+    const problems = letterProblems(doc, scope)
+    if (!canUseLetter(problems)) {
+      const why = problems.find((p) => p.level === 'refuse')?.message ?? 'it is not fit to send'
+      throw new Error(`${name ?? 'That letter'} was not attached: ${why}`)
+    }
   }
 
   const head = letterhead !== undefined ? letterhead : defaultOf(await fetchLetterheads())
@@ -82,13 +100,38 @@ export async function buildLetterAttachment({ template, values, reference, lette
     }
   }
 
-  const bytes = await letterToPdf({
+  return letterToPdf({
     doc,
     page: head?.page ?? A4_LETTERHEAD,
-    /* Always filled. A notice posted with {{balance}} in it is not a notice. */
-    filled: true,
+    filled,
     values,
     letterhead: image,
+  })
+}
+
+export async function buildLetterAttachment({ template, values, reference, letterhead }: {
+  template: LibraryTemplate
+  /** Merge values resolved against the account. See mergeValuesFor. */
+  values: Record<string, string>
+  /** What the debtor knows the account by. Goes in the filename, not in the letter. */
+  reference: string | null
+  /**
+   * The paper, where the caller already has it. Fetched here when it does not — so a caller with
+   * one letterhead in hand does not pay for the round trip twice.
+   */
+  letterhead?: Letterhead | null
+}): Promise<AttachedFile> {
+  const doc = parseLetter(template.body)
+  if (!doc) throw new Error(`${template.name} could not be read back, so nothing was attached.`)
+
+  const bytes = await letterPdfBytes({
+    doc,
+    scope: template.scope,
+    values,
+    /* Always filled. A notice posted with {{balance}} in it is not a notice. */
+    filled: true,
+    letterhead,
+    name: template.name,
   })
   return {
     filename: letterFilename(template.name, reference),

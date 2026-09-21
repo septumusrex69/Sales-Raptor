@@ -11,6 +11,7 @@ import {
 import type { TemplateDraft } from '../../lib/templateLibrary'
 import { inputClass } from '../../components/ui/Modal'
 import { LetterPageEditor } from './LetterPageEditor'
+import { PreviewPdf } from '../../components/letters/PreviewPdf'
 import {
   blankLetter, parseLetter, serialiseLetter, letterProblems, canUseLetter, lettersText,
 } from '../../lib/letterDocument.ts'
@@ -214,6 +215,16 @@ export function TemplateEditor({
         <div>
           <span className="flex items-baseline justify-between mb-1">
             <span className="text-[11px] uppercase tracking-wide text-slate-400">The letter</span>
+            {/*
+              THE PDF, FROM THE DRAFT IN FRONT OF YOU. At the firm's request: "an option to
+              preview what the PDF would look like... once you've done everything, just a
+              preview." It reads the LIVE document rather than the saved row, so it answers the
+              question somebody actually has, which is about the edit they have just made.
+            */}
+            {letterDoc !== null && (
+              <PreviewPdf doc={letterDoc} scope={scope} values={sampleValues()}
+                name={draft.name || 'Letter'} />
+            )}
             {letterDoc === null && (
               <span className="text-[11px] text-negative-700">
                 This letter could not be read back. Nothing has been changed.
