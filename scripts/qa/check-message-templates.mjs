@@ -28,7 +28,8 @@ import {
   KINDS_FOR_SCOPE,
   MERGE_FIELDS, SMS_RAND_PER_SEGMENT, addressAs, deleteRefusal, deleteWarning, fieldsUsed,
   forecastSms, kindForChannel, longDate,
-  bankLine, mergeValuesFor, renderTemplate, resolveNote, resolveTemplate, sampleValues,
+  FIELD_GROUPS, bankLine, groupedFields, mergeValuesFor, renderTemplate, resolveNote,
+  resolveTemplate, sampleValues,
   templateProblems,
   unknownFields, usageNote,
 } from '../../src/lib/messageTemplates.ts'
@@ -333,6 +334,39 @@ check('neither reaches a sales template',
 ok('...and both are offered to a debtor notice',
   keys('collections').includes('payment_instruction')
   && keys('collections').includes('firm_bank_type'))
+
+/* ---------- the fields, in groups ---------- */
+
+/*
+ * THE FIRM: "if we can categorize it ... because now it's like all over the place." Forty chips
+ * in one row, in the order the fields happened to be written in.
+ *
+ * THE FAILURE MODE OF A GROUPING TABLE IS SILENCE. A field the table does not mention simply
+ * stops being offered -- the screen looks tidier, nobody notices, and a field written, checked
+ * and exported is never used again. groupedFields puts the strays in a group called "Not yet
+ * grouped" so they are visible rather than missing, and this refuses that group outright.
+ */
+for (const scope of ['collections', 'sales']) {
+  const groups = groupedFields(scope)
+  ok(`${scope} fields are offered in groups (${groups.length})`, groups.length >= 4)
+  const stray = groups.find((g) => g.title === 'Not yet grouped')
+  check(`...with every ${scope} field in one of them`,
+    stray ? stray.fields.map((f) => f.key) : [], [])
+  /* Every field exactly once: a key in two groups is a chip that inserts the same thing twice
+     and a reader who cannot tell which group it really belongs to. */
+  const shown = groups.flatMap((g) => g.fields.map((f) => f.key))
+  check(`...and none of them twice`, shown.filter((k, i) => shown.indexOf(k) !== i), [])
+  check(`...and none of them lost`, shown.length, MERGE_FIELDS[scope].length)
+}
+/* A group title claimed twice would render two identical headings with the row split between
+   them, which reads as a bug in the data rather than in the table. */
+const titles = FIELD_GROUPS.map((g) => g.title)
+check('no two groups share a title', titles.filter((t, i) => titles.indexOf(t) !== i), [])
+/* And the table may not name a field that does not exist -- a typo there is a key silently
+   dropped from the screen, which is the same silence again from the other end. */
+const known = new Set(Object.values(MERGE_FIELDS).flatMap((l) => l.map((f) => f.key)))
+check('every key in the grouping table is a real field',
+  FIELD_GROUPS.flatMap((g) => g.keys).filter((k) => !known.has(k)), [])
 
 /* ---------- what an SMS costs ---------- */
 

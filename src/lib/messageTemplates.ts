@@ -285,6 +285,77 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
   ],
 }
 
+/**
+ * THE FIELDS, IN GROUPS, because forty chips in one row is a list nobody reads.
+ *
+ * THE FIRM: "if we can categorize it ... because now it's like all over the place. Debtor
+ * details, collector details, liaison details, firm details." The chips were in the order the
+ * fields happened to be written in, which put the trust account between a debtor's ID number and
+ * the date -- so somebody looking for the bank details read the whole row every time.
+ *
+ * ORDERED BY WHO THE FIELD IS ABOUT, and the groups are in the order a letter uses them: the
+ * debtor it is to, the account it is about, whose book it is, who is working it, where to pay,
+ * who we are, and the letter itself.
+ *
+ * A TABLE RATHER THAN A PROPERTY ON EACH FIELD. Both work; this one puts the whole grouping on
+ * one screen, where a field in the wrong place is visible. A field missing from it is a failure
+ * rather than a silent "everything else" bucket -- check-message-templates refuses one, because
+ * a field that quietly stops being offered is a field nobody uses again.
+ */
+export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
+  { title: 'The debtor', keys: ['debtor_name', 'debtor_first_name', 'debtor_address', 'debtor_id_masked'] },
+  { title: 'The person', keys: ['contact_name', 'contact_first_name'] },
+  { title: 'The account', keys: ['reference', 'account_number', 'balance', 'capital', 'position_as_at', 'respond_by'] },
+  { title: 'Their business', keys: ['company_name', 'service_interested'] },
+  { title: 'The deal', keys: ['deal_name', 'deal_value'] },
+  { title: 'The client', keys: ['client_name'] },
+  /* Named for what it does rather than for a role: the same two fields are the collector on a
+     debtor account and the consultant on a lead, and one group cannot be called both. */
+  { title: 'Whoever is dealing with it', keys: ['agent_name', 'agent_phone'] },
+  {
+    title: 'Paying us',
+    keys: ['payment_instruction', 'firm_bank', 'firm_bank_name', 'firm_bank_branch',
+      'firm_bank_holder', 'firm_bank_account', 'firm_bank_type'],
+  },
+  {
+    title: 'Paying us (the client side)',
+    keys: ['firm_business_bank', 'firm_business_bank_name', 'firm_business_bank_branch',
+      'firm_business_bank_holder', 'firm_business_bank_account'],
+  },
+  {
+    title: 'The firm',
+    keys: ['firm_name', 'firm_phone', 'firm_email', 'firm_website', 'firm_address',
+      'firm_postal_address', 'firm_hours'],
+  },
+  /* Not the firm: these are facts about THIS piece of correspondence -- the day it carries and
+     the person putting their name under it. */
+  { title: 'This letter', keys: ['today', 'signatory_name', 'signatory_title'] },
+]
+
+/**
+ * The scope's fields, in groups, with empty groups left out.
+ *
+ * Built from FIELD_GROUPS so the order on the screen is the order in that table and not the order
+ * the fields were written in. A field the table does not mention would vanish from the screen
+ * entirely, so it is returned here as its own group named for the mistake -- visible rather than
+ * missing -- and refused by the checks.
+ */
+export function groupedFields(scope: TemplateScope): { title: string; fields: MergeField[] }[] {
+  const fields = MERGE_FIELDS[scope] ?? []
+  const placed = new Set<string>()
+  const out: { title: string; fields: MergeField[] }[] = []
+  for (const g of FIELD_GROUPS) {
+    const inGroup = g.keys
+      .map((k) => fields.find((f) => f.key === k))
+      .filter((f): f is MergeField => f !== undefined)
+    for (const f of inGroup) placed.add(f.key)
+    if (inGroup.length) out.push({ title: g.title, fields: inGroup })
+  }
+  const rest = fields.filter((f) => !placed.has(f.key))
+  if (rest.length) out.push({ title: 'Not yet grouped', fields: rest })
+  return out
+}
+
 /** Every field either side may use. What a reader of a template needs, before it is filed. */
 export const ALL_FIELD_KEYS = new Set(
   Object.values(MERGE_FIELDS).flatMap((list) => list.map((f) => f.key)),

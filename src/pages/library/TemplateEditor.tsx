@@ -4,7 +4,7 @@ import {
   DESK_POSITIONS, type DeskPosition,
 } from '../../lib/clientPosition'
 import {
-  KINDS_FOR_SCOPE, MERGE_FIELDS, TEMPLATE_KINDS, fieldsUsed, forecastSms, renderTemplate,
+  KINDS_FOR_SCOPE, TEMPLATE_KINDS, fieldsUsed, forecastSms, groupedFields, renderTemplate,
   sampleValues, templateProblems, unknownFields,
   type TemplateKind, type TemplateScope,
 } from '../../lib/messageTemplates'
@@ -272,15 +272,31 @@ export function TemplateEditor({
         <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-2">
           Fields you may use &mdash; press one to drop it in
         </p>
-        <div className="flex flex-wrap gap-1.5">
-          {MERGE_FIELDS[scope].map((f) => (
-            <button key={f.key} type="button" onClick={() => insert(f.key)}
-              title={`${f.label} — e.g. ${f.sample}`}
-              className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded
-                border border-slate-200 bg-white text-navy-700 hover:border-[#c9a052] hover:bg-gold-50">
-              <Plus size={10} className="text-slate-400" />
-              {`{{${f.key}}}`}
-            </button>
+        {/*
+          GROUPED, AT THE FIRM'S REQUEST: "now it's like all over the place ... debtor details,
+          collector details, liaison details, firm details." Forty chips in one row, in the order
+          the fields happened to be written, put the trust account between a debtor's ID number
+          and today's date -- so finding the bank details meant reading the whole row.
+
+          The group titles come from FIELD_GROUPS rather than from anything on this screen, so the
+          order here is the order in that table and the two cannot drift.
+        */}
+        <div className="space-y-2.5">
+          {groupedFields(scope).map((g) => (
+            <div key={g.title}>
+              <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">{g.title}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {g.fields.map((f) => (
+                  <button key={f.key} type="button" onClick={() => insert(f.key)}
+                    title={`${f.label} — e.g. ${f.sample}`}
+                    className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded
+                      border border-slate-200 bg-white text-navy-700 hover:border-[#c9a052] hover:bg-gold-50">
+                    <Plus size={10} className="text-slate-400" />
+                    {`{{${f.key}}}`}
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
         {/*
