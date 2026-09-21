@@ -28,7 +28,7 @@ import {
   KINDS_FOR_SCOPE,
   MERGE_FIELDS, SMS_RAND_PER_SEGMENT, addressAs, deleteRefusal, deleteWarning, fieldsUsed,
   forecastSms, kindForChannel, longDate,
-  FIELD_GROUPS, bankLine, groupedFields, mergeValuesFor, renderTemplate, resolveNote,
+  FIELD_GROUPS, bankLine, groupedFields, maskSaId, mergeValuesFor, renderTemplate, resolveNote,
   resolveTemplate, sampleValues,
   templateProblems,
   unknownFields, usageNote,
@@ -339,6 +339,55 @@ check('neither reaches a sales template',
 ok('...and both are offered to a debtor notice',
   keys('collections').includes('payment_instruction')
   && keys('collections').includes('firm_bank_type'))
+
+/* ---------- the three fields the firm said still needed attention ---------- */
+
+/*
+ * THE FIRM, naming them one by one: "{{debtor_reg_no}} isn't a field yet. The company SMS, email
+ * and letter all use it." "{{debtor_address}} exists, but Raptor doesn't fill it yet." "And
+ * {{respond_by}} exists, but Raptor doesn't fill it yet."
+ */
+
+/*
+ * ONE COLUMN, TWO MEANINGS, TWO FIELDS. debtor_id_number holds an ID number on a person and a
+ * registration number on a company; debtor_kind says which. So each field must answer on ONE kind
+ * of debtor and stay silent on the other -- and silence is null, which leaves the placeholder
+ * standing rather than printing a blank.
+ */
+const company = {
+  ...person, debtorKind: 'company', debtorTitle: '', debtorFirstName: '',
+  debtorSurname: 'Moloto Trading CC',
+}
+const asPerson = mergeValuesFor({
+  account: person, balance: 1, clientName: 'x', agentName: 'y', agentPhone: 'z',
+  firm: { firmName: 'f' }, today: '2026-09-18', money, debtorIdMasked: '8503125009087',
+})
+const asCompany = mergeValuesFor({
+  account: company, balance: 1, clientName: 'x', agentName: 'y', agentPhone: 'z',
+  firm: { firmName: 'f' }, today: '2026-09-18', money, debtorIdMasked: '2019/940923/07',
+})
+check('a company answers with a registration number',
+  [asCompany.debtor_reg_no, asCompany.debtor_id_masked], ['2019/940923/07', null])
+check('...and a person with an identity number, and no registration number',
+  [asPerson.debtor_reg_no, asPerson.debtor_id_masked], [null, '850312 XXXX 08 X'])
+
+/*
+ * AND IT IS ACTUALLY MASKED. The field has been called debtor_id_masked since it was written and
+ * nothing masked anything -- AccountDetail passed the whole thirteen digits through. A field
+ * whose name promises a mask and prints the number is worse than one that never claimed to.
+ */
+check('the four digits that encode sex are covered', maskSaId('8503125009087'), '850312 XXXX 08 X')
+check('...and so is the check digit', maskSaId('8503125009087').slice(-1), 'X')
+/* The date of birth is deliberately left: it is what lets a debtor recognise their own number. */
+ok('...while the date of birth is left, so a debtor recognises it',
+  maskSaId('8503125009087').startsWith('850312'))
+/*
+ * ANYTHING THAT IS NOT THIRTEEN DIGITS IS RETURNED UNTOUCHED. 45 rows of the firm's own import
+ * file had a telephone number in this column, and "0746 XXXX 63" would look deliberate.
+ */
+check('a telephone number in the ID column is not dressed up as an ID',
+  maskSaId('0746013863'), '0746013863')
+check('nothing stays nothing', maskSaId(''), null)
 
 /* ---------- three people, and they are not the same person ---------- */
 

@@ -5528,3 +5528,17 @@ alter table public.firm_settings add column if not exists payment_instruction te
 -- as a step channel since it was written. Merging them would put a landline into a WhatsApp
 -- message and nothing would report it.
 alter table public.profiles add column if not exists whatsapp text;
+
+-- {{debtor_reg_no}} WITHOUT A COLUMN, and the column is the part worth explaining.
+--
+-- The firm: "{{debtor_reg_no}} isn't a field yet. The company SMS, email and letter all use it."
+-- A column was added here for it and then dropped again, because debtor_accounts had already
+-- decided this question the other way and written down why: debtor_id_number is ONE field with
+-- TWO meanings -- an ID number on a person, a registration number on a company -- and debtor_kind
+-- says which. See the comment on Account.debtorIdNumber in accountBook.ts: "cheaper and less
+-- error-prone than two columns of which one is always null."
+--
+-- So the merge field is the new thing and the storage is not. {{debtor_reg_no}} resolves from
+-- debtor_id_number only where debtor_kind is 'company', and {{debtor_id_masked}} only where it is
+-- 'individual' -- which also fixes a company's registration number being masked as though it were
+-- an ID, on a letter, which is what it did before.

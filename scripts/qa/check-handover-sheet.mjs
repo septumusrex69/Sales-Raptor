@@ -178,7 +178,9 @@ const NOT_CARRIED = new Set([
   'Fax Number 1', 'Fax Number 2', 'Fax Number 3', 'Email 4',
   /* Asked of a debtor before the firm has even spoken to them. Empty in all 45 rows. */
   'Nationality', 'Passport number', 'Gender', 'Marital Status', 'Number of Children',
-  'Next of Kin Number 2', 'Next of Kin Number 3',
+  /* Kin 2 is now carried -- the firm asked for a second next-of-kin number. The third is still
+     dropped: nobody has ever filled in three. */
+  'Next of Kin Number 3',
   /* A person's name in the client's office, not a fact about the account. */
   'Client Division',
   /* Interest, dropped at the firm's instruction -- and the old sheet asked for it twice, in two

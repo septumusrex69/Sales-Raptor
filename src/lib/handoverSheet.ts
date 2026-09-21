@@ -46,6 +46,7 @@ export interface HandoverColumn {
   /** What the client reads at the top of the column. */
   label: string
   group: 'The account' | 'The debtor' | 'Reaching them' | 'Useful if you have it'
+    | 'Anything else worth ringing'
   kind: ColumnKind
   required?: true
   choices?: string[]
@@ -196,7 +197,28 @@ export const HANDOVER_COLUMNS: HandoverColumn[] = [
   { key: 'occupation', label: 'Occupation', group: 'Useful if you have it', kind: 'text', was: ['Occupation'], note: '' },
   { key: 'next_of_kin', label: 'Next of kin', group: 'Useful if you have it', kind: 'text', note: 'A relative or partner, e.g. Maria Buitendag.' },
   { key: 'next_of_kin_phone', label: 'Next of kin number', group: 'Useful if you have it', kind: 'text', was: ['Next of Kin Number 1'], note: 'e.g. 082 123 4567.' },
+  /* A SECOND ONE, at the firm's request. One relative is one telephone that may be out of use;
+     the point of a next of kin is to have somewhere to go when the debtor's own numbers stop
+     answering, and one of them is not a list. */
+  { key: 'next_of_kin_2', label: 'Second next of kin', group: 'Useful if you have it', kind: 'text', note: 'Another relative, e.g. Pieter Buitendag.' },
+  { key: 'next_of_kin_2_phone', label: 'Second next of kin number', group: 'Useful if you have it', kind: 'text', was: ['Next of Kin Number 2'], note: 'e.g. 083 234 5678.' },
   { key: 'notes', label: 'Anything we should know', group: 'Useful if you have it', kind: 'text', note: 'A dispute already raised, an arrangement already broken, a debtor who has died.' },
+
+  /* ---------------------------------------------------------------- anything else to ring
+   *
+   * A BLOCK FOR THE NUMBERS THAT FIT NOWHERE ELSE, at the firm's request. The named columns above
+   * cover the debtor, their work and their next of kin; a client who has an employer's
+   * switchboard, a neighbour, or the attorney who wrote to them last year had nowhere to put it
+   * and the old sheet's answer was a fourth column of every kind, thirty-one of which were empty
+   * in every row.
+   *
+   * ONE PLACE, WITH A LINE SAYING WHOSE IT IS, which is the thing a collector actually needs: a
+   * number nobody can say whose it is gets rung once and never again.
+   */
+  { key: 'other_phone', label: 'Another number', group: 'Anything else worth ringing', kind: 'text', note: 'Any other number for them, e.g. 011 456 7890.' },
+  { key: 'other_phone_2', label: 'And another', group: 'Anything else worth ringing', kind: 'text', note: 'e.g. 084 345 6789.' },
+  { key: 'other_email', label: 'Another email address', group: 'Anything else worth ringing', kind: 'text', note: 'e.g. j.vdwesthuizen@work.co.za.' },
+  { key: 'other_contact_note', label: 'Whose numbers are these', group: 'Anything else worth ringing', kind: 'text', note: 'Say whose they are, e.g. "his employer\u2019s switchboard, ask for Sarah".' },
 ]
 
 /** The order the groups appear in, taken from the columns so the two cannot disagree. */

@@ -74,14 +74,22 @@ const TEMPLATES = [
   },
   {
     /*
-     * A TEMPLATE THIS ACCOUNT CANNOT FULLY ANSWER. {{respond_by}} is not the firm's detail and is
-     * not on the account either, so nothing can fill it — which is the case the warning exists
-     * for, and the case that must NOT be silent.
+     * A TEMPLATE THIS ACCOUNT CANNOT FULLY ANSWER, which is the case the warning exists for and
+     * the case that must NOT be silent.
+     *
+     * IT USED TO BE {{respond_by}}, "not the firm's detail and not on the account either, so
+     * nothing can fill it" — and that stopped being true the day Raptor learned to count ten
+     * working days. The check failed on a real improvement, which is the right way round.
+     *
+     * {{debtor_address}} replaces it, and it is a better test for being DATA-DRIVEN rather than
+     * structural: the field is perfectly fillable, and this fixture's account simply has no
+     * address contact on it. That is the state a real account is in until a client sends one, and
+     * it is the one a section 129 cannot be posted from.
      */
     id: 'tpl-script-1', scope: 'collections', kind: 'call_script', name: 'Opening the call',
     subject: null, format: 'text',
     body: 'Good day, may I speak to {{debtor_name}}? I am calling about {{balance}} outstanding. '
-      + 'We need this settled by {{respond_by}}.',
+      + 'I have you at {{debtor_address}} — is that still right?',
     position: null, language: 'en', active: true, attachment_id: null,
     seed_key: null, updated_at: '2026-09-01T08:00:00Z',
   },
@@ -263,13 +271,21 @@ try {
   t.ok(`the script carries this debtor's balance (${JSON.stringify(script)})`,
     /R\s?180,000\.00/.test(script))
   /*
-   * AND THE FIELD NOTHING COULD FILL IS NAMED. {{respond_by}} is left STANDING in the words by
-   * renderTemplate — visible, but visible as a mistake somebody made rather than as a field the
-   * app could not answer. The sentence is what turns it into an instruction.
+   * AND THE FIELD THIS ACCOUNT COULD NOT ANSWER IS NAMED. {{debtor_address}} is left STANDING in
+   * the words by renderTemplate — visible, but visible as a mistake somebody made rather than as
+   * a field the app could not answer. The sentence is what turns it into an instruction.
    */
-  t.ok('...and what could not be filled is still standing in it', script.includes('{{respond_by}}'))
+  t.ok('...and what could not be filled is still standing in it', script.includes('{{debtor_address}}'))
   t.ok('...and is named, rather than left to be spotted',
-    await page.getByText(/\{\{respond_by\}\} could not be filled from this account/).first().isVisible())
+    await page.getByText(/\{\{debtor_address\}\} could not be filled from this account/).first().isVisible())
+  /*
+   * AND {{respond_by}} IS NOT IN THAT LIST ANY MORE. The firm: "{{respond_by}} exists, but Raptor
+   * doesn't fill it yet. The s129 letters use it." It does now — ten WORKING days — so the screen
+   * must have stopped reporting it as unanswerable, or the warning is crying wolf on the one
+   * screen where a warning has to mean something.
+   */
+  t.check('the date to respond by is no longer reported as unfillable',
+    await page.getByText(/\{\{respond_by\}\} could not be filled/).count(), 0)
   await t.shot(page, '81-account-call-script')
   await page.locator('button[aria-label="Close"]').first().click()
   await page.waitForTimeout(400)

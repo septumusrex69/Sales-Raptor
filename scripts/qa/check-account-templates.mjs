@@ -205,6 +205,40 @@ check('a non-breaking space is what makes the difference',
   [smsCost(`R${NBSP}180,000.00`).encoding, smsCost('R 180,000.00').encoding],
   ['UCS-2', 'GSM-7'])
 
+/* ---------- the two fields that were filled by nothing ---------- */
+
+/*
+ * THE FIRM, naming them: "{{debtor_address}} exists, but Raptor doesn't fill it yet ... and
+ * {{respond_by}} exists, but Raptor doesn't fill it yet. The s129 letters use it."
+ *
+ * Both were written, checked and exported with nothing in the app passing a value, so every
+ * notice using one printed the placeholder. check-message-templates proves mergeValuesFor can
+ * answer them; only the PAGE can prove something passes them, which is what this reads.
+ */
+ok('the account passes a debtor address to the merge',
+  /debtorAddress: addressOf\(/.test(account))
+ok('...taken from the account\u2019s own contacts rather than typed',
+  /addressOf\(workspace\?\.contacts/.test(account))
+/* A retired address is one somebody established the debtor has left. Posting a statutory demand
+   to it is worse than posting none, because it looks served. */
+ok('...and never a retired one',
+  /kind === 'address' && !c\.retiredAt/.test(account))
+ok('...preferring the one marked primary', /live\.find\(\(c\) => c\.isPrimary\)/.test(account))
+
+/*
+ * TEN WORKING DAYS, NOT TEN CALENDAR DAYS. addWorkingDays knows the public holidays -- Easter
+ * included, and the Monday a holiday moves to when it falls on a Sunday. A demand giving a debtor
+ * less time than the Act does is a demand that can be set aside.
+ */
+ok('the account works out the date to respond by', /respondBy: addWorkingDays\(/.test(account))
+ok('...counting ten of them', /addWorkingDays\(dayKey\(new Date\(\)\), 10\)/.test(account))
+ok('...from the working-days library rather than by hand',
+  /from '\.\.\/\.\.\/lib\/workingDays'/.test(account))
+
+/* The merge is a memo; a dependency left off means a letter naming last week's address. */
+ok('the contacts are in the merge\u2019s dependencies', /workspace\?\.contacts,/.test(account))
+
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')

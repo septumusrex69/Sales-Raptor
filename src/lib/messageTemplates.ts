@@ -251,7 +251,18 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
      * hand, which is how one debtor's address ends up on another debtor's demand.
      */
     { key: 'debtor_address', label: 'Where the notice is posted, on its own lines', sample: '14 Protea Street\nWonderboom\nPretoria, 0182' },
-    { key: 'debtor_id_masked', label: 'Identity number, masked', sample: '850312 XXXX 08 X' },
+    /*
+     * ONE COLUMN, TWO MEANINGS, TWO FIELDS. debtor_accounts.debtor_id_number holds an ID number on
+     * a person and a registration number on a company -- a decision accountBook.ts made and wrote
+     * down, "cheaper and less error-prone than two columns of which one is always null" -- and
+     * debtor_kind says which it is.
+     *
+     * So these two are the same column read twice, each resolving to NOTHING on the other kind of
+     * debtor. That is not tidiness: before this, {{debtor_id_masked}} masked a company's
+     * registration number as though it were an identity number and printed it on a letter.
+     */
+    { key: 'debtor_id_masked', label: 'Identity number, masked (a person)', sample: '850312 XXXX 08 X' },
+    { key: 'debtor_reg_no', label: 'Registration number (a company)', sample: '2019/940923/07' },
     { key: 'account_number', label: "The creditor's own account number", sample: '92322880' },
     { key: 'respond_by', label: 'The date the debtor must answer by, written out', sample: '5 October 2026' },
     { key: 'position_as_at', label: 'The date the balance was struck', sample: '18 September 2026' },
@@ -340,7 +351,8 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
  * a field that quietly stops being offered is a field nobody uses again.
  */
 export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
-  { title: 'The debtor', keys: ['debtor_name', 'debtor_first_name', 'debtor_address', 'debtor_id_masked'] },
+  { title: 'The debtor', keys: ['debtor_name', 'debtor_first_name', 'debtor_address', 'debtor_id_masked',
+    'debtor_reg_no'] },
   { title: 'The person', keys: ['contact_name', 'contact_first_name'] },
   { title: 'The account', keys: ['reference', 'account_number', 'balance', 'capital', 'position_as_at', 'respond_by'] },
   { title: 'Their business', keys: ['company_name', 'service_interested'] },
@@ -581,6 +593,27 @@ export function addressAs(account: TemplateAccount): string | null {
   return title === '' ? surname : `${title} ${surname}`
 }
 
+/**
+ * "8503125009087" -> "850312 XXXX 08 X".
+ *
+ * THE SHAPE IS THE ONE THE FIELD ALREADY ADVERTISED as its sample, so a template previewed before
+ * this existed prints what it previewed. A South African ID is YYMMDD SSSS C A Z: the date of
+ * birth, four digits that encode sex, a citizenship digit, and a check digit. The four that
+ * encode sex are covered and so is the check digit; the date of birth is left, because it is what
+ * lets a debtor recognise their own number on a notice, which is the whole point of printing part
+ * of it.
+ *
+ * ANYTHING THAT IS NOT THIRTEEN DIGITS IS RETURNED UNTOUCHED rather than mangled into a shape it
+ * does not have -- 45 rows of the firm's own import file had a telephone number in this column,
+ * and "0746 XXXX 63" masked as though it were an identity number would look deliberate.
+ */
+export function maskSaId(raw: string | null | undefined): string | null {
+  const s = (raw ?? '').replace(/\s/g, '')
+  if (!s) return null
+  if (!/^\d{13}$/.test(s)) return s
+  return `${s.slice(0, 6)} XXXX ${s.slice(10, 12)} X`
+}
+
 /** "2026-09-18" -> "18 September 2026". A date in a letter is never written in ISO. */
 export function longDate(date: string): string {
   const months = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -718,7 +751,14 @@ export function mergeValuesFor(input: {
        appears on the debtor's paperwork, and a section 129 has to identify the agreement. */
     account_number: some(a.accountNumber),
     debtor_address: some(input.debtorAddress),
-    debtor_id_masked: some(input.debtorIdMasked),
+    /*
+     * MASKED HERE, not at the call site, and it was not masked at all before: the field has
+     * always been called debtor_id_masked and AccountDetail passed the whole number straight
+     * through. A field whose name promises a mask and prints thirteen digits is worse than one
+     * that never claimed to.
+     */
+    debtor_id_masked: a.debtorKind === 'company' ? null : maskSaId(input.debtorIdMasked),
+    debtor_reg_no: a.debtorKind === 'company' ? some(input.debtorIdMasked) : null,
     respond_by: input.respondBy ? longDate(input.respondBy) : null,
     position_as_at: input.positionAsAt ? longDate(input.positionAsAt) : null,
     firm_bank: bankLine(input.firm.trustBank, input.firm.trustBranchCode),

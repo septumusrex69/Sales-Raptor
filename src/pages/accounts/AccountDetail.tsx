@@ -73,6 +73,8 @@ import { formatMoney, formatDate } from '../../data/mockData'
 import { mergeValuesFor } from '../../lib/messageTemplates'
 import { FIRM_UNSET, fetchFirmSettings, type FirmSettings } from '../../lib/firmSettings'
 import { dayKey } from '../../lib/collectionPace'
+import { addWorkingDays } from '../../lib/workingDays'
+import type { AccountContact } from '../../lib/accountWorkspace'
 
 type Tab = 'Overview' | 'Transactions' | 'Emails' | 'Documents'
 
@@ -392,6 +394,23 @@ export function AccountDetail() {
           money: formatMoney,
           debtorIdMasked: account.debtorIdNumber,
           positionAsAt: dayKey(new Date()),
+          /*
+           * THE TWO FIELDS THAT WERE WRITTEN, CHECKED, EXPORTED AND FILLED BY NOTHING.
+           *
+           * {{debtor_address}} is the primary address on the account -- account_contacts already
+           * holds one, kind 'address', and every section 129 needs it to be posted at all. The
+           * PRIMARY one where a primary is marked, and otherwise the first that has not been
+           * retired: a retired address is one somebody established the debtor no longer lives at,
+           * and posting a statutory demand to it is worse than not posting one.
+           *
+           * {{respond_by}} is ten WORKING days from today, the day the notice goes out. Not ten
+           * calendar days, and not counted by hand -- addWorkingDays knows the public holidays,
+           * including the Easter dates and the Monday a holiday moves to when it falls on a
+           * Sunday. A demand that gives a debtor less time than the Act does is a demand that can
+           * be set aside.
+           */
+          debtorAddress: addressOf(workspace?.contacts ?? []),
+          respondBy: addWorkingDays(dayKey(new Date()), 10),
           /* Passed whole. There is no list of the firm's fields here to fall behind the ones the
              library grew -- see mergeValuesFor, which takes FirmSettings' own shape. */
           firm,
@@ -404,6 +423,7 @@ export function AccountDetail() {
      out of them: left off, a letter keeps naming whoever held the account before it was handed
      on, which is the one failure these fields exist to prevent. */
   }), [account, statement?.breakdown?.balance, client?.name, client?.accountOwnerId, users,
+    workspace?.contacts,
     currentUser?.name, currentUser?.phone, currentUser?.email, currentUser?.whatsapp, firm])
 
 
@@ -2598,4 +2618,21 @@ function StatementTable({ statement, account, breakdown }: {
       )}
     </>
   )
+}
+
+/**
+ * The address a notice is posted to.
+ *
+ * THE PRIMARY ONE, AND NEVER A RETIRED ONE. `retiredAt` is set when somebody established the
+ * debtor no longer lives there — posting a statutory demand to an address known to be wrong is
+ * worse than posting none, because it looks served. Where nothing is marked primary the first
+ * live address is used, which is the order they were captured in.
+ *
+ * Returned as typed, on its own lines, because that is how {{debtor_address}} is merged and how
+ * an address is written on a page.
+ */
+function addressOf(contacts: AccountContact[]): string | null {
+  const live = contacts.filter((c) => c.kind === 'address' && !c.retiredAt)
+  const pick = live.find((c) => c.isPrimary) ?? live[0]
+  return (pick?.value ?? '').trim() || null
 }
