@@ -133,6 +133,7 @@ const FIRM = [{
   phone: '015 291 1234',
   phone_alt: null,
   email: 'info@bredellferreira.co.za',
+  website: 'www.bredellferreira.co.za',
   physical_address: '25 Kerk Street\nPolokwane\n0699',
   /* POST GOES SOMEWHERE ELSE, which is the whole reason it is a second field: a section 129 is
      delivered to a chosen address, and the street the firm sits in need not be it. */
@@ -1075,6 +1076,10 @@ try {
     && addresses.some((a) => a.startsWith('PO Box 1234')))
   t.ok('the office\u2019s hours are written out rather than picked as a time',
     boxes.includes('Monday to Friday, 08:00 \u2013 16:30'))
+  /* As typed: no scheme added on the way in either, or the box would argue with whoever filled
+     it in the moment they wanted the other form. */
+  t.ok('the website is kept exactly as it was typed',
+    boxes.includes('www.bredellferreira.co.za'))
 
   /*
    * THE WARNING NAMES WHAT IS MISSING AND STAYS QUIET ABOUT WHAT IS NOT.

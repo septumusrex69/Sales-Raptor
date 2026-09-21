@@ -5490,3 +5490,11 @@ alter table public.firm_settings add column if not exists postal_address text;
 -- rather than open/close times: the firm writes it the way it should read on a letter, and no
 -- part of the app decides anything from it -- nothing here closes the switchboard at 16:30.
 alter table public.firm_settings add column if not exists office_hours text;
+
+-- The firm's website, at its request, alongside the telephone, the email and the two addresses.
+--
+-- STORED AS TYPED AND MERGED AS TYPED. No scheme is added and none is stripped: a letterhead
+-- reads "www.bredellferreira.co.za" and an email signature may want "https://..." to be a link,
+-- and which of those is right is the firm's decision per template, not this column's. Nothing in
+-- the app fetches it, so there is nothing for a malformed one to break.
+alter table public.firm_settings add column if not exists website text;

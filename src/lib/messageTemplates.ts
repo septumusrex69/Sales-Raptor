@@ -170,6 +170,10 @@ const EVERYWHERE: MergeField[] = [
    */
   { key: 'firm_phone', label: "The office's telephone number", sample: '012 111 2222' },
   { key: 'firm_email', label: "The office's email address", sample: 'info@bredellferreira.co.za' },
+  /* Merged exactly as it was typed. Whether it carries a scheme is a question about the template
+     -- a letterhead wants "www...", a signature may want "https://..." so a mail client links it
+     -- and not a question this field can answer once for both. */
+  { key: 'firm_website', label: "The firm's website", sample: 'www.bredellferreira.co.za' },
   { key: 'firm_address', label: 'The firm’s address, on its own lines', sample: '25 Kerk Street\nPolokwane, 0699' },
   /* NOT THE SAME ADDRESS, and on a statutory notice the difference is the point: a firm that
      works from a street it does not receive post at would have replies going nowhere. Offered
@@ -502,6 +506,7 @@ export function mergeValuesFor(input: {
     firmName: string
     phone?: string | null
     email?: string | null
+    website?: string | null
     physicalAddress?: string | null
     postalAddress?: string | null
     officeHours?: string | null
@@ -532,6 +537,7 @@ export function mergeValuesFor(input: {
     firm_name: input.firm.firmName,
     firm_phone: some(input.firm.phone),
     firm_email: some(input.firm.email),
+    firm_website: some(input.firm.website),
     firm_address: some(input.firm.physicalAddress),
     firm_postal_address: some(input.firm.postalAddress),
     firm_hours: some(input.firm.officeHours),

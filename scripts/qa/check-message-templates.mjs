@@ -192,6 +192,7 @@ const values = mergeValuesFor({
   firm: {
     firmName: 'Bredell Ferreira',
     phone: '015 291 1234', email: 'info@bredellferreira.co.za',
+    website: 'www.bredellferreira.co.za',
     physicalAddress: '25 Kerk Street\nPolokwane\n0699',
     postalAddress: 'PO Box 1234\nPolokwane\n0700',
     officeHours: 'Monday to Friday, 08:00 \u2013 16:30',
@@ -248,6 +249,13 @@ check('the address is merged on the lines it was typed on',
  */
 check('post goes to its own address, not the street',
   values.firm_postal_address, 'PO Box 1234\nPolokwane\n0700')
+/*
+ * MERGED EXACTLY AS TYPED, scheme and all -- or neither. A letterhead reads "www..." and an email
+ * signature may want "https://..." so the mail client makes it a link; normalising here would
+ * pick one of those for every template at once, and the wrong one silently.
+ */
+check('the website is merged as typed', values.firm_website, 'www.bredellferreira.co.za')
+
 /* Free text: "telephone this office" is only useful with the hours attached, and nothing in the
    app reads this as a time -- no queue closes because this box says half past four. */
 check('the office\u2019s hours are merged as written',

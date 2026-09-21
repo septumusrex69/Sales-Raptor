@@ -39,7 +39,7 @@ import { supabase } from './supabase'
  * that reads `undefined` for ever.
  */
 const COLUMNS = 'firm_name, registration_number, vat_number, council_number, '
-  + 'phone, phone_alt, email, physical_address, postal_address, office_hours, '
+  + 'phone, phone_alt, email, website, physical_address, postal_address, office_hours, '
   + 'trust_bank, trust_branch_code, trust_account_name, trust_account_number, '
   + 'business_bank, business_branch_code, business_account_name, business_account_number, '
   + 'signatory_name, signatory_title, '
@@ -53,6 +53,7 @@ interface Row {
   phone: string | null
   phone_alt: string | null
   email: string | null
+  website: string | null
   physical_address: string | null
   postal_address: string | null
   office_hours: string | null
@@ -82,6 +83,8 @@ export interface FirmSettings {
   phone: string | null
   phoneAlt: string | null
   email: string | null
+  /** As typed: no scheme added, none stripped. A letterhead and a signature want different ones. */
+  website: string | null
   /** Multi-line and merged as typed: an address is written on its own lines on a letterhead. */
   physicalAddress: string | null
   /** Where post is received, which is not always where the firm sits. Multi-line, like above. */
@@ -123,6 +126,7 @@ export const FIRM_UNSET: FirmSettings = {
   phone: null,
   phoneAlt: null,
   email: null,
+  website: null,
   physicalAddress: null,
   postalAddress: null,
   officeHours: null,
@@ -157,6 +161,7 @@ function toSettings(r: Row): FirmSettings {
     phone: some(r.phone),
     phoneAlt: some(r.phone_alt),
     email: some(r.email),
+    website: some(r.website),
     physicalAddress: some(r.physical_address),
     postalAddress: some(r.postal_address),
     officeHours: some(r.office_hours),
@@ -202,6 +207,7 @@ export async function saveFirmSettings(next: Omit<FirmSettings, 'updatedAt'>): P
     phone: some(next.phone),
     phone_alt: some(next.phoneAlt),
     email: some(next.email),
+    website: some(next.website),
     physical_address: some(next.physicalAddress),
     postal_address: some(next.postalAddress),
     office_hours: some(next.officeHours),

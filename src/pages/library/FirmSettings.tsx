@@ -164,16 +164,26 @@ export function FirmSettingsPage() {
           The switchboard, not the collector. A letter that says &ldquo;telephone this
           office&rdquo; means these, wherever the account goes next.
         </p>
-        <div className="grid gap-4 sm:grid-cols-2">
+        {/* THE TELEPHONE THINGS TOGETHER, three across: two numbers and the hours somebody would
+            be ringing them during. A letter that gives a number and no hours sends a debtor to a
+            switchboard nobody is on. */}
+        <div className="grid gap-4 sm:grid-cols-3">
           {text('phone', 'Telephone', 'Fills {{firm_phone}}.', '015 291 1234')}
           {text('phoneAlt', 'Second number', 'Not merged on its own \u2014 kept here so it is in one place.',
             '015 291 5678')}
-          {text('email', 'Email address', 'Fills {{firm_email}}.', 'info@bredellferreira.co.za')}
           {/* Free text, written the way it should read on a letter. Nothing in Raptor acts on it:
               no queue closes at half past four because this box says so. */}
           {text('officeHours', 'Office hours',
             'Fills {{firm_hours}}. Written out \u2014 nothing in the app reads it as a time.',
             'Monday to Friday, 08:00 \u2013 16:30')}
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 mt-4">
+          {text('email', 'Email address', 'Fills {{firm_email}}.', 'info@bredellferreira.co.za')}
+          {/* Merged exactly as typed. Whether it carries a scheme is a question about the template
+              -- a letterhead wants "www...", a signature may want "https://..." so a mail client
+              makes it a link -- and not one this box can answer once for both. */}
+          {text('website', 'Website', 'Fills {{firm_website}}, exactly as you type it.',
+            'www.bredellferreira.co.za')}
           {/* THE TWO ADDRESSES SIDE BY SIDE, because that is the only way the difference between
               them reads as deliberate rather than as one of them being the spare. */}
           {lines('physicalAddress', 'Physical address',
