@@ -9,40 +9,47 @@ import { NewVersionWatcher } from './components/NewVersionWatcher'
 import { LoginPage } from './pages/auth/LoginPage'
 import { AppLayout } from './components/layout/AppLayout'
 import { DashboardRouter } from './pages/DashboardRouter'
-import { LeadsList } from './pages/leads/LeadsList'
-import { LeadDetail } from './pages/leads/LeadDetail'
-import { DealsBoard } from './pages/deals/DealsBoard'
-import { DealDetail } from './pages/deals/DealDetail'
-import { ContactsList } from './pages/contacts/ContactsList'
-import { ContactDetail } from './pages/contacts/ContactDetail'
 import { RequireClientAccess } from './components/auth/RequireClientAccess'
-import { CompaniesList } from './pages/companies/CompaniesList'
-import { CompanyDetail } from './pages/companies/CompanyDetail'
-import { AccountsList } from './pages/accounts/AccountsList'
-import { AccountDetail } from './pages/accounts/AccountDetail'
-import { DisputesBoard } from './pages/accounts/DisputesBoard'
-import { LibraryWorkflows } from './pages/library/LibraryWorkflows'
-import { LibraryLetterhead } from './pages/library/LibraryLetterhead'
-import { LibraryFirm } from './pages/library/LibraryFirm'
 import { CollectorDashboard } from './pages/CollectorDashboard'
-import { CollectorProfile } from './pages/CollectorProfile'
-import { DiaryPage } from './pages/diary/DiaryPage'
-import { MailPage } from './pages/mail/MailPage'
-import { TasksPage } from './pages/tasks/TasksPage'
-import { CalendarPage } from './pages/calendar/CalendarPage'
-import { ActivitiesPage } from './pages/activities/ActivitiesPage'
 /*
- * Loaded on demand.
+ * LOADED ON DEMAND -- EVERY SCREEN EXCEPT THE TWO YOU LAND ON.
  *
- * Reports and Settings are the two heaviest screens and the two least often opened — Reports
- * pulls in the whole charting library for the sake of one page, and a collector who lives on
- * Accounts was downloading it on every first load. Splitting them takes roughly a third off what
- * the app fetches before it can show anything.
+ * THE FIRM: "it's slow to load ... I think the speed can pick up."
+ *
+ * Three screens were split before this, and the other twenty-one were compiled into the first
+ * file the browser downloads, so opening the login page fetched the mail client, the diary, the
+ * letter editor and the charting library. Nobody uses twenty-one screens before the first paint,
+ * and on an iPad over mobile data that download is the wait.
+ *
+ * LoginPage, AppLayout and DashboardRouter stay eager on purpose: they are what is on the screen
+ * a second after the app opens, and fetching them in a second round trip would move the wait
+ * rather than remove it. CollectorProfile is split because it, not Reports, is what was dragging
+ * the charting library into the first download.
  */
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const LibraryPage = lazy(() => import('./pages/library/LibraryPage').then((m) => ({ default: m.LibraryPage })))
 const SettingsPage = lazy(() => import('./pages/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
-import { RepDetailPage } from './pages/reps/RepDetailPage'
+const LeadsList = lazy(() => import('./pages/leads/LeadsList').then((m) => ({ default: m.LeadsList })))
+const LeadDetail = lazy(() => import('./pages/leads/LeadDetail').then((m) => ({ default: m.LeadDetail })))
+const DealsBoard = lazy(() => import('./pages/deals/DealsBoard').then((m) => ({ default: m.DealsBoard })))
+const DealDetail = lazy(() => import('./pages/deals/DealDetail').then((m) => ({ default: m.DealDetail })))
+const ContactsList = lazy(() => import('./pages/contacts/ContactsList').then((m) => ({ default: m.ContactsList })))
+const ContactDetail = lazy(() => import('./pages/contacts/ContactDetail').then((m) => ({ default: m.ContactDetail })))
+const CompaniesList = lazy(() => import('./pages/companies/CompaniesList').then((m) => ({ default: m.CompaniesList })))
+const CompanyDetail = lazy(() => import('./pages/companies/CompanyDetail').then((m) => ({ default: m.CompanyDetail })))
+const AccountsList = lazy(() => import('./pages/accounts/AccountsList').then((m) => ({ default: m.AccountsList })))
+const AccountDetail = lazy(() => import('./pages/accounts/AccountDetail').then((m) => ({ default: m.AccountDetail })))
+const DisputesBoard = lazy(() => import('./pages/accounts/DisputesBoard').then((m) => ({ default: m.DisputesBoard })))
+const LibraryWorkflows = lazy(() => import('./pages/library/LibraryWorkflows').then((m) => ({ default: m.LibraryWorkflows })))
+const LibraryLetterhead = lazy(() => import('./pages/library/LibraryLetterhead').then((m) => ({ default: m.LibraryLetterhead })))
+const LibraryFirm = lazy(() => import('./pages/library/LibraryFirm').then((m) => ({ default: m.LibraryFirm })))
+const CollectorProfile = lazy(() => import('./pages/CollectorProfile').then((m) => ({ default: m.CollectorProfile })))
+const DiaryPage = lazy(() => import('./pages/diary/DiaryPage').then((m) => ({ default: m.DiaryPage })))
+const MailPage = lazy(() => import('./pages/mail/MailPage').then((m) => ({ default: m.MailPage })))
+const TasksPage = lazy(() => import('./pages/tasks/TasksPage').then((m) => ({ default: m.TasksPage })))
+const CalendarPage = lazy(() => import('./pages/calendar/CalendarPage').then((m) => ({ default: m.CalendarPage })))
+const ActivitiesPage = lazy(() => import('./pages/activities/ActivitiesPage').then((m) => ({ default: m.ActivitiesPage })))
+const RepDetailPage = lazy(() => import('./pages/reps/RepDetailPage').then((m) => ({ default: m.RepDetailPage })))
 
 function App() {
   return (
