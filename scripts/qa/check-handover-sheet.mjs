@@ -69,6 +69,35 @@ check('the default date is a date', by('default_date')?.kind, 'date')
 check('the two old capital headings both land on one column',
   [index.get(headingKey('Amount'))?.key, index.get(headingKey('Capital on Default'))?.key],
   ['capital', 'capital'])
+
+/*
+ * THE CLIENT'S WORD AND RAPTOR'S WORD ARE DIFFERENT, ON PURPOSE.
+ *
+ * THE FIRM: "change that to handover amount ... we should still keep that capital on default,
+ * possibly in Raptor, but the import should say handover amount, makes it easier."
+ *
+ * Raptor calls it capital on default because that is what in duplum is measured against; rename
+ * the KEY and the ceiling stops being about the right number. The label is what a client reads.
+ * So the two are asserted apart: a future tidy-up that makes them agree breaks one or the other,
+ * and this says which.
+ */
+check('a client is asked for a handover amount', by('capital')?.label, 'Handover amount')
+check('...while Raptor still calls it capital', by('capital')?.key, 'capital')
+ok('...and the note keeps the precision the friendlier label gives up',
+  /before interest and costs/i.test(by('capital')?.note ?? ''))
+
+/*
+ * EVERY LABEL THIS FILE HAS EVER USED STAYS READABLE, not only the client's old sheet. A sheet
+ * went out headed "Capital outstanding" before the firm renamed it, and one headed "Prescription
+ * last interrupted on" before that column became the last payment. A client who fills in the copy
+ * they were sent is not wrong, and the importer has to read it.
+ */
+for (const [heading, key] of [
+  ['Capital outstanding', 'capital'],
+  ['Prescription last interrupted on', 'last_payment_date'],
+]) {
+  check(`a sheet headed "${heading}" still reads`, index.get(headingKey(heading))?.key, key)
+}
 /*
  * INTEREST IS NOT ASKED FOR AT ALL, at the firm's instruction, and the old sheet is the argument
  * for it: "Interest Rate" 24 and "Percentage" 0.25 in the same row, a percent and a fraction with

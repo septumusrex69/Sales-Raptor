@@ -74,10 +74,27 @@ export const HANDOVER_COLUMNS: HandoverColumn[] = [
     key: 'account_number', label: 'Account number', group: 'The account', kind: 'text',
     note: 'The account number on the agreement, if it differs from your reference.',
   },
+  /*
+   * THE LABEL IS THE CLIENT'S WORD, THE KEY IS RAPTOR'S.
+   *
+   * THE FIRM: "change that to handover amount ... we should still keep that capital on default,
+   * possibly in Raptor, but the import should say handover amount, makes it easier."
+   *
+   * This is the reason `key` and `label` are separate fields rather than one string. Raptor calls
+   * it capital on default because that is what in duplum is measured against -- rename the key
+   * and the ceiling stops being about the right number. A client is not asked to know that; they
+   * are asked what they are handing over. The NOTE carries the precision the label gives up,
+   * because "handover amount" alone would collect a balance including interest from somebody.
+   *
+   * 'Capital outstanding' is in `was` because a sheet went out with that heading on it. Every
+   * label this file has ever used stays readable -- the alias table is not only for the client's
+   * old sheet, it is for ours.
+   */
   {
-    key: 'capital', label: 'Capital outstanding', group: 'The account', kind: 'money',
-    required: true, was: ['Capital on Default', 'Amount'],
-    note: 'The capital owing on the day it defaulted, excluding interest and costs. Numbers only.',
+    key: 'capital', label: 'Handover amount', group: 'The account', kind: 'money',
+    required: true, was: ['Capital on Default', 'Amount', 'Capital outstanding'],
+    note: 'The capital owing on the day it defaulted \u2014 what you are handing over, before '
+      + 'interest and costs. Numbers only.',
   },
   {
     key: 'default_date', label: 'Date of default', group: 'The account', kind: 'date',
@@ -100,7 +117,7 @@ export const HANDOVER_COLUMNS: HandoverColumn[] = [
    */
   {
     key: 'last_payment_date', label: 'Last date of payment', group: 'The account',
-    kind: 'date', was: ['Interruptor Before Handover Date'],
+    kind: 'date', was: ['Interruptor Before Handover Date', 'Prescription last interrupted on'],
     note: 'The last time they paid anything, even a small amount. Leave empty if they never have.',
   },
 
