@@ -113,8 +113,24 @@ export function HandoverImportCard() {
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(null) }
   }
 
+  /*
+   * NO MANDATE, NO HANDOVER, at the firm's instruction: "a client needs a mandate before a
+   * handover can be imported."
+   *
+   * A REFUSAL AND NOT A WARNING, because the consequence is not untidy data. Collecting on a book
+   * the firm holds no signed mandate for is work it cannot lawfully charge for and cannot defend
+   * if the debtor's attorney asks on whose authority the demand was issued -- and by then two
+   * hundred accounts are open and letters have gone out.
+   *
+   * IT IS REFUSED HERE AND NOT ON THE FORM THAT CREATES THE CLIENT. A client is often loaded
+   * while the mandate is still in the post, and a form that will not save without a date is a
+   * form people fill in with a made-up one. The refusal belongs where the consequence is.
+   */
+  const client = clients.find((c) => c.id === companyId)
+  const noMandate = !!client && !client.mandateSignedAt
+
   async function hold() {
-    if (!plan || !sheet || !companyId) return
+    if (!plan || !sheet || !companyId || noMandate) return
     setBusy('Holding it in Raptor'); setError(null)
     try {
       const documentFor = new Map((docs?.matched ?? []).map((m) => [m.reference, m.filename]))
@@ -236,7 +252,7 @@ export function HandoverImportCard() {
           {busy ?? 'Read the sheet'}
         </button>
         {plan && (
-          <button type="button" onClick={() => void hold()} disabled={!companyId || !!busy}
+          <button type="button" onClick={() => void hold()} disabled={!companyId || !!busy || noMandate}
             title={companyId ? undefined : 'Choose which client this handover is from first'}
             className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg
               bg-gold-400 text-navy-950 border border-gold-500 disabled:opacity-40">
@@ -244,6 +260,15 @@ export function HandoverImportCard() {
           </button>
         )}
       </div>
+
+      {/* Said the moment the client is chosen, not after the sheet has been read: somebody who
+          has to go and find a mandate should not first spend ten minutes on the file. */}
+      {noMandate && (
+        <p className="text-sm text-negative-700 mt-3">
+          {client?.name} has no signed mandate on record, so no handover can be imported for them.
+          Add the date it was signed on the client first.
+        </p>
+      )}
 
       {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
       {done && <p className="text-sm text-positive-700 mt-3">{done}</p>}

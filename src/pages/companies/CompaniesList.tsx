@@ -1,17 +1,22 @@
 import { Fragment, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Search, ChevronRight, ChevronDown } from 'lucide-react'
+import { Search, ChevronRight, ChevronDown, Plus } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { formatCurrency } from '../../data/mockData'
 import { topLevelClients, rollupClient } from '../../lib/companyRollup'
+import { AddClientModal } from '../../components/companies/AddClientModal'
+import { useAuth } from '../../store/AuthContext'
 import type { ID } from '../../types'
 
 export function CompaniesList() {
-  const { companies, deals, users } = useAppStore()
+  const { companies, deals, users, addCompany } = useAppStore()
+  const { currentUser } = useAuth()
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [addError, setAddError] = useState<string | null>(null)
   // Sub-accounts start collapsed — only expand the ones someone actually opens.
   const [expanded, setExpanded] = useState<Set<ID>>(new Set())
 
@@ -48,6 +53,17 @@ export function CompaniesList() {
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search clients..." className="text-sm outline-none flex-1 min-w-0" />
         </div>
         <span className="text-xs text-slate-400">{filtered.length} clients</span>
+        {/*
+          LOADING A CLIENT DIRECTLY, at the firm's instruction -- "this isn't the traditional way
+          of converting a lead to a client, this is just loading a client directly." The lead path
+          learns the services, the mandate and the contacts on the way; a client with no lead
+          behind it has nowhere to have learned them, so this asks.
+        */}
+        <button type="button" onClick={() => { setAddError(null); setAdding(true) }}
+          className="ml-auto inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2
+            rounded-lg bg-gold-400 text-navy-950 border border-gold-500 hover:bg-gold-500">
+          <Plus size={15} /> Add client
+        </button>
       </div>
 
       <Card padded={false}>
@@ -132,8 +148,17 @@ export function CompaniesList() {
               })}
               {filtered.length === 0 && (
                 <tr>
+                  {/*
+                    THE RULE, IN FULL. This said only "once one of its deals is marked Won", which
+                    is half of it -- topLevelClients also accepts a company with a CODE, and every
+                    client that came across from Swordfish is here on that half. The firm added a
+                    company by hand, could not find it, and reasonably read a rule as a bug.
+                  */}
                   <td colSpan={7} className="text-center text-slate-400 text-sm py-10">
-                    No clients yet — a company shows up here once one of its deals is marked Won.
+                    {search
+                      ? 'No client matches that.'
+                      : 'No clients yet. A company lands here once it has a client code — which '
+                        + '"Add client" gives it — or once one of its deals is marked Won.'}
                   </td>
                 </tr>
               )}
@@ -141,6 +166,26 @@ export function CompaniesList() {
           </table>
         </div>
       </Card>
+      {adding && (
+        <AddClientModal
+          /* EVERY code in use, parents and children alike. The unique index only covers top-level
+             clients -- Adowa and its Ellis Park property share APM, which is Swordfish's doing and
+             is frozen -- but proposing a code a child already holds would still read as a clash. */
+          takenCodes={companies.map((c) => c.code ?? '').filter(Boolean)}
+          liaisons={users.filter((u) => u.status === 'Active')}
+          busy={false}
+          error={addError}
+          onClose={() => setAdding(false)}
+          onSave={(input) => {
+            try {
+              const created = addCompany({ ...input, accountOwnerId: input.accountOwnerId ?? currentUser?.id ?? '' })
+              setAdding(false)
+              navigate(`/companies/${created.id}`)
+            } catch (e) {
+              setAddError(e instanceof Error ? e.message : String(e))
+            }
+          }} />
+      )}
     </div>
   )
 }

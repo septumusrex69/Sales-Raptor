@@ -315,6 +315,24 @@ export interface Company {
   estimatedHandoverAmount?: number
   estimatedAccountsCount?: number
   estimatedAtConversion?: string
+
+  /*
+   * WHAT A CLIENT LOADED DIRECTLY CARRIES. All of these columns already existed on `companies`
+   * -- the Swordfish import writes several -- but were not on this type, so nothing could set
+   * them from a screen. AppStore maps rows generically, so they arrived and were invisible.
+   */
+  registrationNumber?: string
+  vatNumber?: string
+  /** Where remittance goes OUT to this client. Not the firm's trust account -- see CLAUDE.md. */
+  bankingDetails?: string
+  contactPerson?: string
+  /** What they have signed for, where the client was loaded directly rather than converted. */
+  services?: ProductService[]
+  /** A single rate, as a FRACTION — 0.3 is thirty percent. Null where a scale applies instead. */
+  commissionRate?: number
+  /** The sliding scale, where the mandate has one. Ordered ascending, ending in an "and above". */
+  commissionBands?: { upTo: number | null; rate: number }[]
+  commissionBandsSource?: string
   /** When the collection mandate was signed — the clock on "signed, but nothing handed over yet". */
   mandateSignedAt?: string
 }
