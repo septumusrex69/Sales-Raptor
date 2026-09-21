@@ -167,6 +167,23 @@ ok('the warning is only rendered when there is one',
  */
 ok('...and against the saved row, not the half-typed draft', /missingTrust\(row\)/.test(screen))
 
+/*
+ * THE SECOND OFFICE LINE IS THE FIRM'S, NOT A PERSON'S.
+ *
+ * The firm: "each clerk will have their own dedicated number ... we'll put that in when we load
+ * the clerk as a user." firm_settings is ONE ROW, so a clerk's direct number typed into this box
+ * would print on every notice the firm sends regardless of who actually holds the account -- and
+ * it would look right to the person who typed it. Nothing can stop that at the database; the only
+ * thing that can is the box saying what it is for, so the box has to keep saying it.
+ *
+ * A clerk's own number already has a home: profiles.phone, which fills {{agent_phone}} and
+ * follows the account when it is handed out.
+ */
+const secondLine = screen.match(/text\('phoneAlt',([\s\S]*?)\)\}/)
+ok('the second number is labelled as the office\u2019s', /Second office line/.test(secondLine?.[1] ?? ''))
+ok('...and says where a person\u2019s own number goes instead',
+  /user profile/.test(secondLine?.[1] ?? '') && /agent_phone/.test(secondLine?.[1] ?? ''))
+
 /* ---------- 7. the business account cannot reach a debtor ---------- */
 
 /*

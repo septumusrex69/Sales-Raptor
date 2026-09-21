@@ -169,8 +169,18 @@ export function FirmSettingsPage() {
             switchboard nobody is on. */}
         <div className="grid gap-4 sm:grid-cols-3">
           {text('phone', 'Telephone', 'Fills {{firm_phone}}.', '015 291 1234')}
-          {text('phoneAlt', 'Second number', 'Not merged on its own \u2014 kept here so it is in one place.',
-            '015 291 5678')}
+          {/*
+            AN OFFICE LINE, NOT A PERSON'S, and the label has to say so.
+            THE FIRM: "each clerk will have their own dedicated number ... we'll put that in when
+            we load the clerk as a user." A clerk's direct number put HERE would sit on the firm's
+            one row and print on every notice regardless of who actually holds the account -- the
+            exact distinction this card is built on. A clerk's number belongs on their profile,
+            which is what fills {{agent_phone}} and follows the account when it is handed out.
+          */}
+          {text('phoneAlt', 'Second office line',
+            'The firm\u2019s, not a person\u2019s \u2014 a clerk\u2019s own number goes on their user profile, '
+            + 'which fills {{agent_phone}}. Not merged on its own.',
+            '012 348 2157')}
           {/* Free text, written the way it should read on a letter. Nothing in Raptor acts on it:
               no queue closes at half past four because this box says so. */}
           {text('officeHours', 'Office hours',
