@@ -33,7 +33,13 @@ export type ColumnKind =
   /** Digits that are not a quantity: a phone, an ID, a reference. Formatted as TEXT in the sheet
    *  so Excel cannot eat a leading zero or turn 13 digits into 1.23457E+12. */
   | 'text'
-  /** A real date, written yyyy-mm-dd, so "02/09/2024" can never mean two different days. */
+  /**
+   * A real date, formatted dd/mm/yyyy — how South Africa writes one, at the firm's correction.
+   *
+   * The format is what the person SEES; a date cell stores a serial number, so the importer gets
+   * an unambiguous day whichever way it is displayed. Showing an ISO date to a South African
+   * bookkeeper bought nothing and read as foreign.
+   */
   | 'date'
   | 'money'
   | 'number'
@@ -100,7 +106,7 @@ export const HANDOVER_COLUMNS: HandoverColumn[] = [
   {
     key: 'default_date', label: 'Date of default', group: 'The account', kind: 'date',
     required: true, was: ['Date of Default'],
-    note: 'The day the account fell into default. In duplum runs from here, so it matters.',
+    note: 'Day/month/year. The day the account fell into default \u2014 in duplum runs from here.',
   },
   /*
    * THE LAST PAYMENT, NOT "THE INTERRUPTOR". At the firm's instruction: "remove the things about
@@ -119,7 +125,8 @@ export const HANDOVER_COLUMNS: HandoverColumn[] = [
   {
     key: 'last_payment_date', label: 'Last date of payment', group: 'The account',
     kind: 'date', was: ['Interruptor Before Handover Date', 'Prescription last interrupted on'],
-    note: 'The last time they paid anything, even a small amount. Leave empty if they never have.',
+    note: 'Day/month/year. The last time they paid anything, even a small amount. Leave empty if '
+      + 'they never have.',
   },
 
   /* ---------------------------------------------------------------- the debtor */

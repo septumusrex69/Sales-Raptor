@@ -61,6 +61,8 @@ export interface PlannedRow {
 
 export interface HandoverPlan {
   kind: SheetKind
+  /** Which way round this file writes a text date, and whether it proved it. */
+  dates: { order: DateOrder; proven: boolean; contradictory: boolean }
   /** One sentence for the screen, before anything is written. */
   note: string
   matched: ColumnMatch[]
@@ -105,18 +107,59 @@ export function parseMoney(raw: string | null | undefined): number | null {
 /** Excel counts days from 1899-12-30 — the offset absorbs its deliberate 1900 leap-year bug. */
 const EXCEL_EPOCH = Date.UTC(1899, 11, 30)
 
+export type DateOrder = 'day-first' | 'month-first'
+
 /**
- * A date, or null, and NEVER a guess between two readings.
+ * Which way round a file writes its dates, decided ONCE from the whole file.
  *
- * yyyy-mm-dd and an Excel serial both mean exactly one day. A slash date does not: 02/09/2024 is
- * 9 February to one person and 2 September to another, and nothing downstream can tell which was
- * meant — on a date of default that is the difference between a debt having prescribed and not.
+ * THE FIRM: "South Africa reads the dates first the day, then the month, then the year." So
+ * day-first is the answer unless the file itself proves otherwise — and a file can prove it,
+ * because a component above twelve can only be one thing. 18/03/2026 can only be a day first;
+ * 03/18/2026 can only be a month first.
  *
- * So a slash date is read ONLY where it can mean one thing: a first component above twelve can
- * only be a day. Anything still ambiguous comes back as null with the row refused, which is a
- * question asked once rather than a wrong answer written for ever.
+ * DECIDED FOR THE FILE AND NOT FOR THE ROW, which is the part that matters. Reading each row on
+ * its own, a sheet written by an American-locale machine would come out with most rows read
+ * day-first and the handful containing a day above twelve read month-first — every one of them
+ * plausible, the file internally inconsistent, and nothing reporting it. One order, applied
+ * throughout, is either right or visibly wrong.
+ *
+ * A file that proves BOTH is contradictory and is reported rather than resolved: something has
+ * been pasted into it from somewhere else, and no order is safe.
  */
-export function parseSheetDate(raw: string | null | undefined): string | null {
+export function detectDateOrder(samples: (string | null | undefined)[]): {
+  order: DateOrder
+  /** True where the file contains dates that prove both orders. Nothing can be read safely. */
+  contradictory: boolean
+  /** True where the file proved its order rather than falling back to the South African default. */
+  proven: boolean
+} {
+  let day = false
+  let month = false
+  for (const raw of samples) {
+    const m = /^(\d{1,2})[/.-](\d{1,2})[/.-]\d{4}$/.exec((raw ?? '').trim())
+    if (!m) continue
+    if (Number(m[1]) > 12) day = true
+    if (Number(m[2]) > 12) month = true
+  }
+  if (day && month) return { order: 'day-first', contradictory: true, proven: false }
+  if (month) return { order: 'month-first', contradictory: false, proven: true }
+  return { order: 'day-first', contradictory: false, proven: day }
+}
+
+/**
+ * A date, or null.
+ *
+ * yyyy-mm-dd and an Excel serial each mean exactly one day and are read as they are — and the
+ * serial is the ordinary case, because a date-formatted cell stores a number and the dd/mm/yyyy
+ * the person sees is only how it is drawn.
+ *
+ * A slash date is TEXT, which happens when a sheet is saved as CSV or when somebody types into a
+ * column that is not formatted as a date. It is read in the order the FILE uses — see
+ * detectDateOrder — which is day-first for South Africa unless the file proves otherwise.
+ */
+export function parseSheetDate(
+  raw: string | null | undefined, order: DateOrder = 'day-first',
+): string | null {
   const s = (raw ?? '').trim()
   if (!s) return null
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return Number.isNaN(Date.parse(s)) ? null : s
@@ -129,11 +172,15 @@ export function parseSheetDate(raw: string | null | undefined): string | null {
   const slash = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(s)
   if (slash) {
     const [, a, b, y] = slash
-    /* Above twelve it can only be a day; at or below it, the sheet means one of two days and we
-       are not going to decide which. */
-    if (Number(a) <= 12) return null
-    const iso = `${y}-${b.padStart(2, '0')}-${a.padStart(2, '0')}`
-    return Number.isNaN(Date.parse(iso)) ? null : iso
+    const [d, mo] = order === 'day-first' ? [a, b] : [b, a]
+    /* A component the chosen order cannot account for: 13 as a month, or 32 as a day. Refused
+       rather than wrapped round, because a wrapped date is a wrong date that looks like a date. */
+    if (Number(mo) < 1 || Number(mo) > 12 || Number(d) < 1 || Number(d) > 31) return null
+    const iso = `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`
+    if (Number.isNaN(Date.parse(iso))) return null
+    /* Date.parse accepts 31 February and rolls it into March. A day that does not exist in its
+       month is a typo, not a date. */
+    return iso.slice(8) === String(new Date(iso).getUTCDate()).padStart(2, '0') ? iso : null
   }
   return null
 }
@@ -205,6 +252,17 @@ export function planHandover(input: {
       + 'header row is not the first row.',
   }[kind]
 
+  /*
+   * THE ORDER IS SETTLED BEFORE THE FIRST ROW IS READ, over every date column in the file. Read
+   * row by row, an American-locale sheet comes out mostly day-first with a handful of rows
+   * month-first, each one plausible on its own. One order for the file is either right or
+   * visibly wrong.
+   */
+  const dateColumns = [...at].filter(([, key]) =>
+    HANDOVER_COLUMNS.find((c) => c.key === key)?.kind === 'date').map(([i]) => i)
+  const dates = detectDateOrder(
+    input.rows.slice(1).flatMap((row) => dateColumns.map((i) => row[i])))
+
   const seen = new Set<string>()
   const rows: PlannedRow[] = []
   for (let r = 1; r < input.rows.length; r += 1) {
@@ -213,14 +271,23 @@ export function planHandover(input: {
     if (raw.every((c) => (c ?? '').trim() === '')) continue
     const values: Record<string, string | null> = {}
     for (const [i, key] of at) values[key] = (raw[i] ?? '').trim() || null
-    rows.push(readRow(values, r + 1, { seen, existing: input.existingReferences, today: input.today }))
+    rows.push(readRow(values, r + 1, {
+      seen, existing: input.existingReferences, today: input.today, order: dates.order,
+    }))
   }
 
   const refused = rows.filter((x) => x.refused)
   const ready = rows.filter((x) => !x.refused)
   return {
     kind,
-    note,
+    dates,
+    note: dates.contradictory
+      /* Said instead of the sheet note, not after it: an order nothing can settle is a bigger
+         problem than which sheet this is, and both sentences in a row get read as one. */
+      ? 'This file writes its dates both ways round — some can only be day/month, others can only '
+        + 'be month/day. Nothing here can tell which was meant for the rest, so check the file '
+        + 'before importing it.'
+      : note,
     matched,
     unrecognised,
     missingRequired,
@@ -244,7 +311,7 @@ export function planHandover(input: {
 function readRow(
   values: Record<string, string | null>,
   line: number,
-  ctx: { seen: Set<string>; existing?: Set<string>; today: string },
+  ctx: { seen: Set<string>; existing?: Set<string>; today: string; order: DateOrder },
 ): PlannedRow {
   const problems: RowProblem[] = []
   const refuse = (message: string) => problems.push({ level: 'refuse', message })
@@ -259,13 +326,13 @@ function readRow(
     refuse('The handover amount is nought or less.')
   }
 
-  const defaulted = parseSheetDate(values.default_date)
+  const defaulted = parseSheetDate(values.default_date, ctx.order)
   if (!defaulted) {
     refuse(values.default_date
       /* Named as the ambiguity it is, because "invalid date" sends somebody to check a date that
          is perfectly valid and merely means two things. */
-      ? `Date of default "${values.default_date}" could be two different days. Write it as `
-        + 'yyyy-mm-dd.'
+      ? `Date of default "${values.default_date}" is not a date this file's order can account `
+        + `for — it is being read ${ctx.order === 'day-first' ? 'day/month/year' : 'month/day/year'}.`
       : 'No date of default — in duplum runs from it.')
   } else if (defaulted > ctx.today) {
     warn('The date of default is in the future.')
@@ -296,7 +363,7 @@ function readRow(
   }
 
   const paid = values.last_payment_date
-  if (paid && !parseSheetDate(paid)) warn(`Last date of payment "${paid}" could not be read.`)
+  if (paid && !parseSheetDate(paid, ctx.order)) warn(`Last date of payment "${paid}" could not be read.`)
 
   if (!values.cell_1 && !values.home_phone && !values.work_phone && !values.email_1) {
     warn('No telephone number and no email address — nobody can be contacted.')

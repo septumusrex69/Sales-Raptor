@@ -13,8 +13,13 @@
  *   - EVERY COLUMN OF DIGITS-THAT-ARE-NOT-A-QUANTITY IS FORMATTED AS TEXT. 40 of 42 "Cell Phone
  *     2" values in the old sheet had lost their leading zero, because Excel read 0129403445 as a
  *     number. Those numbers cannot be dialled. A text column is never converted.
- *   - DATES ARE A DATE FORMAT, yyyy-mm-dd. "02/09/2024" is 9 February in one locale and
- *     2 September in another and nothing downstream can tell which was meant.
+ *   - DATES ARE A DATE FORMAT, dd/mm/yyyy, WHICH IS HOW SOUTH AFRICA WRITES THEM. This was
+ *     yyyy-mm-dd first, to dodge "02/09/2024" meaning two different days -- but that was solving
+ *     the wrong problem in the wrong place. A date-formatted cell stores a SERIAL NUMBER; the
+ *     format is only what the person sees. So the ambiguity never reaches the importer either
+ *     way, and showing a South African bookkeeper an ISO date buys nothing and reads as foreign.
+ *     What a client types day-first into a date column on a South African machine is parsed
+ *     day-first by Excel, and arrives here as a number that means one day.
  *   - THE REQUIRED COLUMNS ARE COLOURED AND MARKED, so "the surname is missing" is visible while
  *     the file is being filled in rather than after 45 letters have gone out unaddressed.
  *   - A SECOND SHEET SAYS WHAT EACH COLUMN IS FOR in the firm's words, with one worked example.
@@ -107,7 +112,7 @@ function colName(i) {
  */
 const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-<numFmts count="2"><numFmt numFmtId="164" formatCode="yyyy\\-mm\\-dd"/><numFmt numFmtId="165" formatCode="#,##0.00"/></numFmts>
+<numFmts count="2"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/><numFmt numFmtId="165" formatCode="#,##0.00"/></numFmts>
 <fonts count="4">
 <font><sz val="11"/><name val="Calibri"/></font>
 <font><b/><sz val="12"/><color rgb="FF1B2A4A"/><name val="Calibri"/></font>
@@ -200,7 +205,7 @@ ${validations ? `<dataValidations count="${(validations.match(/<dataValidation /
 const EXAMPLE = [
   ['Your reference', 'GPS3/10103'],
   ['Capital outstanding', '48250.00'],
-  ['Date of default', '2026-03-18'],
+  ['Date of default', '18/03/2026'],
   ['Interest rate (% a year)', '24'],
   ['Person or business', 'Person'],
   ['Surname, or the business name', 'Van Der Westhuizen'],

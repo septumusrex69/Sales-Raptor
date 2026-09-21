@@ -11,7 +11,9 @@
  * every notice to nobody. Both sheets are therefore read here, the same rows, and the same
  * debtor has to come out of both.
  */
-import { planHandover, parseMoney, parseSheetDate } from '../../src/lib/handoverImport.ts'
+import {
+  detectDateOrder, parseMoney, parseSheetDate, planHandover,
+} from '../../src/lib/handoverImport.ts'
 
 let pass = 0
 const failures = []
@@ -60,14 +62,48 @@ check('an ISO date reads', parseSheetDate('2026-03-18'), '2026-03-18')
 /* Excel hands a date over as a serial. 46282 is 17 September 2026. */
 check('an Excel serial reads', parseSheetDate('46282'), '2026-09-17')
 /*
- * A SLASH DATE THAT CAN ONLY MEAN ONE THING IS READ; ONE THAT COULD MEAN TWO IS REFUSED.
- * 18/03/2026 has an 18 in it, so it can only be a day. 02/09/2024 is 9 February to one person
- * and 2 September to another, and on a date of default that is whether the debt has prescribed.
+ * A SLASH DATE IS READ DAY-FIRST, at the firm's correction: "South Africa reads the dates first
+ * the day, then the month, then the year."
+ *
+ * This file used to refuse 02/09/2024 as ambiguous, which was right before the convention was
+ * stated and merely timid afterwards -- a question asked of the firm once is an answer, and
+ * refusing a date every South African sheet contains would have refused most files.
  */
-check('an unambiguous slash date reads', parseSheetDate('18/03/2026'), '2026-03-18')
-check('an ambiguous one is refused rather than guessed', parseSheetDate('02/09/2024'), null)
+check('a slash date reads day first', parseSheetDate('02/09/2024'), '2024-09-02')
+check('...and so does one that could only ever have been a day', parseSheetDate('18/03/2026'), '2026-03-18')
+check('...while month-first reads the other way when the file says so',
+  parseSheetDate('02/09/2024', 'month-first'), '2024-02-09')
+/* A day that does not exist in its month is a typo, not a date: Date.parse rolls 31 February
+   into March, which is a wrong date that looks exactly like a date. */
+check('the 31st of February is not a date', parseSheetDate('31/02/2026'), null)
+check('a thirteenth month is not a date', parseSheetDate('03/13/2026'), null)
 check('a reference number is not a date', parseSheetDate('929228801'), null)
 check('nothing is not a date', parseSheetDate(''), null)
+
+/*
+ * THE ORDER IS THE FILE'S, NOT THE ROW'S, and this is the part that matters.
+ *
+ * Read row by row, a sheet written by an American-locale machine comes out with most rows read
+ * day-first and the handful containing a day above twelve read month-first -- every one of them
+ * plausible on its own, the file internally inconsistent, and nothing reporting it.
+ */
+check('a file with nothing to go on is read the South African way',
+  detectDateOrder(['02/09/2024', '01/01/2026']).order, 'day-first')
+check('...and says it fell back rather than proved it',
+  detectDateOrder(['02/09/2024']).proven, false)
+check('a file that can only be day-first is read that way, and proved',
+  [detectDateOrder(['18/03/2026', '02/09/2024']).order, detectDateOrder(['18/03/2026']).proven],
+  ['day-first', true])
+/* A day above twelve in the SECOND position can only be a month first. One such row settles the
+   whole file, including its ambiguous rows -- which is the entire point of deciding once. */
+check('one American date settles the whole file',
+  detectDateOrder(['03/18/2026', '02/09/2024']).order, 'month-first')
+/*
+ * A FILE THAT PROVES BOTH IS REPORTED, NOT RESOLVED. Something has been pasted into it from
+ * somewhere else, and no order is safe for the rows that could go either way.
+ */
+check('a file that proves both orders is reported rather than resolved',
+  detectDateOrder(['18/03/2026', '03/18/2026']).contradictory, true)
 
 /* ---------- 3. the same debtor, out of either sheet ---------- */
 
@@ -159,10 +195,36 @@ const noName = rows(['A1', '100', '2026-01-01', 'Person', '', '', '082 1', 'x'])
 ok('a row with no name is refused', noName.refused.length === 1)
 const noMoney = rows(['A1', '', '2026-01-01', 'Person', 'Dube', '', '082 1', 'x'])
 ok('a row with no handover amount is refused', noMoney.refused.length === 1)
-const badDate = rows(['A1', '100', '02/09/2024', 'Person', 'Dube', '', '082 1', 'x'])
-ok('a row whose date could mean two days is refused', badDate.refused.length === 1)
-ok(`...and says which day it could not choose between (${firstMessage(badDate.rows[0])})`,
-  /could be two different days/.test(firstMessage(badDate.rows[0])))
+const badDate = rows(['A1', '100', '31/02/2026', 'Person', 'Dube', '', '082 1', 'x'])
+ok('a row whose date does not exist is refused', badDate.refused.length === 1)
+ok(`...and names the order it was read in (${firstMessage(badDate.rows[0])})`,
+  /day\/month\/year/.test(firstMessage(badDate.rows[0])))
+
+/*
+ * AND THE ORDER REACHES THE ROWS. A plan that detects month-first and then reads its rows
+ * day-first anyway would be the same bug wearing a detection routine.
+ */
+const american = planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Person or business',
+    'Surname, or the business name'],
+  ['A1', '100', '03/18/2026', 'Person', 'Dube'],
+  ['A2', '100', '02/09/2024', 'Person', 'Mokoena']],
+  today: TODAY,
+})
+check('a month-first file is detected', american.dates.order, 'month-first')
+check('...and every row is read that way, including the one that reads either way',
+  american.ready.map((r) => r.values.default_date), ['03/18/2026', '02/09/2024'])
+ok('...with none of them refused', american.refused.length === 0)
+
+const muddled = planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Person or business',
+    'Surname, or the business name'],
+  ['A1', '100', '18/03/2026', 'Person', 'Dube'],
+  ['A2', '100', '03/18/2026', 'Person', 'Mokoena']],
+  today: TODAY,
+})
+ok('a file written both ways round says so instead of picking one',
+  muddled.dates.contradictory && /both ways round/.test(muddled.note))
 
 /*
  * WARNINGS: the firm can work without these and would rather know. The ID above all -- every one
@@ -216,6 +278,7 @@ console.log(`${pass} passed, 0 failed`)
 console.log(`
 Either sheet, read without anybody declaring which -- the same debtor, the same money and the same
 surname out of both, with the old sheet's "Debtor Initials" corrected to the name because that is
-where its surnames actually are. A heading nobody knows is named rather than mapped by position, a
-date that could mean two days is refused rather than guessed, and an ID that is not an ID warns
-rather than refusing a whole book.`)
+where its surnames actually are. A heading nobody knows is named rather than mapped by position; dates
+are read day/month/year the way South Africa writes them, with the order settled ONCE for the whole
+file so an American sheet cannot come out half one way and half the other; and an ID that is not an
+ID warns rather than refusing a whole book.`)
