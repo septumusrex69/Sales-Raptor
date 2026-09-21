@@ -122,6 +122,16 @@ a **real word** is reported and the build refuses, because substituting would ch
 debtor is told. The **soft hyphen is encodable and still dropped**: WinAnsi draws it as a real
 hyphen, mid-word. The **non-breaking space is kept**, so Rand amounts do not break across lines.
 
+**A table with no widths is sized to its CONTENT, not split evenly.** `autoColumnWidths`
+(`src/lib/tableWidths.ts`) is CSS `table-layout: auto`, near enough — a column is never narrower
+than its widest word, never wider than its longest cell on one line, and the slack is shared in
+proportion. **The even split it replaced was invisible on screen and wrong on paper**: a bulleted
+list pasted out of Word arrives as a table whose first cell is the bullet, a browser shrinks that
+column to fit, and the PDF printed a bullet alone in the left half of the page. Whenever the
+editor and the PDF disagree, suspect something the browser computes and the layout engine assumes.
+(A `•` or `1.` followed by a tab is also now read as a **list** at paste time, which is the
+honest half of the same fix.)
+
 **The PDF is the only page-accurate view, so there is a preview of it.** `PreviewPdf` draws it
 with **pdf.js onto a canvas, never an `<iframe>`** — Safari on iOS will not render a PDF in one
 and the firm works on an iPad. It reads the live draft, not the saved row. The editor's own

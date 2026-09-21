@@ -20,6 +20,7 @@
  * once, at the drawing edge, beats carrying two systems through the arithmetic.
  */
 import type { Block, LetterDocument, PageSetup, Span } from './letterDocument.ts'
+import { autoColumnWidths } from './tableWidths.ts'
 import { renderTemplate } from './messageTemplates.ts'
 
 /** A run of text on a line, already positioned. */
@@ -351,15 +352,36 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
       case 'table': {
         const cols = block.rows[0]?.length ?? 0
         if (cols === 0) break
-        const widths = (block.widths ?? Array.from({ length: cols }, () => 100 / cols))
-          .map((pc) => (pc / 100) * textWidth)
+        const pad = block.borders === 'all' ? CELL_PAD_MM : 0
+        /*
+         * WIDTHS THE LETTER GAVE, OR THE ONES THE CONTENT ASKS FOR.
+         *
+         * AN EVEN SPLIT WAS THE OLD ANSWER AND IT WAS WRONG, in the firm's words: "we pasted,
+         * [it] generated, but the generation didn't work like the pasting." A bulleted list
+         * pasted out of Word arrives as a table whose first cell holds the bullet. A browser
+         * shrinks that column to fit a bullet, so on screen it reads as a list; an even split
+         * printed the bullet alone in the left HALF of the page. Both were drawing the same
+         * document — only one was sizing the columns.
+         */
+        const widths = block.widths
+          ? block.widths.map((pc) => (pc / 100) * textWidth)
+          : autoColumnWidths({
+            rows: block.rows.map((row, ri) => row.map((cell) => ({
+              text: fill(cell.spans).map((sp) => sp.text).join(''),
+              sizePt: base.sizePt,
+              bold: block.headerRow === true && ri === 0,
+              italic: false,
+            }))),
+            totalMm: textWidth,
+            padMm: pad,
+            measure,
+          })
         const xs: number[] = []
         let cx = left
         for (const w of widths) { xs.push(cx); cx += w }
 
         block.rows.forEach((row, ri) => {
           const headerRow = block.headerRow === true && ri === 0
-          const pad = block.borders === 'all' ? CELL_PAD_MM : 0
           /* Every cell is wrapped first so the row's height is known before anything is drawn --
              a row is kept whole across a page break, and half the legal-process table at the foot
              of a page reads as two different statements. */

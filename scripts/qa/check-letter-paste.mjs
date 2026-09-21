@@ -363,6 +363,62 @@ check('a pasted sentence is still just a sentence',
 check('...and so are two of them', clipboardToLetterHtml({ html: '', text: 'One.\n\nTwo.' }), null)
 
 
+
+/*
+ * A BULLET FOLLOWED BY A TAB IS A LIST, NOT A TWO-COLUMN TABLE.
+ *
+ * Word writes a bulleted list into plain text as "•<tab>the sentence", one line per item -- which
+ * is indistinguishable from a two-cell row unless the first cell is read.
+ *
+ * TAKEN AS A TABLE IT WAS INVISIBLE ON SCREEN AND WRONG ON PAPER. A browser shrinks a column to
+ * fit its content, so the editor drew the bullet column a bullet wide and it read as a list; the
+ * PDF split its columns evenly and printed a bullet alone in the left half of the page. The firm
+ * reported it as "the generation didn't work like the pasting". autoColumnWidths fixes the
+ * printing; this stops it being a table at all, which is the honest half.
+ */
+{
+  const WORD_BULLETS = '•\tPay in full. Payment of {{balance}} settles the account.\n'
+    + '•\tPropose an arrangement. Tell us in writing what you can afford.\n'
+    + '•\tDispute it. If the amount is wrong, tell us in writing.'
+  const blocks = documentHtmlToBlocks(clipboardToLetterHtml({ html: '', text: WORD_BULLETS }) ?? '')
+  check('bullets pasted out of Word are a list, not a table',
+    blocks.map((b) => b.kind).join(','), 'list')
+  check('...unordered, with every item',
+    (blocks[0]?.items ?? []).map((i) => i.map((s) => s.text).join('').slice(0, 12)),
+    ['Pay in full.', 'Propose an a', 'Dispute it. '])
+  /* The bullet character itself is the list's, drawn by the renderer -- left in the text it would
+     print twice. */
+  ok('...and the bullet character is not left in the words',
+    !JSON.stringify(blocks[0]?.items ?? []).includes('•'))
+}
+/* Numbered items likewise, and they stay ordered. */
+{
+  const blocks = documentHtmlToBlocks(
+    clipboardToLetterHtml({ html: '', text: '1.\tPay in full.\n2.\tTelephone this office.' }) ?? '')
+  check('numbered items pasted the same way are an ordered list',
+    [blocks[0]?.kind, blocks[0]?.ordered], ['list', true])
+}
+/*
+ * AND A REAL TWO-COLUMN TABLE IS STILL A TABLE. "Credit bureau listing<tab>Your default is
+ * reported..." is the same shape on the wire and must not be swept up by the rule above -- the
+ * difference is entirely in whether the first cell is a bullet.
+ */
+{
+  const blocks = documentHtmlToBlocks(clipboardToLetterHtml({ html: '',
+    text: 'Credit bureau listing\tYour default is reported.\nSummons\tIssued and served on you.' }) ?? '')
+  check('a real two-column table is still a table',
+    blocks.map((b) => b.kind).join(','), 'table')
+  check('...with both its rows', (blocks[0]?.rows ?? []).length, 2)
+}
+/* The two in one paste, which is what a section 129 actually is. */
+{
+  const both = '•\tPay in full.\n•\tPropose an arrangement.\n\n'
+    + 'Credit bureau listing\tYour default is reported.\nSummons\tIssued and served.'
+  check('a notice carrying both keeps them apart',
+    documentHtmlToBlocks(clipboardToLetterHtml({ html: '', text: both }) ?? '')
+      .map((b) => b.kind).join(','), 'list,table')
+}
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')

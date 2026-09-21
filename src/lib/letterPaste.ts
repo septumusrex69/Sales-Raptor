@@ -341,8 +341,25 @@ export function markdownToLetterHtml(text: string): string {
  */
 export function tabbedTextToLetterHtml(text: string): string | null {
   const lines = text.replace(/\r\n?/g, '\n').split('\n')
+
+  /*
+   * A BULLET FOLLOWED BY A TAB IS A LIST, NOT A TWO-COLUMN TABLE.
+   *
+   * Word writes a bulleted list into plain text as "\u2022<tab>the sentence", one line per item —
+   * which is indistinguishable from a two-cell row unless the first cell is read. Taken as a
+   * table it made a column out of the bullets: the EDITOR hid that, because a browser shrinks a
+   * column to fit its content and a bullet is narrow, but the PDF printed a bullet alone in the
+   * left half of the page. That is the fault the firm reported as "the generation didn't work
+   * like the pasting" — and the honest fix is not to make it a table in the first place.
+   */
+  const marker = (l: string): string | null => {
+    const m = /^\s*([\u2022\u00b7\u25aa\u25cf\u2043*-]|\d+[.)])\t+(.*)$/.exec(l)
+    return m ? m[2] : null
+  }
+
   /** How many cells this line would be, or 0 where it is not a row at all. */
-  const cells = lines.map((l) => (l.includes('\t') && l.trim() !== '' ? l.split('\t').length : 0))
+  const cells = lines.map((l) => (
+    l.includes('\t') && l.trim() !== '' && marker(l) === null ? l.split('\t').length : 0))
 
   const out: string[] = []
   let para: string[] = []
@@ -363,6 +380,22 @@ export function tabbedTextToLetterHtml(text: string): string | null {
         j += 1
       }
       out.push(`<table class="ltr-t ltr-b-rows"><tbody>${rows.join('')}</tbody></table>`)
+      found = true
+      i = j - 1
+      continue
+    }
+    /* A run of bulleted or numbered items, which is a list wherever it came from. */
+    if (marker(lines[i]) !== null) {
+      closePara()
+      const ordered = /^\s*\d+[.)]\t/.test(lines[i])
+      const items: string[] = []
+      let j = i
+      while (j < lines.length && marker(lines[j]) !== null
+        && /^\s*\d+[.)]\t/.test(lines[j]) === ordered) {
+        items.push(`<li>${inlineMarkdown(marker(lines[j])!.trim())}</li>`)
+        j += 1
+      }
+      out.push(`<${ordered ? 'ol' : 'ul'}>${items.join('')}</${ordered ? 'ol' : 'ul'}>`)
       found = true
       i = j - 1
       continue
