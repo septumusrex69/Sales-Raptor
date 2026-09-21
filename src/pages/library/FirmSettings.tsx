@@ -9,6 +9,20 @@ import {
 } from '../../lib/firmSettings'
 
 /**
+ * The keys that hold a line of text somebody types, derived rather than listed.
+ *
+ * `null extends FirmSettings[K]` is what does the work: it keeps every nullable string and drops
+ * `emailFont` and `updatedAt`, which are a select and a timestamp, and `firmName`, which is the
+ * one box that may not be emptied to null. A hand-kept union went stale the moment the firm asked
+ * for more fields; this cannot.
+ */
+type TextKey = {
+  [K in keyof FirmSettings]: FirmSettings[K] extends string | null
+    ? (null extends FirmSettings[K] ? K : never)
+    : never
+}[keyof FirmSettings]
+
+/**
  * THE FIRM'S OWN DETAILS.
  *
  * At the firm's question: "where are we going to store all the data, for example, the firm's
@@ -47,6 +61,9 @@ export function FirmSettingsPage() {
     setSaved(false)
   }
   const changed = JSON.stringify({ ...draft, updatedAt: '' }) !== JSON.stringify({ ...row, updatedAt: '' })
+  /* Read off what is SAVED, not what is being typed: the warning describes the state a notice
+     would be posted in, and a half-typed box is neither. */
+  const trustGaps = missingTrust(row)
 
   async function save() {
     if (!draft) return
@@ -64,14 +81,47 @@ export function FirmSettingsPage() {
   }
 
   /* Every field: the column, what it is called on screen, and the sentence that says what it is
-     for. Written as data so the three sections read the same and none of them quietly loses its
-     explanation. */
-  const text = (k: 'firmName' | 'trustBank' | 'trustAccountNumber' | 'signatoryName' | 'signatoryTitle',
-    label: string, help: string, placeholder: string) => (
+     for. Written as data so the sections read the same and none of them quietly loses its
+     explanation.
+
+     TYPED AGAINST THE KEYS THAT HOLD TEXT, rather than a hand-kept union of the five that existed
+     when this was written. The union went stale the moment the firm asked for more fields, and a
+     stale one fails as a type error on the field you just added -- which is survivable -- or, if
+     somebody widens it to `keyof FirmSettings`, as a box that writes a string into emailSizePt. */
+  const text = (k: TextKey, label: string, help: string, placeholder: string) => (
     <label className="block">
       <span className="block text-[11px] uppercase tracking-wide text-slate-400 mb-1">{label}</span>
       <input className={inputClass} disabled={!mayEdit} placeholder={placeholder}
-        value={(draft[k] as string | null) ?? ''}
+        value={draft[k] ?? ''}
+        onChange={(e) => set(k, (e.target.value || null) as FirmSettings[typeof k])} />
+      <span className="block text-[11px] text-slate-400 mt-1">{help}</span>
+    </label>
+  )
+
+  /*
+   * The firm's name, which is the one box that may NOT go null.
+   *
+   * saveFirmSettings falls back to the firm's own name on a blank and does it with `.trim()` --
+   * so a null, which is what the nullable helper writes when somebody clears a box, threw there
+   * rather than falling back. Kept as '' while it is being retyped; the fallback does the rest.
+   */
+  const requiredText = (label: string, help: string, placeholder: string) => (
+    <label className="block">
+      <span className="block text-[11px] uppercase tracking-wide text-slate-400 mb-1">{label}</span>
+      <input className={inputClass} disabled={!mayEdit} placeholder={placeholder}
+        value={draft.firmName}
+        onChange={(e) => set('firmName', e.target.value)} />
+      <span className="block text-[11px] text-slate-400 mt-1">{help}</span>
+    </label>
+  )
+
+  /* An address is written on its own lines and merged as typed, so it is typed on its own lines
+     too. Flattening it to one box prints a street and a city in a single run. */
+  const lines = (k: TextKey, label: string, help: string, placeholder: string) => (
+    <label className="block">
+      <span className="block text-[11px] uppercase tracking-wide text-slate-400 mb-1">{label}</span>
+      <textarea className={`${inputClass} min-h-[5.5rem]`} disabled={!mayEdit} rows={3}
+        placeholder={placeholder} value={draft[k] ?? ''}
         onChange={(e) => set(k, (e.target.value || null) as FirmSettings[typeof k])} />
       <span className="block text-[11px] text-slate-400 mt-1">{help}</span>
     </label>
@@ -83,20 +133,55 @@ export function FirmSettingsPage() {
         <h3 className="text-sm font-semibold text-navy-950">The firm</h3>
         <p className="text-sm text-slate-500 mt-0.5 mb-4 max-w-3xl">
           What a letter says about us. These fill the merge fields a notice needs and an SMS never
-          did &mdash; the trust account, who signs, and the firm&rsquo;s own name.
+          did.
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
-          {text('firmName', 'The firm', 'Printed wherever a template says {{firm_name}}.',
+          {requiredText('The firm', 'Printed wherever a template says {{firm_name}}.',
             'Bredell Ferreira')}
+        </div>
+        {/*
+          NOTHING READS THESE THREE. They are printed and nothing else — no validation, no lookup,
+          no behaviour hangs off them. They are here because a letterhead and an invoice carry them
+          and the firm was retyping them into every template that needed one.
+        */}
+        <div className="grid gap-4 sm:grid-cols-3 mt-4">
+          {text('registrationNumber', 'Registration number',
+            'Company or CK number, if the firm shows one.', '2014/123456/21')}
+          {text('vatNumber', 'VAT number', 'Shown on what the firm invoices.', '4123456789')}
+          {text('councilNumber', 'Council for Debt Collectors',
+            'Where the firm shows its registration on correspondence.', 'Reg. 0001234/56')}
+        </div>
+      </Card>
+
+      <Card>
+        <h3 className="text-sm font-semibold text-navy-950">How to reach the firm</h3>
+        {/*
+          THE OFFICE, WHICH IS NOT THE COLLECTOR. {{agent_phone}} is whoever is dealing with the
+          account and it changes the day the account is handed out. "Please telephone this office"
+          needed a number that does not, and until now Raptor held none.
+        */}
+        <p className="text-sm text-slate-500 mt-0.5 mb-4 max-w-3xl">
+          The switchboard, not the collector. A letter that says &ldquo;telephone this
+          office&rdquo; means these, wherever the account goes next.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {text('phone', 'Telephone', 'Fills {{firm_phone}}.', '015 291 1234')}
+          {text('phoneAlt', 'Second number', 'Not merged on its own \u2014 kept here so it is in one place.',
+            '015 291 5678')}
+          {text('email', 'Email address', 'Fills {{firm_email}}.', 'info@bredellferreira.co.za')}
+          {lines('physicalAddress', 'Physical address',
+            'Fills {{firm_address}}, on the lines you type it in.',
+            '25 Kerk Street\nPolokwane\n0699')}
         </div>
       </Card>
 
       <Card>
         <h3 className="text-sm font-semibold text-navy-950">Where a debtor pays</h3>
         {/*
-          SAID PLAINLY, because this is the one pair of boxes on the screen that costs money to
-          get wrong. companies.banking_details is the OTHER direction — where a client is remitted
-          — and the two are never the same account.
+          SAID PLAINLY, because these are the boxes on the screen that cost money to get wrong.
+          THREE DIRECTIONS OF MONEY: a debtor pays IN here; a client pays the firm IN to the
+          business account below; a client is remitted OUT from companies.banking_details, which
+          is not on this screen at all. No two of them are the same account.
         */}
         <p className="text-sm text-slate-500 mt-0.5 mb-4 max-w-3xl">
           The firm&rsquo;s <strong>trust account</strong>, as it is printed at the foot of a
@@ -104,22 +189,59 @@ export function FirmSettingsPage() {
           client is remitted from &mdash; that one lives on the client, not here.
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
-          {text('trustBank', 'Bank and branch code',
-            'Written the way it should read on the page. Fills {{firm_bank}}.',
-            'Standard Bank · 051001')}
+          {text('trustBank', 'Bank', 'Fills {{firm_bank_name}}.', 'Standard Bank')}
+          {/* Apart from the bank at the firm's own correction: a branch code is a separate thing
+              a person copies into a separate box in a banking app. */}
+          {text('trustBranchCode', 'Branch code',
+            'Fills {{firm_bank_branch}}. {{firm_bank}} still prints both together.', '051001')}
+          {text('trustAccountName', 'Account name',
+            'The name the payment must reach. Fills {{firm_bank_holder}}.',
+            'Bredell Ferreira Trust')}
           {text('trustAccountNumber', 'Account number',
             'Fills {{firm_bank_account}}.', '01 234 5678')}
         </div>
         {/*
-          A WARNING THAT ONLY FIRES WHEN SOMETHING IS WRONG. CLAUDE.md: one that fires when
-          nothing is wrong is worse than none, because people stop reading it.
+          A WARNING THAT ONLY FIRES WHEN SOMETHING IS WRONG, and that NAMES what is missing rather
+          than saying something is. CLAUDE.md: one that fires when nothing is wrong is worse than
+          none, because people stop reading it — and one that fires without saying what to do
+          about it is read once and then skipped.
         */}
-        {(row.trustBank === null || row.trustAccountNumber === null) && (
+        {trustGaps.length > 0 && (
           <p className="text-xs text-negative-700 mt-3">
-            Until both of these are filled in, a section 129 prints &#123;&#123;firm_bank&#125;&#125;
-            where the account should be &mdash; deliberately, so it is caught here rather than posted.
+            A section 129 cannot be posted without {trustGaps.join(', ')}. Until
+            {' '}{trustGaps.length === 1 ? 'it is' : 'they are'} filled in, the notice
+            prints the merge field standing on the page &mdash; deliberately, so it is caught here
+            rather than posted.
           </p>
         )}
+      </Card>
+
+      <Card>
+        <h3 className="text-sm font-semibold text-navy-950">Where a client pays the firm</h3>
+        {/*
+          THE FIRM'S OWN WORDS: "there's also an account that is still outstanding with our
+          client." That is commission owed TO the firm, and it is paid into the business account —
+          never the trust account above.
+
+          NO DEBTOR NOTICE CAN NAME THIS. These merge fields exist only in the sales vocabulary,
+          and templateProblems refuses a field that is not in the template's scope, so a section
+          129 asking for {{firm_business_bank}} does not save. That is the protection: a debtor
+          paying into the business account is trust money in the wrong place, found at month end.
+        */}
+        <p className="text-sm text-slate-500 mt-0.5 mb-4 max-w-3xl">
+          The firm&rsquo;s <strong>business account</strong>, for what a client still owes us.
+          Offered to templates on the sales side only &mdash; a debtor notice has no field that
+          can name it, on purpose.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {text('businessBank', 'Bank', 'Fills {{firm_business_bank_name}}.', 'Standard Bank')}
+          {text('businessBranchCode', 'Branch code', 'Fills {{firm_business_bank_branch}}.',
+            '051001')}
+          {text('businessAccountName', 'Account name',
+            'Fills {{firm_business_bank_holder}}.', 'Bredell Ferreira')}
+          {text('businessAccountNumber', 'Account number',
+            'Fills {{firm_business_bank_account}}.', '02 345 6789')}
+        </div>
       </Card>
 
       <Card>
@@ -208,4 +330,23 @@ function styleObject(css: string): React.CSSProperties {
     out[prop] = rule.slice(at + 1).trim()
   }
   return out as React.CSSProperties
+}
+
+/**
+ * What the trust account is still short of, in the firm's own words rather than column names.
+ *
+ * THE ACCOUNT NAME IS IN THE LIST because an EFT without it reaches the right number under the
+ * wrong name and the receiving bank may send it back — which looks, from the debtor's side, like
+ * the firm refusing their payment. The branch code is in it because a debtor has to type it into
+ * a separate box; a notice naming the bank and not the code is a telephone call, not a payment.
+ *
+ * Returns [] when nothing is missing, and the screen shows nothing at all then.
+ */
+function missingTrust(s: FirmSettings): string[] {
+  const gaps: string[] = []
+  if (s.trustBank === null) gaps.push('the bank')
+  if (s.trustBranchCode === null) gaps.push('the branch code')
+  if (s.trustAccountName === null) gaps.push('the account name')
+  if (s.trustAccountNumber === null) gaps.push('the account number')
+  return gaps
 }

@@ -90,8 +90,15 @@ const TEMPLATES = [
 /* The firm's own row. Filled in, so the letter has a trust account to name. */
 const FIRM = [{
   firm_name: 'Bredell Ferreira',
-  trust_bank: 'Standard Bank · 051001',
+  /* Bank and branch code APART, the way the firm asked for them to be stored. {{firm_bank}} joins
+     them back together for a notice already written -- which is the half worth driving here. */
+  trust_bank: 'Standard Bank',
+  trust_branch_code: '051001',
+  trust_account_name: 'Bredell Ferreira Trust',
   trust_account_number: '01 234 5678',
+  phone: '015 291 1234',
+  email: 'info@bredellferreira.co.za',
+  physical_address: '25 Kerk Street\nPolokwane\n0699',
   signatory_name: 'J Bredell',
   signatory_title: 'Duly authorised legal representative',
   email_font: 'Georgia, "Times New Roman", Times, serif',

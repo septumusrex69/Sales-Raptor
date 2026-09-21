@@ -105,7 +105,50 @@ const handlersFor = (profile) => [
       }
     },
   ],
+  /*
+   * THE FIRM'S OWN ROW, DELIBERATELY ONE FIELD SHORT.
+   *
+   * The bank, the branch code and the account number are filled and the ACCOUNT NAME is not, so
+   * one run settles both halves of the warning on that card: that it names what is missing, and
+   * that it stays quiet about the three things that are not. A row with everything filled would
+   * only prove it can be silent; an empty one only that it can shout.
+   */
+  [
+    (u) => u.includes('/rest/v1/firm_settings'),
+    (u, req) => {
+      if (req.method() !== 'GET') {
+        written.push({ method: req.method(), url: u, body: req.postData() ?? '' })
+        return { body: [] }
+      }
+      return { body: FIRM }
+    },
+  ],
 ]
+
+const FIRM = [{
+  firm_name: 'Bredell Ferreira',
+  registration_number: null,
+  vat_number: null,
+  council_number: null,
+  phone: '015 291 1234',
+  phone_alt: null,
+  email: 'info@bredellferreira.co.za',
+  physical_address: '25 Kerk Street\nPolokwane\n0699',
+  /* APART, which is the change: the firm asked for the branch code to be a field of its own. */
+  trust_bank: 'Standard Bank',
+  trust_branch_code: '051001',
+  trust_account_name: null,
+  trust_account_number: '01 234 5678',
+  business_bank: null,
+  business_branch_code: null,
+  business_account_name: null,
+  business_account_number: null,
+  signatory_name: 'J Bredell',
+  signatory_title: 'Duly authorised legal representative',
+  email_font: 'Georgia, "Times New Roman", Times, serif',
+  email_size_pt: '10.5',
+  updated_at: '2026-09-18T08:00:00Z',
+}]
 
 let browser
 const server = startServer()
@@ -983,6 +1026,83 @@ try {
     deletes.length > beforeDelete)
   t.ok(`...naming the one that was asked for (${(deletes[deletes.length - 1]?.url ?? '').slice(-50)})`,
     (deletes[deletes.length - 1]?.url ?? '').includes(LIBRARY[0].id))
+
+  /* ---------- the firm's own details ---------- */
+
+  /*
+   * WHY A BROWSER FOR A FORM. check-firm-settings.mjs holds every column against the table in
+   * both directions, so a field that never reaches the mapper fails there. What it cannot say is
+   * that eighteen boxes across five cards actually RENDER -- and this suite exists because a
+   * panel once shipped, was provably in the deployed bundle, and was invisible.
+   *
+   * The split is the thing to see. The firm asked for the bank and the branch code to be stored
+   * apart, "the branch code can be a different thing than the bank", and the whole point is two
+   * boxes rather than one. Asserted on the rendered VALUES, which is the only place the
+   * difference shows: one box holding "Standard Bank - 051001" and two boxes holding the halves
+   * look identical in the source and identical in the database schema.
+   */
+  await page.goto(`http://localhost:${PORT}/library/firm`)
+  await page.getByText('Where a debtor pays').first().waitFor({ timeout: 20000 })
+
+  const cards = (await page.locator('h3').allInnerTexts()).map((h) => h.trim())
+  for (const heading of ['The firm', 'How to reach the firm', 'Where a debtor pays',
+    'Where a client pays the firm', 'Who signs', 'The font emails are sent in']) {
+    t.ok(`the screen carries "${heading}" (${cards.length} cards)`, cards.includes(heading))
+  }
+
+  /* Read as VALUES rather than by locator, so the assertion is equality and not "contains": one
+     box holding "Standard Bank \u00b7 051001" would satisfy a substring match on either half. */
+  const boxes = await page.$$eval('input', (els) => els.map((e) => e.value))
+  t.check('the bank is in a box of its own',
+    boxes.filter((v) => v === 'Standard Bank').length, 1)
+  t.check('...and the branch code in another',
+    boxes.filter((v) => v === '051001').length, 1)
+  t.ok(`...with no box still holding the two joined (${boxes.filter(Boolean).join(' | ')})`,
+    !boxes.some((v) => v.includes('\u00b7')))
+  t.ok('the office has a number of its own, which is not the collector\u2019s',
+    boxes.includes('015 291 1234'))
+  /* The address is typed on the lines it is merged on, so it is a textarea and not an input. */
+  t.check('the address is typed on its own lines',
+    await page.locator('textarea').count(), 1)
+
+  /*
+   * THE WARNING NAMES WHAT IS MISSING AND STAYS QUIET ABOUT WHAT IS NOT.
+   *
+   * The stubbed row has the bank, the branch code and the account number and no account name, so
+   * both halves are settled at once. A warning that fires when nothing is wrong is worse than
+   * none -- and one that fires without saying what to do is read once and then skipped.
+   */
+  const warning = await page.getByText(/A section 129 cannot be posted without/).first().innerText()
+  t.ok(`the gap is named (${warning.replace(/\s+/g, ' ').slice(0, 90)})`,
+    warning.includes('the account name'))
+  t.ok('...and the three that are filled in are not mentioned',
+    !/the bank|the branch code|the account number/.test(warning))
+
+  /* The second account, empty and offered -- a client's commission, never a debtor's payment. */
+  t.ok('the business account is a separate card with its own boxes',
+    await page.getByPlaceholder('02 345 6789').first().isVisible())
+  /* Photographed BEFORE the save, because the warning is what is worth looking at and filling the
+     box in is what makes it go away. */
+  await t.shot(page, '68-library-firm')
+
+  /*
+   * AND THE SPLIT REACHES THE DATABASE AS TWO COLUMNS. Typed into the box that was empty, saved,
+   * and read off the wire -- because a screen that shows two boxes and writes one joined string
+   * back is the same bug wearing a better hat.
+   */
+  const beforeFirm = written.length
+  await page.getByPlaceholder('Bredell Ferreira Trust').first().fill('Bredell Ferreira Trust')
+  await page.getByRole('button', { name: 'Save' }).first().click()
+  await page.waitForTimeout(1200)
+  const sentFirm = written[written.length - 1]
+  t.ok(`the save left the browser (${written.length - beforeFirm} write)`, written.length > beforeFirm)
+  t.ok(`...to firm_settings (${(sentFirm?.url ?? '').slice(-40)})`,
+    (sentFirm?.url ?? '').includes('firm_settings'))
+  const body = sentFirm?.body ?? ''
+  t.ok('...carrying the account name that was typed',
+    /"trust_account_name":"Bredell Ferreira Trust"/.test(body))
+  t.ok('...and the bank and the branch code as separate columns, not one joined string',
+    /"trust_bank":"Standard Bank"/.test(body) && /"trust_branch_code":"051001"/.test(body))
 
   const real = errors.filter((e) => !/favicon|404 \(Not Found\)/i.test(e))
   t.check('no console errors', real.length, 0)

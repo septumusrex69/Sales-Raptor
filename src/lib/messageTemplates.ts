@@ -162,6 +162,15 @@ const EVERYWHERE: MergeField[] = [
   { key: 'agent_phone', label: 'The number to call back on', sample: '012 111 2222' },
   { key: 'firm_name', label: 'The firm', sample: 'Bredell Ferreira' },
   { key: 'today', label: "Today's date, written out", sample: '18 September 2026' },
+  /*
+   * THE OFFICE, WHICH IS NOT THE AGENT. {{agent_phone}} is whoever is dealing with the account
+   * and changes when the account is handed out; "please telephone this office" needs a number
+   * that does not. Both sides of the business write letters under the firm's name, so these sit
+   * here rather than in either list.
+   */
+  { key: 'firm_phone', label: "The office's telephone number", sample: '012 111 2222' },
+  { key: 'firm_email', label: "The office's email address", sample: 'info@bredellferreira.co.za' },
+  { key: 'firm_address', label: 'The firm’s address, on its own lines', sample: '25 Kerk Street\nPolokwane, 0699' },
 ]
 
 /**
@@ -204,7 +213,19 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
      * table for them -- companies.banking_details is where REMITTANCE GOES, which is the opposite
      * direction from where a debtor pays -- so these resolve to nothing until it has one.
      */
-    { key: 'firm_bank', label: 'Trust account, bank and branch code', sample: 'Standard Bank · 051001' },
+    { key: 'firm_bank', label: 'Trust account, bank and branch code together', sample: 'Standard Bank · 051001' },
+    /*
+     * THE BRANCH CODE ON ITS OWN, at the firm's correction: "the branch code can be a different
+     * thing than the bank". {{firm_bank}} above still merges the two joined, so a notice written
+     * before the split keeps printing exactly what it printed -- but a page that lays the details
+     * out in a block, which is how a debtor copies them into a banking app, can now ask for each
+     * line separately instead of making somebody retype the half they wanted.
+     */
+    { key: 'firm_bank_branch', label: 'Trust account branch code, on its own', sample: '051001' },
+    { key: 'firm_bank_name', label: 'Trust account bank, on its own', sample: 'Standard Bank' },
+    /* The beneficiary name. An account number without it reaches the right number under the wrong
+       name, and the receiving bank may send it back. */
+    { key: 'firm_bank_holder', label: 'The name on the trust account', sample: 'Bredell Ferreira Trust' },
     { key: 'firm_bank_account', label: 'Trust account number', sample: '01 234 5678' },
     { key: 'signatory_name', label: 'Who signs the letter', sample: 'J Bredell' },
     { key: 'signatory_title', label: 'Their title', sample: 'Director' },
@@ -217,6 +238,24 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
     { key: 'service_interested', label: 'What they asked about', sample: 'Debt collecting' },
     { key: 'deal_name', label: 'The piece of business', sample: 'GPS collections mandate' },
     { key: 'deal_value', label: 'What it is worth', sample: 'R 120,000.00' },
+    /*
+     * WHERE A CLIENT PAYS THE FIRM, and why it is only on this side.
+     *
+     * The firm: "there's also an account that is still outstanding with our client." That is
+     * commission the firm is owed, and it is paid into the firm's BUSINESS account -- a third
+     * direction of money, separate from the trust account a debtor pays into and from
+     * companies.banking_details, where remittance goes out.
+     *
+     * A DEBTOR NOTICE CANNOT NAME IT, because these keys are not in the collections list and
+     * templateProblems refuses a field that is not in its scope. That is the whole protection:
+     * getting a debtor to pay into the business account is trust money in the wrong place, and
+     * nobody finds out until month end. A closed list per side is cheaper than a warning.
+     */
+    { key: 'firm_business_bank', label: 'The firm’s own account, bank and branch code together', sample: 'Standard Bank · 051001' },
+    { key: 'firm_business_bank_branch', label: 'Branch code, on its own', sample: '051001' },
+    { key: 'firm_business_bank_name', label: 'Bank, on its own', sample: 'Standard Bank' },
+    { key: 'firm_business_bank_holder', label: 'The name on the account', sample: 'Bredell Ferreira' },
+    { key: 'firm_business_bank_account', label: 'Account number', sample: '02 345 6789' },
     ...EVERYWHERE,
   ],
 }
@@ -423,7 +462,6 @@ export function mergeValuesFor(input: {
   clientName: string | null
   agentName: string | null
   agentPhone: string | null
-  firmName: string
   today: string
   money: (amount: number) => string
   /**
@@ -439,12 +477,37 @@ export function mergeValuesFor(input: {
   debtorIdMasked?: string | null
   respondBy?: string | null
   positionAsAt?: string | null
-  /* The firm's own details. companies.banking_details is where REMITTANCE GOES, which is the
-     opposite direction from where a debtor pays, so it is deliberately not read here. */
-  firmBank?: string | null
-  firmBankAccount?: string | null
-  signatoryName?: string | null
-  signatoryTitle?: string | null
+  /**
+   * The firm's own details, PASSED WHOLE RATHER THAN FIELD BY FIELD.
+   *
+   * The shape is FirmSettings' -- same key names, every one optional but `firmName` -- and the
+   * type is written out here rather than imported, because firmSettings.ts reaches the database
+   * and importing it would drag supabase into every QA check that imports this file.
+   *
+   * WHOLE, BECAUSE A MAPPER IN BETWEEN IS THE FAILURE CLAUDE.md WARNS ABOUT. The caller now
+   * writes `firm` and nothing else; there is no list of fields to copy across and therefore no
+   * list to forget a field from. That matters more here every time this grows: the firm's details
+   * went from four fields to eighteen in one sitting.
+   *
+   * companies.banking_details is still deliberately not read: remittance goes OUT to a client,
+   * which is the opposite direction from both accounts below.
+   */
+  firm: {
+    firmName: string
+    phone?: string | null
+    email?: string | null
+    physicalAddress?: string | null
+    trustBank?: string | null
+    trustBranchCode?: string | null
+    trustAccountName?: string | null
+    trustAccountNumber?: string | null
+    businessBank?: string | null
+    businessBranchCode?: string | null
+    businessAccountName?: string | null
+    businessAccountNumber?: string | null
+    signatoryName?: string | null
+    signatoryTitle?: string | null
+  }
 }): Record<string, string | null> {
   const a = input.account
   const some = (v: string | null | undefined): string | null => (v ?? '').trim() || null
@@ -458,7 +521,10 @@ export function mergeValuesFor(input: {
     capital: input.money(a.capitalOutstanding),
     agent_name: (input.agentName ?? '').trim() || null,
     agent_phone: (input.agentPhone ?? '').trim() || null,
-    firm_name: input.firmName,
+    firm_name: input.firm.firmName,
+    firm_phone: some(input.firm.phone),
+    firm_email: some(input.firm.email),
+    firm_address: some(input.firm.physicalAddress),
     today: longDate(input.today),
     /* The creditor's own number, which is NOT the reference above: the client's reference is what
        appears on the debtor's paperwork, and a section 129 has to identify the agreement. */
@@ -467,11 +533,47 @@ export function mergeValuesFor(input: {
     debtor_id_masked: some(input.debtorIdMasked),
     respond_by: input.respondBy ? longDate(input.respondBy) : null,
     position_as_at: input.positionAsAt ? longDate(input.positionAsAt) : null,
-    firm_bank: some(input.firmBank),
-    firm_bank_account: some(input.firmBankAccount),
-    signatory_name: some(input.signatoryName),
-    signatory_title: some(input.signatoryTitle),
+    firm_bank: bankLine(input.firm.trustBank, input.firm.trustBranchCode),
+    firm_bank_name: some(input.firm.trustBank),
+    firm_bank_branch: some(input.firm.trustBranchCode),
+    firm_bank_holder: some(input.firm.trustAccountName),
+    firm_bank_account: some(input.firm.trustAccountNumber),
+    /* The other direction a client's money comes from. Offered only to sales templates -- see
+       MERGE_FIELDS -- but resolved here, because one function answers every scope. */
+    firm_business_bank: bankLine(input.firm.businessBank, input.firm.businessBranchCode),
+    firm_business_bank_name: some(input.firm.businessBank),
+    firm_business_bank_branch: some(input.firm.businessBranchCode),
+    firm_business_bank_holder: some(input.firm.businessAccountName),
+    firm_business_bank_account: some(input.firm.businessAccountNumber),
+    signatory_name: some(input.firm.signatoryName),
+    signatory_title: some(input.firm.signatoryTitle),
   }
+}
+
+/**
+ * Bank and branch code written the way they read on a page: "Standard Bank · 051001".
+ *
+ * THE JOIN LIVES HERE BECAUSE THE SPLIT HAPPENED IN THE DATABASE. The firm used to type both into
+ * one box and {{firm_bank}} printed it; they then asked for them apart, because a branch code is
+ * a separate thing copied into a separate box in a banking app. Templates already written still
+ * say {{firm_bank}}, so something has to put them back together, and it has to do it the same way
+ * every time -- a letter that reads "Standard Bank - 051001" on one notice and
+ * "Standard Bank, 051001" on the next looks like two different accounts to a nervous debtor.
+ *
+ * HALF AN ANSWER IS STILL AN ANSWER. With only one of the two filled in, that one is returned
+ * rather than null: a notice naming the bank and not the branch is worse than one naming both and
+ * better than one naming neither, and the screen is already saying what is missing.
+ *
+ * The separator is U+00B7, which WinAnsi can draw -- see winAnsi.ts. A character the PDF cannot
+ * print would refuse the build of every notice carrying this field.
+ */
+export function bankLine(
+  bank: string | null | undefined, branchCode: string | null | undefined,
+): string | null {
+  const b = (bank ?? '').trim()
+  const c = (branchCode ?? '').trim()
+  if (b && c) return `${b} \u00b7 ${c}`
+  return b || c || null
 }
 
 /* ---------------------------------------------------------------- is it fit to save */

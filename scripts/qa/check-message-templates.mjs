@@ -21,11 +21,15 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-message-templates.mjs
  */
 import { readFileSync } from 'node:fs'
+/* The PDF's repertoire, so the separator bankLine joins with is held against what a notice can
+   actually print rather than against what looks right in a terminal. */
+import { isPrintable } from '../../src/lib/winAnsi.ts'
 import {
   KINDS_FOR_SCOPE,
   MERGE_FIELDS, SMS_RAND_PER_SEGMENT, addressAs, deleteRefusal, deleteWarning, fieldsUsed,
   forecastSms, kindForChannel, longDate,
-  mergeValuesFor, renderTemplate, resolveNote, resolveTemplate, sampleValues, templateProblems,
+  bankLine, mergeValuesFor, renderTemplate, resolveNote, resolveTemplate, sampleValues,
+  templateProblems,
   unknownFields, usageNote,
 } from '../../src/lib/messageTemplates.ts'
 
@@ -181,8 +185,20 @@ check('a debtor with no name at all answers nothing rather than a guess',
 const money = (n) => `R ${n.toFixed(2)}`
 const values = mergeValuesFor({
   account: person, balance: 48250, clientName: 'Gauteng Property Services',
-  agentName: 'Stephan Bredell', agentPhone: '012 111 2222', firmName: 'Bredell Ferreira',
+  agentName: 'Stephan Bredell', agentPhone: '012 111 2222',
   today: '2026-09-18', money,
+  /* PASSED WHOLE, the way AccountDetail passes it: mergeValuesFor takes FirmSettings' own shape
+     so that no list of the firm's fields exists in between to fall behind the ones it grew. */
+  firm: {
+    firmName: 'Bredell Ferreira',
+    phone: '015 291 1234', email: 'info@bredellferreira.co.za',
+    physicalAddress: '25 Kerk Street\nPolokwane\n0699',
+    trustBank: 'Standard Bank', trustBranchCode: '051001',
+    trustAccountName: 'Bredell Ferreira Trust', trustAccountNumber: '01 234 5678',
+    businessBank: 'Nedbank', businessBranchCode: '198765',
+    businessAccountName: 'Bredell Ferreira', businessAccountNumber: '02 345 6789',
+    signatoryName: 'J Bredell', signatoryTitle: 'Duly authorised legal representative',
+  },
 })
 check('the debtor is addressed as they should be', values.debtor_name, 'Mr Buitendag')
 /* The client's own reference is what is on the debtor's paperwork; ours is only the fallback. */
@@ -190,19 +206,84 @@ check('the reference is the client’s own', values.reference, 'GPS3/10103')
 check('...falling back to ours where the client has none',
   mergeValuesFor({
     account: { ...person, clientReference: null }, balance: 1, clientName: 'x', agentName: 'y',
-    agentPhone: 'z', firmName: 'f', today: '2026-09-18', money,
+    agentPhone: 'z', firm: { firmName: 'f' }, today: '2026-09-18', money,
   }).reference, 'ACF10085')
 check('the balance is formatted by the app’s own formatter', values.balance, 'R 48250.00')
 check('a balance that is not known answers nothing rather than nought',
   mergeValuesFor({
     account: person, balance: null, clientName: 'x', agentName: 'y', agentPhone: 'z',
-    firmName: 'f', today: '2026-09-18', money,
+    firm: { firmName: 'f' }, today: '2026-09-18', money,
   }).balance, null)
 check('the date is written out, never ISO', values.today, '18 September 2026')
 check('longDate leaves a date it cannot read alone', longDate('not a date'), 'not a date')
 /* Every field in the catalogue must be answerable, or a template can use one nothing ever fills. */
 check('every collections field can be answered',
   MERGE_FIELDS.collections.filter((f) => !(f.key in values)).map((f) => f.key), [])
+/*
+ * The firm's own fields on the OTHER side, which nothing checked before.
+ *
+ * Only the firm_ ones: mergeValuesFor answers an ACCOUNT, so {{contact_name}} and {{deal_value}}
+ * are filled by the sales side's own resolver and are legitimately absent here. The firm's
+ * details are not -- they come from this one function whichever scope asked, and a sales template
+ * offering {{firm_business_bank_account}} that renders as nothing is the exact failure the closed
+ * list exists to stop.
+ */
+check('every firm field the sales side offers can be answered',
+  MERGE_FIELDS.sales.filter((f) => f.key.startsWith('firm_') && !(f.key in values)).map((f) => f.key),
+  [])
+
+/* ---------- the firm's details, and the two accounts that must not meet ---------- */
+
+check('the office number is the firm\u2019s, not the collector\u2019s',
+  [values.firm_phone, values.agent_phone], ['015 291 1234', '012 111 2222'])
+check('the address is merged on the lines it was typed on',
+  values.firm_address, '25 Kerk Street\nPolokwane\n0699')
+
+/*
+ * {{firm_bank}} STILL PRINTS WHAT IT USED TO. The firm asked for the bank and the branch code to
+ * be stored apart; every notice already written says {{firm_bank}}, so the join has to happen
+ * somewhere and has to happen the same way every time. A letter reading "Standard Bank - 051001"
+ * on one notice and "Standard Bank, 051001" on the next looks like two accounts to a debtor.
+ */
+check('bank and branch code are joined the way they read on a page',
+  values.firm_bank, 'Standard Bank \u00b7 051001')
+check('...and are each answerable on their own',
+  [values.firm_bank_name, values.firm_bank_branch], ['Standard Bank', '051001'])
+check('half an answer is still an answer', bankLine('Standard Bank', null), 'Standard Bank')
+check('...from either half', bankLine(null, '051001'), '051001')
+check('...and neither is nothing, not a stray separator', bankLine(null, null), null)
+check('a blank is not a half', bankLine('   ', '  '), null)
+/*
+ * THE SEPARATOR IS TAKEN OUT OF bankLine'S OWN ANSWER, not typed here.
+ *
+ * Written as isPrintable('\u00b7') this asserted a character the check itself had chosen, and it
+ * stayed green with the join changed to an arrow -- a check that passes on broken code, which
+ * CLAUDE.md says is worse than none. Found by making exactly that change.
+ *
+ * Windows-1252 is all a PDF built on the 14 standard faces can draw, so a separator outside it
+ * refuses the build of every notice carrying this field.
+ */
+const sep = bankLine('A', 'B').slice(1, -1)
+ok(`the join is drawn with characters a PDF can print ("${sep}")`,
+  [...sep].every((ch) => isPrintable(ch.codePointAt(0))))
+
+/*
+ * THE TWO ACCOUNTS ARE KEPT APART BY THE VOCABULARY, NOT BY A WARNING.
+ *
+ * A debtor pays into the trust account; a client pays the firm's commission into the business
+ * account. templateProblems refuses a field that is not in the template's scope, so as long as
+ * these lists stay disjoint a section 129 CANNOT name the business account -- it will not save.
+ * Trust money in the business account is found at month end, not on the day.
+ */
+const keys = (scope) => MERGE_FIELDS[scope].map((f) => f.key)
+const trustKeys = keys('collections').filter((k) => k.startsWith('firm_bank'))
+const businessKeys = keys('sales').filter((k) => k.startsWith('firm_business_bank'))
+ok(`the trust account is in the collections vocabulary (${trustKeys.length})`, trustKeys.length >= 4)
+ok(`the business account is in the sales vocabulary (${businessKeys.length})`, businessKeys.length >= 4)
+check('no debtor notice can name the business account',
+  keys('collections').filter((k) => k.startsWith('firm_business')), [])
+check('and no sales template can name the trust account',
+  keys('sales').filter((k) => k.startsWith('firm_bank')), [])
 
 /* ---------- what an SMS costs ---------- */
 
@@ -432,8 +513,16 @@ ok('...and the reason is written down',
 const src = readFileSync(new URL('../../src/lib/messageTemplates.ts', import.meta.url), 'utf8')
 ok('the rule is written down where the next person will read it',
   /fees are raised on ACCOUNTS ONLY/i.test(src))
-/* Pure: no database, no clock, no network. The wording has to be testable without any of them. */
-ok('nothing here fetches', !/\bfetch\(|supabase/.test(src))
+/*
+ * Pure: no database, no clock, no network. The wording has to be testable without any of them.
+ *
+ * READ WITH THE COMMENTS STRIPPED, at the cost of one false alarm already paid: mergeValuesFor's
+ * own comment EXPLAINS why it declines to import firmSettings.ts -- naming supabase to say what
+ * it is keeping out -- and this check failed on the explanation of the rule it enforces. The same
+ * trap has caught several checks in this suite: the prose and the code are not the same text.
+ */
+const code = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+ok('nothing here fetches', !/\bfetch\(|supabase/.test(code(src)))
 ok('...and nothing reads a clock', !/new Date\(\)|Date\.now\(\)/.test(src))
 
 /* ---------- throwing one away ---------- */

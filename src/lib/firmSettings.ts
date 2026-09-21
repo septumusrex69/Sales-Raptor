@@ -13,20 +13,55 @@
  * whichever trust account the query happened to return first — right in testing, wrong in
  * production, because the ordering changes.
  *
- * THE TRUST ACCOUNT IS WHERE A DEBTOR PAYS IN, and it is deliberately not
- * `companies.banking_details`, which is where REMITTANCE GOES OUT to the client whose book it is.
- * Opposite directions. Paying one into the other is a debtor's money sitting in a client's
- * account and the firm finding out at month end.
+ * THREE DIRECTIONS OF MONEY, THREE PLACES, and mixing any two of them is the expensive mistake
+ * this file exists to make hard:
+ *
+ *   - the TRUST account, below — a debtor pays IN;
+ *   - the BUSINESS account, below — a client pays the firm IN, for commission still outstanding.
+ *     The firm's words: "there's also an account that is still outstanding with our client";
+ *   - `companies.banking_details`, which is NOT here — remittance goes OUT to the client whose
+ *     book it is.
+ *
+ * A debtor's money in a client's account is found at month end, not on the day, so the two that
+ * both take money in are stored as separate columns, shown under separate headings, and offered
+ * to separate halves of the merge vocabulary. See MERGE_FIELDS: there is no collections field
+ * that names the business account, so a debtor notice cannot print it even by mistake.
  */
 import { supabase } from './supabase'
 
-const COLUMNS = 'firm_name, trust_bank, trust_account_number, signatory_name, signatory_title, '
+/*
+ * WRITTEN OUT, NOT BUILT FROM A LIST, and the reason is a check rather than taste:
+ * check-select-columns.mjs resolves a const that is a literal or a concatenation of literals and
+ * SILENTLY SKIPS anything else. A list mapped and joined here would read fine, cover nothing, and
+ * take the count up by zero — which is how that check was found not to be running at all once
+ * before. check-firm-settings.mjs holds this string against schema.sql instead, in both
+ * directions, so a column added to the table and forgotten here is a failure rather than a field
+ * that reads `undefined` for ever.
+ */
+const COLUMNS = 'firm_name, registration_number, vat_number, council_number, '
+  + 'phone, phone_alt, email, physical_address, '
+  + 'trust_bank, trust_branch_code, trust_account_name, trust_account_number, '
+  + 'business_bank, business_branch_code, business_account_name, business_account_number, '
+  + 'signatory_name, signatory_title, '
   + 'email_font, email_size_pt, updated_at'
 
 interface Row {
   firm_name: string
+  registration_number: string | null
+  vat_number: string | null
+  council_number: string | null
+  phone: string | null
+  phone_alt: string | null
+  email: string | null
+  physical_address: string | null
   trust_bank: string | null
+  trust_branch_code: string | null
+  trust_account_name: string | null
   trust_account_number: string | null
+  business_bank: string | null
+  business_branch_code: string | null
+  business_account_name: string | null
+  business_account_number: string | null
   signatory_name: string | null
   signatory_title: string | null
   email_font: string
@@ -36,9 +71,28 @@ interface Row {
 
 export interface FirmSettings {
   firmName: string
-  /** Bank and branch code as a debtor reads it off a notice: "Standard Bank · 051001". */
+  /** Company registration number, if the firm shows one. Printed, never acted on. */
+  registrationNumber: string | null
+  vatNumber: string | null
+  /** Council for Debt Collectors number, where the firm shows it on correspondence. */
+  councilNumber: string | null
+  /** The office's own line — NOT {{agent_phone}}, which is whoever is dealing with the account. */
+  phone: string | null
+  phoneAlt: string | null
+  email: string | null
+  /** Multi-line and merged as typed: an address is written on its own lines on a letterhead. */
+  physicalAddress: string | null
+  /** Where a DEBTOR pays in. Bank and branch code apart — the firm's own correction. */
   trustBank: string | null
+  trustBranchCode: string | null
+  /** The beneficiary name. An account number on its own is not enough to pay into. */
+  trustAccountName: string | null
   trustAccountNumber: string | null
+  /** Where a CLIENT pays the firm what it still owes. Never where a debtor pays. */
+  businessBank: string | null
+  businessBranchCode: string | null
+  businessAccountName: string | null
+  businessAccountNumber: string | null
   signatoryName: string | null
   /** The firm's own correction: not "authorised agent" — a duly authorised legal representative. */
   signatoryTitle: string | null
@@ -51,14 +105,27 @@ export interface FirmSettings {
 /**
  * WHAT THE FIRM FALLS BACK TO BEFORE ANYBODY HAS FILLED THIS IN.
  *
- * Every money field is null, not an empty string, and that is the whole point: `mergeValuesFor`
+ * Every field is null, not an empty string, and that is the whole point: `mergeValuesFor`
  * turns null into a placeholder left standing and an empty string into a blank line. One of those
  * gets caught before it is posted; the other gets posted.
  */
 export const FIRM_UNSET: FirmSettings = {
   firmName: 'Bredell Ferreira',
+  registrationNumber: null,
+  vatNumber: null,
+  councilNumber: null,
+  phone: null,
+  phoneAlt: null,
+  email: null,
+  physicalAddress: null,
   trustBank: null,
+  trustBranchCode: null,
+  trustAccountName: null,
   trustAccountNumber: null,
+  businessBank: null,
+  businessBranchCode: null,
+  businessAccountName: null,
+  businessAccountNumber: null,
   signatoryName: null,
   signatoryTitle: null,
   emailFont: 'Georgia, "Times New Roman", Times, serif',
@@ -76,8 +143,21 @@ function toSettings(r: Row): FirmSettings {
   const some = (v: string | null): string | null => (v ?? '').trim() || null
   return {
     firmName: r.firm_name,
+    registrationNumber: some(r.registration_number),
+    vatNumber: some(r.vat_number),
+    councilNumber: some(r.council_number),
+    phone: some(r.phone),
+    phoneAlt: some(r.phone_alt),
+    email: some(r.email),
+    physicalAddress: some(r.physical_address),
     trustBank: some(r.trust_bank),
+    trustBranchCode: some(r.trust_branch_code),
+    trustAccountName: some(r.trust_account_name),
     trustAccountNumber: some(r.trust_account_number),
+    businessBank: some(r.business_bank),
+    businessBranchCode: some(r.business_branch_code),
+    businessAccountName: some(r.business_account_name),
+    businessAccountNumber: some(r.business_account_number),
     signatoryName: some(r.signatory_name),
     signatoryTitle: some(r.signatory_title),
     emailFont: r.email_font,
@@ -101,14 +181,28 @@ export async function fetchFirmSettings(): Promise<FirmSettings> {
 
 export async function saveFirmSettings(next: Omit<FirmSettings, 'updatedAt'>): Promise<void> {
   const { data: me } = await supabase.auth.getUser()
+  /* Written back as NULL where somebody cleared the box, never as ''. An empty string would merge
+     as a blank line on a notice and read as finished. */
+  const some = (v: string | null): string | null => (v ?? '').trim() || null
   const { error } = await supabase.from('firm_settings').update({
     firm_name: next.firmName.trim() || 'Bredell Ferreira',
-    /* Written back as NULL where somebody cleared the box, never as ''. An empty string would
-       merge as a blank line on a notice and read as finished. */
-    trust_bank: next.trustBank?.trim() || null,
-    trust_account_number: next.trustAccountNumber?.trim() || null,
-    signatory_name: next.signatoryName?.trim() || null,
-    signatory_title: next.signatoryTitle?.trim() || null,
+    registration_number: some(next.registrationNumber),
+    vat_number: some(next.vatNumber),
+    council_number: some(next.councilNumber),
+    phone: some(next.phone),
+    phone_alt: some(next.phoneAlt),
+    email: some(next.email),
+    physical_address: some(next.physicalAddress),
+    trust_bank: some(next.trustBank),
+    trust_branch_code: some(next.trustBranchCode),
+    trust_account_name: some(next.trustAccountName),
+    trust_account_number: some(next.trustAccountNumber),
+    business_bank: some(next.businessBank),
+    business_branch_code: some(next.businessBranchCode),
+    business_account_name: some(next.businessAccountName),
+    business_account_number: some(next.businessAccountNumber),
+    signatory_name: some(next.signatoryName),
+    signatory_title: some(next.signatoryTitle),
     email_font: next.emailFont,
     email_size_pt: next.emailSizePt,
     updated_at: new Date().toISOString(),

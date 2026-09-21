@@ -373,15 +373,13 @@ export function AccountDetail() {
           clientName: client?.name ?? null,
           agentName: currentUser?.name ?? null,
           agentPhone: currentUser?.phone ?? null,
-          firmName: firm.firmName,
           today: dayKey(new Date()),
           money: formatMoney,
           debtorIdMasked: account.debtorIdNumber,
           positionAsAt: dayKey(new Date()),
-          firmBank: firm.trustBank,
-          firmBankAccount: firm.trustAccountNumber,
-          signatoryName: firm.signatoryName,
-          signatoryTitle: firm.signatoryTitle,
+          /* Passed whole. There is no list of the firm's fields here to fall behind the ones the
+             library grew -- see mergeValuesFor, which takes FirmSettings' own shape. */
+          firm,
         })).filter((entry): entry is [string, string] => entry[1] !== null),
       )
       : {},

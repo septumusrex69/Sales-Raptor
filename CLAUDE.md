@@ -70,7 +70,10 @@ the month it matters.
 **Hand-written row mappers drop columns silently.** `AuthContext.mapProfileRow` and
 `accountBook.toAccount` list every field by hand. A column present in the database, in the type
 and in the `select('*')` but missing from the mapper reads as `undefined` for ever and nothing
-fails. `diary_capacity` sat in that state for months.
+fails. `diary_capacity` sat in that state for months. `firmSettings.ts` keeps FIVE such lists —
+the select, the `Row`, the interface, the mapper and the update — so `check-firm-settings.mjs`
+holds all of them against `schema.sql` **in both directions**; a column added to the table and
+forgotten in one of them is a failure there rather than a blank trust account on a section 129.
 
 **One clause builder.** `applyAccountFilters()` turns an `AccountQuery` into clauses and both the
 list and every bulk action go through it. Written twice they drift, and the failure is not a
@@ -137,6 +140,17 @@ with **pdf.js onto a canvas, never an `<iframe>`** — Safari on iOS will not re
 and the firm works on an iPad. It reads the live draft, not the saved row. The editor's own
 pagination is measured in the browser's fonts and can differ from the PDF by a line near a
 boundary; this is the one that prints.
+
+**Three directions of money, three places, and mixing any two is found at month end.** A debtor
+pays **in** to the firm's TRUST account; a client pays the firm **in** to its BUSINESS account,
+for commission still outstanding — both on `firm_settings`. `companies.banking_details` is
+neither: remittance goes **out** to the client whose book it is. They are separate columns under
+separate headings, and — this is the part that is load-bearing — **offered to separate halves of
+the merge vocabulary**. No `collections` field names the business account, and `templateProblems`
+refuses a field outside the template's scope, so a section 129 asking for it does not save. The
+protection is the closed list, not a warning. Bank and branch code are stored apart at the firm's
+instruction; `{{firm_bank}}` still prints them joined, and `bankLine` is the only place that join
+happens, because the same account written two ways across two notices reads as two accounts.
 
 **Things that bite:**
 - `protect_closed_diary_entries` **silently reverts** edits to `done`/`moved` entries. It does

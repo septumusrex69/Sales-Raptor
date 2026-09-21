@@ -5421,3 +5421,59 @@ create policy firm_settings_write on public.firm_settings
 -- null so that a notice built before somebody fills this in shows {{firm_bank}} standing on the
 -- page -- which gets caught -- rather than a blank line, which gets posted.
 insert into public.firm_settings (id) values (true) on conflict (id) do nothing;
+
+-- ============================================================================================
+-- The firm's own details, widened
+-- ============================================================================================
+--
+-- At the firm's request: "we're going to need more fields in the library ... separate bank and
+-- branch code ... the telephone numbers ... physical address" -- and a SECOND bank account,
+-- because "there's also an account that is still outstanding with our client": money owed to the
+-- firm by the client whose book it is, which is not money a debtor pays in.
+
+-- ---------------------------------------------------------------- the trust account, split apart
+--
+-- trust_bank held "Standard Bank - 051001" in one box because that is how it reads on a page. The
+-- firm's correction: "the branch code can be a different thing than the bank". A branch code is a
+-- separate thing a person copies into a separate box in their banking app, and one field made
+-- that a retyping exercise. {{firm_bank}} still merges the two joined, so a notice already
+-- written keeps printing what it printed.
+alter table public.firm_settings add column if not exists trust_branch_code text;
+-- The beneficiary name. Without it an EFT reaches the right number under the wrong name and the
+-- receiving bank may bounce it -- the account number alone was never enough to pay into.
+alter table public.firm_settings add column if not exists trust_account_name text;
+
+-- ---------------------------------------------------------- the business account, and why it is
+--                                                             a separate set of columns
+--
+-- THREE DIRECTIONS OF MONEY, THREE PLACES. A debtor pays IN to the trust account (above). A
+-- client is remitted OUT to companies.banking_details. And a client who still owes the firm its
+-- commission pays IN to the firm's own business account -- this one. They are never the same
+-- account and crossing any two of them is money in the wrong place discovered at month end.
+--
+-- Kept out of the collections merge vocabulary on purpose: a debtor notice cannot name it,
+-- because there is no field for it on that side. See MERGE_FIELDS.
+alter table public.firm_settings add column if not exists business_bank text;
+alter table public.firm_settings add column if not exists business_branch_code text;
+alter table public.firm_settings add column if not exists business_account_name text;
+alter table public.firm_settings add column if not exists business_account_number text;
+
+-- ------------------------------------------------------------------------ how to reach the firm
+--
+-- "Please telephone this office" was true of no number Raptor held: {{agent_phone}} is the
+-- collector's own line, and a letter that goes out under the firm's name needs the firm's.
+alter table public.firm_settings add column if not exists phone text;
+alter table public.firm_settings add column if not exists phone_alt text;
+alter table public.firm_settings add column if not exists email text;
+-- Multi-line, like debtor_address, and merged as typed. An address is written on its own lines on
+-- a letterhead and flattening it to one would print a street and a city in a single run.
+alter table public.firm_settings add column if not exists physical_address text;
+
+-- ----------------------------------------------------------- what the firm is, in its own right
+--
+-- All optional, all merely printed. Nothing derives behaviour from them -- they exist because a
+-- letterhead and an invoice carry them and the firm was retyping them into every template.
+alter table public.firm_settings add column if not exists registration_number text;
+alter table public.firm_settings add column if not exists vat_number text;
+-- The Council for Debt Collectors number, where the firm shows it on correspondence.
+alter table public.firm_settings add column if not exists council_number text;
