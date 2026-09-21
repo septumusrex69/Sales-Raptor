@@ -112,9 +112,12 @@ ok('...by putting the old row back rather than raising', /return old;/.test(sche
 /* ---------- 4. the screen says why, and lets it be fixed ---------- */
 
 ok('the card exists and is the import’s own', /export function HandoverImportCard\(/.test(card))
+/* Matched as an ELEMENT rather than as the exact string it used to be: it takes a prop now (the
+   client somebody arrived from), and an order assertion anchored to a literal that no longer
+   appears is an indexOf of -1, which sorts before everything and passes on nothing. */
+const cardAt = tab.indexOf('<HandoverImportCard')
 ok('...and sits at the top of the collections side',
-  tab.indexOf('<HandoverImportCard />') !== -1
-  && tab.indexOf('<HandoverImportCard />') < tab.indexOf('Bring the book across from Swordfish'))
+  cardAt !== -1 && cardAt < tab.indexOf('Bring the book across from Swordfish'))
 ok('the client is chosen on the screen', /Whose handover is this/.test(card))
 ok('...and the PDFs come in together', /multiple/.test(card) && /matchDocuments\(/.test(card))
 ok('every row can be typed into', /onBlur=\{/.test(card))

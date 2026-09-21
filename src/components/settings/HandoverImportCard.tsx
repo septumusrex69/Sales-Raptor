@@ -60,7 +60,7 @@ async function readSheet(file: File): Promise<(string | null)[][]> {
  * a corrected cell is judged by the code that judged the file — the screen cannot go on refusing
  * a row for something already fixed.
  */
-export function HandoverImportCard() {
+export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | null } = {}) {
   const { companies, deals } = useAppStore()
   /* A CLIENT IS ONE WITH A CODE OR A WON DEAL, which is how CompanyDetail decides it too. A list
      of every company would offer the prospects a handover cannot come from. */
@@ -70,7 +70,24 @@ export function HandoverImportCard() {
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [companies, deals])
 
+  /*
+   * THE CLIENT CAN ARRIVE WITH THE PERSON, from "Upload a batch" on that client's own page.
+   *
+   * Seeded in an effect rather than in useState, because `clients` comes out of AppStore and is
+   * EMPTY on the first render while the tables load. Seeded from the initial value, the id would
+   * be thrown away as unknown a moment before the client it names turns up.
+   *
+   * AND ONLY IF IT IS A CLIENT WE WOULD OFFER. A <select> whose value matches no <option> draws
+   * blank while the state says otherwise -- the screen would show "Choose a client…" and the
+   * Hold button would be enabled, which is the worst of both.
+   */
   const [companyId, setCompanyId] = useState('')
+  const [seeded, setSeeded] = useState(false)
+  useEffect(() => {
+    if (seeded || !forCompanyId || clients.length === 0) return
+    if (clients.some((c) => c.id === forCompanyId)) setCompanyId(forCompanyId)
+    setSeeded(true)
+  }, [forCompanyId, clients, seeded])
   const [sheet, setSheet] = useState<File>()
   const [pdfs, setPdfs] = useState<File[]>([])
   const [plan, setPlan] = useState<HandoverPlan | null>(null)

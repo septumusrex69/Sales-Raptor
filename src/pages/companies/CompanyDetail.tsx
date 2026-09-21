@@ -685,7 +685,7 @@ export function CompanyDetail() {
             */}
             {isClient && (
               <RecordAction icon={Upload} label="Upload a batch" primary
-                onClick={() => navigate('/settings?tab=Data%20Import')}
+                onClick={() => navigate(`/settings?tab=Data+Import&client=${company.id}`)}
                 title="Read a handover sheet and its PDFs, and check it before anything is written" />
             )}
             {isClient && (
@@ -755,7 +755,8 @@ export function CompanyDetail() {
             <div className="space-y-5">
               {/* Above the deals: for a debt collection client this IS the relationship. What
                   they signed is one line on a deal; what they actually send is the work. */}
-              <HandoverBook company={company} onUpload={() => navigate('/settings?tab=Data%20Import')} />
+              <HandoverBook company={company}
+                onUpload={() => navigate(`/settings?tab=Data+Import&client=${company.id}`)} />
               {/* Notes in the middle, and still on their own tab — both places, at the firm's
                   asking. Here they are capped at five with a "show more"; the tab is where you
                   go for the lot. */}

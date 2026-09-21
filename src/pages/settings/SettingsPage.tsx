@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
@@ -29,8 +30,34 @@ import { formatCurrency, TODAY } from '../../data/mockData'
 const TABS = ['Profile', 'Appearance', 'Users', 'Teams', 'Targets', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations', 'Data Import'] as const
 type Tab = (typeof TABS)[number]
 
+const isTab = (v: string | null): v is Tab => TABS.includes((v ?? '') as Tab)
+
 export function SettingsPage() {
-  const [tab, setTab] = useState<Tab>('Profile')
+  /*
+   * THE TAB IS IN THE URL, so another screen can send somebody straight to one.
+   *
+   * THE FIRM: "when I go to Bredell Ferreira as a client and I say upload a batch, it takes me
+   * here" -- here being Profile. The button already linked to ?tab=Data Import; this page held
+   * the tab in a useState seeded with 'Profile' and never looked at the query string, so the
+   * link was right and landed nowhere. A link that silently ignores half of itself is worse than
+   * no link, because it reads as the app losing your place.
+   *
+   * A tab nobody recognises falls back to Profile rather than rendering an empty pane.
+   */
+  const [params, setParams] = useSearchParams()
+  const fromUrl = params.get('tab')
+  const tab: Tab = isTab(fromUrl) ? fromUrl : 'Profile'
+
+  /* Clicking a tab REPLACES rather than pushes: twelve tabs clicked in a row should not mean
+     twelve taps of Back to leave the page. Arriving by link keeps its own history entry. */
+  const setTab = (next: Tab) => {
+    const keep = new URLSearchParams(params)
+    keep.set('tab', next)
+    /* The client only means anything to Data Import; carrying it onto Teams would put a stale
+       company in the URL of a screen that has never heard of one. */
+    if (next !== 'Data Import') keep.delete('client')
+    setParams(keep, { replace: true })
+  }
 
   return (
     <div className="flex gap-6">
@@ -57,7 +84,7 @@ export function SettingsPage() {
         {tab === 'Rejection Reasons' && <StringListTab title="Rejection Reasons" initial={REJECTION_REASONS} />}
         {tab === 'Notifications' && <NotificationsTab />}
         {tab === 'Integrations' && <IntegrationsTab />}
-        {tab === 'Data Import' && <DataImportTab />}
+        {tab === 'Data Import' && <DataImportTab forCompanyId={params.get('client')} />}
       </div>
     </div>
   )

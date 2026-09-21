@@ -123,7 +123,7 @@ type SourceKey = (typeof SOURCES)[number]['key']
 type Files = Partial<Record<SourceKey, File>>
 type Phase = { step: string; done: number; total: number } | null
 
-export function DataImportTab() {
+export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }) {
   const { currentUser } = useAuth()
   const { users } = useAppStore()
   const [files, setFiles] = useState<Files>({})
@@ -281,7 +281,7 @@ export function DataImportTab() {
       */}
       {side === 'collections' && (
       <>
-      <HandoverImportCard />
+      <HandoverImportCard forCompanyId={forCompanyId} />
 
       <Card>
         <CardHeader
