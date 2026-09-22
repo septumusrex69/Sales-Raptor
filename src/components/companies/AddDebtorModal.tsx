@@ -1,5 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
+import { DictateButton } from '../ui/Dictate'
 import { suggestReference, validateNewDebtor, type NewDebtorInput, type Problem } from '../../lib/newDebtor'
 
 /**
@@ -19,7 +20,8 @@ export function AddDebtorModal({ companyName, existingReferences, clientCode, bu
   busy: boolean
   error: string | null
   onClose: () => void
-  onSave: (input: NewDebtorInput) => void
+  /** The note is separate: it is not part of the account, it goes onto its timeline. */
+  onSave: (input: NewDebtorInput, note: string | null) => void
 }) {
   const today = new Date().toISOString().slice(0, 10)
   const suggested = useMemo(
@@ -32,6 +34,7 @@ export function AddDebtorModal({ companyName, existingReferences, clientCode, bu
     clientReference: '',
     firstName: '',
     surname: '',
+    debtorKind: 'individual',
     idNumber: '',
     capital: '',
     handoverDate: today,
@@ -41,6 +44,12 @@ export function AddDebtorModal({ companyName, existingReferences, clientCode, bu
     mobile: '', workPhone: '', altNumber: '', email: '', address: '', employer: '',
     kin1Name: '', kin1Phone: '', kin2Name: '', kin2Phone: '',
   })
+  /*
+   * A NOTE, AT THE FIRM'S ASKING: "at the add a debtor, there should be a note as well, option
+   * for make a note." Kept out of NewDebtorInput because it is not part of the account -- it goes
+   * onto the account's own timeline afterwards, the same place the import writes its notes.
+   */
+  const [note, setNote] = useState('')
   // Problems appear once, on submit. Marking a field wrong while somebody is still typing in it
   // is just shouting at them for not having finished.
   const [shown, setShown] = useState<Problem[]>([])
@@ -48,12 +57,13 @@ export function AddDebtorModal({ companyName, existingReferences, clientCode, bu
   const set = (k: keyof NewDebtorInput) => (e: { target: { value: string } }) =>
     setForm((f) => ({ ...f, [k]: e.target.value }))
   const problemFor = (k: keyof NewDebtorInput) => shown.find((p) => p.field === k)?.message
+  const isCompany = form.debtorKind === 'company'
 
   function submit(e: FormEvent) {
     e.preventDefault()
     const problems = validateNewDebtor(form, today)
     setShown(problems)
-    if (problems.length === 0) onSave(form)
+    if (problems.length === 0) onSave(form, note.trim() || null)
   }
 
   return (
@@ -88,16 +98,63 @@ export function AddDebtorModal({ companyName, existingReferences, clientCode, bu
             <input className={inputClass} value={form.clientReference} onChange={set('clientReference')} />
           </Field>
 
-          <Field label="First name" problem={problemFor('firstName')}>
-            <input className={inputClass} value={form.firstName} onChange={set('firstName')} />
-          </Field>
-          <Field label="Surname" required problem={problemFor('surname')}>
-            <input className={inputClass} value={form.surname} onChange={set('surname')} />
-          </Field>
+          {/*
+            PERSON OR BUSINESS, ASKED FIRST, at the firm's instruction: "when you add a debtor,
+            remember we have to account for a company as well -- person or a company or a
+            business. And then you would say, add a debtor: okay, this debtor is an individual or
+            a person."
+            
+            IT CHANGES THE FIELDS UNDER IT AND THAT IS WHY IT IS FIRST. A company has no first
+            name and no ID number; it has a registration number, and asking a company for a
+            thirteen-digit ID is how a registration number ends up in the ID column -- which is
+            what the old sheet did on its own, in all 45 rows.
+
+            THE DATABASE'S WORDS ARE 'individual' AND 'company'; the screen says Person and
+            Business, which is what the handover sheet asks a client. Two vocabularies for one
+            distinction, and the screen speaks the firm's.
+          */}
+          <div className="col-span-2">
+            <Field label="Person or business" required problem={problemFor('debtorKind')}>
+              <div className="flex gap-2">
+                {([['individual', 'Person'], ['company', 'Business']] as const).map(([value, label]) => (
+                  <button key={value} type="button"
+                    onClick={() => setForm((f) => ({ ...f, debtorKind: value }))}
+                    className={`flex-1 text-sm font-medium rounded-lg border px-3 py-2 ${
+                      form.debtorKind === value
+                        ? 'border-gold-500 bg-gold-50 text-navy-950'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          </div>
+
+          {!isCompany && (
+            <Field label="First name" problem={problemFor('firstName')}>
+              <input className={inputClass} value={form.firstName} onChange={set('firstName')} />
+            </Field>
+          )}
+          <div className={isCompany ? 'col-span-2' : undefined}>
+            <Field label={isCompany ? 'Registered name' : 'Surname'} required
+              problem={problemFor('surname')}>
+              <input className={inputClass} value={form.surname} onChange={set('surname')} />
+            </Field>
+          </div>
 
           <div className="col-span-2">
-            <Field label="ID number" problem={problemFor('idNumber')} hint="checked against the ID check digit">
-              <input className={inputClass} value={form.idNumber} onChange={set('idNumber')} inputMode="numeric" maxLength={13} />
+            {/*
+              ONE COLUMN, TWO MEANINGS, decided by the kind -- which is how debtor_id_number
+              already works on the account (see accountBook.ts). Labelled for what is being asked
+              for, because "ID number" over a box somebody is typing a CK number into is the
+              label doing the opposite of its job.
+            */}
+            <Field label={isCompany ? 'Registration number' : 'ID number'}
+              problem={problemFor('idNumber')}
+              hint={isCompany ? 'e.g. 2016/210735/07' : 'checked against the ID check digit'}>
+              <input className={inputClass} value={form.idNumber} onChange={set('idNumber')}
+                inputMode={isCompany ? 'text' : 'numeric'}
+                maxLength={isCompany ? 30 : 13} />
             </Field>
           </div>
 
@@ -161,6 +218,27 @@ export function AddDebtorModal({ companyName, existingReferences, clientCode, bu
           <Field label="Number" problem={problemFor('kin2Phone')}>
             <input className={inputClass} value={form.kin2Phone} onChange={set('kin2Phone')} inputMode="tel" />
           </Field>
+        </div>
+
+        {/*
+          A NOTE, at the firm's asking: "at the add a debtor, there should be a note as well,
+          option for make a note."
+
+          LAST, BECAUSE IT IS ABOUT EVERYTHING ABOVE IT. An account taken over the phone arrives
+          with things that fit in no box -- what the client said about the debtor, why the ID is
+          missing, what was promised -- and until now the only way to record them was to open the
+          account afterwards and remember to. It goes onto the account's own timeline, which is
+          where the import already writes its notes, so the collector who gets it reads one thing.
+
+          DICTATED OR TYPED. A spoken note is two or three sentences where a typed one is four
+          words, and this is the moment somebody has the client on the telephone.
+        */}
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mt-5 mb-2">A note</p>
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3}
+          placeholder="Anything the collector should know before the first call — optional"
+          className={`${inputClass} resize-none`} />
+        <div className="mt-1.5">
+          <DictateButton size="small" value={note} onChange={setNote} />
         </div>
 
         {error && (

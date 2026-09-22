@@ -85,6 +85,8 @@ const mailSent = []
 const feesRaised = []
 /** Notes written onto opened accounts, so the per-row note can be proved to still land. */
 const notesWritten = []
+/** What the import put on the CLIENT's own timeline. See importNote.ts. */
+const clientNotes = []
 /** The batch rows the approval created. A query now hangs off one, so its id has to be real. */
 const handoversCreated = []
 const DRAFT = {
@@ -191,6 +193,10 @@ const handlers = [
   }],
   [(u, r) => /account_fees/.test(u) && r.method() === 'POST', (u, r) => {
     feesRaised.push(r.postData() ?? '')
+    return { body: [] }
+  }],
+  [(u, r) => /\/rest\/v1\/activities/.test(u) && r.method() === 'POST', (u, r) => {
+    clientNotes.push(JSON.parse(r.postData() ?? '{}'))
     return { body: [] }
   }],
   [(u, r) => /account_notes/.test(u) && r.method() === 'POST', (u, r) => {
@@ -973,6 +979,30 @@ try {
   /* A category says why the DEBTOR objects, so it means nothing here and the database refuses it
      on any kind but a dispute. */
   t.check('...and no dispute category', queriesRaised[0]?.category ?? null, null)
+
+  /*
+   * ---- AND THE IMPORT IS NOTED ON THE CLIENT'S OWN RECORD ----
+   *
+   * THE FIRM: "in the notes section of the client, I don't see any notes made of any imports that
+   * I've made. Of course that's important -- that a handover has been received and imported, this
+   * is how many accounts have been imported, just a quick description. And so collections have
+   * been added, and then obviously the query that has been logged."
+   *
+   * Everything else an import writes is filed against an ACCOUNT, so the one place somebody looks
+   * first said "No activity recorded yet" over a book that had just grown. The sentence itself is
+   * checked beside this folder; what only a browser can show is that the request goes out at all,
+   * against the right company, on a real import.
+   */
+  t.check('the import is noted on the client', clientNotes.length, 1)
+  t.check('...against the client whose book it is', clientNotes[0]?.company_id, COMPANY_ID)
+  t.check('...as a note rather than a call or an email', clientNotes[0]?.type, 'Note')
+  t.ok(`...naming their own sheet (${clientNotes[0]?.subject ?? '(none)'})`,
+    /Handover imported: handover\.csv/.test(clientNotes[0]?.subject ?? ''))
+  t.ok(`...saying what opened (${clientNotes[0]?.notes ?? '(none)'})`,
+    /account(s)? (was|were) opened/.test(clientNotes[0]?.notes ?? ''))
+  /* The half the firm asked for by name: whether the client has actually been told. */
+  t.ok('...and that the client was told',
+    /query has been raised/.test(clientNotes[0]?.notes ?? ''))
 
   /* THE EMAIL. Written to be forwarded, so the liaison does not have to rewrite it. */
   t.check('one email goes to the liaison', mailSent.length, 1)

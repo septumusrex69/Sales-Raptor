@@ -47,6 +47,7 @@ import { HandoverBook } from '../../components/companies/HandoverBook'
 import type { Company, Contact, ProductService } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
 import { summaryLine } from '../../lib/summaryLine'
+import { supabase } from '../../lib/supabase'
 
 type ClientTab = 'Overview' | 'Emails' | 'Notes' | 'Tasks'
 
@@ -887,7 +888,7 @@ export function CompanyDetail() {
           busy={debtorBusy}
           error={debtorError}
           onClose={() => setDebtorOpen(false)}
-          onSave={async (input: NewDebtorInput) => {
+          onSave={async (input: NewDebtorInput, note: string | null) => {
             setDebtorBusy(true); setDebtorError(null)
             try {
               // Commission is the client's, not the account's, so it is inherited rather than
@@ -898,6 +899,30 @@ export function CompanyDetail() {
                 toAccountRow(input, company.id, null, await fetchClientCommissionRate(company.id).catch(() => null)),
                 (id) => toContactRows(input, id),
               )
+              /*
+                THE NOTE, ON THE ACCOUNT, at the firm's asking: "at the add a debtor, there
+                should be a note as well." Written AFTER the account because it hangs off its id,
+                and the same table and source the import writes its notes to -- so the collector
+                who gets the account reads one timeline rather than two.
+
+                A NOTE THAT FAILS IS SAID, not swallowed: it is somebody's words about a debtor
+                they have just had on the telephone, and losing it silently is losing the only
+                record of that call.
+              */
+              if (note && account.id) {
+                const { error } = await supabase.from('account_notes').insert({
+                  account_id: account.id,
+                  body: note,
+                  author_name: currentUser?.name ?? 'Added by hand',
+                  created_by: currentUser?.id ?? null,
+                  source: 'manual',
+                })
+                if (error) {
+                  setDebtorError(`The account was opened, but the note did not save: ${error.message}`)
+                  setDebtorBusy(false)
+                  return
+                }
+              }
               setDebtorOpen(false)
               navigate(`/accounts/${account.id}`)
             } catch (e) {

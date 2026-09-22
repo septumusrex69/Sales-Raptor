@@ -32,6 +32,8 @@ import { raiseQuery } from './accountQueries'
 import { createDebtorAccount, fetchAccountReferences, fetchExistingAccounts } from './accountBook'
 import { buildXlsx, toBase64, XLSX_MIME } from './xlsxWrite.ts'
 import { rejectedSheetName, rejectedSheetRows } from './rejectedSheet.ts'
+import { importNoteBody, importNoteSubject } from './importNote.ts'
+import { formatCurrency } from '../data/mockData'
 
 /* ONE LITERAL, not a concatenation: supabase-js types the result off this string, and split
    across a `+` every field comes back as GenericStringError. Learned on ROW_COLUMNS below. */
@@ -546,6 +548,10 @@ export async function approveDraft(input: {
   const noteFailures: string[] = []
   /** References opened on a substituted date of default, for the note to Communications. */
   const substituted: string[] = []
+  /** Whether the client was actually told. Said on the client's own note -- see importNote.ts. */
+  let queryRaised = false
+  /** What the accounts that actually opened are worth, for the client's own note. */
+  let openedCapital = 0
 
   /*
    * ---------------------------------------------------------------- built and checked FIRST
@@ -677,6 +683,9 @@ export async function approveDraft(input: {
     }
     openedFor.set(row.values.client_reference ?? `#${created}`, account.id)
     created += 1
+    /* Counted off the rows that actually OPENED, not off judged.totalCapital -- that is the whole
+       draft's figure and would report money for accounts that never came in. */
+    openedCapital += row.planned?.capital ?? 0
     input.onProgress?.(created, going.length)
   }
 
@@ -775,6 +784,7 @@ export async function approveDraft(input: {
            being wrong is not something any debtor pays for. */
         charge: false,
       })
+      queryRaised = true
     } catch (e) {
       problems.push(`The client query was not raised: ${e instanceof Error ? e.message : String(e)}`)
     }
@@ -873,6 +883,45 @@ export async function approveDraft(input: {
       problems.push('Communications was not notified about the substituted dates of default: '
         + `${e instanceof Error ? e.message : String(e)}`)
     }
+  }
+
+  /*
+   * ---------------------------------------------------------------- and on the CLIENT's record
+   *
+   * THE FIRM: "in the notes section of the client, I don't see any notes made of any imports that
+   * I've made. Of course that's important -- that a handover has been received and imported, this
+   * is how many accounts have been imported, just a quick description. And so collections have
+   * been added, and then obviously the query that has been logged."
+   *
+   * EVERYTHING ELSE AN IMPORT WRITES IS FILED AGAINST AN ACCOUNT -- a note per debtor, a query on
+   * the batch, a notice to Communications. So the one place a person looks first to ask "what did
+   * we get from them in September" said "No activity recorded yet" while the book had just grown
+   * by five accounts.
+   *
+   * LAST, AND NEVER AT THE ACCOUNTS' EXPENSE. It is a record of what happened, so it is written
+   * after the thing it records; a timeline entry that failed is worth reporting and is not worth
+   * losing an import over.
+   */
+  try {
+    const { error } = await supabase.from('activities').insert({
+      type: 'Note',
+      user_id: me.user?.id ?? null,
+      company_id: judged.draft.companyId,
+      subject: importNoteSubject(judged.draft.filename),
+      notes: importNoteBody({
+        created,
+        capital: formatCurrency(openedCapital),
+        leftBehind: judged.rows.length - created,
+        corrections: corrections.length,
+        queryRaised,
+        substituted: substituted.length,
+      }),
+      activity_date: new Date().toISOString(),
+    })
+    if (error) throw new Error(error.message)
+  } catch (e) {
+    problems.push('The import was not noted on the client\u2019s record: '
+      + `${e instanceof Error ? e.message : String(e)}`)
   }
 
   await supabase.from('handover_drafts').update({
