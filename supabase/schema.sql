@@ -5709,3 +5709,27 @@ comment on column public.companies.services is
 -- its parent's prefix is Swordfish's arrangement, left alone.
 create unique index if not exists companies_client_code_unique
   on public.companies (code) where code is not null and parent_company_id is null;
+
+-- A row with a problem has to be DECIDED before the handover can be approved.
+--
+-- THE FIRM: "if there is an issue with a handover, it should be in a pending state, and the
+-- approving cannot happen if all of the bottom things have not been sorted out. For example an ID
+-- number is not correct -- then you could say accept it, or reject it. You can also put in a note
+-- to the person working the account: the ID number is wrong and needs to be confirmed."
+--
+-- Two columns rather than a status table: the decision is about ONE row of ONE draft and has no
+-- life of its own. `excluded` stays the thing approveDraft honours, so there is one gate on the
+-- import and not two -- rejecting a row sets both, and check-handover-decision.mjs holds the
+-- invariant that a rejected row is an excluded one.
+alter table public.handover_draft_rows
+  add column if not exists decision text
+    check (decision in ('accepted', 'rejected')),
+  add column if not exists note text;
+
+comment on column public.handover_draft_rows.decision is
+  'accepted or rejected by a person, where the row carried a problem. Null means undecided, which '
+  'blocks approval. A refused row can only be rejected or corrected, never accepted.';
+
+comment on column public.handover_draft_rows.note is
+  'What to tell the collector who gets the account: "the ID number is wrong and needs to be '
+  'confirmed". Written onto the account as a note when the handover is approved.';

@@ -10,9 +10,11 @@ import { planHandover, type HandoverPlan } from '../../lib/handoverImport.ts'
 import { matchDocuments, type MatchPlan } from '../../lib/documentMatch.ts'
 import { HANDOVER_COLUMNS } from '../../lib/handoverSheet.ts'
 import {
-  approveDraft, discardDraft, fetchDraft, fetchOpenDrafts, saveDraft, updateDraftRow,
+  acceptDraftRow, approveDraft, clearDraftRowDecision, discardDraft, fetchDraft, fetchOpenDrafts,
+  rejectDraftRow, saveDraft, updateDraftRow,
   type HandoverDraft, type JudgedDraft,
 } from '../../lib/handoverDraft'
+import { canAccept, type Decision } from '../../lib/handoverDecision.ts'
 import { fetchClientCommissionRate, fetchExistingAccounts } from '../../lib/accountBook'
 import { formatCurrency } from '../../data/mockData'
 
@@ -31,6 +33,9 @@ const today = () => new Date().toISOString().slice(0, 10)
  * than a sentence under the table does, and it can be filled in.
  */
 const SHOWN = HANDOVER_COLUMNS.map((c) => c.key)
+
+/** A column's heading, by its key. Module level: the table and the decision list both need it. */
+const label = (key: string) => HANDOVER_COLUMNS.find((c) => c.key === key)?.label ?? key
 
 /*
  * NOTHING IS PINNED WHILE IT SCROLLS, and that is a retreat from something that looked better on
@@ -210,6 +215,19 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
     if (draftId) await load(draftId)
   }
 
+  /*
+   * ACCEPT, REJECT, OR PUT IT BACK. One call each, in handoverDraft.ts, because rejecting has to
+   * set BOTH the decision and `excluded` -- the decision is what the gate reads and `excluded` is
+   * what the approval honours, and a row rejected in one but not the other would be rejected on
+   * the screen and imported anyway.
+   */
+  async function decide(rowId: string, decision: Decision, note: string | null) {
+    if (decision === 'accepted') await acceptDraftRow(rowId, note)
+    else if (decision === 'rejected') await rejectDraftRow(rowId, note)
+    else await clearDraftRowDecision(rowId)
+    if (draftId) await load(draftId)
+  }
+
   async function approve() {
     if (!judged) return
     setBusy('Opening the accounts'); setError(null)
@@ -224,7 +242,12 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
         onProgress: (n, total) => setBusy(`Opening the accounts — ${n} of ${total}`),
       })
       setDone(`${result.created} accounts opened.`
-        + (result.leftBehind ? ` ${result.leftBehind} left on the handover.` : ''))
+        + (result.leftBehind ? ` ${result.leftBehind} left on the handover.` : '')
+        /* A note that did not save is worth saying: the note IS the record of what was overridden
+           and why, so losing one silently loses the reason an account was accepted. */
+        + (result.noteFailures.length
+          ? ` ${result.noteFailures.length} note(s) could not be saved: ${result.noteFailures.join('; ')}`
+          : ''))
       setJudged(null); setDraftId(null)
       await refreshDrafts()
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(null) }
@@ -246,7 +269,7 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
   if (judged) return (
     <DraftTable
       judged={judged} busy={busy} error={error}
-      onEdit={edit} onExclude={exclude} onApprove={approve}
+      onEdit={edit} onExclude={exclude} onApprove={approve} onDecide={decide}
       onBack={() => { setJudged(null); setDraftId(null) }}
       onDiscard={() => discard(judged.draft.id)} />
   )
@@ -390,6 +413,116 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
   )
 }
 
+
+/**
+ * One row's problems, and the decision they are waiting on.
+ *
+ * THE FIRM: "you could say accept it, or reject it. You can also put in a note, for example to
+ * the person working the account: the ID number is wrong, so the ID number needs to be
+ * confirmed. So that goes on the notes or the main comment."
+ *
+ * THE NOTE IS TYPED BEFORE THE DECISION, not after it, because that is the order somebody thinks
+ * in: they read what is wrong, write down what to do about it, and then say whether the account
+ * goes in. Asked for afterwards it would be a second dialog on a decision already made, and it
+ * would be skipped.
+ *
+ * ACCEPT IS NOT OFFERED ON A REFUSED ROW. There is nothing to accept -- no capital, or no date of
+ * default, or no name to address a letter from. It is corrected in the table above or it is
+ * rejected, and an Accept button on it would be offering to open a ledger that cannot be right.
+ */
+function DecisionRow({ row, busy, onAccept, onReject, onReopen }: {
+  row: JudgedDraft['rows'][number]
+  busy: string | null
+  onAccept: (note: string | null) => Promise<void>
+  onReject: (note: string | null) => Promise<void>
+  onReopen: () => Promise<void>
+}) {
+  const [note, setNote] = useState(row.note ?? '')
+  const decided = row.decision !== null
+  const problems = row.planned?.problems ?? []
+  const refused = row.planned?.refused === true
+
+  return (
+    <div className={`rounded-lg border px-3 py-2.5 ${
+      row.decision === 'rejected' ? 'border-slate-200 bg-slate-50'
+        : row.decision === 'accepted' ? 'border-gold-300 bg-gold-50/40'
+          : refused ? 'border-negative-300' : 'border-slate-200'}`}>
+      <div className="flex items-baseline gap-2 mb-1">
+        <span className={`text-xs font-medium tabular-nums shrink-0 ${
+          refused ? 'text-negative-700' : 'text-slate-500'}`}>
+          Row {row.line}
+        </span>
+        <span className="text-xs text-slate-400 truncate">
+          {row.values.client_reference ?? 'no reference'}
+          {row.values.name ? ` \u00b7 ${row.values.name}` : ''}
+        </span>
+        {decided && (
+          <span className="ml-auto text-[11px] font-medium text-slate-500">
+            {row.decision === 'accepted' ? 'Accepted' : 'Rejected'}
+          </span>
+        )}
+      </div>
+
+      <div className="space-y-0.5 mb-2">
+        {problems.map((p, i) => (
+          <p key={i} className={`text-xs ${p.level === 'refuse' ? 'text-negative-700' : 'text-slate-500'}`}>
+            {p.level === 'refuse' && <AlertTriangle size={11} className="inline mr-1 -mt-0.5" />}
+            {/* The column, so a sentence can be traced to one of forty boxes without reading it
+                twice. The cell is marked in the table as well; this is for somebody working down
+                the list rather than across the row. */}
+            {p.key && <span className="text-slate-400">{label(p.key)}: </span>}
+            {p.message}
+          </p>
+        ))}
+      </div>
+
+      {decided ? (
+        <div className="flex items-baseline gap-3">
+          {row.note && <p className="text-xs text-slate-600 min-w-0 flex-1">{row.note}</p>}
+          {/* THE WAY BACK. A decision recorded with no way to undo it is a typo nobody can fix,
+              and putting the row back to undecided holds the approval again, which is correct. */}
+          <button type="button" disabled={!!busy} onClick={() => void onReopen()}
+            className="ml-auto text-[11px] font-medium text-slate-400 hover:text-slate-600 shrink-0">
+            Change
+          </button>
+        </div>
+      ) : (
+        <>
+          <input
+            value={note}
+            disabled={!!busy}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="A note for whoever works this account \u2014 optional"
+            className="w-full rounded border border-slate-200 px-2 py-1.5 text-[13px] mb-2
+              focus:border-brand-500 focus:outline-none" />
+          <div className="flex items-center gap-2">
+            {canAccept(row) && (
+              <button type="button" disabled={!!busy}
+                onClick={() => void onAccept(note.trim() || null)}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5
+                  rounded-lg bg-gold-400 text-navy-950 border border-gold-500">
+                <Check size={13} /> Accept
+              </button>
+            )}
+            <button type="button" disabled={!!busy}
+              onClick={() => void onReject(note.trim() || null)}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5
+                rounded-lg border border-slate-200 text-slate-600 hover:border-negative-300
+                hover:text-negative-700">
+              <X size={13} /> Reject
+            </button>
+            {refused && (
+              <span className="text-[11px] text-slate-400">
+                Correct it above, or reject it \u2014 it cannot be accepted as it stands.
+              </span>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 /** What the file turned out to be, before it is held. */
 function PlanSummary({ plan, docs }: { plan: HandoverPlan; docs: MatchPlan | null }) {
   return (
@@ -437,17 +570,19 @@ function PlanSummary({ plan, docs }: { plan: HandoverPlan; docs: MatchPlan | nul
 }
 
 /** The draft itself: every row, what is wrong with it, and the boxes to fix it in. */
-function DraftTable({ judged, busy, error, onEdit, onExclude, onApprove, onBack, onDiscard }: {
+function DraftTable({
+  judged, busy, error, onEdit, onExclude, onApprove, onBack, onDiscard, onDecide,
+}: {
   judged: JudgedDraft
   busy: string | null
   error: string | null
   onEdit: (rowId: string, key: string, value: string) => Promise<void>
   onExclude: (rowId: string, excluded: boolean) => Promise<void>
   onApprove: () => Promise<void>
+  onDecide: (rowId: string, decision: Decision, note: string | null) => Promise<void>
   onBack: () => void
   onDiscard: () => Promise<void>
 }) {
-  const label = (key: string) => HANDOVER_COLUMNS.find((c) => c.key === key)?.label ?? key
   return (
     <Card>
       <CardHeader
@@ -466,16 +601,27 @@ function DraftTable({ judged, busy, error, onEdit, onExclude, onApprove, onBack,
         their reasons.
       */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
-        <button type="button" onClick={() => void onApprove()} disabled={!!busy || judged.ready === 0}
+        {/*
+          HELD UNTIL EVERY PROBLEM HAS AN ANSWER, at the firm's instruction. It used to import
+          whatever was importable and leave the rest behind, which made a warning advice somebody
+          could scroll past -- and forty-five identical warnings under a table is advice everybody
+          scrolls past.
+
+          The COUNT comes off the gate rather than off `ready`, because the two have to agree: a
+          button reading "Approve 44 handovers" on a draft that cannot be approved is the screen
+          disagreeing with itself.
+        */}
+        <button type="button" onClick={() => void onApprove()}
+          disabled={!!busy || !judged.gate.ready}
+          title={judged.gate.why ?? undefined}
           className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg
             bg-gold-400 text-navy-950 border border-gold-500 disabled:opacity-40">
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
-          {busy ?? `Approve ${judged.ready} handovers`}
+          {busy ?? `Approve ${judged.gate.importing} `
+            + `${judged.gate.importing === 1 ? 'handover' : 'handovers'}`}
         </button>
-        {judged.refused > 0 && !busy && (
-          <span className="text-xs text-slate-500">
-            {judged.refused} would be left on this handover to fix.
-          </span>
+        {judged.gate.why && !busy && (
+          <span className="text-xs text-negative-700">{judged.gate.why}</span>
         )}
         <button type="button" onClick={() => void onDiscard()} disabled={!!busy}
           className="ml-auto text-xs font-medium text-negative-700 hover:underline">
@@ -560,25 +706,21 @@ function DraftTable({ judged, busy, error, onEdit, onExclude, onApprove, onBack,
         THE REASONS, UNDER THE TABLE RATHER THAN IN IT. A cell wide enough to hold "Date of default
         could be two different days" is a table nobody can read across; the row number ties them.
       */}
-      <div className="mt-4 space-y-1.5">
-        {judged.rows.filter((r) => !r.excluded && (r.planned?.problems.length ?? 0) > 0).map((row) => (
-          <div key={row.id} className="flex gap-2 text-xs">
-            <span className={`shrink-0 tabular-nums ${row.planned?.refused ? 'text-negative-700' : 'text-slate-400'}`}>
-              Row {row.line}
-            </span>
-            <span className="min-w-0">
-              {(row.planned?.problems ?? []).map((p, i) => (
-                <span key={i} className={`block ${p.level === 'refuse' ? 'text-negative-700' : 'text-slate-500'}`}>
-                  {p.level === 'refuse' && <AlertTriangle size={11} className="inline mr-1 -mt-0.5" />}
-                  {/* The column, so a sentence can be traced to one of forty boxes without
-                      reading it twice. The cell is marked as well; this is for the person
-                      scanning the list rather than the table. */}
-                  {p.key && <span className="text-slate-400">{label(p.key)}: </span>}
-                  {p.message}
-                </span>
-              ))}
-            </span>
-          </div>
+      {/*
+        EACH ONE IS A DECISION, NOT A SENTENCE TO SCROLL PAST. THE FIRM: "currently you need to go
+        down and read that, but then you have to go back up and remove the account if there is a
+        problem ... it should be in a pending state, and the approving cannot happen if all of the
+        bottom things have not been sorted out."
+
+        So every row carrying a problem gets Accept or Reject here, where the reasons are, rather
+        than sending somebody back up a forty-column table to find the × on the right line.
+      */}
+      <div className="mt-4 space-y-3">
+        {judged.rows.filter((r) => (r.planned?.problems.length ?? 0) > 0).map((row) => (
+          <DecisionRow key={row.id} row={row} busy={busy}
+            onAccept={(note) => onDecide(row.id, 'accepted', note)}
+            onReject={(note) => onDecide(row.id, 'rejected', note)}
+            onReopen={() => onDecide(row.id, null, null)} />
         ))}
       </div>
     </Card>

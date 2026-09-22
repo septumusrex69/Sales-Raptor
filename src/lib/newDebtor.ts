@@ -91,6 +91,39 @@ export function isValidSaId(id: string): boolean {
  *
  * Returns null where there is nothing to learn from, and the field stays free text.
  */
+/**
+ * The next `count` references in the client's series, for a whole handover at once.
+ *
+ * THE FIRM, on a batch that had just been imported: "the reference numbers for the previous
+ * import — it didn't generate reference numbers for Raptor. I see the client ref, but I don't see
+ * the Raptor reference."
+ *
+ * It generated none because nothing asked it to: `toDebtorInput` reads an `account_number` column
+ * off the sheet, and a client's sheet has no reason to carry OUR reference. So 45 accounts opened
+ * with none, which is not cosmetic — the reference is what a debtor is told to quote when they
+ * pay, what a receipt is matched on, and what the duplicate check compares. With every account
+ * carrying none, the next import of the same file reported forty-five "possible duplicates of an
+ * account with no reference", which is exactly what the firm was looking at.
+ *
+ * BUILT ON suggestReference, one at a time, each answer fed back in as though it were already on
+ * the book. Anything cleverer would be a second implementation of the prefix-and-padding rule,
+ * and the two would disagree the first time a client's series did something unexpected.
+ */
+export function nextReferences(
+  existing: string[], clientCode: string | null | undefined, count: number,
+): (string | null)[] {
+  const book = [...existing]
+  const out: (string | null)[] = []
+  for (let i = 0; i < count; i += 1) {
+    const next = suggestReference(book, clientCode)
+    out.push(next)
+    /* Pushed even when null, so a client with no series AND no code returns nulls rather than
+       looping on the same answer -- the field is free text and stays empty, as it did before. */
+    if (next) book.push(next)
+  }
+  return out
+}
+
 export function suggestReference(existing: string[], clientCode?: string | null): string | null {
   const parsed: { prefix: string; digits: string }[] = []
   for (const ref of existing) {

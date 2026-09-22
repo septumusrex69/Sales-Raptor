@@ -20,12 +20,18 @@ import {
   planHandover, toDebtorInput, type HandoverPlan, type PlannedRow,
 } from './handoverImport.ts'
 import { HANDOVER_COLUMNS } from './handoverSheet.ts'
-import { toAccountRow, toContactRows } from './newDebtor.ts'
-import { createDebtorAccount, fetchExistingAccounts } from './accountBook'
+import { nextReferences, toAccountRow, toContactRows } from './newDebtor.ts'
+import {
+  noteForAccount, readiness, type Decision, type Readiness,
+} from './handoverDecision.ts'
+import { createDebtorAccount, fetchAccountReferences, fetchExistingAccounts } from './accountBook'
 
 const DRAFT_COLUMNS = 'id, company_id, filename, sheet_kind, date_order, state, handover_id, '
   + 'approved_at, approved_by, created_by, created_at, updated_at'
-const ROW_COLUMNS = 'id, draft_id, line, values, document_filename, excluded, created_at, updated_at'
+/* ONE LITERAL, NOT A CONCATENATION. supabase-js types the result off this string, so split
+   across a `+` every field came back as GenericStringError -- and check-select-columns.mjs is
+   likewise happier reading a literal. */
+const ROW_COLUMNS = 'id, draft_id, line, values, document_filename, excluded, decision, note, created_at, updated_at'
 
 export interface HandoverDraft {
   id: string
@@ -44,6 +50,10 @@ export interface DraftRow {
   values: Record<string, string | null>
   documentFilename: string | null
   excluded: boolean
+  /** Accepted or rejected by a person, where the row carried a problem. See handoverDecision.ts. */
+  decision: Decision
+  /** What to tell the collector who gets the account. */
+  note: string | null
 }
 
 /** A draft and its rows, with every row judged fresh against the current rules. */
@@ -54,6 +64,8 @@ export interface JudgedDraft {
   ready: number
   refused: number
   totalCapital: number
+  /** Whether it may be approved, and what is still waiting on a person. */
+  gate: Readiness
 }
 
 const toDraft = (r: Record<string, unknown>): HandoverDraft => ({
@@ -136,6 +148,8 @@ export async function fetchDraft(id: string, today: string): Promise<JudgedDraft
     values: (r.values ?? {}) as Record<string, string | null>,
     documentFilename: (r.document_filename as string | null) ?? null,
     excluded: r.excluded as boolean,
+    decision: ((r.decision as Decision | null) ?? null),
+    note: (r.note as string | null) ?? null,
   }))
 
   /*
@@ -168,17 +182,47 @@ export async function fetchDraft(id: string, today: string): Promise<JudgedDraft
     refused: live.filter((r) => r.planned?.refused).length,
     totalCapital: live.filter((r) => !r.planned?.refused)
       .reduce((t, r) => t + (r.planned?.capital ?? 0), 0),
+    gate: readiness(rows),
   }
 }
 
 export async function updateDraftRow(
-  id: string, patch: { values?: Record<string, string | null>; excluded?: boolean },
+  id: string,
+  patch: {
+    values?: Record<string, string | null>
+    excluded?: boolean
+    decision?: Decision
+    note?: string | null
+  },
 ): Promise<void> {
   const { error } = await supabase.from('handover_draft_rows').update({
     ...(patch.values ? { values: patch.values } : {}),
     ...(patch.excluded === undefined ? {} : { excluded: patch.excluded }),
+    ...(patch.decision === undefined ? {} : { decision: patch.decision }),
+    ...(patch.note === undefined ? {} : { note: patch.note }),
   }).eq('id', id)
   if (error) throw new Error(error.message)
+}
+
+/**
+ * Reject a row: one call, because the two things it sets must never disagree.
+ *
+ * `excluded` is what approveDraft honours, so a row rejected without it would be rejected on the
+ * screen and imported anyway -- the worst possible split. The decision is what the gate reads and
+ * what says a person has been here.
+ */
+export async function rejectDraftRow(id: string, note: string | null): Promise<void> {
+  await updateDraftRow(id, { decision: 'rejected', excluded: true, note })
+}
+
+/** Accept a row despite its problems, with a note for whoever gets the account. */
+export async function acceptDraftRow(id: string, note: string | null): Promise<void> {
+  await updateDraftRow(id, { decision: 'accepted', excluded: false, note })
+}
+
+/** Put a row back to undecided, which blocks approval again. */
+export async function clearDraftRowDecision(id: string): Promise<void> {
+  await updateDraftRow(id, { decision: null, excluded: false })
 }
 
 export async function discardDraft(id: string): Promise<void> {
@@ -208,10 +252,28 @@ export async function approveDraft(input: {
   today: string
   commissionRate: number | null
   onProgress?: (done: number, total: number) => void
-}): Promise<{ handoverId: string; created: number; leftBehind: number }> {
+}): Promise<{
+  handoverId: string
+  created: number
+  leftBehind: number
+  /** References whose note did not save. Reported rather than swallowed: the note IS the record
+   *  of what was overridden, so losing one silently loses the reason an account was accepted. */
+  noteFailures: string[]
+}> {
   const judged = await fetchDraft(input.draftId, input.today)
   if (!judged) throw new Error('That draft is no longer there.')
   if (judged.draft.state !== 'draft') throw new Error('That handover has already been approved.')
+
+  /*
+   * THE GATE IS CHECKED HERE TOO, not only on the button.
+   *
+   * The screen disables approve while a row is undecided, and a screen is not a rule: a stale tab
+   * whose draft somebody else has since edited would post an approval the firm's own condition
+   * says must not happen. Same function, so the two cannot come to different answers.
+   */
+  if (!judged.gate.ready) {
+    throw new Error(judged.gate.why ?? 'This handover is not ready to approve.')
+  }
 
   const going = judged.rows.filter((r) => !r.excluded && !r.planned?.refused)
   if (going.length === 0) throw new Error('Nothing on this handover can be imported yet.')
@@ -229,13 +291,67 @@ export async function approveDraft(input: {
   if (batchError) throw new Error(batchError.message)
   const handoverId = batch.id as string
 
+  /*
+   * OUR REFERENCE, GENERATED HERE, because nothing else was going to.
+   *
+   * THE FIRM: "it didn't generate reference numbers for Raptor. I see the client ref, but I don't
+   * see the Raptor reference." `toDebtorInput` reads an `account_number` column off the sheet,
+   * and a client's sheet has no reason to carry ours -- so every account on the first real import
+   * opened with none. The reference is what a debtor quotes when they pay and what the duplicate
+   * check compares, so 45 accounts with none reported 45 duplicates "of an account with no
+   * reference" the next time the file was read.
+   *
+   * READ AND ASSIGNED IN ONE PASS, off the book as it stands a moment before the first insert.
+   * Two people approving two handovers for one client in the same minute could still collide;
+   * that is a real race and the wrong place to solve it -- the fix is a unique index on
+   * (company_id, account_number), which is a migration and a decision about the 14 imported
+   * clients whose references may already repeat. Left to the firm rather than assumed.
+   *
+   * A REFERENCE ON THE SHEET WINS. A client who does carry ours is telling us which account this
+   * is, and generating over it would open a second account for a debt already on the book.
+   */
+  const [onBook, { data: client }] = await Promise.all([
+    fetchAccountReferences(judged.draft.companyId).catch(() => []),
+    supabase.from('companies').select('code').eq('id', judged.draft.companyId).maybeSingle(),
+  ])
+  const needing = going.filter((r) => !(r.values.account_number ?? '').trim()).length
+  const generated = nextReferences(onBook, (client?.code as string | null) ?? null, needing)
+
   let created = 0
+  let nextGenerated = 0
+  /** References whose note did not save, reported rather than swallowed. */
+  const noteFailures: string[] = []
   for (const row of going) {
     const debtor = toDebtorInput(row.values)
-    await createDebtorAccount(
+    if (!debtor.accountNumber.trim()) {
+      debtor.accountNumber = generated[nextGenerated] ?? ''
+      nextGenerated += 1
+    }
+    const account = await createDebtorAccount(
       toAccountRow(debtor, judged.draft.companyId, handoverId, input.commissionRate),
-      (accountId) => toContactRows(debtor, accountId),
+      (id) => toContactRows(debtor, id),
     )
+    /*
+     * THE NOTE, ON THE ACCOUNT. THE FIRM: "a note from admin -- the handover was accepted, but
+     * the ID number is incorrect, or there are no email addresses. That's overwritten the flag
+     * the account gave. Show it to them."
+     *
+     * Written AFTER the account rather than inside it: a note that fails is worth reporting and
+     * is not worth losing an account over, and account_notes has no update or delete policy --
+     * once it is there it is there, which is the point of putting it there.
+     */
+    const note = noteForAccount(row)
+    if (account.id && note) {
+      await supabase.from('account_notes').insert({
+        account_id: account.id,
+        body: note,
+        author_name: 'Handover import',
+        created_by: me.user?.id ?? null,
+        source: 'import',
+      }).then(({ error }) => {
+        if (error) noteFailures.push(`${row.values.client_reference ?? `row ${row.line}`}: ${error.message}`)
+      })
+    }
     created += 1
     input.onProgress?.(created, going.length)
   }
@@ -247,5 +363,5 @@ export async function approveDraft(input: {
     approved_by: me.user?.id ?? null,
   }).eq('id', input.draftId)
 
-  return { handoverId, created, leftBehind: judged.rows.length - created }
+  return { handoverId, created, leftBehind: judged.rows.length - created, noteFailures }
 }

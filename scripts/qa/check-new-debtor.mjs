@@ -7,7 +7,7 @@
  *
  *   node --experimental-strip-types scripts/qa/check-new-debtor.mjs
  */
-import { isValidSaId, suggestReference, validateNewDebtor, toAccountRow, toContactRows } from '../../src/lib/newDebtor.ts'
+import { isValidSaId, nextReferences, suggestReference, validateNewDebtor, toAccountRow, toContactRows } from '../../src/lib/newDebtor.ts'
 
 let failed = 0
 function check(name, actual, expected) {
@@ -58,6 +58,36 @@ const TODAY = '2026-09-10'
   // An existing series is the client's own convention and outranks the code, even where the two
   // disagree -- imported history is frozen, so a book numbered GPS3/ stays numbered GPS3/.
   check('an existing series beats the code', suggestReference(['GPS3/10103'], 'ACF'), 'GPS3/10104')
+}
+
+/*
+ * A WHOLE HANDOVER AT ONCE. THE FIRM, looking at 45 accounts it had just imported: "it didn't
+ * generate reference numbers for Raptor. I see the client ref, but I don't see the Raptor
+ * reference."
+ *
+ * Nothing asked it to -- the import read an `account_number` column off the client's sheet, and a
+ * client's sheet has no reason to carry ours. The reference is what a debtor quotes when they
+ * pay and what the duplicate check compares, so 45 accounts with none meant the next read of the
+ * same file reported 45 "possible duplicates of an account with no reference".
+ */
+{
+  check('a batch continues the series without repeating itself',
+    nextReferences(['ACF10085'], 'ACF', 3), ['ACF10086', 'ACF10087', 'ACF10088'])
+  check('...and starts one from the code where there is no series',
+    nextReferences([], 'BF', 3), ['BF00001', 'BF00002', 'BF00003'])
+  check('...keeping the padding the client uses', nextReferences(['AIS0009'], 'AIS', 2),
+    ['AIS0010', 'AIS0011'])
+  check('...and a prefix with a slash in it', nextReferences(['GPS3/10103'], 'GPS3', 2),
+    ['GPS3/10104', 'GPS3/10105'])
+  /* EVERY ONE DISTINCT is the whole point: forty-five accounts sharing a reference is worse than
+     forty-five with none, because a receipt would be matched to the wrong debt. */
+  const many = nextReferences(['ACF10085'], 'ACF', 45)
+  check('forty-five of them are forty-five different references', new Set(many).size, 45)
+  /* Nothing to learn from and no code gives nulls rather than looping on one answer -- the field
+     is free text and stays empty, exactly as it did before. */
+  check('no series and no code gives nothing, not the same thing twice',
+    nextReferences([], null, 2), [null, null])
+  check('none asked for is none given', nextReferences(['ACF10085'], 'ACF', 0), [])
 }
 
 /* What stops a save. */

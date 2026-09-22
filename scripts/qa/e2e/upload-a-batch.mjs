@@ -81,7 +81,7 @@ const handlers = [
       nextRowId += 1
       draftRows.push({
         id: `row-${nextRowId}`, draft_id: DRAFT_ID, line: row.line, values: row.values,
-        document_filename: row.document_filename, excluded: false,
+        document_filename: row.document_filename, excluded: false, decision: null, note: null,
         created_at: '2026-09-21T00:00:00Z', updated_at: '2026-09-21T00:00:00Z',
       })
     }
@@ -120,13 +120,19 @@ const SHEET = [
 ].join('\n')
 
 /*
- * A fuller sheet for the table: one good row, one with an amount that is not a number, and no
- * street address anywhere -- which is the shape of the file the firm actually sent.
+ * A fuller sheet: one clean row, one REFUSED (an amount that is not a number) and one merely
+ * WARNED (no email address) -- and no street address anywhere, which is the shape of the file the
+ * firm actually sent.
+ *
+ * The third row is the one that matters for the gate. Written with only the first two, there was
+ * no row that could be accepted at all -- a refusal offers no Accept, by design -- so the half of
+ * the flow the firm asked for could not be reached.
  */
 const FULL_SHEET = [
   'Your reference,Handover amount,Date of default,Person or business,Surname,Email address',
   'GPS3/10103,48250.00,18/03/2026,Person,Van Der Westhuizen,jvdw@example.co.za',
   'GPS3/10104,not money,18/03/2026,Person,Buitendag,',
+  'GPS3/10105,1200.00,18/03/2026,Person,Ndlovu,',
 ].join('\n')
 
 const server = await startServer()
@@ -254,8 +260,8 @@ try {
   /* The rows have to be ACCEPTED for this to be testing the table somebody actually uses. The
      first version of this fixture used a heading the importer did not know, so every row refused
      for having no name and the screen under test was a table of empty boxes. */
-  t.ok('the good row is accepted',
-    /1 ready/.test(await page.locator('body').innerText()))
+  t.ok('the good rows are accepted',
+    /2 ready/.test(await page.locator('body').innerText()))
 
   const headers = await page.locator('table thead th').allTextContents()
   t.ok('every column of the sheet is on the screen', headers.length >= 40)
@@ -302,6 +308,68 @@ try {
     okCell ? !/negative|gold/.test((await okCell.getAttribute('class')) ?? '') : false)
 
   await t.shot(page, 'upload-a-batch-table')
+
+  /*
+   * THE HANDOVER IS HELD UNTIL EVERY PROBLEM HAS AN ANSWER.
+   *
+   * THE FIRM: "it should be in a pending state, and the approving cannot happen if all of the
+   * bottom things have not been sorted out. For example an ID number is not correct -- then you
+   * could say accept it, or reject it. You can also put in a note to the person working the
+   * account."
+   *
+   * The second row of the fixture has an amount that is not a number (a refusal) and no email (a
+   * warning), so two rows are waiting.
+   */
+  const approve = page.getByRole('button', { name: /Approve \d+ handover/ })
+  t.check('approve is on the screen', await approve.count(), 1)
+  t.check('...and is held', await approve.isDisabled(), true)
+  const heldText = await page.locator('body').innerText()
+  t.ok('...saying which rows it is waiting for', /needs? a decision/.test(heldText))
+  /*
+   * AND ITS COUNT IS HONEST WHILE IT IS HELD. This is the only moment the two numbers differ:
+   * `ready` counts the warned row because nothing refuses it, and the gate does not because
+   * nobody has decided it yet. Asserted after the decisions instead, both read 2 and the
+   * assertion could not tell the old behaviour from the new one.
+   */
+  t.ok('...and offers only what is actually settled',
+    /Approve 1 handover\b/.test(await approve.innerText()))
+
+  /* A REFUSED ROW OFFERS NO ACCEPT. There is nothing to accept: it has no amount. */
+  const rejects = page.getByRole('button', { name: 'Reject', exact: true })
+  const accepts = page.getByRole('button', { name: 'Accept', exact: true })
+  t.check('every waiting row can be rejected', await rejects.count(), 2)
+  t.check('...but only the one that could be imported can be accepted', await accepts.count(), 1)
+
+  /*
+   * ACCEPT THE WARNED ROW, WITH A NOTE, which is the firm's own example.
+   *
+   * SCOPED TO THE SAME CARD AS THE BUTTON. Every waiting row has a note box, and taking the first
+   * one on the page filled the REFUSED row's note and then accepted a different row with nothing
+   * in it -- green on the accept, silent on the note, and the assertion below is what caught it.
+   */
+  const acceptCard = page.locator('div.rounded-lg.border').filter({ has: accepts.first() }).last()
+  await acceptCard.getByPlaceholder(/A note for whoever works this account/)
+    .fill('Confirm the email address with the client.')
+  await acceptCard.getByRole('button', { name: 'Accept', exact: true }).click()
+  await page.waitForTimeout(700)
+  t.check('accepting records the note', await page.locator('text=Confirm the email address with the client.').count(), 1)
+  t.ok('...and says so', /Accepted/.test(await page.locator('body').innerText()))
+  /* One down, one to go: the refusal still holds it. */
+  t.check('still held while the other row waits', await approve.isDisabled(), true)
+
+  await rejects.first().click()
+  await page.waitForTimeout(700)
+  t.check('with everything decided, approve is offered', await approve.isDisabled(), false)
+  /* AND THE COUNT AGREES WITH THE GATE. A button offering to import accounts it is refusing to
+     import is the screen disagreeing with itself. */
+  t.ok('...for the rows that will actually open',
+    /Approve 2 handover/.test(await approve.innerText()))
+
+  /* A decision can be taken back, and taking it back holds the handover again -- a decision with
+     no way to undo it is a typo nobody can fix. */
+  await page.getByRole('button', { name: 'Change', exact: true }).first().click()
+  await page.waitForTimeout(700)
+  t.check('changing a decision holds it again', await approve.isDisabled(), true)
 
   /* NOTHING ON THIS SCREEN SAYS ANYTHING IS POSTED. The firm: "we will never be posting
      something. Never ever we will post a letter. We will send everything via email." */

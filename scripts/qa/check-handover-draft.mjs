@@ -125,13 +125,30 @@ ok('...and a row can be left out without being deleted', /onExclude\(/.test(card
 ok('the reasons are shown against the row number', /Row \{row\.line\}/.test(card))
 
 /*
- * APPROVE IS OFFERED WHILE ROWS ARE STILL REFUSED, and says how many it would leave behind.
- * Holding a whole batch until every row is perfect is how a client waits a week for 194 good
- * accounts because six have no date of default.
+ * APPROVE IS HELD UNTIL EVERY PROBLEM HAS AN ANSWER, and this file asserted the opposite until
+ * the firm said otherwise.
+ *
+ * It used to import whatever was importable and leave the rest behind, on the argument that
+ * holding a whole batch until every row is perfect is how a client waits a week for 194 good
+ * accounts because six have no date of default. That argument was sound about REFUSALS and wrong
+ * about the screen it produced: forty-five identical warnings under a table, none of which
+ * anybody had to do anything about.
+ *
+ * THE FIRM: "it should be in a pending state, and the approving cannot happen if all of the
+ * bottom things have not been sorted out ... you could say accept it, or reject it."
+ *
+ * The 194 good accounts still go in -- rejecting the six takes six clicks, and the difference is
+ * that somebody has now SEEN them. See check-handover-decision.mjs for the gate itself.
  */
-ok('approve is offered while some rows are still refused',
-  /would be left on this handover to fix/.test(card))
-ok('...and is refused only when nothing at all is ready', /judged\.ready === 0/.test(card))
+ok('approve is held until nothing is waiting on a person', /judged\.gate\.ready/.test(card))
+ok('...and says which rows it is waiting for', /judged\.gate\.why/.test(card))
+/* The count beside the button comes off the gate, so the button cannot offer to import a number
+   of accounts it is simultaneously refusing to import. */
+ok('...and counts what it would import off the same gate', /judged\.gate\.importing/.test(card))
+/* Each problem is answerable where it is written, rather than sending somebody back up a
+   forty-column table to find the right row. */
+ok('every problem offers a decision beside it', /<DecisionRow/.test(card))
+ok('...with a note for whoever works the account', /A note for whoever works this account/.test(card))
 
 /* ---------- 5. a draft row opens the account it describes ---------- */
 
