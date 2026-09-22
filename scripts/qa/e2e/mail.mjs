@@ -109,6 +109,28 @@ const handlers = [
       if (has('read_at=is.null')) rows = rows.filter((m) => !m.read_at)
 
       /*
+       * AND THE SEARCH TERM, which this stub used to ignore completely.
+       *
+       * Every row came back whatever was typed, so the box could be tested for being ON SCREEN
+       * and never for narrowing anything -- and the empty result, which is a state of its own on
+       * this page, could not be reached at all. fetchMail writes the term as an `or` of three
+       * ilikes; the same three are applied here.
+       */
+      /*
+       * PostgREST writes the wildcard as % (url-encoded) and some clients as *; both are read.
+       * A space arrives as %20 or as +, and a term read with the + still in it matches nothing --
+       * "Debt+collection" against "Debt collection enquiry" -- which looks exactly like a search
+       * that has stopped working. decodeURIComponent does not undo +, so it is undone here.
+       */
+      const term = /or=\(from_address\.ilike\.[%*]([^%*,)]+)[%*]/
+        .exec(decodeURIComponent(u))?.[1]?.replace(/\+/g, ' ')
+      if (term) {
+        const needle = term.toLowerCase()
+        rows = rows.filter((m) => [m.from_address, m.subject, m.from_name]
+          .some((f) => (f ?? '').toLowerCase().includes(needle)))
+      }
+
+      /*
        * THE PAGE SIZE IS HONOURED, or the control that sets it cannot be tested. fetchMail asks
        * for one row PAST the page so it can tell whether there is more without a second count --
        * a stub that returns everything makes every page size look identical and "Show 25" look
@@ -282,6 +304,99 @@ try {
   t.ok('the list is still beside the message',
     await page.getByText('Request for information').first().isVisible())
   await t.shot(page, '22a-mail-reading-pane')
+
+  /*
+   * ---- AND YOU CAN ACTUALLY TYPE IN IT ----
+   *
+   * THE FIRM, on the box in the photograph: "this search function here, I can't type something
+   * out -- I press one letter and then it goes away, and then if I do anything else I can't
+   * search properly."
+   *
+   * The search box lives INSIDE the reading pane's left column, and the pane was drawn only when
+   * `!loading`. Every keystroke re-ran the query, `loading` went true, and the pane came down
+   * taking the box with it -- so the caret was lost after the first letter and the rest of the
+   * word went nowhere. Typed one character at a time, which is the only way to see it: `fill`
+   * sets the value in one go and never reproduces it.
+   *
+   * ASSERTED ON document.activeElement, not on the value. The value survives in React state
+   * whether or not the box is still the focused element, so a value check passes on the broken
+   * code -- the input is simply a NEW input by then, with the old one's text and none of its
+   * focus. The count of boxes is asked too, since the failure was one unmounting and another
+   * appearing somewhere else.
+   */
+  const searchBox = page.getByLabel('Search your mailbox')
+  await searchBox.click()
+  const focused = () => page.evaluate(() => {
+    const el = document.activeElement
+    return el instanceof HTMLInputElement ? (el.getAttribute('aria-label') ?? '') : '(not an input)'
+  })
+  t.check('the search box takes focus when you click it', await focused(), 'Search your mailbox')
+  let lostAfter = ''
+  /*
+   * AND HOW MANY TIMES THE DATABASE IS ASKED, because the box is over a mailbox and not over a
+   * list already in the browser. One request per letter is five searches of every message the
+   * firm has for one question, and it is also what made the list rearrange itself under the
+   * words as they were typed. The typed value and the asked-for value are separate for this.
+   */
+  const searches = () => seen.filter((r) => r.startsWith('GET') && r.includes('/user_emails')
+    && /ilike/.test(decodeURIComponent(r))).length
+  for (const ch of 'agree') {
+    await page.keyboard.type(ch)
+    /* Long enough for the debounce to fire and a re-query to land, which is precisely when the
+       pane used to be pulled out from under the caret. */
+    await page.waitForTimeout(450)
+    if (!lostAfter && (await focused()) !== 'Search your mailbox') lostAfter = ch
+  }
+  t.check('typing never takes the focus off it',
+    lostAfter ? `focus was lost at "${lostAfter}"` : '', '')
+  t.check('...and the whole word arrives in the box', await searchBox.inputValue(), 'agree')
+  t.check('...and there is still only one search box', await searchBox.count(), 1)
+  t.ok('...and the search actually narrowed the list',
+    await page.getByText('Agreement and next steps').first().isVisible())
+  /*
+   * TYPED AT SPEED FOR THE COUNT, and that is not a trick to make it pass: the loop above waits
+   * out the debounce between every letter ON PURPOSE, because the focus it is testing was lost
+   * when a re-query landed. Those are two different questions and one pace cannot ask both. This
+   * is somebody typing a word, which is what the debounce is for.
+   */
+  await searchBox.fill('')
+  await page.waitForTimeout(700)
+  const searchesBefore = searches()
+  await searchBox.click()
+  for (const ch of 'agree') await page.keyboard.type(ch)
+  await page.waitForTimeout(1200)
+  const ran = searches() - searchesBefore
+  t.ok(`a word typed at speed is not five searches of the mailbox (${ran})`, ran > 0 && ran < 5)
+  t.check('...and the box still holds the word', await searchBox.inputValue(), 'agree')
+  t.check('...and still has the caret', await focused(), 'Search your mailbox')
+
+  /*
+   * AND TYPING ON PAST THE LAST MATCH KEEPS IT. This was the second half of it: an empty result
+   * swapped the pane for a page-wide empty state, so the box somebody would have corrected their
+   * search in went with it.
+   *
+   * ASSERTED ON FOCUS, NOT ON A COUNT. Counting the boxes passes on the broken code -- the pane's
+   * box is removed and the list view's box appears in its place, so there is still exactly one.
+   * It is a DIFFERENT element, which is why the caret is gone, and focus is the only thing that
+   * can tell the two apart.
+   */
+  for (const ch of 'zzzz') {
+    await page.keyboard.type(ch)
+    await page.waitForTimeout(450)
+    if (!lostAfter && (await focused()) !== 'Search your mailbox') lostAfter = `empty result ("${ch}")`
+  }
+  t.check('typing on past the last match keeps the focus too',
+    lostAfter ? `focus was lost at ${lostAfter}` : '', '')
+  t.check('a search matching nothing keeps the search box',
+    await page.getByLabel('Search your mailbox').count(), 1)
+  const emptyWords = await page.locator('body').innerText()
+  t.ok(`...and says the list is empty rather than going blank (${
+    emptyWords.replace(/\s+/g, ' ').slice(0, 300)})`,
+    /nothing matches that/i.test(emptyWords))
+  await searchBox.fill('')
+  await page.waitForTimeout(900)
+  t.ok('clearing it brings the mail back',
+    await page.getByText('Debt collection enquiry').first().isVisible())
 
   /*
    * AND IT STAYS PUT, which is the whole point and the thing source-reading cannot see. The firm:

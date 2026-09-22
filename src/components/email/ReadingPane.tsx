@@ -37,7 +37,7 @@ function readSplit(): number {
 
 export function ReadingPane<T extends { id: string }>({
   items, selectedId, onSelect, renderRow, renderDetail, renderLead, emptyDetail, listHeader,
-  fill = false,
+  listEmpty, fill = false,
 }: {
   items: T[]
   selectedId: string | null
@@ -65,6 +65,14 @@ export function ReadingPane<T extends { id: string }>({
    * that scrolls away is one you have to go back up for.
    */
   listHeader?: ReactNode
+  /**
+   * What the left column says when there are no rows.
+   *
+   * IT EXISTS SO THE PANE CAN STAY UP WITH AN EMPTY LIST. The mailbox used to swap the whole pane
+   * out for a page-wide empty state, which took the search box in listHeader down with it -- so a
+   * search that matched nothing removed the box you would have corrected it in.
+   */
+  listEmpty?: ReactNode
   /**
    * Take the height the parent gives instead of a fixed 38rem.
    *
@@ -150,6 +158,7 @@ export function ReadingPane<T extends { id: string }>({
         {/* flex-1 min-h-0 is what lets this scroll instead of growing the column past the
             pane: a flex child's default min-height is its content, and overflow never kicks in. */}
         <div className="flex-1 min-h-0 lg:overflow-y-auto divide-y divide-slate-100">
+          {items.length === 0 && listEmpty}
           {items.map((item) => (
             <div key={item.id}
               className={`flex items-start ${item.id === selectedId ? 'bg-gold-50' : 'hover:bg-slate-50'}`}>

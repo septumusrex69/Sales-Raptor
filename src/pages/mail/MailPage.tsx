@@ -193,7 +193,26 @@ export function MailPage() {
   const [settling, setSettling] = useState<MailItem | null>(null)
   const [senderRules, setSenderRules] = useState<SenderRule[]>([])
   const [emptying, setEmptying] = useState(false)
+  /*
+   * WHAT IS IN THE BOX, AND WHAT HAS BEEN ASKED OF THE DATABASE. They are not the same thing
+   * while somebody is still typing.
+   *
+   * `search` is the box. `asked` is what `load` runs on, and it follows a third of a second
+   * behind -- so a six-letter search is one query rather than six, and the list stops rearranging
+   * itself under the words as they are typed. A mailbox is searched in the database, over every
+   * message in it, and a request per keystroke is six of those for one question.
+   *
+   * THE BOX IS NEVER THE DEBOUNCED VALUE. Feeding the input `asked` would put the caret back a
+   * third of a second behind the typing, which is the other way of making a search box unusable.
+   */
   const [search, setSearch] = useState('')
+  const [asked, setAsked] = useState('')
+  useEffect(() => {
+    /* Cleared instantly: emptying the box is somebody wanting their mailbox back, not a search. */
+    if (search === '') { setAsked(''); return }
+    const t = setTimeout(() => setAsked(search), 300)
+    return () => clearTimeout(t)
+  }, [search])
   /*
    * A search looks at the WHOLE mailbox, not the tab you happen to be standing on.
    *
@@ -396,7 +415,7 @@ export function MailPage() {
         return
       }
       const res = await fetchMail({
-        userId: currentUser.id, filter, search, unreadOnly, everywhere: searchEverywhere,
+        userId: currentUser.id, filter, search: asked, unreadOnly, everywhere: searchEverywhere,
         offset: at * pageSize, limit: pageSize,
       })
       setItems(res.items)
@@ -407,7 +426,7 @@ export function MailPage() {
       // Alongside the page, so the badges track whatever the last action did.
       void countNeedsFiling(currentUser.id).then(setOutstanding).catch(() => {})
       /* Every tab, so each one can say whether anything on it is waiting to be read. */
-      void countUnreadByTab(currentUser.id, search).then(setUnreadByTab).catch(() => {})
+      void countUnreadByTab(currentUser.id, asked).then(setUnreadByTab).catch(() => {})
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       /*
@@ -425,7 +444,7 @@ export function MailPage() {
     } finally {
       setLoading(false)
     }
-  }, [currentUser, filter, search, unreadOnly, pageSize, searchEverywhere])
+  }, [currentUser, filter, asked, unreadOnly, pageSize, searchEverywhere])
 
   useEffect(() => { void load(0) }, [load])
 
@@ -860,8 +879,24 @@ export function MailPage() {
    * instead. Worked out once, here, because two copies of this condition would eventually
    * disagree and put two search boxes on the screen.
    */
-  const paneShowing = !loading && !loadFailed && filter !== 'blocked'
-    && items.length > 0 && view === 'reading'
+  /*
+   * NOT `!loading`, AND NOT `items.length > 0`, AND THAT IS THE WHOLE OF THE BUG THE FIRM HIT.
+   *
+   * THE FIRM: "this search function here, I can't type something out -- I press one letter and
+   * then it goes away, and then if I do anything else I can't search properly."
+   *
+   * `load` has `search` in its dependencies, so every keystroke re-ran it and set `loading`. With
+   * `loading` in here the pane came down on the first letter -- and the search box lives INSIDE
+   * the pane, in its left column, so the box the person was typing into was unmounted underneath
+   * them. The caret went with it and the second letter reached nothing. The same happened the
+   * moment a search matched nothing, which is worse: the box you would have corrected the search
+   * in was the thing that disappeared.
+   *
+   * So the pane stays up through both. `items` holds the previous page while the next one loads,
+   * which is what every mail client does, and an empty result is said inside the list column --
+   * see listEmpty.
+   */
+  const paneShowing = !loadFailed && filter !== 'blocked' && view === 'reading'
 
   return (
     /*
@@ -1155,11 +1190,13 @@ export function MailPage() {
           </div>
         )}
 
-        {loading ? (
-          <div className="py-14 grid place-items-center text-slate-400">
-            <Loader2 size={18} className="animate-spin" />
-          </div>
-        ) : filter === 'blocked' ? (
+        {/*
+          THE ORDER OF THESE BRANCHES IS LOAD-BEARING, and it used to open with `loading`.
+          Anything drawn behind a `loading` test is a thing that unmounts on every keystroke that
+          reaches the database -- which for the reading pane meant taking its own search box down.
+          The pane is now asked for FIRST and says inside itself that it is loading or empty.
+        */}
+        {filter === 'blocked' ? (
           /*
            * One tab for every standing decision about a sender, because they are one question
            * asked twice: what should happen to mail from this person, before anybody reads it?
@@ -1181,9 +1218,7 @@ export function MailPage() {
           </>
         ) : loadFailed ? (
           <LoadFailed onRetry={() => void load(page)} />
-        ) : items.length === 0 ? (
-          <Empty filter={filter} searching={!!search.trim()} />
-        ) : view === 'reading' ? (
+        ) : paneShowing ? (
           /*
            * Outlook's shape. The left column is summaries only: ReadingPane makes each row a
            * button, so a checkbox or a Link button nested inside it would be a control inside a
@@ -1196,6 +1231,18 @@ export function MailPage() {
             selectedId={open}
             onSelect={(m) => void toggleTo(m)}
             emptyDetail="Pick a message on the left to read it."
+            /*
+              SAID IN THE COLUMN, so the pane -- and the search box in its header -- stays up.
+              A spinner while the next page is on its way, and the tab's own empty words when it
+              really is empty. Drawn in place of the rows rather than instead of the pane.
+            */
+            listEmpty={loading ? (
+              <div className="py-14 grid place-items-center text-slate-400">
+                <Loader2 size={18} className="animate-spin" />
+              </div>
+            ) : (
+              <Empty filter={filter} searching={!!asked.trim()} />
+            )}
             listHeader={
               <MailSearchBar search={search} onSearch={setSearch}
                 unreadOnly={unreadOnly} onUnreadOnly={setUnreadOnly} unread={unread}
@@ -1318,6 +1365,12 @@ export function MailPage() {
               </div>
             )}
           />
+        ) : loading ? (
+          <div className="py-14 grid place-items-center text-slate-400">
+            <Loader2 size={18} className="animate-spin" />
+          </div>
+        ) : items.length === 0 ? (
+          <Empty filter={filter} searching={!!asked.trim()} />
         ) : (
           <>
             <ul className="divide-y divide-slate-100">

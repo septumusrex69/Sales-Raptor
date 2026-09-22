@@ -518,7 +518,29 @@ ok('...and the list is fetched at that size', /offset: at \* pageSize, limit: pa
  * AND REFETCHED WHEN IT CHANGES. A page size that only takes effect on the next filter change is
  * a control that does nothing when you press it, which is worse than not offering it.
  */
-ok('...and refetched when it changes', /\[currentUser, filter, search, unreadOnly, pageSize, searchEverywhere\]/.test(page))
+ok('...and refetched when it changes',
+  /\[currentUser, filter, asked, unreadOnly, pageSize, searchEverywhere\]/.test(page))
+/*
+ * `asked`, NOT `search`, AND THE DIFFERENCE IS THE WHOLE OF A BUG THE FIRM REPORTED.
+ *
+ * `search` is what is in the box; `asked` follows a third of a second behind. With `search` in
+ * here every keystroke re-ran the query and set `loading` -- and the search box lives inside the
+ * reading pane, which was drawn only while not loading, so the box unmounted under the person
+ * typing into it. THE FIRM: "I press one letter and then it goes away."
+ *
+ * Both halves are asserted: the box must never be fed the delayed value either, or the caret
+ * would run a third of a second behind the typing instead.
+ */
+ok('the query follows the typing rather than racing it',
+  /setTimeout\(\(\) => setAsked\(search\), \d+\)/.test(page))
+ok('...and the box itself is never the delayed value',
+  /search=\{search\} onSearch=\{setSearch\}/.test(page) && !/search=\{asked\}/.test(page))
+/*
+ * AND THE PANE DOES NOT COME DOWN WHILE IT LOADS, which is the other half. A search box drawn
+ * inside something conditional on `loading` is a search box that cannot be typed into.
+ */
+ok('the reading pane survives a load and an empty result',
+  /const paneShowing = !loadFailed && filter !== 'blocked' && view === 'reading'/.test(page))
 /* Back to the first page, or "page 4 of 50" becomes "page 4 of 200" and skips 600 messages. */
 ok('...from the first page', /setPageSize\(n\); setPage\(0\)/.test(page))
 /*
