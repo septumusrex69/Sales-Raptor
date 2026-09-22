@@ -52,6 +52,16 @@ const BY_KEY: Record<string, (message: string) => string> = {
   debtor_kind: () => 'Confirm whether this is a person or a business before anything goes out — '
     + 'it is being worked as a person, and a letter to a company is addressed differently.',
 
+  /*
+   * A DATE OF DEFAULT IN THE FUTURE is now accepted on a substitute -- three months before
+   * handover -- rather than refused. The instruction has to say that the figures ARE being
+   * calculated from a date the firm chose, because a collector quoting interest off this account
+   * is quoting off a guess until the client answers.
+   */
+  default_date: () => 'The date of default on this account is one we chose, not one the client '
+    + 'gave — interest and in duplum are both being calculated from it. Get the real date from '
+    + 'the client before quoting a settlement figure.',
+
   last_payment_date: () => 'Confirm the date of the last payment with the client. Prescription '
     + 'runs from it.',
 

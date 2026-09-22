@@ -24,6 +24,7 @@ import { HANDOVER_COLUMNS, aliasIndex, headingKey, type HandoverColumn } from '.
 /* The same ID check the by-hand form uses. Two implementations of a Luhn checksum eventually
    disagree, and the one that disagrees is whichever a person is not looking at. */
 import { isValidSaId, type NewDebtorInput } from './newDebtor.ts'
+import { substituteDefaultDate, substitutionMessage } from './defaultDateFallback.ts'
 
 /* ---------------------------------------------------------------- what a field should look like */
 
@@ -233,6 +234,15 @@ export interface PlannedRow {
   capital: number | null
   problems: RowProblem[]
   refused: boolean
+  /**
+   * The date of default to OPEN ON, where it differs from what the sheet says.
+   *
+   * Only ever set when the client's date is in the future -- see defaultDateFallback.ts. Null
+   * everywhere else, which is nearly every row. Carried on the planned row rather than written
+   * back into `values`, because `values` is what the client sent and the draft is the record of
+   * exactly that; substituting there would lose the thing the client has to correct.
+   */
+  defaultDateUsed: string | null
 }
 
 export interface HandoverPlan {
@@ -604,27 +614,32 @@ function readRow(
     refuse('capital', 'The handover amount is nought or less.')
   }
 
+  let defaultDateUsed: string | null = null
   const defaulted = parseSheetDate(values.default_date, ctx.order)
   if (!defaulted) {
     refuse('default_date', dateMessage(values.default_date, ctx.order))
   } else if (defaulted > ctx.today) {
     /*
-     * REFUSED, NOT WARNED, AT THE FIRM'S INSTRUCTION: "make it so that a date of default can't be
-     * in the future for an import. It needs to be changed."
+     * ACCEPTED ON A SUBSTITUTE, NOT REFUSED, AT THE FIRM'S INSTRUCTION: "just say that it can be
+     * accepted, but when it's accepted it will be minimum 30 days before handover. Let's make it
+     * default three months before handover."
      *
-     * It sits exactly on the line this file already draws -- a refusal is a row that cannot open
-     * a correct ledger, "no date for in duplum to run from" -- because a day that has not arrived
-     * is not one anything can run from. In duplum, prescription and interest are all measured
-     * from this date, so an account opened on a future one is wrong from its first day and wrong
-     * in three different directions.
+     * THIS REVERSES A REFUSAL PUT HERE TWO DAYS AGO, at the same firm's instruction, and the
+     * reasoning behind that refusal has not gone away: in duplum, prescription and interest are
+     * all measured from this date. What changed is who carries it. A refusal stopped the work and
+     * put the whole row back on the client; the firm would rather open the account, work it, and
+     * settle the date alongside.
      *
-     * AND IT MAKES THE TWO DOORS AGREE. validateNewDebtor has always stopped the by-hand form on
-     * this -- "A handover cannot be dated in the future" -- so the same fact was being answered
-     * two ways depending on how the account arrived, and the door that lets it through is the one
-     * that arrives forty-five rows at a time.
+     * WHICH IS ONLY DEFENSIBLE BECAUSE NOTHING ABOUT IT IS SILENT. The substitute is named in
+     * this message, so it reaches the draft table, the client's email, the batch query and the
+     * account's own note -- and approveDraft tells Communications besides.
+     *
+     * A WARNING, so the row still needs a decision before the handover can be approved. The
+     * account does not open until somebody has read this and pressed Accept.
      */
-    refuse('default_date',
-      'The date of default is in the future — in duplum and prescription both run from it.')
+    defaultDateUsed = substituteDefaultDate(ctx.today)
+    warn('default_date', substitutionMessage(
+      displayDate(values.default_date, ctx.order), displayDate(defaultDateUsed, 'day-first')))
   }
 
   const ref = values.client_reference
@@ -740,7 +755,10 @@ function readRow(
      at the second: "row 4 duplicates row 3, row 3 duplicates row 2" is a chain nobody unpicks. */
   for (const sig of signatures) if (!ctx.seenSignatures.has(sig)) ctx.seenSignatures.set(sig, line)
 
-  return { line, values, capital, problems, refused: problems.some((p) => p.level === 'refuse') }
+  return {
+    line, values, capital, problems, defaultDateUsed,
+    refused: problems.some((p) => p.level === 'refuse'),
+  }
 }
 
 /**

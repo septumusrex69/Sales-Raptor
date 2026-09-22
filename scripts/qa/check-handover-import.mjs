@@ -323,40 +323,68 @@ ok(`...saying there is no such day (${firstMessage(badDate.rows[0])})`,
 ok('...and not blaming the order it was read in',
   !/order can account/.test(firstMessage(badDate.rows[0])))
 /*
- * A DATE OF DEFAULT IN THE FUTURE IS REFUSED, NOT WARNED ABOUT.
+ * A DATE OF DEFAULT IN THE FUTURE IS ACCEPTED ON A SUBSTITUTE, NOT REFUSED.
  *
- * THE FIRM: "make it so that a date of default can't be in the future for an import. It needs to
- * be changed." It was a warning, which meant somebody could accept it and open the account.
+ * THE FIRM, reversing their own instruction of two days earlier: "just say that it can be
+ * accepted, but when it's accepted it will be minimum 30 days before handover. Let's make it
+ * default three months before handover. However, still send a notification and make a note for
+ * the client, send it to the communications department, and make a note on the system."
  *
- * Three clocks are started from this date -- in duplum, prescription, and interest -- so a row
- * dated forward is wrong from its first day and wrong in three directions at once. It is exactly
- * the line this file already draws: a refusal is a row with "no date for in duplum to run from",
- * and a day that has not arrived is not one anything can run from.
+ * The reasoning behind the refusal has not gone away -- in duplum, prescription and interest are
+ * all measured from this date. What changed is who carries it: a refusal stopped the work and put
+ * the whole row back on the client, and the firm would rather open the account, work it, and
+ * settle the date alongside. Which is only defensible because nothing about it is silent, and
+ * that is what most of this block asserts.
  */
 const future = rows(['A1', '100', '15/03/2027', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
-ok('a date of default in the future is refused', future.refused.length === 1)
-check('...and nothing from that file is ready to import', future.ready.length, 0)
-ok(`...saying why (${firstMessage(future.rows[0])})`,
+check('a date of default in the future no longer refuses the row', future.refused.length, 0)
+check('...so the account can be opened', future.ready.length, 1)
+/* A WARNING, so the row still needs a decision. It does not slip through unread. */
+check('...but it still has to be answered',
+  problemsOf(future.rows[0]).filter((p) => p.level === 'warn').map((p) => p.key), ['default_date'])
+ok(`...saying what was wrong (${firstMessage(future.rows[0])})`,
   /in the future/.test(firstMessage(future.rows[0])))
-ok('...and naming what runs from it, so it does not read as fussiness',
-  /in duplum|prescription/i.test(firstMessage(future.rows[0])))
-/* It has to be marked ON THE CELL, or the person has to guess which of forty boxes to correct. */
-check('...against the date of default itself',
-  problemsOf(future.rows[0]).filter((p) => p.level === 'refuse').map((p) => p.key), ['default_date'])
-/*
- * TODAY ITSELF IS NOT THE FUTURE. An off-by-one here refuses every account a client hands over
- * on the day it defaults, which is a normal thing for a client to do -- and the failure would
- * look like Raptor rejecting good files at random.
- */
-const dueToday = rows(['A1', '100', '21/09/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
-check('an account that defaulted today is not in the future', dueToday.refused.length, 0)
-const yesterday = rows(['A1', '100', '20/09/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
-check('nor is yesterday', yesterday.refused.length, 0)
 
 /*
- * AND THE TWO DOORS NOW AGREE. validateNewDebtor has always stopped the by-hand form on this;
- * the importer warned. The same fact answered two ways depending on how an account arrived, and
- * the door that let it through is the one that takes forty-five rows at a time.
+ * AND THE SUBSTITUTE IS NAMED IN THE MESSAGE, which is what carries it everywhere it has to go:
+ * the draft table, the client's email, the batch query, and the account's own note through
+ * noteForAccount. One sentence doing four jobs is why it has to hold BOTH dates.
+ */
+ok('...naming the date it will be opened on instead', /21\/06\/2026/.test(firstMessage(future.rows[0])))
+ok('...and the date the client actually sent', /15\/03\/2027/.test(firstMessage(future.rows[0])))
+ok('...and that the client must still confirm it',
+  /client must confirm/i.test(firstMessage(future.rows[0])))
+
+/*
+ * THE SUBSTITUTE ITSELF, carried on the planned row rather than written into `values`. The draft
+ * is the record of exactly what the client sent -- overwriting it there would erase the thing
+ * the query is about.
+ */
+check('the row carries the date it will open on', future.rows[0].defaultDateUsed, '2026-06-21')
+check('...while the sheet\u2019s own value is untouched',
+  future.rows[0].values.default_date, '15/03/2027')
+/* Every other row carries none, so a substitution cannot be applied where none was decided. */
+check('a row with a good date substitutes nothing',
+  rows(['A1', '100', '20/09/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+    .rows[0].defaultDateUsed, null)
+
+/*
+ * TODAY ITSELF IS NOT THE FUTURE. An off-by-one here substitutes a date on every account a client
+ * hands over on the day it defaults, which is a normal thing for a client to do -- and the
+ * failure would be silent, because the row would import perfectly on the wrong date.
+ */
+const dueToday = rows(['A1', '100', '21/09/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('an account that defaulted today is not in the future', dueToday.rows[0].defaultDateUsed, null)
+const yesterday = rows(['A1', '100', '20/09/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('nor is yesterday', yesterday.rows[0].defaultDateUsed, null)
+
+/*
+ * AND THE TWO DOORS NO LONGER AGREE, WHICH IS NOW THE POINT.
+ *
+ * validateNewDebtor still refuses a future handover date outright, and should: somebody typing
+ * one account by hand has the client on the telephone and can ask. An import is forty-five rows
+ * that arrived overnight from a spreadsheet, and stopping all of them to chase one date is what
+ * the firm asked us to stop doing. Asserted so the difference is deliberate rather than drift.
  */
 const blankDebtor = {
   accountNumber: '', clientReference: 'A1', firstName: '', surname: 'Dube', idNumber: '',

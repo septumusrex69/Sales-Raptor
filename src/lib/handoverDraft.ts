@@ -25,6 +25,7 @@ import {
   noteForAccount, readiness, type Decision, type Readiness,
 } from './handoverDecision.ts'
 import { batchQueryDescription, correctionEmail } from './importCorrections.ts'
+import { communicationsNotices } from './communicationsNotice.ts'
 import { raiseQuery } from './accountQueries'
 import { createDebtorAccount, fetchAccountReferences, fetchExistingAccounts } from './accountBook'
 import { buildXlsx, toBase64, XLSX_MIME } from './xlsxWrite.ts'
@@ -491,8 +492,26 @@ export async function approveDraft(input: {
   const accepted = going
   /** References whose note did not save, reported rather than swallowed. */
   const noteFailures: string[] = []
+  /** References opened on a substituted date of default, for the note to Communications. */
+  const substituted: string[] = []
   for (const row of going) {
     const debtor = toDebtorInput(row.values)
+    /*
+     * THE SUBSTITUTE DATE, WHERE THE PLANNER SET ONE. THE FIRM: "when it's accepted it will be
+     * minimum 30 days before handover -- let's make it default three months before handover."
+     *
+     * Applied HERE rather than inside toDebtorInput, because the substitute is a fact about the
+     * DAY THE HANDOVER CAME IN and toDebtorInput knows only the row. It is also why the draft's
+     * own `values` are left alone: that is what the client sent, it is what they have to correct,
+     * and overwriting it would erase the thing the query is about.
+     *
+     * handoverDate as well as the ledger's opening date -- they are one field on an account, and
+     * splitting them here would open the ledger on one date and count prescription from another.
+     */
+    if (row.planned?.defaultDateUsed) {
+      debtor.handoverDate = row.planned.defaultDateUsed
+      substituted.push(row.values.client_reference ?? `row ${row.line}`)
+    }
     if (!debtor.accountNumber.trim()) {
       debtor.accountNumber = generated[nextGenerated] ?? ''
       nextGenerated += 1
@@ -578,12 +597,14 @@ export async function approveDraft(input: {
    * also be downloaded automatically for the user."
    */
   let refusedSheet: { filename: string; contentType: string; bytes: Uint8Array } | null = null
+  /* The liaison is whoever looks after the CLIENT, which is the company's account owner — the
+     same person AccountDetail shows under "Client liaison". Read once: the corrections email
+     needs it, and so does the notice to Communications below, which is outside that block. */
+  const { data: company } = await supabase
+    .from('companies').select('name, contact_person, account_owner_id')
+    .eq('id', judged.draft.companyId).maybeSingle()
+
   if (corrections.length > 0 || notBroughtIn.length > 0) {
-    /* The liaison is whoever looks after the CLIENT, which is the company's account owner —
-       the same person AccountDetail shows under "Client liaison". */
-    const { data: company } = await supabase
-      .from('companies').select('name, contact_person, account_owner_id')
-      .eq('id', judged.draft.companyId).maybeSingle()
 
     /*
      * ONE QUERY FOR THE SHEET, NOT ONE PER ROW.
@@ -675,6 +696,48 @@ export async function approveDraft(input: {
       if (sent) problems.push(sent)
     } else {
       problems.push('Not signed in to a mailbox, so the corrections were not emailed.')
+    }
+  }
+
+  /*
+   * ---- AND COMMUNICATIONS IS TOLD, where a date of default was substituted ----
+   *
+   * THE FIRM: "still send a notification ... send it to the communications department."
+   *
+   * AFTER THE ACCOUNTS ARE OPEN, and never fatal. A notice about accounts that did not open is a
+   * lie; a notifications table that refuses must not undo an import that worked. The account's
+   * own note carries the same fact independently -- noteForAccount prints every problem under
+   * whatever was typed, and the substitution IS one of those problems -- so a bell that fails
+   * loses the prompt and not the record.
+   *
+   * Every member of every Communications team, because the question is about a client rather
+   * than a desk and a notice to one person waits while they are on leave.
+   */
+  if (substituted.length > 0) {
+    try {
+      const { data: comms } = await supabase
+        .from('profiles').select('id, teams!inner(kind)').eq('teams.kind', 'Communications')
+      const notices = communicationsNotices({
+        department: (comms ?? []).map((r) => r.id as string),
+        references: substituted,
+        clientName: (company?.name as string | null) ?? 'this client',
+        handoverId,
+        actorId: me.user?.id ?? null,
+      })
+      for (const n of notices) {
+        await supabase.rpc('notify_user', {
+          p_user_id: n.userId, p_type: n.type, p_message: n.message, p_link: n.link,
+        })
+      }
+      /* SAID ON THE SCREEN WHEN NOBODY WAS TOLD. A department with no members is a real gap and
+         the person who just ran the import is the one who can raise it. */
+      if (notices.length === 0) {
+        problems.push(`${substituted.length} account(s) opened on a substituted date of default, `
+          + 'but there is nobody on a Communications team to tell.')
+      }
+    } catch (e) {
+      problems.push('Communications was not notified about the substituted dates of default: '
+        + `${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
