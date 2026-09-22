@@ -23,6 +23,7 @@ import {
 } from '../../lib/handoverDraft'
 import { canAccept, type Decision } from '../../lib/handoverDecision.ts'
 import { columnWidthCh } from '../../lib/handoverColumnWidth.ts'
+import { downloadBytes } from '../../lib/xlsxWrite.ts'
 import { fetchClientCommissionRate, fetchExistingAccounts } from '../../lib/accountBook'
 import { formatCurrency } from '../../data/mockData'
 
@@ -299,6 +300,19 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
          allocate, and a link to an empty list reads as a bug in the import. */
       if (result.created > 0) {
         setAllocate({ handoverId: result.handoverId, count: result.created })
+      }
+      /*
+       * THE REFUSED ROWS, STRAIGHT INTO THEIR DOWNLOADS. THE FIRM: "it should also be downloaded
+       * automatically for the user."
+       *
+       * The same file the liaison was emailed, so the person who ran the import is holding what
+       * the client is holding -- and can send it on themselves if the email did not go. Only
+       * when there were refusals: an empty sheet in somebody's Downloads is a file they have to
+       * open to find out it says nothing.
+       */
+      if (result.refusedSheet) {
+        downloadBytes(result.refusedSheet.filename, result.refusedSheet.bytes,
+          result.refusedSheet.contentType)
       }
       setJudged(null); setDraftId(null)
       await refreshDrafts()

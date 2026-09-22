@@ -27,6 +27,8 @@ import {
 import { batchQueryDescription, correctionEmail } from './importCorrections.ts'
 import { raiseQuery } from './accountQueries'
 import { createDebtorAccount, fetchAccountReferences, fetchExistingAccounts } from './accountBook'
+import { buildXlsx, toBase64, XLSX_MIME } from './xlsxWrite.ts'
+import { rejectedSheetName, rejectedSheetRows } from './rejectedSheet.ts'
 
 const DRAFT_COLUMNS = 'id, company_id, filename, sheet_kind, date_order, state, handover_id, '
   + 'approved_at, approved_by, created_by, created_at, updated_at'
@@ -280,12 +282,24 @@ export async function discardDraft(id: string): Promise<void> {
  */
 async function sendCorrectionEmail(
   accessToken: string, to: string, mail: { subject: string; bodyHtml: string },
+  /**
+   * The refused rows as the client's own sheet, where there were any.
+   *
+   * THE FIRM: "those ones that were rejected, they should be attached in the email sent to the
+   * client liaison. Only the rejected ones." A client sent a list of problems has to go back to
+   * their own spreadsheet and find each row again; a client sent their sheet back with only the
+   * refused rows on it corrects the cells and sends it on.
+   */
+  attachment: { filename: string; contentType: string; content: string } | null,
 ): Promise<string | null> {
   try {
     const res = await fetch('/api/email/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({ to, subject: mail.subject, bodyHtml: mail.bodyHtml }),
+      body: JSON.stringify({
+        to, subject: mail.subject, bodyHtml: mail.bodyHtml,
+        ...(attachment ? { attachments: [attachment] } : {}),
+      }),
     })
     if (res.ok) return null
     const body = (await res.json().catch(() => ({}))) as { error?: string }
@@ -316,6 +330,14 @@ export async function approveDraft(input: {
   /** References whose note did not save. Reported rather than swallowed: the note IS the record
    *  of what was overridden, so losing one silently loses the reason an account was accepted. */
   noteFailures: string[]
+  /**
+   * The refused rows as the client's own sheet, for the screen to hand straight to the person.
+   *
+   * THE FIRM: "it should also be downloaded automatically for the user." Null when nothing was
+   * refused -- an empty sheet landing in somebody's Downloads is a file they have to open to
+   * find out it says nothing.
+   */
+  refusedSheet: { filename: string; contentType: string; bytes: Uint8Array } | null
 }> {
   const judged = await fetchDraft(input.draftId, input.today)
   if (!judged) throw new Error('That draft is no longer there.')
@@ -463,6 +485,11 @@ export async function approveDraft(input: {
     .map(asCorrection)
 
   const problems: string[] = []
+  /*
+   * Declared out here so the screen can hand it to whoever ran the import. THE FIRM: "it should
+   * also be downloaded automatically for the user."
+   */
+  let refusedSheet: { filename: string; contentType: string; bytes: Uint8Array } | null = null
   if (corrections.length > 0 || notBroughtIn.length > 0) {
     /* The liaison is whoever looks after the CLIENT, which is the company's account owner —
        the same person AccountDetail shows under "Client liaison". */
@@ -527,12 +554,36 @@ export async function approveDraft(input: {
       labelFor: (key) => HANDOVER_COLUMNS.find((c) => c.key === key)?.label ?? key,
     })
 
+    /*
+     * THE SHEET OF REFUSED ROWS, built once and used three ways: attached to the liaison's email,
+     * handed back to whoever ran the import, and offered again from the query.
+     *
+     * NOTHING IS STORED. The firm asked for it to be attached, downloaded, on the ticket, and
+     * "once the query has been resolved it can be erased" -- and a file generated from the frozen
+     * draft each time satisfies all four without a stored copy to go stale or to erase. The draft
+     * IS the record of what the client sent; a file written beside it would be a second one.
+     */
+    refusedSheet = notBroughtIn.length > 0
+      ? {
+        filename: rejectedSheetName(judged.draft.filename),
+        contentType: XLSX_MIME,
+        bytes: buildXlsx('To correct', rejectedSheetRows(notBroughtIn)),
+      }
+      : null
+
     if (!liaisonEmail) {
       /* SAID, NOT SWALLOWED. A client with no liaison on it is a real gap, and the person who
          just ran the import is the one who can fix it. */
       problems.push('No client liaison on this client, so nobody was emailed the corrections.')
     } else if (input.accessToken) {
-      const sent = await sendCorrectionEmail(input.accessToken, liaisonEmail, mail)
+      const sent = await sendCorrectionEmail(input.accessToken, liaisonEmail, mail,
+        refusedSheet
+          ? {
+            filename: refusedSheet.filename,
+            contentType: refusedSheet.contentType,
+            content: toBase64(refusedSheet.bytes),
+          }
+          : null)
       if (sent) problems.push(sent)
     } else {
       problems.push('Not signed in to a mailbox, so the corrections were not emailed.')
@@ -553,5 +604,6 @@ export async function approveDraft(input: {
     noteFailures,
     corrections: corrections.length + notBroughtIn.length,
     correctionProblems: problems,
+    refusedSheet,
   }
 }

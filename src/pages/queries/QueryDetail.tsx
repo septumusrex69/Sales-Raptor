@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Loader2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Download, Loader2 } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { useAuth } from '../../store/AuthContext'
 import { formatDate } from '../../data/mockData'
@@ -12,6 +12,8 @@ import {
 import { fetchDraftForHandover, type JudgedDraft } from '../../lib/handoverDraft'
 import { HANDOVER_COLUMNS } from '../../lib/handoverSheet.ts'
 import { givenFor } from '../../lib/importCorrections.ts'
+import { rejectedSheetName, rejectedSheetRows } from '../../lib/rejectedSheet.ts'
+import { buildXlsx, downloadBytes, XLSX_MIME } from '../../lib/xlsxWrite.ts'
 
 const TODAY = () => new Date().toISOString().slice(0, 10)
 
@@ -169,7 +171,26 @@ export function QueryDetail() {
       <RowTable
         title="Not brought in — the client must send these again"
         intro="No account was opened for these, so nothing is being done on them."
-        rows={notBroughtIn} />
+        rows={notBroughtIn}
+        /*
+         * THE SHEET, AGAIN, FROM HERE. THE FIRM: "it should also be in the query ticket, and once
+         * the query has been resolved it can be erased."
+         *
+         * BUILT WHEN IT IS ASKED FOR, never stored. A copy written beside the draft would be a
+         * second record of the same thing, would go stale the moment a row was corrected, and
+         * would be the thing that has to be erased. Generated from the frozen draft there is
+         * nothing to erase and nothing that can disagree with it -- and when the query closes the
+         * page stops offering it rather than something having to go and delete a file.
+         */
+        download={q.status === 'closed' || !draft ? null : () => {
+          downloadBytes(
+            rejectedSheetName(data.batch?.reference ?? 'handover'),
+            buildXlsx('To correct', rejectedSheetRows(notBroughtIn.map((r) => ({
+              values: r.values, problems: r.planned?.problems ?? [],
+            })))),
+            XLSX_MIME,
+          )
+        }} />
       <RowTable
         title="Brought in, but the client must confirm"
         intro="These are open and being worked while we wait."
@@ -193,10 +214,12 @@ function Fact({ label: name, value, tone }: { label: string; value: string; tone
  * ONE PROBLEM PER LINE, not one per row: a row with three things wrong is three things the client
  * has to fix, and folding them into one line is how the third gets missed.
  */
-function RowTable({ title, intro, rows }: {
+function RowTable({ title, intro, rows, download }: {
   title: string
   intro: string
   rows: JudgedDraft['rows']
+  /** Offered where these rows can go back to the client as a sheet. Null on a closed query. */
+  download?: (() => void) | null
 }) {
   /* Nothing at all is not worth a heading. An empty table under "the client must send these
      again" reads as a list that failed to load. */
@@ -204,7 +227,13 @@ function RowTable({ title, intro, rows }: {
   return (
     <Card padded={false}>
       <div className="p-5 pb-3">
-        <CardHeader title={title} subtitle={intro} />
+        <CardHeader title={title} subtitle={intro}
+          action={download ? (
+            <button type="button" onClick={download}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline">
+              <Download size={13} /> Send these back to the client
+            </button>
+          ) : undefined} />
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">

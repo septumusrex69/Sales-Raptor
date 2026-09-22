@@ -702,6 +702,96 @@ try {
     /GPS3\/10104/.test(mailSent[0]?.bodyHtml ?? ''))
   t.ok('...under a heading that asks for it again',
     /send these again/i.test(mailSent[0]?.bodyHtml ?? ''))
+
+  /*
+   * ---------- THE REFUSED ROWS GO BACK AS A SHEET, AND THE SHEET COMES BACK IN ----------
+   *
+   * THE FIRM: "those ones that were rejected, they should be attached in the email sent to the
+   * client liaison. Only the rejected ones."
+   *
+   * A client sent a table of problems has to go back to their own spreadsheet and find each row
+   * again. Sent their sheet back with only the refused rows on it, they fix the cells and send it
+   * on -- so the file has to be one the importer will accept, and that is the half worth proving
+   * in a browser. This uploads the attachment we just generated straight back into the import
+   * screen and reads what the planner makes of it.
+   */
+  const attached = mailSent[0]?.attachments ?? []
+  t.check('one file is attached to the liaison\u2019s email', attached.length, 1)
+  t.ok('...named for the sheet the client sent', /handover/.test(attached[0]?.filename ?? ''))
+  t.ok('...as a spreadsheet', (attached[0]?.contentType ?? '').includes('spreadsheetml'))
+
+  const corrected = Buffer.from(attached[0]?.content ?? '', 'base64')
+  t.ok('...and it is a real zip', corrected[0] === 0x50 && corrected[1] === 0x4b)
+
+  /*
+   * NOW READ IT BACK WITH THE IMPORTER. Bytes that open in Excel and bytes the importer reads are
+   * different claims, and a writer nobody reads back produces a file the client corrects and we
+   * then refuse. The unit check unzips it; only here does the real reader run.
+   */
+  /*
+   * THE STUB ANSWERS EVERY DRAFT WITH THE SAME ROWS, so anything held earlier would still be on
+   * screen and the assertions below would read it instead of the corrected sheet. Emptied here
+   * rather than keyed by draft id because that is the smaller lie: this part of the run is about
+   * one file, and written without it the round trip passed against a sheet of forty empty
+   * columns -- it was reading the first upload's rows the whole time.
+   */
+  draftRows.length = 0
+  await page.goto(`http://localhost:${PORT}/settings?tab=Data+Import&client=${COMPANY_ID}`)
+  await clientsLoaded(page)
+  await page.keyboard.press('Escape')
+  await page.setInputFiles('input[type="file"]', {
+    name: attached[0].filename,
+    mimeType: attached[0].contentType,
+    buffer: corrected,
+  })
+  /* Choosing the file only chooses it -- nothing is read until asked, which is the whole shape of
+     this screen. Written without the click, the assertion below failed against a working writer. */
+  await page.getByRole('button', { name: 'Read the sheet' }).click()
+  await page.waitForTimeout(1500)
+  await t.shot(page, 'upload-a-batch-corrected-sheet')
+  /*
+   * READ OFF THE PLAN SUMMARY, which is what this screen shows before anything is held. The rows
+   * themselves only appear after "Hold it in Raptor", and holding it here would put a second
+   * draft into a fixture that counts them -- so the assertion is on what the importer SAYS about
+   * the file, which is the claim being made anyway.
+   */
+  const readBack = await page.locator('body').innerText()
+  t.ok('the importer recognises it as our own handover sheet',
+    /firm.s own handover sheet/i.test(readBack))
+  t.ok('...with every column of it', /40 columns recognised/.test(readBack))
+  /* ONE ROW: only the refused one goes back. The two that were opened are not asked for again,
+     and a sheet that asked for them would have the client re-sending accounts already on the
+     book -- which the importer would then refuse as duplicates of themselves. */
+  t.ok('...carrying one row, the one that could not be opened',
+    /\b1\b[\s\S]{0,40}rows with something in them/.test(readBack))
+  /* Still refused, because the client has not corrected it yet -- presence before absence: a
+     file that read as nothing at all would also show no accepted rows. */
+  t.ok('...still not accepted, because nothing has been corrected yet',
+    /\b1\b[\s\S]{0,40}reasons on each row/.test(readBack))
+  /*
+   * AND THE COLUMN WE ADDED IS IGNORED ON THE WAY BACK IN. It is last so the sheet's own columns
+   * stay where they were, and unknown so the client may leave it or delete it -- the screen says
+   * as much rather than refusing the file for it.
+   */
+  t.ok('...and the column we added is not mistaken for one of theirs',
+    /not imported: What we need/.test(readBack))
+
+  /*
+   * AND THE CLIENT'S OWN VALUES CAME WITH IT. Held in Raptor so the row table is drawn, because
+   * the summary above counts rows and says nothing about what is in them -- a sheet of forty
+   * empty columns satisfies every assertion up to here and is useless to the client, who would
+   * be retyping the row rather than correcting it.
+   *
+   * Safe to hold at this point: every assertion that counts drafts has already run.
+   */
+  await page.getByRole('button', { name: 'Hold it in Raptor' }).click()
+  await page.waitForTimeout(1500)
+  const held = await page.locator('body').innerText()
+  t.ok('the row the client must correct is theirs, not a blank one', /GPS3\/10104/.test(held))
+  t.ok('...with the name that was never the problem', /Buitendag/.test(held))
+  /* Only the refused one: asking for the accounts already opened would have the client
+     re-handing over debts that are on the book. */
+  t.ok('...and not the rows that were opened', !/GPS3\/10103/.test(held))
   t.ok('...and the subject says how many need resending',
     /1 not brought in/.test(mailSent[0]?.subject ?? ''))
   /* Nothing that went out to a client may read "1 account need". */

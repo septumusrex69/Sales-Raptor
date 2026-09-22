@@ -345,6 +345,32 @@ ok('...and never off neither',
 ok('...which needed account_id to stop being required',
   /alter column account_id drop not null/.test(schema))
 
+/* ---------- the refused rows go back as a sheet ---------- */
+
+/*
+ * THE FIRM: "those ones that were rejected, they should be attached in the email sent to the
+ * client liaison. Only the rejected ones. And it should also be downloaded automatically for the
+ * user, should also be in the query ticket, and once the query has been resolved it can be
+ * erased."
+ *
+ * NOTHING IS STORED, and that is what answers the last of those four. A file written beside the
+ * draft would be a second record of the same thing, would go stale the moment a row was
+ * corrected, and would be the thing somebody has to remember to erase. Built from the frozen
+ * draft each time, there is nothing to erase and nothing that can disagree with it.
+ */
+ok('the approval builds the sheet of refused rows', /rejectedSheetRows\(notBroughtIn\)/.test(lib))
+/* ONLY the refused ones. The accepted-with-a-warning rows are open and being worked; asking the
+   client to send them again would have them re-handing over accounts already on the book. */
+ok('...from the rows that were NOT brought in', !/rejectedSheetRows\(corrections\)/.test(lib))
+ok('...and only when there were any', /notBroughtIn\.length > 0\s*\?/.test(lib))
+ok('...attached to the liaison\u2019s email', /attachments: \[attachment\]/.test(lib))
+ok('...as base64, which is how the send endpoint takes one', /toBase64\(refusedSheet\.bytes\)/.test(lib))
+/* Handed back to whoever ran the import as well, so they are holding what the client is holding
+   -- and can send it on themselves if the email did not go. */
+ok('...and handed to the person who ran the import', /downloadBytes\(result\.refusedSheet/.test(card))
+ok('...only when something was refused',
+  /if \(result\.refusedSheet\) \{/.test(card))
+
 /* ---------- a query has a page of its own ---------- */
 
 /*
@@ -367,6 +393,18 @@ ok('...which reads the sheet back off the frozen draft', /fetchDraftForHandover\
 ok('...and keeps the email\u2019s two groups', /Not brought in/.test(detail) && /must confirm/.test(detail))
 /* A draft that has been tidied away must leave the query readable rather than the page broken. */
 ok('...and survives the draft being gone', /no longer on file/.test(detail))
+/* AND THE SHEET IS OFFERED FROM HERE TOO -- built on the spot, never stored. */
+/* THE REFUSED ONES, named. `rejectedSheetRows(` alone passed with `toConfirm` handed to it --
+   which would ask the client to re-send the accounts that ARE open and being worked. */
+ok('the ticket can send the refused rows back',
+  /rejectedSheetRows\(notBroughtIn\.map\(/.test(detail))
+ok('...built when it is asked for rather than stored', /downloadBytes\(/.test(detail))
+/*
+ * "Once the query has been resolved it can be erased." A closed query stops offering it, which
+ * is the whole of erasing when nothing was written down.
+ */
+ok('...and a closed query no longer offers it',
+  /q\.status === 'closed' \|\| !draft \? null/.test(detail))
 const clientList = code(read('../../src/pages/companies/ClientQueries.tsx'))
 ok('the client page opens the query', /to=\{`\/queries\/\$\{q\.id\}`\}/.test(clientList))
 /* A batch has no debtor, so naming one would link to /accounts/null -- a page that says the
