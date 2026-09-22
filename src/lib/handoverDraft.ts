@@ -448,7 +448,7 @@ export async function approveDraft(input: {
     /* The liaison is whoever looks after the CLIENT, which is the company's account owner —
        the same person AccountDetail shows under "Client liaison". */
     const { data: company } = await supabase
-      .from('companies').select('name, account_owner_id')
+      .from('companies').select('name, contact_person, account_owner_id')
       .eq('id', judged.draft.companyId).maybeSingle()
 
     for (const [i, row] of corrections.entries()) {
@@ -482,6 +482,8 @@ export async function approveDraft(input: {
 
     const mail = correctionEmail({
       clientName: (company?.name as string | null) ?? 'this client',
+      /* Whom the liaison will be forwarding it to. Absent, the greeting simply says "Good day,". */
+      contactName: (company?.contact_person as string | null) ?? null,
       filename: judged.draft.filename,
       today: input.today,
       broughtIn: created,

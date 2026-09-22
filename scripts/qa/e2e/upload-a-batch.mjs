@@ -36,6 +36,8 @@ const CLIENT = {
   /* WHO LOOKS AFTER THE CLIENT. This is the liaison the corrections are raised with and emailed
      to -- AccountDetail reads the same column for its "Client liaison" line. */
   account_owner_id: PROFILE.id,
+  /* Whom the liaison forwards it to, so the greeting has somebody to name. */
+  contact_person: 'Thandi Nkosi',
   mandate_signed_at: '2026-02-01',
   created_at: '2026-01-01T00:00:00Z',
 }
@@ -522,7 +524,10 @@ try {
   /* THE EMAIL. Written to be forwarded, so the liaison does not have to rewrite it. */
   t.check('one email goes to the liaison', mailSent.length, 1)
   t.check('...addressed to them', mailSent[0]?.to, ADMIN.email)
-  t.ok('...naming the client', /Northbank Properties/.test(mailSent[0]?.subject ?? ''))
+  /* "Data import for <client> — <date>", at the firm's asking: it led with the client's name and
+     left the reader to work out what about it. */
+  t.ok('...saying what it is, then whose',
+    (mailSent[0]?.subject ?? '').startsWith('Data import for Northbank Properties'))
   t.ok('...with the reference in the table', /GPS3\/10105/.test(mailSent[0]?.bodyHtml ?? ''))
   t.ok('...and what the sheet left empty', /\(nothing\)/.test(mailSent[0]?.bodyHtml ?? ''))
 
@@ -540,6 +545,9 @@ try {
     /1 not brought in/.test(mailSent[0]?.subject ?? ''))
   /* Nothing that went out to a client may read "1 account need". */
   t.ok('...in the firm’s own English', !/\b1 accounts\b/.test(mailSent[0]?.bodyHtml ?? ''))
+  /* Addressed to somebody, so the liaison does not have to top and tail it before forwarding. */
+  t.ok('...and greets the person at the client',
+    /Good day Thandi Nkosi,/.test(mailSent[0]?.bodyHtml ?? ''))
 
   /*
    * AND NOTHING WAS CHARGED TO A DEBTOR. A dispute raises Annexure B item 3 because the DEBTOR

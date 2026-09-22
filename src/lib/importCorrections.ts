@@ -133,6 +133,18 @@ const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : 
  */
 export function correctionEmail(input: {
   clientName: string
+  /**
+   * The person at the client this is for, where the client has one on record.
+   *
+   * THE FIRM: "the email should be addressed to a specific person or to a specific client."
+   * It opened "Good day," at nobody — which on a message the liaison is meant to FORWARD means
+   * they have to top and tail it before sending, and a message somebody has to rewrite is one
+   * they will write themselves instead.
+   *
+   * Used exactly as it is stored. Taking the first word would greet "Mrs C Bredell" as "Mrs",
+   * and the firm types this field themselves, so what they put in it is what they want said.
+   */
+  contactName?: string | null
   filename: string
   /** Today, as an ISO day. Formatted here so the caller cannot pass a different shape. */
   today: string
@@ -145,6 +157,7 @@ export function correctionEmail(input: {
   labelFor: LabelFor
 }): CorrectionEmail {
   const { clientName, filename, toConfirm, notBroughtIn, labelFor } = input
+  const contact = (input.contactName ?? '').trim()
   const when = new Date(`${input.today}T00:00:00Z`).toLocaleDateString('en-ZA', {
     day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
   })
@@ -168,7 +181,7 @@ export function correctionEmail(input: {
   ].filter(Boolean).join('')
 
   const bodyHtml = `
-<p>Good day,</p>
+<p>Good day${contact ? ` ${esc(contact)}` : ''},</p>
 <p>We have today brought in the handover sheet <strong>${esc(filename)}</strong> for
 ${esc(clientName)}.</p>
 <ul>${summary}</ul>
@@ -185,15 +198,25 @@ ${table(
   )}
 <p>Kind regards</p>`.trim()
 
-  /* THE SUBJECT SAYS WHICH OF THE TWO, because they need different things from the client and the
-     one that needs a resend is the one worth opening the email for. */
+  /*
+   * THE SUBJECT SAYS WHAT IT IS, THEN WHOSE, THEN WHEN, at the firm's instruction: "in the
+   * subject line it should say data import for Bredell Ferreira, for example. Or this date."
+   *
+   * It read "Bredell Ferreira — handover 22 September 2026", which leads with a name and leaves
+   * somebody to work out what about it. A liaison forwarding this to a client, and the client
+   * filing it, both want the same first two words.
+   *
+   * THE COUNTS STAY ON THE END, because they are what makes it worth opening now rather than
+   * later -- and the two need different things from the client, so both are named.
+   */
   const parts = [
     notBroughtIn.length > 0 ? `${notBroughtIn.length} not brought in` : '',
     toConfirm.length > 0 ? `${toConfirm.length} to confirm` : '',
   ].filter(Boolean)
 
   return {
-    subject: `${clientName} \u2014 handover ${when}: ${parts.join(', ') || 'all accounts opened'}`,
+    subject: `Data import for ${clientName} \u2014 ${when}`
+      + `${parts.length ? `: ${parts.join(', ')}` : ''}`,
     bodyHtml,
     accounts: toConfirm.length + notBroughtIn.length,
   }

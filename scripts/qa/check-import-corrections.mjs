@@ -88,6 +88,7 @@ const REJECTED = {
 
 const mail = correctionEmail({
   clientName: 'Bredell Ferreira',
+  contactName: 'Camille Bredell',
   filename: 'handover 3 (refusals).xlsx',
   today: '2026-09-22',
   broughtIn: 4,
@@ -117,10 +118,39 @@ ok('...and are said to be already being worked', /open and being worked/i.test(m
  * THE SUBJECT SAYS WHICH OF THE TWO. The one that needs a resend is what the email is worth
  * opening for, and "1 account need correcting" — which is what went out — said neither.
  */
-ok('the subject names the client', /Bredell Ferreira/.test(mail.subject))
+/*
+ * THE SUBJECT SAYS WHAT IT IS, THEN WHOSE, THEN WHEN. THE FIRM: "in the subject line it should
+ * say data import for Bredell Ferreira, for example. Or this date." It read "Bredell Ferreira —
+ * handover 22 September 2026", which leads with a name and leaves the reader to work out what
+ * about it -- and a liaison forwarding it, and the client filing it, both want the same first
+ * two words.
+ */
+ok('the subject says what it is first', mail.subject.startsWith('Data import for Bredell Ferreira'))
+ok('...and when', /22 September 2026/.test(mail.subject))
 ok('...how many need sending again', /1 not brought in/.test(mail.subject))
 ok('...and how many need confirming', /2 to confirm/.test(mail.subject))
 check('...and it counts both groups', mail.accounts, 3)
+
+/*
+ * AND IT IS ADDRESSED TO SOMEBODY. THE FIRM: "the email should be addressed to a specific person
+ * or to a specific client." It opened "Good day," at nobody -- on a message the liaison is meant
+ * to FORWARD, that means topping and tailing it first, and a message somebody has to rewrite is
+ * one they will write themselves instead.
+ */
+ok('the greeting names the person at the client', /Good day Camille Bredell,/.test(mail.bodyHtml))
+/* A client with nobody on record still gets a greeting, not "Good day null,". */
+const noContact = correctionEmail({
+  clientName: 'X', filename: 'f.xlsx', today: '2026-09-22', labelFor,
+  broughtIn: 1, toConfirm: [ROW], notBroughtIn: [],
+})
+ok('a client with no contact still opens properly', /Good day,/.test(noContact.bodyHtml))
+ok('...and never greets a null', !/Good day (null|undefined)/.test(noContact.bodyHtml))
+/* The contact's name is a client's own data going into HTML, like everything else here. */
+const nastyName = correctionEmail({
+  clientName: 'X', filename: 'f.xlsx', today: '2026-09-22', labelFor,
+  contactName: 'A & B <script>', broughtIn: 1, toConfirm: [ROW], notBroughtIn: [],
+})
+ok('the contact’s name is escaped too', /Good day A &amp; B &lt;script&gt;,/.test(nastyName.bodyHtml))
 
 /*
  * ONE ACCOUNT, NOT "1 ACCOUNT NEED". The email that went to the firm read "there were one
