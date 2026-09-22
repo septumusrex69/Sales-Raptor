@@ -434,6 +434,49 @@ try {
     .getAttribute('placeholder')
   t.ok('...including in the note box', (ph ?? '').includes('—') && !(ph ?? '').includes('\\u'))
 
+  /*
+   * THE ROW NUMBER STAYS PUT WHILE THE OTHER FORTY COLUMNS GO PAST.
+   *
+   * THE FIRM: "keep the rows fixed to the left here so it doesn't move, so if you move around you
+   * can always know in which row you are, because you're working on a specific query."
+   *
+   * MEASURED AFTER SCROLLING, because before it every column is at its resting place and the
+   * assertion passes whether anything is pinned or not -- which is exactly the vacuous pass
+   * CLAUDE.md warns about. The reference beside it is deliberately NOT pinned, so it moving is
+   * half the proof: a table that simply did not scroll would satisfy the first half alone.
+   */
+  const scroller = page.locator('div.overflow-x-auto').filter({ has: page.locator('table') }).first()
+  const rowCell = page.locator('table tbody tr').first().locator('td').first()
+  const refCell = page.locator('table tbody tr').first().locator('td').nth(1)
+  /* Wound back to the left first: earlier steps here filled a cell forty columns along, which
+     scrolled the table to reach it -- so "before" was already most of the way across and the
+     scroll below moved everything BACKWARDS. The measurement was right and the direction was
+     not, which is the kind of assertion that fails for a reason nobody reads. */
+  await scroller.evaluate((el) => { el.scrollLeft = 0 })
+  await page.waitForTimeout(250)
+  const before = { row: await rowCell.boundingBox(), ref: await refCell.boundingBox() }
+  await scroller.evaluate((el) => { el.scrollLeft = 600 })
+  await page.waitForTimeout(250)
+  const moved = await scroller.evaluate((el) => el.scrollLeft)
+  t.ok('the table really did scroll sideways', moved > 100)
+  const after = { row: await rowCell.boundingBox(), ref: await refCell.boundingBox() }
+  t.ok('the row number stays where it was',
+    !!before.row && !!after.row && Math.abs(after.row.x - before.row.x) < 2)
+  t.ok('...while everything beside it moves',
+    !!before.ref && !!after.ref && before.ref.x - after.ref.x > 100)
+  /* Pinned over the scrolled columns, not under them: without an opaque background the cells
+     passing beneath show through and the number becomes unreadable at exactly the moment it is
+     needed. Read off the computed style, because a class name proves nothing about paint order. */
+  const paint = await rowCell.evaluate((el) => {
+    const s = getComputedStyle(el)
+    return { pos: s.position, left: s.left, bg: s.backgroundColor }
+  })
+  t.check('...and it is pinned rather than merely placed', paint.pos, 'sticky')
+  t.check('...to the left edge', paint.left, '0px')
+  t.ok('...over an opaque background', !/transparent|rgba\(0, 0, 0, 0\)/.test(paint.bg))
+  await t.shot(page, 'upload-a-batch-pinned-row')
+  await scroller.evaluate((el) => { el.scrollLeft = 0 })
+
   await t.shot(page, 'upload-a-batch-table')
 
   /*

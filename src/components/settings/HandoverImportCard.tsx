@@ -48,13 +48,28 @@ const DATE_KEYS = new Set(HANDOVER_COLUMNS.filter((c) => c.kind === 'date').map(
 const label = (key: string) => HANDOVER_COLUMNS.find((c) => c.key === key)?.label ?? key
 
 /*
- * NOTHING IS PINNED WHILE IT SCROLLS, and that is a retreat from something that looked better on
- * paper. Holding the row number and the reference still with `position: sticky` needs each pinned
- * cell's left offset to equal the measured width of everything before it; given a fixed offset it
- * drifts, and the pinned headings render ON TOP of the scrolled ones -- "ROW :LIACCOUNT NUMBER"
- * across the top of the table, which is what the first attempt actually drew. A plain scroll is
- * legible; a broken freeze is not.
+ * THE ROW NUMBER IS PINNED, AND ONLY THE ROW NUMBER.
+ *
+ * THE FIRM: "keep the rows fixed to the left here so it doesn't move, so if you move around you
+ * can always know in which row you are, because you're working on a specific query." Forty
+ * columns scroll past and every decision underneath the table is addressed by row -- "Row 7
+ * BF-206" -- so a number that scrolls off is the one thing on the screen tying a cell to the
+ * question being answered about it.
+ *
+ * ONE COLUMN IS WHY THIS WORKS NOW AND DID NOT BEFORE. An earlier attempt pinned the row number
+ * AND the reference, and the second of those needs a left offset equal to the MEASURED width of
+ * the first: given a fixed one it drifts, and the pinned headings drew on top of the scrolled
+ * ones -- "ROW :LIACCOUNT NUMBER" across the table. The first column needs no measurement at
+ * all. `left: 0` is exact by construction.
+ *
+ * TWO DETAILS ARE LOAD-BEARING. The pinned cells carry their own opaque background, or the
+ * scrolled columns pass underneath and show through. And the right-hand edge is an inset
+ * box-shadow rather than a border: the table collapses its borders, and a collapsed border on a
+ * sticky cell is the one part Safari does not reliably paint -- and the firm is on an iPad.
  */
+
+/** The pinned column's edge. Inset shadow, not a border -- see above. */
+const PINNED = 'sticky left-0 bg-white shadow-[inset_-1px_0_0_#e2e8f0]'
 
 /** Marked with a star in the header, the same way the .xlsx marks them. */
 const required = new Set(HANDOVER_COLUMNS.filter((c) => c.required).map((c) => c.key))
@@ -699,7 +714,8 @@ function DraftTable({
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
-              <th className="py-2 pr-2 font-medium">Row</th>
+              {/* z-20: above both the scrolled headings and the pinned cells below it. */}
+              <th className={`${PINNED} z-20 py-2 pr-2 font-medium`}>Row</th>
               {SHOWN.map((k) => (
                 <th key={k} className="py-2 pr-2 font-medium whitespace-nowrap">
                   {label(k)}{required.has(k) && <span className="text-gold-600"> *</span>}
@@ -714,7 +730,9 @@ function DraftTable({
               return (
                 <tr key={row.id}
                   className={`border-t border-slate-100 align-top ${row.excluded ? 'opacity-40' : ''}`}>
-                  <td className="py-2 pr-2 text-slate-400 tabular-nums">{row.line}</td>
+                  <td className={`${PINNED} z-10 py-2 pr-2 text-slate-400 tabular-nums`}>
+                    {row.line}
+                  </td>
                   {SHOWN.map((k) => {
                     /*
                       THE CELL SAYS WHICH DATA IS WRONG, at the firm's asking. A problem carries
