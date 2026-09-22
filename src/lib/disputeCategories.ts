@@ -187,6 +187,40 @@ export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
   },
 }
 
+/**
+ * WHICH OF THE CLIENT'S TWO LISTS AN ESCALATION BELONGS ON, OR NEITHER.
+ *
+ * THE FIRM: "there's a difference between a client dispute, a client query, and a debtor's
+ * dispute. Queries are for clients and disputes are for debtors. Now there should be two
+ * different sections on the client portal about which ones are their open disputes and which ones
+ * are their open queries. This would fall under a query, for example, the import that's not
+ * completed."
+ *
+ * The client page had ONE list headed "Disputes on this client's book" and put everything
+ * escalated to a liaison on it -- so an import correction, which is the firm asking the CLIENT to
+ * check their own data, was shown to them as a DEBTOR disputing the debt. Two different things
+ * wearing one word, on the screen a liaison reads before they phone the client.
+ *
+ * 'help' IS ON NEITHER LIST. An agent asking a team leader what to do is the firm supervising its
+ * own staff, and a client has no business seeing it.
+ *
+ * 'litigation' IS A QUERY, and this one is a judgement rather than something the firm said. It is
+ * plainly not a debtor's dispute; and a recommendation to sue is a thing the CLIENT has to
+ * authorise, so it belongs in front of them rather than nowhere. Worth confirming.
+ */
+export type ClientSection = 'dispute' | 'query'
+
+export function clientSection(kind: EscalationKind | null | undefined): ClientSection | null {
+  switch (kind) {
+    case 'dispute': return 'dispute'
+    case 'import': return 'query'
+    case 'litigation': return 'query'
+    /* Everything raised before the kind column existed reads as a dispute, which is what it was. */
+    case null: case undefined: return 'dispute'
+    default: return null
+  }
+}
+
 /** In the order the options should be offered: the common one first. */
 export const ESCALATION_KIND_ORDER: EscalationKind[] = ['dispute', 'help', 'litigation']
 

@@ -39,16 +39,17 @@ export type QueryStatus = 'open' | 'closed'
  * import for everything about a dispute is the right shape for a caller, whatever the files do.
  */
 import {
-  canSendToClient, stageForAssignee, escalationChargeable, escalationNote,
+  canSendToClient, stageForAssignee, escalationChargeable, escalationNote, clientSection,
   CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL, ESCALATION_KINDS, ESCALATION_KIND_ORDER,
   type DisputeStage as QueryStage, type QueryOutcome, type EscalationKind,
+  type ClientSection,
 } from './disputeCategories'
 
 export {
-  canSendToClient, stageForAssignee, escalationChargeable, escalationNote,
+  canSendToClient, stageForAssignee, escalationChargeable, escalationNote, clientSection,
   CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL, ESCALATION_KINDS, ESCALATION_KIND_ORDER,
 }
-export type { EscalationKind }
+export type { EscalationKind, ClientSection }
 export type { QueryStage, QueryOutcome }
 
 /**

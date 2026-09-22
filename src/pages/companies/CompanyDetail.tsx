@@ -774,7 +774,16 @@ export function CompanyDetail() {
             <ClientBookCard key="book" companyId={company.id} />,
             /* Beside the handover book, because these are the two things a liaison opens this
                page for: what came in, and what is stuck. */
-            <ClientQueries key="queries" companyId={company.id} />,
+            /*
+              TWO SECTIONS, at the firm's instruction: "queries are for clients and disputes are
+              for debtors ... there should be two different sections on the client portal about
+              which ones are their open disputes and which ones are their open queries."
+
+              Queries first: an import waiting on this client is something the firm is holding
+              them to, while a dispute is usually already being worked.
+            */
+            <ClientQueries key="client-queries" companyId={company.id} section="query" />,
+            <ClientQueries key="client-disputes" companyId={company.id} section="dispute" />,
             companyInfoPanel,
             subAccountsPanel,
             leadsPanel,

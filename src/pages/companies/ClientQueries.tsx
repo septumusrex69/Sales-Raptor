@@ -4,8 +4,9 @@ import { Loader2 } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { formatDate } from '../../data/mockData'
 import {
-  ageInDays, fetchQueriesForClient, isStale,
-  QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL, type QueryStage, type QueueRow,
+  ageInDays, clientSection, fetchQueriesForClient, isStale,
+  QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
+  type ClientSection, type QueryStage, type QueueRow,
 } from '../../lib/accountQueries'
 
 const TODAY = new Date().toISOString().slice(0, 10)
@@ -18,8 +19,34 @@ const STAGE_CHIP: Record<QueryStage, string> = {
   client: 'bg-gold-100 text-[var(--c-gold-deep)]',
 }
 
+/** The words each section uses. One place, because the whole point is that they differ. */
+const SECTION = {
+  dispute: {
+    title: "Disputes on this client's book",
+    nothing: 'Nothing has been escalated to the liaison on this client.',
+    empty: 'Nothing escalated to the liaison on this client.',
+    waiting: 'waiting on this client',
+  },
+  query: {
+    title: 'Queries with this client',
+    nothing: 'Nothing outstanding with this client.',
+    empty: 'Nothing outstanding with this client.',
+    waiting: 'waiting on this client',
+  },
+} as const
+
 /**
- * This client's queries and disputes.
+ * This client's disputes, or this client's queries — one section each.
+ *
+ * THE FIRM: "there's a difference between a client dispute, a client query, and a debtor's
+ * dispute. Queries are for clients and disputes are for debtors ... there should be two different
+ * sections on the client portal about which ones are their open disputes and which ones are their
+ * open queries. This would fall under a query, for example, the import that's not completed."
+ *
+ * It was one section headed "Disputes on this client's book" holding everything escalated to a
+ * liaison, so an import correction — the firm asking the CLIENT to check their own data — was
+ * shown to them as a DEBTOR disputing the debt. See clientSection() for which kind goes where;
+ * this file renders whichever it is given and never decides.
  *
  * Its own section rather than a line among the notes. A liaison opening Accelerate Fitness wants
  * one question answered — what is outstanding with them — and a note stream cannot answer it,
@@ -29,7 +56,10 @@ const STAGE_CHIP: Record<QueryStage, string> = {
  * belongs to the debt it disputes; this is a second way of reading the same record, not a second
  * copy of it.
  */
-export function ClientQueries({ companyId }: { companyId: string }) {
+export function ClientQueries({ companyId, section }: {
+  companyId: string
+  section: ClientSection
+}) {
   const [rows, setRows] = useState<QueueRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showClosed, setShowClosed] = useState(false)
@@ -66,21 +96,35 @@ export function ClientQueries({ companyId }: { companyId: string }) {
    * Stage carries over when a dispute closes, so one that was resolved inside the firm stays
    * hidden and one that reached the liaison stays visible — no extra column needed to remember it.
    */
-  const escalated = rows.filter((q) => q.stage === 'liaison' || q.stage === 'client')
+  const escalated = rows.filter((q) => (q.stage === 'liaison' || q.stage === 'client')
+    /* AND OF THIS SECTION'S KIND. Without it both lists would show everything twice, which is
+       worse than the one list it replaced. */
+    && clientSection(q.kind) === section)
   const open = escalated.filter((q) => q.status === 'open')
   const closed = escalated.filter((q) => q.status === 'closed')
   const withClient = open.filter((q) => q.stage === 'client')
   const shown = showClosed ? closed : open
+  const words = SECTION[section]
+
+  /*
+   * AN EMPTY QUERIES CARD IS NOT DRAWN AT ALL, and an empty DISPUTES card is.
+   *
+   * They are not the same kind of fact. "No disputes on this book" is a steady state a liaison
+   * wants stated; "no queries" is the ordinary case on nearly every client, and a second empty
+   * card under the first is the page getting longer to say nothing. The firm has already said
+   * this page is crowded on an iPad.
+   */
+  if (section === 'query' && escalated.length === 0) return null
 
   return (
     <Card padded={false}>
       <div className="p-5 pb-0">
         <CardHeader
-          title="Disputes on this client's book"
+          title={words.title}
           subtitle={
             open.length === 0
-              ? 'Nothing has been escalated to the liaison on this client.'
-              : `${open.length} open${withClient.length ? `, ${withClient.length} waiting on this client` : ''}.`
+              ? words.nothing
+              : `${open.length} open${withClient.length ? `, ${withClient.length} ${words.waiting}` : ''}.`
           }
           action={
             closed.length > 0 ? (
@@ -94,7 +138,7 @@ export function ClientQueries({ companyId }: { companyId: string }) {
 
       {shown.length === 0 ? (
         <p className="text-sm text-slate-400 py-8 text-center">
-          {showClosed ? 'Nothing closed yet.' : 'Nothing escalated to the liaison on this client.'}
+          {showClosed ? 'Nothing closed yet.' : words.empty}
         </p>
       ) : (
         <div className="divide-y divide-slate-50">

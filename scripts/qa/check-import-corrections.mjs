@@ -18,7 +18,9 @@ import { readFileSync } from 'node:fs'
 import {
   correctionDescription, correctionEmail, givenFor,
 } from '../../src/lib/importCorrections.ts'
-import { ESCALATION_KINDS, ESCALATION_KIND_ORDER, escalationChargeable } from '../../src/lib/disputeCategories.ts'
+import {
+  ESCALATION_KINDS, ESCALATION_KIND_ORDER, clientSection, escalationChargeable,
+} from '../../src/lib/disputeCategories.ts'
 
 let pass = 0
 const failures = []
@@ -220,6 +222,41 @@ ok('rows that did not come in are gathered too', /notBroughtIn/.test(draft))
 ok('...from the excluded and the refused', /excluded \|\| r\.planned\?\.refused/.test(draft))
 ok('...and either group is enough to send the email',
   /corrections\.length > 0 \|\| notBroughtIn\.length > 0/.test(draft))
+
+/* ---------- 5. a query is not a dispute, and the client page says so ---------- */
+
+/*
+ * THE FIRM: "there's a difference between a client dispute, a client query, and a debtor's
+ * dispute. Queries are for clients and disputes are for debtors. Now there should be two
+ * different sections on the client portal about which ones are their open disputes and which ones
+ * are their open queries. This would fall under a query, for example, the import that's not
+ * completed."
+ *
+ * The client page had ONE list headed "Disputes on this client's book" holding everything
+ * escalated to a liaison -- so an import correction, which is the firm asking the CLIENT to check
+ * their own data, was shown to them as a DEBTOR disputing the debt. Two different things wearing
+ * one word, on the screen a liaison reads before they phone the client.
+ */
+check('an import correction is a query', clientSection('import'), 'query')
+check('a debtor’s objection is a dispute', clientSection('dispute'), 'dispute')
+/* An agent asking a team leader what to do is the firm supervising its own staff. */
+check('asking for help is neither, and the client never sees it', clientSection('help'), null)
+/* Everything raised before the kind column existed reads as a dispute, which is what it was. */
+check('an old row with no kind reads as a dispute', clientSection(null), 'dispute')
+
+const clientPage = readFileSync(new URL('../../src/pages/companies/CompanyDetail.tsx',
+  import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+ok('the client page shows queries', /section="query"/.test(clientPage))
+ok('...and disputes, separately', /section="dispute"/.test(clientPage))
+
+const panel = readFileSync(new URL('../../src/pages/companies/ClientQueries.tsx',
+  import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+/* PRESENCE BEFORE ABSENCE: a file with no filter at all satisfies "does not show everything". */
+ok('the panel filters by which section it is', /clientSection\(q\.kind\) === section/.test(panel))
+ok('...and takes its heading from the section rather than hard-coding one',
+  /title=\{words\.title\}/.test(panel))
+ok('...so neither list is headed "Disputes" unconditionally',
+  !/title="Disputes on this client's book"/.test(panel))
 
 /* ---------------------------------------------------------------- report */
 
