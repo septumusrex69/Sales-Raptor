@@ -24,7 +24,9 @@ import { HANDOVER_COLUMNS, aliasIndex, headingKey, type HandoverColumn } from '.
 /* The same ID check the by-hand form uses. Two implementations of a Luhn checksum eventually
    disagree, and the one that disagrees is whichever a person is not looking at. */
 import { isValidSaId, type NewDebtorInput } from './newDebtor.ts'
-import { substituteDefaultDate, substitutionMessage } from './defaultDateFallback.ts'
+import {
+  missingDateMessage, substituteDefaultDate, substitutionMessage,
+} from './defaultDateFallback.ts'
 
 /* ---------------------------------------------------------------- what a field should look like */
 
@@ -629,7 +631,26 @@ function readRow(
   let defaultDateUsed: string | null = null
   const defaulted = parseSheetDate(values.default_date, ctx.order)
   if (!defaulted) {
-    refuse('default_date', dateMessage(values.default_date, ctx.order))
+    /*
+     * NO DATE, OR ONE NOBODY CAN READ -- AND THAT IS NO LONGER A REFUSAL EITHER.
+     *
+     * THE FIRM: "it should also show you in a rejection state, but I have an option to accept it
+     * -- kind of like a warning -- and then make it three months before the handover. Not having
+     * the date of default is not a deal breaker for starting to work the account, but it would be
+     * good to confirm it. Make it three months, because most of the clients hand over on 90
+     * days."
+     *
+     * THE SAME SUBSTITUTE THE FUTURE-DATE CASE USES, because it is the same question from the
+     * other end: what do we open on while the client is asked for the real one. Keeping the two
+     * apart would be two guesses at one thing, and the second one would drift.
+     *
+     * THE DIAGNOSIS SURVIVES. dateMessage still says WHY -- "there is no 31 February" is what
+     * tells somebody the cell is a typo rather than an omission, and it is what gets quoted back
+     * at the client. The substitute is added to it rather than written over it.
+     */
+    defaultDateUsed = substituteDefaultDate(ctx.today)
+    warn('default_date', missingDateMessage(
+      dateMessage(values.default_date, ctx.order), displayDate(defaultDateUsed, 'day-first')))
   } else if (defaulted > ctx.today) {
     /*
      * ACCEPTED ON A SUBSTITUTE, NOT REFUSED, AT THE FIRM'S INSTRUCTION: "just say that it can be

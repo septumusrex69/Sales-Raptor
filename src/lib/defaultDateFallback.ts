@@ -86,3 +86,25 @@ export function substitutionMessage(sheetSaid: string, openedOn: string): string
     + `${MONTHS_BEFORE_HANDOVER} months before handover — and the client must confirm the real `
     + `one. Their sheet says ${sheetSaid}.`
 }
+
+/**
+ * The same substitute, where the sheet gave no date at all or gave one nobody can read.
+ *
+ * THE FIRM: "it should also show you in a rejection state, but I have an option to accept it --
+ * kind of like a warning -- and then make it three months before the handover. Not having the
+ * date of default is not a deal breaker for starting to work the account, but it would be good to
+ * confirm it. Make it three months, because most of the clients hand over on 90 days."
+ *
+ * SO THE 90 DAYS ARE NOT A GUESS DRESSED UP. They are the firm's own observation about how its
+ * clients behave, which is a better estimate than any date the row carries -- and it is the same
+ * three months the future-date case already substitutes, because it is the same question asked
+ * from the other end.
+ *
+ * THE DIAGNOSIS IS KEPT, not replaced. "There is no 31 February" is what tells somebody the cell
+ * is a typo rather than a missing figure, and it is the sentence the client needs quoted back at
+ * them. What is added is what we opened on in the meantime.
+ */
+export function missingDateMessage(why: string, openedOn: string): string {
+  return `${why} Opened at ${openedOn} instead — ${MONTHS_BEFORE_HANDOVER} months before `
+    + 'handover, which is when most clients hand over — and the client must confirm the real one.'
+}

@@ -311,17 +311,53 @@ const noName = rows(['A1', '100', '2026-01-01', 'Person', '', '', '082 123 4567'
 ok('a row with no name is refused', noName.refused.length === 1)
 const noMoney = rows(['A1', '', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
 ok('a row with no handover amount is refused', noMoney.refused.length === 1)
-const badDate = rows(['A1', '100', '31/02/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
-ok('a row whose date does not exist is refused', badDate.refused.length === 1)
 /*
- * AND THE ROW SAYS WHICH IT IS. The fixture's 31/02/2026 is a typo in the cell, and telling
+ * ---- A DATE NOBODY CAN READ, AND NO DATE AT ALL, ARE WARNINGS TOO ----
+ *
+ * THE FIRM: "it should also show you in a rejection state, but I have an option to accept it --
+ * kind of like a warning -- and then make it three months before the handover. Not having the
+ * date of default is not a deal breaker for starting to work the account, but it would be good
+ * to confirm it. Make it three months, because most of the clients hand over on 90 days."
+ *
+ * The same substitute the future-date case below uses, because it is the same question asked
+ * from the other end: what do we open on while the client is asked for the real one.
+ */
+const badDate = rows(['A1', '100', '31/02/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('a date that does not exist no longer refuses the row', badDate.refused.length, 0)
+check('...and it opens three months before handover',
+  badDate.rows[0].defaultDateUsed, '2026-06-21')
+/*
+ * AND THE ROW STILL SAYS WHICH IT IS. The fixture's 31/02/2026 is a typo in the cell, and telling
  * somebody the file's order could not account for it is telling them the wrong thing to go and
- * check -- which is exactly what the firm went and checked.
+ * check -- which is exactly what the firm went and checked. The substitute is ADDED to that
+ * sentence, never written over it: without the diagnosis the client cannot be told what to fix.
  */
 ok(`...saying there is no such day (${firstMessage(badDate.rows[0])})`,
   /there is no 31 February/.test(firstMessage(badDate.rows[0])))
 ok('...and not blaming the order it was read in',
   !/order can account/.test(firstMessage(badDate.rows[0])))
+ok('...and naming what it opened on instead',
+  /21\/06\/2026/.test(firstMessage(badDate.rows[0])))
+
+/* NO DATE AT ALL, which is the case the firm was actually looking at. */
+const noDate = rows(['A1', '100', '', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('no date of default no longer refuses the row', noDate.refused.length, 0)
+check('...and it opens three months before handover too',
+  noDate.rows[0].defaultDateUsed, '2026-06-21')
+ok('...still saying there was none', /No date of default/.test(firstMessage(noDate.rows[0])))
+ok('...and why it matters', /in duplum runs from it/.test(firstMessage(noDate.rows[0])))
+/*
+ * A WARNING, SO IT STILL NEEDS A PERSON. The account opens only once somebody has read the
+ * sentence and pressed Accept -- which is the whole of what makes a guessed date defensible.
+ */
+ok('a row with no date still has to be answered',
+  noDate.rows[0].problems.some((p) => p.key === 'default_date' && p.level === 'warn'))
+/*
+ * AND THE 90 DAYS ARE THE FIRM'S OWN, said on the screen. A substitute nobody can account for is
+ * one nobody will defend when a debtor's attorney asks where the date came from.
+ */
+ok('...and says where three months comes from',
+  /most clients hand over/.test(firstMessage(noDate.rows[0])))
 /*
  * A DATE OF DEFAULT IN THE FUTURE IS ACCEPTED ON A SUBSTITUTE, NOT REFUSED.
  *
