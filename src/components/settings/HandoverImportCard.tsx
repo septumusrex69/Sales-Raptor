@@ -7,7 +7,9 @@ import { useAuth } from '../../store/AuthContext'
 import { parseCsv } from '../../lib/csv'
 import { readXlsxRows } from '../../lib/xlsx'
 import { readSingleCsvFromZip } from '../../lib/zip'
-import { planHandover, type HandoverPlan } from '../../lib/handoverImport.ts'
+import {
+  displayDate, planHandover, type DateOrder, type HandoverPlan,
+} from '../../lib/handoverImport.ts'
 import { matchDocuments, type MatchPlan } from '../../lib/documentMatch.ts'
 import { HANDOVER_COLUMNS } from '../../lib/handoverSheet.ts'
 import {
@@ -34,6 +36,9 @@ const today = () => new Date().toISOString().slice(0, 10)
  * than a sentence under the table does, and it can be filled in.
  */
 const SHOWN = HANDOVER_COLUMNS.map((c) => c.key)
+
+/** The columns holding a date, so the table can show one the way the firm writes it. */
+const DATE_KEYS = new Set(HANDOVER_COLUMNS.filter((c) => c.kind === 'date').map((c) => c.key))
 
 /** A column's heading, by its key. Module level: the table and the decision list both need it. */
 const label = (key: string) => HANDOVER_COLUMNS.find((c) => c.key === key)?.label ?? key
@@ -502,7 +507,7 @@ function DecisionRow({ row, busy, onAccept, onReject, onReopen }: {
             value={note}
             disabled={!!busy}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="A note for whoever works this account \u2014 optional"
+            placeholder="A note for whoever works this account — optional"
             className="w-full rounded border border-slate-200 px-2 py-1.5 text-[13px] mb-2
               focus:border-brand-500 focus:outline-none" />
           <div className="flex items-center gap-2">
@@ -523,7 +528,7 @@ function DecisionRow({ row, busy, onAccept, onReject, onReopen }: {
             </button>
             {refused && (
               <span className="text-[11px] text-slate-400">
-                Correct it above, or reject it \u2014 it cannot be accepted as it stands.
+                Correct it above, or reject it — it cannot be accepted as it stands.
               </span>
             )}
           </div>
@@ -593,6 +598,10 @@ function DraftTable({
   onBack: () => void
   onDiscard: () => Promise<void>
 }) {
+  /* The order the WHOLE FILE was read in, settled when it was first read and stored on the
+     draft. Reading each cell on its own would show a date differently from how it was judged. */
+  const order: DateOrder = judged.draft.dateOrder === 'month-first' ? 'month-first' : 'day-first'
+
   return (
     <Card>
       <CardHeader
@@ -668,6 +677,7 @@ function DraftTable({
                       warning in gold -- and the sentence under the table stops being the only
                       way to find out which of forty boxes it meant.
                     */
+                    const isDate = DATE_KEYS.has(k)
                     const worst = (row.planned?.problems ?? []).filter((pr) => pr.key === k)
                     const bad = worst.some((pr) => pr.level === 'refuse')
                     const iffy = !bad && worst.length > 0
@@ -679,7 +689,23 @@ function DraftTable({
                           would be a request a letter.
                         */}
                         <input
-                          defaultValue={row.values[k] ?? ''}
+                          /*
+                            A DATE IS SHOWN THE WAY SOUTH AFRICA WRITES IT. The stored value is
+                            whatever the sheet's reader produced, which for an .xlsx date cell is
+                            yyyy/mm/dd -- so the table was showing the firm its own reader's
+                            format on a file the firm fills in day-first. One that cannot be
+                            parsed comes back untouched, because that is the one somebody has to
+                            look at and correct.
+
+                            `key` on the date cells so React re-mounts the input when the value
+                            behind it changes: these are uncontrolled (defaultValue), and an edit
+                            elsewhere that re-judges the draft would otherwise leave the old text
+                            sitting in the box.
+                          */
+                          key={isDate ? `${k}:${row.values[k] ?? ''}` : undefined}
+                          defaultValue={isDate
+                            ? displayDate(row.values[k], order)
+                            : row.values[k] ?? ''}
                           disabled={!!busy || row.excluded}
                           title={worst.map((pr) => pr.message).join(' ') || undefined}
                           onBlur={(e) => {

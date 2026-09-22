@@ -12,7 +12,8 @@
  * debtor has to come out of both.
  */
 import {
-  checkPhone, detectDateOrder, looksLikeEmail, parseMoney, parseSheetDate, planHandover,
+  checkPhone, dateFault, detectDateOrder, displayDate, looksLikeEmail, parseMoney, parseSheetDate,
+  planHandover, spellDate,
 } from '../../src/lib/handoverImport.ts'
 
 let pass = 0
@@ -93,6 +94,55 @@ check('the 31st of February is not a date', parseSheetDate('31/02/2026'), null)
 check('a thirteenth month is not a date', parseSheetDate('03/13/2026'), null)
 check('a reference number is not a date', parseSheetDate('929228801'), null)
 check('nothing is not a date', parseSheetDate(''), null)
+
+/*
+ * ---------- 2b. a date shown back the way South Africa writes it ----------
+ *
+ * THE FIRM, looking at the draft table: "this date of default that it says is wrong, it's
+ * actually in the right way -- first day, then month, then year. This is how we do it in South
+ * Africa. So everything else is wrong, to be honest."
+ *
+ * And they were right about everything else. The table printed the raw cell, and readXlsxRows
+ * renders an .xlsx date as yyyy/mm/dd -- so a sheet the firm fills in day-first, read correctly
+ * and judged correctly, was shown back to them year-first. The app was displaying its own
+ * reader's internal format to the people whose convention the file is built around.
+ */
+check('a date read out of a workbook is shown day first', displayDate('2026/03/18'), '18/03/2026')
+check('...and one already day-first is left as it is', displayDate('18/03/2026'), '18/03/2026')
+check('...and an ISO one is turned round too', displayDate('2026-03-18'), '18/03/2026')
+/* A month-first FILE is shown day-first as well: the display is the firm's convention, not the
+   file's, and the parse has already settled which is which. */
+check('a month-first file is still shown day first',
+  displayDate('03/18/2026', 'month-first'), '18/03/2026')
+/*
+ * UNPARSEABLE COMES BACK UNTOUCHED, which is the other half of it. 31/02/2026 is the row somebody
+ * has to correct, and reformatting it would hide the very thing that is wrong with it.
+ */
+check('a date nobody can read is shown exactly as the sheet has it',
+  displayDate('31/02/2026'), '31/02/2026')
+check('...as is anything that is not a date at all',
+  displayDate('when they could'), 'when they could')
+check('an empty cell shows nothing', displayDate(''), '')
+
+/*
+ * ---------- 2c. WHY it could not be read, which is a different question ----------
+ *
+ * The message said the file's ORDER could not account for 31/02/2026, which reads as Raptor not
+ * understanding the way South Africa writes a date -- and sent the firm to check the importer
+ * instead of the cell. February has no 31st; that is the whole of it.
+ */
+check('the 31st of February is a day that does not exist',
+  dateFault('31/02/2026', 'day-first'), 'no-such-day')
+/* A thirteenth month under this order IS the other complaint, and still is. */
+check('a thirteenth month is a file written the other way round',
+  dateFault('03/13/2026', 'day-first'), 'wrong-order')
+check('a real date is fine', dateFault('18/03/2026', 'day-first'), 'ok')
+check('words are unreadable', dateFault('when they could', 'day-first'), 'unreadable')
+check('nothing is empty, not wrong', dateFault('', 'day-first'), 'empty')
+
+check('a bad day is spelt out in words', spellDate('31/02/2026', 'day-first'), '31 February')
+check('...read the file’s own way round', spellDate('02/31/2026', 'month-first'), '31 February')
+check('...and nothing is spelt where there is no date', spellDate('rubbish', 'day-first'), null)
 
 /*
  * THE ORDER IS THE FILE'S, NOT THE ROW'S, and this is the part that matters.
@@ -262,8 +312,29 @@ const noMoney = rows(['A1', '', '2026-01-01', 'Person', 'Dube', '', '082 123 456
 ok('a row with no handover amount is refused', noMoney.refused.length === 1)
 const badDate = rows(['A1', '100', '31/02/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
 ok('a row whose date does not exist is refused', badDate.refused.length === 1)
-ok(`...and names the order it was read in (${firstMessage(badDate.rows[0])})`,
-  /day\/month\/year/.test(firstMessage(badDate.rows[0])))
+/*
+ * AND THE ROW SAYS WHICH IT IS. The fixture's 31/02/2026 is a typo in the cell, and telling
+ * somebody the file's order could not account for it is telling them the wrong thing to go and
+ * check -- which is exactly what the firm went and checked.
+ */
+ok(`...saying there is no such day (${firstMessage(badDate.rows[0])})`,
+  /there is no 31 February/.test(firstMessage(badDate.rows[0])))
+ok('...and not blaming the order it was read in',
+  !/order can account/.test(firstMessage(badDate.rows[0])))
+/*
+ * A THIRTEENTH MONTH STILL NAMES THE ORDER -- but it takes a file that CONTRADICTS itself to
+ * reach that message, and the first attempt at this fixture did not.
+ *
+ * A lone 03/13/2026 proves the file is month-first, so the date parses and nothing is wrong with
+ * it at all. The message only appears where the file has already been settled the other way: one
+ * row that can only be day-first, one that can only be month-first, and no order that reads both.
+ */
+const wrongWayRound = rows(
+  ['A1', '100', '31/01/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'],
+  ['A2', '100', '03/13/2026', 'Person', 'Mokoena', '', '082 123 4567', 'a@b.co.za'])
+ok('a file written both ways round is read day-first', wrongWayRound.dates.contradictory)
+ok('...and the row that cannot be reports the order, not a missing day',
+  /day\/month\/year/.test(firstMessage(wrongWayRound.rows[1])))
 
 /*
  * AND THE ORDER REACHES THE ROWS. A plan that detects month-first and then reads its rows

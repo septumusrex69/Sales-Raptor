@@ -94,6 +94,87 @@ function signaturesOf(
   return name ? [`name:${name}:${amount}`] : []
 }
 
+/**
+ * A date as South Africa writes it, for showing back to a person.
+ *
+ * THE FIRM, looking at the draft table: "this date of default that it says is wrong, it's
+ * actually in the right way -- first day, then month, then year. This is how we do it in South
+ * Africa. So everything else is wrong, to be honest."
+ *
+ * And they were right about everything else. The table printed the raw cell, and `readXlsxRows`
+ * renders a date cell as yyyy/mm/dd -- "the shape Swordfish's own exports use". So a sheet the
+ * firm fills in day-first, read correctly, judged correctly, was displayed back to them
+ * year-first: the app showing its own reader's internal format to the people whose convention the
+ * whole file is built around.
+ *
+ * UNPARSEABLE COMES BACK UNTOUCHED, which is the other half of it. The one row they were
+ * complaining about says 31/02/2026, and it has to keep saying that -- it is what the sheet
+ * holds, it is what somebody has to correct, and reformatting it would hide the very thing that
+ * is wrong with it.
+ */
+/**
+ * WHY a date could not be read, which is not the same question as whether it could.
+ *
+ * THE FIRM, on "31/02/2026": "this date of default that it says is wrong, it's actually in the
+ * right way -- first day, then month, then year." They are right, and the message told them
+ * otherwise: it said the file's ORDER could not account for the date, which reads as Raptor not
+ * understanding day/month/year. The actual problem is that February has no 31st, and saying so
+ * is the difference between somebody checking their date and somebody checking our importer.
+ *
+ * Both cases really exist and they need opposite fixes, which is why they are told apart:
+ * 31/02/2026 is a typo in the cell, 03/13/2026 is a file written the other way round.
+ */
+export type DateFault = 'ok' | 'empty' | 'no-such-day' | 'wrong-order' | 'unreadable'
+
+export function dateFault(raw: string | null | undefined, order: DateOrder): DateFault {
+  const s = (raw ?? '').trim()
+  if (!s) return 'empty'
+  if (parseSheetDate(s, order)) return 'ok'
+
+  const slash = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(s)
+  if (slash) {
+    const [, a, b] = slash
+    const [d, mo] = order === 'day-first' ? [a, b] : [b, a]
+    /* A month outside 1-12 under this order is a file written the other way round -- and reading
+       it the other way is a real date, which is what makes it worth saying so. */
+    if (Number(mo) < 1 || Number(mo) > 12) return 'wrong-order'
+    /* The order accounts for it and the day still does not exist: 31 February, 31 April. */
+    if (Number(d) >= 1 && Number(d) <= 31) return 'no-such-day'
+  }
+  const ymd = /^(\d{4})[/.-](\d{2})[/.-](\d{2})$/.exec(s)
+  if (ymd) return 'no-such-day'
+  return 'unreadable'
+}
+
+/** The name of a month, for saying "there is no 31st of February" in those words. */
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December']
+
+/** The day and month somebody typed, as words. Null where it is not a date-shaped thing. */
+export function spellDate(raw: string, order: DateOrder): string | null {
+  const slash = /^(\d{1,2})[/.-](\d{1,2})[/.-]\d{4}$/.exec(raw.trim())
+  if (slash) {
+    const [, a, b] = slash
+    const [d, mo] = order === 'day-first' ? [a, b] : [b, a]
+    const name = MONTHS[Number(mo) - 1]
+    return name ? `${Number(d)} ${name}` : null
+  }
+  const ymd = /^\d{4}[/.-](\d{2})[/.-](\d{2})$/.exec(raw.trim())
+  if (ymd) {
+    const name = MONTHS[Number(ymd[1]) - 1]
+    return name ? `${Number(ymd[2])} ${name}` : null
+  }
+  return null
+}
+
+export function displayDate(raw: string | null | undefined, order: DateOrder = 'day-first'): string {
+  const s = (raw ?? '').trim()
+  if (!s) return ''
+  const iso = parseSheetDate(s, order)
+  if (!iso) return s
+  return `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`
+}
+
 export type SheetKind = 'raptor' | 'swordfish' | 'mixed' | 'unknown'
 
 export interface ColumnMatch {
@@ -462,6 +543,34 @@ export function planHandover(input: {
  * 129. A warning that refused the row would stop a client handing over work; a refusal demoted
  * to a warning would open a ledger that is wrong for ever.
  */
+/**
+ * What to say about a date of default that could not be read.
+ *
+ * THE FIRM: "this date of default that it says is wrong, it's actually in the right way -- first
+ * day, then month, then year." Every word of that was true of 31/02/2026, and the message said
+ * the file's ORDER could not account for it -- which reads as Raptor not understanding the way
+ * South Africa writes a date, and sends somebody to check the importer instead of the cell.
+ */
+function dateMessage(raw: string | null | undefined, order: DateOrder): string {
+  const s = (raw ?? '').trim()
+  if (!s) return 'No date of default — in duplum runs from it.'
+  switch (dateFault(s, order)) {
+    case 'no-such-day': {
+      const spelt = spellDate(s, order)
+      return spelt
+        ? `Date of default "${s}" — there is no ${spelt}. Check the day.`
+        : `Date of default "${s}" is not a day that exists.`
+    }
+    /* Named as the ambiguity it is, because "invalid date" sends somebody to check a date that is
+       perfectly valid and merely means two things. */
+    case 'wrong-order':
+      return `Date of default "${s}" is not a date this file's order can account for — it is `
+        + `being read ${order === 'day-first' ? 'day/month/year' : 'month/day/year'}.`
+    default:
+      return `Date of default "${s}" could not be read as a date.`
+  }
+}
+
 function readRow(
   values: Record<string, string | null>,
   line: number,
@@ -494,12 +603,7 @@ function readRow(
 
   const defaulted = parseSheetDate(values.default_date, ctx.order)
   if (!defaulted) {
-    refuse('default_date', values.default_date
-      /* Named as the ambiguity it is, because "invalid date" sends somebody to check a date that
-         is perfectly valid and merely means two things. */
-      ? `Date of default "${values.default_date}" is not a date this file's order can account `
-        + `for — it is being read ${ctx.order === 'day-first' ? 'day/month/year' : 'month/day/year'}.`
-      : 'No date of default — in duplum runs from it.')
+    refuse('default_date', dateMessage(values.default_date, ctx.order))
   } else if (defaulted > ctx.today) {
     warn('default_date', 'The date of default is in the future.')
   }

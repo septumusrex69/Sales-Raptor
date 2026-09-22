@@ -160,12 +160,17 @@ const SHEET = [
  * The third row is the one that matters for the gate. Written with only the first two, there was
  * no row that could be accepted at all -- a refusal offers no Accept, by design -- so the half of
  * the flow the firm asked for could not be reached.
+ *
+ * THE DATES ARE WRITTEN yyyy/mm/dd ON PURPOSE, which is what readXlsxRows produces from a real
+ * .xlsx date cell. Written 18/03/2026 -- the way they look in Excel -- the display assertion
+ * below passed against code that printed the raw cell, because a CSV hands the text straight
+ * through and there was nothing to turn round.
  */
 const FULL_SHEET = [
   'Your reference,Handover amount,Date of default,Person or business,Surname,Email address',
-  'GPS3/10103,48250.00,18/03/2026,Person,Van Der Westhuizen,jvdw@example.co.za',
-  'GPS3/10104,not money,18/03/2026,Person,Buitendag,',
-  'GPS3/10105,1200.00,18/03/2026,Person,Ndlovu,',
+  'GPS3/10103,48250.00,2026/03/18,Person,Van Der Westhuizen,jvdw@example.co.za',
+  'GPS3/10104,not money,2026/03/18,Person,Buitendag,',
+  'GPS3/10105,1200.00,2026/03/18,Person,Ndlovu,',
 ].join('\n')
 
 
@@ -380,6 +385,26 @@ try {
   const okCell = cell(0, amount)
   t.ok('...and a cell that is fine is not marked',
     okCell ? !/negative|gold/.test((await okCell.getAttribute('class')) ?? '') : false)
+
+  /*
+   * DATES ARE SHOWN THE WAY SOUTH AFRICA WRITES THEM.
+   *
+   * THE FIRM: "this date of default that it says is wrong, it's actually in the right way --
+   * first day, then month, then year. This is how we do it in South Africa. So everything else is
+   * wrong, to be honest." The fixture's dates are 18/03/2026; read out of the sheet they arrive
+   * as 2026/03/18, which is what the table used to print.
+   */
+  const dateCol = columnAt('Date of default')
+  const firstDate = cell(0, dateCol)
+  t.check('a date is shown day first', firstDate ? await firstDate.inputValue() : '', '18/03/2026')
+
+  /* AND NO ESCAPE SEQUENCE REACHES THE SCREEN. \u2014 is a JavaScript string escape; in JSX text
+     or an attribute it is just those six characters, which is what the firm was looking at. */
+  const screenText = await page.locator('body').innerText()
+  t.ok('no \\u escape is printed at anybody', !/\\u[0-9a-f]{4}/i.test(screenText))
+  const ph = await page.getByPlaceholder(/A note for whoever works this account/).first()
+    .getAttribute('placeholder')
+  t.ok('...including in the note box', (ph ?? '').includes('—') && !(ph ?? '').includes('\\u'))
 
   await t.shot(page, 'upload-a-batch-table')
 
