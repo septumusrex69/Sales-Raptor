@@ -580,8 +580,43 @@ try {
    * in it -- green on the accept, silent on the note, and the assertion below is what caught it.
    */
   const acceptCard = page.locator('div.rounded-lg.border').filter({ has: accepts.first() }).last()
-  await acceptCard.getByPlaceholder(/A note for whoever works this account/)
-    .fill('Confirm the email address with the client.')
+  const noteBox = acceptCard.getByPlaceholder(/A note for whoever works this account/)
+
+  /*
+   * ---- THE BOX OPENS WITH THE INSTRUCTION ALREADY IN IT ----
+   *
+   * THE FIRM: "you can automatically fill the note for the clerk ... fill it automatically and
+   * then just accept, and they can remove it if they need to."
+   *
+   * The row waiting here has no email address, so the suggestion is the one about a section 129
+   * needing somewhere to go. Asserted in a browser because the box is filled from useState's
+   * initialiser and this component re-renders on every save -- whether that opening value
+   * survives, and whether it can then be emptied, is not a question source can answer.
+   */
+  t.ok('the note box opens with something already in it',
+    (await noteBox.inputValue()).trim().length > 0)
+  const opened = await noteBox.inputValue()
+  /* AN INSTRUCTION, not the problem read back: the problem is printed directly above the box. */
+  t.ok('...which says what to do about it', /ask for an email address/i.test(opened))
+  t.ok('...and does not quote the fault back', !/no email address/i.test(opened))
+  t.ok('...and is marked as a suggestion', /Suggested/.test(await acceptCard.innerText()))
+
+  /*
+   * AND IT CAN BE EMPTIED. Written as `value={note || suggested}` the box refills itself and
+   * cannot be cleared at all -- and this note goes onto the account under the name of whoever
+   * presses Accept, so words nobody could remove would be words put in their mouth.
+   */
+  await noteBox.fill('')
+  await page.waitForTimeout(200)
+  t.check('...and it can be emptied', await noteBox.inputValue(), '')
+  t.ok('...which drops the suggested label with it',
+    !/Suggested/.test(await acceptCard.innerText()))
+
+  await noteBox.fill('Confirm the email address with the client.')
+  await page.waitForTimeout(200)
+  /* Once it is their wording it is no longer ours, and labelling it would be wrong. */
+  t.ok('a note somebody typed is not called a suggestion',
+    !/Suggested/.test(await acceptCard.innerText()))
   await acceptCard.getByRole('button', { name: 'Accept', exact: true }).click()
   await page.waitForTimeout(700)
   t.check('accepting records the note', await page.locator('text=Confirm the email address with the client.').count(), 1)

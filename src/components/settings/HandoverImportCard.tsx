@@ -23,6 +23,7 @@ import {
 } from '../../lib/handoverDraft'
 import { canAccept, type Decision } from '../../lib/handoverDecision.ts'
 import { columnWidthCh } from '../../lib/handoverColumnWidth.ts'
+import { suggestedNote } from '../../lib/noteSuggestion.ts'
 import { downloadBytes } from '../../lib/xlsxWrite.ts'
 import { fetchClientCommissionRate, fetchExistingAccounts } from '../../lib/accountBook'
 import { formatCurrency } from '../../data/mockData'
@@ -509,9 +510,22 @@ function DecisionRow({ row, busy, onAccept, onReject, onReopen }: {
   onReject: (note: string | null) => Promise<void>
   onReopen: () => Promise<void>
 }) {
-  const [note, setNote] = useState(row.note ?? '')
-  const decided = row.decision !== null
   const problems = row.planned?.problems ?? []
+  /*
+   * THE BOX STARTS WITH THE INSTRUCTION ALREADY IN IT. THE FIRM: "you can automatically fill the
+   * note for the clerk ... fill it automatically and then just accept, and they can remove it if
+   * they need to."
+   *
+   * ONLY AS AN OPENING VALUE, never as a controlled default. useState's initialiser runs once, so
+   * what the person then types, edits or CLEARS is theirs and survives every re-render -- and
+   * this component re-renders on each save, because the whole draft is re-read to re-judge it.
+   * Written as `note || suggested` in the textarea instead, clearing the box would put the
+   * suggestion straight back and the field could not be emptied at all.
+   *
+   * A note already saved on the row wins: it is what a person decided, and a suggestion is not.
+   */
+  const [note, setNote] = useState(() => row.note ?? suggestedNote(problems))
+  const decided = row.decision !== null
   const refused = row.planned?.refused === true
 
   return (
@@ -570,7 +584,7 @@ function DecisionRow({ row, busy, onAccept, onReject, onReopen }: {
           <textarea
             value={note}
             disabled={!!busy}
-            rows={2}
+            rows={3}
             onChange={(e) => setNote(e.target.value)}
             placeholder="A note for whoever works this account — optional"
             className="w-full resize-none rounded border border-slate-200 px-2 py-1.5 text-[13px]
@@ -582,8 +596,19 @@ function DecisionRow({ row, busy, onAccept, onReject, onReopen }: {
             working down a list of eleven of them on an iPad, which is exactly the job people
             stop doing properly when it is slow.
           */}
-          <div className="mb-2">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
             <DictateButton size="small" value={note} onChange={setNote} />
+            {/*
+              SAID, SO IT IS NOT MISTAKEN FOR SOMEBODY'S WORDS. A note that arrived by itself and
+              looks typed is one nobody edits -- and it goes onto the account under the name of
+              whoever pressed Accept. Shown only while it is still ours: the moment a person
+              changes a character it is theirs, and labelling it would then be wrong.
+            */}
+            {note === suggestedNote(problems) && note !== '' && (
+              <span className="text-[11px] text-slate-400">
+                Suggested — change it or clear it.
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {canAccept(row) && (
