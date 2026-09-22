@@ -243,6 +243,10 @@ try {
       debtor_kind: 'Person', name: 'Van Der Westhuizen', first_name: 'Johannes',
       /* The leading zero is the point. */
       cell_1: '0821234567',
+    }, {
+      /* A client who writes words where a figure goes. */
+      client_reference: 'GPS3/10104', capital: 'to be advised', default_date: '2026-09-17',
+      debtor_kind: 'Person', name: 'Buitendag',
     }],
     notes: [['A heading', 'Something we changed.']],
   }))
@@ -279,6 +283,15 @@ try {
      entirely plausible on screen. */
   ok('a date is written as the serial the importer reads', body.includes('<v>46282</v>'))
   ok('money is written as a number', body.includes('<v>48250.75</v>'))
+  /*
+   * AND WORDS IN THE AMOUNT COLUMN STAY WORDS. Stripping to digits made "to be advised" the empty
+   * string, Number('') is 0, and 0 is finite -- so the sheet was written carrying an amount of
+   * nought that nobody typed, and the importer refused it as "nought or less" instead of as "not
+   * a number". A client's own words have to reach them back.
+   */
+  const words = (sheet ?? '').split('<row r="3">')[1]?.split('</row>')[0] ?? ''
+  ok('an amount that is words is kept as words', words.includes('to be advised'))
+  ok('...and is not written as nought', !/<v>0<\/v>/.test(words))
 
   const notes = entry('xl/worksheets/sheet3.xml')
   ok('a conversion carries its own account of itself', (notes ?? '').includes('Something we changed.'))

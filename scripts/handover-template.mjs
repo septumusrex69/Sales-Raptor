@@ -193,7 +193,15 @@ function valueCell(ref, column, value) {
       : `<c r="${ref}" s="${style}"><v>${serial}</v></c>`
   }
   if (column.kind === 'money' || column.kind === 'number') {
-    const n = typeof value === 'number' ? value : Number(String(value).replace(/[^0-9.-]/g, ''))
+    /*
+     * WORDS STAY WORDS. Stripping everything but digits turned "to be advised" into the empty
+     * string, and Number('') is 0 -- which is finite, so the guard passed and the sheet was
+     * written carrying an amount of nought that nobody had typed. A client who writes "to be
+     * advised" in the amount column must have that read back to them, not silently valued at
+     * zero: the importer has a refusal for each and they say different things.
+     */
+    const cleaned = typeof value === 'number' ? value : String(value).replace(/[^0-9.-]/g, '')
+    const n = typeof cleaned === 'number' ? cleaned : (/\d/.test(cleaned) ? Number(cleaned) : NaN)
     return Number.isFinite(n) ? `<c r="${ref}" s="${style}"><v>${n}</v></c>` : inlineCell(ref, 4, value)
   }
   /* Everything else inline, never as a number -- this is the whole point of the text format, and
