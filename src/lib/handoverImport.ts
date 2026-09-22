@@ -27,6 +27,7 @@ import { isValidSaId, type NewDebtorInput } from './newDebtor.ts'
 import {
   missingDateMessage, substituteDefaultDate, substitutionMessage,
 } from './defaultDateFallback.ts'
+import { linkedMessage, type BookAccount, type LinkedMatch } from './linkedAccount.ts'
 
 /* ---------------------------------------------------------------- what a field should look like */
 
@@ -227,6 +228,18 @@ export interface ExistingAccount {
   idNumber: string | null
   name: string | null
   capital: number | null
+  /*
+   * AND ENOUGH TO DECIDE ON, which is the firm's addition: "there might be another one, and
+   * that's the reference number for the client, and the surname is Peter, and the account is
+   * currently being worked by Jennifer ... or it's been withdrawn, or it's been settled. Then we
+   * can see who worked on that account and allocate it to that person." A duplicate warning
+   * naming only a reference is one somebody has to leave the screen to act on.
+   */
+  clientReference?: string | null
+  status?: string | null
+  subStatus?: string | null
+  heldBy?: string | null
+  heldByName?: string | null
 }
 
 export interface PlannedRow {
@@ -257,6 +270,14 @@ export interface PlannedRow {
    * Null only where the date could not be read at all, which refuses the row.
    */
   defaultDate: string | null
+  /**
+   * The account or row this looks like a second debt for, or null.
+   *
+   * THE FIRM: "it's the same reference number, but two accounts -- it could be like a linked
+   * account." Carried rather than only described in a message, because the screen offers an
+   * action on it: putting the new account on the same desk as the old one.
+   */
+  linkedTo: LinkedMatch | null
 }
 
 export interface HandoverPlan {
@@ -512,14 +533,30 @@ export function planHandover(input: {
    * WHAT IS ALREADY ON THE BOOK, keyed the same way the rows are, so "the same data has already
    * been handed over" can be said with the reference somebody would go and look at.
    */
-  const onBook = new Map<string, string>()
+  const onBook = new Map<string, BookAccount>()
+  /** The CLIENT's own reference, which is the other way one debtor's second debt shows up. */
+  const byClientReference = new Map<string, BookAccount>()
   for (const a of input.existingAccounts ?? []) {
-    for (const sig of signaturesOf({ id_number: a.idNumber, name: a.name }, a.capital)) {
-      if (!onBook.has(sig)) onBook.set(sig, a.reference ?? 'an account with no reference')
+    const book: BookAccount = {
+      reference: a.reference,
+      clientReference: a.clientReference ?? null,
+      name: a.name,
+      idNumber: a.idNumber,
+      capital: a.capital,
+      status: a.status ?? null,
+      subStatus: a.subStatus ?? null,
+      heldBy: a.heldBy ?? null,
+      heldByName: a.heldByName ?? null,
     }
+    for (const sig of signaturesOf({ id_number: a.idNumber, name: a.name }, a.capital)) {
+      if (!onBook.has(sig)) onBook.set(sig, book)
+    }
+    const cr = (a.clientReference ?? '').trim()
+    if (cr && !byClientReference.has(cr)) byClientReference.set(cr, book)
   }
 
-  const seen = new Set<string>()
+  /** Client reference -> the line that first used it, so a repeat can name the other one. */
+  const seen = new Map<string, number>()
   /** signature -> the line earlier in THIS file that already carried it. */
   const seenSignatures = new Map<string, number>()
   const rows: PlannedRow[] = []
@@ -530,7 +567,7 @@ export function planHandover(input: {
     const values: Record<string, string | null> = {}
     for (const [i, key] of at) values[key] = (raw[i] ?? '').trim() || null
     rows.push(readRow(values, r + 1, {
-      seen, seenSignatures, onBook,
+      seen, seenSignatures, onBook, byClientReference,
       existing: input.existingReferences, today: input.today, order: dates.order,
     }))
   }
@@ -602,11 +639,14 @@ function readRow(
   values: Record<string, string | null>,
   line: number,
   ctx: {
-    seen: Set<string>
+    /** References already met in this file, and the line each came from. */
+    seen: Map<string, number>
     /** Signatures already met in this file, and the line each came from. */
     seenSignatures: Map<string, number>
     /** Signatures already on the client's book, and the reference each belongs to. */
-    onBook: Map<string, string>
+    onBook: Map<string, BookAccount>
+    /** Accounts already on the book, by the CLIENT's own reference. */
+    byClientReference: Map<string, BookAccount>
     existing?: Set<string>
     today: string
     order: DateOrder
@@ -628,6 +668,8 @@ function readRow(
     refuse('capital', 'The handover amount is nought or less.')
   }
 
+  /** The account or earlier row this looks like a second debt for. See linkedAccount.ts. */
+  let linkedTo: LinkedMatch | null = null
   let defaultDateUsed: string | null = null
   const defaulted = parseSheetDate(values.default_date, ctx.order)
   if (!defaulted) {
@@ -675,15 +717,39 @@ function readRow(
       displayDate(values.default_date, ctx.order), displayDate(defaultDateUsed, 'day-first')))
   }
 
-  const ref = values.client_reference
+  /*
+   * A REFERENCE USED TWICE IS A LINKED ACCOUNT, NOT A BROKEN FILE -- and both of these used to
+   * refuse the row.
+   *
+   * THE FIRM: "it's the same reference number, but two accounts. It could be like a linked
+   * account ... the same person with two different accounts from the same client. The first thing
+   * that should happen is it should ask you: this looks like a linked account, do you want to
+   * accept it or reject it? But there should be an accept option."
+   *
+   * THE REFUSAL RESTED ON A MISREADING. This column holds the CLIENT's reference, which is theirs
+   * to reuse; what a debtor quotes when they pay is the reference Raptor generates on import. So
+   * two rows sharing a client reference collide over nothing, and refusing them sent a second
+   * genuine debt back to the client to argue about.
+   *
+   * AN EMPTY ONE IS STILL A REFUSAL, because that is a different thing entirely: no reference at
+   * all is the client unable to tell us which of their debts this is.
+   */
+  const ref = (values.client_reference ?? '').trim()
   if (!ref) {
     refuse('client_reference', 'No reference. It is what the debtor is told to quote when they pay.')
   } else if (ctx.seen.has(ref)) {
-    refuse('client_reference', `Reference ${ref} appears twice in this file.`)
+    linkedTo = { how: 'client-reference', line: ctx.seen.get(ref) ?? null, account: null }
+    warn('client_reference', linkedMessage(linkedTo, ref))
   } else {
-    ctx.seen.add(ref)
-    if (ctx.existing?.has(ref)) {
-      refuse('client_reference', `Reference ${ref} is already on this client's book.`)
+    ctx.seen.set(ref, line)
+    const already = ctx.byClientReference.get(ref)
+    if (already) {
+      linkedTo = { how: 'client-reference', line: null, account: already }
+      warn('client_reference', linkedMessage(linkedTo, ref))
+    } else if (ctx.existing?.has(ref)) {
+      /* The book was read without the detail -- still worth saying, with less to say about it. */
+      linkedTo = { how: 'client-reference', line: null, account: null }
+      warn('client_reference', linkedMessage(linkedTo, ref))
     }
   }
 
@@ -773,15 +839,19 @@ function readRow(
    * screen cannot know whether a debtor genuinely owes twice, and neither can we.
    */
   const signatures = signaturesOf(values, capital)
-  const earlier = signatures.map((sig) => ctx.seenSignatures.get(sig)).find((l) => l !== undefined)
-  if (earlier !== undefined) {
-    warn('client_reference', `Possible duplicate of row ${earlier} — the same debtor and the same `
-      + 'amount appear twice in this file. Accept it if they genuinely owe twice, or leave it out.')
-  } else {
-    const already = signatures.map((sig) => ctx.onBook.get(sig)).find((ref) => ref !== undefined)
-    if (already !== undefined) {
-      warn('client_reference', `Possible duplicate of ${already}, already on this client's book `
-        + '— the same debtor for the same amount. Accept it if it is a second debt, or leave it out.')
+  /* Said once per row. A row matching on the reference AND on the debtor is ONE linked account,
+     not two, and saying it twice reads as two different accounts to go and look at. */
+  if (!linkedTo) {
+    const earlier = signatures.map((sig) => ctx.seenSignatures.get(sig)).find((l) => l !== undefined)
+    if (earlier !== undefined) {
+      linkedTo = { how: 'same-debtor', line: earlier, account: null }
+      warn('client_reference', linkedMessage(linkedTo, ref || null))
+    } else {
+      const already = signatures.map((sig) => ctx.onBook.get(sig)).find((a) => a !== undefined)
+      if (already) {
+        linkedTo = { how: 'same-debtor', line: null, account: already }
+        warn('client_reference', linkedMessage(linkedTo, ref || null))
+      }
     }
   }
   /* Recorded whether or not it was reported, so a third copy points at the FIRST one rather than
@@ -789,7 +859,7 @@ function readRow(
   for (const sig of signatures) if (!ctx.seenSignatures.has(sig)) ctx.seenSignatures.set(sig, line)
 
   return {
-    line, values, capital, problems, defaultDateUsed, defaultDate: defaulted,
+    line, values, capital, problems, defaultDateUsed, defaultDate: defaulted, linkedTo,
     refused: problems.some((p) => p.level === 'refuse'),
   }
 }

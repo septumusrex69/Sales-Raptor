@@ -23,6 +23,7 @@ import {
 } from '../../lib/handoverDraft'
 import { canAccept, type Decision } from '../../lib/handoverDecision.ts'
 import { columnWidthCh, foldableColumns } from '../../lib/handoverColumnWidth.ts'
+import { suggestedDesk } from '../../lib/linkedAccount.ts'
 import { suggestedNote } from '../../lib/noteSuggestion.ts'
 import { downloadBytes } from '../../lib/xlsxWrite.ts'
 import { fetchClientCommissionRate, fetchExistingAccounts } from '../../lib/accountBook'
@@ -283,8 +284,10 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
    * what the approval honours, and a row rejected in one but not the other would be rejected on
    * the screen and imported anyway.
    */
-  async function decide(rowId: string, decision: Decision, note: string | null) {
-    if (decision === 'accepted') await acceptDraftRow(rowId, note)
+  async function decide(
+    rowId: string, decision: Decision, note: string | null, allocateTo: string | null = null,
+  ) {
+    if (decision === 'accepted') await acceptDraftRow(rowId, note, allocateTo)
     else if (decision === 'rejected') await rejectDraftRow(rowId, note)
     else await clearDraftRowDecision(rowId)
     if (draftId) await load(draftId)
@@ -528,11 +531,14 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
 function DecisionRow({ row, busy, onAccept, onReject, onReopen }: {
   row: JudgedDraft['rows'][number]
   busy: string | null
-  onAccept: (note: string | null) => Promise<void>
+  onAccept: (note: string | null, allocateTo: string | null) => Promise<void>
   onReject: (note: string | null) => Promise<void>
   onReopen: () => Promise<void>
 }) {
   const problems = row.planned?.problems ?? []
+  /* The desk the linked account is already on, where there is one. See linkedAccount.ts. */
+  const desk = suggestedDesk(row.planned?.linkedTo ?? null)
+  const [toDesk, setToDesk] = useState(false)
   /*
    * THE BOX STARTS WITH THE INSTRUCTION ALREADY IN IT. THE FIRM: "you can automatically fill the
    * note for the clerk ... fill it automatically and then just accept, and they can remove it if
@@ -632,10 +638,36 @@ function DecisionRow({ row, busy, onAccept, onReject, onReopen }: {
               </span>
             )}
           </div>
+          {/*
+            AND WHOSE DESK IT SHOULD OPEN ON, where this looks like a second debt for a debtor
+            somebody is already working.
+
+            THE FIRM: "usually these accounts should be worked by the same people ... we can see
+            who worked on that account and then allocate it to that person. Do you want to
+            allocate it to a new person, or to another person in the allocation state? So we need
+            to give that option as well."
+
+            OFFERED, AND OFF UNTIL IT IS PRESSED. The account it points at may be settled,
+            withdrawn, or on the desk of somebody who has left -- and an account appearing on a
+            collector's list that nobody chose to put there is worse than one waiting in the pile,
+            because the pile is a place people look and a list is a place they trust.
+          */}
+          {desk && (
+            <label className="mb-2 flex items-start gap-2 text-[13px] text-slate-600">
+              <input type="checkbox" className="mt-0.5" checked={toDesk} disabled={!!busy}
+                onChange={(e) => setToDesk(e.target.checked)} />
+              <span>
+                Open it on {desk.name}’s desk, with the account it is linked to.
+                <span className="block text-[11px] text-slate-400">
+                  Otherwise it goes to the unallocated pile with the rest of the handover.
+                </span>
+              </span>
+            </label>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             {canAccept(row) && (
               <button type="button" disabled={!!busy}
-                onClick={() => void onAccept(note.trim() || null)}
+                onClick={() => void onAccept(note.trim() || null, toDesk ? desk?.id ?? null : null)}
                 className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5
                   rounded-lg bg-gold-400 text-navy-950 border border-gold-500">
                 <Check size={13} /> Accept
@@ -725,7 +757,9 @@ export function DraftTable({
   onEdit: (rowId: string, key: string, value: string) => Promise<void>
   onExclude: (rowId: string, excluded: boolean) => Promise<void>
   onApprove: () => Promise<void>
-  onDecide: (rowId: string, decision: Decision, note: string | null) => Promise<void>
+  onDecide: (
+    rowId: string, decision: Decision, note: string | null, allocateTo?: string | null,
+  ) => Promise<void>
   onBack: () => void
   onDiscard: () => Promise<void>
   /** What "Back" goes back to. Named, because on a query ticket it is not the import screen. */
@@ -966,7 +1000,7 @@ export function DraftTable({
       <div className="mt-4 space-y-3">
         {judged.rows.filter((r) => (r.planned?.problems.length ?? 0) > 0).map((row) => (
           <DecisionRow key={row.id} row={row} busy={busy}
-            onAccept={(note) => onDecide(row.id, 'accepted', note)}
+            onAccept={(note, allocateTo) => onDecide(row.id, 'accepted', note, allocateTo)}
             onReject={(note) => onDecide(row.id, 'rejected', note)}
             onReopen={() => onDecide(row.id, null, null)} />
         ))}

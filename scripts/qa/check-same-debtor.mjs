@@ -13,7 +13,7 @@
  * on the wrong column and the screen invites a collector to click through to a stranger's debt.
  */
 import { readFileSync } from 'node:fs'
-import { debtorKey, orderOtherAccounts, OTHER_ACCOUNTS_HEADING } from '../../src/lib/sameDebtor.ts'
+import { debtorKey, orderOtherAccounts, LINKED_ACCOUNTS_HEADING } from '../../src/lib/sameDebtor.ts'
 
 let pass = 0
 const failures = []
@@ -102,8 +102,14 @@ const panel = readFileSync(new URL('../../src/components/collections/OtherAccoun
  * it linked accounts? Any other possibilities?" — and a word that is going to be reconsidered
  * should not be typed into six files first.
  */
-ok('the heading is a constant, not a string in the markup', /OTHER_ACCOUNTS_HEADING/.test(panel))
-ok('...and it is not called "linked"', !/[Ll]inked/.test(OTHER_ACCOUNTS_HEADING))
+ok('the heading is a constant, not a string in the markup', /LINKED_ACCOUNTS_HEADING/.test(panel))
+/*
+ * AND IT IS THE FIRM'S OWN WORD, which is a reversal. This asserted the opposite until the firm
+ * said, of the same thing on the import screen: "just call it linked account, not other account."
+ * The argument against it -- that "linked" invites an unlink button for a grouping nobody linked
+ * -- is still in sameDebtor.ts and still true; the words on a screen are the firm's.
+ */
+ok('the heading uses the firm\u2019s word', /[Ll]inked/.test(LINKED_ACCOUNTS_HEADING))
 
 /*
  * AND THE PANEL SAYS THE BALANCES ARE SEPARATE. Three or four figures under one heading read as

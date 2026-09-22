@@ -470,7 +470,7 @@ ok('the import screen\u2019s table is shared rather than copied',
 ok('...and the ticket uses that one', /<DraftTable/.test(detail))
 ok('...driven by the same library calls',
   /updateDraftRow\(rowId, \{ excluded \}\)/.test(detail)
-  && /acceptDraftRow\(rowId, note\)/.test(detail)
+  && /acceptDraftRow\(rowId, note, allocateTo\)/.test(detail)
   && /approveDraft\(\{/.test(detail))
 /* Through approveDraft, which is what opens the accounts, raises the references, writes the
    notes and tells the client -- a second import path would do some of that and not the rest. */

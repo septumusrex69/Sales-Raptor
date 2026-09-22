@@ -305,8 +305,10 @@ export function QueryDetail() {
             await updateDraftRow(rowId, { excluded })
             await reload(followUp.draft.id)
           }}
-          onDecide={async (rowId, decision, note) => {
-            if (decision === 'accepted') await acceptDraftRow(rowId, note)
+          onDecide={async (rowId, decision, note, allocateTo = null) => {
+            /* The desk travels with the decision here too -- the ticket draws the same table and
+               a second go at a refused row is the same question about who works it. */
+            if (decision === 'accepted') await acceptDraftRow(rowId, note, allocateTo)
             else if (decision === 'rejected') await rejectDraftRow(rowId, note)
             else await clearDraftRowDecision(rowId)
             await reload(followUp.draft.id)

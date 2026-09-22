@@ -98,5 +98,16 @@ export function orderOtherAccounts(rows: OtherAccount[]): OtherAccount[] {
   })
 }
 
-/** What the heading says. One place, because the firm may yet prefer another word for it. */
-export const OTHER_ACCOUNTS_HEADING = 'Other accounts for this debtor'
+/**
+ * What the heading says. One place -- and the firm did prefer another word for it.
+ *
+ * THE FIRM, on the import screen: "it could be like a linked account. Just call it linked
+ * account, not other account."
+ *
+ * THIS OVERRULES THE ARGUMENT AT THE TOP OF THIS FILE, which is left standing because it is still
+ * true and somebody will wonder. "Linked" reads as though a person linked them and invites an
+ * unlink button that cannot exist, since the grouping is derived from the identity number and
+ * never stored. The firm has heard that and wants their own word; the words on a screen are
+ * theirs. Nothing about the derivation changed -- there is still nothing to link or unlink.
+ */
+export const LINKED_ACCOUNTS_HEADING = 'Linked accounts for this debtor'

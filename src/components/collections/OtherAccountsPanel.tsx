@@ -1,10 +1,10 @@
 import { Link } from 'react-router-dom'
 import { Card, CardHeader } from '../ui/Card'
 import { formatCurrency } from '../../data/mockData'
-import { OTHER_ACCOUNTS_HEADING, orderOtherAccounts, type OtherAccount } from '../../lib/sameDebtor'
+import { LINKED_ACCOUNTS_HEADING, orderOtherAccounts, type OtherAccount } from '../../lib/sameDebtor'
 
 /**
- * The debtor's other accounts, each one a way into it.
+ * The debtor's linked accounts, each one a way into it.
  *
  * THE FIRM: "it will indicate, when you're on an account, this debtor has other accounts, those
  * account numbers, and you would be able to click on that account number and it opens that
@@ -15,7 +15,7 @@ import { OTHER_ACCOUNTS_HEADING, orderOtherAccounts, type OtherAccount } from '.
  * is in this list. That is the whole mechanism, and it is the reason nothing is stored: a panel
  * built from the rows means the return journey exists without anybody building it.
  *
- * NOT SHOWN AT ALL WHERE THERE IS NOTHING TO SHOW. An empty "Other accounts (0)" on the great
+ * NOT SHOWN AT ALL WHERE THERE IS NOTHING TO SHOW. An empty "Linked accounts (0)" on the great
  * majority of accounts is a panel that pushes the figures down the page in order to say nothing,
  * and CLAUDE.md is explicit that something which fires when nothing is wrong stops being read.
  */
@@ -26,10 +26,10 @@ export function OtherAccountsPanel({ rows }: { rows: OtherAccount[] }) {
   return (
     <Card>
       <CardHeader
-        title={OTHER_ACCOUNTS_HEADING}
+        title={LINKED_ACCOUNTS_HEADING}
         subtitle={rows.length === 1
-          ? 'One other account, on the same identity number.'
-          : `${rows.length} other accounts, on the same identity number.`} />
+          ? 'One linked account, on the same identity number.'
+          : `${rows.length} linked accounts, on the same identity number.`} />
 
       <ul className="divide-y divide-slate-100 -mx-1">
         {ordered.map((a) => (

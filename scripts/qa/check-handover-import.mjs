@@ -16,6 +16,7 @@ import {
   planHandover, spellDate,
 } from '../../src/lib/handoverImport.ts'
 import { validateNewDebtor } from '../../src/lib/newDebtor.ts'
+import { suggestedDesk } from '../../src/lib/linkedAccount.ts'
 
 let pass = 0
 const failures = []
@@ -588,8 +589,12 @@ const twiceInFile = rows(
   ['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'],
   ['A2', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
 ok('the same debtor and amount twice in one file is flagged',
-  problemsOf(twiceInFile.rows[1]).some((p) => /Possible duplicate of row 2/.test(p.message)))
+  problemsOf(twiceInFile.rows[1]).some((p) => /Row 2 is the other one/.test(p.message)))
 check('...as a warning, not a refusal', twiceInFile.refused.length, 0)
+/* THE FIRM'S OWN WORD FOR IT: "it could be like a linked account -- just call it linked account,
+   not other account." The screen says what the firm calls the thing. */
+ok('...and calls it a linked account',
+  /linked account/.test(firstMessage(twiceInFile.rows[1])))
 ok('...and says what to do about it',
   /Accept it if they genuinely owe twice/.test(firstMessage(twiceInFile.rows[1])))
 check('...and the first copy is not itself flagged', problemsOf(twiceInFile.rows[0]).length, 0)
@@ -601,7 +606,7 @@ const thrice = rows(
   ['A2', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'],
   ['A3', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
 ok('a third copy points at the first, not at the second',
-  /row 2/.test(firstMessage(thrice.rows[2])))
+  /Row 2 is the other one/.test(firstMessage(thrice.rows[2])))
 
 /* Same name, different amount, and the other way round: either half alone is worthless. In the
    firm's own file fourteen accounts are for exactly R380 and three surnames appear twice. */
@@ -636,7 +641,7 @@ const sameIdSameAmount = rows(
   ['A1', '100', '2026-01-01', 'Person', 'Dube', ID_A, '082 123 4567', 'a@b.co.za'],
   ['A2', '100', '2026-01-01', 'Person', 'Mokoena', ID_A, '082 123 4567', 'a@b.co.za'])
 ok('the same ID for the same amount is flagged',
-  problemsOf(sameIdSameAmount.rows[1]).some((p) => /Possible duplicate of row 2/.test(p.message)))
+  problemsOf(sameIdSameAmount.rows[1]).some((p) => /Row 2 is the other one/.test(p.message)))
 /* THE ID BEATS THE SURNAME where the two disagree: the row above has a different surname and is
    still caught, because the identifier is the ID wherever there is a usable one. */
 check('...even though the surnames differ', sameIdSameAmount.refused.length, 0)
@@ -657,17 +662,51 @@ const onBook = (data) => planHandover({
   rows: [['Your reference', 'Handover amount', 'Date of default', 'Person or business',
     'Surname', 'ID number', 'Cell number 1', 'Email address'], data],
   existingAccounts: [
-    { reference: 'ACF10085', idNumber: null, name: 'Dube', capital: 100 },
+    {
+      reference: 'ACF10085', clientReference: 'CR-1', idNumber: null, name: 'Dube', capital: 100,
+      status: 'Active: Activated', subStatus: 'Promise To Pay',
+      heldBy: 'jennifer-id', heldByName: 'Jennifer Adams',
+    },
     { reference: 'ACF10086', idNumber: ID_A, name: 'Ntuli', capital: 4200 },
   ],
   today: TODAY,
 })
 const onBookAlready = onBook(['A9', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
 ok('a debt already on the book is flagged',
-  /already on this client's book/.test(firstMessage(onBookAlready.rows[0])))
+  /Already on the book/.test(firstMessage(onBookAlready.rows[0])))
 ok('...and names the account to go and look at',
   /ACF10085/.test(firstMessage(onBookAlready.rows[0])))
 check('...still as a warning', onBookAlready.refused.length, 0)
+/*
+ * AND IT SAYS ENOUGH TO DECIDE ON. THE FIRM: "there might be another one, and that's the
+ * reference number for the client, and the surname is Peter, and the account is currently being
+ * worked by Jennifer ... then we can see who worked on that account and allocate it to that
+ * person." A reference alone is a warning somebody has to leave the screen to act on.
+ *
+ * THE POSITION, NOT THE STATUS COLUMN -- CLAUDE.md's first rule. "Active: Activated" describes
+ * how the row got into the table; "Arranged" is what the person deciding needs.
+ */
+ok(`...the surname (${firstMessage(onBookAlready.rows[0])})`,
+  /Dube/.test(firstMessage(onBookAlready.rows[0])))
+ok('...where it stands, as a position rather than a status column',
+  /Arranged/.test(firstMessage(onBookAlready.rows[0]))
+  && !/Active: Activated/.test(firstMessage(onBookAlready.rows[0])))
+ok('...and whose desk it is on',
+  /Jennifer Adams/.test(firstMessage(onBookAlready.rows[0])))
+check('...and the desk is offered as a suggestion',
+  suggestedDesk(onBookAlready.rows[0].linkedTo)?.name, 'Jennifer Adams')
+/* An account nobody holds suggests nobody, rather than suggesting the pile as though it were a
+   person. There is no desk to follow onto. */
+const unheld = planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Person or business', 'Surname'],
+    ['A9', '100', '2026-01-01', 'Person', 'Dube']],
+  existingAccounts: [{ reference: 'ACF10099', idNumber: null, name: 'Dube', capital: 100 }],
+  today: TODAY,
+})
+check('an account on nobody’s desk suggests nobody',
+  suggestedDesk(unheld.rows[0].linkedTo), null)
+ok('...and says so rather than leaving it out',
+  /nobody/.test(firstMessage(unheld.rows[0])))
 const byId = onBook(['A9', '4200', '2026-01-01', 'Person', 'Someone', ID_A, '082 123 4567', 'a@b.co.za'])
 ok('...matched on the ID as well as on the surname', /ACF10086/.test(firstMessage(byId.rows[0])))
 /* And a second debt for somebody already on the book is not a duplicate of their first. */
@@ -686,16 +725,68 @@ const twice = rows(
   ['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'x'],
   ['A1', '200', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'x'],
 )
-check('the same reference twice in one file opens one ledger, not two',
-  [twice.ready.length, twice.refused.length], [1, 1])
+/*
+ * ---- THE SAME REFERENCE TWICE IS A LINKED ACCOUNT, NOT A BROKEN FILE ----
+ *
+ * THE FIRM: "it's the same reference number, but two accounts. It could be like a linked account
+ * ... the same person with two different accounts from the same client. The first thing that
+ * should happen is it should ask you: this looks like a linked account, do you want to accept it
+ * or reject it? But there should be an accept option."
+ *
+ * BOTH OF THESE REFUSED A MOMENT AGO, and the refusal rested on a misreading: this column holds
+ * the CLIENT's reference, which is theirs to reuse. What a debtor quotes when they pay is the
+ * reference Raptor generates on import, so two rows sharing a client reference collide over
+ * nothing -- and refusing them sent a second genuine debt back to the client to argue about.
+ */
+check('the same reference twice opens both, as a question rather than a refusal',
+  [twice.ready.length, twice.refused.length], [2, 0])
+ok('...saying it looks like a linked account',
+  /linked account/.test(firstMessage(twice.rows[1])))
+ok('...and naming the row it is linked to', /Row 2 is the other one/.test(firstMessage(twice.rows[1])))
+/* The FIRST use is not itself flagged: a pair is one question, and asking it twice reads as two.
+   Asked of the LINKED problem only -- this fixture's rows carry an unrelated email warning, and
+   counting every problem would make this pass or fail for a reason that is not the subject. */
+check('...and the first use is not flagged as linked',
+  problemsOf(twice.rows[0]).filter((x) => /linked account/.test(x.message)).length, 0)
+/* A row still has to be ANSWERED. The account opens only once somebody has pressed Accept, which
+   is the whole of what makes taking a repeated reference safe. */
+ok('...and it still has to be answered',
+  problemsOf(twice.rows[1]).some((p) => p.key === 'client_reference' && p.level === 'warn'))
+
 const already = planHandover({
   rows: [['Your reference', 'Handover amount', 'Date of default', 'Person or business',
     'Surname, or the business name'], ['A1', '100', '2026-01-01', 'Person', 'Dube']],
   existingReferences: new Set(['A1']),
   today: TODAY,
 })
-ok(`a reference the client has already handed over is refused (${firstMessage(already.refused[0])})`,
-  already.refused.length === 1 && /already on this client/.test(firstMessage(already.refused[0])))
+check('a reference the client has already handed over is not refused either',
+  already.refused.length, 0)
+ok(`...it is asked about (${firstMessage(already.rows[0])})`,
+  /linked account/.test(firstMessage(already.rows[0])))
+
+/* AND WITH THE BOOK READ IN FULL, it says which account and whose desk it is on. */
+const linkedOnBook = planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Person or business', 'Surname'],
+    ['CR-1', '900', '2026-01-01', 'Person', 'Dube']],
+  existingAccounts: [{
+    reference: 'ACF10085', clientReference: 'CR-1', idNumber: null, name: 'Dube', capital: 100,
+    status: 'Active: Activated', subStatus: 'Promise To Pay',
+    heldBy: 'jennifer-id', heldByName: 'Jennifer Adams',
+  }],
+  today: TODAY,
+})
+check('a client reference already on the book is a linked account, not a refusal',
+  linkedOnBook.refused.length, 0)
+ok(`...naming the account (${firstMessage(linkedOnBook.rows[0])})`,
+  /ACF10085/.test(firstMessage(linkedOnBook.rows[0])))
+check('...and suggesting the desk it is already on',
+  suggestedDesk(linkedOnBook.rows[0].linkedTo)?.id, 'jennifer-id')
+/*
+ * ONE QUESTION, NOT TWO. This row matches on the client's reference AND would match as the same
+ * debtor; saying both reads as two separate accounts to go and look at.
+ */
+check('...said once even when both tests would fire',
+  problemsOf(linkedOnBook.rows[0]).filter((p) => /linked account/.test(p.message)).length, 1)
 
 /* Blank rows under the data are the template's formatting, not debtors with nothing filled in. */
 const padded = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'x'],
@@ -703,7 +794,7 @@ const padded = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4
 check('the blank rows the template carries are not read as debtors', padded.rows.length, 1)
 
 /* The line number is the one Excel shows, so "row 7" means row 7 on the person's screen. */
-check('a problem names the row as the spreadsheet numbers it', twice.refused[0]?.line, 3)
+check('a problem names the row as the spreadsheet numbers it', twice.rows[1]?.line, 3)
 
 /* ---------------------------------------------------------------- report */
 

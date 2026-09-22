@@ -579,22 +579,49 @@ export async function fetchAccountReferences(companyId: string): Promise<string[
  * one person to miss each other.
  */
 export async function fetchExistingAccounts(companyId: string): Promise<ExistingAccount[]> {
+  /*
+   * ENOUGH TO DECIDE ON, not just enough to recognise a duplicate by.
+   *
+   * THE FIRM: "there might be another one, and that's the reference number for the client, and
+   * the surname is Peter, and the account is currently being worked by Jennifer, or allocated to
+   * Jennifer, or it's been withdrawn, or it's been settled. Then we can see who worked on that
+   * account and allocate it to that person."
+   *
+   * So the status, the sub-status and the desk come back too -- the position a client is reported
+   * on is DERIVED from the first two (clientPosition.ts) and cannot be worked out from a
+   * reference. The holder's name is joined rather than looked up per row: forty rows each
+   * resolving one profile is forty requests for a handful of distinct people.
+   */
   const { data, error } = await supabase
     .from('debtor_accounts')
-    .select('account_number, debtor_id_number, debtor_surname, capital_handed_over')
+    /* One literal, not a concatenation: supabase-js infers the row type FROM the select string,
+       and a joined one infers nothing and lands on GenericStringError. */
+    .select('account_number, client_reference, debtor_id_number, debtor_surname, capital_handed_over, status, sub_status, assigned_to, assigned:profiles!debtor_accounts_assigned_to_fkey(name)')
     .eq('company_id', companyId)
     .limit(5000)
   if (error) throw new Error(error.message)
   return (data ?? []).map((r: {
     account_number: string | null
+    client_reference: string | null
     debtor_id_number: string | null
     debtor_surname: string | null
     capital_handed_over: number | string | null
+    status: string | null
+    sub_status: string | null
+    assigned_to: string | null
+    assigned?: { name: string | null } | { name: string | null }[] | null
   }) => ({
     reference: r.account_number,
+    clientReference: r.client_reference,
     idNumber: r.debtor_id_number,
     name: r.debtor_surname,
     capital: r.capital_handed_over === null ? null : Number(r.capital_handed_over),
+    status: r.status,
+    subStatus: r.sub_status,
+    heldBy: r.assigned_to,
+    /* PostgREST gives an embedded row as an object or a one-element array depending on how it
+       reads the relationship. Both, because the difference is invisible until a name is blank. */
+    heldByName: Array.isArray(r.assigned) ? (r.assigned[0]?.name ?? null) : (r.assigned?.name ?? null),
   }))
 }
 

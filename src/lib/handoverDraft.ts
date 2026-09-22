@@ -39,7 +39,7 @@ const DRAFT_COLUMNS = 'id, company_id, filename, sheet_kind, date_order, state, 
 /* ONE LITERAL, NOT A CONCATENATION. supabase-js types the result off this string, so split
    across a `+` every field came back as GenericStringError -- and check-select-columns.mjs is
    likewise happier reading a literal. */
-const ROW_COLUMNS = 'id, draft_id, line, values, document_filename, excluded, decision, note, created_at, updated_at'
+const ROW_COLUMNS = 'id, draft_id, line, values, document_filename, excluded, decision, note, allocate_to, created_at, updated_at'
 
 export interface HandoverDraft {
   id: string
@@ -62,6 +62,11 @@ export interface DraftRow {
   excluded: boolean
   /** Accepted or rejected by a person, where the row carried a problem. See handoverDecision.ts. */
   decision: Decision
+  /**
+   * Whose desk the account should open on. Null is the unallocated pile, which is the ordinary
+   * case. Set from the linked-account suggestion -- see linkedAccount.ts.
+   */
+  allocateTo: string | null
   /** What to tell the collector who gets the account. */
   note: string | null
 }
@@ -263,6 +268,7 @@ export async function fetchDraft(id: string, today: string): Promise<JudgedDraft
     documentFilename: (r.document_filename as string | null) ?? null,
     excluded: r.excluded as boolean,
     decision: ((r.decision as Decision | null) ?? null),
+    allocateTo: (r.allocate_to as string | null) ?? null,
     note: (r.note as string | null) ?? null,
   }))
 
@@ -340,12 +346,14 @@ export async function updateDraftRow(
     excluded?: boolean
     decision?: Decision
     note?: string | null
+    allocateTo?: string | null
   },
 ): Promise<void> {
   const { error } = await supabase.from('handover_draft_rows').update({
     ...(patch.excluded === undefined ? {} : { excluded: patch.excluded }),
     ...(patch.decision === undefined ? {} : { decision: patch.decision }),
     ...(patch.note === undefined ? {} : { note: patch.note }),
+    ...(patch.allocateTo === undefined ? {} : { allocate_to: patch.allocateTo }),
   }).eq('id', id)
   if (error) throw new Error(error.message)
 }
@@ -361,14 +369,25 @@ export async function rejectDraftRow(id: string, note: string | null): Promise<v
   await updateDraftRow(id, { decision: 'rejected', excluded: true, note })
 }
 
-/** Accept a row despite its problems, with a note for whoever gets the account. */
-export async function acceptDraftRow(id: string, note: string | null): Promise<void> {
-  await updateDraftRow(id, { decision: 'accepted', excluded: false, note })
+/**
+ * Accept a row despite its problems, with a note for whoever gets the account.
+ *
+ * AND, WHERE IT WAS CHOSEN, WHOSE DESK IT OPENS ON. One call with the decision, because the two
+ * are one act: the person pressing Accept on a linked account is the person deciding it should go
+ * to the collector already working the other one. Written separately they could disagree, and the
+ * one that lost would be the allocation -- an account quietly in the pile that somebody believes
+ * is on a desk.
+ */
+export async function acceptDraftRow(
+  id: string, note: string | null, allocateTo: string | null = null,
+): Promise<void> {
+  await updateDraftRow(id, { decision: 'accepted', excluded: false, note, allocateTo })
 }
 
 /** Put a row back to undecided, which blocks approval again. */
 export async function clearDraftRowDecision(id: string): Promise<void> {
-  await updateDraftRow(id, { decision: null, excluded: false })
+  /* The desk goes with it. Reopening a row un-decides where it was going as well as whether. */
+  await updateDraftRow(id, { decision: null, excluded: false, allocateTo: null })
 }
 
 export async function discardDraft(id: string): Promise<void> {
@@ -619,10 +638,22 @@ export async function approveDraft(input: {
   const handoverId = batch.id as string
 
   for (const { row, debtor } of built) {
-    const account = await createDebtorAccount(
-      toAccountRow(debtor, judged.draft.companyId, handoverId, input.commissionRate),
-      (id) => toContactRows(debtor, id),
-    )
+    /*
+     * AND ON A DESK, WHERE THE ROW SAID SO.
+     *
+     * THE FIRM, on a row that looks like a second debt for a debtor already on the book: "usually
+     * these accounts should be worked by the same people ... we can see who worked on that
+     * account and then allocate it to that person."
+     *
+     * Set on the INSERT rather than allocated afterwards, so an account never exists in the pile
+     * for a moment and then moves -- a collector's list is watched, and an account appearing and
+     * vanishing again reads as somebody taking work off them.
+     */
+    const opening: Record<string, unknown> = {
+      ...toAccountRow(debtor, judged.draft.companyId, handoverId, input.commissionRate),
+      ...(row.allocateTo ? { assigned_to: row.allocateTo } : {}),
+    }
+    const account = await createDebtorAccount(opening, (id) => toContactRows(debtor, id))
     /*
      * THE NOTE, ON THE ACCOUNT. THE FIRM: "a note from admin -- the handover was accepted, but
      * the ID number is incorrect, or there are no email addresses. That's overwritten the flag

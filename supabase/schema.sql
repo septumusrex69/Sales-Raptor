@@ -5900,3 +5900,24 @@ grant execute on function public.set_draft_row_value(uuid, text, text) to authen
 comment on function public.set_draft_row_value(uuid, text, text) is
   'Set one cell on a handover draft row, merged against the stored row rather than against the '
   'caller''s copy of it. A whole-object write loses any edit the caller has not seen yet.';
+
+-- WHOSE DESK AN ACCEPTED ROW SHOULD LAND ON, decided while the handover is being read.
+--
+-- THE FIRM, on a row that looks like a second debt for a debtor already on the book: "usually
+-- these accounts should be worked by the same people ... we can see who worked on that account
+-- and then allocate it to that person. Do you want to allocate it to a new person, or to another
+-- person in the allocation state? So we need to give that option as well."
+--
+-- NULL IS THE ORDINARY CASE and means the unallocated pile, which is where every imported account
+-- went before this and still goes unless somebody says otherwise on the row. The suggestion is
+-- made by the screen and never applied by itself: the linked account may be settled, withdrawn,
+-- or on the desk of somebody who has left, and an account appearing on a collector's list that
+-- nobody chose to put there is worse than one sitting in the pile.
+--
+-- ON DELETE SET NULL rather than cascade: a person leaving must not delete a draft row.
+alter table public.handover_draft_rows
+  add column if not exists allocate_to uuid references public.profiles (id) on delete set null;
+
+comment on column public.handover_draft_rows.allocate_to is
+  'Whose desk this row''s account should open on. Null is the unallocated pile. Set from the '
+  'linked-account suggestion on the import screen, and only ever by a person accepting the row.';
