@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { Card, CardHeader } from '../ui/Card'
 import { ClientPicker } from '../ui/ClientPicker'
+import { DictateButton } from '../ui/Dictate'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { parseCsv } from '../../lib/csv'
@@ -529,14 +530,32 @@ function DecisionRow({ row, busy, onAccept, onReject, onReopen }: {
         </div>
       ) : (
         <>
-          <input
+          {/*
+            A TEXTAREA, NOT A ONE-LINE BOX, now that it can be spoken into. THE FIRM: "you should
+            be able to write a note and dictate and tell the note, just don't have to write it,
+            just to talk." A spoken note is two or three sentences where a typed one was four
+            words, and a single line that scrolls sideways hides everything but the end of it --
+            which is the half nobody needs to check.
+          */}
+          <textarea
             value={note}
             disabled={!!busy}
+            rows={2}
             onChange={(e) => setNote(e.target.value)}
             placeholder="A note for whoever works this account — optional"
-            className="w-full rounded border border-slate-200 px-2 py-1.5 text-[13px] mb-2
-              focus:border-brand-500 focus:outline-none" />
-          <div className="flex items-center gap-2">
+            className="w-full resize-none rounded border border-slate-200 px-2 py-1.5 text-[13px]
+              mb-2 focus:border-brand-500 focus:outline-none" />
+          {/*
+            THE MICROPHONE BELONGS TO THE BOX, so it sits under it rather than in the row of
+            decisions -- where it would lead, and Accept is what should. This note is the record
+            of why an ID number nobody could verify was accepted anyway, written by somebody
+            working down a list of eleven of them on an iPad, which is exactly the job people
+            stop doing properly when it is slow.
+          */}
+          <div className="mb-2">
+            <DictateButton size="small" value={note} onChange={setNote} />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
             {canAccept(row) && (
               <button type="button" disabled={!!busy}
                 onClick={() => void onAccept(note.trim() || null)}

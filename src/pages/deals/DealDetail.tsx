@@ -493,7 +493,7 @@ export function DealDetail() {
             )}
             {contact && (
               <>
-                <span className="text-white/30">\u00b7</span>
+                <span className="text-white/30">·</span>
                 <span>{contact.firstName} {contact.lastName}</span>
               </>
             )}

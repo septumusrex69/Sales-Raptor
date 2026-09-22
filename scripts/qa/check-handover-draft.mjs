@@ -149,6 +149,22 @@ ok('...and counts what it would import off the same gate', /judged\.gate\.import
    forty-column table to find the right row. */
 ok('every problem offers a decision beside it', /<DecisionRow/.test(card))
 ok('...with a note for whoever works the account', /A note for whoever works this account/.test(card))
+/*
+ * AND IT CAN BE SPOKEN. THE FIRM: "you should be able to write a note and dictate and tell the
+ * note, just don't have to write it, just to talk."
+ *
+ * This note is the record of why an account whose ID number nobody could verify was accepted
+ * anyway, and it is written by somebody working down eleven of them on an iPad. The shared
+ * DictateButton, not a second implementation: it already handles the browser ending a session on
+ * a pause, which is the difference between dictating a note and dictating its first sentence.
+ */
+ok('...which can be dictated rather than typed',
+  /<DictateButton size="small" value=\{note\} onChange=\{setNote\} \/>/.test(card))
+ok('...using the shared one', /from '\.\.\/ui\/Dictate'/.test(card))
+/* A textarea, because a spoken note is sentences: a one-line box scrolls sideways and shows the
+   end of what was said, which is the half nobody needs to check. */
+ok('...into a box that shows more than the last few words it heard',
+  /<textarea\s+value=\{note\}/.test(card))
 
 /* ---------- 5. a draft row opens the account it describes ---------- */
 
