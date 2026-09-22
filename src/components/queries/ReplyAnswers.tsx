@@ -77,8 +77,9 @@ export function ReplyAnswers({ accountFor }: {
       <div className="p-5 pb-3">
         <CardHeader
           title="The client&rsquo;s answers"
-          subtitle={'Copy their reply and paste it here. The last column is read back against the '
-            + `accounts it is about; nothing is written until you say so. (${ANSWER_COLUMN})`} />
+          subtitle={`Copy their reply and paste it here. Whatever they typed in the \u201c${
+            ANSWER_COLUMN}\u201d column is read back against the accounts it is about; nothing is `
+            + 'written until you say so.'} />
       </div>
 
       <div className="px-5 pb-4">

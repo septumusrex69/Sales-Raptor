@@ -411,6 +411,83 @@ ok('the client page opens the query', /to=\{`\/queries\/\$\{q\.id\}`\}/.test(cli
    account is gone. */
 ok('...and only links a debtor where there is one', /q\.accountId \? \(/.test(clientList))
 
+/* ---------- a second go at the rows that could not be opened ---------- */
+
+/*
+ * THE FIRM: "in the query ticket, specifically this ticket for a handover that is in an awaiting
+ * state, it should show all of the details like it's ready for an import, and when the details is
+ * changed it can be approved and imported."
+ *
+ * A NEW DRAFT, NEVER THE OLD ONE REOPENED, and that is the assertion this section exists for. An
+ * approved draft is frozen because it is the only record of what the client sent and what was
+ * corrected on the way in; editing a refused row back into it rewrites that record. The refused
+ * rows are COPIED, and the copy goes through the ordinary path -- same planner, same gate, same
+ * approval, its own batch.
+ */
+ok('the refused rows can be raised again', /export async function startFollowUpDraft/.test(lib))
+ok('...as a new draft', /from\('handover_drafts'\)\.insert\(\{[\s\S]{0,400}?from_query_id/.test(lib))
+/* THE ORIGINAL IS NEVER TOUCHED. Nothing in the follow-up may update the draft it copied from,
+   or the frozen record stops being one. */
+const followUp = lib.slice(
+  lib.indexOf('export async function startFollowUpDraft'),
+  lib.indexOf('export async function fetchDraft(id'))
+ok('...and the original draft is only read', !/update\(/.test(followUp))
+ok('...its rows only read', !/handover_draft_rows'\)\.update/.test(followUp))
+/* THE SAME TEST FOR "not brought in" the email and the ticket use, so the three cannot come to
+   mean different things about the same row. */
+ok('...taking the rows nothing was opened for',
+  /r\.excluded \|\| r\.planned\?\.refused/.test(followUp))
+/*
+ * ONE PER QUERY, and by a unique index rather than a read-then-write. Two people opening the same
+ * ticket at once is an ordinary Tuesday, and check-then-insert gives them a draft each.
+ */
+ok('...one follow-up per query, enforced by the database',
+  /create unique index if not exists handover_drafts_from_query_idx/.test(schema))
+ok('...and pressing the button twice finds the one already there',
+  /const already = await followUpDraft\(/.test(followUp))
+/*
+ * RENUMBERED FROM 2. Every message about a row says "Row 7", and 7 on this sheet would be 7 on a
+ * sheet nobody is looking at.
+ */
+ok('...with the rows numbered for the new sheet', /line: i \+ 2/.test(followUp))
+/* Named for the sheet it came out of: a liaison looking at the queue a week later has to tell it
+   from the original at a glance. */
+/* The source spells the dash as an escape inside a template literal, where it IS interpreted --
+   so this matches the source's own spelling rather than the character it produces. */
+ok('...and named for the sheet it came from',
+  /original\.draft\.filename\.replace\([\s\S]{0,40}?corrected/.test(followUp))
+
+/*
+ * THE SAME TABLE THE IMPORT SCREEN DRAWS. Drawn twice they drift, and the failure is not two
+ * tables that look different -- it is one of them judging a row by rules the other has moved on
+ * from.
+ */
+ok('the import screen\u2019s table is shared rather than copied',
+  /export function DraftTable/.test(card))
+ok('...and the ticket uses that one', /<DraftTable/.test(detail))
+ok('...driven by the same library calls',
+  /updateDraftRow\(rowId, \{ excluded \}\)/.test(detail)
+  && /acceptDraftRow\(rowId, note\)/.test(detail)
+  && /approveDraft\(\{/.test(detail))
+/* Through approveDraft, which is what opens the accounts, raises the references, writes the
+   notes and tells the client -- a second import path would do some of that and not the rest. */
+/* WIRED TO THE BUTTON, not merely present in the file. Asserted only as "approveDraft appears
+   somewhere", this passed with the button's handler emptied -- the function was still there,
+   doing nothing for anybody. */
+ok('...and imported through the one approval',
+  /approveDraft\(\{[\s\S]{0,200}?draftId: followUp/.test(detail)
+  && /onApprove=\{importFollowUp\}/.test(detail))
+/*
+ * RAISED BY A BUTTON, never by opening the ticket. A draft created as a side effect of looking at
+ * a page is one nobody asked for, and a "waiting to be approved" queue with strangers in it is a
+ * queue nobody trusts.
+ */
+ok('opening the ticket only reads', /followUpDraft\(found\.query\.id/.test(detail))
+ok('...and raising one is a button', /raiseFollowUp\(\)/.test(detail))
+/* Nothing to correct means nothing to offer: a button on a handover where everything came in
+   would open an empty draft. */
+ok('...offered only where something was refused', /notBroughtIn\.length > 0 && \(/.test(detail))
+
 /* ---------------------------------------------------------------- report */
 
 if (failures.length) {

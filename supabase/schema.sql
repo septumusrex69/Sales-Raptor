@@ -5839,3 +5839,28 @@ create index if not exists account_queries_handover_idx
 comment on column public.account_queries.handover_id is
   'The batch this query is about, where it is about a whole handover sheet rather than one '
   'account. Exactly one of account_id and handover_id is set.';
+
+-- A SECOND GO AT THE ROWS A HANDOVER COULD NOT OPEN.
+--
+-- THE FIRM: "in the query ticket, specifically this ticket for a handover that is in an awaiting
+-- state, it should show all of the details like it's ready for an import, and when the details is
+-- changed it can be approved and imported."
+--
+-- A NEW DRAFT RATHER THAN EDITING THE OLD ONE, and that is not a shortcut. An approved draft is
+-- frozen because it is the only record of what the client sent and what was corrected on the way
+-- in; reopening it to fix a refused row would rewrite that record. So the refused rows are copied
+-- into a fresh draft, which goes through exactly the path every other sheet goes through -- the
+-- same planner, the same gate, the same approval, its own batch.
+--
+-- The query is what ties the two together: it is the conversation with the client about the sheet,
+-- and the follow-up is what that conversation produced. Without this column the ticket would
+-- create a second draft every time somebody opened it.
+alter table public.handover_drafts
+  add column if not exists from_query_id uuid references public.account_queries (id) on delete set null;
+
+create unique index if not exists handover_drafts_from_query_idx
+  on public.handover_drafts (from_query_id) where from_query_id is not null;
+
+comment on column public.handover_drafts.from_query_id is
+  'The client query whose refused rows this draft was raised from. Unique: one follow-up per '
+  'query, so reopening the ticket finds the draft already there rather than starting another.';

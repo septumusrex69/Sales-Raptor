@@ -660,8 +660,17 @@ function PlanSummary({ plan, docs }: { plan: HandoverPlan; docs: MatchPlan | nul
 }
 
 /** The draft itself: every row, what is wrong with it, and the boxes to fix it in. */
-function DraftTable({
-  judged, busy, error, onEdit, onExclude, onApprove, onBack, onDiscard, onDecide,
+/**
+ * The sheet as a table, with every problem answerable where it is written.
+ *
+ * EXPORTED, because a client query about a handover shows the SAME table. THE FIRM: "in the query
+ * ticket ... it should show all of the details like it's ready for an import, and when the
+ * details is changed it can be approved and imported." Drawn twice it would drift, and the
+ * failure would not be two tables looking different -- it would be one of them judging a row by
+ * rules the other had moved on from.
+ */
+export function DraftTable({
+  judged, busy, error, onEdit, onExclude, onApprove, onBack, onDiscard, onDecide, backLabel,
 }: {
   judged: JudgedDraft
   busy: string | null
@@ -672,6 +681,8 @@ function DraftTable({
   onDecide: (rowId: string, decision: Decision, note: string | null) => Promise<void>
   onBack: () => void
   onDiscard: () => Promise<void>
+  /** What "Back" goes back to. Named, because on a query ticket it is not the import screen. */
+  backLabel?: string
 }) {
   /* The order the WHOLE FILE was read in, settled when it was first read and stored on the
      draft. Reading each cell on its own would show a date differently from how it was judged. */
@@ -703,7 +714,9 @@ function DraftTable({
           + `${formatCurrency(judged.totalCapital)} capital`}
         action={
           <button type="button" onClick={onBack}
-            className="text-xs font-medium text-slate-500 hover:text-slate-700">Back</button>
+            className="text-xs font-medium text-slate-500 hover:text-slate-700">
+            {backLabel ?? 'Back'}
+          </button>
         } />
 
       {/*

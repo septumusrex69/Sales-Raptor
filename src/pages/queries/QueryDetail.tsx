@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Download, Loader2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Download, Loader2, Upload } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { useAuth } from '../../store/AuthContext'
 import { formatDate } from '../../data/mockData'
@@ -9,7 +9,13 @@ import {
   QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
   type QueryStage,
 } from '../../lib/accountQueries'
-import { fetchDraftForHandover, type JudgedDraft } from '../../lib/handoverDraft'
+import {
+  acceptDraftRow, approveDraft, clearDraftRowDecision, discardDraft, fetchDraft,
+  fetchDraftForHandover, followUpDraft, rejectDraftRow, startFollowUpDraft, updateDraftRow,
+  type JudgedDraft,
+} from '../../lib/handoverDraft'
+import { DraftTable } from '../../components/settings/HandoverImportCard'
+import { fetchClientCommissionRate } from '../../lib/accountBook'
 import { HANDOVER_COLUMNS } from '../../lib/handoverSheet.ts'
 import { givenFor } from '../../lib/importCorrections.ts'
 import { ReplyAnswers } from '../../components/queries/ReplyAnswers'
@@ -47,7 +53,7 @@ const label = (key: string) => HANDOVER_COLUMNS.find((c) => c.key === key)?.labe
  */
 export function QueryDetail() {
   const { id } = useParams<{ id: string }>()
-  const { currentUser } = useAuth()
+  const { currentUser, session } = useAuth()
   const [data, setData] = useState<Awaited<ReturnType<typeof fetchQuery>>>(null)
   const [draft, setDraft] = useState<JudgedDraft | null>(null)
   /**
@@ -58,6 +64,15 @@ export function QueryDetail() {
    * exactly what tells the screen it has nowhere to put that answer.
    */
   const [openedFor, setOpenedFor] = useState<Map<string, string>>(new Map())
+  /**
+   * The second go at the rows that could not be opened.
+   *
+   * THE FIRM: "this ticket for a handover that is in an awaiting state should show all of the
+   * details like it's ready for an import, and when the details is changed it can be approved
+   * and imported." A NEW draft, never the frozen original -- see startFollowUpDraft.
+   */
+  const [followUp, setFollowUp] = useState<JudgedDraft | null>(null)
+  const [imported, setImported] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -81,6 +96,8 @@ export function QueryDetail() {
         setOpenedFor(new Map(opened.accounts
           .filter((a) => a.clientReference)
           .map((a) => [a.clientReference as string, a.id])))
+        /* Read, never raised: opening a ticket must not create anything. The button does that. */
+        setFollowUp(await followUpDraft(found.query.id, TODAY()).catch(() => null))
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -90,6 +107,53 @@ export function QueryDetail() {
   }, [id])
 
   useEffect(() => { void load() }, [load])
+
+  /*
+   * THE SAME HANDLERS THE IMPORT SCREEN USES, against the same library functions. The table is
+   * shared; wiring it to a second set of writes here is how the two screens would come to mean
+   * different things by the same button.
+   *
+   * Every one re-reads the draft afterwards rather than patching state: the verdict on a row is
+   * never stored, it is recomputed from the values, so a screen that edited its own copy would
+   * show a row still refused for something already fixed.
+   */
+  const reload = useCallback(async (draftId: string) => {
+    setFollowUp(await fetchDraft(draftId, TODAY()))
+  }, [])
+
+  async function raiseFollowUp() {
+    if (!data?.batch) return
+    setBusy(true); setError(null)
+    try {
+      setFollowUp(await startFollowUpDraft({
+        queryId: data.query.id, handoverId: data.batch.id, today: TODAY(),
+      }))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally { setBusy(false) }
+  }
+
+  async function importFollowUp() {
+    if (!followUp) return
+    setBusy(true); setError(null)
+    try {
+      const result = await approveDraft({
+        draftId: followUp.draft.id,
+        today: TODAY(),
+        /* THE CLIENT'S RATE, read fresh rather than off a row in memory: commission is the
+           client's, and a stale copy of it is an account invoiced at the wrong rate for life. */
+        commissionRate: await fetchClientCommissionRate(followUp.draft.companyId).catch(() => null),
+        accessToken: session?.access_token ?? null,
+      })
+      setImported(`${result.created} accounts opened.`
+        + (result.leftBehind ? ` ${result.leftBehind} left behind.` : '')
+        + (result.correctionProblems.length ? ` ${result.correctionProblems.join(' ')}` : ''))
+      setFollowUp(null)
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally { setBusy(false) }
+  }
 
   async function close(outcome: 'valid' | 'not_valid') {
     if (!data) return
@@ -212,6 +276,70 @@ export function QueryDetail() {
         title="Brought in, but the client must confirm"
         intro="These are open and being worked while we wait."
         rows={toConfirm} />
+
+      {/*
+        THE SECOND GO, IN THE TICKET. THE FIRM: "this ticket for a handover that is in an awaiting
+        state should show all of the details like it's ready for an import, and when the details
+        is changed it can be approved and imported."
+
+        THE SAME TABLE THE IMPORT SCREEN DRAWS, against the same library functions -- drawn twice
+        it would drift, and the failure would not be two tables looking different but one of them
+        judging a row by rules the other had moved on from.
+      */}
+      {followUp && (
+        <DraftTable
+          judged={followUp}
+          busy={busy ? 'Working' : null}
+          error={error}
+          backLabel="Put it away"
+          onBack={() => setFollowUp(null)}
+          onEdit={async (rowId, key, value) => {
+            const row = followUp.rows.find((r) => r.id === rowId)
+            if (!row) return
+            /* Written first, then the whole draft re-read: a row's verdict comes from the
+               database's copy of it, so what the screen shows is what an approval would act on. */
+            await updateDraftRow(rowId, { values: { ...row.values, [key]: value.trim() || null } })
+            await reload(followUp.draft.id)
+          }}
+          onExclude={async (rowId, excluded) => {
+            await updateDraftRow(rowId, { excluded })
+            await reload(followUp.draft.id)
+          }}
+          onDecide={async (rowId, decision, note) => {
+            if (decision === 'accepted') await acceptDraftRow(rowId, note)
+            else if (decision === 'rejected') await rejectDraftRow(rowId, note)
+            else await clearDraftRowDecision(rowId)
+            await reload(followUp.draft.id)
+          }}
+          onApprove={importFollowUp}
+          onDiscard={async () => {
+            await discardDraft(followUp.draft.id)
+            setFollowUp(null)
+          }} />
+      )}
+
+      {/*
+        RAISED BY A BUTTON, never by opening the ticket. Creating a draft as a side effect of
+        looking at a page is how somebody ends up with one they did not ask for -- and a draft
+        sitting in "waiting to be approved" that nobody started is a queue nobody trusts.
+      */}
+      {!followUp && q.status !== 'closed' && data.batch && notBroughtIn.length > 0 && (
+        <Card>
+          <CardHeader
+            title="Import these once the client has corrected them"
+            subtitle={`${notBroughtIn.length} ${notBroughtIn.length === 1 ? 'account' : 'accounts'} `
+              + 'could not be opened. Their details come across as they were sent, so they can be '
+              + 'corrected here and imported without the client re-sending the whole sheet.'} />
+          {imported && <p className="text-sm text-positive-700 mt-3">{imported}</p>}
+          {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
+          <button type="button" disabled={busy} onClick={() => void raiseFollowUp()}
+            className="mt-3 inline-flex items-center gap-2 text-sm font-medium px-4 py-2
+              rounded-lg bg-gold-400 text-navy-950 border border-gold-500 disabled:opacity-40">
+            {busy ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
+            Correct these and import them
+          </button>
+        </Card>
+      )}
 
       {/*
         THE OTHER HALF OF THE COLUMN WE ASKED THEM TO FILL IN. Offered only while the query is

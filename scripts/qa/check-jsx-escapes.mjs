@@ -59,11 +59,19 @@ function suspicious(code) {
    */
   const lines = code
     .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+    /*
+     * TEMPLATE LITERALS OVER THE WHOLE FILE TOO, and for the same reason as block comments: a
+     * template may run over several lines, and a per-line stripper cannot see its backticks pair
+     * up. The first one that did reported a subtitle as a bug -- a string where the escape works
+     * perfectly -- which is the false positive this whole check exists to avoid.
+     *
+     * After the comments, so a backtick inside one cannot unbalance the pairing.
+     */
+    .replace(/`(?:[^`\\]|\\[\s\S])*`/g, (m) => m.replace(/[^\n]/g, ' '))
     .split('\n')
   for (let i = 0; i < lines.length; i += 1) {
     const bare = lines[i]
       .replace(/\/\/.*$/, '')
-      .replace(/`(?:[^`\\]|\\.)*`/g, '``')
       /*
        * REGULAR EXPRESSIONS, which escape legally and are full of `\u00a0`. Only where one can
        * actually start — after an opening bracket, a comma, an operator — so that a division is
@@ -112,6 +120,9 @@ const MUST_IGNORE = [
   '        {unread > 0 ? `Unread \\u00b7 ${unread}` : \'Unread\'}',
   '  /* A comment may say \\u2014 and hold an apostrophe: don\'t be fooled. */',
   '  /*\n   * And it may run over lines, saying \\u2014 on one of them.\n   */',
+  /* A template literal may run over lines as well, and the escape works in every one of them. */
+  '  const s = `a long sentence that wraps \\u2014 like this\n    and carries on to here`',
+  '  subtitle={`typed in the \\u201c${name}\\u201d column`}',
 ]
 for (const line of MUST_CATCH) {
   ok(`the scanner catches: ${line.trim()}`, suspicious(line).length === 1)

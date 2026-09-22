@@ -30,8 +30,9 @@ import { createDebtorAccount, fetchAccountReferences, fetchExistingAccounts } fr
 import { buildXlsx, toBase64, XLSX_MIME } from './xlsxWrite.ts'
 import { rejectedSheetName, rejectedSheetRows } from './rejectedSheet.ts'
 
-const DRAFT_COLUMNS = 'id, company_id, filename, sheet_kind, date_order, state, handover_id, '
-  + 'approved_at, approved_by, created_by, created_at, updated_at'
+/* ONE LITERAL, not a concatenation: supabase-js types the result off this string, and split
+   across a `+` every field comes back as GenericStringError. Learned on ROW_COLUMNS below. */
+const DRAFT_COLUMNS = 'id, company_id, filename, sheet_kind, date_order, state, handover_id, from_query_id, approved_at, approved_by, created_by, created_at, updated_at'
 /* ONE LITERAL, NOT A CONCATENATION. supabase-js types the result off this string, so split
    across a `+` every field came back as GenericStringError -- and check-select-columns.mjs is
    likewise happier reading a literal. */
@@ -45,6 +46,8 @@ export interface HandoverDraft {
   dateOrder: string | null
   state: 'draft' | 'approved' | 'discarded'
   handoverId: string | null
+  /** The client query whose refused rows this was raised from, where it is a second go. */
+  fromQueryId: string | null
   createdAt: string
 }
 
@@ -80,6 +83,7 @@ const toDraft = (r: Record<string, unknown>): HandoverDraft => ({
   dateOrder: (r.date_order as string | null) ?? null,
   state: r.state as HandoverDraft['state'],
   handoverId: (r.handover_id as string | null) ?? null,
+  fromQueryId: (r.from_query_id as string | null) ?? null,
   createdAt: r.created_at as string,
 })
 
@@ -154,6 +158,90 @@ export async function fetchDraftForHandover(
   if (error) throw new Error(error.message)
   if (!data) return null
   return fetchDraft(data.id as string, today)
+}
+
+/**
+ * A SECOND GO AT THE ROWS THAT COULD NOT BE OPENED.
+ *
+ * THE FIRM: "in the query ticket, specifically this ticket for a handover that is in an awaiting
+ * state, it should show all of the details like it's ready for an import, and when the details is
+ * changed it can be approved and imported."
+ *
+ * A NEW DRAFT, NOT THE OLD ONE REOPENED. An approved draft is frozen because it is the only
+ * record of what the client sent and what was corrected on the way in -- editing a refused row
+ * back into it would rewrite that record. The refused rows are COPIED into a fresh draft, which
+ * then goes through exactly the path every other sheet goes through: the same planner, the same
+ * gate, the same approval, its own batch, its own references.
+ *
+ * ONE PER QUERY, enforced by a unique index rather than by this reading first and then writing.
+ * Two people opening the same ticket at once is an ordinary Tuesday, and a check-then-insert
+ * would give them a draft each.
+ */
+export async function followUpDraft(
+  queryId: string, today: string,
+): Promise<JudgedDraft | null> {
+  const { data, error } = await supabase
+    .from('handover_drafts').select('id').eq('from_query_id', queryId).maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) return null
+  return fetchDraft(data.id as string, today)
+}
+
+/**
+ * Raise that second go, from the rows the original could not open.
+ *
+ * Returns the existing one where there already is one, so pressing the button twice -- or two
+ * people pressing it at once -- lands on the same draft rather than making another.
+ */
+export async function startFollowUpDraft(input: {
+  queryId: string
+  /** The batch the original sheet became, which is what leads back to its draft. */
+  handoverId: string
+  today: string
+}): Promise<JudgedDraft | null> {
+  const already = await followUpDraft(input.queryId, input.today)
+  if (already) return already
+
+  const original = await fetchDraftForHandover(input.handoverId, input.today)
+  if (!original) throw new Error('The sheet this came from is no longer on file.')
+
+  /* THE SAME TEST THE EMAIL AND THE TICKET USE for "not brought in", so the three cannot come to
+     mean different things: thrown out or refused, and something actually wrong with it. */
+  const refused = original.rows.filter((r) => (r.excluded || r.planned?.refused)
+    && (r.planned?.problems.length ?? 0) > 0)
+  if (refused.length === 0) return null
+
+  const { data: me } = await supabase.auth.getUser()
+  const { data, error } = await supabase.from('handover_drafts').insert({
+    company_id: original.draft.companyId,
+    /* Named for the sheet it came out of, because a liaison looking at the queue a week later
+       has to tell it from the original at a glance. */
+    filename: `${original.draft.filename.replace(/\.[^.]+$/, '')} \u2014 corrected`,
+    sheet_kind: original.draft.sheetKind,
+    date_order: original.draft.dateOrder,
+    from_query_id: input.queryId,
+    created_by: me.user?.id ?? null,
+  }).select('id').single()
+  if (error) throw new Error(error.message)
+  const draftId = data.id as string
+
+  /*
+   * LINE NUMBERS RENUMBERED FROM 2, not carried across. Every message about a row says "Row 7",
+   * and 7 on this sheet would be 7 on a sheet nobody is looking at. Two is the first row under a
+   * header, which is what the original's numbering means as well.
+   */
+  const rows = refused.map((r, i) => ({
+    draft_id: draftId,
+    line: i + 2,
+    values: r.values,
+    document_filename: r.documentFilename,
+  }))
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error: rowError } = await supabase
+      .from('handover_draft_rows').insert(rows.slice(i, i + 200))
+    if (rowError) throw new Error(rowError.message)
+  }
+  return fetchDraft(draftId, input.today)
 }
 
 export async function fetchDraft(id: string, today: string): Promise<JudgedDraft | null> {
