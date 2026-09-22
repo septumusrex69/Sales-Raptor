@@ -50,8 +50,9 @@ if (ref) {
 
 /* Guards. These are the ways this reader could be wrong while still looking busy. */
 let failed = 0
+let passed = 0
 const check = (name, ok, detail) => {
-  if (!ok) failed++
+  if (ok) passed++; else failed++
   console.log(`\n${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail ? `\n        ${detail}` : ''}`)
 }
 
@@ -137,5 +138,11 @@ check('accounts missing from the book are reported', half.unmatched.length === r
 check('a partial match still applies to what it found', half.matched === 400)
 check('untouched accounts are counted', planEnrichment(rows.slice(0, 100), refs).untouched === refs.length - 100)
 
+/*
+ * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+ * headline and is indistinguishable from a healthy one -- a review of this suite found 20
+ * files silent that way, about 800 assertion sites reported as nothing.
+ */
+if (failed === 0) console.log(`${passed} passed, 0 failed`)
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)
 process.exit(failed ? 1 : 0)

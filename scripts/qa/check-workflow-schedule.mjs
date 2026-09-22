@@ -110,6 +110,16 @@ check('...having been given exactly the two month-ends the firm means',
   monthEndsGiven('2026-09-18', rotationDate('2026-09-18')), ['2026-10-05', '2026-11-05'])
 
 /*
+ * AND ACROSS THE YEAR. Every other case in this file allocates inside one calendar year, so the
+ * month arithmetic's 12 -> 1 rollover was only ever walked over by the rotation date itself. A
+ * December handover is the ordinary case that puts the month-end list over it too.
+ */
+check('a December handover is given January and February',
+  monthEndsGiven('2026-12-18', rotationDate('2026-12-18')), ['2027-01-05', '2027-02-05'])
+check('...and one late in November gets December and January',
+  monthEndsGiven('2026-11-28', rotationDate('2026-11-28')), ['2026-12-05', '2027-01-05'])
+
+/*
  * IT IS NOT A DAY COUNT, which is the correction the firm made to their own chart. Day 40 from
  * 18 September is 28 October — before the 5 November month-end, so the clerk who spent October
  * arranging the debit orders hands the file over days before they run.

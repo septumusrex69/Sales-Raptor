@@ -14,9 +14,10 @@ import {
 } from '../../src/lib/annexureB.ts'
 
 let failed = 0
+let passed = 0
 const near = (a, b) => Math.abs(a - b) < 0.005
 function check(name, ok, detail) {
-  if (!ok) failed++
+  if (ok) passed++; else failed++
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail ? `\n        ${detail}` : ''}`)
 }
 
@@ -233,13 +234,40 @@ for (const { schedule, year, ceiling, receiptMax, rate, items } of SCHEDULES) {
     schedule.items.find((i) => i.id === '1c')?.countsTowardCap === true)
 }
 
+/* ---------------------------------------------------------------- the two flags themselves */
+
+/*
+ * THE FLAGS' VALUES, ASSERTED. This is the one thing the block below cannot do for itself.
+ *
+ * A review of this suite flipped ENFORCE_MONTHLY_LIMITS and found the whole suite still green,
+ * even though the block underneath was written to guard exactly that -- because the block
+ * BRANCHES on the flag. Flip it and you move out of one true branch into another true branch. Its
+ * own comment says the sibling flag's defect was that flipping it "left every check green", and
+ * after the fix, flipping it still did.
+ *
+ * BOTH ARE A RECORDED INSTRUCTION FROM THE FIRM, WITH A DATE, which is what makes the value a
+ * fact worth pinning rather than a preference somebody happened to hold:
+ *
+ *   ENFORCE_ITEM_TOTALS     false -- item 3 charged per occurrence, as Swordfish charged it.
+ *                                    Bredell Ferreira, 9 September 2026.
+ *   ENFORCE_MONTHLY_LIMITS  false -- no refusal at a fifth bureau search in a month, because the
+ *                                    gazette counts per ACCOUNT and the work happens per PERSON.
+ *                                    Bredell Ferreira, 10 September 2026.
+ *
+ * Both are direct revenue decisions. Asserted here so that changing one is a deliberate act with
+ * a failing test in front of it, rather than a one-word edit nothing notices.
+ */
+check('item 3 is charged per occurrence, at the firm\u2019s instruction',
+  ENFORCE_ITEM_TOTALS === false)
+check('the per-month allowances do not bind, at the firm\u2019s instruction',
+  ENFORCE_MONTHLY_LIMITS === false)
+
 /* ---------------------------------------------------------------- the monthly allowances */
 
 /*
- * PINNED IN BOTH DIRECTIONS, like ENFORCE_ITEM_TOTALS beside it and for the same reason. Its
- * sibling flag had neither: flipping ENFORCE_MONTHLY_LIMITS on -- which makes Raptor refuse to
- * charge a fifth credit-bureau search or an eleventh electronic communication in a month, a
- * direct revenue change the firm instructed against -- left every check green.
+ * AND THE BEHAVIOUR EITHER WAY, which is still worth having: the flag is meant to be flippable
+ * and the comment in annexureB.ts explicitly invites it. What was missing was the line above --
+ * the value itself -- not this.
  */
 {
   const s = ANNEXURE_B_2026
@@ -267,5 +295,11 @@ for (const { schedule, year, ceiling, receiptMax, rate, items } of SCHEDULES) {
   check('...and unbounded where there is no limit', monthlyRoom(null, 900) === Infinity)
 }
 
+/*
+ * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+ * headline and is indistinguishable from a healthy one -- a review of this suite found 20
+ * files silent that way, about 800 assertion sites reported as nothing.
+ */
+if (failed === 0) console.log(`${passed} passed, 0 failed`)
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)
 process.exit(failed ? 1 : 0)

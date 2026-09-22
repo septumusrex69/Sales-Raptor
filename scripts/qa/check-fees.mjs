@@ -15,11 +15,12 @@
 import { receiptFeeInclVat, settlementReceiptFee, ANNEXURE_B_2020, ANNEXURE_B_2026 } from '../../src/lib/annexureB.ts'
 
 let failed = 0
+let passed = 0
 const near = (a, b) => Math.abs(a - b) < 0.005
 
 function check(name, actual, expected) {
   const ok = near(actual, expected)
-  if (!ok) failed++
+  if (ok) passed++; else failed++
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`)
   if (!ok) console.log(`        expected ${expected.toFixed(2)}, got ${actual.toFixed(2)}`)
 }
@@ -75,5 +76,11 @@ check('zero pays nothing', receiptFeeInclVat(0), 0)
 check('a big payment under the 2020 schedule tops out at R509 + VAT', receiptFeeInclVat(7000, 0.15, ANNEXURE_B_2020), 585.35)
 console.log('      NOTE  Swordfish billed R577.30 (a R502 maximum) — confirmed a capture error on their side.')
 
+/*
+ * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+ * headline and is indistinguishable from a healthy one -- a review of this suite found 20
+ * files silent that way, about 800 assertion sites reported as nothing.
+ */
+if (failed === 0) console.log(`${passed} passed, 0 failed`)
 console.log(failed ? `\n${failed} failed` : '\nall checks pass')
 process.exit(failed ? 1 : 0)

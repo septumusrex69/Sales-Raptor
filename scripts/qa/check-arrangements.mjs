@@ -10,9 +10,10 @@
 import { nextDueDate, describeArrangement } from '../../src/lib/arrangements.ts'
 
 let failed = 0
+let passed = 0
 function check(name, actual, expected) {
   const ok = actual === expected
-  if (!ok) failed++
+  if (ok) passed++; else failed++
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`)
   if (!ok) console.log(`        expected ${expected}, got ${actual}`)
 }
@@ -71,5 +72,11 @@ check('last day reads as last day', p({ onLastDay: true }), 'Monthly on the last
 check('weekly names the day', p({ arrangement: 'weekly', dayOfWeek: 3 }), 'Weekly on Wednesday')
 check('once-off says so', p({ arrangement: 'once_off' }), 'Once-off')
 
+/*
+ * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+ * headline and is indistinguishable from a healthy one -- a review of this suite found 20
+ * files silent that way, about 800 assertion sites reported as nothing.
+ */
+if (failed === 0) console.log(`${passed} passed, 0 failed`)
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)
 process.exit(failed ? 1 : 0)

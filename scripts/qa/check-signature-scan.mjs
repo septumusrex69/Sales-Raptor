@@ -14,8 +14,10 @@ import {
 } from '../../src/lib/signature.ts'
 
 let failures = 0
+let passed = 0
 const check = (name, got, want) => {
   const ok = JSON.stringify(got) === JSON.stringify(want)
+  if (ok) passed += 1
   if (!ok) {
     failures += 1
     console.error(`FAIL ${name}\n  got  ${JSON.stringify(got)}\n  want ${JSON.stringify(want)}`)
@@ -163,6 +165,12 @@ check('text and links both contribute',
   ).map((c) => `${c.kind}:${c.value}`),
   ['mobile:083 555 0199', 'phone:021 555 1234'])
 
+/*
+ * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+ * headline and is indistinguishable from a healthy one -- a review of this suite found
+ * eighteen files silent that way, about 800 assertion sites reported as nothing.
+ */
+if (failures === 0) console.log(`${passed} passed, 0 failed`)
 console.log(failures === 0
   ? '\nPASS — scan finds real numbers in text AND links, and refuses references, IDs, amounts, tracking URLs and quoted chains'
   : `\nFAILED ${failures} check(s)`)

@@ -122,6 +122,12 @@ if (functions.length > FUNCTION_LIMIT) {
 
 console.log(`walked ${checked} files reachable from api/`)
 if (failures.length === 0) {
+/*
+   * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+   * headline and is indistinguishable from a healthy one -- a review of this suite found
+   * eighteen files silent that way, about 800 assertion sites reported as nothing.
+   */
+  console.log(`${checked} passed, 0 failed`)
   console.log('every runtime import into src/ uses a .js specifier\n')
   process.exit(0)
 }

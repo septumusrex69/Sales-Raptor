@@ -420,5 +420,11 @@ if (failures.length > 0) {
   for (const f of failures) console.error(`  ✗ ${f}`)
   process.exit(1)
 }
+/*
+ * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+ * headline and is indistinguishable from a healthy one -- a review of this suite found 20
+ * files silent that way, about 800 assertion sites reported as nothing.
+ */
+console.log(`${pass} passed, 0 failed`)
 console.log(`PASS — ${pass} checks: the TypeScript ladder matches the SQL, and a broken PTP`)
 console.log('       is worked before a year-old follow-up while an account about to prescribe beats both.')

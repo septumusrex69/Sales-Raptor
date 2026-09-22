@@ -47,8 +47,26 @@ for (const file of [...unit, ...browser]) {
   try {
     const out = execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
     const n = /(\d+) passed, 0 failed/.exec(out)
-    checks += n ? Number(n[1]) : 0
-    console.log(`  ok   ${file}${n ? `  (${n[1]})` : ''}`)
+    /*
+     * A FILE THAT REPORTS NO COUNT IS A FAILURE, not a zero.
+     *
+     * It used to be counted as `n ? Number(n[1]) : 0` and printed as `ok`, which made a silent
+     * file indistinguishable from a healthy one -- and a file that exits 0 having asserted
+     * NOTHING (an early return, a loop over an empty list, a rewrite that dropped its own
+     * summary) looked exactly the same. A review of this suite found eighteen files in that
+     * state, roughly 800 assertion sites reported as nothing in the headline.
+     *
+     * The two in TAKES_AN_ARGUMENT are not run here at all, so they cannot be caught by this.
+     */
+    if (!n) {
+      failed += 1
+      console.log(`  FAIL ${file}`)
+      console.log('       exited 0 but printed no "N passed, 0 failed" line, so it counted as')
+      console.log('       nothing. A file that asserts nothing looks the same from here.')
+      continue
+    }
+    checks += Number(n[1])
+    console.log(`  ok   ${file}  (${n[1]})`)
   } catch (e) {
     failed += 1
     console.log(`  FAIL ${file}`)

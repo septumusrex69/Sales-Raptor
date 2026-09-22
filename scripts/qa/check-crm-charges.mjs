@@ -116,6 +116,12 @@ if (entryPoints.length < FLOOR) {
   process.exit(1)
 }
 
+/*
+ * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+ * headline and is indistinguishable from a healthy one -- a review of this suite found
+ * eighteen files silent that way, about 800 assertion sites reported as nothing.
+ */
+console.log(`${entryPoints.length + seen.size} passed, 0 failed`)
 console.log(
   `PASS — ${entryPoints.length} shared record component(s) reach ${seen.size} module(s),`
   + ' and none of them can raise a fee',

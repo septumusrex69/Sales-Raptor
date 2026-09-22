@@ -92,5 +92,11 @@ if (failures.length) {
   for (const f of failures) console.error(`  ✗ ${f}`)
   process.exit(1)
 }
+/*
+ * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+ * headline and is indistinguishable from a healthy one -- a review of this suite found 20
+ * files silent that way, about 800 assertion sites reported as nothing.
+ */
+console.log(`${pass} passed, 0 failed`)
 console.log(`PASS — ${pass} checks: a Connect Mobile delivery report and reply are read from the`)
 console.log("       field names they actually use ('userid', 'ud', 'da'), on GET or POST.")

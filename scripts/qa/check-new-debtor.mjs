@@ -10,9 +10,10 @@
 import { isValidSaId, nextReferences, suggestReference, validateNewDebtor, toAccountRow, toContactRows } from '../../src/lib/newDebtor.ts'
 
 let failed = 0
+let passed = 0
 function check(name, actual, expected) {
   const ok = JSON.stringify(actual) === JSON.stringify(expected)
-  if (!ok) failed++
+  if (ok) passed++; else failed++
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`)
   if (!ok) console.log(`        expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
 }
@@ -161,5 +162,11 @@ const TODAY = '2026-09-10'
     toContactRows({ ...ok, kin1Name: 'Brother' }, 'acct-1').length, 0)
 }
 
+/*
+ * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+ * headline and is indistinguishable from a healthy one -- a review of this suite found 20
+ * files silent that way, about 800 assertion sites reported as nothing.
+ */
+if (failed === 0) console.log(`${passed} passed, 0 failed`)
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)
 process.exit(failed ? 1 : 0)

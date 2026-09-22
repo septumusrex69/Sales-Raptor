@@ -447,8 +447,18 @@ try {
    * every tab is what a stub counting the whole fixture looks like and is indistinguishable from
    * a working badge, so these two are asserted exactly and the fixtures make them differ from All.
    */
-  t.check('Junk says how many of ITS messages are unread', await tabBadge('Junk'), 2)
+  t.check('Junk says how many of ITS messages are unread', await tabBadge('Junk'), 1)
   t.check('...and Open mail how many of its own', await tabBadge('Open mail'), 2)
+  /*
+   * AND THEY DIFFER, the same pairwise test All and Needs matching already have two lines above.
+   *
+   * Both read 2 until now, and a review of this suite swapped 'junk' and 'no-record' in
+   * countUnreadByTab's `tabs` array -- so each badge showed the other's count -- and all 94
+   * assertions here passed. Two badges showing each other's number is indistinguishable from two
+   * badges working, for exactly as long as the numbers match.
+   */
+  t.ok('...which is not the same number as Junk, or the two are answering each other\u2019s question',
+    (await tabBadge('Junk')) !== (await tabBadge('Open mail')))
 
   /*
    * READING ONE TAKES THE BADGE DOWN WITH IT, without a reload.

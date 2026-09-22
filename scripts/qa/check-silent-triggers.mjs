@@ -1,11 +1,14 @@
 /**
- * THE TWO TRIGGERS THAT REVERT WITHOUT SAYING SO.
+ * THE THREE TRIGGERS THAT REVERT WITHOUT SAYING SO.
  *
- * CLAUDE.md lists both under "things that bite", and the first one first:
+ * CLAUDE.md lists two of them under "things that bite", and the first one first:
  *
  *   - `protect_closed_diary_entries` SILENTLY REVERTS edits to done/moved entries. It does not
  *     raise.
  *   - `protect_filed_mail_target` reverts link changes on `user_emails` for non-Administrators.
+ *   - `protect_profile_privileged_fields` freezes `role`, `status` and `team_id` on `profiles`
+ *     for anybody who is not an Administrator. It is not in CLAUDE.md, which is part of how it
+ *     came to have no check at all.
  *
  * THAT IS WHY THEY NEED A CHECK MORE THAN A TRIGGER THAT THROWS DOES. A trigger that raises
  * announces itself the moment it stops working, because the error people expected stops arriving.
@@ -162,13 +165,79 @@ function triggerStatement(name, table) {
   }
 }
 
+/* ------------------------------------------------------------------ who you are */
+
+/*
+ * THE ONE THAT STOPS SOMEBODY MAKING THEMSELVES AN ADMINISTRATOR, and the most serious of the
+ * three -- found by a review of this suite, which disabled its guard and watched every one of
+ * 5 093 checks stay green.
+ *
+ * WHY IT IS THE ONLY THING STANDING THERE. `profiles_update` is granted on
+ * `auth.uid() = id or current_user_role() = 'Administrator'` -- so every signed-in person may
+ * update their OWN profile row, which is what makes Settings → Profile work at all. Row-level
+ * security therefore cannot be what refuses a role change; it has already said yes. This trigger
+ * is what throws the value away afterwards.
+ *
+ * AND ROLE IS NOT A LABEL. It decides canViewClients (a client's commission rate and mandate),
+ * canFreezeAccounts, and who may re-file mail that is already on a debtor. A Pre-legal Agent who
+ * could write `role = 'Administrator'` on themselves would have the whole book's commercial terms
+ * by the next page load.
+ *
+ * The policy itself is deliberately NOT asserted here. Tightening it would be an improvement, and
+ * a check that goes red on an improvement is a check people learn to edit rather than read.
+ */
+{
+  const body = functionBody('protect_profile_privileged_fields')
+  ok('the profile trigger exists', body !== null)
+
+  const trigger = triggerStatement('protect_profile_privileged_fields', 'profiles')
+  ok('...and is attached to profiles', trigger !== null)
+  if (trigger) {
+    /* BEFORE, or the role is already written by the time it is put back. */
+    ok(`...before update, for each row (${trigger})`,
+      /before update/i.test(trigger) && /for each row/i.test(trigger))
+  }
+
+  if (body) {
+    /*
+     * THE GUARD, and the exact mutation that proved this file needed a third block: replaced with
+     * `if false then`, the trigger still fires, still returns the row, and restores nothing.
+     */
+    ok('...and it lets an Administrator through and nobody else',
+      /if\s+public\.current_user_role\(\)\s*<>\s*'Administrator'\s+then/i.test(body))
+
+    /*
+     * THE THREE FIELDS, one assertion each so a failure names the one somebody removed.
+     *
+     *   role     what the app is allowed to show and do
+     *   status   whether the account works at all -- a suspended person restoring themselves
+     *   team_id  whose book and whose figures, and which team leader sees the work
+     */
+    const frozen = ['role', 'status', 'team_id']
+    const missing = frozen.filter((f) => !new RegExp(`new\\.${f}\\s*:=\\s*old\\.${f}\\b`).test(body))
+    check('...freezing role, status and team for everybody else', missing, [])
+
+    /*
+     * AND NOTHING ELSE IS FROZEN. Editing your own name, telephone number or signature from
+     * Settings → Profile is the ordinary case this trigger has to stay out of the way of -- and a
+     * trigger that quietly discarded those would be indistinguishable from a page that failed to
+     * save.
+     */
+    const ownToEdit = ['name', 'phone', 'email_signature', 'avatar_url']
+    const overreach = ownToEdit.filter((f) => new RegExp(`new\\.${f}\\s*:=`).test(body))
+    check('...and leaving alone what anybody may edit about themselves', overreach, [])
+  }
+}
+
 /* ------------------------------------------------------------------ the shape of the guard */
 
 /*
- * BOTH ARE `security definer`, and that is load-bearing rather than incidental: a trigger that
- * ran as the person being restrained would be refused by the same RLS it exists to backstop.
+ * ALL THREE ARE `security definer`, and that is load-bearing rather than incidental: a trigger
+ * that ran as the person being restrained would be refused by the same RLS it exists to backstop.
  */
-for (const name of ['protect_closed_diary_entries', 'protect_filed_mail_target']) {
+for (const name of [
+  'protect_closed_diary_entries', 'protect_filed_mail_target', 'protect_profile_privileged_fields',
+]) {
   const body = functionBody(name)
   if (!body) continue
   ok(`${name} runs as its definer`, /security\s+definer/i.test(body))
@@ -176,7 +245,8 @@ for (const name of ['protect_closed_diary_entries', 'protect_filed_mail_target']
      table it silently protects instead. */
   ok(`...with search_path pinned`, /set\s+search_path\s*=\s*public/i.test(body))
   /*
-   * NEITHER RAISES, and that is the documented design rather than an oversight -- CLAUDE.md says
+   * NONE OF THEM RAISES, and that is the documented design rather than an oversight -- CLAUDE.md
+   * says
    * the diary one "does not raise". Asserted so that changing it to raise is a decision somebody
    * makes on purpose: every caller in the app is written expecting a silent revert, and a trigger
    * that suddenly throws would surface as a failed save on a screen with no handler for it.
@@ -191,7 +261,8 @@ if (failures.length) {
 }
 console.log(`${pass} passed, 0 failed`)
 console.log(`
-The two triggers that revert without saying so, asserted for what they DO rather than only for
+The three triggers that revert without saying so, asserted for what they DO rather than only for
 what they must not: the guard condition, the table and moment they fire on, and every field they
 restore, named one at a time. A trigger that raises announces itself when it breaks; one that
-quietly restores the old value announces nothing at all.`)
+quietly restores the old value announces nothing at all -- and the profile one is the only thing
+standing between a Pre-legal Agent and making themselves an Administrator.`)

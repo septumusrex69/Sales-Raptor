@@ -34,8 +34,14 @@ check('...at R60 excluding VAT', item(CONSULTATION_ITEM_ID).amount, 60)
 check('...counting towards the items 1-7 ceiling', item(CONSULTATION_ITEM_ID).countsTowardCap, true)
 check('...per occurrence, not a total for the account', item(CONSULTATION_ITEM_ID).isTotal, undefined)
 check('...with no monthly allowance to run out', item(CONSULTATION_ITEM_ID).maxPerMonth, undefined)
-check('and the firm has always charged its consultation at that rate',
-  TARIFF_HISTORY[0].rates.consultation, 60)
+/*
+ * "ALWAYS" MEANS ALL FOUR SCHEDULES, not `[0]`. As written this said always and read the current
+ * one, so a consultation could have been any price on any date before March 2026 -- and a fee is
+ * priced on the schedule in force on the day of the ACTION, so those dates are live.
+ */
+check('and the firm has always charged its consultation at that schedule\u2019s rate',
+  TARIFF_HISTORY.map((t) => t.rates.consultation), [60, 52, 49, 44])
+check('...which under the current schedule is R60', TARIFF_HISTORY[0].rates.consultation, 60)
 
 /* ---- the item charged when nobody picks up ---- */
 check('the unanswered-call item is 2', ATTEMPT_ITEM_ID, '2')
@@ -44,7 +50,9 @@ check('...which the gazette defines as the call that is NOT a consultation',
 check('...at R25 excluding VAT', item(ATTEMPT_ITEM_ID).amount, 25)
 check('...counting towards the items 1-7 ceiling', item(ATTEMPT_ITEM_ID).countsTowardCap, true)
 check('...per occurrence, not a total for the account', item(ATTEMPT_ITEM_ID).isTotal, undefined)
-check('and the firm has always charged a phone call at that rate', TARIFF_HISTORY[0].rates.phone_call, 25)
+check('and the firm has always charged a phone call at that schedule\u2019s rate',
+  TARIFF_HISTORY.map((t) => t.rates.phone_call), [25, 21, 20, 18])
+check('...which under the current schedule is R25', TARIFF_HISTORY[0].rates.phone_call, 25)
 
 /*
  * The gazette's own wording, recorded because the firm's rule departs from it.

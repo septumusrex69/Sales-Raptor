@@ -13,8 +13,9 @@ import { buildTimeline, filterTimeline, groupByDay } from '../../src/lib/account
 import { styleFor } from '../../src/pages/accounts/timelineStyle.ts'
 
 let failed = 0
+let passed = 0
 function check(name, ok, detail) {
-  if (!ok) failed++
+  if (ok) passed++; else failed++
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`)
   if (!ok && detail) console.log(`        ${detail}`)
 }
@@ -174,5 +175,11 @@ check('reversed payment is kept and flagged',
     styleFor(row('Outbound Telephone Call', null)).ring === styleFor(row('x', 'phone_call')).ring)
 }
 
+/*
+ * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+ * headline and is indistinguishable from a healthy one -- a review of this suite found 20
+ * files silent that way, about 800 assertion sites reported as nothing.
+ */
+if (failed === 0) console.log(`${passed} passed, 0 failed`)
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)
 process.exit(failed ? 1 : 0)

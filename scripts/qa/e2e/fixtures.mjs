@@ -343,7 +343,11 @@ export const MAIL = [
     to_address: 'stephan@bredellferreira.co.za', to_name: 'Stephan',
     to_recipients: [], cc_recipients: [],
     attachment_names: [], is_junk: true, occurred_at: MAIL_AT(260),
-    read_at: null, is_filed: false, is_settled: false, no_record_at: null,
+    /* READ, so the Junk badge is not the same number as Open mail's. A review of this
+       suite swapped the two tabs' filters and all 94 assertions passed, because both
+       said 2 -- two badges showing each other's count is indistinguishable from two
+       badges working. */
+    read_at: MAIL_AT(199), is_filed: false, is_settled: false, no_record_at: null,
     linked_account_id: null, linked_lead_id: null, linked_deal_id: null,
     linked_company_id: null, linked_contact_id: null,
     debtor_accounts: null, leads: null, deals: null, companies: null, contacts: null,

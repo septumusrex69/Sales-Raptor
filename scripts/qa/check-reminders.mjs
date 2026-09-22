@@ -157,6 +157,12 @@ if (failures.length) {
   for (const f of failures) console.error(`  ✗ ${f}`)
   process.exit(1)
 }
+/*
+ * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+ * headline and is indistinguishable from a healthy one -- a review of this suite found 20
+ * files silent that way, about 800 assertion sites reported as nothing.
+ */
+console.log(`${pass} passed, 0 failed`)
 console.log(`PASS — ${pass} checks: an hour means an hour to the minute, a reminder missed`)
 console.log('       overnight still arrives and says how late it is, and a time already gone')
 console.log('       is refused rather than fired the instant it is saved.')

@@ -12,11 +12,12 @@ import { computeBalance, buildStatement } from '../../src/lib/accountBalance.ts'
 import { accrueToDate, coveredTo } from '../../src/lib/interestAccrual.ts'
 
 let failed = 0
+let passed = 0
 const near = (a, b) => Math.abs(a - b) < 0.005
 
 function check(name, actual, expected) {
   const ok = near(actual, expected)
-  if (!ok) failed++
+  if (ok) passed++; else failed++
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`)
   if (!ok) console.log(`        expected ${expected.toFixed(2)}, got ${actual.toFixed(2)}`)
 }
@@ -405,5 +406,11 @@ const empty = { payments: [], fees: [], interest: [] }
   checkText('untimed fees keep the order they arrived in', order.join(' then '), 'Letter then Phone Call')
 }
 
+/*
+ * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+ * headline and is indistinguishable from a healthy one -- a review of this suite found 20
+ * files silent that way, about 800 assertion sites reported as nothing.
+ */
+if (failed === 0) console.log(`${passed} passed, 0 failed`)
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)
 process.exit(failed ? 1 : 0)

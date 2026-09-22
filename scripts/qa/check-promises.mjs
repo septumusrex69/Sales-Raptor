@@ -33,9 +33,17 @@ check('item 5 is the settlement account drawn at the debtor’s request',
 check('item 5 is R50 excluding VAT', item5.amount, 50)
 check('item 5 counts towards the items 1-7 ceiling', item5.countsTowardCap, true)
 check('item 5 is per occurrence, not a total for the account', item5.isTotal, undefined)
+/*
+ * LITERALS ON THE RIGHT, and that is the fix rather than a tidy-up.
+ *
+ * This read `TARIFF_HISTORY.map(t => t.rates.promise_to_pay)` against a map of the SAME array
+ * that passed every value but one straight through -- so three of the four numbers were being
+ * compared to themselves and could be set to anything. A review of this suite found it. Every
+ * rate of every schedule is now pinned in check-tariff-history.mjs; this keeps the promise-to-pay
+ * column beside the item 5 rules it belongs to.
+ */
 check('the promise_to_pay action has always been charged at the item 5 rate',
-  TARIFF_HISTORY.map((t) => t.rates.promise_to_pay),
-  TARIFF_HISTORY.map((t) => t.effectiveFrom === '2026-03-06' ? 50 : t.rates.promise_to_pay))
+  TARIFF_HISTORY.map((t) => t.rates.promise_to_pay), [50, 41, 39, 35])
 check('and under the current schedule that is R50', TARIFF_HISTORY[0].rates.promise_to_pay, 50)
 
 /* ---- the ceiling ---- */

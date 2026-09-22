@@ -178,6 +178,17 @@ export function monthEndsGiven(
 ): string[] {
   const out: string[] = []
   if (rotatesOn <= allocatedOn) return out
+  /*
+   * THE STARTING MONTH IS A HINT, NOT A DECISION, and that is worth writing down because a review
+   * of this suite reported the offset as unguarded. Reading the month one character early, or one
+   * digit short, starts the scan in the wrong month and changes NOTHING: every candidate is
+   * filtered by `> allocatedOn`, by not falling in the month of arrival, and by `> rotatesOn`
+   * ending the loop. Starting too early costs iterations against a guard of 120 and arrives at
+   * the same list.
+   *
+   * What is NOT absorbed, and is checked next door: an offset that yields NaN (which sorts above
+   * every real date and gets pushed), and a month-of-arrival slice that reads the day as well.
+   */
   const arrivedIn = allocatedOn.slice(0, 7)
   let year = Number(allocatedOn.slice(0, 4))
   let month = Number(allocatedOn.slice(5, 7))
