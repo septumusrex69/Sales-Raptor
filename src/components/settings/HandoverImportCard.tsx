@@ -22,6 +22,7 @@ import {
   type HandoverDraft, type JudgedDraft,
 } from '../../lib/handoverDraft'
 import { canAccept, type Decision } from '../../lib/handoverDecision.ts'
+import { columnWidthCh } from '../../lib/handoverColumnWidth.ts'
 import { fetchClientCommissionRate, fetchExistingAccounts } from '../../lib/accountBook'
 import { formatCurrency } from '../../data/mockData'
 
@@ -662,6 +663,24 @@ function DraftTable({
      draft. Reading each cell on its own would show a date differently from how it was judged. */
   const order: DateOrder = judged.draft.dateOrder === 'month-first' ? 'month-first' : 'day-first'
 
+  /*
+   * EACH COLUMN AS WIDE AS WHAT IS IN IT, at the firm's asking -- see handoverColumnWidth.ts for
+   * why the browser could not work this out for itself.
+   *
+   * Measured on what the cell will SHOW, not on what is stored: a date is held as the sheet's
+   * reader produced it and drawn as dd/mm/yyyy, and sizing the column to the stored form would
+   * be sizing it to a string nobody is looking at.
+   */
+  const widths = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const k of SHOWN) {
+      out[k] = columnWidthCh(label(k), judged.rows.map((r) => (
+        DATE_KEYS.has(k) ? displayDate(r.values[k], order) : r.values[k]
+      )))
+    }
+    return out
+  }, [judged.rows, order])
+
   return (
     <Card>
       <CardHeader
@@ -775,7 +794,8 @@ function DraftTable({
                             if (e.target.value.trim() === (row.values[k] ?? '')) return
                             void onEdit(row.id, k, e.target.value)
                           }}
-                          className={`w-full min-w-[7rem] rounded border px-1.5 py-1 text-[13px]
+                          style={{ minWidth: `${widths[k]}ch` }}
+                          className={`w-full rounded border px-1.5 py-1 text-[13px]
                             focus:border-brand-500 focus:outline-none ${
                             bad ? 'border-negative-400 bg-negative-50'
                               : iffy ? 'border-gold-400 bg-gold-50'

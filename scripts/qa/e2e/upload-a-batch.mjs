@@ -19,6 +19,7 @@ import {
   OUT, PORT, chromium, makeRunner, signedInPage, startServer, stopServer,
 } from './harness.mjs'
 import { COMPANY_ID, PROFILE, TEAM } from './fixtures.mjs'
+import { MAX_CH } from '../../../src/lib/handoverColumnWidth.ts'
 
 const t = makeRunner('upload-a-batch')
 
@@ -170,7 +171,16 @@ const SHEET = [
  */
 const FULL_SHEET = [
   'Your reference,Handover amount,Date of default,Person or business,Surname,Email address',
-  'GPS3/10103,48250.00,2026/03/18,Person,Van Der Westhuizen,jvdw@example.co.za',
+  /*
+   * THE FIRM'S OWN ADDRESS, at its real length. Two things had to be true of it and the first
+   * draft got the second one wrong:
+   *   - LONGER THAN THE OLD ONE-SIZE COLUMN, or the clipping in the photograph cannot happen
+   *     here and the check below passes against the unfixed code. `jvdw@example.co.za` fitted.
+   *   - AND SHORTER THAN MAX_CH, or the clipping check EXCLUDES it as an allowed overflow and
+   *     passes vacuously. A 34-character address did exactly that: only the width comparison
+   *     noticed the width was gone.
+   */
+  'GPS3/10103,48250.00,2026/03/18,Person,Van Der Westhuizen,kagiso.molefe@example.co.za',
   'GPS3/10104,not money,2026/03/18,Person,Buitendag,',
   'GPS3/10105,1200.00,2026/03/18,Person,Ndlovu,',
 ].join('\n')
@@ -474,6 +484,35 @@ try {
   t.check('...and it is pinned rather than merely placed', paint.pos, 'sticky')
   t.check('...to the left edge', paint.left, '0px')
   t.ok('...over an opaque background', !/transparent|rgba\(0, 0, 0, 0\)/.test(paint.bg))
+  /*
+   * AND NOTHING IS CUT OFF. THE FIRM: "if there's written things like that, that goes into like a
+   * hidden state, just make the thing longer so that the column is longer so I can actually see
+   * that stuff." The photograph was an email column reading "kagiso.molefe@".
+   *
+   * Asked of EVERY cell rather than of the email one, because the complaint is about the rule and
+   * not about that column -- and measured with scrollWidth against clientWidth, which is the
+   * browser reporting that it had to hide something. A value past the cap is allowed to clip, so
+   * the exception is stated rather than the assertion weakened to nothing.
+   */
+  const clipped = await page.$$eval('table tbody input', (els, cap) => els
+    .filter((el) => el.scrollWidth > el.clientWidth + 1 && el.value.trim().length <= cap)
+    .map((el) => el.value), MAX_CH)
+  /* Joined into a string, not compared as an array: this runner's check is Object.is, so two
+     empty arrays are not equal and the failure reads "expected [] got []". Joined, a failure
+     names the values that were cut off, which is what somebody fixing it needs. */
+  t.check('nothing in the table is cut off', clipped.join(' | '), '')
+  /* And the widths are not simply all the same again: a column of addresses is wider than a
+     column of dates, which is the whole of what content-sized means here. */
+  const widthOf = async (heading) => {
+    const i = columnAt(heading)
+    const c = cell(0, i)
+    const b = c ? await c.boundingBox() : null
+    return b ? b.width : 0
+  }
+  const emailWidth = await widthOf('Email address')
+  const dateWidth = await widthOf('Date of default')
+  t.ok('an address column is wider than a date column', emailWidth > dateWidth + 10)
+
   await t.shot(page, 'upload-a-batch-pinned-row')
   await scroller.evaluate((el) => { el.scrollLeft = 0 })
 
