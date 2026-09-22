@@ -114,6 +114,29 @@ export interface CorrectionEmail {
   accounts: number
 }
 
+/**
+ * The heading of the column the CLIENT fills in.
+ *
+ * THE FIRM: "there's an empty thing ... forward this email back to us or respond to this email,
+ * but fill in this block on the right hand side, the information we require."
+ */
+export const ANSWER_COLUMN = 'Fill this in'
+
+/**
+ * A cell somebody types into when they hit Reply.
+ *
+ * EMPTY, WIDE AND PALE, because that is the whole of what makes it look like a box to fill in
+ * rather than a column we forgot to populate. Every other blank in this email says "(nothing)"
+ * for exactly that reason -- this is the one place an empty cell means the opposite, so it is
+ * drawn differently on purpose.
+ *
+ * `&nbsp;` rather than nothing at all: an empty <td> collapses to a sliver in Outlook, and a box
+ * one pixel high is not a box anybody can click into.
+ */
+const ANSWER_CELL =
+  '<td style="padding:6px 10px;border:1px solid #9aa6b8;background:#ffffff;min-width:160px">'
+  + '&nbsp;</td>'
+
 /** One row of a table, so both tables are drawn by the same code. */
 function tableRows(rows: CorrectionRow[], labelFor: LabelFor): string {
   return rows.flatMap((row) => row.problems.map((p) => `
@@ -123,6 +146,7 @@ function tableRows(rows: CorrectionRow[], labelFor: LabelFor): string {
       <td style="padding:6px 10px;border:1px solid #d9dee6">${esc(p.key ? labelFor(p.key) : '\u2014')}</td>
       <td style="padding:6px 10px;border:1px solid #d9dee6">${esc(givenFor(row, p.key))}</td>
       <td style="padding:6px 10px;border:1px solid #d9dee6">${esc(p.message)}</td>
+      ${ANSWER_CELL}
     </tr>`).join(''))
     .join('')
 }
@@ -140,6 +164,10 @@ function table(heading: string, intro: string, rows: CorrectionRow[], labelFor: 
       <th style="padding:6px 10px;border:1px solid #1b2a4a">Field</th>
       <th style="padding:6px 10px;border:1px solid #1b2a4a">What your sheet says</th>
       <th style="padding:6px 10px;border:1px solid #1b2a4a">What we need</th>
+      <!-- A width ATTRIBUTE as well as the style. Outlook lays tables out with Word, which
+           ignores min-width on a cell -- and an empty column collapsed to its heading is not a
+           box anybody can see to type in. -->
+      <th width="180" style="padding:6px 10px;border:1px solid #1b2a4a;width:180px">${esc(ANSWER_COLUMN)}</th>
     </tr>
   </thead>
   <tbody>${tableRows(rows, labelFor)}</tbody>
@@ -232,11 +260,33 @@ export function correctionEmail(input: {
       : '',
   ].filter(Boolean).join('')
 
+  /*
+   * HOW TO ANSWER, SAID ONCE AND BEFORE THE TABLES.
+   *
+   * THE FIRM: "there's an empty thing ... forward this email back to us or respond to this email,
+   * but fill in this block on the right hand side, the information we require."
+   *
+   * TWO WAYS, because clients are not the same. Somebody with three rows to fix will reply and
+   * type into the last column; somebody with two hundred wants the spreadsheet, which is attached.
+   * Naming both here is what makes the empty column read as a box to fill in rather than as a
+   * column we forgot to populate -- and the attachment is only mentioned when there IS one.
+   */
+  const howToAnswer = [
+    `<p style="margin:14px 0 4px">Please reply to this email with the last column,`
+    + ` <strong>${esc(ANSWER_COLUMN)}</strong>, completed \u2014 you can type straight into it.`,
+    notBroughtIn.length > 0
+      ? ' The accounts we could not open are also attached as a spreadsheet, if you would rather'
+        + ' correct them there and send it back.'
+      : '',
+    '</p>',
+  ].filter(Boolean).join('')
+
   const bodyHtml = `
 <p>Good day${contact ? ` ${esc(contact)}` : ''},</p>
 <p>We have today brought in the handover sheet <strong>${esc(filename)}</strong> for
 ${esc(clientName)}.</p>
 <ul>${summary}</ul>
+${howToAnswer}
 ${table(
     'Not brought in — please send these again',
     'We cannot open an account without these, so nothing is being done on them yet.',

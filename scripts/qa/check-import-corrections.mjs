@@ -16,7 +16,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  batchQueryDescription, correctionDescription, correctionEmail, givenFor,
+  ANSWER_COLUMN, batchQueryDescription, correctionDescription, correctionEmail, givenFor,
 } from '../../src/lib/importCorrections.ts'
 import {
   ESCALATION_KINDS, ESCALATION_KIND_ORDER, clientSection, escalationChargeable,
@@ -195,6 +195,61 @@ ok('...counting the ones that could not be opened',
       clientName: 'X', filename: 'f.xlsx', today: '2026-09-22', labelFor,
       broughtIn: 0, toConfirm: [], notBroughtIn: [REJECTED],
     }).bodyHtml))
+
+/* ---------- the client fills the last column in ---------- */
+
+/*
+ * THE FIRM: "there's an empty thing ... forward this email back to us or respond to this email,
+ * but fill in this block on the right hand side, the information we require."
+ *
+ * The email told a client what was wrong and gave them nowhere to answer, so the answer came back
+ * as prose in a reply -- "BF-204's email is kagiso@..., and 301 is Bezuidenhout" -- which somebody
+ * then had to read and transcribe into forty columns.
+ */
+const filled = correctionEmail({
+  clientName: 'X', filename: 'f.xlsx', today: '2026-09-22', labelFor,
+  broughtIn: 3, toConfirm: [ROW], notBroughtIn: [REJECTED],
+})
+ok('there is a column for the client to fill in',
+  new RegExp(`<th[^>]*>${ANSWER_COLUMN}</th>`).test(filled.bodyHtml))
+/* BOTH tables. The rows that were accepted need confirming just as much as the refused ones,
+   and a box on only one of them reads as the other not needing an answer. */
+check('...on both tables',
+  (filled.bodyHtml.match(new RegExp(ANSWER_COLUMN, 'g')) ?? []).length, 3)
+/*
+ * AND IT IS EMPTY. Every other blank in this email says "(nothing)", because there the emptiness
+ * IS the problem -- this is the one cell where empty means "your turn", so it must not be filled
+ * with anything that reads as an answer we already have.
+ */
+ok('...and the cell is left blank for them',
+  /<td[^>]*background:#ffffff[^>]*>&nbsp;<\/td>/.test(filled.bodyHtml))
+/* A box one pixel high is not a box anybody can click into: Outlook lays tables out with Word,
+   which ignores min-width, so the width is stated as an attribute too. */
+ok('...wide enough to type in, in Outlook as well', /<th width="180"/.test(filled.bodyHtml))
+/* SAID, NOT LEFT TO BE NOTICED. An empty column with no instruction reads as one we forgot to
+   populate -- which is exactly what "(nothing)" means three columns to its left. */
+ok('the email says to reply with it completed',
+  /reply to this email with the last column/.test(filled.bodyHtml))
+ok('...naming the column by the name on it',
+  new RegExp(`<strong>${ANSWER_COLUMN}</strong>`).test(filled.bodyHtml))
+/* And the spreadsheet as the other way, for a client with two hundred rows rather than three. */
+ok('...and offers the attached sheet as the other way',
+  /attached as a spreadsheet/.test(filled.bodyHtml))
+/*
+ * THE ATTACHMENT IS ONLY MENTIONED WHEN THERE IS ONE. handoverDraft builds the sheet when
+ * something was refused, and this sentence appears on the same condition -- an email promising
+ * an attachment that is not there is worse than one that never mentioned it.
+ */
+const nothingRefused = correctionEmail({
+  clientName: 'X', filename: 'f.xlsx', today: '2026-09-22', labelFor,
+  broughtIn: 3, toConfirm: [ROW], notBroughtIn: [],
+})
+ok('an email with nothing refused promises no attachment',
+  !/attached as a spreadsheet/.test(nothingRefused.bodyHtml))
+ok('...but still asks for the column', /reply to this email with the last column/.test(nothingRefused.bodyHtml))
+const lib = readFileSync('src/lib/handoverDraft.ts', 'utf8')
+ok('...on the same condition the sheet is built on',
+  /notBroughtIn\.length > 0\s*\?/.test(lib))
 
 /* ---------- one query for the whole sheet ---------- */
 
