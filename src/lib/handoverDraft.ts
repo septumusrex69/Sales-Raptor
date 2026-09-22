@@ -24,7 +24,7 @@ import { nextReferences, toAccountRow, toContactRows } from './newDebtor.ts'
 import {
   noteForAccount, readiness, type Decision, type Readiness,
 } from './handoverDecision.ts'
-import { correctionDescription, correctionEmail } from './importCorrections.ts'
+import { batchQueryDescription, correctionEmail } from './importCorrections.ts'
 import { raiseQuery } from './accountQueries'
 import { createDebtorAccount, fetchAccountReferences, fetchExistingAccounts } from './accountBook'
 
@@ -135,6 +135,25 @@ export async function fetchOpenDrafts(): Promise<HandoverDraft[]> {
  * makes an edit take effect: a corrected cell is judged by the same code that judged the file,
  * so the screen cannot say a row is refused for something somebody has already fixed.
  */
+/**
+ * The draft a batch was imported from, read back after the fact.
+ *
+ * THE RECORD OF WHAT WAS WRONG, and the reason a sheet-level query needs no copy of it. The draft
+ * is frozen once approved -- it is the only record of what was corrected on the way in -- so
+ * reading it back is reading the file as it was imported rather than a description of it written
+ * on the day and true only then.
+ */
+export async function fetchDraftForHandover(
+  handoverId: string,
+  today: string,
+): Promise<JudgedDraft | null> {
+  const { data, error } = await supabase
+    .from('handover_drafts').select('id').eq('handover_id', handoverId).maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) return null
+  return fetchDraft(data.id as string, today)
+}
+
 export async function fetchDraft(id: string, today: string): Promise<JudgedDraft | null> {
   const [{ data: d, error: de }, { data: rs, error: re }] = await Promise.all([
     supabase.from('handover_drafts').select(DRAFT_COLUMNS).eq('id', id).maybeSingle(),
@@ -451,27 +470,43 @@ export async function approveDraft(input: {
       .from('companies').select('name, contact_person, account_owner_id')
       .eq('id', judged.draft.companyId).maybeSingle()
 
-    for (const [i, row] of corrections.entries()) {
-      const accountId = openedFor.get(row.reference ?? '')
-      if (!accountId) continue
-      try {
-        await raiseQuery({
-          accountId,
-          description: correctionDescription(row),
-          kind: 'import',
-          /* WITH THE LIAISON, because it is the client who has to answer it and only a liaison
-             may put a query in front of a client. */
-          stage: 'liaison',
-          ownerId: (company?.account_owner_id as string | null) ?? null,
-          raisedBy: me.user?.id ?? null,
-          raisedByName: 'Handover import',
-          /* NEVER. A dispute raises Annexure B item 3 because the DEBTOR's objection caused the
-             work. A client's sheet being wrong is not something a debtor pays for. */
-          charge: false,
-        })
-      } catch (e) {
-        problems.push(`${row.reference ?? `row ${i + 1}`}: ${e instanceof Error ? e.message : String(e)}`)
-      }
+    /*
+     * ONE QUERY FOR THE SHEET, NOT ONE PER ROW.
+     *
+     * THE FIRM: "let's say there's a handover sheet of 500 imports and 50 of them have problems.
+     * Now there'll be 50 different individual queries. I think we should have a query per
+     * handover sheet."
+     *
+     * It raised one per corrected account, which on a real batch is a liaison's client page
+     * turned into fifty copies of the same sentence about fifty different debtors -- and fifty
+     * things to chase and close separately when the client answers all of them in one reply.
+     *
+     * AGAINST THE BATCH, WHICH IS THE THING IT IS ABOUT. That is also what finally lets the rows
+     * that were NOT opened be part of it: they have no account, so under the old shape they could
+     * have no query at all and the email was the only way the client ever heard about them.
+     */
+    try {
+      await raiseQuery({
+        handoverId,
+        description: batchQueryDescription({
+          filename: judged.draft.filename,
+          toConfirm: corrections.length,
+          notBroughtIn: notBroughtIn.length,
+        }),
+        kind: 'import',
+        /* WITH THE LIAISON, because it is the client who has to answer it and only a liaison
+           may put a query in front of a client. */
+        stage: 'liaison',
+        ownerId: (company?.account_owner_id as string | null) ?? null,
+        raisedBy: me.user?.id ?? null,
+        raisedByName: 'Handover import',
+        /* NEVER, and now it cannot be: a batch has no account to charge. A dispute raises
+           Annexure B item 3 because the DEBTOR's objection caused the work; a client's sheet
+           being wrong is not something any debtor pays for. */
+        charge: false,
+      })
+    } catch (e) {
+      problems.push(`The client query was not raised: ${e instanceof Error ? e.message : String(e)}`)
     }
 
     const liaisonId = (company?.account_owner_id as string | null) ?? null

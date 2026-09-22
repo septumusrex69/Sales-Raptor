@@ -40,6 +40,7 @@ const CompanyDetail = lazy(() => import('./pages/companies/CompanyDetail').then(
 const AccountsList = lazy(() => import('./pages/accounts/AccountsList').then((m) => ({ default: m.AccountsList })))
 const AccountDetail = lazy(() => import('./pages/accounts/AccountDetail').then((m) => ({ default: m.AccountDetail })))
 const DisputesBoard = lazy(() => import('./pages/accounts/DisputesBoard').then((m) => ({ default: m.DisputesBoard })))
+const QueryDetail = lazy(() => import('./pages/queries/QueryDetail').then((m) => ({ default: m.QueryDetail })))
 const LibraryWorkflows = lazy(() => import('./pages/library/LibraryWorkflows').then((m) => ({ default: m.LibraryWorkflows })))
 const LibraryLetterhead = lazy(() => import('./pages/library/LibraryLetterhead').then((m) => ({ default: m.LibraryLetterhead })))
 const LibraryFirm = lazy(() => import('./pages/library/LibraryFirm').then((m) => ({ default: m.LibraryFirm })))
@@ -107,6 +108,10 @@ function App() {
                   stand relative to everybody else." */}
               <Route path="/performance/:userId" element={<CollectorProfile />} handle={{ title: 'Collector' }} />
               <Route path="/queries" element={<DisputesBoard />} handle={{ title: 'Disputes' }} />
+              {/* THE FIRM: "a query should have a card, like the same as a deal, with the details
+                  of the query on the inside." Before this a query had no page and both lists
+                  opened the ACCOUNT -- which a query about a whole handover sheet does not have. */}
+              <Route path="/queries/:id" element={<QueryDetail />} handle={{ title: 'Query' }} />
               <Route path="/tasks" element={<TasksPage />} handle={{ title: 'Tasks' }} />
               <Route path="/calendar" element={<CalendarPage />} handle={{ title: 'Calendar' }} />
               <Route path="/activities" element={<ActivitiesPage />} handle={{ title: 'Activities' }} />

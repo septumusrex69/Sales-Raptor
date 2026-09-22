@@ -208,7 +208,7 @@ export function DisputesBoard() {
                       ownerName={q.ownerId ? userById(q.ownerId)?.name ?? null : null}
                       busy={moving === q.id}
                       onDragStart={() => setDragging(q.id)}
-                      onOpen={() => navigate(`/accounts/${q.accountId}`)}
+                      onOpen={() => navigate(`/queries/${q.id}`)}
                     />
                   ))}
                   {cards.length === 0 && (
@@ -237,11 +237,16 @@ export function DisputesBoard() {
               </thead>
               <tbody>
                 {filtered.map((q) => (
-                  <tr key={q.id} onClick={() => navigate(`/accounts/${q.accountId}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
+                  <tr key={q.id} onClick={() => navigate(`/queries/${q.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
                     <td className="px-5 py-2">
-                      <Link to={`/accounts/${q.accountId}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
-                        {q.debtorName}
-                      </Link>
+                      {/* A query about a whole handover sheet has no account, so it is named
+                          rather than linked to /accounts/null -- which renders as a page saying
+                          the account is gone. */}
+                      {q.accountId ? (
+                        <Link to={`/accounts/${q.accountId}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
+                          {q.debtorName}
+                        </Link>
+                      ) : <span className="font-medium text-slate-700">{q.debtorName}</span>}
                       <span className="block text-xs text-slate-400">{q.accountNumber}</span>
                     </td>
                     <td className="px-3 py-2 text-slate-600 max-w-[26rem]">

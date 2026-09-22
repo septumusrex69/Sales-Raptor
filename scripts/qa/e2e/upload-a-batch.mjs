@@ -76,6 +76,10 @@ const accountsOpened = []
 const mailSent = []
 /** Any Annexure B fee raised on the way through. Must stay empty: see the assertion below. */
 const feesRaised = []
+/** Notes written onto opened accounts, so the per-row note can be proved to still land. */
+const notesWritten = []
+/** The batch rows the approval created. A query now hangs off one, so its id has to be real. */
+const handoversCreated = []
 const DRAFT = {
   id: DRAFT_ID, company_id: COMPANY_ID, filename: 'handover.csv', sheet_kind: 'raptor',
   date_order: 'day-first', state: 'draft', handover_id: null, approved_at: null,
@@ -119,6 +123,21 @@ const handlers = [
   }],
   [(u) => /handover_draft_rows/.test(u), () => ({ body: draftRows })],
 
+  /*
+   * THE BATCH ITSELF, which nothing here answered until a query needed its id.
+   *
+   * `/handover_drafts/` and `/handover_draft_rows/` both match their own literal, so a POST to
+   * `/rest/v1/handovers` fell through to the harness default and the import read `batch.id` as
+   * undefined -- with no error, because the insert appeared to succeed. Every account opened in
+   * this fixture has been carrying an undefined handover_id ever since, and nothing asked.
+   *
+   * Ordered BEFORE the drafts handlers is not enough on its own -- the regexes do not overlap --
+   * but it is put here so the three tables of one feature read together.
+   */
+  [(u, r) => /\/rest\/v1\/handovers\b/.test(u) && r.method() === 'POST', (u, r) => {
+    handoversCreated.push(JSON.parse(r.postData() ?? '{}'))
+    return { body: { id: `batch-${handoversCreated.length}` } }
+  }],
   [(u, r) => /handover_drafts/.test(u) && r.method() === 'POST', () => ({ body: { id: DRAFT_ID } })],
   [(u, r) => /handover_drafts/.test(u) && r.method() === 'PATCH', (u, r) => {
     draftPatches.push(r.postData() ?? '')
@@ -138,6 +157,10 @@ const handlers = [
   }],
   [(u, r) => /account_fees/.test(u) && r.method() === 'POST', (u, r) => {
     feesRaised.push(r.postData() ?? '')
+    return { body: [] }
+  }],
+  [(u, r) => /account_notes/.test(u) && r.method() === 'POST', (u, r) => {
+    notesWritten.push(JSON.parse(r.postData() ?? '{}'))
     return { body: [] }
   }],
   [(u, r) => /account_queries/.test(u) && r.method() === 'POST', (u, r) => {
@@ -616,15 +639,45 @@ try {
   t.ok('...each with our own reference',
     accountsOpened.every((a) => /^NBP\d{5}$/.test(a.account_number ?? '')))
 
-  /* ONE QUERY, for the one account accepted with something wrong on it -- not for the clean one
-     and not for the rejected one. */
-  t.check('a query is raised for the account accepted with a problem', queriesRaised.length, 1)
+  /*
+   * ONE QUERY FOR THE WHOLE SHEET.
+   *
+   * THE FIRM: "let's say there's a handover sheet of 500 imports and 50 of them have problems.
+   * Now there'll be 50 different individual queries. I think we should have a query per handover
+   * sheet." It raised one per corrected account, which on a real batch is a liaison's client page
+   * turned into fifty copies of the same sentence about fifty different debtors.
+   *
+   * This fixture has one row accepted with a problem and one rejected, so under the old shape it
+   * raised one -- the same number, for a different reason. What tells them apart is WHAT IT HANGS
+   * OFF, which is asserted next, and that is the assertion that matters here.
+   */
+  /* The batch is created before the first account, so a run that dies leaves something
+     findable -- and the query below hangs off it, so its id has to be a real one. */
+  t.check('the batch itself is created', handoversCreated.length, 1)
+  t.ok('...carrying every account it opened',
+    accountsOpened.every((a) => typeof a.handover_id === 'string'))
+
+  t.check('one query is raised for the sheet', queriesRaised.length, 1)
+  t.check('...against the batch, not one debtor', typeof queriesRaised[0]?.handover_id, 'string')
+  t.check('...and against no single account', queriesRaised[0]?.account_id ?? null, null)
   t.check("...as an import correction, not a debtor's dispute", queriesRaised[0]?.kind, 'import')
   t.check('...with the liaison', queriesRaised[0]?.stage, 'liaison')
-  t.ok('...carrying the note that was typed',
-    (queriesRaised[0]?.description ?? '').includes('Confirm the email address with the client.'))
-  t.ok('...and the problem it overrode',
-    /section 129 is sent by email/.test(queriesRaised[0]?.description ?? ''))
+  /* It names the sheet, because a liaison with four clients and three sheets each cannot tell two
+     queries apart by a count of accounts. */
+  t.ok('...naming the sheet it is about',
+    (queriesRaised[0]?.description ?? '').includes('handover.csv'))
+  t.ok('...and what is outstanding on it',
+    /could not be opened|open with something for the client to confirm/
+      .test(queriesRaised[0]?.description ?? ''))
+  /*
+   * AND THE PER-ROW NOTE STILL LANDS ON THE ACCOUNT. That is where it always belonged -- it is
+   * for whoever picks the account up, not for the client -- and moving the query to the batch
+   * must not take it with it.
+   */
+  t.ok('the note typed on the row still reaches its account',
+    notesWritten.some((n) => (n.body ?? '').includes('Confirm the email address with the client.')))
+  t.ok('...with the problem it overrode',
+    notesWritten.some((n) => /section 129 is sent by email/.test(n.body ?? '')))
   /* A category says why the DEBTOR objects, so it means nothing here and the database refuses it
      on any kind but a dispute. */
   t.check('...and no dispute category', queriesRaised[0]?.category ?? null, null)

@@ -147,11 +147,24 @@ export function ClientQueries({ companyId, section }: {
             return (
               <div key={q.id} className="px-5 py-3 flex flex-wrap items-start gap-x-4 gap-y-1.5">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-slate-800 line-clamp-3 wrap-anywhere">{q.description}</p>
+                  {/*
+                    THE QUERY OPENS THE QUERY. THE FIRM: "if you click on that little query for
+                    this date's handover sheet, then it goes in there." It used to link only to
+                    the account, which answers a different question -- and a query about a whole
+                    handover sheet has no account to open at all.
+                  */}
+                  <Link to={`/queries/${q.id}`}
+                    className="block text-sm text-slate-800 line-clamp-3 wrap-anywhere hover:text-brand-600">
+                    {q.description}
+                  </Link>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    <Link to={`/accounts/${q.accountId}`} className="text-brand-600 hover:underline">
-                      {q.debtorName}
-                    </Link>
+                    {/* The debtor still goes to the debtor. A batch has none, so it is named
+                        without a link rather than linked to nothing. */}
+                    {q.accountId ? (
+                      <Link to={`/accounts/${q.accountId}`} className="text-brand-600 hover:underline">
+                        {q.debtorName}
+                      </Link>
+                    ) : q.debtorName}
                     {q.accountNumber && <> · {q.accountNumber}</>}
                     {q.category && <> · {q.category}</>}
                     {q.raisedByName && <> · raised by {q.raisedByName}</>}

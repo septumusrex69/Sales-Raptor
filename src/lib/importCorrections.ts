@@ -53,6 +53,46 @@ export function correctionDescription(row: CorrectionRow): string {
   return [head, '', ...lines].join('\n')
 }
 
+/** "1 account" / "2 accounts", because "1 accounts" went out to a client once already. */
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+/**
+ * ONE QUERY FOR THE WHOLE SHEET, in words.
+ *
+ * THE FIRM: "let's say there's a handover sheet of 500 imports and 50 of them have problems. Now
+ * there'll be 50 different individual queries. I think we should have a query per handover sheet."
+ *
+ * It was one query per row, which on a real batch is a liaison's client page turned into fifty
+ * copies of the same sentence about fifty different debtors -- and fifty things to chase and
+ * close separately when the client answers all of them in one reply. The correction is one
+ * conversation about one file, so it is one query about one batch.
+ *
+ * A SUMMARY, NOT THE TABLE. The rows themselves are not copied in here: they are read back off
+ * the frozen draft wherever the query is opened, which keeps one record of what was wrong rather
+ * than a description that was true on the day it was written. What this has to do is say enough
+ * that the line on a client's page means something without opening it.
+ */
+export function batchQueryDescription(input: {
+  filename: string
+  /** Opened, but something on them needs the client to confirm it. */
+  toConfirm: number
+  /** Not opened at all: refused, or thrown out. */
+  notBroughtIn: number
+}): string {
+  const parts: string[] = []
+  if (input.notBroughtIn > 0) {
+    parts.push(`${count(input.notBroughtIn, 'account', 'accounts')} could not be opened and `
+      + `${input.notBroughtIn === 1 ? 'needs' : 'need'} to be sent again`)
+  }
+  if (input.toConfirm > 0) {
+    parts.push(`${count(input.toConfirm, 'account is', 'accounts are')} open with something for `
+      + 'the client to confirm')
+  }
+  /* Named, never left as a bare count. A liaison with four clients and three sheets each cannot
+     tell two queries apart by "6 accounts". */
+  return `${input.filename} — ${parts.join(', ')}.`
+}
+
 /* ---------------------------------------------------------------- the email */
 
 const esc = (v: string) => v
@@ -107,7 +147,6 @@ function table(heading: string, intro: string, rows: CorrectionRow[], labelFor: 
 }
 
 /** "1 account" / "3 accounts", because "1 account need correcting" went out to a client. */
-const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
 /**
  * The email to the client liaison.
@@ -165,7 +204,20 @@ export function correctionEmail(input: {
   /* WHAT HAPPENED, IN ONE LINE, before any table. Somebody forwarding this to a client should be
      able to answer "so where are we?" without counting rows. */
   const clean = input.broughtIn - toConfirm.length
+  /*
+   * THE TOTAL FIRST, AT THE FIRM'S ASKING: "12 accounts were handed over on the import sheet,
+   * 12 accounts are open and being worked, 11 of them with nothing outstanding."
+   *
+   * The lines under it are what happened to the sheet; without the total they do not add up to
+   * anything a reader can check. A client who sent 500 and is told "480 are open" has to add two
+   * numbers to find out whether the other twenty are accounted for -- and the one number they
+   * actually know is how many they sent.
+   */
+  const handedOver = input.broughtIn + notBroughtIn.length
   const summary = [
+    handedOver > 0
+      ? `<li>${count(handedOver, 'account was', 'accounts were')} handed over on this sheet.</li>`
+      : '',
     input.broughtIn > 0
       ? `<li>${count(input.broughtIn, 'account is', 'accounts are')} open and being worked`
         + `${clean > 0 && toConfirm.length > 0 ? `, ${clean} of them with nothing outstanding` : ''}.</li>`

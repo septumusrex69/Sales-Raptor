@@ -90,7 +90,16 @@ export const DISPUTE_ESCALATION_ROLES = ['Pre-legal Team Leader', 'Liaison Manag
 
 export interface AccountQuery {
   id: string
-  accountId: string
+  /**
+   * The account this is about, or null where it is about a whole handover sheet.
+   *
+   * THE FIRM: "let's say there's a handover sheet of 500 imports and 50 of them have problems.
+   * Now there'll be 50 different individual queries. I think we should have a query per handover
+   * sheet." Exactly one of this and handoverId is set; the database enforces it.
+   */
+  accountId: string | null
+  /** The batch, where this is about a sheet rather than one account. */
+  handoverId: string | null
   description: string
   /** What this escalation is. Everything raised before the kinds existed reads as a dispute. */
   kind: EscalationKind
@@ -112,7 +121,8 @@ export interface AccountQuery {
 
 const toQuery = (r: any): AccountQuery => ({
   id: r.id,
-  accountId: r.account_id,
+  accountId: r.account_id ?? null,
+  handoverId: r.handover_id ?? null,
   description: r.description,
   kind: (r.kind ?? 'dispute') as EscalationKind,
   category: r.category,
@@ -234,14 +244,30 @@ function toQueueRow(r: any): QueueRow {
  * lives, two places it is read from.
  */
 export async function fetchQueriesForClient(companyId: string): Promise<QueueRow[]> {
-  const { data, error } = await supabase
-    .from('account_queries')
-    .select('*, debtor_accounts!inner(account_number, debtor_first_name, debtor_surname, company_id)')
-    .eq('debtor_accounts.company_id', companyId)
-    .order('raised_at', { ascending: false })
-  if (error) throw new Error(error.message)
+  /*
+   * TWO READS, NOT ONE. A client's queries now reach them two ways -- through an account they own,
+   * and through a handover batch of theirs -- and PostgREST cannot OR across two embedded
+   * resources: `!inner` on either one silently drops every row of the other kind. Written as one
+   * request it would have shown the account queries and quietly hidden every sheet-level query,
+   * which is a shorter list that looks like good news.
+   */
+  const [byAccount, byBatch] = await Promise.all([
+    supabase
+      .from('account_queries')
+      .select('*, debtor_accounts!inner(account_number, debtor_first_name, debtor_surname, company_id)')
+      .eq('debtor_accounts.company_id', companyId)
+      .order('raised_at', { ascending: false }),
+    supabase
+      .from('account_queries')
+      .select('*, handovers!inner(company_id, reference, received_at)')
+      .eq('handovers.company_id', companyId)
+      .order('raised_at', { ascending: false }),
+  ])
+  if (byAccount.error) throw new Error(byAccount.error.message)
+  if (byBatch.error) throw new Error(byBatch.error.message)
+
   /* eslint-disable @typescript-eslint/no-explicit-any */
-  return (data ?? []).map((r: any) => {
+  const rows: QueueRow[] = (byAccount.data ?? []).map((r: any) => {
     const a = r.debtor_accounts ?? {}
     return {
       ...toQuery(r),
@@ -250,10 +276,98 @@ export async function fetchQueriesForClient(companyId: string): Promise<QueueRow
       companyId: a.company_id ?? null,
     }
   })
+  for (const r of (byBatch.data ?? []) as any[]) {
+    const h = r.handovers ?? {}
+    rows.push({
+      ...toQuery(r),
+      accountNumber: null,
+      /* The sheet stands where the debtor's name would. A batch query is about a file, and
+         "Unnamed debtor" on one would read as an account we failed to name. */
+      debtorName: (h.reference as string | null) ?? 'One handover sheet',
+      companyId: h.company_id ?? null,
+    })
+  }
+  rows.sort((a, b) => (a.raisedAt < b.raisedAt ? 1 : -1))
+  return rows
+}
+
+/**
+ * One query, with whatever it hangs off.
+ *
+ * FOR ITS OWN PAGE. THE FIRM: "a query should have a card, like the same as a deal, with the
+ * details of the query on the inside ... if you click on that little query for this date's
+ * handover sheet, then it goes in there." Until now a query had no page: clicking one on the
+ * board opened the ACCOUNT, which answers a different question and cannot answer this one at all
+ * for a query about a whole sheet.
+ *
+ * Two reads rather than an embed of both parents: PostgREST resolves an embedded resource against
+ * a foreign key, and a row has exactly one of these two set -- so asking for both in one select
+ * returns null for whichever is absent and needs the same branch on this side anyway.
+ */
+export async function fetchQuery(id: string): Promise<{
+  query: AccountQuery
+  /** The account it is about, where it is about one. */
+  account: { id: string; accountNumber: string | null; debtorName: string; companyId: string } | null
+  /** The batch it is about, where it is about a sheet. */
+  batch: { id: string; reference: string | null; receivedAt: string; companyId: string } | null
+  clientName: string | null
+} | null> {
+  const { data, error } = await supabase
+    .from('account_queries').select('*').eq('id', id).maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) return null
+  const q = toQuery(data)
+
+  let companyId: string | null = null
+  let acc: { id: string; accountNumber: string | null; debtorName: string; companyId: string } | null = null
+  let batch: { id: string; reference: string | null; receivedAt: string; companyId: string } | null = null
+
+  if (q.accountId) {
+    const { data: a } = await supabase.from('debtor_accounts')
+      .select('id, account_number, debtor_first_name, debtor_surname, company_id')
+      .eq('id', q.accountId).maybeSingle()
+    if (a) {
+      acc = {
+        id: a.id as string,
+        accountNumber: (a.account_number as string | null) ?? null,
+        debtorName: [a.debtor_first_name, a.debtor_surname].filter(Boolean).join(' ') || 'Unnamed debtor',
+        companyId: a.company_id as string,
+      }
+      companyId = acc.companyId
+    }
+  } else if (q.handoverId) {
+    const { data: h } = await supabase.from('handovers')
+      .select('id, reference, received_at, company_id').eq('id', q.handoverId).maybeSingle()
+    if (h) {
+      batch = {
+        id: h.id as string,
+        reference: (h.reference as string | null) ?? null,
+        receivedAt: h.received_at as string,
+        companyId: h.company_id as string,
+      }
+      companyId = batch.companyId
+    }
+  }
+
+  const clientName = companyId
+    ? ((await supabase.from('companies').select('name').eq('id', companyId).maybeSingle())
+      .data?.name as string | null) ?? null
+    : null
+
+  return { query: q, account: acc, batch, clientName }
 }
 
 export async function raiseQuery(input: {
-  accountId: string
+  /** The account, for an ordinary query. Omitted when `handoverId` is given instead. */
+  accountId?: string | null
+  /**
+   * The batch, for a query about a whole handover sheet.
+   *
+   * THE FIRM: "I think we should have a query per handover sheet." Fifty rows against one client,
+   * each saying the same sentence about a different debtor, is a liaison's page made useless by
+   * the thing meant to help them.
+   */
+  handoverId?: string | null
   description: string
   /**
    * What this escalation is. Defaults to a debtor's dispute, which is what the table was
@@ -280,7 +394,8 @@ export async function raiseQuery(input: {
   const { data, error } = await supabase
     .from('account_queries')
     .insert({
-      account_id: input.accountId,
+      account_id: input.accountId ?? null,
+      handover_id: input.handoverId ?? null,
       description: input.description.trim(),
       kind: input.kind ?? 'dispute',
       // Only a dispute is classified. The database refuses a category on the other two — see
@@ -309,9 +424,15 @@ export async function raiseQuery(input: {
    * Decided here rather than trusted to the caller, so a future screen that forgets to pass
    * `charge: false` still cannot raise the fee.
    */
-  const mayCharge = escalationChargeable(input.kind ?? 'dispute')
+  /*
+   * AND A BATCH HAS NOBODY TO CHARGE. A sheet-level query is about a client's data, not a
+   * debtor's objection -- there is no one account to raise a fee against and there must not be
+   * one. This is the third lock on the same rule, after `charge: false` at the call site and
+   * escalationChargeable('import') being false, and it is the one that cannot be forgotten.
+   */
+  const mayCharge = escalationChargeable(input.kind ?? 'dispute') && !!input.accountId
   const charge = (!mayCharge || input.charge === false) ? null : await chargeItem({
-    accountId: input.accountId,
+    accountId: input.accountId!,
     itemId: '3',
     actionCode: 'perusal',
     // "ONE" is what the firm calls item 3 -- Other Necessary Expenses. Their own shorthand,
@@ -320,18 +441,26 @@ export async function raiseQuery(input: {
     createdBy: input.raisedBy ?? null,
   })
 
-  // The account's own timeline gets it too, so a collector reading the history sees the dispute
-  // where they read everything else, not only if they think to open a panel.
-  await addNote({
-    accountId: input.accountId,
-    // Just what happened. The fee is already its own line on the timeline with its own amount,
-    // and repeating it here made a two-line event into a five-line one.
-    body: escalationNote(input.kind ?? 'dispute', q.description),
-    authorName: input.raisedByName ?? null,
-    createdBy: input.raisedBy ?? null,
-    queryId: q.id,
-    kind: 'query',
-  })
+  /*
+   * The account's own timeline gets it too, so a collector reading the history sees the dispute
+   * where they read everything else, not only if they think to open a panel.
+   *
+   * ONLY WHERE THERE IS AN ACCOUNT. A sheet-level query has no timeline to write to -- account
+   * notes are per account and a batch is not one. Its record is the query itself, which is why
+   * it has a page of its own.
+   */
+  if (input.accountId) {
+    await addNote({
+      accountId: input.accountId,
+      // Just what happened. The fee is already its own line on the timeline with its own amount,
+      // and repeating it here made a two-line event into a five-line one.
+      body: escalationNote(input.kind ?? 'dispute', q.description),
+      authorName: input.raisedByName ?? null,
+      createdBy: input.raisedBy ?? null,
+      queryId: q.id,
+      kind: 'query',
+    })
+  }
   return { query: q, charge }
 }
 
@@ -375,7 +504,8 @@ export async function updateQuery(
     category?: string | null
     description?: string
   },
-  context: { accountId: string; actorId: string | null; actorName: string | null; note?: string },
+  /** `accountId` is null on a sheet-level query: there is no timeline and nobody to charge. */
+  context: { accountId: string | null; actorId: string | null; actorName: string | null; note?: string },
 ): Promise<AccountQuery> {
   const row: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (patch.stage !== undefined) {
@@ -395,10 +525,12 @@ export async function updateQuery(
   const { data, error } = await supabase.from('account_queries').update(row).eq('id', id).select('*').single()
   if (error) throw new Error(error.message)
 
-  const chargeable = patch.stage ? CHARGE_ON_STAGE[patch.stage] : undefined
+  /* A batch has no account to charge, and a client's own data being wrong is not something any
+     debtor pays for. The same rule as raiseQuery, in the other place a stage can move. */
+  const chargeable = patch.stage && context.accountId ? CHARGE_ON_STAGE[patch.stage] : undefined
   if (chargeable) {
     await chargeItem({
-      accountId: context.accountId,
+      accountId: context.accountId!,
       itemId: chargeable.itemId,
       actionCode: chargeable.actionCode,
       description: chargeable.description,
@@ -406,7 +538,7 @@ export async function updateQuery(
     })
   }
 
-  if (patch.stage || context.note) {
+  if ((patch.stage || context.note) && context.accountId) {
     const body = context.note?.trim()
       || `Query moved: ${QUERY_STAGE_LABEL[patch.stage as QueryStage] ?? patch.stage}.`
     await addNote({
@@ -433,7 +565,8 @@ export async function updateQuery(
 export async function closeQuery(
   id: string,
   decision: { outcome: QueryOutcome; action?: string | null; amount?: number | null },
-  context: { accountId: string; actorId: string | null; actorName: string | null },
+  /** `accountId` is null on a sheet-level query: there is no account timeline to write to. */
+  context: { accountId: string | null; actorId: string | null; actorName: string | null },
 ): Promise<AccountQuery> {
   const { data, error } = await supabase
     .from('account_queries')
@@ -452,16 +585,18 @@ export async function closeQuery(
     .single()
   if (error) throw new Error(error.message)
 
-  const parts = [`Query closed — ${QUERY_OUTCOME_LABEL[decision.outcome].toLowerCase()}`]
-  if (decision.action) parts.push(decision.action.trim())
-  await addNote({
-    accountId: context.accountId,
-    body: parts.join('. '),
-    authorName: context.actorName,
-    createdBy: context.actorId,
-    queryId: id,
-    kind: 'query',
-  })
+  if (context.accountId) {
+    const parts = [`Query closed — ${QUERY_OUTCOME_LABEL[decision.outcome].toLowerCase()}`]
+    if (decision.action) parts.push(decision.action.trim())
+    await addNote({
+      accountId: context.accountId,
+      body: parts.join('. '),
+      authorName: context.actorName,
+      createdBy: context.actorId,
+      queryId: id,
+      kind: 'query',
+    })
+  }
 
   // Closing one drops it off the badge; reassigning one moves it off mine and onto theirs.
   refreshNavCounts()

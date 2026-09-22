@@ -35,6 +35,9 @@ const TITLES: { test: RegExp; title: string }[] = [
      the static-before-dynamic ordering below still matters for anything added later. */
   { test: /^\/accounts\/[^/]+$/, title: 'Account' },
   { test: /^\/accounts/, title: 'Accounts' },
+  /* The one query before the board, or /queries/:id would be headed "Disputes" -- and a query
+     about a client's handover sheet is precisely not one. Static-before-dynamic, as above. */
+  { test: /^\/queries\/[^/]+$/, title: 'Query' },
   { test: /^\/queries/, title: 'Disputes' },
   /* The workflows first: /library/workflows would otherwise be titled "Library", which is the
      same mistake /accounts/workflows was written to avoid one section up. */

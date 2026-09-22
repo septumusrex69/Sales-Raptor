@@ -305,6 +305,74 @@ check('an unrecognised word is a person',
   toDebtorInput({ name: 'Dube', debtor_kind: 'Individual' }).debtorKind, 'individual')
 check('...and so is a blank', toDebtorInput({ name: 'Dube' }).debtorKind, 'individual')
 
+/* ---------- one query for the sheet, not one per row ---------- */
+
+/*
+ * THE FIRM: "let's say there's a handover sheet of 500 imports and 50 of them have problems. Now
+ * there'll be 50 different individual queries. I think we should have a query per handover sheet."
+ *
+ * Fifty rows on a liaison's client page, each the same sentence about a different debtor, and
+ * fifty things to chase and close separately when the client answers all of them in one reply.
+ */
+ok('the import raises its query against the batch', /raiseQuery\(\{\s*handoverId,/.test(lib))
+/* THE LOOP IS GONE, not merely joined by a batch one. Left in place it would raise fifty-one. */
+ok('...and no longer one per corrected row',
+  !/for \(const \[i, row\] of corrections\.entries\(\)\)/.test(lib))
+ok('...exactly once', (lib.match(/await raiseQuery\(/g) ?? []).length === 1)
+/* The description names the sheet and the counts -- see check-import-corrections for the words. */
+ok('...describing the sheet rather than one debtor', /batchQueryDescription\(\{/.test(lib))
+/*
+ * NEVER CHARGED, and now it cannot be: a batch has no account to raise a fee against. Annexure B
+ * item 3 recovers the time a DEBTOR's objection cost; a client's own sheet being wrong is not
+ * something any debtor pays for. Three locks, and this asserts the two that live in code.
+ */
+ok('...and charges nobody', /charge: false/.test(lib))
+const queries = code(read('../../src/lib/accountQueries.ts'))
+ok('...with a fee that cannot be raised without an account',
+  /escalationChargeable\(input\.kind \?\? 'dispute'\) && !!input\.accountId/.test(queries))
+/* An account note is per account, and a batch is not one. Writing one would need an account id
+   that does not exist. */
+ok('a sheet-level query writes no account note', /if \(input\.accountId\) \{/.test(queries))
+
+/*
+ * AND THE DATABASE KEEPS EVERY QUERY PARENTED. account_id had to become nullable for a batch
+ * query to exist at all, and a nullable column with no check is a table that will quietly accept
+ * a query belonging to nothing -- which nothing would ever show, because every list joins.
+ */
+ok('a query hangs off an account or a batch', /handover_id uuid references public\.handovers/.test(schema))
+ok('...and never off neither',
+  /check \(account_id is not null or handover_id is not null\)/.test(schema))
+ok('...which needed account_id to stop being required',
+  /alter column account_id drop not null/.test(schema))
+
+/* ---------- a query has a page of its own ---------- */
+
+/*
+ * THE FIRM: "a query should have a card, like the same as a deal, with the details of the query
+ * on the inside ... if you click on that little query for this date's handover sheet, then it
+ * goes in there."
+ *
+ * A query had no page: the board and the client list both opened the ACCOUNT -- a different
+ * question, and one a sheet-level query cannot answer because it has no account.
+ */
+const app = code(read('../../src/App.tsx'))
+ok('there is a route for one query', /path="\/queries\/:id"/.test(app))
+const detail = code(read('../../src/pages/queries/QueryDetail.tsx'))
+/*
+ * THE ROWS ARE READ BACK, NOT STORED ON THE QUERY. The draft is frozen once approved and is the
+ * record of what the client sent; a description copied onto the query at approval would be true
+ * on the day and slowly stop being true.
+ */
+ok('...which reads the sheet back off the frozen draft', /fetchDraftForHandover\(/.test(detail))
+ok('...and keeps the email\u2019s two groups', /Not brought in/.test(detail) && /must confirm/.test(detail))
+/* A draft that has been tidied away must leave the query readable rather than the page broken. */
+ok('...and survives the draft being gone', /no longer on file/.test(detail))
+const clientList = code(read('../../src/pages/companies/ClientQueries.tsx'))
+ok('the client page opens the query', /to=\{`\/queries\/\$\{q\.id\}`\}/.test(clientList))
+/* A batch has no debtor, so naming one would link to /accounts/null -- a page that says the
+   account is gone. */
+ok('...and only links a debtor where there is one', /q\.accountId \? \(/.test(clientList))
+
 /* ---------------------------------------------------------------- report */
 
 if (failures.length) {

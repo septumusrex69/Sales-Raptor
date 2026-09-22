@@ -16,7 +16,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  correctionDescription, correctionEmail, givenFor,
+  batchQueryDescription, correctionDescription, correctionEmail, givenFor,
 } from '../../src/lib/importCorrections.ts'
 import {
   ESCALATION_KINDS, ESCALATION_KIND_ORDER, clientSection, escalationChargeable,
@@ -173,6 +173,62 @@ ok('several of a thing is plural', /2 accounts need something confirmed/.test(tw
    without counting rows in a table. */
 ok('the email opens with what happened', /accounts are open and being worked/.test(mail.bodyHtml))
 ok('...and how many had nothing wrong at all', /2 of them with nothing outstanding/.test(mail.bodyHtml))
+/*
+ * THE TOTAL LEADS, AT THE FIRM'S ASKING: "12 accounts were handed over on the import sheet, 12
+ * accounts are open and being worked, 11 of them with nothing outstanding."
+ *
+ * Without it the lines under it do not add up to anything a reader can check. A client who sent
+ * 500 and is told "480 are open" has to add two numbers to find out whether the other twenty are
+ * accounted for -- and the one number they actually know is how many they sent.
+ */
+ok('the total handed over is stated first',
+  /<li>4 accounts were handed over on this sheet\.<\/li><li>/.test(
+    correctionEmail({
+      clientName: 'X', filename: 'f.xlsx', today: '2026-09-22', labelFor,
+      broughtIn: 3, toConfirm: [ROW], notBroughtIn: [REJECTED],
+    }).bodyHtml))
+/* It is the sheet's total, so the rows that were NOT opened count towards it. Told only what was
+   opened, a client cannot see that anything is missing. */
+ok('...counting the ones that could not be opened',
+  /1 account was handed over on this sheet/.test(
+    correctionEmail({
+      clientName: 'X', filename: 'f.xlsx', today: '2026-09-22', labelFor,
+      broughtIn: 0, toConfirm: [], notBroughtIn: [REJECTED],
+    }).bodyHtml))
+
+/* ---------- one query for the whole sheet ---------- */
+
+/*
+ * THE FIRM: "let's say there's a handover sheet of 500 imports and 50 of them have problems. Now
+ * there'll be 50 different individual queries. I think we should have a query per handover sheet."
+ *
+ * It raised one per corrected account: fifty rows on a liaison's client page, each the same
+ * sentence about a different debtor, and fifty things to chase and close separately when the
+ * client answers all of them in one reply.
+ */
+const batch = batchQueryDescription({ filename: 'handover 2.xlsx', toConfirm: 9, notBroughtIn: 1 })
+ok('the query names the sheet it is about', /handover 2\.xlsx/.test(batch))
+ok('...and how many could not be opened', /1 account could not be opened/.test(batch))
+ok('...and how many need confirming', /9 accounts are open/.test(batch))
+/* One line, not a copy of the table. The rows are read back off the frozen draft wherever the
+   query is opened, so a description written on the day cannot drift away from them. */
+ok('...in one line rather than a copy of the table', !batch.includes('\n'))
+check('a sheet with only refusals says only that',
+  batchQueryDescription({ filename: 'f.xlsx', toConfirm: 0, notBroughtIn: 2 }),
+  'f.xlsx — 2 accounts could not be opened and need to be sent again.')
+/* THE WHOLE SENTENCE, not a substring of it. Checked with a regex for "1 account could not be
+   opened", this passed with the verb left plural -- "1 account need to be sent again" went out
+   to a client once already. */
+check('...and one of them reads as one',
+  batchQueryDescription({ filename: 'f.xlsx', toConfirm: 0, notBroughtIn: 1 }),
+  'f.xlsx — 1 account could not be opened and needs to be sent again.')
+check('...and one with only confirmations likewise',
+  batchQueryDescription({ filename: 'f.xlsx', toConfirm: 1, notBroughtIn: 0 }),
+  'f.xlsx — 1 account is open with something for the client to confirm.')
+/* A liaison with four clients and three sheets each cannot tell two queries apart by "6
+   accounts", so the filename is never dropped. */
+ok('the filename survives even when there is one problem',
+  batchQueryDescription({ filename: 'only.xlsx', toConfirm: 1, notBroughtIn: 0 }).startsWith('only.xlsx'))
 
 /* A HANDOVER WHERE EVERYTHING PROBLEMATIC WAS REJECTED still has to be sent: it is the only way
    the client hears, because a rejected row opens no account and so can carry no query. */
@@ -297,7 +353,7 @@ if (failures.length) {
 }
 console.log(`${pass} passed, 0 failed`)
 console.log(`
-A handover accepted with something wrong on it raises a query per account, with the liaison,
+A handover accepted with something wrong on it raises ONE query for the sheet, with the liaison,
 owned by whoever looks after the client -- and one email the liaison can forward without
 rewriting. None of it charges the debtor: a dispute is the debtor's objection, and a handover
 sheet with a telephone number in the ID column is the client's typing.`)

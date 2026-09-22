@@ -5806,3 +5806,36 @@ comment on function public.notify_user(uuid, text, text, text) is
   'Create a notification for a colleague. security definer because notifications has no insert '
   'policy -- reading and clearing are yours alone, but anybody on the staff may tell you '
   'something landed on your book.';
+
+-- A QUERY MAY HANG OFF A HANDOVER BATCH INSTEAD OF ONE ACCOUNT.
+--
+-- THE FIRM: "let's say there's a handover sheet of 500 imports and 50 of them have problems. Now
+-- there'll be 50 different individual queries. I think we should have a query per handover sheet."
+--
+-- Fifty rows against one client, each saying the same sentence about a different debtor, is a
+-- liaison's page made useless by the thing meant to help them. The correction is one conversation
+-- with the client about one sheet, and the sheet is the batch -- which is what `handovers` is.
+--
+-- account_id becomes nullable rather than a second table: a query is a query, it needs the same
+-- queue, the same chasing and the same outcome whichever it hangs off, and two tables would mean
+-- two places to look for "what is waiting on me". The check keeps every row parented to one or
+-- the other, so a query belonging to nothing cannot be written.
+alter table public.account_queries
+  alter column account_id drop not null;
+
+alter table public.account_queries
+  add column if not exists handover_id uuid references public.handovers (id) on delete cascade;
+
+alter table public.account_queries
+  drop constraint if exists account_queries_has_a_parent;
+
+alter table public.account_queries
+  add constraint account_queries_has_a_parent
+  check (account_id is not null or handover_id is not null);
+
+create index if not exists account_queries_handover_idx
+  on public.account_queries (handover_id, raised_at desc) where handover_id is not null;
+
+comment on column public.account_queries.handover_id is
+  'The batch this query is about, where it is about a whole handover sheet rather than one '
+  'account. Exactly one of account_id and handover_id is set.';
