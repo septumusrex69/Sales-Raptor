@@ -542,6 +542,9 @@ export function planHandover(input: {
  * know: an ID that is not an ID, a debtor with no telephone number, nowhere to post a section
  * 129. A warning that refused the row would stop a client handing over work; a refusal demoted
  * to a warning would open a ledger that is wrong for ever.
+ *
+ * A DATE OF DEFAULT IN THE FUTURE MOVED ACROSS THAT LINE, at the firm's instruction. It reads
+ * like a typo somebody can live with and it is not: three separate clocks are started from it.
  */
 /**
  * What to say about a date of default that could not be read.
@@ -605,7 +608,23 @@ function readRow(
   if (!defaulted) {
     refuse('default_date', dateMessage(values.default_date, ctx.order))
   } else if (defaulted > ctx.today) {
-    warn('default_date', 'The date of default is in the future.')
+    /*
+     * REFUSED, NOT WARNED, AT THE FIRM'S INSTRUCTION: "make it so that a date of default can't be
+     * in the future for an import. It needs to be changed."
+     *
+     * It sits exactly on the line this file already draws -- a refusal is a row that cannot open
+     * a correct ledger, "no date for in duplum to run from" -- because a day that has not arrived
+     * is not one anything can run from. In duplum, prescription and interest are all measured
+     * from this date, so an account opened on a future one is wrong from its first day and wrong
+     * in three different directions.
+     *
+     * AND IT MAKES THE TWO DOORS AGREE. validateNewDebtor has always stopped the by-hand form on
+     * this -- "A handover cannot be dated in the future" -- so the same fact was being answered
+     * two ways depending on how the account arrived, and the door that lets it through is the one
+     * that arrives forty-five rows at a time.
+     */
+    refuse('default_date',
+      'The date of default is in the future — in duplum and prescription both run from it.')
   }
 
   const ref = values.client_reference

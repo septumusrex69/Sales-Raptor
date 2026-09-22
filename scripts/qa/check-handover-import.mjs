@@ -15,6 +15,7 @@ import {
   checkPhone, dateFault, detectDateOrder, displayDate, looksLikeEmail, parseMoney, parseSheetDate,
   planHandover, spellDate,
 } from '../../src/lib/handoverImport.ts'
+import { validateNewDebtor } from '../../src/lib/newDebtor.ts'
 
 let pass = 0
 const failures = []
@@ -321,6 +322,57 @@ ok(`...saying there is no such day (${firstMessage(badDate.rows[0])})`,
   /there is no 31 February/.test(firstMessage(badDate.rows[0])))
 ok('...and not blaming the order it was read in',
   !/order can account/.test(firstMessage(badDate.rows[0])))
+/*
+ * A DATE OF DEFAULT IN THE FUTURE IS REFUSED, NOT WARNED ABOUT.
+ *
+ * THE FIRM: "make it so that a date of default can't be in the future for an import. It needs to
+ * be changed." It was a warning, which meant somebody could accept it and open the account.
+ *
+ * Three clocks are started from this date -- in duplum, prescription, and interest -- so a row
+ * dated forward is wrong from its first day and wrong in three directions at once. It is exactly
+ * the line this file already draws: a refusal is a row with "no date for in duplum to run from",
+ * and a day that has not arrived is not one anything can run from.
+ */
+const future = rows(['A1', '100', '15/03/2027', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+ok('a date of default in the future is refused', future.refused.length === 1)
+check('...and nothing from that file is ready to import', future.ready.length, 0)
+ok(`...saying why (${firstMessage(future.rows[0])})`,
+  /in the future/.test(firstMessage(future.rows[0])))
+ok('...and naming what runs from it, so it does not read as fussiness',
+  /in duplum|prescription/i.test(firstMessage(future.rows[0])))
+/* It has to be marked ON THE CELL, or the person has to guess which of forty boxes to correct. */
+check('...against the date of default itself',
+  problemsOf(future.rows[0]).filter((p) => p.level === 'refuse').map((p) => p.key), ['default_date'])
+/*
+ * TODAY ITSELF IS NOT THE FUTURE. An off-by-one here refuses every account a client hands over
+ * on the day it defaults, which is a normal thing for a client to do -- and the failure would
+ * look like Raptor rejecting good files at random.
+ */
+const dueToday = rows(['A1', '100', '21/09/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('an account that defaulted today is not in the future', dueToday.refused.length, 0)
+const yesterday = rows(['A1', '100', '20/09/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('nor is yesterday', yesterday.refused.length, 0)
+
+/*
+ * AND THE TWO DOORS NOW AGREE. validateNewDebtor has always stopped the by-hand form on this;
+ * the importer warned. The same fact answered two ways depending on how an account arrived, and
+ * the door that let it through is the one that takes forty-five rows at a time.
+ */
+const blankDebtor = {
+  accountNumber: '', clientReference: 'A1', firstName: '', surname: 'Dube', idNumber: '',
+  capital: '100', handoverDate: '', interestRateAnnual: '24',
+  mobile: '', workPhone: '', altNumber: '', email: '', address: '', employer: '',
+  kin1Name: '', kin1Phone: '', kin2Name: '', kin2Phone: '',
+}
+const byHand = validateNewDebtor({ ...blankDebtor, handoverDate: '2027-03-15' }, TODAY)
+ok('the by-hand form refuses a future handover date too',
+  byHand.some((p) => p.field === 'handoverDate'))
+/* Presence before absence: the same input dated today must pass, or the line above is satisfied
+   by a form that objects to everything. */
+check('...and accepts one dated today',
+  validateNewDebtor({ ...blankDebtor, handoverDate: TODAY }, TODAY)
+    .filter((p) => p.field === 'handoverDate').length, 0)
+
 /*
  * A THIRTEENTH MONTH STILL NAMES THE ORDER -- but it takes a file that CONTRADICTS itself to
  * reach that message, and the first attempt at this fixture did not.
