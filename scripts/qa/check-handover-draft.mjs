@@ -617,6 +617,30 @@ ok('...and before the first account is opened', validate < firstAccount)
 /* WIRED TO THE COUNT, not merely present in the file. Asserted as "the sentence appears
    somewhere" this passed with the condition replaced by `if (false)` -- the words were still
    there, telling nobody anything. */
+/*
+ * AND IT STOPS THE RIGHT THINGS ONLY.
+ *
+ * validateNewDebtor answers "would the by-hand form save this", which is stricter than "can the
+ * database store it" -- deliberately. An ID number that is not an ID number is a WARNING on an
+ * import: the draft asks about it and somebody presses Accept. Run unfiltered, this check would
+ * have held eleven good accounts on the firm's own sheet over two bad ID numbers, which is the
+ * screen overruling a decision a person had already made on it.
+ *
+ * So the blocking set is the fields that land in a `date` or a `numeric`. Asserted both ways --
+ * what must stop a batch and what must not -- because a set like this drifts in both directions
+ * and only one of them is visible.
+ */
+ok('only a value the database itself would refuse stops a batch',
+  /const STOPS_A_WRITE = new Set\(\['handoverDate', 'capital', 'interestRateAnnual'\]\)/.test(lib)
+  && /\.filter\(\(p\) => STOPS_A_WRITE\.has\(p\.field\)\)/.test(lib))
+check('...so a bad ID number does not hold the handover',
+  validateNewDebtor({ ...input, idNumber: '0823456789', handoverDate: '2026-03-18',
+    interestRateAnnual: '0' }, '2026-09-22')
+    .filter((p) => ['handoverDate', 'capital', 'interestRateAnnual'].includes(p.field)).length, 0)
+check('...and a date the database cannot read does',
+  validateNewDebtor({ ...input, handoverDate: '15/03/2026', interestRateAnnual: '0' }, '2026-09-22')
+    .filter((p) => ['handoverDate', 'capital', 'interestRateAnnual'].includes(p.field)).length, 1)
+
 ok('a row that cannot open an account stops the whole import',
   /if \(unopenable\.length > 0\) \{\s*throw new Error\(/.test(lib)
   && /nothing on this handover was imported/i.test(lib))

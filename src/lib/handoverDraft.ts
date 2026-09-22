@@ -432,6 +432,16 @@ async function sendCorrectionEmail(
   }
 }
 
+/**
+ * The fields a bad value in stops the write, rather than merely displeasing the by-hand form.
+ *
+ * Each of these lands in a typed column -- a `date` or a `numeric` -- so Postgres parses it and
+ * throws if it cannot. Everything else validateNewDebtor checks goes into text, which the
+ * database takes happily and the PLANNER decides about: that is where "this is not an ID number"
+ * belongs, as a warning somebody answers, not as a reason to hold a whole handover.
+ */
+const STOPS_A_WRITE = new Set(['handoverDate', 'capital', 'interestRateAnnual'])
+
 export async function approveDraft(input: {
   draftId: string
   today: string
@@ -561,15 +571,25 @@ export async function approveDraft(input: {
   })
 
   /*
-   * AND CHECKED BY THE SAME FUNCTION THE BY-HAND FORM USES, so the two cannot come to different
-   * answers about what an account may be opened on. A row that gets here having passed the
-   * planner and still fails this is a rule one of them has and the other has not -- worth saying
-   * out loud rather than discovering as a database error halfway through a batch.
+   * AND CHECKED BY THE SAME FUNCTION THE BY-HAND FORM USES -- but only on the fields that can
+   * actually stop a write.
+   *
+   * THE TWO ARE ASKING DIFFERENT QUESTIONS AND ONLY ONE OF THEM MAY ABORT A BATCH.
+   * validateNewDebtor answers "would the by-hand form let somebody save this", which is stricter
+   * on purpose. An ID number that is not an ID number is a WARNING on an import: the draft asks
+   * about it, somebody presses Accept, and it goes onto the account as a note. Blocking the batch
+   * on it would overrule a decision a person has already made on the screen -- and on the firm's
+   * own sheet it would have held eleven good accounts over two bad ID numbers.
+   *
+   * What is left is the fields whose value goes into a TYPED column. Those are the ones Postgres
+   * refuses at write time, and a refusal at write time is what leaves half a batch behind.
    */
   const unopenable = built
     .map(({ row, debtor }) => ({
       row,
-      problems: validateNewDebtor(debtor, input.today).map((p) => p.message),
+      problems: validateNewDebtor(debtor, input.today)
+        .filter((p) => STOPS_A_WRITE.has(p.field))
+        .map((p) => p.message),
     }))
     .filter((x) => x.problems.length > 0)
   if (unopenable.length > 0) {
