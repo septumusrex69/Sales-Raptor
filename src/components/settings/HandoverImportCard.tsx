@@ -446,9 +446,14 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
       {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
       {done && <p className="text-sm text-positive-700 mt-3">{done}</p>}
       {allocate && (
-        <Link to={`/accounts?handover=${allocate.handoverId}`}
+        /*
+          STRAIGHT INTO THE HAND-OUT, not onto a filtered list with the work still to find.
+          THE FIRM: "after I've accepted the handovers, it should immediately go to a state of
+          where they should be allocated and referred."
+        */
+        <Link to={`/accounts?handover=${allocate.handoverId}&handout=1`}
           className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700">
-          Allocate {allocate.count.toLocaleString('en-ZA')}
+          Allocate and refer {allocate.count.toLocaleString('en-ZA')}
           {allocate.count === 1 ? ' account' : ' accounts'}
           <ArrowRight size={14} />
         </Link>

@@ -134,9 +134,25 @@ ok('a bell that will not ring does not throw away the hand-out',
  * and rebuild the filter by hand. The link is that step.
  */
 const card = readFileSync('src/components/settings/HandoverImportCard.tsx', 'utf8')
-ok('approving offers the allocation', /Allocate \{allocate\.count/.test(card))
+ok('approving offers the allocation', /Allocate and refer \{allocate\.count/.test(card))
 ok('and links to the batch it just imported',
   /\/accounts\?handover=\$\{allocate\.handoverId\}/.test(card))
+/*
+ * AND LANDS IN THE HAND-OUT, not on a filtered list with the work still to find. THE FIRM: "after
+ * I've accepted the handovers, it should immediately go to a state of where they should be
+ * allocated and referred." Both halves: the link asks for it, and the list acts on the asking.
+ */
+ok('...and opens the hand-out rather than just filtering',
+  /&handout=1/.test(card))
+const list = readFileSync('src/pages/accounts/AccountsList.tsx', 'utf8')
+ok('the list opens the hand-out when the link says so',
+  /get\('handout'\) !== '1'/.test(list) && /setAllocating\(\{ kind: 'matching', query \}\)/.test(list))
+/* EVERYTHING THE FILTER MATCHES, not the page. A batch is often more than one page, and handing
+   out the first fifty of two hundred is the worst outcome because it looks finished. */
+ok('...on everything the batch matches, not the first page',
+  /setAllMatching\(true\)[\s\S]{0,120}?setAllocating\(\{ kind: 'matching'/.test(list))
+/* Once. Closing it must not have it open again on the next render. */
+ok('...and only once', /if \(handOutOpened \|\| !canSeeOthers\) return/.test(list))
 /* An import that opened nothing has nothing to allocate, and a link to an empty list reads as a
    bug in the import rather than as an import that correctly imported nothing. */
 ok('but not when nothing was opened', /if \(result\.created > 0\)[\s\S]{0,120}?setAllocate/.test(card))

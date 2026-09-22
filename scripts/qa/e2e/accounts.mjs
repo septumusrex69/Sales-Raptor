@@ -103,7 +103,17 @@ const handlers = [
       const idList = /id=in\.\(([^)]*)\)/.exec(decodeURIComponent(u))?.[1]
       if (idList) {
         const wanted = new Set(idList.split(',').map((s) => s.replace(/^"|"$/g, '')))
-        const rows = accountsPage(VIEW_COUNTS.whole_book).filter((r) => wanted.has(r.id))
+        let rows = accountsPage(VIEW_COUNTS.whole_book).filter((r) => wanted.has(r.id))
+        /*
+         * AND THE ONE FILTER THAT CAN RIDE ALONG WITH AN ID LIST.
+         *
+         * unallocatedCount asks "how many of these have no owner", which is an id list PLUS
+         * assigned_to=is.null. Answered without the second half, the stub says every ticked
+         * account is unallocated -- and the hand-out screen then withholds "Refer only" on a
+         * selection that is mostly owned. The fixture's own rows carry an owner on every sixth
+         * account, so both answers are reachable and neither is a guess.
+         */
+        if (/assigned_to=is\.null/.test(u)) rows = rows.filter((r) => !r.assigned_to)
         return {
           body: rows,
           headers: { 'content-range': `0-${Math.max(0, rows.length - 1)}/${rows.length}` },
@@ -662,6 +672,7 @@ try {
     await page.getByRole('button', { name: 'Allocate and refer', exact: true }).last().isVisible())
   t.ok('...with no allocate-without-booking', !/Allocate only/.test(modal))
 
+
   /*
    * HOW YOU ARE CHOOSING, THEN WHO — and this is the layer that can prove the second row actually
    * appears, because the rank and team chips only exist once a mode is picked. A source check can
@@ -721,6 +732,45 @@ try {
     /Nobody chosen, so there is nothing to plan/.test(await page.locator('body').innerText()))
   await page.getByRole('button', { name: 'Everyone' }).click()
   await page.waitForTimeout(300)
+
+  /*
+   * ---- AND REFER-ONLY IS NOT OFFERED WHEN NOBODY OWNS THEM ----
+   *
+   * THE FIRM, on the accounts a handover has just opened: "there's no option of just referring. It
+   * should be allocated and referred."
+   *
+   * Refer-only leaves ownership alone, which needs there to BE an owner. On an account nobody
+   * holds it books a diary entry against a book that is not anybody's -- the mirror of the
+   * "allocate but do not book" this screen already refuses.
+   *
+   * ASSERTED BOTH WAYS, and that is the point of doing it here at all. The selection above is a
+   * page of the book, roughly a sixth of it owned, and it GETS the choice; this one is the
+   * Unallocated view in full and does not. Either assertion alone passes on a screen that always
+   * does the same thing.
+   *
+   * "SELECT ALL MATCHING", not the header tick box. Ticking the page selects a hundred rows that
+   * happen to include owned ones, so the selection would not be what this is about -- the first
+   * draft of this did exactly that and reported that the option was still offered, correctly.
+   */
+  /* A fresh load rather than closing the modal: the page is the thing under test, and a stuck
+     overlay would fail this as a timeout thirty lines from the cause. */
+  await page.goto(`http://localhost:${PORT}/accounts?who=nobody`)
+  await page.waitForFunction(() => /Showing \d+ of 730/.test(document.body.innerText), { timeout: 15000 })
+  await page.locator('thead input[type="checkbox"]').check()
+  await page.waitForTimeout(400)
+  await page.getByRole('button', { name: /Select all 730 matching/ }).click()
+  await page.waitForTimeout(400)
+  await page.getByRole('button', { name: /^Hand out/ }).click()
+  await page.waitForTimeout(2000)
+  const unowned = await page.locator('body').innerText()
+  t.ok('a selection nobody owns still offers allocate and refer',
+    unowned.includes('Allocate and refer'))
+  t.ok('...but not refer only', !unowned.includes('Refer only'))
+  /* SAID, not a button that has quietly gone. Somebody who has used this screen will look for it. */
+  t.ok('...and says why it is not on offer',
+    /no owner for a referral to leave in place/.test(unowned))
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
 
   /* ---------- nothing broke on the way ---------- */
 

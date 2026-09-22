@@ -20,13 +20,15 @@
  * heading is ignored, so the client may leave it or delete it.
  */
 import { HANDOVER_COLUMNS } from './handoverSheet.ts'
+import type { Cell } from './xlsxWrite.ts'
 
 /** The heading of the column this adds. Read back on import as nothing, which is intended. */
 export const WHAT_WE_NEED = 'What we need'
 
 export interface RejectedRow {
   values: Record<string, string | null>
-  problems: { message: string }[]
+  /** `key` is the column the problem is about, and is null where it is about the whole row. */
+  problems: { message: string; key?: string | null }[]
 }
 
 /**
@@ -35,17 +37,48 @@ export interface RejectedRow {
  * Pure, and returns rows rather than bytes so a check can read what is in the file without
  * unzipping one.
  */
-export function rejectedSheetRows(rows: RejectedRow[]): string[][] {
+export function rejectedSheetRows(rows: RejectedRow[]): Cell[][] {
   const keys = HANDOVER_COLUMNS.map((c) => c.key)
-  const header = [...HANDOVER_COLUMNS.map((c) => c.label), WHAT_WE_NEED]
-  const body = rows.map((r) => [
-    ...keys.map((k) => (r.values[k] ?? '').toString()),
+  const header: Cell[] = [...HANDOVER_COLUMNS.map((c) => c.label), WHAT_WE_NEED]
+    .map((v) => ({ v, style: 'head' as const }))
+  const body: Cell[][] = rows.map((r) => {
     /*
-     * EVERY PROBLEM, not the first. A row refused for two things fixed once comes straight back,
-     * and the client would rightly say they did what they were asked.
+     * ---- THE CELLS TO CHANGE ARE COLOURED ----
+     *
+     * THE FIRM: "can't we just highlight the fields that need attention on that sheet and give it
+     * to the client? If the client fixes it and sends it back and we import it, even if it's
+     * still yellow, will it still import?"
+     *
+     * IT WILL. A fill is styling and the reader in xlsx.ts reads VALUES -- the only thing it ever
+     * looks up a style for is whether a number is meant to be a date. So the client can correct
+     * the red cells and send the file straight back with the colour still on it, and it imports
+     * exactly as though it were plain.
+     *
+     * RED RATHER THAN YELLOW, and it is Excel's own red: the "Bad" style, #FFC7CE on #9C0006.
+     * Excel's yellow is "Neutral", which reads as "have a look at this" -- and these are not
+     * suggestions, they are the reason the account could not be opened. Borrowing the colour the
+     * client's own spreadsheet already uses means it needs no explaining in the covering email.
+     *
+     * THE COLOUR IS NEVER THE MESSAGE. It does not survive a monochrome print, a paste-as-values
+     * or a red-green colourblind reader, so every problem is still written out in words in the
+     * last column. The fill only says WHICH cell the words are about, which is the part a
+     * sentence under a forty-column sheet cannot say.
      */
-    r.problems.map((p) => p.message).join(' '),
-  ])
+    const bad = new Set(r.problems.map((p) => p.key).filter((k): k is string => !!k))
+    return [
+      ...keys.map((k): Cell => {
+        const v = (r.values[k] ?? '').toString()
+        /* Marked even when EMPTY, which is the case that matters: a row refused for a missing
+           value has nothing in the box, and that box is the one they have to find. */
+        return bad.has(k) ? { v, style: 'bad' } : v
+      }),
+      /*
+       * EVERY PROBLEM, not the first. A row refused for two things fixed once comes straight back,
+       * and the client would rightly say they did what they were asked.
+       */
+      r.problems.map((p) => p.message).join(' '),
+    ]
+  })
   return [header, ...body]
 }
 

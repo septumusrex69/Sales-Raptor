@@ -111,14 +111,75 @@ function zip(files: Entry[]): Uint8Array {
  * `rows[0]` is the header row like any other: this writes what it is given and decides nothing
  * about which row means what.
  */
-export function buildXlsx(sheetName: string, rows: (string | null | undefined)[][]): Uint8Array {
+/**
+ * How a cell is drawn. Three, because three is what the sheet has to say.
+ *
+ * EXCEL'S OWN COLOURS, NOT OURS. 'bad' is the fill and text of Excel's built-in "Bad" style --
+ * #FFC7CE on #9C0006 -- and 'head' is a plain grey. A client who lives in a spreadsheet already
+ * reads light red as "this is the problem", and a colour we invented would have to be explained
+ * in the covering email before it meant anything.
+ *
+ * DELIBERATELY NOT YELLOW for a problem. Excel's yellow is the "Neutral" style, which reads as
+ * "have a look at this"; a cell on this sheet is not a suggestion, it is the reason an account
+ * could not be opened.
+ */
+export type CellStyle = 'head' | 'bad'
+export type Cell = string | null | undefined | { v: string; style?: CellStyle }
+
+const STYLE_INDEX: Record<CellStyle, number> = { head: 1, bad: 2 }
+
+/**
+ * The styles part.
+ *
+ * FILL 0 AND FILL 1 ARE FIXED BY THE FORMAT: Excel requires the first to be `none` and the
+ * second `gray125`, and a workbook without them opens as corrupt. Everything real starts at 2.
+ *
+ * numFmtId STAYS 0 (General) ON EVERY STYLE, which matters more here than it looks. The reader in
+ * xlsx.ts decides whether a cell is a DATE by looking up its style's number format -- so a style
+ * carrying a date format would make a text cell come back as a date. Nothing here needs a format,
+ * so nothing here has one.
+ */
+const STYLES = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+  + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+  + '<fonts count="3">'
+  + '<font><sz val="11"/><name val="Calibri"/></font>'
+  + '<font><b/><sz val="11"/><name val="Calibri"/></font>'
+  + '<font><color rgb="FF9C0006"/><sz val="11"/><name val="Calibri"/></font>'
+  + '</fonts>'
+  + '<fills count="4">'
+  + '<fill><patternFill patternType="none"/></fill>'
+  + '<fill><patternFill patternType="gray125"/></fill>'
+  + '<fill><patternFill patternType="solid"><fgColor rgb="FFF2F2F2"/><bgColor indexed="64"/></patternFill></fill>'
+  + '<fill><patternFill patternType="solid"><fgColor rgb="FFFFC7CE"/><bgColor indexed="64"/></patternFill></fill>'
+  + '</fills>'
+  + '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+  + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+  + '<cellXfs count="3">'
+  + '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+  + '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>'
+  + '<xf numFmtId="0" fontId="2" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/>'
+  + '</cellXfs>'
+  + '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+  + '</styleSheet>'
+
+export function buildXlsx(sheetName: string, rows: Cell[][]): Uint8Array {
   const body = rows.map((row, r) => {
-    const cells = row.map((value, c) => {
-      const text = (value ?? '').toString()
-      if (!text) return ''
+    const cells = row.map((cell, c) => {
+      const isObject = typeof cell === 'object' && cell !== null
+      const text = (isObject ? cell.v : cell ?? '').toString()
+      const style = isObject ? cell.style : undefined
+      /*
+       * AN EMPTY CELL IS STILL WRITTEN WHEN IT IS COLOURED, and that is the case that matters
+       * here: a row refused for a MISSING value has nothing in the box, and the box is exactly
+       * what the client has to fill in. Skipped as empty, the one cell they need to find would be
+       * the only one on the sheet with no colour on it.
+       */
+      if (!text && !style) return ''
+      const s = style ? ` s="${STYLE_INDEX[style]}"` : ''
+      if (!text) return `<c r="${columnName(c)}${r + 1}"${s}/>`
       /* `t="inlineStr"` rather than the shared-strings table: one fewer part in the zip, and
          nothing here repeats itself often enough for the table to pay for itself. */
-      return `<c r="${columnName(c)}${r + 1}" t="inlineStr"><is><t xml:space="preserve">`
+      return `<c r="${columnName(c)}${r + 1}"${s} t="inlineStr"><is><t xml:space="preserve">`
         + `${esc(text)}</t></is></c>`
     }).join('')
     return `<row r="${r + 1}">${cells}</row>`
@@ -143,6 +204,7 @@ export function buildXlsx(sheetName: string, rows: (string | null | undefined)[]
         + '<Default Extension="xml" ContentType="application/xml"/>'
         + '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
         + '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        + '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
         + '</Types>'),
     },
     {
@@ -158,8 +220,10 @@ export function buildXlsx(sheetName: string, rows: (string | null | undefined)[]
       bytes: enc.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
         + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+        + '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
         + '</Relationships>'),
     },
+    { name: 'xl/styles.xml', bytes: enc.encode(STYLES) },
     { name: 'xl/worksheets/sheet1.xml', bytes: enc.encode(sheet) },
   ]
   return zip(files)

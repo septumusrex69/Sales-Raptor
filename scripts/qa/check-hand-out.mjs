@@ -1080,6 +1080,60 @@ check('a reserve of none is honoured', diaryReserveOf(0), 0)
   check('...for a stated reason', reasonOf(p), 'no_one_graded')
 }
 
+/* ---------------------------------------------------- refer-only needs there to be an owner */
+
+/*
+ * THE FIRM, on the accounts a handover has just opened: "there's no option of just referring. It
+ * should be allocated and referred."
+ *
+ * AND IT IS A RULE RATHER THAN A PREFERENCE ABOUT IMPORTS. This file already refuses "allocate
+ * but do not book", because an account on a desk with nobody diarised is how 355 accounts arrived
+ * from Swordfish owned by somebody and rung by nobody. Refer-only on an account NOBODY owns is
+ * the same fault from the other side: a diary entry against a book that is not anybody's.
+ *
+ * SO THE QUESTION IS ASKED OF THE BOOK, not of where the person came from. A batch fresh off an
+ * import is the common case and not the rule -- and an account allocated on the way in, which a
+ * linked account now can be, is owned and may be referred like any other.
+ */
+const modal = readFileSync('src/pages/accounts/HandOutModal.tsx', 'utf8')
+ok('the screen counts what is on nobody’s desk', /unallocatedCount\(selection\)/.test(modal))
+ok('...and withholds refer-only when they all are',
+  /const referOnlyPossible = unowned === null \|\| unowned < selectedCount/.test(modal))
+ok('...offering it again the moment one of them has an owner',
+  /referOnlyPossible && \(/.test(modal))
+/*
+ * A FAILED COUNT LEAVES THE CHOICE OPEN. A count that did not come back is not evidence that
+ * these accounts have no owner, and taking somebody's option away on no information is the screen
+ * deciding for them.
+ */
+ok('...and a count that failed does not remove the option',
+  /unowned === null \|\|/.test(modal))
+/*
+ * AND A CHOICE THAT STOPS BEING POSSIBLE GOES BACK, rather than being submitted as something the
+ * screen no longer offers. The selection can change under it -- the modal stays open while it is
+ * re-counted.
+ */
+ok('...and refer-only reverts if it stops being possible',
+  /if \(!referOnlyPossible && mode === 'refer'\) setMode\('allocate_and_refer'\)/.test(modal))
+/* SAID, not a button that quietly is not there. Somebody who has used this screen will look. */
+ok('...and the screen says why it is not on offer',
+  /no owner for a referral to leave in place/.test(modal))
+
+/*
+ * THE COUNT ITSELF IS A COUNT IN THE DATABASE, not a filter over the accounts already loaded.
+ * That list is capped at BULK_CEILING and is fetched for the diary planner, so counting inside it
+ * would answer "are the first five thousand unowned" and say yes on a bigger batch.
+ */
+const alloc = readFileSync('src/lib/accountAllocation.ts', 'utf8')
+ok('the count is taken in the database',
+  /export async function unallocatedCount[\s\S]{0,700}?count: 'exact', head: true/.test(alloc))
+ok('...over the same filters the selection means',
+  /\{ \.\.\.selection\.query, assignedTo: 'nobody' \}/.test(alloc))
+/* Chunked, like every other id query here: PostgREST gives up on a long `in` long before
+   Postgres does, and a five-thousand-account batch is exactly what this is for. */
+ok('...and chunked when it is a list of ids',
+  /export async function unallocatedCount[\s\S]{0,400}?idChunks\(selection\.ids\)/.test(alloc))
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')

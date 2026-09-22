@@ -7,6 +7,7 @@ import {
 } from '../../lib/handOut.ts'
 import { loadHandOutContext, type HandOutContext } from '../../lib/handOutData.ts'
 import { commitHandOut, handOutSummary, type HandOutMode } from '../../lib/handOutWrite.ts'
+import { unallocatedCount } from '../../lib/accountAllocation.ts'
 import { BULK_CEILING, type Selection } from '../../lib/accountAllocation.ts'
 import { ACCOUNT_BANDS, COLLECTOR_GRADES, bookCeilingOf } from '../../lib/collectorGrade.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
@@ -59,6 +60,11 @@ export function HandOutModal({
   const [startOn, setStartOn] = useState(() => new Date().toISOString().slice(0, 10))
   const [windowDays, setWindowDays] = useState(DEFAULT_WINDOW)
   const [mode, setMode] = useState<HandOutMode>('allocate_and_refer')
+  /*
+   * How many of these are on nobody's desk, which decides whether "Refer only" is a thing that
+   * can be done to them at all. Null while it is being counted -- see the note by the choice.
+   */
+  const [unowned, setUnowned] = useState<number | null>(null)
   const [reason, setReason] = useState('')
   const [search, setSearch] = useState('')
   /*
@@ -105,6 +111,40 @@ export function HandOutModal({
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [selection, users, startOn, to])
+
+  /*
+   * WHETHER THESE ACCOUNTS HAVE OWNERS AT ALL, which decides whether refer-only is on offer.
+   *
+   * ITS OWN REQUEST, not read off `context.accounts`: that list is capped at BULK_CEILING and is
+   * loaded for the diary planner, so counting inside it would answer "are the first five thousand
+   * unowned" and quietly say yes on a bigger batch. A count in the database answers the question
+   * that was asked.
+   *
+   * A FAILURE LEAVES IT NULL, and null keeps the choice OPEN rather than closing it. A count that
+   * did not come back is not evidence that these accounts have no owner, and removing somebody's
+   * option because a request failed is the screen making a decision on no information.
+   */
+  useEffect(() => {
+    let cancelled = false
+    setUnowned(null)
+    void unallocatedCount(selection)
+      .then((n) => { if (!cancelled) setUnowned(n) })
+      .catch(() => { if (!cancelled) setUnowned(null) })
+    return () => { cancelled = true }
+  }, [selection])
+
+  /*
+   * Offered only where every account in the hand-out already has an owner. A MIXED selection --
+   * some owned, some not -- still offers it, because referring the owned ones is a real thing
+   * somebody may be doing; what is withheld is the case where it could not mean anything.
+   */
+  const referOnlyPossible = unowned === null || unowned < selectedCount
+
+  /* And if it stops being possible while it is chosen, the choice goes back rather than being
+     submitted as something the screen no longer offers. */
+  useEffect(() => {
+    if (!referOnlyPossible && mode === 'refer') setMode('allocate_and_refer')
+  }, [referOnlyPossible, mode])
 
   const plan: HandOutPlan | null = useMemo(() => {
     if (!context) return null
@@ -624,6 +664,17 @@ export function HandOutModal({
                   "allocate but do not book" is not offered. It was a checkbox here until now, and
                   clearing it produced exactly the state this feature exists to end: an account on
                   somebody's desk with nobody booked to ring it.
+
+                  AND SOMETIMES A CHOICE OF ONE. THE FIRM, on a handover that has just been
+                  approved: "there's no option of just referring. It should be allocated and
+                  referred."
+
+                  Refer-only leaves ownership alone, which needs there to be an owner. On an
+                  account nobody holds it books a diary entry against a book that is not anybody's
+                  — the same fault as "allocate but do not book", seen from the other side. So it
+                  is offered when these accounts have owners and withheld when they do not, which
+                  is a question about the BOOK rather than about where the person came from: a
+                  freshly imported batch is the common case and not the rule.
                 */}
                 <div>
                   <span className="block text-xs font-medium text-slate-500 mb-1.5">What are you doing</span>
@@ -632,11 +683,26 @@ export function HandOutModal({
                       chosen={mode === 'allocate_and_refer'} onChoose={() => setMode('allocate_and_refer')}
                       label="Allocate and refer"
                       note="The account becomes theirs, and they are booked to work it." />
-                    <ModeCard
-                      chosen={mode === 'refer'} onChoose={() => setMode('refer')}
-                      label="Refer only"
-                      note="They are booked to work it. Whose account it is does not change." />
+                    {referOnlyPossible && (
+                      <ModeCard
+                        chosen={mode === 'refer'} onChoose={() => setMode('refer')}
+                        label="Refer only"
+                        note="They are booked to work it. Whose account it is does not change." />
+                    )}
                   </div>
+                  {/*
+                    SAID, RATHER THAN A MISSING BUTTON. Somebody who has used this screen before
+                    will look for the second card, and a gap where it was is a thing that reads as
+                    broken. Named with the number, because "some of these" is not checkable.
+                  */}
+                  {!referOnlyPossible && unowned !== null && (
+                    <p className="text-[11px] text-slate-400 mt-1.5">
+                      {unowned === 1
+                        ? 'This account is on nobody’s desk, so there is no owner for a referral to leave in place.'
+                        : `These ${unowned.toLocaleString('en-ZA')} accounts are on nobody’s desk, so there is no owner for a referral to leave in place.`}
+                      {' '}Allocating is what gives them one.
+                    </p>
+                  )}
                 </div>
 
                 {chosen.size === 0

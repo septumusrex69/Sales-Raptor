@@ -68,6 +68,8 @@ export function AccountsList() {
   /** True once "select all N matching" is used: the selection is the filter, not a list of ids. */
   const [allMatching, setAllMatching] = useState(false)
   const [allocating, setAllocating] = useState<Selection | null>(null)
+  /** Opened once from the URL, so closing it does not have it spring straight back. */
+  const [handOutOpened, setHandOutOpened] = useState(false)
   const [done, setDone] = useState<string | null>(null)
 
   const companyId = params.get('client') ?? undefined
@@ -111,6 +113,29 @@ export function AccountsList() {
    * action, because it looks exactly like the right one.
    */
   useEffect(() => { setTicked(new Set()); setAllMatching(false) }, [key])
+
+  /*
+   * STRAIGHT INTO THE HAND-OUT, where the link said so.
+   *
+   * THE FIRM: "after I've accepted the handovers, it should immediately go to a state of where
+   * they should be allocated and referred." Approving used to leave somebody on a filtered list
+   * with the work still to find: tick the accounts, then find Hand out. The batch IS the
+   * selection, so the link carries ?handout=1 and the screen opens on the thing to do.
+   *
+   * EVERYTHING THE FILTER MATCHES, not the page. A batch is often more than one page, and a
+   * hand-out of the first fifty of two hundred is the worst possible outcome -- it looks done.
+   *
+   * ONCE. Closing the modal must not have it open again on the next render, and the flag is what
+   * stops that; the link stays in the URL so the page can be reloaded and still be about the
+   * batch, which is what the filter is for.
+   */
+  useEffect(() => {
+    if (handOutOpened || !canSeeOthers) return
+    if (new URLSearchParams(key).get('handout') !== '1') return
+    setHandOutOpened(true)
+    setAllMatching(true)
+    setAllocating({ kind: 'matching', query })
+  }, [key, query, handOutOpened, canSeeOthers])
 
   /*
    * The first page, whenever the question changes. Pages after it are appended by loadMore, so

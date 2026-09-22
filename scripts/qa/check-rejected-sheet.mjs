@@ -48,15 +48,24 @@ const REFUSED = [
       capital: '640', default_date: '18/03/2026', debtor_kind: 'Person',
       email_1: 'kagiso.molefe.example.co.za', cell_1: '0828641711',
     },
-    problems: [{ message: 'Email address is not an email address.' }],
+    problems: [{ message: 'Email address is not an email address.', key: 'email_1' }],
   },
   {
     values: { client_reference: 'BF-301', name: 'Swanepoel', capital: '', default_date: '' },
-    problems: [{ message: 'No handover amount.' }, { message: 'No date of default.' }],
+    problems: [
+      { message: 'No handover amount.', key: 'capital' },
+      { message: 'No date of default.', key: 'default_date' },
+      /* A problem about the whole row, which has no cell to colour. */
+      { message: 'Nobody can be contacted.', key: null },
+    ],
   },
 ]
 
 const rows = rejectedSheetRows(REFUSED)
+/* A cell is a string, or an object carrying a style. `text` reads either. */
+const text = (cell) => (typeof cell === 'object' && cell !== null ? cell.v : cell ?? '')
+const styleOf = (cell) => (typeof cell === 'object' && cell !== null ? cell.style : undefined)
+const at = (row, key) => row[HANDOVER_COLUMNS.findIndex((c) => c.key === key)]
 check('a row per refusal, under one header', rows.length, REFUSED.length + 1)
 /*
  * EVERY COLUMN OF THE SHEET, IN THE SHEET'S ORDER. A file carrying only the columns that were
@@ -65,16 +74,41 @@ check('a row per refusal, under one header', rows.length, REFUSED.length + 1)
  */
 check('the header is the sheet, plus one', rows[0].length, HANDOVER_COLUMNS.length + 1)
 check('...in the sheet’s own order',
-  rows[0].slice(0, HANDOVER_COLUMNS.length), HANDOVER_COLUMNS.map((c) => c.label))
-check('...and the extra column is last', rows[0][rows[0].length - 1], WHAT_WE_NEED)
+  rows[0].slice(0, HANDOVER_COLUMNS.length).map(text), HANDOVER_COLUMNS.map((c) => c.label))
+check('...and the extra column is last', text(rows[0][rows[0].length - 1]), WHAT_WE_NEED)
 /* The values that were fine come too, or the client is retyping the row rather than fixing it. */
-ok('a column with nothing wrong still carries its value', rows[1].includes('0828641711'))
+ok('a column with nothing wrong still carries its value', rows[1].map(text).includes('0828641711'))
 ok('...and the one that was wrong carries what they typed',
-  rows[1].includes('kagiso.molefe.example.co.za'))
+  rows[1].map(text).includes('kagiso.molefe.example.co.za'))
+
+/* ---------- the cells that need attention are coloured ---------- */
+
+/*
+ * THE FIRM: "can't we just highlight the fields that need attention on that sheet and give it to
+ * the client? If the client fixes it and sends it back and we import it, even if it's still
+ * yellow, will it still import?"
+ *
+ * The answer is below, at the round trip. What is asserted here is WHICH cells are marked, and
+ * the two that are easy to get wrong are both here: a cell whose value is MISSING is the one the
+ * client most needs to find, and a problem about the whole row has no cell to point at.
+ */
+check('the cell that was wrong is marked', styleOf(at(rows[1], 'email_1')), 'bad')
+check('...and a cell with nothing wrong is not', styleOf(at(rows[1], 'cell_1')), undefined)
+check('an EMPTY cell that is the problem is marked too',
+  [text(at(rows[2], 'capital')), styleOf(at(rows[2], 'capital'))], ['', 'bad'])
+check('...and the other one on the same row', styleOf(at(rows[2], 'default_date')), 'bad')
+/* A problem about the whole row colours nothing: there is no cell it is about, and colouring an
+   arbitrary one would send the client to fix a box that is perfectly correct. */
+check('a problem about the whole row colours no cell',
+  rows[2].filter((c) => styleOf(c) === 'bad').length, 2)
+ok('...and is still said in words',
+  /Nobody can be contacted/.test(text(rows[2][rows[2].length - 1])))
+/* The heading row is marked as a heading, so the sheet reads as a form rather than as data. */
+check('the header row is styled as a header', styleOf(rows[0][0]), 'head')
 /* EVERY problem, not the first: a row refused for two things fixed once comes straight back. */
 ok('a row refused twice says both things',
-  /No handover amount\./.test(rows[2][rows[2].length - 1])
-  && /No date of default\./.test(rows[2][rows[2].length - 1]))
+  /No handover amount\./.test(text(rows[2][rows[2].length - 1]))
+  && /No date of default\./.test(text(rows[2][rows[2].length - 1])))
 
 /* ---------- what it is called ---------- */
 
@@ -141,6 +175,63 @@ ok('...and the values', sheetXml.includes('kagiso.molefe.example.co.za'))
 /* A leading zero survives, which is the whole reason every cell is written as text. */
 ok('...including a number that must keep its leading zero', sheetXml.includes('0828641711'))
 ok('...and what we need said on the row', sheetXml.includes('No handover amount.'))
+/*
+ * ---- AND THE COLOUR CANNOT AFFECT WHAT IS IMPORTED ----
+ *
+ * THE FIRM: "if the client fixes it, sends it back and we import it, even if it's still yellow,
+ * will it still import?"
+ *
+ * IT WILL, AND THIS IS WHY. A fill lives in styles.xml and is pointed at by the cell's `s`
+ * attribute; the VALUE lives in the cell. So the same rows written with and without styling
+ * produce the same values, which is asserted directly rather than reasoned about.
+ */
+const plainBytes = buildXlsx('To correct', rows.map((row) => row.map(text)))
+const plainAb = plainBytes.buffer.slice(plainBytes.byteOffset, plainBytes.byteOffset + plainBytes.length)
+const plainEntries = readZipEntries(plainAb)
+const valuesOf = (xml) => [...xml.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((m) => m[1])
+const plainXml = new TextDecoder().decode(await readZipEntry(plainAb,
+  plainEntries.find((e) => e.name === 'xl/worksheets/sheet1.xml')))
+check('colouring a cell does not change one character of what it says',
+  valuesOf(sheetXml), valuesOf(plainXml))
+/* And the colour really is there, or the line above passes because nothing was coloured. */
+ok('...and the cells really are marked', /<c r="[A-Z]+\d+" s="2"/.test(sheetXml))
+ok('...the heading row too', /<c r="A1" s="1"/.test(sheetXml))
+/*
+ * READ DEFENSIVELY FROM HERE, which CLAUDE.md names and this file just demonstrated. Dropping the
+ * styles part DID fail the line below -- and then `entries.find(...)` returned undefined two
+ * lines later, readZipEntry threw on it, and the process died before anything was printed. The
+ * failure was recorded and nobody ever saw it: a stack trace with no failing assertion in it.
+ */
+const stylesEntry = entries.find((e) => e.name === 'xl/styles.xml')
+ok('the archive carries the styles it points at', !!stylesEntry)
+const stylesXml = stylesEntry
+  ? new TextDecoder().decode(await readZipEntry(ab, stylesEntry))
+  : ''
+/*
+ * THE FIRST TWO FILLS ARE FIXED BY THE FORMAT. Excel requires fill 0 to be `none` and fill 1 to
+ * be `gray125`; a workbook without them opens as corrupt, which is a thing that happens on the
+ * client's machine a day later and never here.
+ */
+ok('fill 0 is none and fill 1 is gray125',
+  /<fills count="\d+"><fill><patternFill patternType="none"\/><\/fill><fill><patternFill patternType="gray125"\/><\/fill>/
+    .test(stylesXml))
+ok('...and the bad fill is Excel’s own Bad red', /FFC7CE/.test(stylesXml) && /FF9C0006/.test(stylesXml))
+/*
+ * AND NO STYLE CARRIES A DATE FORMAT, which is the one way a fill COULD have changed an import.
+ * readXlsx decides whether a cell is a date by looking up its style's numFmtId -- so a style with
+ * a date format on it would turn a text cell into a date on the way back in. Every style here is
+ * General, and this is what keeps it that way.
+ */
+const numFmtIds = [...stylesXml.slice(stylesXml.indexOf('<cellXfs'))
+  .matchAll(/numFmtId="(\d+)"/g)].map((m) => Number(m[1]))
+ok(`every style is General, so no cell can be read as a date (${numFmtIds.join(',')})`,
+  numFmtIds.length > 0 && numFmtIds.every((n) => n === 0))
+/* The parts a reader resolves styles through, or Excel opens the file with no colour at all. */
+ok('the workbook points at the styles part', /styles\.xml/.test(new TextDecoder().decode(
+  await readZipEntry(ab, entries.find((e) => e.name === 'xl/_rels/workbook.xml.rels')))))
+ok('...and the content types declare it', /spreadsheetml\.styles\+xml/.test(new TextDecoder().decode(
+  await readZipEntry(ab, entries.find((e) => e.name === '[Content_Types].xml')))))
+
 /* A client's own text may carry an ampersand or a bracket; unescaped, the file will not open. */
 const hostile = buildXlsx('x', [['A & B <C>'], ['"quoted"']])
 const hostileXml = new TextDecoder().decode(await (async () => {

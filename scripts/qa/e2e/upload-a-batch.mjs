@@ -1014,6 +1014,15 @@ try {
 
   const corrected = Buffer.from(attached[0]?.content ?? '', 'base64')
   t.ok('...and it is a real zip', corrected[0] === 0x50 && corrected[1] === 0x4b)
+  /*
+   * AND IT IS THE COLOURED ONE, which is what makes the round trip below answer the firm's
+   * actual question -- "if the client fixes it and sends it back, even if it's still yellow, will
+   * it still import?" Read back below by the real importer with the fills still on it. Asserted
+   * here so that a writer which quietly stopped colouring would not leave the round trip passing
+   * while proving something easier.
+   */
+  t.ok('...with the cells that need attention marked',
+    corrected.includes('styles.xml') && /s="2"/.test(corrected.toString('latin1')))
 
   /*
    * NOW READ IT BACK WITH THE IMPORTER. Bytes that open in Excel and bytes the importer reads are

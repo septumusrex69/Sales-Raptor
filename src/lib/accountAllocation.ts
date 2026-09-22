@@ -195,6 +195,42 @@ async function noteEach(ids: string[], body: string, actor: Actor): Promise<numb
   return failed
 }
 
+/**
+ * How many of a selection are on nobody's desk.
+ *
+ * THE FIRM, on the accounts a handover has just opened: "there's no option of just referring. It
+ * should be allocated and referred."
+ *
+ * AND THAT IS A RULE, NOT A PREFERENCE FOR NEW ACCOUNTS. handOutWrite.ts already refuses
+ * "allocate but do not book", because an account on a desk with nobody diarised is how 355
+ * accounts arrived from Swordfish owned by somebody and rung by nobody. Refer-only on an account
+ * nobody owns is the same fault seen from the other side: a diary entry against a book that is
+ * not anybody's. So the question the screen has to answer is not "is this an import" -- it is
+ * "does this account have an owner for a referral to leave alone", and only the book can say.
+ */
+export async function unallocatedCount(selection: Selection): Promise<number> {
+  if (selection.kind === 'ids') {
+    let total = 0
+    /* In chunks, like every other id query here: PostgREST gives up on a long `in` list long
+       before Postgres does, and a 5 000-account batch is exactly what this is for. */
+    for (const ids of idChunks(selection.ids)) {
+      const { count, error } = await supabase.from('debtor_accounts')
+        .select('id', { count: 'exact', head: true }).in('id', ids).is('assigned_to', null)
+      if (error) throw new Error(error.message)
+      total += count ?? 0
+    }
+    return total
+  }
+  const { count, error } = await applyAccountFilters(
+    supabase.from('debtor_accounts').select('id', { count: 'exact', head: true }),
+    /* The same filters, plus the one question being asked. `nobody` is what applyAccountFilters
+       reads as "is null" -- see the note on assignedTo there. */
+    { ...selection.query, assignedTo: 'nobody' },
+  )
+  if (error) throw new Error(error.message)
+  return count ?? 0
+}
+
 /** How many accounts a selection covers, for the confirmation that has to name a number. */
 export async function selectionCount(selection: Selection): Promise<number> {
   if (selection.kind === 'ids') return selection.ids.length
