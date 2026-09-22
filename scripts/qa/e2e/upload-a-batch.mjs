@@ -351,6 +351,48 @@ try {
   t.check('...and it goes off the waiting list',
     await page.getByRole('button', { name: 'Discard', exact: true }).count(), 0)
 
+  /*
+   * THE SETTINGS MENU FOLDS AWAY TOO. THE FIRM: "the pane on the left hand side has been
+   * collapsed, but now that you've got all these other settings, that pane should also be able to
+   * collapse, because now the screen is getting small."
+   */
+  await page.goto(`http://localhost:${PORT}/settings?tab=Data+Import&client=${COMPANY_ID}`)
+  const tabList = page.getByRole('button', { name: 'Rejection Reasons', exact: true })
+  await tabList.waitFor({ timeout: 15000 })
+  t.check('the settings menu is there to begin with', await tabList.count(), 1)
+
+  const narrow = page.getByRole('button', { name: /Narrow this menu/ })
+  t.check('...and offers to fold away', await narrow.count(), 1)
+  if (await narrow.count()) await narrow.click()
+  await page.waitForTimeout(300)
+  t.check('folded, the tab list is gone', await tabList.count(), 0)
+  /* AND THE WAY BACK CARRIES WHERE YOU ARE. Folded to a bare icon, the one thing lost is which
+     tab is open -- these tabs have no icons, and the panes do not all announce themselves. */
+  const back = page.getByRole('button', { name: /Data Import/ })
+  t.check('...and the way back says which tab is open', await back.count(), 1)
+
+  /* REMEMBERED. A preference that resets on the next page load is not a preference. */
+  await page.reload()
+  await page.waitForTimeout(800)
+  t.check('it is still folded after a reload',
+    await page.getByRole('button', { name: 'Rejection Reasons', exact: true }).count(), 0)
+
+  /*
+   * AND IT IS ITS OWN PREFERENCE, not the main menu's: folding this must not fold that.
+   *
+   * ASSERTED ON THE MAIN MENU'S OWN TOGGLE, because its links do not tell you. Collapsed, the
+   * sidebar hides each label and puts it in a `title` instead -- so "Accounts" is still there
+   * under the same accessible name either way, and counting it proved nothing. Its toggle does
+   * change: it reads "Narrow the menu" open and "Widen the menu" folded.
+   */
+  t.check('the main menu is still open', await page.locator('[title="Narrow the menu"]').count(), 1)
+  t.check('...and has not folded itself',
+    await page.locator('[title="Widen the menu"]').count(), 0)
+
+  if (await back.count()) await back.click()
+  await page.waitForTimeout(300)
+  t.check('and it comes back', await tabList.count(), 1)
+
   /* Clicking away clears the client from the URL: it means nothing to any other tab, and a stale
      company id in the address of the Teams screen is a puzzle for whoever sees it next. */
   await page.getByRole('button', { name: 'Teams', exact: true }).first().click()

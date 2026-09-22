@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { useSettingsNavCollapsed } from '../../lib/sidebarCollapsed'
 import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
@@ -44,6 +46,7 @@ export function SettingsPage() {
    *
    * A tab nobody recognises falls back to Profile rather than rendering an empty pane.
    */
+  const [navCollapsed, toggleNav] = useSettingsNavCollapsed()
   const [params, setParams] = useSearchParams()
   const fromUrl = params.get('tab')
   const tab: Tab = isTab(fromUrl) ? fromUrl : 'Profile'
@@ -61,18 +64,53 @@ export function SettingsPage() {
 
   return (
     <div className="flex gap-6">
-      <nav className="w-52 shrink-0 space-y-0.5">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium ${tab === t ? 'bg-brand-50 text-brand-700' : 'text-slate-500 hover:bg-slate-100'}`}
-          >
-            {t}
+      {/*
+        FOLDS AWAY, LIKE THE MAIN MENU DOES. THE FIRM: "the pane on the left hand side has been
+        collapsed, but now that you've got all these other settings, that pane should also be able
+        to collapse, because now the screen is getting small." Settings is a two-column screen
+        inside a two-column app, and with the main rail already folded this was still the last
+        208px between an iPad and a forty-column table.
+
+        Its own preference, remembered separately from the main menu: somebody who folds this to
+        read the handover table still wants the main menu where they left it.
+      */}
+      {!navCollapsed && (
+        <nav className="w-52 shrink-0 space-y-0.5">
+          {TABS.map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium ${tab === t ? 'bg-brand-50 text-brand-700' : 'text-slate-500 hover:bg-slate-100'}`}
+            >
+              {t}
+            </button>
+          ))}
+          {/* At the bottom, under the list, which is where the main menu keeps its own. */}
+          <button type="button" onClick={toggleNav} aria-expanded="true"
+            title="Narrow the settings menu"
+            className="w-full flex items-center gap-2 mt-2 px-3 py-2 rounded-lg text-[12px]
+              text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+            <PanelLeftClose size={15} /> Narrow this menu
           </button>
-        ))}
-      </nav>
+        </nav>
+      )}
       <div className="flex-1 min-w-0">
+        {/*
+          THE WAY BACK, AND WHERE YOU ARE, in one line.
+          
+          Folded to a bare icon this would reclaim the width and lose the answer to "which tab am
+          I on" -- these tabs have no icons to fall back on, and the panes do not all announce
+          themselves. So the strip carries the tab's own name, which is both the label and the
+          control: the whole thing expands the menu again.
+        */}
+        {navCollapsed && (
+          <button type="button" onClick={toggleNav} aria-expanded="false"
+            title="Show the settings menu"
+            className="flex items-center gap-2 mb-3 -mt-1 px-2 py-1.5 rounded-lg text-sm
+              font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700">
+            <PanelLeftOpen size={15} /> {tab}
+          </button>
+        )}
         {tab === 'Profile' && <ProfileTab />}
         {tab === 'Appearance' && <AppearanceTab />}
         {tab === 'Users' && <UsersTab />}
