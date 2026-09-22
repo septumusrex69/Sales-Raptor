@@ -429,13 +429,30 @@ const sameAmountOtherName = rows(
 check('...nor the same amount for a different surname',
   problemsOf(sameAmountOtherName.rows[1]).length, 0)
 
-/* THE ID IS THE STRONG SIGNAL and beats a different amount, because it is the same person and
-   there is no innocent reason for one ID to arrive twice in one batch. */
+/*
+ * THE SAME ID FOR A DIFFERENT AMOUNT IS NOT A DUPLICATE, at the firm's correction: "it is also
+ * possible for the same debtor to be handed over twice ... the same ID number. You can create
+ * something called a linked account."
+ *
+ * This file asserted the opposite a commit ago, and the assertion was right about the code and
+ * wrong about the firm. One person with two debts is the ordinary case; flagged as a duplicate it
+ * would have had somebody discard a real account. It is two accounts for one debtor, which is
+ * what the account page shows instead.
+ */
 const sameIdOtherAmount = rows(
   ['A1', '100', '2026-01-01', 'Person', 'Dube', ID_A, '082 123 4567', 'a@b.co.za'],
-  ['A2', '999', '2026-01-01', 'Person', 'Mokoena', ID_A, '082 123 4567', 'a@b.co.za'])
-ok('the same ID number twice is flagged even for a different amount',
-  problemsOf(sameIdOtherAmount.rows[1]).some((p) => /Possible duplicate of row 2/.test(p.message)))
+  ['A2', '999', '2026-01-01', 'Person', 'Dube', ID_A, '082 123 4567', 'a@b.co.za'])
+check('the same ID for a different amount is a second debt, not a duplicate',
+  problemsOf(sameIdOtherAmount.rows[1]).length, 0)
+/* The same ID AND the same amount still is: one debt, typed twice. */
+const sameIdSameAmount = rows(
+  ['A1', '100', '2026-01-01', 'Person', 'Dube', ID_A, '082 123 4567', 'a@b.co.za'],
+  ['A2', '100', '2026-01-01', 'Person', 'Mokoena', ID_A, '082 123 4567', 'a@b.co.za'])
+ok('the same ID for the same amount is flagged',
+  problemsOf(sameIdSameAmount.rows[1]).some((p) => /Possible duplicate of row 2/.test(p.message)))
+/* THE ID BEATS THE SURNAME where the two disagree: the row above has a different surname and is
+   still caught, because the identifier is the ID wherever there is a usable one. */
+check('...even though the surnames differ', sameIdSameAmount.refused.length, 0)
 
 /*
  * AND THE ID COLUMN THAT HELD A TELEPHONE NUMBER MUST NOT MATCH. Every one of the 45 rows in the
@@ -464,8 +481,12 @@ ok('a debt already on the book is flagged',
 ok('...and names the account to go and look at',
   /ACF10085/.test(firstMessage(onBookAlready.rows[0])))
 check('...still as a warning', onBookAlready.refused.length, 0)
-const byId = onBook(['A9', '77', '2026-01-01', 'Person', 'Someone', ID_A, '082 123 4567', 'a@b.co.za'])
-ok('...matched on the ID as well as on name and amount', /ACF10086/.test(firstMessage(byId.rows[0])))
+const byId = onBook(['A9', '4200', '2026-01-01', 'Person', 'Someone', ID_A, '082 123 4567', 'a@b.co.za'])
+ok('...matched on the ID as well as on the surname', /ACF10086/.test(firstMessage(byId.rows[0])))
+/* And a second debt for somebody already on the book is not a duplicate of their first. */
+const secondDebt = onBook(['A9', '77', '2026-01-01', 'Person', 'Ntuli', ID_A, '082 123 4567', 'a@b.co.za'])
+check('a second debt for a debtor already on the book is not flagged',
+  problemsOf(secondDebt.rows[0]).length, 0)
 const notOnBook = onBook(['A9', '101', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
 check('a rand different is not the same debt', problemsOf(notOnBook.rows[0]).length, 0)
 /* A book that could not be read is not a book full of duplicates. */

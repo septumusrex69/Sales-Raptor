@@ -75,6 +75,9 @@ import { FIRM_UNSET, fetchFirmSettings, type FirmSettings } from '../../lib/firm
 import { dayKey } from '../../lib/collectionPace'
 import { addWorkingDays } from '../../lib/workingDays'
 import type { AccountContact } from '../../lib/accountWorkspace'
+import { OtherAccountsPanel } from '../../components/collections/OtherAccountsPanel'
+import { debtorKey, type OtherAccount } from '../../lib/sameDebtor'
+import { fetchOtherAccounts } from '../../lib/accountBook'
 
 type Tab = 'Overview' | 'Transactions' | 'Emails' | 'Documents'
 
@@ -118,6 +121,8 @@ export function AccountDetail() {
   const [emails, setEmails] = useState<AccountEmail[]>([])
   const [standing, setStanding] = useState<AccountStanding>({ directors: [], judgments: [] })
   const [traces, setTraces] = useState<FiledTrace[]>([])
+  /** The same debtor's accounts elsewhere on the book. Derived from the identity number. */
+  const [otherAccounts, setOtherAccounts] = useState<OtherAccount[]>([])
   /** Which filed trace is open for working. See TraceWorkspaceModal. */
   const [openTrace, setOpenTrace] = useState<string | null>(null)
   /** Whether the signed-in agent has a mailbox connected at all. Null while we are asking. */
@@ -190,6 +195,27 @@ export function AccountDetail() {
    */
   const [firm, setFirm] = useState<FirmSettings>(FIRM_UNSET)
   useEffect(() => { void fetchFirmSettings().then(setFirm) }, [])
+
+  /*
+   * THE DEBTOR'S OTHER ACCOUNTS, fetched only where the identity number can be trusted.
+   *
+   * `debtorKey` is asked first so the common case costs nothing: an account with no ID, or with
+   * the telephone number the old sheet put in that column, makes no request at all. Cleared on
+   * the way in, or clicking from one of a debtor's accounts to another would show the first
+   * account's list against the second for as long as the fetch took -- which on this panel means
+   * offering somebody a link back to the account they are already looking at.
+   */
+  useEffect(() => {
+    setOtherAccounts([])
+    if (!account?.id) return
+    const key = debtorKey(account.debtorIdNumber, account.debtorKind)
+    if (!key) return
+    let live = true
+    void fetchOtherAccounts(account.id, account.debtorIdNumber ?? '', account.debtorKind)
+      .then((rows) => { if (live) setOtherAccounts(rows) })
+      .catch(() => { /* A panel that cannot load is a panel that is not shown. */ })
+    return () => { live = false }
+  }, [account?.id, account?.debtorIdNumber, account?.debtorKind])
   const [diariseOpen, setDiariseOpen] = useState(false)
   const [tracing, setTracing] = useState(false)
   /** Null = closed. A kind inside it is the office the trace's status line implied. */
@@ -530,6 +556,8 @@ export function AccountDetail() {
     paidInPeriod: false,
     openQueryWithClient: account.clientActionAsk !== null,
   })
+  const otherAccountsPanel = <OtherAccountsPanel key="others" rows={otherAccounts} />
+
   const clientLinePanel = (
     <ClientLinePanel
       line={clientLine({
@@ -903,7 +931,8 @@ export function AccountDetail() {
             three lines under it. A panel nobody scrolls to is a panel that does not exist, and
             this one only works if the person doing the work reads it.
           */
-          side={[clientLinePanel, summaryPanel, promisePanel, disputesPanel, positionPanel]}
+          side={[clientLinePanel, summaryPanel, otherAccountsPanel, promisePanel,
+            disputesPanel, positionPanel]}
         />
       )}
 

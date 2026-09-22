@@ -66,26 +66,32 @@ const fold = (v: string | null | undefined) => (v ?? '').toLowerCase().replace(/
 /**
  * The two ways one debt is recognised as another, and why it is only ever a WARNING.
  *
- * AN ID NUMBER is the strong one: the same person, and there is no innocent reason for the same
- * ID to arrive twice in one batch. A NAME AND AN AMOUNT TOGETHER is the weak one, and it is here
- * because the sheet the firm sent has no ID numbers at all -- an ID-only rule would have found
- * nothing on the only real file we have. Either on its own is worthless: in that same file
- * fourteen accounts are for exactly R380, and three surnames appear twice.
+ * BOTH OF THEM NEED THE AMOUNT, and that is the firm's correction: "it is also possible for the
+ * same debtor to be handed over twice ... the same ID number. You can create something called a
+ * linked account." An ID arriving again is a person with a SECOND DEBT far more often than it is
+ * a mistake, so the same ID for a different amount is not a duplicate at all — it is two
+ * accounts for one debtor, which is what sameDebtor.ts is for and what the account page shows.
  *
- * NEITHER REFUSES. A client can genuinely hand the same debtor over twice for two different
- * debts, and the firm asked to be told, not stopped: "accept or discard".
+ * WHAT IS LEFT IS THE SAME DEBT TWICE: one identifier, one figure. The identifier is an ID number
+ * where there is one and a surname where there is not, because the sheet the firm actually sent
+ * has no ID numbers at all — an ID-only rule would have found nothing on the only real file we
+ * have. The amount alone is worthless in the other direction too: in that same file fourteen
+ * accounts are for exactly R380.
+ *
+ * NEITHER REFUSES. The firm asked to be told, not stopped: "accept or discard".
  */
 function signaturesOf(
   values: { id_number?: string | null; name?: string | null }, capital: number | null,
 ): string[] {
-  const out: string[] = []
+  /* No amount, nothing to compare: a row with no capital is already refused for that. */
+  if (capital === null) return []
+  const amount = capital.toFixed(2)
   const id = fold(values.id_number)
   /* Thirteen digits, because on the old sheet this column held a telephone number in every row --
      matching on those would report 45 duplicates of nothing. */
-  if (id.length === 13) out.push(`id:${id}`)
+  if (id.length === 13) return [`id:${id}:${amount}`]
   const name = fold(values.name)
-  if (name && capital !== null) out.push(`name:${name}:${capital.toFixed(2)}`)
-  return out
+  return name ? [`name:${name}:${amount}`] : []
 }
 
 export type SheetKind = 'raptor' | 'swordfish' | 'mixed' | 'unknown'

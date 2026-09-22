@@ -16,6 +16,8 @@ import type { FrozenBy } from './clientPosition.ts'
 import type { ViewCounts } from './accountViews.ts'
 import type { PractitionerKind } from './accountStanding.ts'
 import type { ExistingAccount } from './handoverImport.ts'
+import { debtorKey, type OtherAccount } from './sameDebtor.ts'
+import { isWrittenOff } from './accountStatus.ts'
 
 export interface DebtorAccount {
   id: string
@@ -583,6 +585,54 @@ export async function fetchExistingAccounts(companyId: string): Promise<Existing
     idNumber: r.debtor_id_number,
     name: r.debtor_surname,
     capital: r.capital_handed_over === null ? null : Number(r.capital_handed_over),
+  }))
+}
+
+/**
+ * The debtor's other accounts, found by the identity number they share.
+ *
+ * THE FIRM: "it will indicate, when you're on an account, this debtor has other accounts, those
+ * account numbers, and you would be able to click on that account number and it opens that
+ * account ... and then you can go back to the original just by clicking on the other one."
+ *
+ * ACROSS EVERY CLIENT, not just this one. A debtor who owes two of the firm's clients is exactly
+ * the person this is for -- one collector ringing about two debts should know about both, and a
+ * payment arrangement made for one has to be affordable against the other. That is also why the
+ * client's name comes back with each row: the reference alone would not say whose book it is on.
+ *
+ * `debtorKey` decides whether the identifier can be trusted at all; given nothing usable this is
+ * never called, because an eq() on a telephone number would group strangers.
+ */
+export async function fetchOtherAccounts(
+  accountId: string, idNumber: string, kind: 'individual' | 'company',
+): Promise<OtherAccount[]> {
+  if (!debtorKey(idNumber, kind)) return []
+  const { data, error } = await supabase
+    .from('debtor_accounts')
+    .select('id, account_number, capital_outstanding, status, companies(name)')
+    .eq('debtor_id_number', idNumber.replace(/\s/g, ''))
+    .eq('debtor_kind', kind)
+    .neq('id', accountId)
+    .limit(50)
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r: {
+    id: string
+    account_number: string | null
+    capital_outstanding: number | string | null
+    status: string | null
+    companies: { name: string | null } | { name: string | null }[] | null
+  }) => ({
+    id: r.id,
+    reference: r.account_number,
+    /* PostgREST hands an embedded row back as an object or as an array of one depending on how it
+       reads the relationship; both shapes have been seen from this table. */
+    clientName: Array.isArray(r.companies) ? r.companies[0]?.name ?? null : r.companies?.name ?? null,
+    balance: r.capital_outstanding === null ? null : Number(r.capital_outstanding),
+    status: r.status,
+    /* THERE IS NO is_settled ON THIS TABLE, which is what check-select-columns caught: the book
+       carries five statuses and `is_settled` is a generated column on `user_emails`, about a mail
+       thread. isWrittenOff is the one place that decides a closed account. */
+    writtenOff: isWrittenOff(r.status),
   }))
 }
 
