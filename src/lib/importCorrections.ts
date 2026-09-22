@@ -70,54 +70,28 @@ export function givenFor(row: CorrectionRow, key: string | null): string {
 export interface CorrectionEmail {
   subject: string
   bodyHtml: string
-  /** How many accounts it is about, for the note that records it was sent. */
+  /** How many accounts it is about at all, for the note that records it was sent. */
   accounts: number
 }
 
-/**
- * The email to the client liaison.
- *
- * WRITTEN TO BE FORWARDED, at the firm's instruction: "so the client liaison can easily forward
- * that to the client." So it is addressed to the client throughout — "your sheet", "could you
- * confirm" — and carries nothing internal. A liaison who has to rewrite it before sending it on
- * is a liaison who will not send it on.
- *
- * FOUR COLUMNS, because the firm named three of them and the fourth is what makes the other
- * three usable: the reference to look it up by, the FIELD, what the sheet said, and what we need.
- * Without the field, "0823456789 is not an ID number" makes the reader hunt for which column that
- * was.
- */
-export function correctionEmail(input: {
-  clientName: string
-  filename: string
-  /** Today, as an ISO day. Formatted here so the caller cannot pass a different shape. */
-  today: string
-  rows: CorrectionRow[]
-  labelFor: LabelFor
-}): CorrectionEmail {
-  const { clientName, filename, rows, labelFor } = input
-  const when = new Date(`${input.today}T00:00:00Z`).toLocaleDateString('en-ZA', {
-    day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
-  })
-
-  const cells = rows.flatMap((row) => row.problems.map((p) => `
+/** One row of a table, so both tables are drawn by the same code. */
+function tableRows(rows: CorrectionRow[], labelFor: LabelFor): string {
+  return rows.flatMap((row) => row.problems.map((p) => `
     <tr>
-      <td style="padding:6px 10px;border:1px solid #d9dee6;white-space:nowrap">${esc(row.reference ?? '—')}</td>
-      <td style="padding:6px 10px;border:1px solid #d9dee6">${esc(row.name ?? '—')}</td>
-      <td style="padding:6px 10px;border:1px solid #d9dee6">${esc(p.key ? labelFor(p.key) : '—')}</td>
+      <td style="padding:6px 10px;border:1px solid #d9dee6;white-space:nowrap">${esc(row.reference ?? '\u2014')}</td>
+      <td style="padding:6px 10px;border:1px solid #d9dee6">${esc(row.name ?? '\u2014')}</td>
+      <td style="padding:6px 10px;border:1px solid #d9dee6">${esc(p.key ? labelFor(p.key) : '\u2014')}</td>
       <td style="padding:6px 10px;border:1px solid #d9dee6">${esc(givenFor(row, p.key))}</td>
       <td style="padding:6px 10px;border:1px solid #d9dee6">${esc(p.message)}</td>
     </tr>`).join(''))
+    .join('')
+}
 
-  const accounts = rows.length
-  const bodyHtml = `
-<p>Good day,</p>
-<p>We have today brought in the handover sheet <strong>${esc(filename)}</strong> for
-${esc(clientName)}. The accounts are open and being worked — nothing is waiting on this —
-but there were ${accounts === 1 ? 'one account' : `${accounts} accounts`} where the information on
-the sheet could not be used as it stands.</p>
-<p>Could you please have a look at the list below and let us know whether the details are correct,
-or whether you have anything further on your side that we can correct these with.</p>
+function table(heading: string, intro: string, rows: CorrectionRow[], labelFor: LabelFor): string {
+  if (rows.length === 0) return ''
+  return `
+<h3 style="font-family:Calibri,Arial,sans-serif;font-size:15px;margin:22px 0 4px">${esc(heading)}</h3>
+<p style="margin:0 0 8px">${intro}</p>
 <table style="border-collapse:collapse;font-size:13px;font-family:Calibri,Arial,sans-serif">
   <thead>
     <tr style="background:#1b2a4a;color:#ffffff;text-align:left">
@@ -128,14 +102,99 @@ or whether you have anything further on your side that we can correct these with
       <th style="padding:6px 10px;border:1px solid #1b2a4a">What we need</th>
     </tr>
   </thead>
-  <tbody>${cells.join('')}</tbody>
-</table>
+  <tbody>${tableRows(rows, labelFor)}</tbody>
+</table>`
+}
+
+/** "1 account" / "3 accounts", because "1 account need correcting" went out to a client. */
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+/**
+ * The email to the client liaison.
+ *
+ * WRITTEN TO BE FORWARDED, at the firm's instruction: "so the client liaison can easily forward
+ * that to the client." So it is addressed to the client throughout — "your sheet", "could you
+ * confirm" — and carries nothing internal. A liaison who has to rewrite it before sending it on
+ * is a liaison who will not send it on.
+ *
+ * THREE ANSWERS, IN THE ORDER THE FIRM ASKED FOR THEM: "what has been imported, and what needs
+ * additional information, and which ones have not been imported because critical information is
+ * required."
+ *
+ * THE ONES THAT DID NOT COME IN WERE MISSING ENTIRELY, and they are the half that matters most.
+ * The email was built from the accounts that WERE opened, so a handover where eight rows were
+ * rejected told the client about none of them — the accounts they most need to fix and re-send
+ * were the ones we said nothing about. The firm spotted it: "there were more ones that I didn't
+ * accept that should have been on this email."
+ *
+ * THEY GET NO CLIENT QUERY, AND CANNOT. A query hangs off an account, and a rejected row never
+ * opened one. The email is the only way the client hears about them, which is the second reason
+ * it may not be skipped.
+ */
+export function correctionEmail(input: {
+  clientName: string
+  filename: string
+  /** Today, as an ISO day. Formatted here so the caller cannot pass a different shape. */
+  today: string
+  /** Every account that was opened, including the ones with nothing wrong. */
+  broughtIn: number
+  /** Opened, but something on them needs the client to confirm it. */
+  toConfirm: CorrectionRow[]
+  /** Not opened: rejected, or refused for something an account cannot be opened without. */
+  notBroughtIn: CorrectionRow[]
+  labelFor: LabelFor
+}): CorrectionEmail {
+  const { clientName, filename, toConfirm, notBroughtIn, labelFor } = input
+  const when = new Date(`${input.today}T00:00:00Z`).toLocaleDateString('en-ZA', {
+    day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
+  })
+
+  /* WHAT HAPPENED, IN ONE LINE, before any table. Somebody forwarding this to a client should be
+     able to answer "so where are we?" without counting rows. */
+  const clean = input.broughtIn - toConfirm.length
+  const summary = [
+    input.broughtIn > 0
+      ? `<li>${count(input.broughtIn, 'account is', 'accounts are')} open and being worked`
+        + `${clean > 0 && toConfirm.length > 0 ? `, ${clean} of them with nothing outstanding` : ''}.</li>`
+      : '',
+    toConfirm.length > 0
+      ? `<li>${count(toConfirm.length, 'account needs', 'accounts need')} something confirmed. `
+        + 'We are working ' + (toConfirm.length === 1 ? 'it' : 'them') + ' in the meantime.</li>'
+      : '',
+    notBroughtIn.length > 0
+      ? `<li><strong>${count(notBroughtIn.length, 'account could', 'accounts could')} not be `
+        + 'opened</strong> and will need to be sent again.</li>'
+      : '',
+  ].filter(Boolean).join('')
+
+  const bodyHtml = `
+<p>Good day,</p>
+<p>We have today brought in the handover sheet <strong>${esc(filename)}</strong> for
+${esc(clientName)}.</p>
+<ul>${summary}</ul>
+${table(
+    'Not brought in — please send these again',
+    'We cannot open an account without these, so nothing is being done on them yet.',
+    notBroughtIn, labelFor,
+  )}
+${table(
+    'Brought in, but please confirm',
+    'These are open and being worked. Could you check the details below and let us know whether '
+    + 'they are correct, or whether you have anything further on your side.',
+    toConfirm, labelFor,
+  )}
 <p>Kind regards</p>`.trim()
 
+  /* THE SUBJECT SAYS WHICH OF THE TWO, because they need different things from the client and the
+     one that needs a resend is the one worth opening the email for. */
+  const parts = [
+    notBroughtIn.length > 0 ? `${notBroughtIn.length} not brought in` : '',
+    toConfirm.length > 0 ? `${toConfirm.length} to confirm` : '',
+  ].filter(Boolean)
+
   return {
-    subject: `${clientName} — handover ${when}: ${accounts} account${accounts === 1 ? '' : 's'} `
-      + 'need correcting',
+    subject: `${clientName} \u2014 handover ${when}: ${parts.join(', ') || 'all accounts opened'}`,
     bodyHtml,
-    accounts,
+    accounts: toConfirm.length + notBroughtIn.length,
   }
 }

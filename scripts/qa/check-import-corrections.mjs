@@ -76,27 +76,89 @@ ok('with nothing typed it still says what is outstanding',
 
 /* ---------- 3. the email to the liaison ---------- */
 
+const REJECTED = {
+  reference: 'BF-302',
+  name: 'Swanepoel',
+  problems: [{ key: 'capital', level: 'refuse', message: 'No handover amount.' }],
+  values: { capital: null, name: 'Swanepoel' },
+  note: null,
+}
+
 const mail = correctionEmail({
   clientName: 'Bredell Ferreira',
-  filename: 'handover 2 (warnings).xlsx',
+  filename: 'handover 3 (refusals).xlsx',
   today: '2026-09-22',
-  rows: [ROW, { ...ROW, reference: 'BF-205', name: 'Coetzee', note: null,
+  broughtIn: 4,
+  toConfirm: [ROW, { ...ROW, reference: 'BF-205', name: 'Coetzee', note: null,
     problems: [{ key: 'email_1', level: 'warn', message: 'No email address — a section 129 is sent by email.' }] }],
+  notBroughtIn: [REJECTED],
   labelFor,
 })
 
-ok('the subject names the client', /Bredell Ferreira/.test(mail.subject))
-ok('...and how many accounts it is about', /2 accounts/.test(mail.subject))
-check('...and counts them', mail.accounts, 2)
+/*
+ * THE ONES THAT DID NOT COME IN WERE MISSING ENTIRELY, and they are the half that matters most.
+ *
+ * THE FIRM: "there were more ones that I didn't accept that should have been on this email."
+ * The email was built from the accounts that WERE opened, so a handover where eight rows were
+ * rejected told the client about none of them — the accounts they most need to fix and re-send
+ * were the ones we said nothing about.
+ */
+ok('an account that did not come in is on the email', /BF-302/.test(mail.bodyHtml))
+ok('...under a heading that says to send it again', /send these again/i.test(mail.bodyHtml))
+ok('...saying nothing is being done on it', /nothing is being done on them yet/i.test(mail.bodyHtml))
+ok('...and its reason', /No handover amount/.test(mail.bodyHtml))
+/* The two groups need different things from the client, so they are not run together. */
+ok('the ones that came in are under their own heading', /Brought in, but please confirm/.test(mail.bodyHtml))
+ok('...and are said to be already being worked', /open and being worked/i.test(mail.bodyHtml))
 
-/* THE FIRM'S OWN THREE COLUMNS, plus the field — without which "0823456789 is not an ID number"
-   sends the reader hunting for which column that was. */
+/*
+ * THE SUBJECT SAYS WHICH OF THE TWO. The one that needs a resend is what the email is worth
+ * opening for, and "1 account need correcting" — which is what went out — said neither.
+ */
+ok('the subject names the client', /Bredell Ferreira/.test(mail.subject))
+ok('...how many need sending again', /1 not brought in/.test(mail.subject))
+ok('...and how many need confirming', /2 to confirm/.test(mail.subject))
+check('...and it counts both groups', mail.accounts, 3)
+
+/*
+ * ONE ACCOUNT, NOT "1 ACCOUNT NEED". The email that went to the firm read "there were one
+ * account where the information ... could not be used" and "1 account need correcting". A client
+ * reads that.
+ */
+const one = correctionEmail({
+  clientName: 'X', filename: 'f.xlsx', today: '2026-09-22', labelFor,
+  broughtIn: 1, toConfirm: [ROW], notBroughtIn: [],
+})
+ok('one of a thing is singular', /1 account needs something confirmed/.test(one.bodyHtml))
+ok('...and never "accounts need" for one', !/1 accounts/.test(one.bodyHtml))
+const two = correctionEmail({
+  clientName: 'X', filename: 'f.xlsx', today: '2026-09-22', labelFor,
+  broughtIn: 2, toConfirm: [ROW, REJECTED], notBroughtIn: [],
+})
+ok('several of a thing is plural', /2 accounts need something confirmed/.test(two.bodyHtml))
+
+/* THE SUMMARY FIRST. Somebody forwarding this should be able to answer "so where are we?"
+   without counting rows in a table. */
+ok('the email opens with what happened', /accounts are open and being worked/.test(mail.bodyHtml))
+ok('...and how many had nothing wrong at all', /2 of them with nothing outstanding/.test(mail.bodyHtml))
+
+/* A HANDOVER WHERE EVERYTHING PROBLEMATIC WAS REJECTED still has to be sent: it is the only way
+   the client hears, because a rejected row opens no account and so can carry no query. */
+const onlyRejects = correctionEmail({
+  clientName: 'X', filename: 'f.xlsx', today: '2026-09-22', labelFor,
+  broughtIn: 3, toConfirm: [], notBroughtIn: [REJECTED],
+})
+ok('a handover with only rejections still says so', /BF-302/.test(onlyRejects.bodyHtml))
+ok('...and does not draw an empty "please confirm" table',
+  !/Brought in, but please confirm/.test(onlyRejects.bodyHtml))
+ok('...while still saying what did come in', /3 accounts are open/.test(onlyRejects.bodyHtml))
+
 ok('the table shows the client’s own reference', /BF-201/.test(mail.bodyHtml))
 ok('...the debtor', /Maree/.test(mail.bodyHtml))
 ok('...which field it is about', /ID number/.test(mail.bodyHtml))
 ok('...what the sheet actually said', /0823456789/.test(mail.bodyHtml))
 ok('...and what we need', /is not an ID number/.test(mail.bodyHtml))
-ok('the file is named', /handover 2 \(warnings\)\.xlsx/.test(mail.bodyHtml))
+ok('the file is named', /handover 3 \(refusals\)\.xlsx/.test(mail.bodyHtml))
 
 /*
  * AN EMPTY BOX IS WRITTEN AS SOMETHING. A blank cell in a table of problems reads as "we forgot
@@ -111,15 +173,15 @@ ok('the empty one reaches the table', /\(nothing\)/.test(mail.bodyHtml))
  * that to the client." So it carries nothing internal — a liaison who has to rewrite it before
  * sending it on is a liaison who will not send it on.
  */
-ok('it says the accounts are already being worked', /nothing is waiting on this/i.test(mail.bodyHtml))
-ok('...and asks the client to confirm', /let us know whether the details are correct/i.test(mail.bodyHtml))
+ok('...and asks the client to confirm', /let us know whether/i.test(mail.bodyHtml))
 ok('...and nothing in it is addressed to us', !/liaison|internal|Raptor/i.test(mail.bodyHtml))
 
 /* A client's own data goes into HTML, so it is escaped. A debtor called "Smith & Co <Pty>" must
    not close the table. */
 const nasty = correctionEmail({
   clientName: 'A & B', filename: 'x.xlsx', today: '2026-09-22', labelFor,
-  rows: [{ ...ROW, name: 'Smith & Co <Pty>', values: { id_number: '<script>x</script>' },
+  broughtIn: 1, notBroughtIn: [],
+  toConfirm: [{ ...ROW, name: 'Smith & Co <Pty>', values: { id_number: '<script>x</script>' },
     problems: [{ key: 'id_number', level: 'warn', message: 'bad' }] }],
 })
 ok('a debtor’s name is escaped', /Smith &amp; Co &lt;Pty&gt;/.test(nasty.bodyHtml))
@@ -148,6 +210,16 @@ ok('...not through the path that charges the debtor for an email',
 /* And none of it may cost the import its accounts. */
 ok('a query that fails is reported, not thrown', /correctionProblems/.test(draft))
 ok('...and a client with no liaison is said out loud', /No client liaison/.test(draft))
+
+/*
+ * AND THE EMAIL IS SENT WHEN THE ONLY THING WRONG IS WHAT WAS THROWN OUT. Gated on the accounts
+ * that were opened with problems, a handover whose bad rows were all rejected sent nothing — and
+ * those rows carry no query either, because they opened no account to hang one on.
+ */
+ok('rows that did not come in are gathered too', /notBroughtIn/.test(draft))
+ok('...from the excluded and the refused', /excluded \|\| r\.planned\?\.refused/.test(draft))
+ok('...and either group is enough to send the email',
+  /corrections\.length > 0 \|\| notBroughtIn\.length > 0/.test(draft))
 
 /* ---------------------------------------------------------------- report */
 

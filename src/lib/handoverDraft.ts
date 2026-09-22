@@ -411,20 +411,40 @@ export async function approveDraft(input: {
    * not worth losing 194 opened accounts over, so everything below collects its failures rather
    * than throwing.
    */
+  const asCorrection = (r: JudgedDraft['rows'][number]) => ({
+    reference: r.values.client_reference,
+    name: r.values.name,
+    problems: (r.planned?.problems ?? []).map((p) => ({
+      key: p.key, message: p.message, level: p.level,
+    })),
+    values: r.values,
+    note: r.note,
+  })
+
+  /* OPENED, BUT SOMETHING ON THEM NEEDS CONFIRMING. These get a query, because there is an
+     account to hang one on. */
   const corrections = accepted
     .filter((r) => (r.planned?.problems.length ?? 0) > 0)
-    .map((r) => ({
-      reference: r.values.client_reference,
-      name: r.values.name,
-      problems: (r.planned?.problems ?? []).map((p) => ({
-        key: p.key, message: p.message, level: p.level,
-      })),
-      values: r.values,
-      note: r.note,
-    }))
+    .map(asCorrection)
+
+  /*
+   * AND THE ONES THAT DID NOT COME IN AT ALL, which were missing from this entirely.
+   *
+   * THE FIRM: "there were more ones that I didn't accept that should have been on this email."
+   * The email was built from the accounts that WERE opened, so a handover where eight rows were
+   * rejected told the client about none of them — the accounts they most need to fix and re-send
+   * were the ones we said nothing about.
+   *
+   * THEY GET NO QUERY, AND CANNOT: a query hangs off an account and these opened none. The email
+   * is the only way the client hears about them, which is why it is no longer skipped when the
+   * only thing wrong with a handover is the rows that were thrown out of it.
+   */
+  const notBroughtIn = judged.rows
+    .filter((r) => (r.excluded || r.planned?.refused) && (r.planned?.problems.length ?? 0) > 0)
+    .map(asCorrection)
 
   const problems: string[] = []
-  if (corrections.length > 0) {
+  if (corrections.length > 0 || notBroughtIn.length > 0) {
     /* The liaison is whoever looks after the CLIENT, which is the company's account owner —
        the same person AccountDetail shows under "Client liaison". */
     const { data: company } = await supabase
@@ -464,7 +484,9 @@ export async function approveDraft(input: {
       clientName: (company?.name as string | null) ?? 'this client',
       filename: judged.draft.filename,
       today: input.today,
-      rows: corrections,
+      broughtIn: created,
+      toConfirm: corrections,
+      notBroughtIn,
       labelFor: (key) => HANDOVER_COLUMNS.find((c) => c.key === key)?.label ?? key,
     })
 
@@ -492,7 +514,7 @@ export async function approveDraft(input: {
     created,
     leftBehind: judged.rows.length - created,
     noteFailures,
-    corrections: corrections.length,
+    corrections: corrections.length + notBroughtIn.length,
     correctionProblems: problems,
   }
 }

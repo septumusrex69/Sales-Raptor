@@ -527,6 +527,21 @@ try {
   t.ok('...and what the sheet left empty', /\(nothing\)/.test(mailSent[0]?.bodyHtml ?? ''))
 
   /*
+   * AND THE ONE THAT DID NOT COME IN IS ON IT. THE FIRM: "there were more ones that I didn't
+   * accept that should have been on this email." GPS3/10104 was rejected in this run, so the
+   * client is told to send it again -- built from the accounts that WERE opened, it appeared
+   * nowhere.
+   */
+  t.ok('the rejected account is on the email too',
+    /GPS3\/10104/.test(mailSent[0]?.bodyHtml ?? ''))
+  t.ok('...under a heading that asks for it again',
+    /send these again/i.test(mailSent[0]?.bodyHtml ?? ''))
+  t.ok('...and the subject says how many need resending',
+    /1 not brought in/.test(mailSent[0]?.subject ?? ''))
+  /* Nothing that went out to a client may read "1 account need". */
+  t.ok('...in the firm’s own English', !/\b1 accounts\b/.test(mailSent[0]?.bodyHtml ?? ''))
+
+  /*
    * AND NOTHING WAS CHARGED TO A DEBTOR. A dispute raises Annexure B item 3 because the DEBTOR
    * objected; a client's sheet being wrong is their typing. This is the assertion that would cost
    * the firm a Council complaint if it ever stopped being true.
