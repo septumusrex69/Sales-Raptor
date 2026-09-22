@@ -12,6 +12,8 @@ import {
 import { fetchDraftForHandover, type JudgedDraft } from '../../lib/handoverDraft'
 import { HANDOVER_COLUMNS } from '../../lib/handoverSheet.ts'
 import { givenFor } from '../../lib/importCorrections.ts'
+import { ReplyAnswers } from '../../components/queries/ReplyAnswers'
+import { fetchAccounts } from '../../lib/accountBook'
 import { rejectedSheetName, rejectedSheetRows } from '../../lib/rejectedSheet.ts'
 import { buildXlsx, downloadBytes, XLSX_MIME } from '../../lib/xlsxWrite.ts'
 
@@ -48,6 +50,14 @@ export function QueryDetail() {
   const { currentUser } = useAuth()
   const [data, setData] = useState<Awaited<ReturnType<typeof fetchQuery>>>(null)
   const [draft, setDraft] = useState<JudgedDraft | null>(null)
+  /**
+   * The client's own reference to the account it opened.
+   *
+   * READ OFF THE BOOK, not off the draft: the draft says what was sent, and an answer has to be
+   * written to the account that actually exists. A row that opened none is absent here, which is
+   * exactly what tells the screen it has nowhere to put that answer.
+   */
+  const [openedFor, setOpenedFor] = useState<Map<string, string>>(new Map())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -64,6 +74,13 @@ export function QueryDetail() {
        */
       if (found?.batch) {
         setDraft(await fetchDraftForHandover(found.batch.id, TODAY()).catch(() => null))
+        /* The whole batch in one page: a handover is hundreds at the most, and a second page
+           here would mean an answer silently having nowhere to go. */
+        const opened = await fetchAccounts({ handoverId: found.batch.id, pageSize: 2000 })
+          .catch(() => ({ accounts: [], total: 0 }))
+        setOpenedFor(new Map(opened.accounts
+          .filter((a) => a.clientReference)
+          .map((a) => [a.clientReference as string, a.id])))
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -195,6 +212,15 @@ export function QueryDetail() {
         title="Brought in, but the client must confirm"
         intro="These are open and being worked while we wait."
         rows={toConfirm} />
+
+      {/*
+        THE OTHER HALF OF THE COLUMN WE ASKED THEM TO FILL IN. Offered only while the query is
+        open: once it is closed the answers are already on the accounts, and a paste box on a
+        finished query invites somebody to write a month-old correction over a newer one.
+      */}
+      {q.status !== 'closed' && data.batch && (
+        <ReplyAnswers accountFor={(ref) => (ref ? openedFor.get(ref) ?? null : null)} />
+      )}
     </div>
   )
 }
