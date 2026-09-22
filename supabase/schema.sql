@@ -5733,3 +5733,26 @@ comment on column public.handover_draft_rows.decision is
 comment on column public.handover_draft_rows.note is
   'What to tell the collector who gets the account: "the ID number is wrong and needs to be '
   'confirmed". Written onto the account as a note when the handover is approved.';
+
+-- A fourth reason an account goes to somebody else: the data it arrived on was wrong.
+--
+-- THE FIRM: "after this has been imported, if it was accepted with mistakes it should create a
+-- client query -- now we are going to distinguish between a debtor dispute and a client query --
+-- so it'll go on the client's account that there is an import correction needed, and all of the
+-- problems would be listed on there, and that would be flagged at the client liaison."
+--
+-- IT IS NOT CHARGEABLE, AND THAT IS THE WHOLE REASON THIS IS A STORED KIND RATHER THAN A LABEL.
+-- A dispute raises Annexure B item 3 because the DEBTOR's objection caused somebody's time to be
+-- spent. An import correction is the client's data being wrong, and billing a debtor for their
+-- creditor's typing would not survive being asked about. raiseQuery refuses to charge on anything
+-- but a dispute and reads this column to know.
+alter table public.account_queries
+  drop constraint if exists account_queries_kind_check;
+
+alter table public.account_queries
+  add constraint account_queries_kind_check
+  check (kind in ('dispute', 'help', 'litigation', 'import'));
+
+comment on column public.account_queries.kind is
+  'dispute (the debtor objects), help (an agent asks a team leader), litigation (recommend we '
+  'sue), import (the client''s handover data needs correcting). Only a dispute may raise a fee.';

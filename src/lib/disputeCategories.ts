@@ -126,7 +126,7 @@ export const QUERY_OUTCOME_LABEL: Record<QueryOutcome, string> = {
  * the firm supervising its own staff. A recommendation to sue is the firm deciding how to run
  * its business. A debtor pays for the first and must never pay for the other two.
  */
-export type EscalationKind = 'dispute' | 'help' | 'litigation'
+export type EscalationKind = 'dispute' | 'help' | 'litigation' | 'import'
 
 export interface EscalationMeta {
   /** What the option is called. */
@@ -166,6 +166,23 @@ export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
     chargeable: false,
     needsCategory: false,
     placeholder: 'Refuses to pay, has the means, ignored three letters. Recommend we sue.',
+    goesTo: 'liaison',
+  },
+  /*
+   * RAISED BY THE IMPORT, NOT BY A PERSON, which is why it is not in ESCALATION_KIND_ORDER: the
+   * Escalate menu must not offer it. An agent looking at an account cannot decide that the
+   * client's handover sheet was wrong -- the import already knows, and knows exactly which cell.
+   *
+   * NEVER CHARGEABLE. A dispute raises item 3 because the DEBTOR's objection caused the work; a
+   * client's data being wrong is not something a debtor pays for, and billing them for their
+   * creditor's typing would not survive being asked about.
+   */
+  import: {
+    label: 'The client’s handover data needs correcting',
+    blurb: 'Raised by the import when a handover is accepted with something wrong on it.',
+    chargeable: false,
+    needsCategory: false,
+    placeholder: 'The ID number on the handover sheet is a telephone number.',
     goesTo: 'liaison',
   },
 }

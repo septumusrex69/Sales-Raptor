@@ -3,6 +3,7 @@ import { AlertTriangle, Check, CheckCircle2, FileUp, Loader2, Paperclip, Upload,
 import { Card, CardHeader } from '../ui/Card'
 import { inputClass } from '../ui/Modal'
 import { useAppStore } from '../../store/AppStore'
+import { useAuth } from '../../store/AuthContext'
 import { parseCsv } from '../../lib/csv'
 import { readXlsxRows } from '../../lib/xlsx'
 import { readSingleCsvFromZip } from '../../lib/zip'
@@ -90,6 +91,8 @@ async function readSheet(file: File): Promise<(string | null)[][]> {
  */
 export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | null } = {}) {
   const { companies, deals } = useAppStore()
+  /* The approver's own session, so the corrections email goes out on their mailbox. */
+  const { session } = useAuth()
   /* A CLIENT IS ONE WITH A CODE OR A WON DEAL, which is how CompanyDetail decides it too. A list
      of every company would offer the prospects a handover cannot come from. */
   const clients = useMemo(() => {
@@ -240,14 +243,23 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
            account invoiced at the wrong rate for the rest of its life. */
         commissionRate: await fetchClientCommissionRate(judged.draft.companyId).catch(() => null),
         onProgress: (n, total) => setBusy(`Opening the accounts — ${n} of ${total}`),
+        /* So the corrections can be emailed to the liaison through this person's own mailbox.
+           Missing, the import still runs and says the email did not go. */
+        accessToken: session?.access_token ?? null,
       })
       setDone(`${result.created} accounts opened.`
         + (result.leftBehind ? ` ${result.leftBehind} left on the handover.` : '')
         /* A note that did not save is worth saying: the note IS the record of what was overridden
            and why, so losing one silently loses the reason an account was accepted. */
+        + (result.corrections
+          ? ` ${result.corrections} sent to the client liaison to correct.`
+          : '')
         + (result.noteFailures.length
           ? ` ${result.noteFailures.length} note(s) could not be saved: ${result.noteFailures.join('; ')}`
-          : ''))
+          : '')
+        /* A query that did not raise, or an email that did not go, is the client never hearing
+           about it — so it is said on the screen rather than logged and lost. */
+        + (result.correctionProblems.length ? ` ${result.correctionProblems.join(' ')}` : ''))
       setJudged(null); setDraftId(null)
       await refreshDrafts()
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(null) }

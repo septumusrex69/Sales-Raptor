@@ -24,6 +24,8 @@ import { nextReferences, toAccountRow, toContactRows } from './newDebtor.ts'
 import {
   noteForAccount, readiness, type Decision, type Readiness,
 } from './handoverDecision.ts'
+import { correctionDescription, correctionEmail } from './importCorrections.ts'
+import { raiseQuery } from './accountQueries'
 import { createDebtorAccount, fetchAccountReferences, fetchExistingAccounts } from './accountBook'
 
 const DRAFT_COLUMNS = 'id, company_id, filename, sheet_kind, date_order, state, handover_id, '
@@ -247,15 +249,51 @@ export async function discardDraft(id: string): Promise<void> {
  * account points at it: a run that dies half way leaves a batch holding the accounts that did
  * land, which is a thing somebody can look at, rather than orphans nobody can find.
  */
+/**
+ * Send the corrections to the liaison, and say what went wrong rather than throwing.
+ *
+ * THE APPROVER'S OWN MAILBOX, which is what /api/email/send uses -- an internal note from the
+ * person who ran the import to the colleague who looks after the client.
+ *
+ * NOT sendAccountEmail. That path charges Annexure B item 1 against the account, and this message
+ * is to a colleague about a client's typing. CLAUDE.md: fees are charged on accounts only, and a
+ * debtor never pays for their creditor's data.
+ */
+async function sendCorrectionEmail(
+  accessToken: string, to: string, mail: { subject: string; bodyHtml: string },
+): Promise<string | null> {
+  try {
+    const res = await fetch('/api/email/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ to, subject: mail.subject, bodyHtml: mail.bodyHtml }),
+    })
+    if (res.ok) return null
+    const body = (await res.json().catch(() => ({}))) as { error?: string }
+    return `The corrections could not be emailed to ${to}: ${body.error ?? res.statusText}`
+  } catch (e) {
+    return `The corrections could not be emailed to ${to}: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
+
 export async function approveDraft(input: {
   draftId: string
   today: string
   commissionRate: number | null
   onProgress?: (done: number, total: number) => void
+  /**
+   * The signed-in session's token, so the corrections can be emailed to the liaison through the
+   * approver's own mailbox — the same /api/email/send everything else goes out on. Optional: a
+   * missing token does not stop an import, it stops the email and says so.
+   */
+  accessToken?: string | null
 }): Promise<{
   handoverId: string
   created: number
   leftBehind: number
+  /** Queries raised, and anything that went wrong telling the client. */
+  corrections: number
+  correctionProblems: string[]
   /** References whose note did not save. Reported rather than swallowed: the note IS the record
    *  of what was overridden, so losing one silently loses the reason an account was accepted. */
   noteFailures: string[]
@@ -319,6 +357,9 @@ export async function approveDraft(input: {
 
   let created = 0
   let nextGenerated = 0
+  /** Which account each row opened, by the client's reference, for the queries raised below. */
+  const openedFor = new Map<string, string>()
+  const accepted = going
   /** References whose note did not save, reported rather than swallowed. */
   const noteFailures: string[] = []
   for (const row of going) {
@@ -352,8 +393,91 @@ export async function approveDraft(input: {
         if (error) noteFailures.push(`${row.values.client_reference ?? `row ${row.line}`}: ${error.message}`)
       })
     }
+    openedFor.set(row.values.client_reference ?? `#${created}`, account.id)
     created += 1
     input.onProgress?.(created, going.length)
+  }
+
+  /*
+   * ---------------------------------------------------------------- the client's side of it
+   *
+   * THE FIRM: "if it was accepted with mistakes it should create a client query ... it'll go on
+   * the client's account that there is an import correction needed, and all of the problems would
+   * be listed on there, and that would be flagged at the client liaison. Also an email will be
+   * created and sent to the client liaison with the problems."
+   *
+   * AFTER THE ACCOUNTS, AND NEVER AT THEIR EXPENSE. The accounts are the import; the queries and
+   * the email are how the client is told. A query that fails to raise is worth reporting and is
+   * not worth losing 194 opened accounts over, so everything below collects its failures rather
+   * than throwing.
+   */
+  const corrections = accepted
+    .filter((r) => (r.planned?.problems.length ?? 0) > 0)
+    .map((r) => ({
+      reference: r.values.client_reference,
+      name: r.values.name,
+      problems: (r.planned?.problems ?? []).map((p) => ({
+        key: p.key, message: p.message, level: p.level,
+      })),
+      values: r.values,
+      note: r.note,
+    }))
+
+  const problems: string[] = []
+  if (corrections.length > 0) {
+    /* The liaison is whoever looks after the CLIENT, which is the company's account owner —
+       the same person AccountDetail shows under "Client liaison". */
+    const { data: company } = await supabase
+      .from('companies').select('name, account_owner_id')
+      .eq('id', judged.draft.companyId).maybeSingle()
+
+    for (const [i, row] of corrections.entries()) {
+      const accountId = openedFor.get(row.reference ?? '')
+      if (!accountId) continue
+      try {
+        await raiseQuery({
+          accountId,
+          description: correctionDescription(row),
+          kind: 'import',
+          /* WITH THE LIAISON, because it is the client who has to answer it and only a liaison
+             may put a query in front of a client. */
+          stage: 'liaison',
+          ownerId: (company?.account_owner_id as string | null) ?? null,
+          raisedBy: me.user?.id ?? null,
+          raisedByName: 'Handover import',
+          /* NEVER. A dispute raises Annexure B item 3 because the DEBTOR's objection caused the
+             work. A client's sheet being wrong is not something a debtor pays for. */
+          charge: false,
+        })
+      } catch (e) {
+        problems.push(`${row.reference ?? `row ${i + 1}`}: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+
+    const liaisonId = (company?.account_owner_id as string | null) ?? null
+    const liaisonEmail = liaisonId
+      ? (await supabase.from('profiles').select('email')
+        .eq('id', liaisonId).maybeSingle()).data?.email as string | undefined
+      : undefined
+
+    const mail = correctionEmail({
+      clientName: (company?.name as string | null) ?? 'this client',
+      filename: judged.draft.filename,
+      today: input.today,
+      rows: corrections,
+      labelFor: (key) => HANDOVER_COLUMNS.find((c) => c.key === key)?.label ?? key,
+    })
+
+    if (!liaisonEmail) {
+      /* SAID, NOT SWALLOWED. A client with no liaison on it is a real gap, and the person who
+         just ran the import is the one who can fix it. */
+      problems.push('No client liaison on this client, so nobody was emailed the corrections.')
+    } else if (input.accessToken) {
+      const sent = await sendCorrectionEmail(input.accessToken, liaisonEmail, mail)
+      if (sent) problems.push(sent)
+    } else {
+      problems.push('Not signed in to a mailbox, so the corrections were not emailed.')
+    }
   }
 
   await supabase.from('handover_drafts').update({
@@ -363,5 +487,12 @@ export async function approveDraft(input: {
     approved_by: me.user?.id ?? null,
   }).eq('id', input.draftId)
 
-  return { handoverId, created, leftBehind: judged.rows.length - created, noteFailures }
+  return {
+    handoverId,
+    created,
+    leftBehind: judged.rows.length - created,
+    noteFailures,
+    corrections: corrections.length,
+    correctionProblems: problems,
+  }
 }

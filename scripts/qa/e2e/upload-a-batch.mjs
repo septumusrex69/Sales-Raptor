@@ -33,6 +33,9 @@ const CLIENT = {
   code: 'NBP',
   status: 'Won',
   owner_id: PROFILE.id,
+  /* WHO LOOKS AFTER THE CLIENT. This is the liaison the corrections are raised with and emailed
+     to -- AccountDetail reads the same column for its "Client liaison" line. */
+  account_owner_id: PROFILE.id,
   mandate_signed_at: '2026-02-01',
   created_at: '2026-01-01T00:00:00Z',
 }
@@ -64,6 +67,12 @@ let nextRowId = 0
 /** What the screen asked to change about the draft itself, so a discard can be proved. */
 const draftPatches = []
 let discarded = false
+/** Everything the approval wrote, so what reaches the client can be asserted. */
+const queriesRaised = []
+const accountsOpened = []
+const mailSent = []
+/** Any Annexure B fee raised on the way through. Must stay empty: see the assertion below. */
+const feesRaised = []
 const DRAFT = {
   id: DRAFT_ID, company_id: COMPANY_ID, filename: 'handover.csv', sheet_kind: 'raptor',
   date_order: 'day-first', state: 'draft', handover_id: null, approved_at: null,
@@ -72,7 +81,17 @@ const DRAFT = {
 }
 
 const handlers = [
+  /*
+   * AN OBJECT WHERE .maybeSingle() ASKS FOR ONE, AN ARRAY EVERYWHERE ELSE.
+   *
+   * PostgREST returns one or the other depending on the Accept header supabase-js sends, and
+   * answering every read with an array left `company.account_owner_id` undefined -- so the
+   * approval found no liaison, emailed nobody, and said so. Which is correct behaviour on a
+   * client that really has none, and useless as a test of the case that matters.
+   */
+  [(u) => /\/rest\/v1\/companies/.test(u) && /account_owner_id/.test(u), () => ({ body: CLIENT })],
   [(u) => /\/rest\/v1\/companies/.test(u), slowly([CLIENT])],
+  [(u) => /\/rest\/v1\/profiles/.test(u) && /select=email/.test(u), () => ({ body: { email: ADMIN.email } })],
   [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN] })],
   [(u) => /\/rest\/v1\/teams/.test(u), () => ({ body: [TEAM] })],
 
@@ -109,6 +128,20 @@ const handlers = [
    * object; fetchOpenDrafts asks for the whole queue and gets an ARRAY it calls .map on. Handed
    * the object, the list threw and the queue never rendered at all.
    */
+  [(u, r) => /\/rest\/v1\/debtor_accounts/.test(u) && r.method() === 'POST', (u, r) => {
+    const row = JSON.parse(r.postData() ?? '{}')
+    accountsOpened.push(row)
+    return { body: { ...row, id: `acct-${accountsOpened.length}`, created_at: '2026-09-22T00:00:00Z' } }
+  }],
+  [(u, r) => /account_fees/.test(u) && r.method() === 'POST', (u, r) => {
+    feesRaised.push(r.postData() ?? '')
+    return { body: [] }
+  }],
+  [(u, r) => /account_queries/.test(u) && r.method() === 'POST', (u, r) => {
+    const row = JSON.parse(r.postData() ?? '{}')
+    queriesRaised.push(row)
+    return { body: { ...row, id: `q-${queriesRaised.length}`, raised_at: '2026-09-22T00:00:00Z' } }
+  }],
   [(u) => /handover_drafts/.test(u) && /id=eq\./.test(u), () => ({ body: DRAFT })],
   [(u) => /handover_drafts/.test(u), () => ({ body: discarded ? [] : [DRAFT] })],
 ]
@@ -140,6 +173,13 @@ let browser
 try {
   browser = await chromium.launch()
   const { page } = await signedInPage(browser, ADMIN, handlers, [])
+
+  /* SAME ORIGIN, so the supabase stub never sees it -- unrouted, the dev server answers 404 and
+     the approval would report that it could not email anybody. */
+  await page.route('**/api/email/send', async (route) => {
+    mailSent.push(JSON.parse(route.request().postData() ?? '{}'))
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
+  })
 
   let up = false
   for (let i = 0; i < 60; i += 1) {
@@ -365,17 +405,83 @@ try {
   t.ok('...for the rows that will actually open',
     /Approve 2 handover/.test(await approve.innerText()))
 
-  /* A decision can be taken back, and taking it back holds the handover again -- a decision with
-     no way to undo it is a typo nobody can fix. */
-  await page.getByRole('button', { name: 'Change', exact: true }).first().click()
+  /*
+   * A DECISION CAN BE TAKEN BACK, and taking it back holds the handover again -- a decision with
+   * no way to undo it is a typo nobody can fix.
+   *
+   * SCOPED TO THE REJECTED ROW, and named rather than taken as `.first()`. Both cards say
+   * "Change" by now; the first is the REFUSED one, so an unscoped click undid a rejection while
+   * the test went on to look for the Accept button that a refusal never offers.
+   */
+  const rejectedCard = page.locator('div.rounded-lg.border')
+    .filter({ hasText: 'GPS3/10104' }).last()
+  await rejectedCard.getByRole('button', { name: 'Change', exact: true }).click()
   await page.waitForTimeout(700)
   t.check('changing a decision holds it again', await approve.isDisabled(), true)
+  /* A refusal put back is still a refusal: it may be rejected again, never accepted. */
+  t.check('...and a refused row still offers no Accept',
+    await rejectedCard.getByRole('button', { name: 'Accept', exact: true }).count(), 0)
+  await rejectedCard.getByRole('button', { name: 'Reject', exact: true }).click()
+  await page.waitForTimeout(700)
 
   /* NOTHING ON THIS SCREEN SAYS ANYTHING IS POSTED. The firm: "we will never be posting
      something. Never ever we will post a letter. We will send everything via email." */
   const onScreen = (await page.locator('body').innerText()) ?? ''
   t.ok('nothing on the screen says a notice is posted', !/\bpost(ed|ing)\b/i.test(onScreen))
   t.ok('...and a missing email is what it warns about', /sent by email/.test(onScreen))
+
+  /*
+   * AND NOW APPROVE IT, which is where the client's side of this happens.
+   *
+   * THE FIRM: "if it was accepted with mistakes it should create a client query ... that would be
+   * flagged at the client liaison. Also an email will be created and sent to the client liaison
+   * with the problems."
+   */
+  t.check('re-answered, it is approvable again', await approve.isDisabled(), false)
+
+  await approve.click()
+  await page.waitForTimeout(2500)
+
+  t.check('the accounts are opened', accountsOpened.length, 2)
+  /* OUR REFERENCE, generated rather than read off a sheet that never had one. */
+  t.ok('...each with our own reference',
+    accountsOpened.every((a) => /^NBP\d{5}$/.test(a.account_number ?? '')))
+
+  /* ONE QUERY, for the one account accepted with something wrong on it -- not for the clean one
+     and not for the rejected one. */
+  t.check('a query is raised for the account accepted with a problem', queriesRaised.length, 1)
+  t.check("...as an import correction, not a debtor's dispute", queriesRaised[0]?.kind, 'import')
+  t.check('...with the liaison', queriesRaised[0]?.stage, 'liaison')
+  t.ok('...carrying the note that was typed',
+    (queriesRaised[0]?.description ?? '').includes('Confirm the email address with the client.'))
+  t.ok('...and the problem it overrode',
+    /section 129 is sent by email/.test(queriesRaised[0]?.description ?? ''))
+  /* A category says why the DEBTOR objects, so it means nothing here and the database refuses it
+     on any kind but a dispute. */
+  t.check('...and no dispute category', queriesRaised[0]?.category ?? null, null)
+
+  /* THE EMAIL. Written to be forwarded, so the liaison does not have to rewrite it. */
+  t.check('one email goes to the liaison', mailSent.length, 1)
+  t.check('...addressed to them', mailSent[0]?.to, ADMIN.email)
+  t.ok('...naming the client', /Northbank Properties/.test(mailSent[0]?.subject ?? ''))
+  t.ok('...with the reference in the table', /GPS3\/10105/.test(mailSent[0]?.bodyHtml ?? ''))
+  t.ok('...and what the sheet left empty', /\(nothing\)/.test(mailSent[0]?.bodyHtml ?? ''))
+
+  /*
+   * AND NOTHING WAS CHARGED TO A DEBTOR. A dispute raises Annexure B item 3 because the DEBTOR
+   * objected; a client's sheet being wrong is their typing. This is the assertion that would cost
+   * the firm a Council complaint if it ever stopped being true.
+   *
+   * TWO LOCKS, AND IT TAKES BOTH TO BREAK IT. `charge: false` at the call site is one;
+   * escalationChargeable('import') inside raiseQuery is the other, and either alone holds. Setting
+   * charge: true on its own raised nothing, which is the design working and also the reason this
+   * line needed breaking twice before it proved anything: it only fails when the kind is a
+   * dispute AND the call asks to charge.
+   */
+  t.check('no fee is raised against any debtor', feesRaised.length, 0)
+
+  await page.goto(`http://localhost:${PORT}/settings?tab=Data+Import&client=${COMPANY_ID}`)
+  await page.waitForTimeout(800)
 
   /*
    * A QUEUED SHEET CAN BE THROWN AWAY WITHOUT OPENING IT.
@@ -400,9 +506,12 @@ try {
    * with the confirm step deleted, because the request it is asserting the absence of had not
    * been made yet -- an absence checked too early is an absence of nothing.
    */
+  /* COUNTED BY WHAT THEY SAY, not how many there are. Approving the handover PATCHes this same
+     table to mark the draft approved, so a bare length check was counting that too. */
+  const discards = () => draftPatches.filter((p) => p.includes('discarded')).length
   if (await discard.count()) await discard.click()
   await page.waitForTimeout(600)
-  t.check('one press only asks', draftPatches.length, 0)
+  t.check('one press only asks', discards(), 0)
   const sure = page.getByRole('button', { name: 'Sure?', exact: true })
   t.check('...and says it is asking', await sure.count(), 1)
 
@@ -411,9 +520,9 @@ try {
      the confirm step came back as a stack trace with no failing check in it. */
   if (await sure.count()) await sure.click()
   await page.waitForTimeout(600)
-  t.check('the second press discards it', draftPatches.length, 1)
+  t.check('the second press discards it', discards(), 1)
   t.ok('...by marking it discarded rather than deleting it',
-    (draftPatches[0] ?? '').includes('discarded'))
+    draftPatches.some((p) => p.includes('"state":"discarded"') || p.includes("'state':'discarded'")))
   /* And it leaves the queue, so the screen agrees with what was just done. */
   await page.waitForTimeout(400)
   t.check('...and it goes off the waiting list',
