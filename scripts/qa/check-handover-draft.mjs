@@ -488,6 +488,59 @@ ok('...and raising one is a button', /raiseFollowUp\(\)/.test(detail))
    would open an empty draft. */
 ok('...offered only where something was refused', /notBroughtIn\.length > 0 && \(/.test(detail))
 
+/*
+ * ---- A CELL IS WRITTEN ON ITS OWN, NEVER AS THE WHOLE ROW ----
+ *
+ * THE FIRM, on a handover it could not approve: "I changed the contact details in the handover
+ * sheet ... and then it accepted it and then the ticket went away, but now it tells me that it
+ * has not gone away."
+ *
+ * Both screens used to save a corrected cell by spreading the screen's copy of the row and
+ * writing the whole `values` object back. Every edit re-reads and re-judges the draft, which is a
+ * round trip -- so that copy is one edit behind, and writing it back put the previous value in
+ * again. The correction saved, the warning cleared, and a moment later it was there again.
+ *
+ * The browser check beside this proves the behaviour. This holds the shape, because the shape is
+ * what makes it impossible: there is no way to ask for a whole-row write any more.
+ */
+ok('a cell is set through the database’s own merge',
+  /rpc\('set_draft_row_value'/.test(lib))
+ok('...and updateDraftRow cannot write values at all',
+  /export async function updateDraftRow/.test(lib)
+  && !/values\?: Record<string, string \| null>/.test(lib))
+/* Both screens, because the query ticket draws the same table and had the same bug. */
+ok('the import screen writes one cell', /setDraftRowValue\(rowId, key, value\)/.test(card))
+ok('...and so does the query ticket', /setDraftRowValue\(rowId, key, value\)/.test(detail))
+ok('neither builds a row out of its own copy',
+  !/\{ \.\.\.row\.values, \[key\]/.test(card) && !/\{ \.\.\.row\.values, \[key\]/.test(detail))
+/*
+ * AND A KEY NOBODY RECOGNISES FAILS WHERE IT IS TYPED. An unknown one is not dangerous -- the
+ * planner reads named keys and ignores the rest -- but it would be written, stored, and silently
+ * do nothing for ever.
+ */
+ok('...and an unknown column is refused rather than stored',
+  /HANDOVER_COLUMNS\.some\(\(c\) => c\.key === key\)/.test(lib))
+
+/*
+ * ---- THE NEWEST READ WINS ----
+ *
+ * Two re-reads can be out at once and nothing makes them come back in the order they were sent.
+ * The older one landing last redraws the pre-edit judgement: a corrected row goes back to being a
+ * problem while the database is right the whole time.
+ */
+ok('an out-of-date read is thrown away rather than drawn',
+  /readSeq\.current \+= 1/.test(card) && /seq !== readSeq\.current/.test(card))
+
+/*
+ * ---- A BLUR THAT CHANGED NOTHING SAVES NOTHING ----
+ *
+ * A date is stored as the sheet's reader produced it and drawn day-first, so a guard comparing
+ * the box with the STORED value never matched and merely tabbing through a date cell saved the
+ * row. Two rows of the firm's own draft on staging carry a date nobody typed.
+ */
+ok('a blur is judged against what the box was showing',
+  /e\.target\.value\.trim\(\) === shown\.trim\(\)/.test(card))
+
 /* ---------------------------------------------------------------- report */
 
 if (failures.length) {

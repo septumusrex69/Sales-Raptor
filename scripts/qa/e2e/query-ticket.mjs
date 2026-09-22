@@ -156,6 +156,16 @@ const handlers = [
     }
     return { body: [] }
   }],
+  /* ONE CELL, MERGED AGAINST THE STORED ROW -- the same call the import table makes. Answered
+     from the harness default it would return 200 and change nothing, and the correction below
+     would appear to save while the fixture stayed as it was. */
+  [(u, r) => /rpc\/set_draft_row_value/.test(u) && r.method() === 'POST', (u, r) => {
+    const { p_row_id: id, p_key: key, p_value: value } = JSON.parse(r.postData() ?? '{}')
+    rowPatches.push({ id, patch: { values: { [key]: value } } })
+    const row = followRows.find((x) => x.id === id)
+    if (row) row.values = { ...row.values, [key]: (value ?? '').trim() || null }
+    return { body: null }
+  }],
   [(u, r) => /handover_draft_rows/.test(u) && r.method() === 'PATCH', (u, r) => {
     const id = decodeURIComponent(new URL(u).searchParams.get('id') ?? '').replace('eq.', '')
     const patch = JSON.parse(r.postData() ?? '{}')

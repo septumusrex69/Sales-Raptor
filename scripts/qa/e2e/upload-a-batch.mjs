@@ -67,6 +67,13 @@ const slowly = (body) => async () => {
 const DRAFT_ID = '44444444-4444-4444-8444-444444444444'
 const draftRows = []
 let nextRowId = 0
+/* Held open on purpose for the two-edits-at-once case below. See it there. */
+let holdTheRead = 0
+/** Per-read delays, consumed in order, so two reads can be made to land out of order. */
+const readDelays = []
+/** Every PATCH the screen sent at a row, so a write nobody asked for can be seen. */
+const rowPatches = []
+
 /** What the screen asked to change about the draft itself, so a discard can be proved. */
 const draftPatches = []
 let discarded = false
@@ -114,14 +121,41 @@ const handlers = [
     return { body: [] }
   }],
   /* An edit: PATCH ...?id=eq.row-N, merged into the stored row so the next read re-judges it. */
+  /*
+   * ONE CELL, MERGED AGAINST THE STORED ROW -- which is the whole point of the function, so the
+   * fixture has to merge too. Answered from the harness default it would return 200 and change
+   * nothing, and every assertion about an edit below would pass against an app that saved
+   * nothing at all.
+   */
+  [(u, r) => /rpc\/set_draft_row_value/.test(u) && r.method() === 'POST', (u, r) => {
+    const { p_row_id: id, p_key: key, p_value: value } = JSON.parse(r.postData() ?? '{}')
+    rowPatches.push({ id, patch: { values: { [key]: value } } })
+    const row = draftRows.find((x) => x.id === id)
+    if (row) row.values = { ...row.values, [key]: (value ?? '').trim() || null }
+    return { body: null }
+  }],
   [(u, r) => /handover_draft_rows/.test(u) && r.method() === 'PATCH', (u, r) => {
     const id = decodeURIComponent(new URL(u).searchParams.get('id') ?? '').replace('eq.', '')
     const patch = JSON.parse(r.postData() ?? '{}')
+    rowPatches.push({ id, patch })
     const row = draftRows.find((x) => x.id === id)
     if (row) Object.assign(row, patch)
     return { body: [] }
   }],
-  [(u) => /handover_draft_rows/.test(u), () => ({ body: draftRows })],
+  /*
+   * READ AT THE MOMENT IT IS ASKED, ANSWERED WHEN IT IS READY.
+   *
+   * The rows are SNAPSHOTTED on the way in and the delay taken afterwards, because that is what a
+   * database does: a slow read sees the table as it was when it started, not as it is when it
+   * gets back. Returning `draftRows` after the wait would hand every read the newest data, and
+   * two reads could then never disagree -- which is the one thing the out-of-order case needs.
+   */
+  [(u) => /handover_draft_rows/.test(u), async () => {
+    const snapshot = draftRows.map((r) => ({ ...r, values: { ...r.values } }))
+    const wait = readDelays.length ? readDelays.shift() : holdTheRead
+    if (wait) await new Promise((r) => setTimeout(r, wait))
+    return { body: snapshot }
+  }],
 
   /*
    * THE BATCH ITSELF, which nothing here answered until a query needed its id.
@@ -466,6 +500,173 @@ try {
   const ph = await page.getByPlaceholder(/A note for whoever works this account/).first()
     .getAttribute('placeholder')
   t.ok('...including in the note box', (ph ?? '').includes('—') && !(ph ?? '').includes('\\u'))
+
+  /*
+   * TOUCHING A DATE AND CHANGING NOTHING MUST WRITE NOTHING.
+   *
+   * The box for a date SHOWS 18/03/2026 and the row STORES 2026/03/18, which is what the sheet's
+   * reader produced. The guard that decides whether a blur is worth saving compared the box's
+   * text with the stored text, so those two never matched and simply tabbing through a date cell
+   * saved the row -- rewriting the stored date into the displayed form on the way past.
+   *
+   * It is visible in the firm's own draft on staging: two rows carry a date written day-first
+   * while the other eleven carry the reader's yyyy/mm/dd, and only one of the two was ever typed
+   * in by anybody.
+   *
+   * IT IS NOT A HARMLESS WRITE, which is why this is here rather than filed as untidiness. The
+   * save sends the WHOLE row, built from the screen's copy of it, so a write nobody asked for
+   * puts back every value that copy is behind on -- and the correction somebody made a moment
+   * earlier goes with it.
+   */
+  const patchesFor = (line) => {
+    const id = draftRows.find((r) => r.line === line)?.id
+    return rowPatches.filter((p) => p.id === id && p.patch.values)
+  }
+  const beforeTouch = patchesFor(2).length
+  if (firstDate) {
+    await firstDate.focus()
+    await firstDate.blur()
+    await page.waitForTimeout(500)
+  }
+  t.check('touching a date and leaving it alone saves nothing',
+    patchesFor(2).length - beforeTouch, 0)
+  t.check('...and the stored date is still the one the sheet gave',
+    draftRows.find((r) => r.line === 2)?.values.default_date ?? '(no row)', '2026/03/18')
+
+  /*
+   * TWO EDITS ON ONE ROW, THE SECOND SENT BEFORE THE FIRST HAS COME BACK.
+   *
+   * THE FIRM, on a handover it could not approve: "I changed the contact details in the handover
+   * sheet ... and then it accepted it and then the ticket went away, but now it tells me that it
+   * has not gone away."
+   *
+   * Every edit re-reads and re-judges the whole draft, which is a round trip. A save built by
+   * merging into the screen's copy of the row is therefore built on a copy that can be one edit
+   * behind, and merging into it puts the old value back. The correction lands, the warning
+   * clears, and a moment later it is there again with nothing on the screen saying why.
+   *
+   * DISPATCHED RATHER THAN CLICKED. Playwright waits for a box to be editable before it types,
+   * and every box is disabled while the re-read is out -- so driving this through the normal
+   * actions waits the race out and tests nothing. The events are the ones React listens for.
+   *
+   * ASSERTED ON THE STORED ROW, not on the boxes. The boxes are uncontrolled, so they keep what
+   * was typed whether or not it saved -- which is exactly how this stayed invisible.
+   */
+  const editedRow = () => draftRows.find((r) => r.line === 2)
+  holdTheRead = 700
+  const surnameCol = columnAt('Surname')
+  const emailCol = columnAt('Email address')
+  if (surnameCol >= 0 && emailCol >= 0) {
+    await page.evaluate(({ a, b }) => {
+      const at = (col) => document.querySelectorAll('table tbody tr')[0]
+        ?.querySelectorAll('td')[col]?.querySelector('input')
+      const type = (el, v) => {
+        if (!el) return
+        const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+        set?.call(el, v)
+        el.dispatchEvent(new Event('input', { bubbles: true }))
+        el.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+      }
+      type(at(a), 'Van Der Westhuizen-Smit')
+      type(at(b), 'someone@example.co.za')
+    }, { a: surnameCol, b: emailCol })
+    await page.waitForTimeout(3000)
+  }
+  holdTheRead = 0
+  t.check('a second edit does not undo the first',
+    editedRow()?.values.name ?? '(no row)', 'Van Der Westhuizen-Smit')
+  t.check('...and the second one is saved too',
+    editedRow()?.values.email_1 ?? '(no row)', 'someone@example.co.za')
+
+  /*
+   * A SLOW READ THAT LANDS AFTER A FAST ONE MUST NOT PUT THE OLD JUDGEMENT BACK.
+   *
+   * Every edit re-reads and re-judges the whole draft, and nothing makes two of those come back
+   * in the order they were sent. The older one landing last redraws the screen as it was BEFORE
+   * the newer edit: a row that has just been corrected goes back to being a problem, and the
+   * sentence beside Approve goes back to naming it. Nothing on the screen says why, and the
+   * database is right the whole time -- which is what makes it so hard to believe.
+   *
+   * DRIVEN BY MAKING THE FIRST READ SLOW AND THE SECOND FAST, which is the whole of the race.
+   * The second edit is the one that clears a warning, so the revert is visible as that warning
+   * coming back rather than as an invisible difference in state.
+   */
+  const emailOf = (line) => draftRows.find((r) => r.line === line)?.values.email_1 ?? null
+  readDelays.push(1500, 100)
+  await page.evaluate((col) => {
+    const at = (rowIndex, c) => document.querySelectorAll('table tbody tr')[rowIndex]
+      ?.querySelectorAll('td')[c]?.querySelector('input')
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    const type = (el, v) => {
+      if (!el) return
+      set?.call(el, v)
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+    }
+    type(at(0, col), 'first@example.co.za')
+    /* Far enough apart that the first read is out before the second edit is sent, and close
+       enough that it has not come back. */
+    setTimeout(() => type(at(2, col), 'ndlovu@example.co.za'), 300)
+  }, emailCol)
+  await page.waitForTimeout(3500)
+  readDelays.length = 0
+  t.check('the row that was corrected is stored corrected',
+    emailOf(4) ?? '(not saved)', 'ndlovu@example.co.za')
+  /* The card names its row, so its absence is asked for by row rather than by the sentence on
+     it -- the same sentence sits on other rows and would answer for them. */
+  const cardsNow = await page.$$eval('textarea[placeholder*="whoever works this account"]',
+    (els) => els.map((el) => (el.closest('div[class*="rounded"]')?.textContent ?? '')
+      .match(/Row (\d+)/)?.[1] ?? '').filter(Boolean))
+  t.ok('there are still cards on the screen for the other rows', cardsNow.length > 0)
+  t.check('...and the corrected row is not still being asked about',
+    cardsNow.includes('4') ? 'Row 4 is still on the screen' : '', '')
+  /*
+   * AND PUT BACK, because everything below this reads the draft as the sheet made it -- which
+   * rows warn, which can be accepted, what the gate is holding. Left corrected, the two rows
+   * that were missing an email no longer warn and half the assertions below stop testing
+   * anything while still passing.
+   */
+  const restore = [
+    [0, emailCol, 'kagiso.molefe@example.co.za'],
+    [0, surnameCol, 'Van Der Westhuizen'],
+    [2, emailCol, ''],
+  ]
+  for (const [rowIndex, col, value] of restore) {
+    await page.evaluate(({ r, c, v }) => {
+      const el = document.querySelectorAll('table tbody tr')[r]
+        ?.querySelectorAll('td')[c]?.querySelector('input')
+      if (!el) return
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(el, v)
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+    }, { r: rowIndex, c: col, v: value })
+    await page.waitForTimeout(500)
+  }
+  await page.waitForTimeout(500)
+  t.check('the draft is back to the way the sheet left it',
+    `${emailOf(2)}|${draftRows.find((r) => r.line === 2)?.values.name}|${emailOf(4) ?? ''}`,
+    'kagiso.molefe@example.co.za|Van Der Westhuizen|')
+
+  /*
+   * AND THE SCREEN AGREES WITH WHAT IS STORED. The complaint was not really the lost value -- it
+   * was being told a problem was still there with no sign of it on the screen. So the reasons
+   * under the table and the sentence beside Approve are held against each other: a row the gate
+   * is waiting on must have a card somebody can answer it on.
+   */
+  await page.waitForTimeout(600)
+  const gateSays = await page.locator('body').innerText()
+  const waitingLines = [...gateSays.matchAll(/rows need a decision[^\n]*?— ([\d, ]+)/g)]
+    .flatMap((m) => m[1].split(',').map((n) => n.trim()).filter(Boolean))
+  const cardLines = await page.$$eval('textarea[placeholder*="whoever works this account"]',
+    (els) => els.map((el) => {
+      const card = el.closest('div[class*="rounded"]')
+      return (card?.textContent ?? '').match(/Row (\d+)/)?.[1] ?? ''
+    }).filter(Boolean))
+  /* Presence before absence: with no cards on the screen at all the line below passes vacuously,
+     and it did -- the note box is a textarea and this was asking for an input. */
+  t.ok('there are decision cards on the screen to check against', cardLines.length > 0)
+  t.check('every row the gate is waiting on has a card to answer it on',
+    waitingLines.filter((n) => !cardLines.includes(n)).join(', '), '')
 
   /*
    * THE ROW NUMBER STAYS PUT WHILE THE OTHER FORTY COLUMNS GO PAST.

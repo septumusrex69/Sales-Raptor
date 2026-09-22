@@ -5864,3 +5864,39 @@ create unique index if not exists handover_drafts_from_query_idx
 comment on column public.handover_drafts.from_query_id is
   'The client query whose refused rows this draft was raised from. Unique: one follow-up per '
   'query, so reopening the ticket finds the draft already there rather than starting another.';
+
+-- ONE CELL AT A TIME, MERGED HERE RATHER THAN ON THE SCREEN.
+--
+-- The import table saved a corrected cell by merging it into the screen's copy of the row and
+-- writing the WHOLE `values` object back. Every edit re-reads and re-judges the draft, which is a
+-- round trip, so that copy can be one edit behind -- and writing it back put the previous value
+-- in again. The firm saw it as a correction that took and then undid itself: "I changed the
+-- contact details ... and then the ticket went away, but now it tells me that it has not gone
+-- away."
+--
+-- `values || jsonb_build_object(...)` merges against the row as it is in the table at the moment
+-- of the update, so two edits to one row cannot lose each other no matter which order they land
+-- in. Nothing the caller holds is written back.
+--
+-- An empty string is stored as JSON null, which is what a cleared box means and what
+-- `values->>key` then reads back -- the same thing the screen used to send.
+create or replace function public.set_draft_row_value(
+  p_row_id uuid,
+  p_key text,
+  p_value text
+) returns void
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  update public.handover_draft_rows
+     set values = values || jsonb_build_object(p_key, nullif(btrim(p_value), ''))
+   where id = p_row_id;
+end $$;
+
+grant execute on function public.set_draft_row_value(uuid, text, text) to authenticated;
+
+comment on function public.set_draft_row_value(uuid, text, text) is
+  'Set one cell on a handover draft row, merged against the stored row rather than against the '
+  'caller''s copy of it. A whole-object write loses any edit the caller has not seen yet.';

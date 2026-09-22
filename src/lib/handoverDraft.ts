@@ -298,17 +298,49 @@ export async function fetchDraft(id: string, today: string): Promise<JudgedDraft
   }
 }
 
+/**
+ * Set ONE cell on a draft row.
+ *
+ * NOT `updateDraftRow({ values })`, and the difference is the whole point. That writes the whole
+ * `values` object, which the caller has to build by merging into its own copy of the row -- and
+ * every edit re-reads and re-judges the draft, so that copy is one round trip old. Two edits to
+ * one row in quick succession therefore lost the first: it saved, the warning cleared, and the
+ * second write put the old value back. THE FIRM: "I changed the contact details in the handover
+ * sheet ... and then the ticket went away, but now it tells me that it has not gone away."
+ *
+ * The merge happens in the database against the row as it stands -- see set_draft_row_value.
+ *
+ * THE KEY IS CHECKED AGAINST THE COLUMN LIST, not because an unknown one is dangerous -- the
+ * planner reads named keys and ignores the rest -- but because it would be written, stored, and
+ * silently do nothing for ever. A typo should fail where it is made.
+ */
+export async function setDraftRowValue(
+  rowId: string, key: string, value: string,
+): Promise<void> {
+  if (!HANDOVER_COLUMNS.some((c) => c.key === key)) {
+    throw new Error(`"${key}" is not a handover column.`)
+  }
+  const { error } = await supabase.rpc('set_draft_row_value', {
+    p_row_id: rowId, p_key: key, p_value: value,
+  })
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * Everything about a row EXCEPT its cells.
+ *
+ * `values` is deliberately not settable here. A whole-object write is what lost an edit; cells go
+ * through setDraftRowValue, which merges in the database.
+ */
 export async function updateDraftRow(
   id: string,
   patch: {
-    values?: Record<string, string | null>
     excluded?: boolean
     decision?: Decision
     note?: string | null
   },
 ): Promise<void> {
   const { error } = await supabase.from('handover_draft_rows').update({
-    ...(patch.values ? { values: patch.values } : {}),
     ...(patch.excluded === undefined ? {} : { excluded: patch.excluded }),
     ...(patch.decision === undefined ? {} : { decision: patch.decision }),
     ...(patch.note === undefined ? {} : { note: patch.note }),
@@ -758,3 +790,4 @@ export async function approveDraft(input: {
     refusedSheet,
   }
 }
+

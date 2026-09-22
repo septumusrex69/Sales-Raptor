@@ -11,7 +11,8 @@ import {
 } from '../../lib/accountQueries'
 import {
   acceptDraftRow, approveDraft, clearDraftRowDecision, discardDraft, fetchDraft,
-  fetchDraftForHandover, followUpDraft, rejectDraftRow, startFollowUpDraft, updateDraftRow,
+  fetchDraftForHandover, followUpDraft, rejectDraftRow, setDraftRowValue,
+  startFollowUpDraft, updateDraftRow,
   type JudgedDraft,
 } from '../../lib/handoverDraft'
 import { DraftTable } from '../../components/settings/HandoverImportCard'
@@ -294,11 +295,10 @@ export function QueryDetail() {
           backLabel="Put it away"
           onBack={() => setFollowUp(null)}
           onEdit={async (rowId, key, value) => {
-            const row = followUp.rows.find((r) => r.id === rowId)
-            if (!row) return
-            /* Written first, then the whole draft re-read: a row's verdict comes from the
-               database's copy of it, so what the screen shows is what an approval would act on. */
-            await updateDraftRow(rowId, { values: { ...row.values, [key]: value.trim() || null } })
+            /* ONE CELL, MERGED IN THE DATABASE. Built by spreading this screen's copy of the row
+               it would put back whatever that copy is behind on, and it is a round trip behind
+               after every edit -- see setDraftRowValue. */
+            await setDraftRowValue(rowId, key, value)
             await reload(followUp.draft.id)
           }}
           onExclude={async (rowId, excluded) => {

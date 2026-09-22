@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertTriangle, ArrowRight, Check, CheckCircle2, FileUp, Loader2, Paperclip, Upload, X,
@@ -18,7 +18,7 @@ import { matchDocuments, type MatchPlan } from '../../lib/documentMatch.ts'
 import { HANDOVER_COLUMNS } from '../../lib/handoverSheet.ts'
 import {
   acceptDraftRow, approveDraft, clearDraftRowDecision, discardDraft, fetchDraft, fetchOpenDrafts,
-  rejectDraftRow, saveDraft, updateDraftRow,
+  rejectDraftRow, saveDraft, setDraftRowValue, updateDraftRow,
   type HandoverDraft, type JudgedDraft,
 } from '../../lib/handoverDraft'
 import { canAccept, type Decision } from '../../lib/handoverDecision.ts'
@@ -174,12 +174,29 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
   }, [])
   useEffect(() => { void refreshDrafts() }, [refreshDrafts])
 
+  /*
+   * THE NEWEST READ WINS, and an older one that lands after it is thrown away.
+   *
+   * Every edit re-reads and re-judges the whole draft. Two of those can be out at once, and
+   * nothing makes them come back in the order they were sent -- so the slower, older one could
+   * land last and put the pre-edit judgement back on the screen. That is a corrected row going
+   * back to being a problem, with nothing on the screen saying why.
+   *
+   * A counter rather than an AbortController: the read is three requests deep through
+   * supabase-js and the point is which answer is allowed to render, not saving the bytes.
+   */
+  const readSeq = useRef(0)
   const load = useCallback(async (id: string) => {
+    const seq = (readSeq.current += 1)
     setBusy('Reading the handover')
     try {
-      setJudged(await fetchDraft(id, today()))
+      const fresh = await fetchDraft(id, today())
+      if (seq !== readSeq.current) return
+      setJudged(fresh)
       setDraftId(id)
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(null) }
+    } catch (e) {
+      if (seq === readSeq.current) setError(e instanceof Error ? e.message : String(e))
+    } finally { if (seq === readSeq.current) setBusy(null) }
   }, [])
 
   /* ---------- reading the file ---------- */
@@ -240,13 +257,18 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
 
   /* ---------- working the draft ---------- */
 
+  /*
+   * ONE CELL, MERGED IN THE DATABASE. This used to build the row's whole `values` object by
+   * spreading the screen's copy of it and write that back -- and the screen's copy is a round
+   * trip old, because every edit re-reads and re-judges the draft. A second edit to the same row
+   * therefore undid the first: it saved, the warning cleared, and a moment later it was back.
+   * THE FIRM: "I changed the contact details ... and then the ticket went away, but now it tells
+   * me that it has not gone away."
+   */
   async function edit(rowId: string, key: string, value: string) {
-    const row = judged?.rows.find((r) => r.id === rowId)
-    if (!row) return
-    const values = { ...row.values, [key]: value.trim() || null }
     /* Written first, then the whole draft re-read: the verdict comes from the database's copy of
        the row, so what the screen shows is what an approval would act on. */
-    await updateDraftRow(rowId, { values })
+    await setDraftRowValue(rowId, key, value)
     if (draftId) await load(draftId)
   }
 
@@ -815,6 +837,10 @@ export function DraftTable({
                     const worst = (row.planned?.problems ?? []).filter((pr) => pr.key === k)
                     const bad = worst.some((pr) => pr.level === 'refuse')
                     const iffy = !bad && worst.length > 0
+                    /* What the box draws, which is also what a blur is judged against. */
+                    const shown = isDate
+                      ? displayDate(row.values[k], order)
+                      : row.values[k] ?? ''
                     return (
                       <td key={k} className="py-1.5 pr-2">
                         {/*
@@ -837,13 +863,19 @@ export function DraftTable({
                             sitting in the box.
                           */
                           key={isDate ? `${k}:${row.values[k] ?? ''}` : undefined}
-                          defaultValue={isDate
-                            ? displayDate(row.values[k], order)
-                            : row.values[k] ?? ''}
+                          defaultValue={shown}
                           disabled={!!busy || row.excluded}
                           title={worst.map((pr) => pr.message).join(' ') || undefined}
+                          /*
+                            COMPARED WITH WHAT THE BOX WAS SHOWING, not with what is stored.
+                            A date is held as the sheet's reader produced it -- 2026/03/18 -- and
+                            drawn as 18/03/2026, so those two never matched and merely tabbing
+                            through a date cell saved the row, rewriting the stored date into the
+                            displayed form on the way past. Two rows of the firm's own draft on
+                            staging carry a date nobody typed for exactly that reason.
+                          */
                           onBlur={(e) => {
-                            if (e.target.value.trim() === (row.values[k] ?? '')) return
+                            if (e.target.value.trim() === shown.trim()) return
                             void onEdit(row.id, k, e.target.value)
                           }}
                           style={{ minWidth: `${widths[k]}ch` }}
