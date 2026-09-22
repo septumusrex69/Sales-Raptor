@@ -15,6 +15,7 @@ import { supabase } from './supabase'
 import { diarise } from './diary.ts'
 import type { HandOutPlan } from './handOut.ts'
 import { ID_CHUNK, idChunks } from './accountAllocation.ts'
+import { handOutNotices } from './handOutNotice.ts'
 
 /**
  * The two things you can do with a stack of accounts, and they are not independent switches.
@@ -36,6 +37,8 @@ export interface HandOutResult {
   booked: number
   /** Accounts the diary refused, with why. The allocation stands; these need a person. */
   failed: { accountId: string; message: string }[]
+  /** How many people were told. Reported so a silent failure to notify is visible. */
+  notified: number
 }
 
 export interface Actor {
@@ -55,12 +58,31 @@ export async function commitHandOut(input: {
   mode: HandOutMode
   actor: Actor
   reason?: string | null
+  /**
+   * The batch these accounts arrived in, when the whole hand-out came out of one.
+   *
+   * Only used to make the clerk's "see them" link a real list rather than their whole desk. A
+   * hand-out assembled out of a filter across several batches leaves this null and the link falls
+   * back to the person's own accounts, which is still true.
+   */
+  handoverId?: string | null
   /** Called after each account so a long hand-out can show progress rather than appear hung. */
   onProgress?: (done: number, total: number) => void
 }): Promise<HandOutResult> {
   const { placements } = input.plan
-  const result: HandOutResult = { allocated: 0, booked: 0, failed: [] }
+  const result: HandOutResult = { allocated: 0, booked: 0, failed: [], notified: 0 }
   if (placements.length === 0) return result
+
+  /*
+   * Counted as the writes succeed, never off the plan. A clerk told "12 accounts allocated to you"
+   * who finds nine is worse off than one told nine: the bell is the only account of this the
+   * person gets, and an optimistic count turns it into a thing they have to re-check by hand.
+   */
+  const allocatedBy = new Map<string, number>()
+  const bookedBy = new Map<string, number>()
+  const bump = (m: Map<string, number>, userId: string, n = 1) => {
+    m.set(userId, (m.get(userId) ?? 0) + n)
+  }
 
   if (input.mode === 'allocate_and_refer') {
     /*
@@ -84,6 +106,7 @@ export async function commitHandOut(input: {
           .from('debtor_accounts').update({ assigned_to: userId }).in('id', chunk)
         if (error) throw new Error(`Allocating failed: ${error.message}`)
         result.allocated += chunk.length
+        bump(allocatedBy, userId, chunk.length)
       }
     }
   }
@@ -143,6 +166,7 @@ export async function commitHandOut(input: {
       const { error } = await supabase.from('diary_entries').insert(rows.slice(i, i + ID_CHUNK))
       if (error) throw new Error(error.message)
       result.booked += slice.length
+      for (const p of slice) bump(bookedBy, p.userId)
       tick(slice.length)
     } catch {
       /*
@@ -169,6 +193,7 @@ export async function commitHandOut(input: {
             actor: input.actor,
           })
           result.booked += 1
+          bump(bookedBy, p.userId)
         } catch (e) {
           result.failed.push({
             accountId: p.accountId,
@@ -178,6 +203,34 @@ export async function commitHandOut(input: {
         tick(1)
       }
     }
+  }
+
+  /*
+   * THE BELL, LAST AND NEVER FATAL. THE FIRM: "there should be some sort of notification that's
+   * being shown to the clerk that, oh, you've received seven new handovers and referrals."
+   *
+   * After the writes, because a notice about accounts that did not move is a lie, and the counts
+   * above are of rows that actually landed. Wrapped so a notifications table that refuses cannot
+   * undo an allocation that succeeded — the work is on the desks either way, and a team leader who
+   * saw "500 allocated" then an error would reasonably re-run the whole hand-out.
+   *
+   * A failure to allocate is a different matter and still throws above: that one is not cosmetic.
+   */
+  const notices = handOutNotices({
+    /* Empty in refer-only mode, because nothing above filled it. Nobody is told their book grew
+       when all that happened is that they were booked to ring somebody else's accounts. */
+    allocated: allocatedBy,
+    referred: bookedBy,
+    handoverId: input.handoverId ?? null,
+    actorId: input.actor.id,
+  })
+  for (const n of notices) {
+    try {
+      const { error } = await supabase.rpc('notify_user', {
+        p_user_id: n.userId, p_type: n.type, p_message: n.message, p_link: n.link,
+      })
+      if (!error) result.notified += 1
+    } catch { /* see above: a bell that did not ring must not undo work that did happen. */ }
   }
 
   return result

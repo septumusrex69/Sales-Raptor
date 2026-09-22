@@ -36,13 +36,21 @@ interface PickGroup { id: string; label: string; ids: string[] }
  * Not a summary of what will probably happen: the actual placements. A distributor that decides
  * where a billion rand of work goes and reports afterwards is one nobody can refuse.
  */
-export function HandOutModal({ selection, selectedCount, users, teams, actor, onClose, onDone }: {
+export function HandOutModal({
+  selection, selectedCount, users, teams, actor, handoverId, onClose, onDone,
+}: {
   selection: Selection
   /** What the bulk bar said, so the modal can show a figure before its own load finishes. */
   selectedCount: number
   users: User[]
   teams: Team[]
   actor: { id: string | null; name: string | null }
+  /**
+   * The batch, when the list itself is narrowed to one — which is how somebody arrives here from
+   * an approved handover. Passed through only so the clerk's notification links to those accounts
+   * rather than to their whole desk.
+   */
+  handoverId?: string | null
   onClose: () => void
   onDone: (message: string) => void | Promise<void>
 }) {
@@ -240,7 +248,7 @@ export function HandOutModal({ selection, selectedCount, users, teams, actor, on
     setBusy({ done: 0, total: plan.placements.length }); setError(null)
     try {
       const res = await commitHandOut({
-        plan, mode, actor, reason,
+        plan, mode, actor, reason, handoverId,
         onProgress: (done, total) => setBusy({ done, total }),
       })
       await onDone(handOutSummary(res, (id) =>

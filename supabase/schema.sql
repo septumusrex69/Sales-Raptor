@@ -5756,3 +5756,53 @@ alter table public.account_queries
 comment on column public.account_queries.kind is
   'dispute (the debtor objects), help (an agent asks a team leader), litigation (recommend we '
   'sue), import (the client''s handover data needs correcting). Only a dispute may raise a fee.';
+
+-- Telling a colleague something happened on their book.
+--
+-- THE FIRM: "then it should go to the clerk dashboard and ping, or there should be some sort of
+-- notification that's being shown to the clerk that, oh, you've received seven new handovers and
+-- referrals. They should be notified of that."
+--
+-- THE TABLE HAD NO INSERT POLICY AT ALL. Select and update were both scoped to `user_id =
+-- auth.uid()`, which is right -- nobody reads or clears somebody else's bell -- but it meant
+-- nothing could ever CREATE one, for anybody, including oneself. The bell has been sitting there
+-- showing rows that only the Swordfish import ever wrote.
+--
+-- A FUNCTION RATHER THAN AN INSERT POLICY, because the policy that would make this work is
+-- "any authenticated user may insert a row for any user", and that is a bigger hole than the
+-- feature needs. Here the shape is fixed: four columns, the actor recorded as the caller, and no
+-- way to write one on somebody's behalf pretending to be them.
+create or replace function public.notify_user(
+  p_user_id uuid,
+  p_type text,
+  p_message text,
+  p_link text default null
+) returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  new_id uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'Not signed in.';
+  end if;
+  if not exists (select 1 from public.profiles where id = p_user_id) then
+    raise exception 'No such person.';
+  end if;
+
+  insert into public.notifications (user_id, type, message, link)
+  values (p_user_id, p_type, p_message, p_link)
+  returning id into new_id;
+  return new_id;
+end;
+$$;
+
+revoke all on function public.notify_user(uuid, text, text, text) from public;
+grant execute on function public.notify_user(uuid, text, text, text) to authenticated;
+
+comment on function public.notify_user(uuid, text, text, text) is
+  'Create a notification for a colleague. security definer because notifications has no insert '
+  'policy -- reading and clearing are yours alone, but anybody on the staff may tell you '
+  'something landed on your book.';

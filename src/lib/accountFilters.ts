@@ -47,6 +47,9 @@ export const STATUS_GROUPS = [
 export const FILTER_PARAMS = [
   'status', 'sub', 'bucket', 'who', 'team', 'from', 'to',
   'adrift', 'never', 'quiet', 'presc', 'duplum', 'waiting', 'min', 'drift',
+  /* The batch clears with the rest: somebody who came in from an approved handover and then
+     pressed "Clear filters" is asking for the whole book, not for the batch again. */
+  'handover',
 ] as const
 export type FilterParam = (typeof FILTER_PARAMS)[number]
 
@@ -94,6 +97,17 @@ export function queryFromParams(
 
   const client = params.get('client')
   if (client) q.companyId = client
+
+  /*
+   * THE BATCH THEY ARRIVED IN. THE FIRM: "the moment after that, it should go into a state where
+   * it's ready to allocate and refer the accounts to the clerks."
+   *
+   * Approving a handover now links straight here, so "these seven" is a list with the bulk
+   * allocate already on it -- rather than somebody reading a filename off one screen and
+   * reconstructing the filter on another.
+   */
+  const handover = params.get('handover')
+  if (handover) q.handoverId = handover
 
   const group = params.get('status')
   if (group && STATUS_GROUPS.some((g) => g.value === group)) {
@@ -182,6 +196,13 @@ const money = (n: number) => `R${n.toLocaleString('en-ZA')}`
  */
 export function filterChips(params: URLSearchParams, names: ChipNames = {}): FilterChip[] {
   const out: FilterChip[] = []
+
+  /*
+   * THE BATCH FIRST, because arriving from an approved handover it is the whole question. Without
+   * a chip it is a narrowing with nothing on screen saying so -- the list would show seven
+   * accounts out of a book of sixteen thousand and look like a broken filter.
+   */
+  if (params.get('handover')) out.push({ param: 'handover', label: 'One handover' })
 
   const group = STATUS_GROUPS.find((g) => g.value === params.get('status'))
   if (group) out.push({ param: 'status', label: group.label })

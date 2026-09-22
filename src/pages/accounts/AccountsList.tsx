@@ -561,6 +561,9 @@ export function AccountsList() {
           users={users}
           teams={teams}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          /* Only when the list is a single batch. A hand-out made out of some other filter has no
+             one batch to point at, and a link to the wrong one is worse than a link to the desk. */
+          handoverId={params.get('handover')}
           onClose={() => setAllocating(null)}
           onDone={async (message) => { setDone(message); await reload() }}
         />

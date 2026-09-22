@@ -121,6 +121,16 @@ check('an open-ended range reads as one', chipLabels('from=2026-01-01')[0], 'Han
  * reading and into the firm's entire ledger.
  */
 ok('the client never becomes a chip', chipLabels('client=abc').length === 0)
+
+/*
+ * THE BATCH DOES BECOME ONE. Arriving from an approved handover it is the whole question, and
+ * without a chip the list shows seven accounts out of sixteen thousand with nothing on screen
+ * saying why -- which reads as a broken filter rather than a narrowing.
+ */
+ok('a handover becomes a chip', chipLabels('handover=h1').includes('One handover'))
+ok('...and clears with the rest', clearedFilters(new URLSearchParams('handover=h1')).get('handover') === null)
+check('...and narrows to that batch',
+  queryFromParams(new URLSearchParams('handover=h1')).handoverId, 'h1')
 ok('...and survives clearing', clearedFilters(new URLSearchParams('client=abc&sub=Tracing')).get('client') === 'abc')
 ok('...and the search survives clearing', clearedFilters(new URLSearchParams('q=smit&sub=Tracing')).get('q') === 'smit')
 ok('...while the filters do not', clearedFilters(new URLSearchParams('client=abc&sub=Tracing')).get('sub') === null)
@@ -133,6 +143,7 @@ ok('...while the filters do not', clearedFilters(new URLSearchParams('client=abc
 const everyFilterSet = 'status=active&sub=Tracing&bucket=Diary&who=nobody&team=t1'
   + '&from=2026-01-01&to=2026-06-30'
   + '&adrift=1&never=1&quiet=30&presc=90&duplum=1&waiting=1&min=1000&drift=1'
+  + '&handover=h1'
 const allChips = filterChips(new URLSearchParams(everyFilterSet))
 ok('every filter produces a chip', allChips.length === FILTER_PARAMS.length - 1) // from+to share one chip
 ok('every chip can be removed', allChips.every((c) => FILTER_PARAMS.includes(c.param)))

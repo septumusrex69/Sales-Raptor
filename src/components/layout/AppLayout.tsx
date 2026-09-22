@@ -3,6 +3,7 @@ import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { TitleSlotProvider } from './TitleSlot'
 import { ReminderWatcher } from '../reminders/ReminderWatcher'
+import { NewWorkPopup } from '../collections/NewWorkPopup'
 
 const TITLES: { test: RegExp; title: string }[] = [
   { test: /^\/$/, title: 'Dashboard' },
@@ -65,6 +66,13 @@ export function AppLayout() {
           hour has passed and you are somewhere else.
         */}
         <ReminderWatcher />
+        {/*
+          Also around every page, and for the same reason: a clerk is told that seven accounts
+          landed wherever they happen to be, not only if they think to open the book. It decides
+          for itself whether there is anything to say — see newWorkPopup, which is null nearly
+          always.
+        */}
+        <NewWorkPopup />
       </div>
     </TitleSlotProvider>
   )

@@ -227,6 +227,15 @@ export interface AccountQuery {
    * book — the most dangerous shape a filter can fail in.
    */
   assignedToAny?: string[]
+  /**
+   * The batch they arrived in.
+   *
+   * THE FIRM: "the moment after that, it should go into a state where it's ready to allocate and
+   * refer the accounts to the clerks." This is what makes "these seven" a list somebody can act
+   * on -- the accounts of one handover, filtered in the database like every other clause, so the
+   * bulk allocate acts on exactly what was on the screen.
+   */
+  handoverId?: string
   /** Handed over on or after this date. */
   handedOverFrom?: string
   /** Handed over on or before this date. */
@@ -273,6 +282,7 @@ export function applyAccountFilters<T>(query: T, q: AccountQuery): T {
   let out = query as any
 
   if (q.companyId) out = out.eq('company_id', q.companyId)
+  if (q.handoverId) out = out.eq('handover_id', q.handoverId)
   if (q.status) out = out.eq('status', q.status)
   /*
    * Prefix matching, not a list of the five values seen today. The import writes whatever

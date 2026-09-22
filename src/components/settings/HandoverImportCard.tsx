@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Check, CheckCircle2, FileUp, Loader2, Paperclip, Upload, X } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import {
+  AlertTriangle, ArrowRight, Check, CheckCircle2, FileUp, Loader2, Paperclip, Upload, X,
+} from 'lucide-react'
 import { Card, CardHeader } from '../ui/Card'
 import { ClientPicker } from '../ui/ClientPicker'
 import { useAppStore } from '../../store/AppStore'
@@ -134,6 +137,16 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
   const [draftId, setDraftId] = useState<string | null>(null)
   const [judged, setJudged] = useState<JudgedDraft | null>(null)
   const [done, setDone] = useState<string | null>(null)
+  /*
+   * WHAT HAPPENS NEXT, and it is a link rather than a sentence. THE FIRM: "the moment after that,
+   * it should go into a state where it's ready to allocate and refer the accounts to the clerks."
+   *
+   * Approving opens the accounts and stops. Nothing on the old screen said where they went, so
+   * somebody had to leave Settings, find the book, and rebuild the filter by hand to reach the
+   * seven they had just imported. Kept beside `done` rather than folded into it because it
+   * survives one thing the sentence does not: it names the batch.
+   */
+  const [allocate, setAllocate] = useState<{ handoverId: string; count: number } | null>(null)
   /** The queued draft whose Discard has been pressed once. */
   const [confirmDiscard, setConfirmDiscard] = useState<string | null>(null)
 
@@ -238,7 +251,7 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
 
   async function approve() {
     if (!judged) return
-    setBusy('Opening the accounts'); setError(null)
+    setBusy('Opening the accounts'); setError(null); setAllocate(null)
     try {
       const result = await approveDraft({
         draftId: judged.draft.id,
@@ -265,6 +278,11 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
         /* A query that did not raise, or an email that did not go, is the client never hearing
            about it — so it is said on the screen rather than logged and lost. */
         + (result.correctionProblems.length ? ` ${result.correctionProblems.join(' ')}` : ''))
+      /* Only when something was actually opened. An import that created nothing has nothing to
+         allocate, and a link to an empty list reads as a bug in the import. */
+      if (result.created > 0) {
+        setAllocate({ handoverId: result.handoverId, count: result.created })
+      }
       setJudged(null); setDraftId(null)
       await refreshDrafts()
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(null) }
@@ -370,6 +388,14 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
 
       {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
       {done && <p className="text-sm text-positive-700 mt-3">{done}</p>}
+      {allocate && (
+        <Link to={`/accounts?handover=${allocate.handoverId}`}
+          className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700">
+          Allocate {allocate.count.toLocaleString('en-ZA')}
+          {allocate.count === 1 ? ' account' : ' accounts'}
+          <ArrowRight size={14} />
+        </Link>
+      )}
 
       {plan && <PlanSummary plan={plan} docs={docs} />}
 

@@ -590,6 +590,14 @@ export type NotificationType =
   | 'Deal won'
   | 'Lead reassigned'
   | 'Email received'
+  /*
+   * Raised by a hand-out, and named with a dot rather than a sentence on purpose: these two are
+   * read by code (newWorkPopup picks them out of the bell to decide whether to interrupt
+   * somebody), where the other eleven are only ever shown. A sentence that has to be matched
+   * exactly is a sentence nobody may reword.
+   */
+  | 'handover.allocated'
+  | 'handover.referred'
 
 export interface AppNotification {
   id: ID
