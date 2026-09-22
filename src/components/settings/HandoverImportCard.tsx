@@ -22,7 +22,7 @@ import {
   type HandoverDraft, type JudgedDraft,
 } from '../../lib/handoverDraft'
 import { canAccept, type Decision } from '../../lib/handoverDecision.ts'
-import { columnWidthCh } from '../../lib/handoverColumnWidth.ts'
+import { columnWidthCh, foldableColumns } from '../../lib/handoverColumnWidth.ts'
 import { suggestedNote } from '../../lib/noteSuggestion.ts'
 import { downloadBytes } from '../../lib/xlsxWrite.ts'
 import { fetchClientCommissionRate, fetchExistingAccounts } from '../../lib/accountBook'
@@ -753,6 +753,32 @@ export function DraftTable({
     return out
   }, [judged.rows, order])
 
+  /*
+   * ---- THE COLUMNS THIS SHEET DOES NOT USE ARE FOLDED AWAY ----
+   *
+   * THE FIRM, on an iPad: the table was 6 239 pixels wide, and the sidebar and the Settings menu
+   * leave a window on it of about 500. Thirty-seven of the forty-three columns were empty on
+   * every row of the sheet in front of them and cost 5 103 of those pixels -- so reaching the six
+   * columns with anything in them meant scrolling past ten screens of empty boxes. "Company
+   * registration number" was 248 pixels of nothing, on every row.
+   *
+   * That is the cost of the minimum width the firm asked for ("just make the thing longer so I
+   * can actually see that stuff"), which is right for a column with something in it and wrong
+   * for one with nothing.
+   *
+   * TWO KINDS ARE NEVER FOLDED, AND THIS IS THE PART THAT MATTERS. A REQUIRED column that is
+   * empty is the whole reason a row is refused -- hiding the box somebody has to type in would
+   * be hiding the only thing they came here to do. And a column carrying a PROBLEM is the one
+   * the reason under the table is pointing at; folded away, the sentence names a box that is not
+   * on the screen. Both are exactly the columns that look emptiest.
+   */
+  const [showEmpty, setShowEmpty] = useState(false)
+  const folded = useMemo(() => foldableColumns(SHOWN, judged.rows.map((r) => ({
+    values: r.values, problemKeys: (r.planned?.problems ?? []).map((p) => p.key),
+  })), required), [judged.rows])
+  const hidden = new Set(showEmpty ? [] : folded)
+  const columns = SHOWN.filter((k) => !hidden.has(k))
+
   return (
     <Card>
       <CardHeader
@@ -803,13 +829,32 @@ export function DraftTable({
 
       {error && <p className="text-sm text-negative-700 mb-3">{error}</p>}
 
+      {/*
+        SAID, AND UNDONE IN ONE PRESS. A table quietly missing columns is worse than a wide one:
+        somebody looking for "Employer" would conclude Raptor does not import it. So the number is
+        on the screen and the way back is next to it.
+
+        The count is of columns THIS SHEET left empty, which is the honest description -- they are
+        not columns Raptor has dropped, they are boxes the client sent nothing in.
+      */}
+      {folded.length > 0 && (
+        <p className="text-xs text-slate-500 mb-2">
+          {folded.length} {folded.length === 1 ? 'column is' : 'columns are'} empty on this sheet
+          {showEmpty ? ' and shown' : ' and folded away'}.{' '}
+          <button type="button" onClick={() => setShowEmpty(!showEmpty)}
+            className="font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900">
+            {showEmpty ? 'Fold them away' : 'Show them'}
+          </button>
+        </p>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
               {/* z-20: above both the scrolled headings and the pinned cells below it. */}
               <th className={`${PINNED} z-20 py-2 pr-2 font-medium`}>Row</th>
-              {SHOWN.map((k) => (
+              {columns.map((k) => (
                 <th key={k} className="py-2 pr-2 font-medium whitespace-nowrap">
                   {label(k)}{required.has(k) && <span className="text-gold-600"> *</span>}
                 </th>
@@ -826,7 +871,7 @@ export function DraftTable({
                   <td className={`${PINNED} z-10 py-2 pr-2 text-slate-400 tabular-nums`}>
                     {row.line}
                   </td>
-                  {SHOWN.map((k) => {
+                  {columns.map((k) => {
                     /*
                       THE CELL SAYS WHICH DATA IS WRONG, at the firm's asking. A problem carries
                       the column it is about, so the box itself is marked -- a refusal in red, a

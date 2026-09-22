@@ -437,8 +437,19 @@ try {
   t.ok('the good rows are accepted',
     /2 ready/.test(await page.locator('body').innerText()))
 
+  /*
+   * UNFOLDED FIRST, because the columns this sheet leaves empty are now folded away by default --
+   * see the block further down that measures what that is worth. Everything from here to there
+   * is about the table with the WHOLE sheet on it, which is what "every column is on the screen"
+   * has always meant: not that they are all in view at once, but that none of them is missing.
+   */
+  const showEmptyColumns = page.getByRole('button', { name: 'Show them', exact: true })
+  if (await showEmptyColumns.count() > 0) {
+    await showEmptyColumns.click()
+    await page.waitForTimeout(300)
+  }
   const headers = await page.locator('table thead th').allTextContents()
-  t.ok('every column of the sheet is on the screen', headers.length >= 40)
+  t.ok('every column of the sheet is reachable', headers.length >= 40)
   for (const col of ['Street address 1', 'Email address', 'Employer', 'Next of kin']) {
     t.ok(`${col} is one of them`, headers.some((h) => h.trim().startsWith(col)))
   }
@@ -736,6 +747,51 @@ try {
   const emailWidth = await widthOf('Email address')
   const dateWidth = await widthOf('Date of default')
   t.ok('an address column is wider than a date column', emailWidth > dateWidth + 10)
+
+  /*
+   * ---- AND THE SHEET'S UNUSED COLUMNS ARE FOLDED AWAY ----
+   *
+   * THE FIRM, looking at this table on an iPad: "why is he doing this? Is it an iPad thing or is
+   * it Raptor?" Measured, it was Raptor: the table was 6 239 pixels wide, and the sidebar and the
+   * Settings menu leave a window on it of about 500 at iPad widths. Thirty-seven of the
+   * forty-three columns were empty on every row and cost 5 103 of those pixels -- ten screens of
+   * empty boxes between the six columns that had anything in them.
+   *
+   * MEASURED IN PIXELS, not counted in columns. A count passes while the table is still a mile
+   * wide, and the width is the entire complaint.
+   */
+  const tableWidth = async () => page.locator('table').first()
+    .evaluate((el) => Math.round(el.getBoundingClientRect().width))
+  const foldNote = page.getByText(/columns are empty on this sheet/)
+  t.ok('the table says how many columns this sheet left empty', await foldNote.count() > 0)
+  const unfolded = await tableWidth()
+  await page.getByRole('button', { name: 'Fold them away', exact: true }).click()
+  await page.waitForTimeout(400)
+  const folded = await tableWidth()
+  t.ok(`folding the empty columns is most of the width (${unfolded}px -> ${folded}px)`,
+    unfolded > folded * 1.5)
+  console.log(`      (the table is ${unfolded}px with every column and ${folded}px folded)`)
+  /*
+   * AND THE TWO KINDS THAT MUST NEVER FOLD, which are exactly the ones that look emptiest.
+   *
+   * A REQUIRED column that is empty is the reason a row is refused -- folding the box somebody
+   * has to type in hides the only thing they came here to do. And a column carrying a PROBLEM is
+   * what the reason under the table is pointing at; folded, the sentence names a box that is not
+   * on the screen. Asserted with the empty ones HIDDEN, because that is the state they have to
+   * survive.
+   */
+  const headingsNow = await page.$$eval('table thead th', (els) => els.map((e) => e.textContent.trim()))
+  /* Every row of this fixture has no email address, and one of them is warned about it. */
+  t.ok('a column with a problem on it stays, empty or not',
+    headingsNow.some((h) => h.startsWith('Email address')))
+  t.ok('...and so does a required one',
+    headingsNow.some((h) => h.startsWith('Surname')) && headingsNow.some((h) => h.startsWith('Date of default')))
+  /* And something genuinely unused really is gone, or the fold is doing nothing. */
+  t.ok('a column nobody filled in and nobody is warned about is folded',
+    !headingsNow.some((h) => h.startsWith('Occupation')))
+  /* Put back, because everything below reads columns by the index they had when unfolded. */
+  await page.getByRole('button', { name: 'Show them', exact: true }).click()
+  await page.waitForTimeout(400)
 
   await t.shot(page, 'upload-a-batch-pinned-row')
   await scroller.evaluate((el) => { el.scrollLeft = 0 })

@@ -15,7 +15,9 @@
  * thirty-nine columns go off the end of the screen for every row in the file.
  */
 import { readFileSync } from 'node:fs'
-import { MAX_CH, MIN_CH, columnWidthCh } from '../../src/lib/handoverColumnWidth.ts'
+import {
+  MAX_CH, MIN_CH, columnWidthCh, foldableColumns,
+} from '../../src/lib/handoverColumnWidth.ts'
 
 let pass = 0
 const failures = []
@@ -89,6 +91,83 @@ ok('...and the one-size-fits-all minimum is gone', !/min-w-\[7rem\]/.test(card))
  */
 ok('a date column is measured on the date as drawn',
   /DATE_KEYS\.has\(k\) \? displayDate\(r\.values\[k\], order\)/.test(card))
+
+/* ---------------------------------------------------------------- what the sheet does not use */
+
+/*
+ * AND THE OTHER HALF OF THE SAME PROBLEM. The minimum width is right for a column with something
+ * in it and wrong for one with nothing, and on a real handover most of them have nothing: the
+ * firm's own sheet left 37 of 43 columns empty, and those 37 cost 5 103 of the table's 6 239
+ * pixels. On an iPad the window onto that table is about 500 pixels wide.
+ *
+ * EVERY CASE IS ASKED SEPARATELY, because the two exceptions are the whole of the rule and both
+ * are invisible on a sheet that happens to fill those columns. Driven through the browser alone,
+ * removing either guard changed nothing and the run stayed green -- which is the vacuous pass
+ * CLAUDE.md warns about, twice over.
+ */
+const REQUIRED = new Set(['name', 'capital'])
+const row = (values, problemKeys = []) => ({ values, problemKeys })
+
+check('a column nothing fills is folded away',
+  foldableColumns(['occupation'], [row({ occupation: null }), row({ occupation: '' })], REQUIRED),
+  ['occupation'])
+check('...and one with something in any row is not',
+  foldableColumns(['occupation'],
+    [row({ occupation: null }), row({ occupation: 'Boilermaker' })], REQUIRED),
+  [])
+/* A column of spaces out of a spreadsheet is nothing to look at. */
+check('...and a column of nothing but spaces counts as empty',
+  foldableColumns(['occupation'], [row({ occupation: '   ' })], REQUIRED), ['occupation'])
+
+/*
+ * THE FIRST EXCEPTION. An empty REQUIRED column is the reason the row is refused -- it is the box
+ * somebody came to the screen to type in, and it is empty precisely because it needs filling.
+ */
+check('a required column is kept even with nothing in it',
+  foldableColumns(['name', 'occupation'], [row({ name: '', occupation: '' })], REQUIRED),
+  ['occupation'])
+
+/*
+ * THE SECOND. A column carrying a PROBLEM is what the reason under the table points at. Folded,
+ * the sentence names a box that is not on the screen -- "No email address" over a table with no
+ * email column on it.
+ */
+check('a column something is warned about is kept even with nothing in it',
+  foldableColumns(['email_1', 'occupation'],
+    [row({ email_1: '', occupation: '' }, ['email_1'])], REQUIRED),
+  ['occupation'])
+/* One row's problem speaks for the column, not just for that row. */
+check('...on the strength of one row out of many',
+  foldableColumns(['email_1'],
+    [row({ email_1: '' }), row({ email_1: '' }, ['email_1']), row({ email_1: '' })], REQUIRED),
+  [])
+/*
+ * A problem with no column on it -- "nobody can be contacted" is about the row, not about a box --
+ * must not fold everything or nothing. It simply has no column to speak for.
+ */
+check('a problem that names no column keeps nothing back',
+  foldableColumns(['occupation'], [row({ occupation: '' }, [null])], REQUIRED), ['occupation'])
+
+/* And the shape the table actually uses it in: many columns, a handful in play. */
+check('a whole sheet folds to the columns in play',
+  foldableColumns(
+    ['name', 'capital', 'email_1', 'occupation', 'employer', 'notes'],
+    [row({ name: 'Dube', capital: '100', email_1: '', occupation: '', employer: '', notes: '' },
+      ['email_1'])],
+    REQUIRED,
+  ),
+  ['occupation', 'employer', 'notes'])
+
+/* Wired to the table, not merely available to it. */
+ok('the table folds through that one function', /foldableColumns\(SHOWN,/.test(card))
+/* Matched on the contiguous half of the sentence: the count and the singular/plural are
+   expressions, so the whole line is never a literal anywhere in the source. */
+ok('...and says so on the screen', /empty on this sheet/.test(card))
+ok('...with a way back', /setShowEmpty\(!showEmpty\)/.test(card)
+  && /'Fold them away' : 'Show them'/.test(card))
+/* Folded by default, or the fix does nothing for the person who has not found the link. */
+ok('...and folded to begin with', /useState\(false\)[^\n]*\n?/.test(card)
+  && /const \[showEmpty, setShowEmpty\] = useState\(false\)/.test(card))
 
 if (failures.length > 0) {
   console.log(`${pass} passed, ${failures.length} failed\n`)

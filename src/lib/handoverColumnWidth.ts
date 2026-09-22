@@ -60,3 +60,41 @@ export function columnWidthCh(
   }
   return Math.min(MAX_CH, Math.max(MIN_CH, longest + CHROME))
 }
+
+/**
+ * The columns a sheet does not use, which the table folds away.
+ *
+ * THE FIRM, looking at a handover on an iPad: "why is he doing this? Is it an iPad thing or is it
+ * Raptor?" Measured, it was Raptor. The table was 6 239 pixels wide and the sidebar and the
+ * Settings menu leave a window on it of about 500 at iPad widths -- so reaching the six columns
+ * with anything in them meant scrolling past ten screens of empty boxes. Thirty-seven of the
+ * forty-three columns were empty on every row and cost 5 103 of those pixels; "Company
+ * registration number" was 248 pixels of nothing, on every row.
+ *
+ * That is the price of the minimum width the firm asked for -- "just make the thing longer so I
+ * can actually see that stuff" -- which is right for a column with something in it and wrong for
+ * one with nothing.
+ *
+ * TWO KINDS ARE NEVER FOLDED, AND THEY ARE EXACTLY THE ONES THAT LOOK EMPTIEST.
+ *
+ *  - A REQUIRED column that is empty is the reason a row is refused. Folding the box somebody has
+ *    to type in would hide the only thing they came to the screen to do.
+ *  - A column carrying a PROBLEM is what the reason under the table is pointing at. Folded, the
+ *    sentence names a box that is not on the screen -- "No email address" over a table with no
+ *    email column on it.
+ *
+ * PURE AND HERE rather than worked out in the table, because the two exceptions are the whole of
+ * it and both are invisible on a sheet that happens to fill those columns: the rule passes for
+ * the wrong reason on any fixture where the required columns are populated, which is most of
+ * them. Given a list to test against, they can be shown one at a time.
+ */
+export function foldableColumns(
+  keys: readonly string[],
+  rows: readonly { values: Record<string, string | null>; problemKeys: readonly (string | null)[] }[],
+  required: ReadonlySet<string>,
+): string[] {
+  const withProblem = new Set(rows.flatMap((r) => r.problemKeys.filter((k): k is string => !!k)))
+  return keys.filter((k) => !required.has(k) && !withProblem.has(k)
+    /* Whitespace is empty: a column of spaces out of a spreadsheet is nothing to look at. */
+    && rows.every((r) => (r.values[k] ?? '').trim() === ''))
+}
