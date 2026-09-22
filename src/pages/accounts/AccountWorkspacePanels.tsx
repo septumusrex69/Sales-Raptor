@@ -174,7 +174,7 @@ export function DebtorDetailsPanel({ account, name, workspace, properties, onCha
         across from 32rem, three from 56rem.
       */}
       <dl className="grid gap-3 @lg/details:grid-cols-2 @4xl/details:grid-cols-3">
-        <NameSlot account={account} name={name} busy={busy}
+        <NameSlot account={account} name={name} isCompany={isCompany} busy={busy}
           onSave={(p) => run(() => saveDebtorIdentity(account.id, p))} />
         <TextSlot icon="id" label={isCompany ? 'Registration Number' : 'ID Number'}
           value={account.debtorIdNumber} busy={busy}
@@ -482,10 +482,30 @@ function TextSlot({ icon, label, value, onSave, busy, placeholder, warn, hint }:
 }
 
 /** The name, plus the title and initials a letter of demand needs to address someone properly. */
-function NameSlot({ account, name, onSave, busy }: {
+/**
+ * THE NAME IS FIVE COLUMNS ON THE SHEET AND IT IS SHOWN AS FIVE.
+ *
+ * THE FIRM: "I imported some of this data, but it shows, for example, the full name Zanele
+ * Sithole. It doesn't show the surname and the name, stuff like that."
+ *
+ * It showed "Zanele Sithole", and under it "Sithole" with nothing saying what that second line
+ * was -- the title and initials joined to the surname, minus the two that were empty. So a person
+ * checking an import could not tell whether the surname had landed in the surname column. THAT IS
+ * NOT A HYPOTHETICAL ON THIS BOOK: the client sheet we were sent carried every one of its 45
+ * surnames in "Debtor Initials", and Raptor addresses a debtor by surname. Seeing which field
+ * holds what is the whole of checking an import.
+ *
+ * A BLANK IS SHOWN AS A BLANK, which is this panel's rule everywhere else -- a title nobody
+ * recorded is why the firm found a section 129 of their own opening "Dear buitendag".
+ */
+function NameSlot({ account, name, isCompany, onSave, busy }: {
   account: DebtorAccount
   name: string
-  onSave: (p: { firstName?: string; surname?: string; title?: string; initials?: string }) => void
+  /** A company has a name, not a first name and a surname. It gets the one field it has. */
+  isCompany: boolean
+  onSave: (p: {
+    firstName?: string; surname?: string; title?: string; initials?: string; secondName?: string
+  }) => void
   busy: boolean
 }) {
   const [editing, setEditing] = useState(false)
@@ -493,26 +513,57 @@ function NameSlot({ account, name, onSave, busy }: {
   const [last, setLast] = useState(account.debtorSurname ?? '')
   const [title, setTitle] = useState(account.debtorTitle ?? '')
   const [initials, setInitials] = useState(account.debtorInitials ?? '')
+  const [second, setSecond] = useState(account.debtorSecondName ?? '')
 
   useEffect(() => {
     setFirst(account.debtorFirstName ?? ''); setLast(account.debtorSurname ?? '')
     setTitle(account.debtorTitle ?? ''); setInitials(account.debtorInitials ?? '')
-  }, [account.debtorFirstName, account.debtorSurname, account.debtorTitle, account.debtorInitials])
+    setSecond(account.debtorSecondName ?? '')
+  }, [account.debtorFirstName, account.debtorSurname, account.debtorTitle,
+    account.debtorInitials, account.debtorSecondName])
 
-  const formal = [account.debtorTitle, account.debtorInitials, account.debtorSurname].filter(Boolean).join(' ')
+  /*
+   * THE SHEET'S OWN ORDER AND THE SHEET'S OWN WORDS, so a row can be read against the file it
+   * came out of without translating anything. "Surname, or the business name" is what the client
+   * filled in; "Surname" is what it holds.
+   */
+  const parts: [string, string | null][] = [
+    ['Title', account.debtorTitle],
+    ['Initials', account.debtorInitials],
+    ['First name', account.debtorFirstName],
+    ['Second name', account.debtorSecondName],
+    ['Surname', account.debtorSurname],
+  ]
 
   if (!editing) {
     return (
-      <SlotShell icon="name" label="Full Name">
+      <SlotShell icon="name" label={isCompany ? 'Business Name' : 'Full Name'}>
         <button onClick={() => setEditing(true)} className="text-left hover:underline">
           {name}
         </button>
-        {formal && formal !== name && <span className="block text-[11px] text-slate-400">{formal}</span>}
+        {/* A company's name is one field. Breaking it into a title and initials would be five
+            labels lying about what the row holds -- the same mistake this panel already avoids
+            with "Residential Address" over a company. */}
+        {!isCompany && (
+          <span className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1 @lg/details:grid-cols-3">
+            {parts.map(([partLabel, value]) => (
+              <span key={partLabel} className="block min-w-0">
+                <span className="block text-[10px] uppercase tracking-wide text-slate-400">
+                  {partLabel}
+                </span>
+                <span className={`block truncate text-[12px] ${
+                  value ? 'text-slate-700' : 'text-slate-300'}`} title={value ?? undefined}>
+                  {value || 'Not recorded'}
+                </span>
+              </span>
+            ))}
+          </span>
+        )}
       </SlotShell>
     )
   }
   return (
-    <SlotShell icon="name" label="Full Name">
+    <SlotShell icon="name" label={isCompany ? 'Business Name' : 'Full Name'}>
       <span className="grid grid-cols-2 gap-1.5 mt-0.5">
         {/*
           SUGGESTED, NOT LOCKED. A letter that opens "Dear buitendag" is what a blank title looks
@@ -529,12 +580,19 @@ function NameSlot({ account, name, onSave, busy }: {
           className="text-sm rounded-lg border border-slate-200 px-2 py-1" />
         <input value={first} onChange={(e) => setFirst(e.target.value)} autoFocus placeholder="First name" aria-label="First name"
           className="text-sm rounded-lg border border-slate-200 px-2 py-1" />
-        <input value={last} onChange={(e) => setLast(e.target.value)} placeholder="Surname" aria-label="Surname"
+        {/* The second given name. It has been imported and stored since the sheet had the column
+            and there was nowhere to type it, which is how a field stops being true quietly. */}
+        <input value={second} onChange={(e) => setSecond(e.target.value)} placeholder="Second name" aria-label="Second name"
           className="text-sm rounded-lg border border-slate-200 px-2 py-1" />
+        <input value={last} onChange={(e) => setLast(e.target.value)} placeholder="Surname" aria-label="Surname"
+          className="text-sm rounded-lg border border-slate-200 px-2 py-1 col-span-2" />
       </span>
       <span className="flex items-center gap-2 mt-1.5">
         <button disabled={busy}
-          onClick={() => { onSave({ firstName: first, surname: last, title, initials }); setEditing(false) }}
+          onClick={() => {
+            onSave({ firstName: first, surname: last, title, initials, secondName: second })
+            setEditing(false)
+          }}
           className="text-[11px] font-medium px-2 py-1 rounded bg-brand-600 text-white disabled:opacity-50">Save</button>
         <button onClick={() => setEditing(false)} className="text-[11px] text-slate-500 hover:text-slate-700">Cancel</button>
       </span>

@@ -757,7 +757,25 @@ export function toDebtorInput(values: Record<string, string | null>): NewDebtorI
     clientReference: v('client_reference'),
     firstName: v('first_name'),
     surname: v('name'),
-    idNumber: v('id_number'),
+    /* All three were on the sheet, read into the draft and shown in the table, and then went no
+       further: toAccountRow had nowhere to put them. See NewDebtorInput. */
+    title: v('title'),
+    initials: v('initials'),
+    secondName: v('second_name'),
+    /*
+     * PERSON OR COMPANY, which no import has ever written. Every account the sheet opened came
+     * out as a person, including the ones a client filled in as a business -- the same state the
+     * Swordfish import left the book in. Anything that is not plainly "business" is a person,
+     * which is what the column defaults to and what the planner already warns about.
+     */
+    debtorKind: /^business/i.test(v('debtor_kind')) ? 'company' : 'individual',
+    /*
+     * ONE IDENTITY FIELD, TWO MEANINGS, told apart by debtorKind. The sheet asks a business for a
+     * registration number in its own column and it was read by nothing, so a company handed over
+     * on the new sheet opened with no identity at all -- nothing to trace on, nothing to put on a
+     * summons, and no way to tell two Pty Ltds apart.
+     */
+    idNumber: v('id_number') || v('registration_number'),
     capital: v('capital'),
     handoverDate: v('default_date'),
     /* NOT ASKED FOR ON THE SHEET ANY MORE, at the firm's instruction -- the rate is in the

@@ -17,6 +17,37 @@ export interface NewDebtorInput {
   clientReference: string
   firstName: string
   surname: string
+  /*
+   * THE OTHER THREE PARTS OF A NAME, and they are optional because only the importer has them.
+   *
+   * The sheet asks a client for a title, initials and a second name; the draft table shows all
+   * three; and until now toAccountRow wrote neither -- so three of the five name columns a client
+   * fills in were collected, validated, displayed, and then dropped on the way to the account.
+   * Nothing failed. The account simply opened without them, which is what the firm was looking at
+   * on a debtor showing "Zanele Sithole" and nothing else.
+   *
+   * THE TITLE IS NOT COSMETIC. addressAs falls back to the surname alone when there is none, and
+   * the firm found a section 129 of their own opening "Dear buitendag".
+   *
+   * Optional rather than required so the by-hand form, which does not ask for them, is unchanged.
+   */
+  title?: string
+  initials?: string
+  secondName?: string
+  /**
+   * Person or company, and it was never written by an import at all.
+   *
+   * Every account the new importer opened came out 'individual', which is precisely the state the
+   * Swordfish import left the book in -- sixteen accounts named "(Pty) Ltd" holding a
+   * registration number and filed as people. The whole debtor panel turns on this: what it is
+   * called, whether the identity field is an ID or a registration number, whether the numbers on
+   * it are the debtor's own or the people who answer for a company, and what a trace searches on.
+   *
+   * Optional, and absent means a person -- which is what the column already defaults to.
+   */
+  /* Written out rather than imported: this file deliberately has no imports, so it can be
+     tested without a database anywhere near it. */
+  debtorKind?: 'individual' | 'company'
   /** South African ID. Optional, but checked when given. */
   idNumber: string
   /** Capital as at handover. The account opens here and everything else is movement. */
@@ -230,6 +261,10 @@ export function toAccountRow(
     client_reference: input.clientReference.trim() || null,
     debtor_first_name: input.firstName.trim() || null,
     debtor_surname: input.surname.trim(),
+    debtor_kind: input.debtorKind ?? 'individual',
+    debtor_title: input.title?.trim() || null,
+    debtor_initials: input.initials?.trim() || null,
+    debtor_second_name: input.secondName?.trim() || null,
     debtor_id_number: input.idNumber.trim() || null,
     capital_handed_over: capital,
     capital_outstanding: capital,

@@ -612,6 +612,15 @@ export async function saveDebtorIdentity(accountId: string, patch: {
   title?: string | null
   initials?: string | null
   /**
+   * The second given name.
+   *
+   * IMPORTED SINCE THE SHEET HAD THE COLUMN, stored on the row, read by toAccount -- and until
+   * now with nothing anywhere that could write it or show it. A field that arrives, is kept and
+   * cannot be seen is the same failure as a mapper that drops one: nothing breaks, and the value
+   * is simply never true again after the day it landed.
+   */
+  secondName?: string | null
+  /**
    * Whether this debtor is a person or a company.
    *
    * The column has existed since the book was imported and nothing could ever write to it, which
@@ -641,6 +650,7 @@ export async function saveDebtorIdentity(accountId: string, patch: {
   }
   if ('title' in patch) row.debtor_title = patch.title?.trim() || null
   if ('initials' in patch) row.debtor_initials = patch.initials?.trim() || null
+  if ('secondName' in patch) row.debtor_second_name = patch.secondName?.trim() || null
   const { error } = await supabase.from('debtor_accounts').update(row).eq('id', accountId)
   if (error) throw new Error(error.message)
 }

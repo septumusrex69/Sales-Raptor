@@ -16,6 +16,8 @@
  */
 import { readFileSync } from 'node:fs'
 import { toDebtorInput } from '../../src/lib/handoverImport.ts'
+import { toAccountRow } from '../../src/lib/newDebtor.ts'
+import { HANDOVER_COLUMNS } from '../../src/lib/handoverSheet.ts'
 
 let pass = 0
 const failures = []
@@ -175,6 +177,7 @@ ok('...into a box that shows more than the last few words it heard',
  */
 const input = toDebtorInput({
   client_reference: 'GPS3/10103', name: 'Van Der Westhuizen', first_name: 'Johannes',
+  title: 'Mr', initials: 'J H', second_name: 'Hendrik',
   capital: '48250.00', default_date: '2026-03-18', id_number: '8503125009089',
   cell_1: '082 123 4567', street_1: '14 Protea Street', suburb: 'Wonderboom',
   city: 'Pretoria', street_code: '0182', next_of_kin: 'Maria', next_of_kin_phone: '083 234 5678',
@@ -193,6 +196,114 @@ check('next of kin comes across', [input.kin1Name, input.kin1Phone], ['Maria', '
  * one somebody notices; opened at a rate nobody chose, it is one nobody does.
  */
 check('interest is left at nought rather than guessed', input.interestRateAnnual, '0')
+
+/*
+ * ---------- every name column a client fills in reaches the account ----------
+ *
+ * THE FIRM: "I imported some of this data, but it shows, for example, the full name Zanele
+ * Sithole. It doesn't show the surname and the name, stuff like that."
+ *
+ * THE TITLE, THE INITIALS AND THE SECOND NAME WERE DROPPED. The sheet asks for all five, the
+ * draft table shows all five, and toAccountRow wrote two -- so three columns were collected from
+ * a client, judged, displayed and then quietly discarded on the way to the ledger. Nothing
+ * failed; the account just opened without them.
+ *
+ * Asserted at BOTH ends, because either alone passes while the value goes nowhere: the mapping
+ * out of the sheet, and the row that actually reaches the database.
+ */
+check('the title comes off the sheet', input.title, 'Mr')
+check('...and the initials', input.initials, 'J H')
+check('...and the second name', input.secondName, 'Hendrik')
+
+const row = toAccountRow(input, 'company-1', 'handover-1')
+check('the title reaches the account row', row.debtor_title, 'Mr')
+check('...and the initials', row.debtor_initials, 'J H')
+check('...and the second name', row.debtor_second_name, 'Hendrik')
+check('...beside the two that always did',
+  [row.debtor_first_name, row.debtor_surname], ['Johannes', 'Van Der Westhuizen'])
+/* Absent is null, not an empty string: the panel prints "Not recorded" for a blank and would
+   print nothing at all for '', which reads as a field that failed to load. */
+const bare = toAccountRow(toDebtorInput({
+  name: 'Dube', capital: '100', default_date: '2026-01-01',
+}), 'company-1', null)
+check('a name column nobody filled in is null rather than empty',
+  [bare.debtor_title, bare.debtor_initials, bare.debtor_second_name], [null, null, null])
+
+/*
+ * ---------- and the question asked of every column at once ----------
+ *
+ * The three above were found by looking at one debtor on one screen. This asks it of all forty,
+ * so the next one does not wait for somebody to notice. It is a RATCHET, not a pass/fail: the
+ * list below is what is known to go nowhere, and the assertion is that the gap is exactly that.
+ * A new column that reaches nothing fails here; so does one that starts reaching something and
+ * is left on the list, which is the half that keeps the list honest.
+ *
+ * WHAT IS ON IT IS REPORTED TO THE FIRM, NOT DECIDED HERE. Each of these has somewhere it could
+ * plausibly live -- a contact row, a note, last_payment_at -- and where a column belongs is the
+ * firm's call, not a thing to guess at while fixing a name field.
+ */
+const GOES_NOWHERE = [
+  /* debtor_accounts.last_payment_at exists and nothing writes to it. Prescription runs off this
+     and the firm asked for the column by name: "call it the last date of payment". */
+  'last_payment_date',
+  /* account_contacts takes mobile / phone / email rows with a label, so all of these have a home
+     and none of them is written. */
+  'cell_3', 'home_phone', 'email_2', 'other_phone', 'other_phone_2', 'other_email',
+  'other_contact_note',
+  /* No column anywhere. The employer contact carries a label that could hold it. */
+  'occupation',
+  /* account_notes, which is where the decision note already goes -- the firm's own words for
+     where an import's remarks belong: "that goes on the notes or the main comment". */
+  'notes',
+  /* THE ONE THAT IS DELIBERATE. THE FIRM: "we will never be posting something. Never ever we
+     will post a letter. We will send everything via email." Still asked for on the sheet, since
+     a summons is served somewhere, but nothing downstream reads a postal address. */
+  'postal_1', 'postal_2', 'postal_city', 'postal_code',
+]
+const NOT_CARRIED = new Set([
+  /* Read as debtorKind rather than stored as text, and asserted separately below. */
+  'debtor_kind',
+  /* Folded into the one address the account keeps, on its own lines. */
+  'street_1', 'street_2', 'suburb', 'city', 'street_code',
+  /* Read into the single identity field, whose meaning debtorKind decides. */
+  'registration_number',
+  ...GOES_NOWHERE,
+])
+const carried = code(read('../../src/lib/handoverImport.ts'))
+const dropped = HANDOVER_COLUMNS
+  .map((c) => c.key)
+  .filter((k) => !NOT_CARRIED.has(k) && !carried.includes(`v('${k}')`))
+check(`every sheet column either reaches the account or is on the known list${
+  dropped.length ? ` (new: ${dropped.join(', ')})` : ''}`, dropped, [])
+/* The other direction: a column that has started arriving must come OFF the list, or the list
+   quietly becomes a record of what used to be broken. */
+const fixed = GOES_NOWHERE.filter((k) => carried.includes(`v('${k}')`))
+check(`nothing on the known list is silently already fixed${
+  fixed.length ? ` (take off: ${fixed.join(', ')})` : ''}`, fixed, [])
+
+/*
+ * PERSON OR COMPANY, WRITTEN. No import has ever set it, so every account the sheet opened came
+ * out a person -- the same state the Swordfish import left the book in, with sixteen accounts
+ * named "(Pty) Ltd" filed as people. The panel turns on this column: what it calls itself,
+ * whether the identity field is an ID or a registration number, whether the numbers on it are
+ * the debtor's own, and what a trace searches on.
+ */
+const business = toDebtorInput({
+  name: 'Adowa Property Managers', debtor_kind: 'Business',
+  registration_number: '2016/210735/07', capital: '100', default_date: '2026-01-01',
+})
+check('a business row opens as a company', business.debtorKind, 'company')
+check('...with its registration number as its identity', business.idNumber, '2016/210735/07')
+check('...and it reaches the row',
+  toAccountRow(business, 'c1', null).debtor_kind, 'company')
+const person = toDebtorInput({ name: 'Dube', debtor_kind: 'Person', id_number: '8503125009089' })
+check('a person row opens as a person', person.debtorKind, 'individual')
+check('...with the ID number, not the registration one', person.idNumber, '8503125009089')
+/* Anything a client typed that is neither reads as a person, which is what the column defaults
+   to and what the planner already warns about -- it must not silently become a company. */
+check('an unrecognised word is a person',
+  toDebtorInput({ name: 'Dube', debtor_kind: 'Individual' }).debtorKind, 'individual')
+check('...and so is a blank', toDebtorInput({ name: 'Dube' }).debtorKind, 'individual')
 
 /* ---------------------------------------------------------------- report */
 

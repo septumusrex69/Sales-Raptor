@@ -222,6 +222,63 @@ const statement = backfill.replace(/--[^\n]*/g, '')
 ok('...and never on the name alone', !/debtor_surname|debtor_first_name/.test(statement))
 ok('...nor on a company-shaped word in the name', !/\(pty\)|\\bcc\\b/i.test(statement))
 
+/* ---------- the five parts of a name are five things on the screen ---------- */
+
+/*
+ * THE FIRM: "I imported some of this data, but it shows, for example, the full name Zanele
+ * Sithole. It doesn't show the surname and the name, stuff like that."
+ *
+ * It printed the joined name and, under it, the title, initials and surname joined together with
+ * nothing saying what that second line was -- so a blank title and blank initials made it read as
+ * the bare surname. Somebody checking an import could not tell which column a value had landed
+ * in. THAT IS NOT HYPOTHETICAL ON THIS BOOK: the client sheet we were sent held all 45 of its
+ * surnames in "Debtor Initials", and every letter is addressed from the surname.
+ */
+/*
+ * READ OUT OF NameSlot ALONE, not the whole file.
+ *
+ * Written against the file, three of these assertions were vacuous: `{value || 'Not recorded'}`
+ * appears in three slots and `{!isCompany && (` twice, so deleting the one in the name block left
+ * the others and the check stayed green. An assertion that can be satisfied by a different part
+ * of the same file is not an assertion about the part it names.
+ */
+const nameSlot = panels.slice(
+  panels.indexOf('function NameSlot('),
+  panels.indexOf('function ContactSlot('))
+ok('NameSlot was actually found, or everything below is about an empty string',
+  nameSlot.length > 500)
+
+for (const part of ['Title', 'Initials', 'First name', 'Second name', 'Surname']) {
+  ok(`the debtor panel names the ${part.toLowerCase()} as its own field`,
+    new RegExp(`\\['${part}', account\\.debtor`).test(nameSlot))
+}
+/* A blank is shown as a blank, which is this panel's rule everywhere else -- and a blank title
+   is why the firm found a section 129 of their own opening "Dear buitendag". */
+ok('...and an empty one says so rather than disappearing',
+  /\{value \|\| 'Not recorded'\}/.test(nameSlot))
+/* The old second line was the bug, not a smaller version of it: joined, unlabelled, and shrinking
+   to just the surname whenever the title and initials were empty. */
+ok('...and the unlabelled joined line is gone',
+  !/const formal = \[account\.debtorTitle/.test(nameSlot))
+/*
+ * A COMPANY HAS A NAME, NOT A SURNAME. Five labels over a business would be the same mistake this
+ * panel already avoids with "Residential Address" on a company. Matched on the guard TOGETHER
+ * with what it guards: `{!isCompany && (` on its own also matches the contact slots below.
+ */
+ok('a company is not broken into a title and initials',
+  /\{!isCompany && \(\s*<span className="mt-1\.5 grid/.test(nameSlot))
+ok('...and its one field is called what it is', /'Business Name' : 'Full Name'/.test(nameSlot))
+/*
+ * THE SECOND NAME CAN BE TYPED. It was imported, stored on the row and read by toAccount, with
+ * nothing anywhere that could write or show it -- the same failure as a mapper dropping a column,
+ * only slower: the value is simply never true again after the day it landed.
+ */
+ok('the second name has an editor at all', /aria-label="Second name"/.test(nameSlot))
+ok('...and saving sends it', /secondName: second/.test(nameSlot))
+const writer = read('../../src/lib/accountWorkspace.ts')
+ok('...and the writer knows the column',
+  /'secondName' in patch.*debtor_second_name/.test(writer))
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')
