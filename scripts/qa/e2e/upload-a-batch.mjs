@@ -293,6 +293,32 @@ try {
   await page.keyboard.press('Escape')
 
   /*
+   * TAPPING A CLIENT CLOSES THE LIST. THE FIRM: "the moment that I click on a client, it just
+   * selects it, it has like this little tick, and then you have to close it manually."
+   *
+   * THE PICKER ALWAYS CLOSED ITSELF -- take() sets open to false. What reopened it was the
+   * <label> around it: activating anything inside a label forwards the activation to the label's
+   * control, so the row's own click selected the client and then focused the input underneath,
+   * and the input opens on focus. FormField is a <label> too, so this was three of the five
+   * places the picker is used.
+   *
+   * Asserted on the listbox being GONE rather than on the input's value: the value was always
+   * right, which is exactly why this looked like a picker that ignores you rather than a bug.
+   */
+  /* Blurred first: the box opens on FOCUS, and after the Escape above it still has it -- so a
+     click here would be a click on an already-focused input and open nothing. */
+  await page.locator('body').click({ position: { x: 5, y: 5 } })
+  await clientBox(page).click()
+  await page.waitForTimeout(300)
+  const rows = page.locator('ul[role="listbox"] li[role="option"]')
+  t.ok('the list opens on the picker', await rows.count() > 0)
+  await rows.first().click()
+  await page.waitForTimeout(400)
+  t.check('choosing a client closes the list',
+    await page.locator('ul[role="listbox"]').count(), 0)
+  t.ok('...and the client is chosen', (await clientBox(page).inputValue()).length > 0)
+
+  /*
    * A CLIENT ID NOBODY RECOGNISES IS NOT CHOSEN AT ALL — asserted through the Hold button, not
    * through the picker.
    *

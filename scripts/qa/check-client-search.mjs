@@ -129,6 +129,28 @@ for (const [path, what] of SCREENS) {
     !/<option key=\{c\.id\}/.test(code) && !/companies\.map\(\(c\) => <option/.test(code))
 }
 
+/* ------------------------------------------------- choosing closes the list */
+
+/*
+ * THE FIRM: "the moment that I click on a client, it just selects it, it has like this little
+ * tick, and then you have to close it manually."
+ *
+ * The real assertion is in e2e/upload-a-batch.mjs, which clicks a row in a browser and looks for
+ * the listbox to be gone -- the bug only exists once a <label> is in the tree. This is the fast
+ * half: the cancel is one call that reads as pointless to anybody who does not know why it is
+ * there, which makes it exactly the kind of line a tidy-up deletes.
+ */
+const picker = readFileSync('src/components/ui/ClientPicker.tsx', 'utf8')
+ok('taking a row cancels the click, so a wrapping <label> cannot refocus the input',
+  /function take\([\s\S]{0,120}?e\?\.preventDefault\(\)/.test(picker))
+ok('...and the row hands its event over for that to be possible',
+  /onClick=\{\(e\) => take\(r\.id, e\)\}/.test(picker))
+/* Not asserted here: that FormField is still a <label>. It is, and it is how three of the five
+   call sites inherited this -- but a check that went red on somebody LEGITIMATELY changing
+   FormField would be a check firing when nothing is wrong. The defence above is unconditional. */
+/* Escape leaves the box focused, so reopening has to be possible from a click as well. */
+ok('the box reopens on a click, not only on focus', /onClick=\{\(\) => \{ setOpen\(true\)/.test(picker))
+
 /* ---------------------------------------------------------------- report */
 
 if (failures.length) {

@@ -58,7 +58,25 @@ export function ClientPicker<T extends Searchable>({
     return () => document.removeEventListener('mousedown', away)
   }, [open])
 
-  function take(rowId: string) {
+  /**
+   * Taking a row, and CANCELLING THE CLICK'S DEFAULT ACTION on the way out.
+   *
+   * THE FIRM: "the moment that I click on a client, it just selects it, it has like this little
+   * tick, and then you have to close it manually."
+   *
+   * The picker always closed itself -- setOpen(false) is right there. What reopened it is the
+   * <label> most of these sit inside: activating anything within a label forwards the activation
+   * to the label's own control, so the row's click selected the client and then focused the input
+   * underneath it, and this input opens on focus. FormField is a <label> too, which made it three
+   * of the five places the picker is used -- and it looked like a picker ignoring you rather than
+   * a bug, because the client WAS chosen every time. The value was never the broken part.
+   *
+   * Cancelled here rather than fixed at the call sites, because the next person to wrap a picker
+   * in a FormField would bring it straight back. A label forwarding to a composite widget is not
+   * behaviour this control ever wants.
+   */
+  function take(rowId: string, e?: { preventDefault: () => void }) {
+    e?.preventDefault()
     onChange(rowId)
     setOpen(false)
     setQuery('')
@@ -86,6 +104,12 @@ export function ClientPicker<T extends Searchable>({
         value={open ? query : clientLabel(chosen)}
         placeholder={placeholder ?? (clearLabel ?? 'Search for a client…')}
         onFocus={() => { setOpen(true); setActive(0) }}
+        /*
+          ON CLICK AS WELL AS FOCUS. Escape closes the list and leaves the box focused, so the
+          next tap on it was a click on an already-focused input -- no focus event fires, nothing
+          opens, and the control reads as having stopped responding.
+        */
+        onClick={() => { setOpen(true); setActive(0) }}
         onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(0) }}
         onKeyDown={(e) => {
           if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -111,7 +135,7 @@ export function ClientPicker<T extends Searchable>({
       <span className="absolute inset-y-0 right-2 flex items-center text-slate-400">
         {clearLabel && value && !open ? (
           <button type="button" aria-label="Clear the client" disabled={disabled}
-            onClick={() => { take(''); input.current?.focus() }}
+            onClick={(e) => { take('', e); input.current?.focus() }}
             className="rounded p-0.5 hover:bg-slate-100 hover:text-slate-600">
             <X size={14} />
           </button>
@@ -130,7 +154,7 @@ export function ClientPicker<T extends Searchable>({
           {rows.map((r, i) => (
             <li key={r.id || '(none)'} role="option" aria-selected={i === active}
               onMouseEnter={() => setActive(i)}>
-              <button type="button" onClick={() => take(r.id)}
+              <button type="button" onClick={(e) => take(r.id, e)}
                 className={`w-full flex items-center gap-2 px-3 py-2 text-left
                   ${i === active ? 'bg-brand-50' : 'hover:bg-slate-50'}`}>
                 <span className="min-w-0 flex-1 truncate text-sm text-slate-800">{r.label}</span>
