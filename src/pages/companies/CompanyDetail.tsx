@@ -39,6 +39,7 @@ import { ClientQueries } from './ClientQueries'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
 import { AddDebtorModal } from '../../components/companies/AddDebtorModal'
+import { ClientPicker } from '../../components/ui/ClientPicker'
 import { CommissionCard } from '../../components/companies/CommissionCard'
 import { createDebtorAccount, fetchAccountReferences, fetchClientCommissionRate } from '../../lib/accountBook'
 import { toAccountRow, toContactRows, type NewDebtorInput } from '../../lib/newDebtor'
@@ -1230,14 +1231,7 @@ function AssignParentModal({
 
         {mode === 'existing' ? (
           <FormField label="Parent Client" required>
-            <select className={inputClass} value={selectedId} onChange={(e) => setSelectedId(e.target.value)} required>
-              {candidates.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                  {c.code ? ` (${c.code})` : ''}
-                </option>
-              ))}
-            </select>
+            <ClientPicker clients={candidates} value={selectedId} onChange={setSelectedId} />
           </FormField>
         ) : (
           <>

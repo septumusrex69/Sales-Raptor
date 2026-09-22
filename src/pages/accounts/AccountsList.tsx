@@ -4,6 +4,7 @@ import { AlertTriangle, GitBranch, Loader2, Search, UserCheck, X } from 'lucide-
 import { Card } from '../../components/ui/Card'
 import { inputClass } from '../../components/ui/Modal'
 import { useAppStore } from '../../store/AppStore'
+import { ClientPicker } from '../../components/ui/ClientPicker'
 import { useAuth } from '../../store/AuthContext'
 import {
   fetchAccounts, fetchBookFacets, fetchBookSummary, fetchViewCounts, hasCommissionDrift,
@@ -323,14 +324,15 @@ export function AccountsList() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <select
-            className={`${inputClass} w-auto`}
-            value={companyId ?? ''}
-            onChange={(e) => setParam('client', e.target.value || null)}
-          >
-            <option value="">All clients</option>
-            {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          {/* Searchable, at the firm's asking. The book is filtered by client constantly and
+              a wheel of every client is the slowest way there is to do it on an iPad. */}
+          <div className="w-64">
+            <ClientPicker
+              clients={companies}
+              value={companyId ?? ''}
+              onChange={(id) => setParam('client', id || null)}
+              clearLabel="All clients" />
+          </div>
           <AccountFilters
             params={params} setParam={setParam} onClear={clearFilters}
             facets={facets} users={users} teams={teams} canSeeOthers={canSeeOthers}

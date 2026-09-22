@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Phone, Mail, MessageCircle, MessageSquare, Calendar, StickyNote, FileText, CheckSquare, ArrowRightLeft, Trophy, XOctagon, Inbox } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
+import { ClientPicker } from '../../components/ui/ClientPicker'
 import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { formatDateTime } from '../../data/mockData'
@@ -96,14 +97,16 @@ export function ActivitiesPage() {
             <option key={t}>{t}</option>
           ))}
         </select>
-        <select value={company} onChange={(e) => setCompany(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none">
-          <option value="All">All Companies</option>
-          {companies.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+        {/* Searchable: the same picker as the book's filter and the handover import, so there is
+            one way of finding a client in this app. 'All' rather than '' because this screen's
+            filter has always used the word. */}
+        <div className="w-56">
+          <ClientPicker
+            clients={companies}
+            value={company === 'All' ? '' : company}
+            onChange={(id) => setCompany(id || 'All')}
+            clearLabel="All companies" />
+        </div>
         <span className="text-xs text-slate-400 ml-auto">{filtered.length} activities</span>
       </div>
 

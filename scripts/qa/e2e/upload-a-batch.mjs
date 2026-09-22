@@ -168,6 +168,26 @@ const FULL_SHEET = [
   'GPS3/10105,1200.00,18/03/2026,Person,Ndlovu,',
 ].join('\n')
 
+
+/*
+ * THE CLIENT PICKER, which is a combobox over a listbox rather than a <select>.
+ *
+ * THE FIRM: "I don't like the drop down ... I should be able to search the client as well." So
+ * these read the input's VALUE rather than a select's, and "the clients have arrived" is asked by
+ * opening the panel and counting rows — there is no options.length to wait on any more.
+ */
+const clientBox = (page) => page.getByPlaceholder(/Search for a client/).first()
+
+async function clientsLoaded(page) {
+  await clientBox(page).waitFor({ timeout: 15000 })
+  await clientBox(page).click()
+  await page.waitForFunction(
+    () => document.querySelectorAll('ul[role="listbox"] li[role="option"]').length > 0,
+    null, { timeout: 15000 },
+  )
+  await page.keyboard.press('Escape')
+}
+
 const server = await startServer()
 let browser
 try {
@@ -226,9 +246,9 @@ try {
    */
   await t.shot(page, 'upload-a-batch-landed')
 
-  const picker = page.locator('select').first()
-  await picker.waitFor({ timeout: 10000 })
-  t.check('the client is already chosen', await picker.inputValue(), COMPANY_ID)
+  await clientBox(page).waitFor({ timeout: 10000 })
+  t.check('the client is already chosen',
+    await clientBox(page).inputValue(), 'Northbank Properties (NBP)')
 
   /*
    * NOW COLD, which is the case the seeding has to survive and the click above does not reach.
@@ -239,12 +259,31 @@ try {
    * an empty list, found to be nobody, and thrown away before the client it names arrives.
    */
   await page.goto(`http://localhost:${PORT}/settings?tab=Data+Import&client=${COMPANY_ID}`)
-  const coldPicker = page.locator('select').first()
-  await coldPicker.waitFor({ timeout: 15000 })
+  await clientBox(page).waitFor({ timeout: 15000 })
   await page.waitForFunction(
-    (id) => document.querySelector('select')?.value === id, COMPANY_ID, { timeout: 10000 },
+    () => (document.querySelector('input[role="combobox"]')?.value ?? '') !== '',
+    null, { timeout: 10000 },
   ).catch(() => {})
-  t.check('opened cold, the client is still chosen', await coldPicker.inputValue(), COMPANY_ID)
+  t.check('opened cold, the client is still chosen',
+    await clientBox(page).inputValue(), 'Northbank Properties (NBP)')
+
+  /*
+   * AND IT CAN BE SEARCHED, which is what the firm asked for. Typed at the CODE, because that is
+   * what they say out loud — "BRF" for Bredell Ferreira — and a native dropdown could only ever
+   * jump to the first letter of the name.
+   */
+  await clientBox(page).click()
+  await clientBox(page).fill('nbp')
+  await page.waitForTimeout(300)
+  const hits = page.locator('ul[role="listbox"] li[role="option"]')
+  t.check('typing the client code finds it', await hits.count(), 1)
+  t.ok('...and it is the right one', /Northbank/.test(await hits.first().innerText()))
+  await clientBox(page).fill('zzzz')
+  await page.waitForTimeout(300)
+  t.check('a search that finds nobody offers nothing', await hits.count(), 0)
+  /* NAMED, NOT EMPTY: a panel that opens on nothing reads as a broken picker. */
+  t.ok('...and says so', /No client matches/.test(await page.locator('ul[role="listbox"]').innerText()))
+  await page.keyboard.press('Escape')
 
   /*
    * A CLIENT ID NOBODY RECOGNISES IS NOT CHOSEN AT ALL — asserted through the Hold button, not
@@ -257,16 +296,13 @@ try {
    * enabled, which is the worst of both and the thing the guard exists to prevent.
    */
   await page.goto(`http://localhost:${PORT}/settings?tab=Data+Import&client=not-a-company`)
-  await page.locator('select').first().waitFor({ timeout: 15000 })
   /*
    * WAIT FOR THE CLIENTS TO LAND BEFORE READING THE SHEET, or this assertion passes for the
    * wrong reason. The seeding only runs once the list arrives; checked before that, the picker
    * is empty and Hold is disabled whether the guard exists or not. Written without this wait it
    * was green against code with the guard deleted, which is the trap CLAUDE.md names.
    */
-  await page.waitForFunction(
-    () => (document.querySelector('select')?.options.length ?? 0) > 1, null, { timeout: 15000 },
-  )
+  await clientsLoaded(page)
   await page.setInputFiles('input[type="file"]', {
     name: 'handover.csv',
     mimeType: 'text/csv',
@@ -279,7 +315,7 @@ try {
   t.ok('...but a client we do not know cannot be held against', await hold.isDisabled())
 
   await page.goto(`http://localhost:${PORT}/settings?tab=Data+Import&client=${COMPANY_ID}`)
-  await page.locator('select').first().waitFor({ timeout: 15000 })
+  await clientBox(page).waitFor({ timeout: 15000 })
 
   /*
    * THE WHOLE SHEET IS ON THE SCREEN, at the firm's asking: "I can see only limited information,
@@ -287,9 +323,7 @@ try {
    * pretty much be in there. And it should show which data is wrong."
    */
   await page.goto(`http://localhost:${PORT}/settings?tab=Data+Import&client=${COMPANY_ID}`)
-  await page.waitForFunction(
-    () => (document.querySelector('select')?.options.length ?? 0) > 1, null, { timeout: 15000 },
-  )
+  await clientsLoaded(page)
   await page.setInputFiles('input[type="file"]', {
     name: 'handover.csv', mimeType: 'text/csv', buffer: Buffer.from(FULL_SHEET),
   })

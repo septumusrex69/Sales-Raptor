@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Check, CheckCircle2, FileUp, Loader2, Paperclip, Upload, X } from 'lucide-react'
 import { Card, CardHeader } from '../ui/Card'
-import { inputClass } from '../ui/Modal'
+import { ClientPicker } from '../ui/ClientPicker'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { parseCsv } from '../../lib/csv'
@@ -300,10 +300,8 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
       */}
       <label className="block mb-4">
         <span className="block text-xs font-medium text-slate-500 mb-1">Whose handover is this</span>
-        <select className={inputClass} value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
-          <option value="">Choose a client…</option>
-          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        <ClientPicker clients={clients} value={companyId} onChange={setCompanyId}
+          placeholder="Search for a client by name or code…" />
       </label>
 
       <div className="space-y-3">

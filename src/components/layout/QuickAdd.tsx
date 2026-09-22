@@ -5,6 +5,7 @@ import { Modal, FormField, inputClass } from '../ui/Modal'
 import { isHandoverService } from '../../lib/dealKind'
 import { SearchableSelect } from '../ui/SearchableSelect'
 import { useAppStore } from '../../store/AppStore'
+import { ClientPicker } from '../ui/ClientPicker'
 import { useAuth } from '../../store/AuthContext'
 import { leadSources, services } from '../../data/mockData'
 import type { Lead, LeadSource, ProductService } from '../../types'
@@ -217,13 +218,10 @@ export function ContactForm({ onClose, store }: { onClose: () => void; store: St
           <input className={inputClass} value={form.jobTitle} onChange={(e) => setForm({ ...form, jobTitle: e.target.value })} />
         </FormField>
         <FormField label="Company">
-          <select className={inputClass} value={form.companyId} onChange={(e) => setForm({ ...form, companyId: e.target.value })}>
-            {store.companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <ClientPicker
+            clients={store.companies}
+            value={form.companyId}
+            onChange={(companyId) => setForm({ ...form, companyId })} />
         </FormField>
         <div className="grid grid-cols-2 gap-3">
           <FormField label="Email">
