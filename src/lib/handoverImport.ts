@@ -243,6 +243,18 @@ export interface PlannedRow {
    * exactly that; substituting there would lose the thing the client has to correct.
    */
   defaultDateUsed: string | null
+  /**
+   * The date of default as a DATE, not as the sheet wrote it.
+   *
+   * `values.default_date` is whatever is in the cell -- the reader's 2026/03/18, or 15/03/2026
+   * typed into the box by somebody in Pretoria. Postgres reads a bare dd/mm/yyyy with its own
+   * DateStyle, which on Supabase is MDY: 15/03/2026 is rejected outright and 03/04/2026 is
+   * silently stored as 4 March. In duplum, interest and prescription all run from this date, so
+   * the one the row was JUDGED on is carried here and is the only one allowed near the database.
+   *
+   * Null only where the date could not be read at all, which refuses the row.
+   */
+  defaultDate: string | null
 }
 
 export interface HandoverPlan {
@@ -756,7 +768,7 @@ function readRow(
   for (const sig of signatures) if (!ctx.seenSignatures.has(sig)) ctx.seenSignatures.set(sig, line)
 
   return {
-    line, values, capital, problems, defaultDateUsed,
+    line, values, capital, problems, defaultDateUsed, defaultDate: defaulted,
     refused: problems.some((p) => p.level === 'refuse'),
   }
 }
@@ -768,7 +780,14 @@ function readRow(
  * that imports it cannot run at all — which is how this ended up in the wrong file first. The
  * mapping is the interesting part and it is the part worth testing.
  */
-export function toDebtorInput(values: Record<string, string | null>): NewDebtorInput {
+export function toDebtorInput(
+  values: Record<string, string | null>,
+  /**
+   * The date of default, ALREADY READ, as yyyy-mm-dd. Taken rather than read off `values`,
+   * because the cell holds whatever was typed into it and this goes into a `date` column.
+   */
+  defaultDate: string | null,
+): NewDebtorInput {
   const v = (k: string) => (values[k] ?? '').trim()
   return {
     accountNumber: v('account_number'),
@@ -795,7 +814,7 @@ export function toDebtorInput(values: Record<string, string | null>): NewDebtorI
      */
     idNumber: v('id_number') || v('registration_number'),
     capital: v('capital'),
-    handoverDate: v('default_date'),
+    handoverDate: defaultDate ?? '',
     /* NOT ASKED FOR ON THE SHEET ANY MORE, at the firm's instruction -- the rate is in the
        agreement the firm already holds. toAccountRow needs a number, and an account opened at
        nought is one somebody notices; opened at a guessed 24% it is one nobody does. */

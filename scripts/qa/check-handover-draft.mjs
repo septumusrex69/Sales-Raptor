@@ -15,8 +15,8 @@
  * verdict is never stored, and this refuses a column that would store one.
  */
 import { readFileSync } from 'node:fs'
-import { toDebtorInput } from '../../src/lib/handoverImport.ts'
-import { toAccountRow } from '../../src/lib/newDebtor.ts'
+import { planHandover, toDebtorInput } from '../../src/lib/handoverImport.ts'
+import { toAccountRow, validateNewDebtor } from '../../src/lib/newDebtor.ts'
 import { HANDOVER_COLUMNS } from '../../src/lib/handoverSheet.ts'
 
 let pass = 0
@@ -178,10 +178,10 @@ ok('...into a box that shows more than the last few words it heard',
 const input = toDebtorInput({
   client_reference: 'GPS3/10103', name: 'Van Der Westhuizen', first_name: 'Johannes',
   title: 'Mr', initials: 'J H', second_name: 'Hendrik',
-  capital: '48250.00', default_date: '2026-03-18', id_number: '8503125009089',
+  capital: '48250.00', id_number: '8503125009089',
   cell_1: '082 123 4567', street_1: '14 Protea Street', suburb: 'Wonderboom',
   city: 'Pretoria', street_code: '0182', next_of_kin: 'Maria', next_of_kin_phone: '083 234 5678',
-})
+}, '2026-03-18')
 check('the surname becomes the surname', input.surname, 'Van Der Westhuizen')
 check('the reference is the client’s own', input.clientReference, 'GPS3/10103')
 check('the handover amount opens the ledger', input.capital, '48250.00')
@@ -224,8 +224,8 @@ check('...beside the two that always did',
 /* Absent is null, not an empty string: the panel prints "Not recorded" for a blank and would
    print nothing at all for '', which reads as a field that failed to load. */
 const bare = toAccountRow(toDebtorInput({
-  name: 'Dube', capital: '100', default_date: '2026-01-01',
-}), 'company-1', null)
+  name: 'Dube', capital: '100',
+}, '2026-01-01'), 'company-1', null)
 check('a name column nobody filled in is null rather than empty',
   [bare.debtor_title, bare.debtor_initials, bare.debtor_second_name], [null, null, null])
 
@@ -263,6 +263,9 @@ const GOES_NOWHERE = [
 const NOT_CARRIED = new Set([
   /* Read as debtorKind rather than stored as text, and asserted separately below. */
   'debtor_kind',
+  /* READ BY THE PLANNER, CARRIED AS A DATE. toDebtorInput is deliberately not allowed near this
+     cell -- it holds whatever was typed into it, and it goes into a `date` column. See below. */
+  'default_date',
   /* Folded into the one address the account keeps, on its own lines. */
   'street_1', 'street_2', 'suburb', 'city', 'street_code',
   /* Read into the single identity field, whose meaning debtorKind decides. */
@@ -290,20 +293,20 @@ check(`nothing on the known list is silently already fixed${
  */
 const business = toDebtorInput({
   name: 'Adowa Property Managers', debtor_kind: 'Business',
-  registration_number: '2016/210735/07', capital: '100', default_date: '2026-01-01',
-})
+  registration_number: '2016/210735/07', capital: '100',
+}, '2026-01-01')
 check('a business row opens as a company', business.debtorKind, 'company')
 check('...with its registration number as its identity', business.idNumber, '2016/210735/07')
 check('...and it reaches the row',
   toAccountRow(business, 'c1', null).debtor_kind, 'company')
-const person = toDebtorInput({ name: 'Dube', debtor_kind: 'Person', id_number: '8503125009089' })
+const person = toDebtorInput({ name: 'Dube', debtor_kind: 'Person', id_number: '8503125009089' }, null)
 check('a person row opens as a person', person.debtorKind, 'individual')
 check('...with the ID number, not the registration one', person.idNumber, '8503125009089')
 /* Anything a client typed that is neither reads as a person, which is what the column defaults
    to and what the planner already warns about -- it must not silently become a company. */
 check('an unrecognised word is a person',
-  toDebtorInput({ name: 'Dube', debtor_kind: 'Individual' }).debtorKind, 'individual')
-check('...and so is a blank', toDebtorInput({ name: 'Dube' }).debtorKind, 'individual')
+  toDebtorInput({ name: 'Dube', debtor_kind: 'Individual' }, null).debtorKind, 'individual')
+check('...and so is a blank', toDebtorInput({ name: 'Dube' }, null).debtorKind, 'individual')
 
 /* ---------- one query for the sheet, not one per row ---------- */
 
@@ -540,6 +543,86 @@ ok('an out-of-date read is thrown away rather than drawn',
  */
 ok('a blur is judged against what the box was showing',
   /e\.target\.value\.trim\(\) === shown\.trim\(\)/.test(card))
+
+/*
+ * ---- A TYPED DATE NEVER REACHES A DATE COLUMN ----
+ *
+ * The handover table shows a date as 18/03/2026 and invites somebody to correct it there. What
+ * they type is stored exactly as typed, and the approval used to hand that string to Postgres.
+ *
+ * Supabase runs DateStyle MDY, so it splits two ways and the loud half is the lucky one:
+ *   15/03/2026 -> "date/time field value out of range", which is what the firm hit
+ *   03/04/2026 -> accepted, and stored as 4 MARCH
+ * In duplum, interest and prescription all run from this date. A silently transposed one is
+ * wrong for the life of the account and nothing anywhere would say so.
+ *
+ * So the row carries the date it was JUDGED on, and that is the only one allowed near the
+ * database. Asserted through planHandover rather than on the parser, because the bug was not in
+ * the parsing -- it was that a correctly parsed date sat there while the raw cell went to
+ * Postgres instead.
+ */
+const typed = planHandover({
+  rows: [
+    ['Your reference', 'Handover amount', 'Date of default', 'Person or business', 'Surname'],
+    ['BF-206', '2075', '15/03/2026', 'Person', 'Mahlangu'],
+    /* The dangerous one: every part of it is a plausible month as well as a plausible day. */
+    ['BF-207', '900', '03/04/2026', 'Person', 'Jacobs'],
+  ],
+  today: '2026-09-22',
+})
+check('a day-first date is carried as a date', typed.rows[0].defaultDate, '2026-03-15')
+check('...and the third of April is the third of April',
+  typed.rows[1].defaultDate, '2026-04-03')
+check('the account opens on that, not on what was typed',
+  toDebtorInput(typed.rows[1].values, typed.rows[1].defaultDate).handoverDate, '2026-04-03')
+/* The guard that makes the route impossible rather than merely unused: toDebtorInput cannot read
+   the cell at all, so no caller can reintroduce this by forgetting. */
+ok('toDebtorInput cannot reach the date cell', !carried.includes("v('default_date')"))
+/*
+ * AND THE LAST LINE OF DEFENCE, on the function every path to an account goes through. A check
+ * that only lives in the import is a check the by-hand form and every future caller do not have.
+ */
+check('a date that is not a date cannot open an account',
+  validateNewDebtor({
+    ...input, handoverDate: '15/03/2026', interestRateAnnual: '0',
+  }, '2026-09-22').some((p) => p.field === 'handoverDate'), true)
+check('...and one that is, can',
+  validateNewDebtor({
+    ...input, handoverDate: '2026-03-15', interestRateAnnual: '0',
+  }, '2026-09-22').some((p) => p.field === 'handoverDate'), false)
+
+/*
+ * ---- NOTHING IS WRITTEN UNTIL EVERY ROW CAN BE OPENED ----
+ *
+ * The approval inserted the batch, then opened the accounts one at a time, and a row the database
+ * refused threw straight out -- leaving the batch and however many accounts had already gone in,
+ * with the draft still in the queue as though nothing had happened. Pressing Approve again opened
+ * them all again. It happened to the firm twice in two minutes on one sheet: two batches, five
+ * accounts each, the same five references on the book twice.
+ *
+ * A half-import is worse than a failed one in every way that matters.
+ */
+const build = lib.indexOf('const built = going.map(')
+const validate = lib.indexOf('validateNewDebtor(debtor, input.today)')
+const batchInsert = lib.indexOf("from('handovers').insert(")
+const firstAccount = lib.indexOf('createDebtorAccount(')
+/* PRESENCE BEFORE ORDER. indexOf returns -1, so an order-only assertion passes vacuously the
+   moment the thing it orders is deleted -- which is the trap CLAUDE.md names. */
+ok('the rows are built before anything is written', build >= 0)
+ok('...and checked', validate >= 0)
+ok('...and there is a batch and an account to order against',
+  batchInsert >= 0 && firstAccount >= 0)
+ok('every row is checked before the batch exists', build < validate && validate < batchInsert)
+ok('...and before the first account is opened', validate < firstAccount)
+/* WIRED TO THE COUNT, not merely present in the file. Asserted as "the sentence appears
+   somewhere" this passed with the condition replaced by `if (false)` -- the words were still
+   there, telling nobody anything. */
+ok('a row that cannot open an account stops the whole import',
+  /if \(unopenable\.length > 0\) \{\s*throw new Error\(/.test(lib)
+  && /nothing on this handover was imported/i.test(lib))
+/* And the throw is above the batch, or it stops nothing that has not already happened. */
+ok('...before there is a batch to leave behind',
+  lib.indexOf('if (unopenable.length > 0)') < batchInsert)
 
 /* ---------------------------------------------------------------- report */
 

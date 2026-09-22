@@ -20,7 +20,9 @@ import {
   planHandover, toDebtorInput, type HandoverPlan, type PlannedRow,
 } from './handoverImport.ts'
 import { HANDOVER_COLUMNS } from './handoverSheet.ts'
-import { nextReferences, toAccountRow, toContactRows } from './newDebtor.ts'
+import {
+  nextReferences, toAccountRow, toContactRows, validateNewDebtor,
+} from './newDebtor.ts'
 import {
   noteForAccount, readiness, type Decision, type Readiness,
 } from './handoverDecision.ts'
@@ -479,17 +481,6 @@ export async function approveDraft(input: {
   if (going.length === 0) throw new Error('Nothing on this handover can be imported yet.')
 
   const { data: me } = await supabase.auth.getUser()
-  const { data: batch, error: batchError } = await supabase.from('handovers').insert({
-    company_id: judged.draft.companyId,
-    received_at: new Date().toISOString(),
-    capital_amount: judged.totalCapital,
-    accounts_count: going.length,
-    reference: judged.draft.filename,
-    notes: `Imported from ${judged.draft.filename}.`,
-    logged_by: me.user?.id ?? null,
-  }).select('id').single()
-  if (batchError) throw new Error(batchError.message)
-  const handoverId = batch.id as string
 
   /*
    * OUR REFERENCE, GENERATED HERE, because nothing else was going to.
@@ -526,8 +517,26 @@ export async function approveDraft(input: {
   const noteFailures: string[] = []
   /** References opened on a substituted date of default, for the note to Communications. */
   const substituted: string[] = []
-  for (const row of going) {
-    const debtor = toDebtorInput(row.values)
+
+  /*
+   * ---------------------------------------------------------------- built and checked FIRST
+   *
+   * EVERY ROW IS TURNED INTO AN ACCOUNT AND CHECKED BEFORE ANYTHING IS WRITTEN, and the batch is
+   * not created until they all pass.
+   *
+   * This used to insert the batch, then open the accounts one at a time, and a row the database
+   * refused threw straight out of here -- leaving the batch and however many accounts had already
+   * gone in, with the draft still sitting in the queue as though nothing had happened. Pressing
+   * Approve again opened them all a second time. It happened to the firm twice in two minutes on
+   * one sheet: two batches, five accounts each, the same five references on the book twice, and
+   * the only sign of it was an error message about a date.
+   *
+   * A half-import is worse than a failed one in every way that matters. The failure is a sentence
+   * on a screen; the half is duplicate ledgers, duplicate references, and a client invoiced twice
+   * for the same debt.
+   */
+  const built = going.map((row) => {
+    const debtor = toDebtorInput(row.values, row.planned?.defaultDate ?? null)
     /*
      * THE SUBSTITUTE DATE, WHERE THE PLANNER SET ONE. THE FIRM: "when it's accepted it will be
      * minimum 30 days before handover -- let's make it default three months before handover."
@@ -548,6 +557,48 @@ export async function approveDraft(input: {
       debtor.accountNumber = generated[nextGenerated] ?? ''
       nextGenerated += 1
     }
+    return { row, debtor }
+  })
+
+  /*
+   * AND CHECKED BY THE SAME FUNCTION THE BY-HAND FORM USES, so the two cannot come to different
+   * answers about what an account may be opened on. A row that gets here having passed the
+   * planner and still fails this is a rule one of them has and the other has not -- worth saying
+   * out loud rather than discovering as a database error halfway through a batch.
+   */
+  const unopenable = built
+    .map(({ row, debtor }) => ({
+      row,
+      problems: validateNewDebtor(debtor, input.today).map((p) => p.message),
+    }))
+    .filter((x) => x.problems.length > 0)
+  if (unopenable.length > 0) {
+    throw new Error(
+      `${unopenable.length === 1 ? 'One row cannot' : `${unopenable.length} rows cannot`} open an `
+      + 'account, so nothing on this handover was imported. '
+      + unopenable.slice(0, 4).map((x) => `Row ${x.row.line}: ${x.problems.join(' ')}`).join(' ')
+      + (unopenable.length > 4 ? ` And ${unopenable.length - 4} more.` : ''),
+    )
+  }
+
+  /*
+   * NOW the batch, with every account it is about to hold known to be openable. Created before
+   * the first of them on purpose: an insert that dies halfway leaves accounts that at least point
+   * at something findable, which is the lesser of the two bad endings.
+   */
+  const { data: batch, error: batchError } = await supabase.from('handovers').insert({
+    company_id: judged.draft.companyId,
+    received_at: new Date().toISOString(),
+    capital_amount: judged.totalCapital,
+    accounts_count: going.length,
+    reference: judged.draft.filename,
+    notes: `Imported from ${judged.draft.filename}.`,
+    logged_by: me.user?.id ?? null,
+  }).select('id').single()
+  if (batchError) throw new Error(batchError.message)
+  const handoverId = batch.id as string
+
+  for (const { row, debtor } of built) {
     const account = await createDebtorAccount(
       toAccountRow(debtor, judged.draft.companyId, handoverId, input.commissionRate),
       (id) => toContactRows(debtor, id),

@@ -219,8 +219,24 @@ export function validateNewDebtor(input: NewDebtorInput, today: string): Problem
   if (capital === null) problems.push({ field: 'capital', message: 'Capital handed over is required.' })
   else if (capital <= 0) problems.push({ field: 'capital', message: 'Capital must be more than nothing.' })
 
+  /*
+   * A DATE, WRITTEN AS A DATE. Not a formality: this is the last thing between a string somebody
+   * typed and a `date` column, and Postgres does not fail safely on a bad one. Supabase runs
+   * DateStyle MDY, so "15/03/2026" is rejected outright -- loudly, which is the lucky half --
+   * while "03/04/2026" is accepted and stored as 4 March. In duplum, interest and prescription
+   * all run from this date, so a silently transposed one is wrong for the life of the account.
+   *
+   * The import hit the loud half on a date typed into the handover table. The check is here
+   * rather than only there because every path to an account comes through this function, and the
+   * comparison below is a STRING comparison that is only meaningful on yyyy-mm-dd anyway.
+   */
   if (!input.handoverDate) {
     problems.push({ field: 'handoverDate', message: 'The handover date is required — interest runs from it.' })
+  } else if (!/^\d{4}-\d{2}-\d{2}$/.test(input.handoverDate)) {
+    problems.push({
+      field: 'handoverDate',
+      message: `"${input.handoverDate}" is not a date this can open an account on.`,
+    })
   } else if (input.handoverDate > today) {
     problems.push({ field: 'handoverDate', message: 'A handover cannot be dated in the future.' })
   }
