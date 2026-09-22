@@ -137,6 +137,55 @@ export function forwardBody(
   ].join('\n')
 }
 
+/** HTML-escape, for the header lines this builds around somebody else's markup. */
+const escapeHtml = (s: string) => s
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+/**
+ * A forward that keeps the original's SHAPE.
+ *
+ * THE FIRM: "I forwarded this email from Raptor and this is what it looks like" -- the corrections
+ * table arriving at a client as a column of stacked lines, one cell per line.
+ *
+ * forwardBody above quotes the message's plain-text part, and the comment on fetchMailBody says
+ * why: "a quoted reply is prose, not a newsletter." That is right for a REPLY. It is wrong for a
+ * forward, because a forward is for passing something on, and what the firm passes on is most
+ * often the table a client has to act on. A text/plain rendering of a table is every cell on its
+ * own line, which is exactly what came out the other end.
+ *
+ * THE ORIGINAL'S MARKUP IS NOT OURS AND IS NOT TRUSTED. It comes out of somebody else's mailbox,
+ * so the caller hands it in already through sanitizeEmailFragment -- the same deny-list the
+ * reading pane uses -- and this function only writes the header around it. Taking raw html here
+ * would make an ordinary-looking helper the one place a script could be re-sent from.
+ */
+export function forwardQuoteHtml(
+  original: { fromName: string | null; fromAddress: string; subject: string | null; occurredAt: string },
+  /** The original's body, ALREADY SANITISED. See above. */
+  safeHtml: string,
+): string {
+  const who = original.fromName?.trim() || original.fromAddress
+  const when = new Intl.DateTimeFormat('en-ZA', {
+    day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  }).format(new Date(original.occurredAt))
+  /*
+   * A plain rule and plain lines, not a <blockquote>. A quoted forward is the message being sent,
+   * not an aside -- and a client's mail reader indents and greys a blockquote, which is a poor
+   * way to present the table somebody is being asked to correct.
+   */
+  return [
+    '<br><br>',
+    '<div style="border-top:1px solid #d9dee6;margin-top:16px;padding-top:12px">',
+    '<div style="font-family:Calibri,Arial,sans-serif;font-size:12px;color:#6b7280;margin-bottom:10px">',
+    '---------- Forwarded message ----------<br>',
+    `From: ${escapeHtml(who)} &lt;${escapeHtml(original.fromAddress)}&gt;<br>`,
+    `Date: ${escapeHtml(when)}<br>`,
+    `Subject: ${escapeHtml((original.subject ?? '').trim() || '(no subject)')}`,
+    '</div>',
+    safeHtml,
+    '</div>',
+  ].join('')
+}
+
 /**
  * Every Message-ID a reply names, newest first.
  *

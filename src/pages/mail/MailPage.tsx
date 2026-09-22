@@ -26,12 +26,13 @@ import { relativeDayLabel, timeOfDay } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
 import { recordSentEmail, replySubject } from '../../lib/accountEmails'
 import {
-  bumpUnread, companyFromDomain, forwardBody, forwardSubject, recipientLine, recipientSummary,
+  bumpUnread, companyFromDomain, forwardBody, forwardQuoteHtml, forwardSubject, recipientLine,
+  recipientSummary,
   replyAllTo, splitPersonName,
 } from '../../lib/emailRules'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
-import { sanitizeEmailHtml } from '../../lib/emailHtml'
+import { sanitizeEmailFragment, sanitizeEmailHtml } from '../../lib/emailHtml'
 import { useEmailView } from '../../lib/emailView'
 import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
@@ -252,7 +253,11 @@ export function MailPage() {
   /** A brand-new message to anybody. Not a reply, so it carries no thread and no record. */
   const [composing, setComposing] = useState(false)
   /** A message being passed on, with the original underneath it. */
-  const [forwarding, setForwarding] = useState<{ mail: MailItem; body: string; complete: boolean } | null>(null)
+  const [forwarding, setForwarding] = useState<{
+    mail: MailItem; body: string; complete: boolean
+    /** The original as markup, already cleaned, where it was written in HTML. */
+    html: string | null
+  } | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [open, setOpen] = useState<string | null>(null)
   /*
@@ -793,12 +798,30 @@ export function MailPage() {
    */
   async function startForward(mail: MailItem) {
     const token = session?.access_token
-    if (!token) { setForwarding({ mail, body: mail.snippet ?? '', complete: false }); return }
+    if (!token) { setForwarding({ mail, body: mail.snippet ?? '', complete: false, html: null }); return }
     try {
       const full = await fetchMailBody(mail.id, token)
-      setForwarding({ mail, body: full.text || mail.snippet || '', complete: !!full.text })
+      /*
+       * THE MARKUP WHERE THERE IS ANY, and the text only where there is not.
+       *
+       * THE FIRM: "I forwarded this email from Raptor and this is what it looks like" -- the
+       * corrections table arriving as a column of stacked lines. A forward quoted `full.text`,
+       * which for a table is every cell on its own line, and the sender could not see it: the
+       * reading pane draws the HTML.
+       *
+       * Cleaned through the same deny-list the reading pane uses, because this is somebody
+       * else's markup and a forward SENDS it. Pictures are allowed through here, unlike in the
+       * pane: the reader's decision not to fetch a stranger's images is about their own privacy
+       * and is not a reason to strip the pictures out of a message being passed on.
+       */
+      const safe = full.html?.trim()
+        ? sanitizeEmailFragment(full.html, { images: full.images, showPictures: true }).html
+        : null
+      setForwarding({
+        mail, body: full.text || mail.snippet || '', complete: !!full.text, html: safe,
+      })
     } catch {
-      setForwarding({ mail, body: mail.snippet ?? '', complete: false })
+      setForwarding({ mail, body: mail.snippet ?? '', complete: false, html: null })
     }
   }
 
@@ -1502,7 +1525,14 @@ export function MailPage() {
       {forwarding && (
         <ComposeEmailModal
           initialSubject={forwardSubject(forwarding.mail.subject)}
-          initialBody={forwardBody(forwarding.mail, forwarding.body, forwarding.complete)}
+          /*
+            THE MARKUP WHERE THERE IS ANY. With HTML the original rides underneath as itself --
+            tables and all -- and the box above starts empty for a covering note. Without it,
+            nothing changes: the plain text is quoted into the box the way it always was.
+          */
+          {...(forwarding.html
+            ? { quotedHtml: forwardQuoteHtml(forwarding.mail, forwarding.html) }
+            : { initialBody: forwardBody(forwarding.mail, forwarding.body, forwarding.complete) })}
           /*
             NOT inReplyTo. A forward starts a new conversation with somebody who was not in the
             old one; threading it onto the original would file the recipient's reply against the

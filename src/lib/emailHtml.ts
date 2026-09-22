@@ -426,6 +426,55 @@ export function sanitizeEmailHtml(
   html: string,
   options: { images?: EmailPicture[]; showPictures?: boolean } = {},
 ): SafeEmail {
+  const { body, ctx } = sanitiseBody(html, options)
+
+  return {
+    html: [
+      '<!doctype html><html><head><meta charset="utf-8">',
+      `<meta http-equiv="Content-Security-Policy" content="${policy(ctx.showPictures)}">`,
+      // Somebody else's server learns nothing about where the picture was being read.
+      '<meta name="referrer" content="no-referrer">',
+      '<base target="_blank">',
+      `<style>${FRAME_CSS}</style>`,
+      '</head><body>',
+      body,
+      '</body></html>',
+    ].join(''),
+    blockedRemote: ctx.blocked.count,
+    usedCids: [...ctx.used],
+  }
+}
+
+/**
+ * The same cleaning, WITHOUT the document around it.
+ *
+ * FOR A FORWARD, where the original has to go inside a message we are sending rather than into a
+ * frame we are showing. THE FIRM: "I forwarded this email from Raptor and this is what it looks
+ * like" -- a table of corrections arriving at a client as a column of stacked lines.
+ *
+ * A forward quoted the message's PLAIN TEXT part, which for a table is every cell on its own
+ * line. That was a deliberate choice and the reasoning is still right for a REPLY, where the
+ * quote is prose; it is wrong for a forward, where the thing being sent on may be the table
+ * itself.
+ *
+ * The wrapper cannot come with it: the frame's document carries a Content-Security-Policy meta,
+ * a `<base target="_blank">` and a stylesheet meant for an iframe, and a whole second `<html>`
+ * inside a mail body is what mail clients strip -- which would put the table straight back where
+ * it started. So the body alone, cleaned by the same pass.
+ */
+export function sanitizeEmailFragment(
+  html: string,
+  options: { images?: EmailPicture[]; showPictures?: boolean } = {},
+): { html: string; blockedRemote: number; usedCids: string[] } {
+  const { body, ctx } = sanitiseBody(html, options)
+  return { html: body, blockedRemote: ctx.blocked.count, usedCids: [...ctx.used] }
+}
+
+/** The token loop both of the above share. Everything dangerous is refused here, once. */
+function sanitiseBody(
+  html: string,
+  options: { images?: EmailPicture[]; showPictures?: boolean },
+): { body: string; ctx: Context } {
   const ctx: Context = {
     pictures: new Map(
       (options.images ?? [])
@@ -479,21 +528,5 @@ export function sanitizeEmailHtml(
     out.push(token.closing ? `</${token.name}>` : renderTag(token, ctx))
   }
 
-  const body = out.join('')
-
-  return {
-    html: [
-      '<!doctype html><html><head><meta charset="utf-8">',
-      `<meta http-equiv="Content-Security-Policy" content="${policy(ctx.showPictures)}">`,
-      // Somebody else's server learns nothing about where the picture was being read.
-      '<meta name="referrer" content="no-referrer">',
-      '<base target="_blank">',
-      `<style>${FRAME_CSS}</style>`,
-      '</head><body>',
-      body,
-      '</body></html>',
-    ].join(''),
-    blockedRemote: ctx.blocked.count,
-    usedCids: [...ctx.used],
-  }
+  return { body: out.join(''), ctx }
 }

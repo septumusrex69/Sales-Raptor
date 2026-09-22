@@ -40,6 +40,7 @@ export function ComposeEmailModal({
   letterContext,
   initialSubject,
   initialBody,
+  quotedHtml,
   contextNote,
   inReplyTo,
   initialCc,
@@ -84,6 +85,20 @@ export function ComposeEmailModal({
    * quoting it again opened the box with two layers of "> " before the agent typed anything.
    */
   initialBody?: string
+  /**
+   * The original, as MARKUP, to be sent underneath whatever is typed.
+   *
+   * FOR A FORWARD, and it is not editable on purpose. THE FIRM: "I forwarded this email from
+   * Raptor and this is what it looks like" -- the corrections table arriving as a column of
+   * stacked lines, because a forward quoted the message's plain-text part.
+   *
+   * It cannot go in the textarea: that box is prose and its contents are escaped into <br>s on
+   * send, so markup put there would either be shown to the client as angle brackets or would let
+   * anything in a received message be re-sent as live HTML. So it rides alongside, the person
+   * writes their covering note above it, and the two are joined only at the moment of sending.
+   * Already sanitised by the caller -- see forwardQuoteHtml.
+   */
+  quotedHtml?: string
   /**
    * The Message-ID being replied to, where this is a reply.
    *
@@ -268,7 +283,9 @@ export function ComposeEmailModal({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!address.trim() || !subject.trim() || !body.trim()) return
+    /* A forward may go out with no covering note -- the original IS the message. Without this,
+       "send" did nothing at all and said nothing about why. */
+    if (!address.trim() || !subject.trim() || (!body.trim() && !quotedHtml)) return
     const accessToken = session?.access_token
     if (!accessToken) return
     setSubmitting(true)
@@ -282,7 +299,9 @@ export function ComposeEmailModal({
           /* Absent rather than empty, so a cleared box sends to the one recipient only. */
           ...(cc.trim() ? { cc: cc.trim() } : {}),
           subject: subject.trim(),
-          bodyHtml: body.trim().replace(/\n/g, '<br>'),
+          /* The note somebody typed, then the original underneath it. The typed half is prose and
+             becomes <br>s; the quoted half is markup that came in already cleaned. */
+          bodyHtml: body.trim().replace(/\n/g, '<br>') + (quotedHtml ?? ''),
           ...(files.length > 0
             ? { attachments: files.map(({ filename, contentType, content }) => ({ filename, contentType, content })) }
             : {}),
@@ -357,9 +376,22 @@ export function ComposeEmailModal({
             Set to the language chosen for dictation, because somebody dictating in Afrikaans is
             writing in Afrikaans.
           */}
-          <textarea className={inputClass} rows={12} value={body} lang={lang}
-            spellCheck onChange={(e) => setBody(e.target.value)} required autoFocus={!!initialSubject} />
+          <textarea className={inputClass} rows={quotedHtml ? 7 : 12} value={body} lang={lang}
+            spellCheck onChange={(e) => setBody(e.target.value)} required={!quotedHtml}
+            placeholder={quotedHtml ? 'Anything you want to say above the forwarded message — optional' : undefined}
+            autoFocus={!!initialSubject} />
         </FormField>
+        {/*
+          SAID, NOT SHOWN. The original goes out underneath as it was written, tables and all --
+          but putting it in the box above would mean showing somebody raw markup, and rendering it
+          here would need a second sandboxed frame inside a dialog to say something one line
+          covers. What matters is that nobody wonders whether it is being included.
+        */}
+        {quotedHtml && (
+          <p className="-mt-2 mb-3 text-xs text-slate-500">
+            The original message is included below, exactly as it was written.
+          </p>
+        )}
 
         {/*
           THE SAME MICROPHONE AS THE REST OF RAPTOR. It has been on the diary and the account

@@ -429,7 +429,7 @@ ok('what is already stored is cleaned when read', /fromName: senderName\(r\.from
  * and you could see at the bottom the previous email that it is going to reply to."
  */
 ok('the composer is a place to write, not a dialog to answer', /width=\{760\}/.test(composer))
-ok('...with room for more than a sentence', /rows=\{12\}/.test(composer))
+ok('...with room for more than a sentence', /rows=\{quotedHtml \? 7 : 12\}/.test(composer))
 
 /*
  * THE MESSAGE BEING ANSWERED, UNDER THE BOX AND NOT IN IT. Quoting into the box was tried and
@@ -437,7 +437,13 @@ ok('...with room for more than a sentence', /rows=\{12\}/.test(composer))
  * composer with two layers of "> " before anybody had typed a word.
  */
 ok('the original is shown', /quoted \?: string|quoted\?: string/.test(composer))
-ok('...below the box rather than inside it', !/setBody\(.*quoted/.test(composer))
+/*
+ * NAMED PRECISELY, because `quotedHtml` later joined `quoted` on this component and a regex for
+ * "setBody and the word quoted on one line" then matched `required={!quotedHtml}` -- an assertion
+ * failing on a line that does exactly what it is meant to enforce.
+ */
+ok('...below the box rather than inside it',
+  !/setBody\(quoted/.test(composer) && !/initialBody=\{quoted/.test(composer))
 /* As text, because this is mail from outside the building. */
 ok('...as text, never as markup', /whitespace-pre-wrap break-words">\{quoted\.trim\(\)\}/.test(composer))
 /* In its own scroller, or a long chain pushes Send off the bottom of the screen. */

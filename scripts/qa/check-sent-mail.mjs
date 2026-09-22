@@ -11,7 +11,8 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  companyFromDomain, forwardBody, forwardSubject, recipientLine, recipientNames, replyAllTo,
+  companyFromDomain, forwardBody, forwardQuoteHtml, forwardSubject, recipientLine, recipientNames,
+  replyAllTo,
   replySubject, senderName, splitPersonName,
 } from '../../src/lib/emailRules.ts'
 
@@ -103,6 +104,75 @@ ok('reply and forward do not produce the same subject',
   check('a missing subject is named, not left blank',
     /Subject: \(no subject\)/.test(forwardBody({ ...original, subject: null }, 'x')), true)
 }
+
+/* ---------- a forward keeps the original's shape ---------- */
+
+/*
+ * THE FIRM: "I forwarded this email from Raptor and this is what it looks like" -- the handover
+ * corrections table arriving at a client as a column of stacked lines, one cell per line.
+ *
+ * A forward quoted the message's PLAIN TEXT part, and the sender could not see it happen: the
+ * reading pane draws the HTML, so the table looked right on the way out and arrived flattened.
+ * The reasoning for quoting text is still right for a REPLY, where the quote is prose; it is
+ * wrong for a forward, whose whole job is passing the thing itself on.
+ */
+{
+  const original = {
+    fromName: 'Raptor', fromAddress: 'stephan@bredellferreira.co.za',
+    subject: 'Data import for Bredell Ferreira', occurredAt: '2026-09-22T06:10:00Z',
+  }
+  const table = '<table><tr><td>BF-201</td><td>Maree</td></tr></table>'
+  const out = forwardQuoteHtml(original, table)
+  ok('the table survives the forward whole', out.includes(table))
+  ok('...and the header still names who sent it', /Raptor/.test(out))
+  ok('...and when', /22 September 2026/.test(out))
+  ok('...and the original subject', /Subject: Data import for Bredell Ferreira/.test(out))
+  ok('...and says it is a forward', /Forwarded message/.test(out))
+  /*
+   * NOT A BLOCKQUOTE. A client's mail reader indents and greys one, which is a poor way to
+   * present the table somebody is being asked to go and correct -- and on a forward the quoted
+   * part IS the message rather than an aside.
+   */
+  ok('the original is not greyed out as an aside', !/<blockquote/.test(out))
+  /*
+   * THE HEADER IS ESCAPED AND THE BODY IS NOT, which is the whole safety question here. A
+   * display name is text and could carry markup; the body is markup and has already been through
+   * the sanitiser at the call site. Escaping the body would send the client angle brackets;
+   * trusting the name would let a sender put markup in our message through their own From line.
+   */
+  const hostile = forwardQuoteHtml(
+    { ...original, fromName: '<img src=x onerror=alert(1)>' }, '<p>fine</p>')
+  ok('a sender cannot put markup in through their own name', !/<img/.test(hostile))
+  ok('...and it is still readable as the text it is', /&lt;img/.test(hostile))
+  ok('...while the body it wraps is left alone', hostile.includes('<p>fine</p>'))
+}
+
+/*
+ * AND THE PAGE CLEANS IT BEFORE IT GOES. The markup comes out of somebody else's mailbox and a
+ * forward SENDS it, so the one thing that must never happen is the raw html reaching the
+ * composer. forwardQuoteHtml takes it on trust by contract -- this is where the contract is kept.
+ */
+const mailPage = readFileSync(new URL('../../src/pages/mail/MailPage.tsx', import.meta.url), 'utf8')
+ok('a forward cleans the original before sending it',
+  /sanitizeEmailFragment\(full\.html/.test(mailPage))
+ok('...and never hands the raw markup to the composer',
+  !/quotedHtml=\{forwardQuoteHtml\(forwarding\.mail, full\.html/.test(mailPage)
+  && !/quotedHtml.*\bfull\.html\b/.test(mailPage))
+/* Pictures come through on a forward. Blocking them is the READER's choice about a stranger's
+   server, and it is not a reason to strip the pictures out of a message being passed on. */
+ok('...with the pictures kept', /showPictures: true/.test(mailPage))
+/* A message with no HTML at all still forwards the way it always did. */
+ok('a text-only message still quotes its text', /initialBody: forwardBody\(/.test(mailPage))
+
+/* The composer joins the two halves, and only at the moment of sending. */
+const box = readFileSync(new URL('../../src/components/ComposeEmailModal.tsx', import.meta.url), 'utf8')
+ok('the typed note and the original are joined on send',
+  /bodyHtml: body\.trim\(\)\.replace\(\/\\n\/g, '<br>'\) \+ \(quotedHtml \?\? ''\)/.test(box))
+/* A forward may go out with nothing typed above it -- the original IS the message. Before this,
+   "send" did nothing at all and said nothing about why. */
+ok('a forward can go with no covering note',
+  /\(!body\.trim\(\) && !quotedHtml\)/.test(box))
+ok('...but an ordinary message still needs words', /required=\{!quotedHtml\}/.test(box))
 
 const page = readFileSync(new URL('../../src/pages/mail/MailPage.tsx', import.meta.url), 'utf8')
 ok('the mail page can start a message to anybody', /setComposing\(true\)/.test(page))
