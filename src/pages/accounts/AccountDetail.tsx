@@ -80,6 +80,10 @@ import { debtorKey, type OtherAccount } from '../../lib/sameDebtor'
 import { fetchOtherAccounts } from '../../lib/accountBook'
 import { useTitleSlot } from '../../components/layout/TitleSlot'
 import { compareTraceReports, comparisonLine, previousTraceFor } from '../../lib/traceCompare.ts'
+import {
+  hasProgress, instalmentProgress, moneyProgress, progressPercent, type PaymentProgress,
+} from '../../lib/paymentProgress.ts'
+import { instalmentsDue } from '../../lib/arrangements'
 
 type Tab = 'Overview' | 'Transactions' | 'Emails' | 'Documents'
 
@@ -489,6 +493,42 @@ export function AccountDetail() {
     [heroName, account?.accountNumber],
   )
 
+  /*
+   * HOW FAR THROUGH THE DEBT THEY ARE. THE FIRM: "a progress report or a progress bar for a
+   * debtor that is paying."
+   *
+   * THE MONEY HALF COMES OFF THE BALANCE, so it cannot disagree with the figures printed beside
+   * it -- `payments` and `balance` are the same two the statement shows, and the bar is their
+   * ratio rather than a second opinion about the account.
+   *
+   * THE INSTALMENT HALF COMES OFF THE ARRANGEMENT the account is actually on. How many have
+   * fallen DUE is counted from the schedule rather than from a flag: an arrangement taken in June
+   * at R300 a month has had four instalments due by October whatever anybody has recorded, and a
+   * count that waited to be told would report a debtor as current on the day they stopped paying.
+   *
+   * ABOVE THE EARLY RETURNS, because it is a hook. Placed beside the panel it feeds -- which is
+   * after the `loading` branch -- it ran on some renders and not others, and React refuses that
+   * outright: the whole account screen threw and the browser check found the page empty.
+   */
+  const progress = useMemo((): PaymentProgress | null => {
+    const bal = statement?.breakdown
+    if (!bal) return null
+    const money = moneyProgress({ payments: bal.payments, balance: bal.balance })
+    const live = (workspace?.promises ?? []).find((x) => x.status === 'open') ?? null
+    return {
+      money,
+      instalments: live
+        ? instalmentProgress({
+          amount: live.amount,
+          totalPromised: live.totalPromised,
+          instalmentsKept: live.instalmentsKept,
+          arrangement: live.arrangement,
+          due: instalmentsDue(live, new Date().toISOString().slice(0, 10)),
+        })
+        : null,
+    }
+  }, [statement, workspace])
+
   if (loading) return <div className="p-10 grid place-items-center text-slate-400"><Loader2 size={20} className="animate-spin" /></div>
   if (error) return <Card className="border-negative-100 bg-negative-50"><p className="text-sm text-negative-700">{error}</p></Card>
   if (!account) return <Card><p className="text-sm text-slate-600">That account is not in the book.</p></Card>
@@ -575,7 +615,10 @@ export function AccountDetail() {
       setNoteOpen={setNoteOpen}
     />
   )
-  const summaryPanel = <SummaryPanel account={account} breakdown={b} note={statement?.note} />
+
+  const summaryPanel = (
+    <SummaryPanel account={account} breakdown={b} note={statement?.note} progress={progress} />
+  )
 
   /*
    * WHAT THE CLIENT WILL READ, shown to the person whose work produces it.
@@ -1622,9 +1665,11 @@ function ClientLinePanel({ line, position, flag, ask, askDue, onAsk }: {
 
 /* ---------- right: the figures ---------- */
 
-function SummaryPanel({ account, breakdown, note }: {
+function SummaryPanel({ account, breakdown, note, progress }: {
   account: DebtorAccount
   breakdown: BalanceBreakdown | undefined
+  /** How far through the debt they are. Null where nothing has been paid. */
+  progress?: PaymentProgress | null
   /**
    * Why the figures above stop where they do — the in duplum ceiling, or a write-off date.
    *
@@ -1674,8 +1719,70 @@ function SummaryPanel({ account, breakdown, note }: {
           <Money label="Receipt fee if settled" value={b?.settlementFee} />
           <Money label="To settle today" value={b?.settlement} strong />
         </div>
+        {/*
+          HOW FAR THROUGH IT THEY ARE. THE FIRM: "a progress report or a progress bar for a debtor
+          that is paying."
+          
+          UNDER THE FIGURES IT IS MADE OF, so it can be checked rather than believed. A bar with
+          only a percentage on it is one nobody can add up, and this arithmetic goes on a section
+          129 and on a client's report next -- both read by people entitled to check it.
+          
+          DRAWN ONLY WHERE SOMETHING HAS BEEN PAID -- see hasProgress. An empty bar on every
+          account in the book is a thing people stop seeing.
+        */}
+        {progress && hasProgress(progress) && (
+          <div className="border-t border-slate-100 pt-2.5 mt-2">
+            <PaymentProgressBar progress={progress} />
+          </div>
+        )}
       </div>
     </Card>
+  )
+}
+
+/**
+ * The bar itself.
+ *
+ * TWO MEASURES, ONE ABOVE THE OTHER, at the firm's asking. They answer different questions and
+ * the money one alone cannot answer the second: a debtor 60% paid who has missed the last three
+ * instalments is not the same account as one 60% paid and current, and a single bar reports them
+ * identically.
+ *
+ * NO PERCENTAGE WITHOUT ITS FIGURES. The words under it are what somebody checks the bar against.
+ */
+export function PaymentProgressBar({ progress }: { progress: PaymentProgress }) {
+  const pct = progressPercent(progress.money)
+  const run = progress.instalments
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[11px] uppercase tracking-wide text-slate-400">Paid so far</span>
+        <span className="text-[13px] font-semibold text-slate-700 tabular-nums">{pct}%</span>
+      </div>
+      {/* aria-hidden on the bar and the numbers in words beside it: a bar is a picture of a
+          figure that is already on the screen, and read aloud twice it is noise. */}
+      <div aria-hidden className="mt-1 h-2 rounded-full bg-slate-100 overflow-hidden">
+        <div className="h-full rounded-full bg-[var(--c-green)]" style={{ width: `${pct}%` }} />
+      </div>
+      <p className="text-[11px] text-slate-500 mt-1 tabular-nums">
+        {formatMoney(progress.money.recovered)} of {formatMoney(progress.money.charged)}
+        {progress.money.owed > 0 && <> &middot; {formatMoney(progress.money.owed)} still owed</>}
+      </p>
+      {run && (
+        <p className="text-[11px] text-slate-500 mt-1">
+          {/*
+            SAID IN WORDS, NOT AS A SECOND BAR. The instalments are a handful of events, and four
+            ticks is a picture of a number small enough to read as a number. What matters is
+            whether any were MISSED, which a bar cannot say at a glance and a sentence can.
+          */}
+          <span className={run.missed > 0 ? 'font-medium text-[var(--c-gold-dark)]' : ''}>
+            {run.kept} of {run.planned} instalments kept
+            {run.missed > 0 && <>, {run.missed} missed</>}
+          </span>
+          {run.toCome > 0 && <span className="text-slate-400">, {run.toCome} still to come</span>}
+        </p>
+      )}
+    </div>
   )
 }
 
