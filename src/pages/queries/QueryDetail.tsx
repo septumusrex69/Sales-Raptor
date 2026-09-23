@@ -291,6 +291,8 @@ export function QueryDetail() {
         <DraftTable
           judged={followUp}
           busy={busy ? 'Working' : null}
+          /* One job on this page, so the approval's progress IS whatever is running. */
+          approving={busy ? 'Working' : null}
           error={error}
           backLabel="Put it away"
           onBack={() => setFollowUp(null)}

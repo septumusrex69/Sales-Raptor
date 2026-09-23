@@ -746,3 +746,47 @@ export async function fetchViewCounts(input: {
     gone_quiet: n('gone_quiet'),
   }
 }
+
+/**
+ * A batch that was imported and never shared out.
+ *
+ * THE FIRM: "there should be a state where it's a warning that 12 accounts has not been
+ * allocated. For example, if a system goes off in the middle of an import."
+ */
+export interface UnallocatedBatch {
+  handoverId: string
+  reference: string | null
+  companyId: string | null
+  companyName: string | null
+  receivedAt: string
+  /** Accounts from this batch still on nobody's desk. */
+  unallocated: number
+  /** How many the batch opened, so the warning can say "9 of 12". */
+  total: number
+}
+
+/**
+ * Recently imported batches with accounts still in the pile.
+ *
+ * BOUNDED BY DAYS ON PURPOSE, and that is the whole design of it. An account on nobody's desk is
+ * not wrong -- most of the inherited book is exactly that and will be until somebody shares it
+ * out -- so "how many unallocated accounts are there" is a number that would be large for ever
+ * and read by nobody. What is worth a warning is the narrow case: a batch that came in this week
+ * whose accounts never reached a desk, which is what an interrupted import leaves behind.
+ *
+ * NEVER FATAL. It decorates a screen; a screen that will not render because a warning could not
+ * be counted is worse than the warning being missing.
+ */
+export async function fetchUnallocatedBatches(days = 14): Promise<UnallocatedBatch[]> {
+  const { data, error } = await supabase.rpc('unallocated_batches', { p_days: days })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    handoverId: r.handover_id as string,
+    reference: (r.reference as string | null) ?? null,
+    companyId: (r.company_id as string | null) ?? null,
+    companyName: (r.company_name as string | null) ?? null,
+    receivedAt: r.received_at as string,
+    unallocated: Number(r.unallocated ?? 0),
+    total: Number(r.total ?? 0),
+  }))
+}

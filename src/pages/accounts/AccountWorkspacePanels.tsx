@@ -537,33 +537,51 @@ function NameSlot({ account, name, isCompany, onSave, busy }: {
 
   if (!editing) {
     return (
-      <SlotShell icon="name" label={isCompany ? 'Business Name' : 'Full Name'}>
-        <button onClick={() => setEditing(true)} className="text-left hover:underline">
-          {name}
-        </button>
-        {/* A company's name is one field. Breaking it into a title and initials would be five
-            labels lying about what the row holds -- the same mistake this panel already avoids
-            with "Residential Address" over a company. */}
-        {!isCompany && (
-          <span className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1 @lg/details:grid-cols-3">
-            {parts.map(([partLabel, value]) => (
-              <span key={partLabel} className="block min-w-0">
-                <span className="block text-[10px] uppercase tracking-wide text-slate-400">
-                  {partLabel}
+      <SlotShell icon="name" label={isCompany ? 'Business Name' : 'Name'}>
+        {/*
+          THE PARTS, AND NOT THE WHOLE NAME AGAIN.
+          
+          THE FIRM: "the full name, Johannes van der Merwe -- you can put it in the hero section
+          up there. And then where the debtor's details is, you can just say title, surname,
+          first name, initials. I think it's important to see, okay, surname and first name,
+          that's important there, but the full name, just keep it on top."
+          
+          It used to print the assembled name and then the five parts it was assembled from,
+          directly underneath -- the same words twice, the second time in grey. The name now
+          lives once, in the top bar beside the page's own heading, where it stays on screen
+          while the panel scrolls.
+          
+          A company's name is ONE field. Breaking it into a title and initials would be five
+          labels lying about what the row holds -- the same mistake this panel already avoids
+          with "Residential Address" over a company.
+        */}
+        {isCompany ? (
+          <button onClick={() => setEditing(true)} className="text-left hover:underline">
+            {name}
+          </button>
+        ) : (
+          <button onClick={() => setEditing(true)}
+            className="block w-full text-left rounded hover:bg-slate-50">
+            <span className="grid grid-cols-2 gap-x-3 gap-y-1 @lg/details:grid-cols-3">
+              {parts.map(([partLabel, value]) => (
+                <span key={partLabel} className="block min-w-0">
+                  <span className="block text-[10px] uppercase tracking-wide text-slate-400">
+                    {partLabel}
+                  </span>
+                  <span className={`block truncate text-[13px] ${
+                    value ? 'text-slate-700' : 'text-slate-300'}`} title={value ?? undefined}>
+                    {value || 'Not recorded'}
+                  </span>
                 </span>
-                <span className={`block truncate text-[12px] ${
-                  value ? 'text-slate-700' : 'text-slate-300'}`} title={value ?? undefined}>
-                  {value || 'Not recorded'}
-                </span>
-              </span>
-            ))}
-          </span>
+              ))}
+            </span>
+          </button>
         )}
       </SlotShell>
     )
   }
   return (
-    <SlotShell icon="name" label={isCompany ? 'Business Name' : 'Full Name'}>
+    <SlotShell icon="name" label={isCompany ? 'Business Name' : 'Name'}>
       <span className="grid grid-cols-2 gap-1.5 mt-0.5">
         {/*
           SUGGESTED, NOT LOCKED. A letter that opens "Dear buitendag" is what a blank title looks

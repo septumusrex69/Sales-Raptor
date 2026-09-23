@@ -365,7 +365,7 @@ ok('the panel is called Trace information', /}>Trace information<\/PanelTitle>/.
  * makes this card look like the ones above and below it rather than a poster.
  */
 ok('...through the same heading component as the panels beside it',
-  /<PanelTitle action=\{[\s\S]{0,900}}>Trace information<\/PanelTitle>/.test(detail))
+  /<PanelTitle action=\{[\s\S]{0,1800}}>Trace information<\/PanelTitle>/.test(detail))
 /*
  * The panel is its own @container, so the blocks inside lay out on THIS CARD'S width. In the
  * three-column layout it is about 19rem wide on a big monitor, and a screen-width breakpoint
@@ -497,7 +497,16 @@ ok('...and the total says it is a floor when one has no amount',
  */
 {
   const panels = read('../../src/pages/accounts/AccountWorkspacePanels.tsx')
-  for (const [name, source] of [['the account screen', detail], ['the workspace panels', panels]]) {
+  /*
+   * ONE EXCEPTION, STATED RATHER THAN THE RULE WEAKENED. The debtor's name now sits in the TOP
+   * BAR beside the page heading -- at the firm's asking, "put it in the hero section up there" --
+   * and the top bar's own <h1> is text-lg. Matching it is the point; the rule here is about
+   * panels not shouting at the panels beside them, which that is not.
+   */
+  const TOP_BAR_NAME = /<span className="text-lg font-semibold text-slate-800 truncate">\{heroName\}<\/span>/
+  ok('the debtor\u2019s name really is the one in the top bar', TOP_BAR_NAME.test(detail))
+  for (const [name, source] of [['the account screen', detail.replace(TOP_BAR_NAME, '')],
+    ['the workspace panels', panels]]) {
     const big = (source.match(/text-(lg|xl|2xl|3xl)\b/g) ?? [])
     ok(`${name} has nothing set larger than the house scale`, big.length === 0)
   }

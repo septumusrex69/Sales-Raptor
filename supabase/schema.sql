@@ -5921,3 +5921,57 @@ alter table public.handover_draft_rows
 comment on column public.handover_draft_rows.allocate_to is
   'Whose desk this row''s account should open on. Null is the unallocated pile. Set from the '
   'linked-account suggestion on the import screen, and only ever by a person accepting the row.';
+
+-- BATCHES THAT WERE IMPORTED AND NEVER SHARED OUT.
+--
+-- THE FIRM: "there should be a state where it's a warning that 12 accounts has not been
+-- allocated. For example, if a system goes off in the middle of an import."
+--
+-- An account on nobody's desk is not wrong in itself -- most of an inherited book is exactly that
+-- -- so this is deliberately NOT "how many unallocated accounts are there". It is the narrow
+-- question worth a warning: a batch that came in RECENTLY and whose accounts are still sitting in
+-- the pile, which is what an interrupted import leaves behind and what nothing on any screen
+-- would otherwise say.
+--
+-- BOUNDED BY DAYS, because the alternative fires for ever. The sixteen thousand accounts
+-- inherited from Swordfish are unallocated and always will be until somebody shares them out; a
+-- warning that counts those is one people stop reading, which CLAUDE.md names as worse than no
+-- warning at all.
+--
+-- security invoker, so a person sees only the batches their own RLS lets them see.
+create or replace function public.unallocated_batches(p_days integer default 14)
+returns table (
+  handover_id uuid,
+  reference text,
+  company_id uuid,
+  company_name text,
+  received_at timestamptz,
+  unallocated integer,
+  total integer
+)
+language sql
+security invoker
+set search_path to 'public'
+as $$
+  select h.id,
+         h.reference,
+         h.company_id,
+         c.name,
+         h.received_at,
+         count(*) filter (where a.assigned_to is null)::integer,
+         count(*)::integer
+    from public.handovers h
+    join public.debtor_accounts a on a.handover_id = h.id
+    left join public.companies c on c.id = h.company_id
+   where h.received_at >= now() - make_interval(days => greatest(p_days, 0))
+   group by h.id, h.reference, h.company_id, c.name, h.received_at
+  having count(*) filter (where a.assigned_to is null) > 0
+   order by h.received_at desc
+$$;
+
+grant execute on function public.unallocated_batches(integer) to authenticated;
+
+comment on function public.unallocated_batches(integer) is
+  'Recently imported batches with accounts still on nobody''s desk. Bounded by days on purpose: '
+  'the inherited book is unallocated and always will be, and counting it would make the warning '
+  'permanent and therefore unread.';

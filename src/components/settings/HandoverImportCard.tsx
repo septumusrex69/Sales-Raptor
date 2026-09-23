@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle, ArrowRight, Check, CheckCircle2, FileUp, Loader2, Paperclip, Upload, X,
 } from 'lucide-react'
@@ -26,10 +26,16 @@ import { columnWidthCh, foldableColumns } from '../../lib/handoverColumnWidth.ts
 import { suggestedDesk } from '../../lib/linkedAccount.ts'
 import { suggestedNote } from '../../lib/noteSuggestion.ts'
 import { downloadBytes } from '../../lib/xlsxWrite.ts'
-import { fetchClientCommissionRate, fetchExistingAccounts } from '../../lib/accountBook'
+import {
+  fetchClientCommissionRate, fetchExistingAccounts, fetchUnallocatedBatches,
+  type UnallocatedBatch,
+} from '../../lib/accountBook'
 import { formatCurrency } from '../../data/mockData'
 
 const today = () => new Date().toISOString().slice(0, 10)
+
+/** Which of this screen's actions is running. See the note on `busy`. */
+type BusyJob = 'load' | 'read' | 'hold' | 'approve' | 'discard'
 
 /**
  * EVERY COLUMN OF THE SHEET, IN THE SHEET'S OWN ORDER.
@@ -119,6 +125,7 @@ async function readSheet(file: File): Promise<(string | null)[][]> {
  */
 export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | null } = {}) {
   const { companies, deals } = useAppStore()
+  const navigate = useNavigate()
   /* The approver's own session, so the corrections email goes out on their mailbox. */
   const { session } = useAuth()
   /* A CLIENT IS ONE WITH A CODE OR A WON DEAL, which is how CompanyDetail decides it too. A list
@@ -151,7 +158,26 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
   const [pdfs, setPdfs] = useState<File[]>([])
   const [plan, setPlan] = useState<HandoverPlan | null>(null)
   const [docs, setDocs] = useState<MatchPlan | null>(null)
-  const [busy, setBusy] = useState<string | null>(null)
+  /*
+   * WHAT IS BUSY, AND NOT ONLY THAT SOMETHING IS.
+   *
+   * THE FIRM: "the approving 12 handovers, it looks like it's blurring -- as well as the hold it
+   * in Raptor also looks like it's blurring when it's loading."
+   *
+   * IT WAS NOT BLURRING. One `busy` string was shown on WHICHEVER button happened to render it,
+   * so pressing "Hold it in Raptor" put "Holding it in Raptor" inside the "Read the sheet"
+   * button, directly beside a "Hold it in Raptor" button that still said its own name. Two
+   * near-identical labels a centimetre apart read as one smeared one.
+   *
+   * The job says whose message it is. Every button still disables on ANY job -- two of these
+   * running at once is not a thing anybody wants -- but only the one doing the work renames
+   * itself.
+   */
+  const [busy, setBusy] = useState<{ job: BusyJob; message: string } | null>(null)
+  /** For the places that only care THAT something is running -- disabling, mostly. */
+  const busyMessage = busy?.message ?? null
+  const labelFor = (job: BusyJob, idle: string) =>
+    (busy?.job === job ? busy.message : idle)
   const [error, setError] = useState<string | null>(null)
   const [openDrafts, setOpenDrafts] = useState<HandoverDraft[]>([])
   const [draftId, setDraftId] = useState<string | null>(null)
@@ -170,8 +196,22 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
   /** The queued draft whose Discard has been pressed once. */
   const [confirmDiscard, setConfirmDiscard] = useState<string | null>(null)
 
+  /**
+   * Batches imported recently whose accounts never reached a desk.
+   *
+   * THE FIRM: "there should be a state where it's a warning that 12 accounts has not been
+   * allocated. For example, if a system goes off in the middle of an import."
+   *
+   * The road now goes straight from approving into the hand-out, so the ordinary way to end up
+   * here is the one the firm named: somebody was interrupted between the two. Read after every
+   * approval as well as on load, so the warning appears the moment it becomes true.
+   */
+  const [unallocated, setUnallocated] = useState<UnallocatedBatch[]>([])
   const refreshDrafts = useCallback(async () => {
     setOpenDrafts(await fetchOpenDrafts().catch(() => []))
+    /* Never fatal: a screen that will not render because a warning could not be counted is worse
+       than the warning being missing. */
+    setUnallocated(await fetchUnallocatedBatches().catch(() => []))
   }, [])
   useEffect(() => { void refreshDrafts() }, [refreshDrafts])
 
@@ -189,7 +229,7 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
   const readSeq = useRef(0)
   const load = useCallback(async (id: string) => {
     const seq = (readSeq.current += 1)
-    setBusy('Reading the handover')
+    setBusy({ job: 'load', message: 'Reading the handover' })
     try {
       const fresh = await fetchDraft(id, today())
       if (seq !== readSeq.current) return
@@ -204,7 +244,7 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
 
   async function read() {
     if (!sheet) return
-    setBusy('Reading the sheet'); setError(null); setDone(null)
+    setBusy({ job: 'read', message: 'Reading the sheet' }); setError(null); setDone(null)
     try {
       const rows = await readSheet(sheet)
       /*
@@ -246,7 +286,7 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
 
   async function hold() {
     if (!plan || !sheet || !companyId || noMandate) return
-    setBusy('Holding it in Raptor'); setError(null)
+    setBusy({ job: 'hold', message: 'Holding it in Raptor' }); setError(null)
     try {
       const documentFor = new Map((docs?.matched ?? []).map((m) => [m.reference, m.filename]))
       const id = await saveDraft({ companyId, filename: sheet.name, plan, documentFor })
@@ -295,7 +335,7 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
 
   async function approve() {
     if (!judged) return
-    setBusy('Opening the accounts'); setError(null); setAllocate(null)
+    setBusy({ job: 'approve', message: 'Opening the accounts' }); setError(null); setAllocate(null)
     try {
       const result = await approveDraft({
         draftId: judged.draft.id,
@@ -304,7 +344,7 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
            company row in the store -- commission is the client's and a stale copy of it is an
            account invoiced at the wrong rate for the rest of its life. */
         commissionRate: await fetchClientCommissionRate(judged.draft.companyId).catch(() => null),
-        onProgress: (n, total) => setBusy(`Opening the accounts — ${n} of ${total}`),
+        onProgress: (n, total) => setBusy({ job: 'approve', message: `Opening the accounts — ${n} of ${total}` }),
         /* So the corrections can be emailed to the liaison through this person's own mailbox.
            Missing, the import still runs and says the email did not go. */
         accessToken: session?.access_token ?? null,
@@ -342,6 +382,29 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
       }
       setJudged(null); setDraftId(null)
       await refreshDrafts()
+      /*
+       * AND STRAIGHT ON TO ALLOCATING THEM.
+       *
+       * THE FIRM: "the primary thing that should happen is after this, it should immediately go
+       * to allocate the accounts. The road would be import handover, accept the handovers,
+       * allocate, back to the screen ... it leaves room for human error, because if the person
+       * just moves to another place it's not going to be referred."
+       *
+       * A LINK IS NOT A STEP. Somebody who has just watched twelve accounts open has finished
+       * what they came to do as far as the screen is concerned, and the next thing is on a
+       * different page behind a button they have to notice. Twelve accounts on nobody's desk is
+       * the state this whole feature exists to avoid, and it was one distraction away.
+       *
+       * THE LINK STAYS ANYWAY, at the firm's instruction -- "so keep that there". This navigation
+       * is the road; the link is what is left if somebody comes back to the screen, and the
+       * unallocated warning below is what is left if they never do.
+       *
+       * ONLY WHERE SOMETHING OPENED. An import that created nothing has nothing to allocate, and
+       * a hand-out screen over an empty list reads as a broken import.
+       */
+      if (result.created > 0) {
+        navigate(`/accounts?handover=${result.handoverId}&handout=1`)
+      }
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(null) }
   }
 
@@ -350,7 +413,7 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
   /* One discard for both the open table and the queue below it, so the two cannot come to mean
      different things -- and so the list is refreshed either way. */
   async function discard(id: string) {
-    setBusy('Discarding'); setError(null)
+    setBusy({ job: 'discard', message: 'Discarding' }); setError(null)
     try {
       await discardDraft(id)
       if (draftId === id) { setJudged(null); setDraftId(null) }
@@ -360,7 +423,8 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
 
   if (judged) return (
     <DraftTable
-      judged={judged} busy={busy} error={error}
+      judged={judged} busy={busyMessage} error={error}
+      approving={busy?.job === 'approve' ? busy.message : null}
       onEdit={edit} onExclude={exclude} onApprove={approve} onDecide={decide}
       onBack={() => { setJudged(null); setDraftId(null) }}
       onDiscard={() => discard(judged.draft.id)} />
@@ -371,6 +435,42 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
       <CardHeader
         title="Import a handover"
         subtitle="The client's sheet and their PDFs. Nothing is written until you approve it." />
+
+      {/*
+        AND WHAT AN EARLIER IMPORT LEFT BEHIND.
+        
+        THE FIRM: "there should be a state where it's a warning that 12 accounts has not been
+        allocated. For example, if a system goes off in the middle of an import."
+        
+        ABOVE THE FORM, because it is about work that is already in the building. Under the
+        upload boxes it would be read as something about the file somebody is holding.
+        
+        BOUNDED TO RECENT BATCHES -- see unallocated_batches. The inherited book is unallocated
+        and always will be; a warning that counted it would be on the screen for ever and read by
+        nobody, which CLAUDE.md names as worse than no warning.
+      */}
+      {unallocated.length > 0 && (
+        <div className="mb-4 rounded-lg border border-gold-300 bg-gold-50 px-3 py-2.5">
+          <p className="text-sm font-medium text-navy-950 flex items-center gap-1.5">
+            <AlertTriangle size={14} className="text-gold-600 shrink-0" />
+            {unallocated.length === 1
+              ? 'A recent handover has accounts on nobody\u2019s desk.'
+              : `${unallocated.length} recent handovers have accounts on nobody\u2019s desk.`}
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {unallocated.map((b) => (
+              <li key={b.handoverId} className="text-[13px] text-slate-600">
+                <Link to={`/accounts?handover=${b.handoverId}&handout=1`}
+                  className="font-medium text-brand-700 hover:underline">
+                  Allocate {b.unallocated.toLocaleString('en-ZA')} of {b.total.toLocaleString('en-ZA')}
+                </Link>
+                {' \u00b7 '}{b.reference ?? 'a handover'}
+                {b.companyName ? ` \u00b7 ${b.companyName}` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/*
         THE CLIENT IS PICKED, NOT READ. A handover sheet says what each debtor owes and never
@@ -419,17 +519,25 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
       </div>
 
       <div className="flex flex-wrap items-center gap-3 mt-4">
+        {/*
+          EACH BUTTON WEARS ITS OWN LABEL. Reading `busy` directly put "Holding it in Raptor"
+          inside this button while the one beside it still said "Hold it in Raptor" -- two
+          near-identical labels a centimetre apart, which is what the firm saw as blurring.
+        */}
         <button type="button" onClick={() => void read()} disabled={!sheet || !!busy}
           className="btn-primary inline-flex items-center gap-2">
-          {busy ? <Loader2 size={15} className="animate-spin" /> : <FileUp size={15} />}
-          {busy ?? 'Read the sheet'}
+          {busy?.job === 'read' ? <Loader2 size={15} className="animate-spin" /> : <FileUp size={15} />}
+          {labelFor('read', 'Read the sheet')}
         </button>
         {plan && (
           <button type="button" onClick={() => void hold()} disabled={!companyId || !!busy || noMandate}
             title={companyId ? undefined : 'Choose which client this handover is from first'}
             className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg
               bg-gold-400 text-navy-950 border border-gold-500 disabled:opacity-40">
-            <Check size={15} /> Hold it in Raptor
+            {busy?.job === 'hold'
+              ? <Loader2 size={15} className="animate-spin" />
+              : <Check size={15} />}
+            {labelFor('hold', 'Hold it in Raptor')}
           </button>
         )}
       </div>
@@ -754,10 +862,20 @@ function PlanSummary({ plan, docs }: { plan: HandoverPlan; docs: MatchPlan | nul
  * rules the other had moved on from.
  */
 export function DraftTable({
-  judged, busy, error, onEdit, onExclude, onApprove, onBack, onDiscard, onDecide, backLabel,
+  judged, busy, approving, error, onEdit, onExclude, onApprove, onBack, onDiscard, onDecide,
+  backLabel,
 }: {
   judged: JudgedDraft
+  /** Anything running, which disables the whole table. */
   busy: string | null
+  /**
+   * The APPROVAL's own progress, which is the only message this table renames a button for.
+   *
+   * Separate from `busy` because they are different questions. Read off `busy`, pressing Discard
+   * relabelled the approve button "Discarding" -- the same fault the firm saw on the screen
+   * before this one, where one message was worn by whichever button happened to render it.
+   */
+  approving?: string | null
   error: string | null
   onEdit: (rowId: string, key: string, value: string) => Promise<void>
   onExclude: (rowId: string, excluded: boolean) => Promise<void>
@@ -853,8 +971,8 @@ export function DraftTable({
           title={judged.gate.why ?? undefined}
           className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg
             bg-gold-400 text-navy-950 border border-gold-500 disabled:opacity-40">
-          {busy ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
-          {busy ?? `Approve ${judged.gate.importing} `
+          {approving ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
+          {approving ?? `Approve ${judged.gate.importing} `
             + `${judged.gate.importing === 1 ? 'handover' : 'handovers'}`}
         </button>
         {judged.gate.why && !busy && (

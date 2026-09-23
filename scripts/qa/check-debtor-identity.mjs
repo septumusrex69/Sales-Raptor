@@ -266,8 +266,25 @@ ok('...and the unlabelled joined line is gone',
  * with what it guards: `{!isCompany && (` on its own also matches the contact slots below.
  */
 ok('a company is not broken into a title and initials',
-  /\{!isCompany && \(\s*<span className="mt-1\.5 grid/.test(nameSlot))
-ok('...and its one field is called what it is', /'Business Name' : 'Full Name'/.test(nameSlot))
+  /isCompany \? \(\s*<button onClick=\{\(\) => setEditing\(true\)\}/.test(nameSlot))
+ok('...and its one field is called what it is', /'Business Name' : 'Name'/.test(nameSlot))
+/*
+ * AND A PERSON'S NAME IS NOT PRINTED TWICE. THE FIRM: "the full name, Johannes van der Merwe --
+ * you can put it in the hero section up there. And then where the debtor's details is, you can
+ * just say title, surname, first name, initials."
+ *
+ * The panel used to print the assembled name and, directly under it, the five parts it was
+ * assembled from. The name now lives once, in the top bar beside the page's heading, where it
+ * stays on screen while the panel scrolls.
+ */
+ok('a person\u2019s panel shows the parts rather than the name again',
+  /\{parts\.map\(\(\[partLabel, value\]\) => \(/.test(nameSlot))
+ok('...and the name is in the top bar instead', /useTitleSlot\(/.test(detail))
+ok('...with the account number beside it', /account\?\.accountNumber && \(/.test(detail))
+/* A hook cannot live behind an early return: called after the loading branch it would run on
+   some renders and not others, which React refuses outright. */
+ok('...and the hook is above the early returns',
+  detail.indexOf('useTitleSlot(') < detail.indexOf('if (loading) return'))
 /*
  * THE SECOND NAME CAN BE TYPED. It was imported, stored on the row and read by toAccount, with
  * nothing anywhere that could write or show it -- the same failure as a mapper dropping a column,

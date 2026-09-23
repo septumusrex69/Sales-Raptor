@@ -158,7 +158,82 @@ ok('...and only once', /if \(handOutOpened \|\| !canSeeOthers\) return/.test(lis
 ok('but not when nothing was opened', /if \(result\.created > 0\)[\s\S]{0,120}?setAllocate/.test(card))
 /* Cleared when the next approval starts, or the previous batch's link sits under the new one. */
 ok('and the previous batch\u2019s link is cleared first',
-  /setBusy\('Opening the accounts'\)[\s\S]{0,80}?setAllocate\(null\)/.test(card))
+  /setBusy\(\{ job: 'approve', message: 'Opening the accounts' \}\)[\s\S]{0,80}?setAllocate\(null\)/
+    .test(card))
+
+/*
+ * ---- AND THE ROAD GOES STRAIGHT THERE ----
+ *
+ * THE FIRM: "the primary thing that should happen is after this, it should immediately go to
+ * allocate the accounts. The road would be import handover, accept the handovers, allocate, back
+ * to the screen ... it leaves room for human error, because if the person just moves to another
+ * place it's not going to be referred."
+ *
+ * A LINK IS NOT A STEP. Somebody who has just watched twelve accounts open has finished what they
+ * came to do as far as the screen is concerned, and twelve accounts on nobody's desk is the state
+ * the whole hand-out exists to avoid.
+ */
+ok('approving goes on to the hand-out by itself',
+  /navigate\(`\/accounts\?handover=\$\{result\.handoverId\}&handout=1`\)/.test(card))
+/* Only where something opened: a hand-out screen over an empty list reads as a broken import. */
+ok('...but not when nothing opened',
+  /if \(result\.created > 0\) \{\s*navigate\(/.test(card))
+/* The link stays as well, at the firm's instruction -- "so keep that there". */
+ok('...and the link is still there for coming back to',
+  /Allocate and refer \{allocate\.count/.test(card))
+
+/*
+ * ---- AND WHAT AN INTERRUPTED IMPORT LEFT BEHIND IS SAID ----
+ *
+ * THE FIRM: "there should be a state where it's a warning that 12 accounts has not been
+ * allocated. For example, if a system goes off in the middle of an import."
+ */
+ok('the import screen counts what was never shared out',
+  /fetchUnallocatedBatches\(\)/.test(card))
+ok('...and says so with a way to finish it',
+  /accounts on nobody\\u2019s desk/.test(card) && /handout=1`\}/.test(card))
+/*
+ * BOUNDED TO RECENT BATCHES, and that is the whole design of it. An account on nobody's desk is
+ * not wrong -- most of the inherited book is exactly that and will be until somebody shares it
+ * out -- so a warning counting those would be on the screen for ever and read by nobody, which
+ * CLAUDE.md names as worse than no warning at all.
+ */
+const schemaSql = readFileSync('supabase/schema.sql', 'utf8')
+ok('the count is of RECENT batches, not of the whole book',
+  /create or replace function public\.unallocated_batches\(p_days integer default 14\)/.test(schemaSql))
+ok('...bounded by that many days',
+  /received_at >= now\(\) - make_interval\(days => greatest\(p_days, 0\)\)/.test(schemaSql))
+/* And only batches that actually have some: a row saying "0 unallocated" is a warning about
+   nothing, which is the thing that teaches people to stop reading them. */
+ok('...and only where some are still in the pile',
+  /having count\(\*\) filter \(where a\.assigned_to is null\) > 0/.test(schemaSql))
+/* A person sees only what their own RLS lets them see. */
+ok('...read as the caller, not as the database', /unallocated_batches[\s\S]{0,400}?security invoker/.test(schemaSql))
+/* NEVER FATAL. A screen that will not render because a warning could not be counted is worse
+   than the warning being missing. */
+ok('...and a count that fails does not take the screen with it',
+  /fetchUnallocatedBatches\(\)\.catch\(\(\) => \[\]\)/.test(card))
+
+/*
+ * ---- EACH BUTTON WEARS ITS OWN LABEL ----
+ *
+ * THE FIRM: "the approving 12 handovers, it looks like it's blurring -- as well as the hold it in
+ * Raptor also looks like it's blurring when it's loading."
+ *
+ * IT WAS NOT BLURRING. One `busy` string was shown on WHICHEVER button rendered it, so pressing
+ * "Hold it in Raptor" put "Holding it in Raptor" inside the "Read the sheet" button beside a
+ * "Hold it in Raptor" button still saying its own name -- two near-identical labels a centimetre
+ * apart, which reads as one smeared one.
+ */
+ok('the busy state says which job it is', /type BusyJob = /.test(card))
+ok('...and a button only renames itself for its own',
+  /labelFor\('read', 'Read the sheet'\)/.test(card)
+  && /labelFor\('hold', 'Hold it in Raptor'\)/.test(card))
+/* The approval's progress is its own prop, or pressing Discard would relabel Approve. */
+ok('...and the table renames Approve only for the approval',
+  /\{approving \?\? `Approve \$\{judged\.gate\.importing\} `/.test(card))
+/* Every button still disables on ANY job: two of these at once is not a thing anybody wants. */
+ok('...while anything running still disables the lot', /disabled=\{!sheet \|\| !!busy\}/.test(card))
 
 /* ---------- the ping ---------- */
 

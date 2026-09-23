@@ -78,6 +78,7 @@ import type { AccountContact } from '../../lib/accountWorkspace'
 import { OtherAccountsPanel } from '../../components/collections/OtherAccountsPanel'
 import { debtorKey, type OtherAccount } from '../../lib/sameDebtor'
 import { fetchOtherAccounts } from '../../lib/accountBook'
+import { useTitleSlot } from '../../components/layout/TitleSlot'
 
 type Tab = 'Overview' | 'Transactions' | 'Emails' | 'Documents'
 
@@ -452,6 +453,37 @@ export function AccountDetail() {
     workspace?.contacts,
     currentUser?.name, currentUser?.phone, currentUser?.email, currentUser?.whatsapp, firm])
 
+
+  /*
+   * THE DEBTOR'S NAME, IN THE TOP BAR.
+   *
+   * THE FIRM: "the full name, Johannes van der Merwe -- you can put it in the hero section up
+   * there. And then where the debtor's details is, you can just say title, surname, first name,
+   * initials."
+   *
+   * The panel used to print the assembled name and the five parts it was assembled from directly
+   * underneath, which is the same words twice. Up here it is on screen whatever the page is
+   * scrolled to -- and a screen headed only "Account" is one somebody lands on from a link with
+   * no idea whose it is.
+   *
+   * BEFORE THE EARLY RETURNS, because it is a hook. Called after the `loading` branch it would
+   * run on some renders and not others, which React refuses outright.
+   */
+  const heroName = account
+    ? ([account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ') || 'Unnamed debtor')
+    : null
+  useTitleSlot(
+    heroName ? (
+      <span className="min-w-0 flex items-baseline gap-2">
+        <span className="text-slate-300">&middot;</span>
+        <span className="text-lg font-semibold text-slate-800 truncate">{heroName}</span>
+        {account?.accountNumber && (
+          <span className="text-xs text-slate-400 tabular-nums shrink-0">{account.accountNumber}</span>
+        )}
+      </span>
+    ) : null,
+    [heroName, account?.accountNumber],
+  )
 
   if (loading) return <div className="p-10 grid place-items-center text-slate-400"><Loader2 size={20} className="animate-spin" /></div>
   if (error) return <Card className="border-negative-100 bg-negative-50"><p className="text-sm text-negative-700">{error}</p></Card>
@@ -1990,10 +2022,22 @@ function StandingPanel({
       */}
       <PanelTitle action={
         <span className="inline-flex items-center gap-2">
-          <button type="button" onClick={onUpload}
-            className="text-[11px] font-medium text-[var(--c-steel)] hover:underline">
-            Upload a trace
-          </button>
+          {/*
+            ONE PLACE TO UPLOAD, NOT TWO. THE FIRM: "you should be able to upload a trace, of
+            course, but there's not necessary to have two places to do that."
+            
+            With an empty panel there are two buttons in the middle of it -- "Do the trace" and
+            "Upload a trace I already have" -- which are the ones somebody with no trace is
+            looking at, and they say what they do at full size. This link sat above them saying
+            the same thing in eleven-point grey. It is what is left once a trace exists and the
+            empty state is gone, so it appears only then.
+          */}
+          {!bare && (
+            <button type="button" onClick={onUpload}
+              className="text-[11px] font-medium text-[var(--c-steel)] hover:underline">
+              Upload a trace
+            </button>
+          )}
           {traces.length > 0 && (
             <button type="button" onClick={() => onOpenTrace(traces[0].id)}
               className="text-[11px] font-medium px-2 py-1 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 inline-flex items-center gap-1">
