@@ -109,6 +109,20 @@ const PERIOD_STARTS = (() => {
   return start.toISOString()
 })()
 
+/*
+ * TWO DATES IN THE PAST, worked out from today so this suite does not rot. Far enough back that
+ * no weekend or public holiday can make either of them "not late yet" -- the rule gives an entry
+ * dated to a day the office was shut until the next working day, and a fixture that happened to
+ * land on one would fail on a Monday in March and nowhere else.
+ */
+const daysAgo = (n) => {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return d.toISOString().slice(0, 10)
+}
+const CARRIED_SINCE = daysAgo(9)
+const CARRIED_LONGER = daysAgo(30)
+
 const handlers = [
   [(u) => u.includes('/auth/v1/user'), () => ({ body: { id: USER_ID, email: PROFILE.email } })],
   [
@@ -120,6 +134,28 @@ const handlers = [
     },
   ],
   [(u) => u.includes('/rest/v1/teams'), () => ({ body: [TEAM] })],
+  /*
+   * NEW ACCOUNTS NOBODY HAS WORKED, which the dashboard now asks for on every load.
+   *
+   * THE STUB HONOURS THE CLAUSES. It would be easier to answer every diary request with the same
+   * three rows, and that would prove nothing: the page's whole claim is that it asks the DATABASE
+   * for open new accounts past their day rather than reading the diary and filtering in the
+   * browser. Answering unfiltered would make a broken version pass. This suite has shipped that
+   * shape of fixture before -- twice this month -- so the clauses are read and obeyed.
+   *
+   * One row is the signed-in agent's and two are a colleague's, so both halves of the panel have
+   * something to draw: the flag for the person, and the floor list for the team leader.
+   */
+  [(u) => u.includes('/rest/v1/diary_entries'), (u) => {
+    if (!/kind=eq\.new_account/.test(u) || !/state=eq\.open/.test(u)) return { body: [] }
+    const before = /due_on=lt\.([0-9-]+)/.exec(u)?.[1]
+    const rows = [
+      { owner_id: USER_ID, account_id: 'acc-1', kind: 'new_account', due_on: CARRIED_SINCE },
+      { owner_id: COLLEAGUE.id, account_id: 'acc-2', kind: 'new_account', due_on: CARRIED_LONGER },
+      { owner_id: COLLEAGUE.id, account_id: 'acc-3', kind: 'new_account', due_on: CARRIED_SINCE },
+    ]
+    return { body: before ? rows.filter((r) => r.due_on < before) : rows }
+  }],
   [(u) => u.includes('/rest/v1/targets'), () => ({ body: TARGETS })],
   [
     (u) => u.includes('/rpc/collector_performance'),
@@ -191,6 +227,37 @@ try {
   await page.getByRole('heading', { name: /The sky is only/ }).waitFor({ timeout: 20000 })
   await page.getByText('Monthly progress').waitFor({ timeout: 20000 })
   await t.shot(page, '40-collections')
+
+  /* ---------- new accounts nobody has worked ---------- */
+
+  /*
+   * THE FIRM ASKED FOR TWO THINGS AND THIS IS THE ONLY LAYER THAT CAN SEE EITHER: "it should be
+   * reported to the team leader and flagged for the agent as well… it should be on their
+   * dashboard." Everything about WHICH accounts count is decided in newAccounts.ts and checked
+   * without a browser. What no unit check can answer is whether the panel is on the page -- and
+   * this suite exists because a panel once shipped, was provably in the bundle, and was invisible.
+   */
+  t.ok('the collector is told a new account is waiting on them',
+    await page.getByText(/new account(s)? (is|are) waiting on you/).first().isVisible())
+  t.ok('...and how long the oldest has been carried',
+    await page.getByText(/carried \d+ working days|Carried since yesterday/i).first().isVisible())
+  /*
+   * AND THE FLOOR'S, because this suite signs in as a Pre-legal TEAM LEADER -- see PROFILE in
+   * fixtures.mjs. "It flags them and it flags the team leader as well in the team leader's
+   * dashboard" is two audiences on one panel, and this is the half an agent must not see.
+   */
+  t.ok('a team leader is also shown the floor',
+    await page.getByText('New accounts not yet worked, by collector').first().isVisible())
+  t.ok('...naming the collector who is behind',
+    await page.getByRole('link', { name: COLLEAGUE.name }).first().isVisible())
+  /*
+   * ONCE, NOT TWICE. A leader carrying accounts of their own gets the flag above; their name
+   * appearing again in the list underneath would have them chasing themselves.
+   */
+  const floorList = page.getByText('New accounts not yet worked, by collector')
+    .locator('xpath=following-sibling::ul')
+  t.check('...and the leader is not in their own list',
+    await floorList.getByText(PROFILE.name, { exact: false }).count(), 0)
 
   /* ---------- the hero renders, and renders the real figures ---------- */
 

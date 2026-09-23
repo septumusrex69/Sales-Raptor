@@ -189,6 +189,29 @@ protection is the closed list, not a warning. Bank and branch code are stored ap
 instruction; `{{firm_bank}}` still prints them joined, and `bankLine` is the only place that join
 happens, because the same account written two ways across two notices reads as two accounts.
 
+**A new account nobody worked is carried into the day, not filed into the backlog.** The firm:
+"the remaining 10 should automatically carry over as priority on the next day's diary, not on the
+backlog", and the team leader is told. `src/lib/newAccounts.ts` decides it and three things there
+are load-bearing. **The date never moves** — re-diarising is what the old system did, and
+`diary.ts` says what it cost ("nobody can say how much work was missed last year"); the entry
+keeps the day it was always due, because that date is the only evidence of the miss and it is
+what the leader's report counts. So the carry happens in the **view** (`DiaryPage` reshapes
+`DayOfWork`; nothing writes). **Derived, never stored**, like `isMissed` — a stored flag needs a
+nightly job, and a night it does not run is a night the diary lies. **Working days, not 24
+hours**, or an account loaded at four on a Friday is late on Saturday morning with nobody in the
+building. It applies to **new accounts only** — the two-list diary is deliberate, and this is the
+narrow exception the firm asked for. The over-capacity number is **shown, not solved**: ten
+carried onto fifty is sixty, and quietly pushing routine reviews out to make it read fifty would
+remove the only signal that somebody is underwater.
+
+**Collections people land on the collections dashboard.** `/` had no collections branch at all —
+Administrator to the admin overview, Communications to theirs, and *everybody else*, including
+every pre-legal agent, to the SALES dashboard. `DashboardRouter` now sends the two **pre-legal**
+roles to `CollectorDashboard`. Not every role in `COLLECTING_ROLES`: a liaison may be given
+accounts, but their day is clients, leads and deals, and those records are on the sales screen.
+`canLeadCollections` (not `canReassign`, which excludes the pre-legal team leader) decides who
+sees the floor's carried accounts rather than only their own.
+
 **Things that bite:**
 - `protect_closed_diary_entries` **silently reverts** edits to `done`/`moved` entries. It does
   not raise.

@@ -18,10 +18,11 @@ import {
   type DayLoads, type DayOfWork, type DiaryRow, type AgentLoad,
 } from '../../lib/diary.ts'
 import {
-  DIARY_KINDS, FIRM_DIARY_ORDER, dayLoad, dayLoadSentence, dayName, inMonth, monthGrid,
-  nearPrescription, orderDiary, overdueBy, shiftDate, shiftMonth, todayIso, validOrder,
-  type DayLoadLevel, type DiaryOrder,
+  DEFAULT_DIARY_CAPACITY, DIARY_KINDS, FIRM_DIARY_ORDER, dayLoad, dayLoadSentence, dayName,
+  inMonth, monthGrid, nearPrescription, orderDiary, overdueBy, shiftDate, shiftMonth, todayIso,
+  validOrder, type DayLoadLevel, type DiaryOrder,
 } from '../../lib/diaryPriority.ts'
+import { carriedLine, dayWeight, daysCarried, splitCarried } from '../../lib/newAccounts.ts'
 import { formatCurrency } from '../../data/mockData'
 import { DESK_POSITIONS, clientFlag, deskPosition } from '../../lib/clientPosition.ts'
 
@@ -106,7 +107,33 @@ export function DiaryPage() {
     }
   }, [params, setParams, currentUser, updateUser, updateCurrentUserLocal])
 
-  const [day, setDay] = useState<DayOfWork | null>(null)
+  const [rawDay, setDay] = useState<DayOfWork | null>(null)
+  /**
+   * NEW ACCOUNTS COME OUT OF THE BACKLOG AND INTO THE DAY.
+   *
+   * The firm: "if an account has been loaded on the 23rd… and they've only worked five of them,
+   * the remaining 10 should automatically carry over as priority on the next day's diary, not on
+   * the backlog."
+   *
+   * DONE HERE, IN A VIEW, AND NOWHERE ELSE. Nothing is written: the entries keep the day they
+   * were always due, because that date is the only evidence the work was missed and it is what
+   * the team leader's report counts. Re-diarising them is what the system Raptor replaces did,
+   * and diary.ts says what it cost — "nobody can say how much work was missed last year".
+   *
+   * Reshaped into the same DayOfWork the page already reads, so every tile, tab and count below
+   * follows without being told twice. `due` gains them; `overdue` is what is left of the backlog.
+   * They sort into place on their own: the ladder puts a new account on rung two, and within a
+   * rung the older date comes first, so a carried one sits above a fresh one without this having
+   * to override the order the collector chose.
+   */
+  const carried = useMemo(
+    () => (rawDay ? splitCarried(rawDay.overdue, viewDay) : { carried: [], backlog: [] }),
+    [rawDay, viewDay],
+  )
+  const day = useMemo<DayOfWork | null>(
+    () => (rawDay ? { due: [...carried.carried, ...rawDay.due], overdue: carried.backlog } : null),
+    [rawDay, carried],
+  )
   const [team, setTeam] = useState<AgentLoad[] | null>(null)
   /** Active accounts nobody is booked to ring. The number the circulation rule exists to kill. */
   const [adrift, setAdrift] = useState<number | null>(null)
@@ -222,6 +249,18 @@ export function DiaryPage() {
     [viewDay, day, owner],
   )
 
+  /*
+   * WHAT THE DAY NOW WEIGHS, and it is shown rather than solved. Ten carried onto a fifty-a-day
+   * diary is sixty. The tempting fix is to push the routine reviews out to make room -- they are
+   * the last rung and the only kind with no event behind them. It is still wrong: reshuffling
+   * until the day reads fifty removes the one signal that somebody is underwater.
+   */
+  const weight = useMemo(() => dayWeight({
+    due: rawDay?.due.length ?? 0,
+    carried: carried.carried.length,
+    capacity: owner?.diaryCapacity ?? DEFAULT_DIARY_CAPACITY,
+  }), [rawDay, carried, owner])
+
   return (
     <div className="space-y-4">
       {/*
@@ -263,6 +302,20 @@ export function DiaryPage() {
           <DiaryCapacity userId={viewing} value={owner?.diaryCapacity} editable={isMine} />
         </span>
       </div>
+
+      {/*
+        WHAT WAS CARRIED, SAID BEFORE THE NUMBERS.
+        The firm asked that a new account nobody worked on the day it landed is flagged for the
+        agent, not quietly filed into the backlog. It is one line, and only when there is
+        something to say -- a banner reading "0 new accounts carried over" every morning is one
+        people stop seeing, and then the morning it says ten they do not see that either.
+      */}
+      {carriedLine(weight) && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-2.5">
+          <AlertTriangle size={15} className="text-amber-600 mt-0.5 shrink-0" />
+          <p className="text-sm text-amber-900">{carriedLine(weight)}</p>
+        </div>
+      )}
 
       {/* The four numbers that decide what the day looks like. */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -615,6 +668,8 @@ export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }:
   const { currentUser } = useAuth()
 
   const late = overdueBy(row.dueOn, today)
+  /* Zero on everything but a new account past its day -- see newAccounts.ts. */
+  const carriedFor = daysCarried(row, today)
   const prescribing = nearPrescription(row.account.prescriptionDate, today)
   const meta = DIARY_KINDS[row.kind]
 
@@ -656,6 +711,20 @@ export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }:
               <span className="text-[11px] font-medium text-[var(--c-rust)]"
                 title={`Was due ${longDate(row.dueOn)}`}>
                 {late}
+              </span>
+            )}
+            {/*
+              CARRIED, AND SAID ON THE ROW ITSELF.
+              A new account that missed its day is now sitting in today's list, so without this
+              it is indistinguishable from one that landed this morning -- and the collector
+              cannot tell which of the fifteen in front of them is the one the team leader is
+              about to ask about. It counts WORKING days, so an account that sat over a weekend
+              does not claim to have been ignored for three.
+            */}
+            {carriedFor > 0 && (
+              <span className="text-[11px] font-medium rounded-full bg-amber-100 text-amber-800 px-2 py-0.5"
+                title={`A new account, still due ${longDate(row.dueOn)} and not worked`}>
+                Carried {carriedFor === 1 ? 'a day' : `${carriedFor} days`}
               </span>
             )}
           </div>

@@ -715,6 +715,47 @@ export async function fetchTeamLoad(date: string): Promise<AgentLoad[]> {
   return [...byOwner.values()].sort((a, b) => b.overdue - a.overdue || b.due - a.due)
 }
 
+/**
+ * Every new account the firm is carrying, by the person holding it.
+ *
+ * ONE QUERY FOR THE WHOLE FLOOR, like fetchTeamLoad above and for the same reason: a few dozen
+ * people, and this sits on a dashboard somebody leaves open all morning.
+ *
+ * NARROWED IN THE DATABASE, not in the browser. `kind = 'new_account'` and `due_on < date` are
+ * both clauses, so what comes back is already only the rows that can possibly be carried. The
+ * book is hundreds of thousands of rows; a version of this that read the diary and filtered in
+ * JavaScript works on staging and stops working the month it matters.
+ *
+ * THE DECIDING IS STILL newAccounts.ts's. This returns rows; `lateForLeaders` says which of them
+ * count and how badly, because the working-day clock and the "dated to a Saturday" rule are not
+ * things SQL should be asked to hold a second copy of.
+ */
+export async function fetchCarriedNewAccounts(date: string): Promise<{
+  ownerId: string | null
+  kind: DiaryKind
+  state: string
+  dueOn: string
+  accountId: string
+}[]> {
+  const { data, error } = await supabase
+    .from('diary_entries')
+    .select('owner_id, account_id, kind, due_on')
+    .eq('state', 'open')
+    .eq('kind', 'new_account')
+    .lt('due_on', date)
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as { owner_id: string | null; account_id: string; kind: string; due_on: string }[])
+    .map((r) => ({
+      ownerId: r.owner_id,
+      accountId: r.account_id,
+      kind: r.kind as DiaryKind,
+      /* Every row came back with state 'open' because the clause said so; named rather than
+         assumed, because isCarried asks for it and a literal here would lie if the clause moved. */
+      state: 'open',
+      dueOn: r.due_on,
+    }))
+}
+
 /** Everything one agent has missed, for the bulk re-diarise tool. */
 export async function fetchOverdue(input: {
   ownerId: string | null

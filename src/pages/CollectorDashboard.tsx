@@ -24,6 +24,10 @@ import { placeLabel, standings } from '../lib/collectorTrend.ts'
 import { CollectionsHero } from '../components/collections/CollectionsHero'
 import { formatCurrency } from '../data/mockData'
 import type { ID, Target, Team, User } from '../types'
+import { canLeadCollections } from '../lib/permissions'
+import { fetchCarriedNewAccounts } from '../lib/diary.ts'
+import { lateForLeaders } from '../lib/newAccounts.ts'
+import { todayIso } from '../lib/diaryPriority.ts'
 
 /** What a person's target is, and whether anybody actually chose it. */
 interface ResolvedTarget { target: number | null; origin: 'set' | 'grade' }
@@ -203,6 +207,42 @@ export function CollectorDashboard() {
     [shownRows, currentUser],
   )
 
+  const mayLeadHere = canLeadCollections(currentUser?.role)
+
+  /*
+   * NEW ACCOUNTS NOBODY HAS TOUCHED, for the person carrying them and for whoever leads them.
+   *
+   * The firm: "if there is a new account and the section 129 is not triggered within 24 hours of
+   * loading, then it should be reported to the team leader and flagged for the agent as well…
+   * it should be on their dashboard."
+   *
+   * ON ITS OWN, NOT PART OF THE MONTH'S FIGURES. Everything else on this screen is money over a
+   * period and moves when the period picker moves; this is a fact about right now that no choice
+   * of month changes, so it is fetched once against today and left alone.
+   */
+  const [carried, setCarried] = useState<Awaited<ReturnType<typeof fetchCarriedNewAccounts>> | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    /* A dashboard that will not draw because one panel could not load is worse than the panel
+       being missing, so this failure stays inside itself. */
+    fetchCarriedNewAccounts(todayIso())
+      .then((rows) => { if (!cancelled) setCarried(rows) })
+      .catch(() => { if (!cancelled) setCarried([]) })
+    return () => { cancelled = true }
+  }, [])
+
+  const late = useMemo(
+    () => (carried ? lateForLeaders(carried, todayIso()) : []),
+    [carried],
+  )
+  const mineLate = late.find((l) => l.ownerId === currentUser?.id) ?? null
+  /* Somebody else's problem to act on, so only what a leader may see — and never their own row
+     twice. `late` is already worst-first: longest waiting, not most. */
+  const othersLate = useMemo(
+    () => (mayLeadHere ? late.filter((l) => l.ownerId !== currentUser?.id) : []),
+    [late, mayLeadHere, currentUser],
+  )
+
   const ceiling = bookCeilingOf(currentUser?.bookCeiling)
   const over = mine ? overBookBy(mine, ceiling) : 0
 
@@ -325,6 +365,66 @@ export function CollectorDashboard() {
               but you will be given little new work until it comes down.
             </span>
           </p>
+        </Card>
+      )}
+
+      {/*
+        NEW ACCOUNTS NOBODY HAS WORKED.
+
+        ABOVE THE MONTH'S FIGURES, because it is the only thing on this screen somebody has to do
+        something about TODAY. Everything under it is money over a period, and a period is a thing
+        you read; this is a thing you act on.
+
+        TWO AUDIENCES, ONE PANEL. A collector is told about their own; a team leader is told about
+        the floor's, worst first — and "worst" is longest waiting, not most, because five accounts
+        sitting a week is a problem and twenty that landed yesterday is a busy Tuesday.
+
+        AND NOTHING AT ALL WHEN THERE IS NOTHING. CLAUDE.md: a warning that fires when nothing is
+        wrong is worse than no warning, because people stop reading it.
+      */}
+      {(mineLate || othersLate.length > 0) && (
+        <Card className="border-amber-200 bg-amber-50/60">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={16} className="shrink-0 mt-0.5 text-amber-700" />
+            <div className="min-w-0 space-y-2">
+              {mineLate && (
+                <p className="text-sm text-amber-900">
+                  <span className="font-medium">
+                    {mineLate.carried === 1
+                      ? 'A new account is waiting on you.'
+                      : `${mineLate.carried} new accounts are waiting on you.`}
+                  </span>{' '}
+                  {mineLate.worst === 1
+                    ? 'Carried since yesterday.'
+                    : `The oldest has been carried ${mineLate.worst} working days.`}{' '}
+                  <Link to="/diary" className="underline underline-offset-2 hover:text-amber-700">
+                    They are at the top of your diary.
+                  </Link>
+                </p>
+              )}
+              {othersLate.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium text-amber-900">
+                    New accounts not yet worked, by collector
+                  </p>
+                  <ul className="mt-1 space-y-0.5">
+                    {othersLate.map((row) => (
+                      <li key={row.ownerId} className="text-sm text-amber-900">
+                        <Link to={`/performance/${row.ownerId}`}
+                          className="font-medium underline underline-offset-2 hover:text-amber-700">
+                          {users.find((u) => u.id === row.ownerId)?.name ?? 'Somebody'}
+                        </Link>
+                        {' — '}
+                        {row.carried === 1 ? '1 account' : `${row.carried} accounts`}
+                        {', oldest '}
+                        {row.worst === 1 ? 'since yesterday' : `${row.worst} working days`}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
         </Card>
       )}
 

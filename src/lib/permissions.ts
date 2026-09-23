@@ -69,6 +69,21 @@ export function canFreezeAccounts(role: Pick<User, 'role'>['role'] | undefined):
     || role === 'Liaison'
 }
 
+/**
+ * Whether this person is answerable for somebody else's collections work.
+ *
+ * THE FIRM ASKED FOR ONE THING AND IT IMPLIES THIS: "it flags them and it flags the team leader
+ * as well in the team leader's dashboard." A collector sees their own carried accounts; a leader
+ * sees the floor's. That is a different screen for the same panel, so it needs a name.
+ *
+ * NOT canReassign, which is the sales side's managerial test and does not include the pre-legal
+ * team leader — who is precisely the person this is for. Borrowing that one would have shown a
+ * collections team leader nothing and a sales manager the collections floor.
+ */
+export function canLeadCollections(role: Pick<User, 'role'>['role'] | undefined): boolean {
+  return role === 'Administrator' || role === 'Pre-legal Team Leader'
+}
+
 /** Roles eligible to own a Lead/Deal/Task/Contact/Company — i.e. show up in "assign to" / "Client Liaison" pickers. */
 export function isAssignableOwner(role: Pick<User, 'role'>['role']): boolean {
   return role === 'Administrator' || role.includes('Sales') || role === 'Liaison' || role === 'Liaison Manager'
