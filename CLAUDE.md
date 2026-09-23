@@ -123,15 +123,31 @@ text, it was in the closed set** — so do not "fix" this back. Two things it mu
 a `<span class="ltr-n">` copied out of the editor carries the **drawn** section number, which has
 to be dropped while the numbering itself survives; and `<style>` contents are not text.
 
-**A PDF can only print Windows-1252.** `letterPdf` uses the 14 standard PDF faces on purpose — an
-embedded Unicode font would add a megabyte to every notice — so the repertoire is fixed, and
-`src/lib/winAnsi.ts` writes it out (check-win-ansi holds it against pdf-lib character by
-character). Two kinds of character it cannot draw, treated oppositely: **invisibles are fixed
-quietly** — a **tab** above all, because a Word table copied as plain text separates its cells
-with tabs, and that is what stopped the firm attaching a section 129 — while a character that is
-a **real word** is reported and the build refuses, because substituting would change what the
-debtor is told. The **soft hyphen is encodable and still dropped**: WinAnsi draws it as a real
-hyphen, mid-word. The **non-breaking space is kept**, so Rand amounts do not break across lines.
+**A PDF can only print Windows-1252.** `letterPdf` draws in the 14 standard PDF faces, which every
+reader already has, so the repertoire is fixed and `src/lib/winAnsi.ts` writes it out
+(check-win-ansi holds it against pdf-lib character by character). Two kinds of character it cannot
+draw, treated oppositely: **invisibles are fixed quietly** — a **tab** above all, because a Word
+table copied as plain text separates its cells with tabs, and that is what stopped the firm
+attaching a section 129 — while a character that is a **real word** is reported and the build
+refuses, because substituting would change what the debtor is told. The **soft hyphen is encodable
+and still dropped**: WinAnsi draws it as a real hyphen, mid-word. The **non-breaking space is
+kept**, so Rand amounts do not break across lines — and `letterLayout` does not treat it as a
+place a line may end, which is the half that actually does the keeping (`\s` includes U+00A0).
+
+**One font is embedded, and only one: Charter**, because the firm asked for it off their own
+section 129. `src/lib/charter.ts` carries the argument and `check-charter.mjs` holds it up. The
+two reasons the standard-faces rule existed were the licence and the size, and neither survived
+for this face: Bitstream's grant lets a public repository ship Charter (the notice in
+`public/fonts/charter/LICENCE.txt` **must stay beside the files** — the permission is conditional
+on it), and a **subsetted** embed puts a four-page notice at about 17 kB, not the megabyte a full
+Unicode embed would cost. **The repertoire did not widen**: Charter is subsetted to Windows-1252,
+so winAnsi still decides what a letter may contain. **An embedded face can be missing a character
+the encoding has** — `FaceGaps`, and Charter has three: the **non-breaking space is drawn as a
+space** (it has no glyph, and a missing glyph prints as a hollow box in the middle of every Rand
+amount), the soft hyphen never reaches it, and the **euro is refused** because a currency symbol
+is a word. A letter set in anything else is unchanged, and a Charter letter whose font files did
+not load **falls back to Times rather than refusing** — a notice in the wrong serif went out; a
+notice that would not attach did not.
 
 **A table with no widths is sized to its CONTENT, not split evenly.** `autoColumnWidths`
 (`src/lib/tableWidths.ts`) is CSS `table-layout: auto`, near enough — a column is never narrower

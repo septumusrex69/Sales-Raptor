@@ -1,6 +1,48 @@
 @import "tailwindcss";
 @import "./styles/raptor.css";
 
+/*
+ * CHARTER, THE FACE THE FIRM'S NOTICES ARE SET IN.
+ *
+ * Declared here rather than fetched from a font service: a letterhead and a statutory demand
+ * should not depend on somebody else's CDN being up, and the licence lets this repository ship
+ * the files (public/fonts/charter/LICENCE.txt travels with them). The same outlines are embedded
+ * in the PDF as .ttf, so what is typed on the sheet is what prints -- see charter.ts.
+ *
+ * `font-display: swap` because these are only ever used on the letter sheet: a collector typing
+ * a notice may see one reflow, which is better than an editor that is blank while a font loads.
+ * NOTHING ELSE IN RAPTOR USES CHARTER -- the app is Inter -- so a browser fetches these four
+ * files only on the page where somebody is actually writing a letter.
+ */
+@font-face {
+  font-family: "Charter";
+  src: url("/fonts/charter/charter-regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Charter";
+  src: url("/fonts/charter/charter-bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Charter";
+  src: url("/fonts/charter/charter-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Charter";
+  src: url("/fonts/charter/charter-bold-italic.woff2") format("woff2");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
 @theme {
   /*
    * "Inter Variable" FIRST, and that name is not a typo. @fontsource-variable/inter registers the

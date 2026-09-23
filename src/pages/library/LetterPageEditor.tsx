@@ -10,6 +10,7 @@ import {
 import { defaultOf, fetchLetterheads } from '../../lib/letterheads'
 import { clipboardToLetterHtml } from '../../lib/letterPaste.ts'
 import { planPageBreaks } from '../../lib/pageBreaks.ts'
+import { CHARTER_STACK } from '../../lib/charter.ts'
 
 /**
  * TYPING ON THE PAGE.
@@ -609,7 +610,14 @@ const blankSignature = () => (
 
 const sel = 'rounded border border-slate-200 bg-white px-2 py-1 text-[12px] text-slate-700 outline-none focus:ring-2 focus:ring-gold-200 disabled:opacity-50'
 
+/*
+ * CHARTER FIRST, because it is the firm's own: "do you have the font charter? I like that… I
+ * think we should use this font in our writing." It is also the only one of these that prints as
+ * itself -- the rest are drawn in the PDF by whichever of the fourteen standard faces is nearest,
+ * so a Calibri letter is a Helvetica letter on paper. See charter.ts.
+ */
 const FONTS = [
+  { label: 'Charter', value: CHARTER_STACK },
   { label: 'Georgia', value: 'Georgia, "Times New Roman", serif' },
   { label: 'Times New Roman', value: '"Times New Roman", Times, serif' },
   { label: 'Arial', value: 'Arial, Helvetica, sans-serif' },

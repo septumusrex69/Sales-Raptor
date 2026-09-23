@@ -412,6 +412,35 @@ try {
     (await page.locator('.ltr-page').first().innerText()).includes('R 48,250.00'))
   await t.shot(page, '65-library-letter')
 
+  /* ---------- the font the notices are set in ---------- */
+
+  /*
+   * CHARTER IS THE ONE THING ON THIS PAGE ONLY A BROWSER CAN ANSWER FOR.
+   *
+   * The firm asked for it off their own section 129, and honouring that meant shipping four font
+   * files and embedding them in every PDF. Everything else about that is checked without a
+   * browser -- the licence, the glyphs, the bytes in the finished PDF. What a unit check cannot
+   * see is whether /fonts/charter/*.woff2 is actually SERVED: a moved folder, a renamed file or a
+   * build that drops public/ leaves the sheet quietly set in Georgia, the PDF still correct, and
+   * the two no longer agreeing about where a line ends.
+   *
+   * ASKED OF document.fonts, NOT OF A SCREENSHOT. `load` fetches the face whether or not anything
+   * on the page happens to use it, and `check` then says whether it arrived. A 404 makes that
+   * false; a cosmetic difference nobody can see does not.
+   */
+  for (const [what, spec] of [
+    ['regular', '400 12px Charter'],
+    ['bold', '700 12px Charter'],
+    ['italic', 'italic 400 12px Charter'],
+    ['bold italic', 'italic 700 12px Charter'],
+  ]) {
+    const loaded = await page.evaluate(async (s) => {
+      try { await document.fonts.load(s) } catch { return false }
+      return document.fonts.check(s)
+    }, spec)
+    t.ok(`Charter ${what} is served and loads in the browser`, loaded)
+  }
+
   /* ---------- and it is edited on the page itself ---------- */
 
   /*

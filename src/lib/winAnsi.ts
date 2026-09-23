@@ -9,12 +9,16 @@
  * the moment somebody pastes a table that way, every row carries tab characters — invisible in
  * the editor, because HTML collapses them, and fatal at the PDF.
  *
- * THE 14 STANDARD PDF FONTS SPEAK WinAnsi, which is Windows-1252 and nothing else. That is not a
- * choice this codebase made: embedding a full Unicode font would add a megabyte to every letter,
- * and `letterPdf` deliberately uses the standard faces so a notice is a few tens of kilobytes.
- * The repertoire is therefore fixed, and it is written out below rather than discovered by
- * catching exceptions — a function that works by try/catch around a font cannot be reasoned about
- * or checked without one.
+ * THE 14 STANDARD PDF FONTS SPEAK WinAnsi, which is Windows-1252 and nothing else, and so does
+ * the one font this repo embeds: Charter is subsetted to this same repertoire rather than shipped
+ * whole, which is what keeps a four-page notice under 17 kB. So the repertoire is fixed whichever
+ * face a letter is set in, and it is written out below rather than discovered by catching
+ * exceptions — a function that works by try/catch around a font cannot be reasoned about or
+ * checked without one.
+ *
+ * AN EMBEDDED FACE CAN STILL BE MISSING A CHARACTER THE ENCODING HAS. Charter has no glyph at the
+ * non-breaking space, and a missing glyph is drawn as a hollow box rather than refused. That is
+ * what FaceGaps below is for; the standard fourteen need none.
  *
  * TWO KINDS OF CHARACTER IT CANNOT PRINT, and they deserve opposite treatment:
  *
@@ -80,6 +84,31 @@ const SPACES = new Set([
   0x202f, 0x205f, 0x3000,
 ])
 
+/**
+ * A FACE THAT CANNOT DRAW EVERYTHING WINDOWS-1252 CAN WRITE.
+ *
+ * The fourteen standard PDF faces all cover the repertoire above, which is why nothing needed
+ * this until an embedded font arrived. Charter — the face the firm asked for — is missing three
+ * of them, and the two kinds of gap are the same two kinds this file already distinguishes:
+ *
+ *   - `substitute` is for a character with no meaning a letter would miss. The non-breaking space
+ *     is the whole reason this exists: Charter has no glyph at U+00A0, and a missing glyph is
+ *     drawn as a hollow box — in the middle of every Rand amount, because en-ZA groups thousands
+ *     with it. A space is what it is, so a space is what it becomes.
+ *   - `unprintable` is for a character that is a WORD. Charter has no euro. Substituting would
+ *     change what the debtor is told, so it is reported and the caller refuses, exactly as an
+ *     arrow already is.
+ *
+ * ASKED BEFORE isPrintable, ALWAYS. A gap is a face that cannot draw a character the encoding CAN
+ * represent, so asking the encoding first would pass it straight through to the hollow box.
+ */
+export interface FaceGaps {
+  /** Code point to what to draw instead. Invisible or near-invisible characters only. */
+  substitute: Record<number, string>
+  /** Code points the face has no glyph for and that mean something. Reported, never guessed at. */
+  unprintable: ReadonlySet<number>
+}
+
 export interface Printable {
   /** The same words, with everything a standard PDF font cannot draw taken out. */
   text: string
@@ -98,7 +127,7 @@ export interface Printable {
  * the letter into lines by the time anything is drawn, so a newline arriving at this point is a
  * bug in the layout rather than a character to clean up. It is reported like any other.
  */
-export function printableForPdf(text: string): Printable {
+export function printableForPdf(text: string, gaps?: FaceGaps): Printable {
   let out = ''
   const unprintable: string[] = []
   for (const ch of text) {
@@ -110,6 +139,15 @@ export function printableForPdf(text: string): Printable {
      * word. Asked in the other order it passes as printable and a debtor reads "out-standing".
      */
     if (code in HARMLESS) { out += HARMLESS[code]; continue }
+    /* The face's own gaps, before the encoding's — see FaceGaps. Without a face this is the
+       fourteen standard fonts, which have no gaps, and nothing below changes. */
+    if (gaps) {
+      if (code in gaps.substitute) { out += gaps.substitute[code]; continue }
+      if (gaps.unprintable.has(code)) {
+        if (!unprintable.includes(ch)) unprintable.push(ch)
+        continue
+      }
+    }
     if (isPrintable(code)) { out += ch; continue }
     if (SPACES.has(code)) { out += ' '; continue }
     if (!unprintable.includes(ch)) unprintable.push(ch)

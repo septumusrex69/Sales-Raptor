@@ -116,7 +116,15 @@ function pieces(spans: Span[], base: { sizePt: number; colour: string }, measure
         out.push({ text: '\n', sizePt, bold: false, italic: false, underline: false, colour, widthMm: 0 })
         continue
       }
-      for (const word of chunk.split(/(\s+)/)) {
+      /*
+       * SPLIT ON WHITESPACE, EXCEPT THE NON-BREAKING KIND. \s includes U+00A0 in JavaScript, so
+       * the obvious /(\s+)/ made "R 12 345,67" four pieces and gave the wrapper three places to
+       * end a line inside one Rand amount -- which is precisely what en-ZA uses that character to
+       * prevent. It travels with the word instead, and the PDF draws it as a plain space because
+       * Charter has no glyph for it (see CHARTER_GAPS); the non-breaking part was never the
+       * glyph, it was this line.
+       */
+      for (const word of chunk.split(/((?:(?!\u00a0)\s)+)/)) {
         if (word === '') continue
         out.push({
           text: word,

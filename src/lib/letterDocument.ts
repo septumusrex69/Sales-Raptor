@@ -27,6 +27,7 @@
  * field names would be a second thing to keep in step with the resolver.
  */
 import { renderTemplate, unknownFields, type TemplateScope } from './messageTemplates.ts'
+import { CHARTER_STACK } from './charter.ts'
 
 /* ------------------------------------------------------------------ inline */
 
@@ -234,9 +235,18 @@ export const A4_LETTERHEAD: PageSetup = {
   backgroundUrl: null,
 }
 
+/*
+ * A NEW LETTER IS IN CHARTER. The firm asked for it by name off their own section 129 ("I think
+ * we should use this font in our writing"), and it is the one face in the picker that prints as
+ * itself rather than being drawn by the nearest of the fourteen standard PDF faces.
+ *
+ * LETTERS ALREADY WRITTEN KEEP THE FACE THEY WERE WRITTEN IN. The font is stored on the document,
+ * so this changes nothing that exists -- a template is re-set in Charter by choosing it in the
+ * editor, which is a decision about a notice the firm has approved and not one to sweep.
+ */
 export function blankLetter(): LetterDocument {
   return {
-    defaults: { font: 'Georgia, "Times New Roman", serif', size: 10.5, colour: '#1f2937', lineHeight: 1.45 },
+    defaults: { font: CHARTER_STACK, size: 10.5, colour: '#1f2937', lineHeight: 1.45 },
     blocks: [{ kind: 'paragraph', spans: [{ text: '' }] }],
   }
 }

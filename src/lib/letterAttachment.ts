@@ -21,6 +21,7 @@ import {
 } from './letterDocument.ts'
 import type { TemplateScope } from './messageTemplates'
 import { letterFilename, letterToPdf, toBase64 } from './letterPdf.ts'
+import { fetchCharter, isCharter } from './charter.ts'
 import type { LibraryTemplate } from './templateLibrary.ts'
 
 export interface AttachedFile {
@@ -100,12 +101,21 @@ export async function letterPdfBytes({ doc, scope, values, filled, letterhead, n
     }
   }
 
+  /*
+   * AND SO IS THE FONT, when the letter is set in Charter -- same reason as the letterhead, plus
+   * one of its own: letterPdf has to stay runnable in a check with no network, so anything it
+   * needs off the wire is fetched out here. Only for a Charter letter; everything else draws in
+   * the fourteen faces every reader already has and fetches nothing.
+   */
+  const charter = isCharter(doc.defaults.font) ? await fetchCharter() : null
+
   return letterToPdf({
     doc,
     page: head?.page ?? A4_LETTERHEAD,
     filled,
     values,
     letterhead: image,
+    charter,
   })
 }
 
