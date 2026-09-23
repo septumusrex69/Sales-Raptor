@@ -160,6 +160,40 @@ check(`the longest SMS is still one message (${cost.units} units)`, cost.segment
 check('...and still GSM-7', cost.encoding, 'GSM-7')
 ok(`...with ${160 - cost.units} characters of room left`, cost.units <= 160)
 
+/* ------------------------------------------------------------------ the right half of the library */
+
+/*
+ * THE FIRM'S COLLECTIONS WORDING EXISTS TWICE all the way down -- "Dear" against "To the
+ * directors of", an identity number against a registration number, summons against liquidation.
+ * Offered unfiltered, a collector chooses between two rows whose names differ by one word in
+ * brackets, at speed, on an iPad, and the wrong choice tells a person their company is being
+ * wound up.
+ */
+const library = readFileSync('src/lib/templateLibrary.ts', 'utf8')
+ok('the library reads the audience back', /audience: \(r\.audience/.test(library))
+ok('...and asks the database for it', /attachment_id, audience/.test(library))
+
+const picker = readFileSync('src/components/library/UseTemplate.tsx', 'utf8')
+ok('the picker filters by the debtor in front of the collector',
+  /r\.audience === audience/.test(picker))
+/*
+ * A TEMPLATE THAT SUITS EITHER IS ALWAYS OFFERED -- every call script the firm has written is one
+ * -- and a caller with no debtor kind filters nothing. A picker that silently hid half the
+ * library would be worse than one that shows all of it.
+ */
+ok('...keeps the wording that suits either', /r\.audience === null/.test(picker))
+ok('...and hides nothing when the caller has no debtor to hand', /!audience \|\|/.test(picker))
+
+for (const [what, file] of [
+  ['the SMS box', 'src/pages/accounts/SmsModal.tsx'],
+  ['the call script', 'src/pages/accounts/CallScriptModal.tsx'],
+]) {
+  ok(`${what} is told which kind of debtor it is on`,
+    /audience=\{debtorKind\}/.test(readFileSync(file, 'utf8')))
+}
+ok('the email composer is told through the account context it already takes',
+  /audience=\{letterContext\.audience\}/.test(readFileSync('src/components/ComposeEmailModal.tsx', 'utf8')))
+
 /* ------------------------------------------------------------------ */
 
 for (const f of failures) console.error(`  ✗ ${f}`)

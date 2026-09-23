@@ -20,7 +20,10 @@ import { missingFieldsNote } from '../../lib/messageTemplates'
  * reading is not one of them. The fee for the call itself is raised by the call, where it
  * already was.
  */
-export function CallScriptModal({ values, onClose }: {
+export function CallScriptModal({ debtorKind, values, onClose }: {
+  /** Which half of the library to offer. Every call script the firm has written suits either,
+      so this filters nothing today -- and it will the day one of them does not. */
+  debtorKind: 'individual' | 'company'
   /** Resolved by the account page, like every other merge in here. */
   values: Record<string, string>
   onClose: () => void
@@ -31,7 +34,7 @@ export function CallScriptModal({ values, onClose }: {
     <Modal title="Call script" onClose={onClose} width={620}>
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-2">
-          <UseTemplate scope="collections" kind="call_script" values={values}
+          <UseTemplate scope="collections" kind="call_script" audience={debtorKind} values={values}
             label={picked ? 'Choose another' : 'Choose a script'}
             onPick={(p) => setPicked({ name: p.template.name, body: p.body, missing: p.missing })} />
           <span className="text-[11px] text-slate-400">Reading this charges nothing.</span>

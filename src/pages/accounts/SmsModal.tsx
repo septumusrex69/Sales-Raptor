@@ -16,8 +16,10 @@ import { UseTemplate } from '../../components/library/UseTemplate'
  * Word costs more than that again. A collector who can see "2 messages, R6.90" before they press
  * send will shorten it; one who finds out on the statement will not.
  */
-export function SmsModal({ accountId, numbers, values, onClose, onDone }: {
+export function SmsModal({ accountId, debtorKind, numbers, values, onClose, onDone }: {
   accountId: string
+  /** Which half of the library to offer: the firm's wording is written twice, person and company. */
+  debtorKind: 'individual' | 'company'
   /** Every number on the account, primary first. The collector picks; the app does not guess. */
   numbers: { label: string; value: string }[]
   /**
@@ -142,7 +144,7 @@ export function SmsModal({ accountId, numbers, values, onClose, onDone }: {
             on the statement.
           */}
           <div className="flex items-center justify-between gap-2">
-            <UseTemplate scope="collections" kind="sms" values={smsValues}
+            <UseTemplate scope="collections" kind="sms" audience={debtorKind} values={smsValues}
               onPick={(p) => { setText(p.body); setMissing(p.missing) }} />
             {text && (
               <button type="button" onClick={() => { setText(''); setMissing([]) }}

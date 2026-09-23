@@ -68,7 +68,20 @@ export function ComposeEmailModal({
    * against a debtor account, and the merge fields on the sales side are a different set
    * entirely. A quotation follow-up to a lead has nothing to attach a section 129 to.
    */
-  letterContext?: { values: Record<string, string>; reference: string | null }
+  /**
+   * The account this email is about, where there is one.
+   *
+   * `audience` rides along HERE rather than as a prop of its own because this modal is opened
+   * from leads, deals, clients and the mail page as well, and none of those has a debtor kind.
+   * letterContext is already the bundle that means "this is about a debtor account", so anything
+   * only true of an account belongs in it rather than as an eighth optional prop everybody else
+   * has to ignore.
+   */
+  letterContext?: {
+    values: Record<string, string>
+    reference: string | null
+    audience?: 'individual' | 'company'
+  }
   /**
    * Where this message will end up, said before it is sent rather than discovered afterwards.
    *
@@ -454,7 +467,8 @@ export function ComposeEmailModal({
             has no debtor to merge against.
           */}
           {letterContext && (
-            <UseTemplate scope="collections" kind="email" values={letterContext.values}
+            <UseTemplate scope="collections" kind="email" audience={letterContext.audience}
+              values={letterContext.values}
               disabled={attaching !== null}
               label={attaching ? 'Drawing the letter\u2026' : 'Use a template'}
               onPick={(p) => void applyEmailTemplate(p)} />

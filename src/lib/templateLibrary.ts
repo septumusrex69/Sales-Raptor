@@ -13,7 +13,7 @@ import type {
 
 /** Named by hand, like every mapper here. See the warning about silent drops in CLAUDE.md. */
 const COLUMNS = 'id, scope, kind, name, subject, body, position, language, active, '
-  + 'attachment_id, format, seed_key, updated_at'
+  + 'attachment_id, audience, format, seed_key, updated_at'
 
 interface Row {
   id: string
@@ -26,6 +26,7 @@ interface Row {
   language: string
   active: boolean
   attachment_id: string | null
+  audience: string | null
   format: string
   seed_key: string | null
   updated_at: string
@@ -36,6 +37,16 @@ export interface LibraryTemplate extends MessageTemplate {
   /** Set on anything a migration seeded, null on anything the firm wrote. */
   seedKey: string | null
   updatedAt: string
+  /**
+   * Who the wording is for: 'individual', 'company', or null where it suits either.
+   *
+   * THE FIRM'S COLLECTIONS LIBRARY IS WRITTEN TWICE all the way down -- "Dear" against "To the
+   * directors of", an ID number against a registration number, summons against liquidation.
+   * Carried here so the picker inside an account can offer the half that fits the debtor in
+   * front of it; without it a collector chooses between two rows whose names differ by one word
+   * in brackets, and the wrong choice tells a person they are being wound up.
+   */
+  audience: 'individual' | 'company' | null
 }
 
 function toTemplate(r: Row): LibraryTemplate {
@@ -49,6 +60,7 @@ function toTemplate(r: Row): LibraryTemplate {
     position: (r.position as DeskPosition | null) ?? null,
     language: r.language,
     active: r.active,
+    audience: (r.audience as 'individual' | 'company' | null) ?? null,
     attachmentId: r.attachment_id,
     format: r.format === 'document' ? 'document' : 'text',
     seedKey: r.seed_key,

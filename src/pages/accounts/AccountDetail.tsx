@@ -393,6 +393,8 @@ export function AccountDetail() {
    */
   const letterContext = useMemo(() => ({
     reference: account?.clientReference ?? account?.accountNumber ?? null,
+    /* So the email picker offers the half of the library written for this debtor. */
+    audience: account?.debtorKind,
     values: account
       ? Object.fromEntries(
         Object.entries(mergeValuesFor({
@@ -1072,7 +1074,8 @@ export function AccountDetail() {
       )}
 
       {smsOpen && (
-        <SmsModal accountId={account.id} numbers={smsNumbers} values={letterContext.values}
+        <SmsModal accountId={account.id} debtorKind={account.debtorKind} numbers={smsNumbers}
+          values={letterContext.values}
           onClose={() => setSmsOpen(false)} onDone={reload} />
       )}
 
@@ -1147,7 +1150,8 @@ export function AccountDetail() {
       )}
 
       {scriptOpen && (
-        <CallScriptModal values={letterContext.values} onClose={() => setScriptOpen(false)} />
+        <CallScriptModal debtorKind={account.debtorKind} values={letterContext.values}
+          onClose={() => setScriptOpen(false)} />
       )}
 
       {composeTo !== null && (

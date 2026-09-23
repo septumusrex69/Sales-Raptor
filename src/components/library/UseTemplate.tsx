@@ -26,9 +26,24 @@ import { renderTemplate, type TemplateKind, type TemplateScope } from '../../lib
  * ONLY WHAT IS LIVE. Retired templates are not offered: the library keeps them so somebody can
  * answer "what did we used to send?", which is a different question from "what do I send now".
  */
-export function UseTemplate({ scope, kind, values, onPick, disabled, label }: {
+export function UseTemplate({ scope, kind, audience, values, onPick, disabled, label }: {
   scope: TemplateScope
   kind: TemplateKind
+  /**
+   * THE DEBTOR IN FRONT OF THE COLLECTOR, so only the half of the library written for them is
+   * offered.
+   *
+   * The firm's collections wording exists twice all the way down -- "Dear" against "To the
+   * directors of", an identity number against a registration number, summons against
+   * liquidation. Unfiltered, a collector chooses between two rows whose names differ by one word
+   * in brackets, at speed, on an iPad; and the wrong choice tells a person their company is
+   * being wound up. A template with no audience suits either and is always offered, which is
+   * every call script the firm has written.
+   *
+   * Undefined where the caller has no debtor kind to hand, and then nothing is filtered -- a
+   * picker that silently hid half the library would be worse than one that shows all of it.
+   */
+  audience?: 'individual' | 'company' | null
   /**
    * The merge values for this account.
    *
@@ -62,13 +77,16 @@ export function UseTemplate({ scope, kind, values, onPick, disabled, label }: {
     void (async () => {
       try {
         const all = await fetchLibrary(scope)
-        if (!cancelled) setRows(all.filter((r) => r.kind === kind && r.active))
+        if (!cancelled) {
+          setRows(all.filter((r) => r.kind === kind && r.active
+            && (!audience || r.audience === null || r.audience === audience)))
+        }
       } catch (e) {
         if (!cancelled) { setRows([]); setError(e instanceof Error ? e.message : String(e)) }
       }
     })()
     return () => { cancelled = true }
-  }, [open, rows, scope, kind])
+  }, [open, rows, scope, kind, audience])
 
   function pick(row: LibraryTemplate) {
     const body = renderTemplate(row.body, values)

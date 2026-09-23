@@ -93,7 +93,13 @@ check('...and never against the library’s samples',
   [picker, sms, script].some((f) => /sampleValues/.test(code(f))), false)
 
 /* Retired wording is kept by the library and not offered to send. */
-ok('only live templates are offered', /\.filter\(\(r\) => r\.kind === kind && r\.active\)/.test(picker))
+/*
+ * THE RULE, NOT THE WHOLE EXPRESSION. Written as the exact filter it failed the day an audience
+ * clause was added beside it -- a correct change reported as retired wording being offered. What
+ * matters is that `active` is one of the things the list is filtered on.
+ */
+ok('only live templates are offered', /\.filter\(\(r\) =>[^)]*r\.active/.test(picker))
+ok('...and only the kind that was asked for', /\.filter\(\(r\) =>[^)]*r\.kind === kind/.test(picker))
 
 /*
  * ONE RESOLUTION FOR ALL THREE. The account page computes the merge values once and hands the
@@ -106,7 +112,10 @@ check('...and mergeValuesFor is called exactly once on the page',
 for (const [what, re] of [
   ['the letter', /letterContext=\{letterContext\}/],
   ['the SMS box', /values=\{letterContext\.values\}/],
-  ['the call script', /<CallScriptModal values=\{letterContext\.values\}/],
+  /* Matched on the prop, not on the tag and its first attribute: the modals have since grown a
+     `debtorKind`, and an expression that assumed the argument order broke on a prop being
+     ADDED. */
+  ['the call script', /<CallScriptModal[\s\S]{0,120}?values=\{letterContext\.values\}/],
 ]) {
   ok(`...and ${what} is given that one`, re.test(account))
 }
@@ -195,7 +204,7 @@ ok('...including wording that arrived from a template',
 ok('the SMS box strips the app\u2019s own non-breaking spaces out of merged values',
   /\.replace\(\/\\u00a0\/g, ' '\)/.test(code(sms)))
 ok('...and the picker is given those, not the raw ones',
-  /<UseTemplate scope="collections" kind="sms" values=\{smsValues\}/.test(sms))
+  /<UseTemplate[\s\S]{0,120}?kind="sms"[\s\S]{0,120}?values=\{smsValues\}/.test(sms))
 /* The writer's own text is NOT rewritten -- the warning is still the mechanism for that. */
 ok('...while what the collector typed is left alone',
   /const cost = smsCost\(text\)/.test(code(sms)))
