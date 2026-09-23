@@ -14,6 +14,90 @@
  * silently; this is the same shape with the disagreement made illegal.
  */
 
+/* ---------------------------------------------------------------- what starts it */
+
+/**
+ * THE EVENT A WORKFLOW WAITS FOR.
+ *
+ * The builder could say what happens to a file and not how the file got there, so every workflow
+ * was implicitly "an account is handed over" -- which is the only one the day numbers were ever
+ * written for. The firm's next four are not: an arrangement workflow starts when an arrangement
+ * breaks, a dispute workflow when a dispute is raised.
+ *
+ * A CLOSED LIST, AND IT IS THE DIARY'S. Every one of these is an event Raptor already records and
+ * already raises diary work for, which is what makes it a trigger something could honour rather
+ * than a sentence somebody wrote. Inventing a wider vocabulary here would be inventing events
+ * nothing can ever fire.
+ *
+ * `review` IS THE ONE DIARY KIND DELIBERATELY MISSING. CLAUDE.md: a routine review is the last
+ * rung and the only kind with no event behind it. There is nothing for a workflow to wait for.
+ */
+export type TriggerKind =
+  | 'handover' | 'allocated' | 'promise_due' | 'promise_broken' | 'arrangement_broken'
+  | 'payment_received' | 'dispute_logged' | 'no_contact' | 'trace_returned' | 'callback'
+  | 'by_hand'
+
+export interface TriggerMeta {
+  /** What the firm would call it, on the button. */
+  label: string
+  /**
+   * WHAT DAY 0 IS, and this is the load-bearing half.
+   *
+   * A node carries an ABSOLUTE day, and until now the schema could say "days from the handover"
+   * because a handover was the only way in. With a trigger, day 0 is the day the trigger fired --
+   * so the same "day 10" means ten days after a broken promise in one workflow and ten days after
+   * a handover in another. The builder prints this sentence beside the day column rather than
+   * leaving somebody to assume, because assuming it is a handover is how a section 129 goes out
+   * five months early.
+   */
+  dayZero: string
+}
+
+export const TRIGGERS: Record<TriggerKind, TriggerMeta> = {
+  handover: { label: 'An account is handed over', dayZero: 'the day the account was handed over' },
+  allocated: { label: 'The account is given to a collector', dayZero: 'the day it was allocated' },
+  promise_due: { label: 'A promise to pay falls due', dayZero: 'the day the promise was due' },
+  promise_broken: { label: 'A promise to pay is broken', dayZero: 'the day the promise was broken' },
+  arrangement_broken: { label: 'An arrangement is broken', dayZero: 'the day the arrangement broke' },
+  payment_received: { label: 'A payment comes in', dayZero: 'the day the payment was received' },
+  dispute_logged: { label: 'A dispute is raised', dayZero: 'the day the dispute was raised' },
+  no_contact: { label: 'Nobody can be reached', dayZero: 'the day the last attempt failed' },
+  trace_returned: { label: 'A trace comes back', dayZero: 'the day the trace came back' },
+  callback: { label: 'A callback is asked for', dayZero: 'the day it was asked for' },
+  by_hand: { label: 'Somebody starts it on a file', dayZero: 'the day somebody started it' },
+}
+
+/** The order the buttons are offered in: a file's life, roughly, and by hand last. */
+export const TRIGGER_ORDER: TriggerKind[] = [
+  'handover', 'allocated', 'promise_due', 'promise_broken', 'arrangement_broken',
+  'payment_received', 'dispute_logged', 'no_contact', 'trace_returned', 'callback', 'by_hand',
+]
+
+/**
+ * How the day column is labelled for this workflow.
+ *
+ * ONE SENTENCE, BUILT IN ONE PLACE. The same phrase belongs on the builder, on the step drawer
+ * and eventually on a file's own timeline; written out at each of those it drifts, and a day
+ * column labelled two ways is a day column nobody trusts.
+ */
+export function dayZeroLabel(trigger: TriggerKind): string {
+  return `Day 0 is ${triggerMeta(trigger).dayZero}.`
+}
+
+/**
+ * A trigger's label and day zero, without taking the page down if the column is not there.
+ *
+ * NOT A SILENT DEFAULT DRESSED UP. The real protection against a dropped column is
+ * check-workflow-triggers, which holds the select, the mapper, the union and the database's own
+ * CHECK against each other in both directions — a drift there is a failed build. This is the
+ * other half: a row that somehow arrives without one must not throw inside a render, because the
+ * page it takes down with it is the whole library. Falling back to "by hand" is the honest
+ * reading of a version nothing says the trigger of.
+ */
+export function triggerMeta(trigger: TriggerKind): TriggerMeta {
+  return TRIGGERS[trigger] ?? TRIGGERS.by_hand
+}
+
 export type NodeKind = 'action' | 'communication' | 'document' | 'task' | 'assignment' | 'wait'
 
 export const NODE_KINDS: Record<NodeKind, { label: string; hint: string }> = {
@@ -87,6 +171,10 @@ export interface WorkflowVersion {
   version: number
   state: VersionState
   publishedAt: string | null
+  /** What this version waits for. On the version, not the workflow: a published one is frozen. */
+  trigger: TriggerKind
+  /** The firm's own narrowing, in their words. Null on most. */
+  triggerNote: string | null
 }
 
 export interface Workflow {
@@ -172,6 +260,16 @@ export interface WorkflowProblem {
 export function workflowProblems(workflow: Workflow): WorkflowProblem[] {
   const out: WorkflowProblem[] = []
   const byId = new Map(workflow.nodes.map((n) => [n.id, n]))
+
+  /*
+   * A WORKFLOW WITH NO STEPS. Refused rather than warned, and it is really about PUBLISHING --
+   * canSave is what the Publish button asks. Every new workflow starts here, so without this the
+   * first thing the firm can do with one is make it live and have it do nothing to every account
+   * that triggers it. A draft with no steps is fine; a published one is a promise nothing keeps.
+   */
+  if (workflow.nodes.length === 0) {
+    out.push({ level: 'refuse', nodeId: null, message: 'A workflow with no steps does nothing. Add the first step.' })
+  }
 
   for (const node of workflow.nodes) {
     if (!node.label.trim()) {

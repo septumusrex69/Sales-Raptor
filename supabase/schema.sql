@@ -5975,3 +5975,190 @@ comment on function public.unallocated_batches(integer) is
   'Recently imported batches with accounts still on nobody''s desk. Bounded by days on purpose: '
   'the inherited book is unallocated and always will be, and counting it would make the warning '
   'permanent and therefore unread.';
+
+-- ---------- What starts a workflow ----------
+--
+-- The builder could describe what happens once a file is in a workflow and had no way to say how
+-- it got there. Every workflow was therefore implicitly "an account is handed over", which is the
+-- only one the day numbers were ever written for -- and the firm's next four (arrangement,
+-- default, dispute, sequestration) are entered from somewhere else entirely.
+--
+-- ON THE VERSION, NOT ON THE WORKFLOW, and that is the same argument as everything else here: a
+-- published version is frozen because "what did this say when the file went through it" is a
+-- question an attorney asks eighteen months later. What starts a workflow is part of that answer.
+--
+-- A CLOSED LIST, and it is the diary's own vocabulary plus the two things the diary does not
+-- raise: a handover and somebody deciding. Every entry is an event Raptor already records, so a
+-- trigger can eventually be honoured rather than described. `review` is deliberately absent --
+-- it is the one diary kind with no event behind it, so nothing could ever fire it.
+alter table public.workflow_versions
+  add column if not exists trigger_kind text not null default 'by_hand'
+    check (trigger_kind in (
+      'handover', 'allocated', 'promise_due', 'promise_broken', 'arrangement_broken',
+      'payment_received', 'dispute_logged', 'no_contact', 'trace_returned', 'callback', 'by_hand'
+    )),
+  -- The firm's own narrowing, in their words: "only on accounts over R50 000", "Gauteng
+  -- Property Services only". Text rather than a condition language, because a condition nothing
+  -- runs is a condition nobody can trust -- and a sentence on the page is honest about that.
+  add column if not exists trigger_note text;
+
+-- ---------- Taking a draft has to carry the trigger over ----------
+--
+-- This function copies a version column by column -- the standing hazard CLAUDE.md names, and it
+-- caught one the day trigger_kind was added: the version insert listed workflow_id, version,
+-- state and created_by, so a draft taken off a published workflow came back with the column's
+-- DEFAULT. Every workflow that waited for a broken arrangement would quietly have become one
+-- somebody starts by hand, and the builder would have shown that as the truth.
+create or replace function public.workflow_take_draft(p_version uuid)
+returns uuid
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare
+  v_workflow uuid;
+  v_next integer;
+  v_draft uuid;
+begin
+  select workflow_id into v_workflow from public.workflow_versions where id = p_version;
+  if v_workflow is null then raise exception 'No such workflow version.'; end if;
+
+  select id into v_draft from public.workflow_versions
+   where workflow_id = v_workflow and state = 'draft' limit 1;
+  if v_draft is not null then return v_draft; end if;
+
+  select coalesce(max(version), 0) + 1 into v_next
+    from public.workflow_versions where workflow_id = v_workflow;
+
+  insert into public.workflow_versions (
+    workflow_id, version, state, created_by, trigger_kind, trigger_note)
+  select v_workflow, v_next, 'draft', auth.uid(), o.trigger_kind, o.trigger_note
+    from public.workflow_versions o where o.id = p_version
+  returning id into v_draft;
+
+  create temp table _phase_map (old uuid, new uuid) on commit drop;
+  create temp table _node_map (old uuid, new uuid) on commit drop;
+
+  insert into public.workflow_phases (version_id, ordinal, name, subtitle, from_day, to_day)
+  select v_draft, ordinal, name, subtitle, from_day, to_day
+    from public.workflow_phases where version_id = p_version order by ordinal;
+  insert into _phase_map
+  select o.id, n.id from public.workflow_phases o
+    join public.workflow_phases n on n.version_id = v_draft and n.ordinal = o.ordinal
+   where o.version_id = p_version;
+
+  insert into public.workflow_nodes (
+    version_id, phase_id, key, kind, label, description, day, deadline_days, deadline_unit,
+    channel, template_id, statutory, assign_to, x, y, ordinal)
+  select v_draft, m.new, o.key, o.kind, o.label, o.description, o.day, o.deadline_days,
+         o.deadline_unit, o.channel, o.template_id, o.statutory, o.assign_to, o.x, o.y, o.ordinal
+    from public.workflow_nodes o
+    left join _phase_map m on m.old = o.phase_id
+   where o.version_id = p_version;
+  insert into _node_map
+  select o.id, n.id from public.workflow_nodes o
+    join public.workflow_nodes n on n.version_id = v_draft and n.key = o.key
+   where o.version_id = p_version;
+
+  insert into public.workflow_connections (version_id, from_node_id, to_node_id, to_workflow_id, label)
+  select v_draft, f.new, t.new, o.to_workflow_id, o.label
+    from public.workflow_connections o
+    join _node_map f on f.old = o.from_node_id
+    left join _node_map t on t.old = o.to_node_id
+   where o.version_id = p_version;
+
+  return v_draft;
+end;
+$$;
+
+grant execute on function public.workflow_take_draft(uuid) to authenticated;
+
+-- ---------- Starting a workflow from nothing ----------
+--
+-- A workflow, its first version and its first phase in ONE statement, because three round trips
+-- from the browser can stop after the first: the library would then list a workflow with no
+-- version, which nothing can open and nothing can delete from that screen. It was reachable the
+-- moment "New workflow" existed -- the firm's library is empty and every workflow from here on
+-- starts through this function.
+--
+-- THE FIRST PHASE IS NOT DECORATION. A step has to belong to one, so a workflow with no phases is
+-- a workflow the builder cannot add a step to -- an empty screen with the only button greyed out.
+create or replace function public.workflow_create(
+  p_name text,
+  p_description text,
+  p_domain text,
+  p_trigger text
+)
+returns uuid
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare
+  v_key text;
+  v_workflow uuid;
+  v_version uuid;
+begin
+  if coalesce(btrim(p_name), '') = '' then
+    raise exception 'A workflow needs a name somebody can read.';
+  end if;
+  -- A key a person can read, made unique by the clock rather than by a counter nobody maintains.
+  v_key := left(regexp_replace(lower(btrim(p_name)), '[^a-z0-9]+', '-', 'g'), 40);
+  v_key := btrim(v_key, '-');
+  if v_key = '' then v_key := 'workflow'; end if;
+  v_key := v_key || '-' || to_char(clock_timestamp(), 'YYYYMMDDHH24MISS');
+
+  insert into public.workflows (key, name, description, domain, created_by)
+  values (v_key, btrim(p_name), nullif(btrim(coalesce(p_description, '')), ''),
+          coalesce(p_domain, 'collections'), auth.uid())
+  returning id into v_workflow;
+
+  insert into public.workflow_versions (
+    workflow_id, version, state, created_by, trigger_kind)
+  values (v_workflow, 1, 'draft', auth.uid(), coalesce(p_trigger, 'by_hand'))
+  returning id into v_version;
+
+  -- Day 0 to day 30 is a starting point, not a rule: the firm edits it. What matters is that one
+  -- exists, so the builder opens with somewhere to put the first step.
+  insert into public.workflow_phases (version_id, ordinal, name, subtitle, from_day, to_day)
+  values (v_version, 1, 'Phase 1', null, 0, 30);
+
+  return v_workflow;
+end;
+$$;
+
+grant execute on function public.workflow_create(text, text, text, text) to authenticated;
+
+-- ---------- What starts a published workflow cannot be changed ----------
+--
+-- workflow_versions is the one table in this group with no frozen-row trigger on it, and for a
+-- good reason: publishing is an UPDATE of state on that very row, so refusing every update would
+-- refuse publishing. That left a hole the moment the trigger moved onto this table -- the phases,
+-- the nodes and the edges of a published version are all protected, and what the version WAITS
+-- FOR was not.
+--
+-- It is not a cosmetic field. Changing it on a live version changes which files enter the
+-- workflow, retroactively, and the archived versions an attorney reads back would no longer say
+-- what actually happened.
+--
+-- NARROW ON PURPOSE: only the two trigger columns, and only once the version has left draft.
+-- Everything else about a version -- its state, when it was published, by whom -- still moves.
+create or replace function public.refuse_trigger_change_when_frozen()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  if old.state <> 'draft'
+     and (new.trigger_kind is distinct from old.trigger_kind
+          or new.trigger_note is distinct from old.trigger_note) then
+    raise exception 'This workflow version is published. Take a draft of it before changing what starts it.'
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists workflow_versions_trigger_frozen on public.workflow_versions;
+create trigger workflow_versions_trigger_frozen before update on public.workflow_versions
+  for each row execute function public.refuse_trigger_change_when_frozen();

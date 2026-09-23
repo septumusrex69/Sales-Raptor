@@ -68,7 +68,16 @@ const WORKFLOW = {
   id: 'w1', key: 'standard-collections', name: 'Standard Collections – Non-Paying Debtor',
   description: 'Main collection workflow for non-paying debtors. Day 0 to Day 80.',
   teams: { name: 'Pre-legal' },
-  workflow_versions: [{ id: VERSION, version: 1, state: 'draft', published_at: null }],
+  /*
+   * THE TRIGGER IS IN THE FIXTURE, not left out and defaulted. A stub that omits a column tests
+   * the fallback and nothing else -- and this suite has already been caught twice this month
+   * answering a request in a way that never exercised the feature under test. This workflow is
+   * the firm's own 160-day spine, so the trigger is the one it was written for.
+   */
+  workflow_versions: [{
+    id: VERSION, version: 1, state: 'draft', published_at: null,
+    trigger_kind: 'handover', trigger_note: null,
+  }],
 }
 
 /** Every PATCH the page sends, so the test can prove an edit actually left the browser. */
@@ -334,6 +343,30 @@ try {
    * shutdown — and that is the kind of error somebody spots in a second and never spots in a
    * day number.
    */
+  /*
+   * WHAT SETS THE WORKFLOW OFF, ON THE PAGE. A workflow could say what happens to a file and not
+   * how the file got there, so every day number silently meant "days from the handover" -- and
+   * the firm's next four workflows are entered from a broken arrangement, a dispute, a default.
+   * The sentence is what stops a section 129 being laid out against the wrong day zero.
+   */
+  t.ok('the builder says what sets this workflow off',
+    await page.getByText('Starts when', { exact: false }).first().isVisible())
+  /*
+   * ASKED OF THE CONTROL, NOT OF THE PAGE TEXT. On a draft the trigger is a <select>, and a
+   * browser does not lay an unselected <option> out -- getByText finds the words in the DOM and
+   * reports them as not visible, which is a failing check about nothing. The selected value is
+   * the fact worth asserting anyway.
+   */
+  const triggerBox = page.locator('select').filter({ has: page.locator('option[value="handover"]') })
+  t.ok('...as a control the firm can change while it is a draft', await triggerBox.first().isVisible())
+  t.check('...set to the event this workflow was written for',
+    await triggerBox.first().inputValue(), 'handover')
+  t.ok('...and every trigger is offered, not just this one',
+    await triggerBox.first().locator('option').count() > 5)
+  t.ok('...and says what day 0 therefore is',
+    await page.getByText('Day 0 is the day the account was handed over', { exact: false })
+      .first().isVisible())
+
   const handover = page.locator('input[type="date"]').first()
   t.ok('the builder asks what handover to date this against', await handover.isVisible())
   await handover.fill('2026-09-18')

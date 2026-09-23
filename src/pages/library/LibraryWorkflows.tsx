@@ -9,12 +9,12 @@ import { useAuth } from '../../store/AuthContext'
 import { canEditLibrary, canViewLibrary } from '../../lib/permissions'
 import { LibraryHeader } from './LibraryHeader'
 import {
-  canSave, workflowFacts, workflowProblems, NODE_KINDS,
-  type NodeKind, type Workflow, type WorkflowNode,
+  canSave, dayZeroLabel, triggerMeta, workflowFacts, workflowProblems, NODE_KINDS, TRIGGERS,
+  TRIGGER_ORDER, type NodeKind, type TriggerKind, type Workflow, type WorkflowNode,
 } from '../../lib/workflowBuilder.ts'
 import {
-  addNode, deleteNode, fetchWorkflow, fetchWorkflows, publish, saveNode, setNextNode, takeDraft,
-  type WorkflowSummary,
+  addNode, createWorkflow, deleteNode, fetchWorkflow, fetchWorkflows, publish, saveNode,
+  setNextNode, setTrigger, takeDraft, type WorkflowSummary,
 } from '../../lib/workflowStore.ts'
 import { fetchLibrary, type LibraryTemplate } from '../../lib/templateLibrary.ts'
 import { clerksReached } from '../../lib/workflowSchedule.ts'
@@ -43,6 +43,7 @@ export function LibraryWorkflows() {
   const navigate = useNavigate()
   const [list, setList] = useState<WorkflowSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [starting, setStarting] = useState(false)
 
   useEffect(() => {
     if (!mayView || openKey) return
@@ -76,12 +77,27 @@ export function LibraryWorkflows() {
       <LibraryHeader mayEdit={mayEdit} />
       <Card>
       <CardHeader title="Workflows"
-        subtitle="What happens to an account, and when. A published workflow is superseded rather than edited." />
+        subtitle="What happens to an account, and when. A published workflow is superseded rather than edited."
+        action={mayEdit && !starting ? (
+          <button type="button" onClick={() => setStarting(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-navy-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-navy-800">
+            <Plus size={13} /> New workflow
+          </button>
+        ) : undefined} />
       {error && <p className="text-sm text-rose-700">{error}</p>}
+      {starting && (
+        <NewWorkflow
+          onCancel={() => setStarting(false)}
+          onCreated={(key) => navigate(`/library/workflows/${key}`)} />
+      )}
       {list === null ? (
         <div className="py-8 grid place-items-center text-slate-400"><Loader2 size={18} className="animate-spin" /></div>
       ) : list.length === 0 ? (
-        <p className="text-sm text-slate-500">No workflows yet.</p>
+        /* Says what to do, not just that there is nothing. An empty library with no next step is
+           a screen somebody leaves. */
+        <p className="text-sm text-slate-500">
+          {mayEdit ? 'No workflows yet. Start one and say what sets it off.' : 'No workflows yet.'}
+        </p>
       ) : (
         <ul className="divide-y divide-slate-100">
           {list.map((w) => {
@@ -106,6 +122,102 @@ export function LibraryWorkflows() {
         </ul>
       )}
       </Card>
+    </div>
+  )
+}
+
+/**
+ * STARTING A WORKFLOW, AND THE TRIGGER IS ASKED FOR FIRST.
+ *
+ * Not as a field somebody fills in later: what sets a workflow off decides what its day numbers
+ * MEAN. "Day 10" is ten days after a handover in one workflow and ten days after a broken promise
+ * in another, and a builder that lets you lay out fourteen steps before asking is a builder that
+ * lets you lay them out against the wrong day zero.
+ *
+ * THE DOMAIN IS NOT ASKED FOR. Every trigger on the list is an event on a debtor account, so the
+ * answer is always collections; offering three choices where two are wrong is a question that
+ * only produces mistakes. It moves out here the day a sales trigger exists.
+ */
+function NewWorkflow({ onCancel, onCreated }: {
+  onCancel: () => void
+  onCreated: (key: string) => void
+}) {
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  /* Named `pickTrigger` rather than `setTrigger` on purpose: the store exports a setTrigger that
+     writes one to the database, and a component that shadows it silently stops being able to. */
+  const [trigger, pickTrigger] = useState<TriggerKind>('handover')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const start = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await createWorkflow({
+        name: name.trim(),
+        description: description.trim() || null,
+        domain: 'collections',
+        trigger,
+      })
+      /* Straight into the builder on the new draft. The next thing anybody wants is the first
+         step, and a list with one more row on it is not that. */
+      const rows = await fetchWorkflows()
+      const made = rows.find((r) => r.name === name.trim())
+      if (made) onCreated(made.key)
+      else onCancel()
+    } catch (e) {
+      setError((e as Error).message)
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 mb-4 space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="block text-[11px] uppercase tracking-wide text-slate-400 mb-1">Name</span>
+          <input className={inputClass} value={name} autoFocus
+            onChange={(e) => setName(e.target.value)} placeholder="Broken arrangement" />
+        </label>
+        <label className="block">
+          <span className="block text-[11px] uppercase tracking-wide text-slate-400 mb-1">
+            What it is for
+          </span>
+          <input className={inputClass} value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="What happens when an arrangement breaks" />
+        </label>
+      </div>
+      <div>
+        <span className="block text-[11px] uppercase tracking-wide text-slate-400 mb-1.5">
+          What sets it off
+        </span>
+        <div className="flex flex-wrap gap-1.5">
+          {TRIGGER_ORDER.map((t) => (
+            <button key={t} type="button" onClick={() => pickTrigger(t)}
+              className={`rounded-full border px-3 py-1.5 text-xs ${
+                trigger === t
+                  ? 'border-navy-900 bg-navy-900 text-white'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+              }`}>{TRIGGERS[t].label}</button>
+          ))}
+        </div>
+        {/* The consequence of the choice, said as the choice is made rather than discovered on
+            the day column later. */}
+        <p className="text-xs text-slate-500 mt-2">{dayZeroLabel(trigger)}</p>
+      </div>
+      {error && <p className="text-sm text-rose-700">{error}</p>}
+      <div className="flex items-center gap-2">
+        <button type="button" disabled={busy || !name.trim()} onClick={() => { void start() }}
+          className="rounded-lg bg-gold-400 px-3 py-1.5 text-xs font-medium text-navy-950 hover:bg-gold-500 disabled:opacity-40">
+          {busy ? 'Starting\u2026' : 'Start it'}
+        </button>
+        <button type="button" onClick={onCancel} disabled={busy}
+          className="rounded-lg px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-100">
+          Cancel
+        </button>
+      </div>
     </div>
   )
 }
@@ -242,10 +354,40 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
             <span className="text-xs font-normal text-slate-400">Version {workflow.version.version}</span>
           </h2>
           {workflow.description && <p className="text-sm text-slate-500">{workflow.description}</p>}
+          {/*
+            WHAT SETS IT OFF, ON THE HEADER RATHER THAN IN A TAB.
+            It is the first thing anybody needs to know about a workflow and the thing that says
+            what every day number underneath it means. On a draft it is editable in place; on a
+            published version it is a sentence, because changing it would change which files are
+            in the workflow after the fact, and the database refuses it.
+          */}
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-slate-400">Starts when</span>
+            {workflow.version.state === 'draft' && mayEdit ? (
+              <select className={`${inputClass} w-auto py-1 text-xs`} value={workflow.version.trigger}
+                disabled={busy}
+                onChange={(e) => {
+                  const next = e.target.value as TriggerKind
+                  void act(() => setTrigger(workflow.version.id, next, workflow.version.triggerNote))
+                }}>
+                {TRIGGER_ORDER.map((t) => (
+                  <option key={t} value={t}>{TRIGGERS[t].label.toLowerCase()}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="font-medium text-slate-700">
+                {triggerMeta(workflow.version.trigger).label.toLowerCase()}
+              </span>
+            )}
+            <span className="text-slate-400">&middot; {dayZeroLabel(workflow.version.trigger)}</span>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Labelled from the TRIGGER, not from a handover. This box dates the whole chart, and
+              on an arrangement workflow "dated from a handover on" is the wrong question -- it is
+              dated from the day the arrangement broke. */}
           <label className="text-xs text-slate-500 flex items-center gap-2 mr-1">
-            Dated from a handover on
+            Dated from {triggerMeta(workflow.version.trigger).dayZero}
             <input type="date" value={from} onChange={(e) => setFrom(e.target.value || from)}
               className={`${inputClass} w-auto py-1`} />
           </label>

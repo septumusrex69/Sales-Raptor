@@ -8,8 +8,8 @@
  */
 import { supabase } from './supabase'
 import type {
-  Channel, DeadlineUnit, NodeKind, Workflow, WorkflowConnection, WorkflowNode, WorkflowPhase,
-  VersionState,
+  Channel, DeadlineUnit, NodeKind, TriggerKind, Workflow, WorkflowConnection, WorkflowNode,
+  WorkflowPhase, VersionState,
 } from './workflowBuilder.ts'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows arrive as untyped JSON from PostgREST. */
@@ -87,7 +87,7 @@ export async function fetchWorkflows(): Promise<WorkflowSummary[]> {
 export async function fetchWorkflow(key: string, versionId?: string): Promise<Workflow | null> {
   const { data: wf, error } = await supabase
     .from('workflows')
-    .select('id, key, name, description, teams(name), workflow_versions(id, version, state, published_at)')
+    .select('id, key, name, description, teams(name), workflow_versions(id, version, state, published_at, trigger_kind, trigger_note)')
     .eq('key', key)
     .maybeSingle()
   if (error) throw new Error(error.message)
@@ -125,6 +125,11 @@ export async function fetchWorkflow(key: string, versionId?: string): Promise<Wo
       version: chosen.version,
       state: chosen.state as VersionState,
       publishedAt: chosen.published_at ?? null,
+      /* Named here like every other column, and the reason to look twice: a trigger missing from
+         this mapper reads as undefined for ever and the builder shows a workflow waiting for
+         nothing. check-workflow-triggers holds the two lists together. */
+      trigger: chosen.trigger_kind as TriggerKind,
+      triggerNote: chosen.trigger_note ?? null,
     },
     phases: (phases.data ?? []).map(toPhase),
     nodes: (nodes.data ?? []).map(toNode),
@@ -210,6 +215,46 @@ export async function addNode(input: NewNode): Promise<string> {
     .single()
   if (error) throw new Error(friendly(error.message))
   return (data as any).id
+}
+
+/**
+ * A workflow from nothing: the row, its first draft version and a phase to put steps in.
+ *
+ * ONE ROUND TRIP, in the database, because three from the browser can stop after the first and
+ * leave a workflow with no version — a row the library lists, nothing can open and nothing can
+ * delete from that screen.
+ */
+export async function createWorkflow(input: {
+  name: string
+  description: string | null
+  domain: 'collections' | 'communications' | 'sales'
+  trigger: TriggerKind
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('workflow_create', {
+    p_name: input.name,
+    p_description: input.description,
+    p_domain: input.domain,
+    p_trigger: input.trigger,
+  })
+  if (error) throw new Error(friendly(error.message))
+  return data as string
+}
+
+/**
+ * What this version waits for.
+ *
+ * A DRAFT ONLY, and the database is what says so rather than this function — the frozen-version
+ * trigger refuses it on a published row and `friendly` turns that into the sentence about taking
+ * a draft. Changing what starts a live workflow would change which files are in it, retroactively.
+ */
+export async function setTrigger(
+  versionId: string, trigger: TriggerKind, note: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('workflow_versions')
+    .update({ trigger_kind: trigger, trigger_note: note?.trim() || null })
+    .eq('id', versionId)
+  if (error) throw new Error(friendly(error.message))
 }
 
 /** "Click Edit: create a Draft version." The copy is done in the database, edges and all. */
