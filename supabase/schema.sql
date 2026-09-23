@@ -6441,3 +6441,58 @@ end;
 $$;
 
 grant execute on function public.workflow_take_draft(uuid) to authenticated;
+
+-- ---------- Raptor's own case number, which is the one a notice quotes ----------
+--
+-- The firm: "always remember for the reference numbers to have a case number. So this is the case
+-- number from Raptor. So that we can find them easily. If they use the client reference, it's
+-- more difficult to find."
+--
+-- AND THE BOOK AGREES WITH THEM, with a number: the client's reference is NOT unique. 5,013 of
+-- them are used on more than one account, so 5,018 accounts -- 21% of the book -- cannot be
+-- identified by the reference the notices were quoting. A debtor ringing in with "dens" lands on
+-- several files, and the clerk has the debtor on the line while they work out which.
+--
+-- WHY NOT account_number, WHICH IS UNIQUE TODAY. It is two things in one column: the number off
+-- the CLIENT'S handover sheet ("the account number on the agreement"), and, when the sheet
+-- carries none, one suggestReference generates in the client's own series. The firm has met that
+-- ambiguity twice -- "I see the client ref, but I don't see the Raptor reference" was the first
+-- time. A column that is sometimes ours and sometimes theirs cannot be the one a notice quotes.
+--
+-- ASSIGNED BY A SEQUENCE AND NEVER REUSED. A case number is quoted in a statutory demand and
+-- typed into a search box a year later; it has to mean one account for ever, including after that
+-- account is closed. Backfilled in the order the accounts were handed over, so the numbering
+-- follows the book's own history rather than whatever order a backfill happened to read rows in.
+create sequence if not exists public.debtor_account_case_seq start with 100000;
+
+alter table public.debtor_accounts
+  add column if not exists case_number text;
+
+-- The prefix is one word in one place. If the firm would rather it read BF- or their own file
+-- series, this default and the backfill below are the only two places that know.
+alter table public.debtor_accounts
+  alter column case_number set default 'RAP-' || nextval('public.debtor_account_case_seq');
+
+with ordered as (
+  select id, row_number() over (order by created_at, id) as n
+    from public.debtor_accounts where case_number is null
+)
+update public.debtor_accounts a
+   set case_number = 'RAP-' || (99999 + o.n)
+  from ordered o where o.id = a.id;
+
+-- The sequence has to start after whatever the backfill used, or the next new account collides
+-- with an old one on its first day.
+select setval('public.debtor_account_case_seq',
+  greatest(100000, (select coalesce(max(substring(case_number from 5)::bigint), 99999) + 1
+                      from public.debtor_accounts where case_number ~ '^RAP-[0-9]+$')));
+
+alter table public.debtor_accounts alter column case_number set not null;
+
+create unique index if not exists debtor_accounts_case_number_key
+  on public.debtor_accounts (case_number);
+
+comment on column public.debtor_accounts.case_number is
+  'Raptor''s own reference for this account, and the one every notice quotes. Unique and never '
+  'reused. The client''s reference is not unique -- 21% of the book shares one with another '
+  'account -- which is why a notice cannot be identified by it.';

@@ -206,6 +206,14 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
   collections: [
     { key: 'debtor_name', label: 'How the debtor is addressed', sample: 'Mr Van Der Westhuizen' },
     { key: 'debtor_first_name', label: 'First name', sample: 'Johannes' },
+    /*
+     * RAPTOR'S OWN, AND THE ONE A NOTICE LEADS WITH. The firm: "so that we can find them easily.
+     * If they use the client reference, it's more difficult to find." The book proves it -- the
+     * client's reference is used on more than one account 5,013 times over, so 21% of the book
+     * cannot be identified by it, and a debtor reading theirs back down the phone lands the clerk
+     * on several files at once. This one is unique and never reused.
+     */
+    { key: 'case_number', label: 'Our case number, which a notice leads with', sample: 'RAP-100001' },
     { key: 'reference', label: 'The reference the debtor knows', sample: 'GPS3/10103' },
     { key: 'client_name', label: 'The client whose book it is', sample: 'Gauteng Property Services' },
     /*
@@ -354,7 +362,7 @@ export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
   { title: 'The debtor', keys: ['debtor_name', 'debtor_first_name', 'debtor_address', 'debtor_id_masked',
     'debtor_reg_no'] },
   { title: 'The person', keys: ['contact_name', 'contact_first_name'] },
-  { title: 'The account', keys: ['reference', 'account_number', 'balance', 'capital', 'position_as_at', 'respond_by'] },
+  { title: 'The account', keys: ['case_number', 'reference', 'account_number', 'balance', 'capital', 'position_as_at', 'respond_by'] },
   { title: 'Their business', keys: ['company_name', 'service_interested'] },
   { title: 'The deal', keys: ['deal_name', 'deal_value'] },
   { title: 'The client', keys: ['client_name'] },
@@ -560,6 +568,8 @@ export function missingFieldsNote(missing: string[]): string | null {
 
 /** Just enough of an account to write to its debtor. Passed in, so this file fetches nothing. */
 export interface TemplateAccount {
+  /** Raptor's own, unique and never reused. Not the creditor's accountNumber below. */
+  caseNumber: string | null
   debtorKind: 'individual' | 'company'
   debtorTitle: string | null
   debtorFirstName: string | null
@@ -722,6 +732,12 @@ export function mergeValuesFor(input: {
   return {
     debtor_name: addressAs(a),
     debtor_first_name: (a.debtorFirstName ?? '').trim() || null,
+    /*
+     * OURS AND THEIRS, SEPARATELY, and `reference` is deliberately left meaning what it always
+     * meant. Flipping it to Raptor's number would have changed what a field labelled "the
+     * reference the debtor knows" resolves to, silently, in every template already written.
+     */
+    case_number: (a.caseNumber ?? '').trim() || null,
     // The client's own reference is what appears on the debtor's paperwork; ours is the fallback.
     reference: (a.clientReference ?? '').trim() || (a.accountNumber ?? '').trim() || null,
     client_name: (input.clientName ?? '').trim() || null,

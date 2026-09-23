@@ -240,6 +240,19 @@ notice opens "the period given in our Section 129 notice has ended".
 looked right and meant something else. **Any column added to `workflow_versions` or
 `workflow_nodes` must be added to that function in the same migration.**
 
+**THREE numbers live on an account, and only one of them is ours.** `case_number` is **Raptor's**
+— unique, never reused, handed out by a sequence, and **the one every notice quotes**.
+`account_number` is the creditor's, off the client's handover sheet — except where the sheet
+carried none and `suggestReference` generated one in the client's series, which is why it was
+labelled "our reference" on the hero while being the client's on most rows. `client_reference` is
+the client's own filing. The firm hit that ambiguity twice: *"I see the client ref, but I don't
+see the Raptor reference"*, then *"if they use the client reference, it's more difficult to
+find"* — and the book agrees, because **the client's reference is not unique: 5,013 of them are
+used on more than one account, so 21% of the book cannot be identified by it.** `{{reference}}`
+still means what it always meant (the reference the *debtor* knows); `{{case_number}}` is ours.
+The SMSs quote ours only, and that swap was free **because the two are the same width** — a
+longer case number is a price rise on every SMS, paid by the debtor, under item 1(c).
+
 **Things that bite:**
 - `protect_closed_diary_entries` **silently reverts** edits to `done`/`moved` entries. It does
   not raise.

@@ -397,6 +397,7 @@ export function AccountDetail() {
       ? Object.fromEntries(
         Object.entries(mergeValuesFor({
           account: {
+            caseNumber: account.caseNumber,
             debtorKind: account.debtorKind,
             debtorTitle: account.debtorTitle,
             debtorFirstName: account.debtorFirstName,
@@ -740,12 +741,19 @@ export function AccountDetail() {
         title={
           <span className="inline-flex flex-wrap items-center gap-2">
             {name}
-            {account.accountNumber && (
-              <span className="font-mono text-[11px] font-bold text-navy-950 bg-gold-400 px-2 py-0.5 rounded-md align-middle"
-                title="Our reference for this account">
-                {account.accountNumber}
-              </span>
-            )}
+            {/*
+              THE CASE NUMBER, IN GOLD, AND IT IS OURS.
+              This badge showed `accountNumber` under a tooltip reading "our reference for this
+              account" -- which was true only when Raptor had generated one and false whenever the
+              client's sheet supplied it, because that column is the number on the agreement. The
+              firm hit the ambiguity twice: once as "I see the client ref, but I don't see the
+              Raptor reference", and again as "if they use the client reference it's more
+              difficult to find". caseNumber is unmistakably ours, on every account, and unique.
+            */}
+            <span className="font-mono text-[11px] font-bold text-navy-950 bg-gold-400 px-2 py-0.5 rounded-md align-middle"
+              title="Our case number. This is what every notice quotes.">
+              {account.caseNumber}
+            </span>
           </span>
         }
         subtitle={
@@ -763,6 +771,17 @@ export function AccountDetail() {
               read the word Client at the start of the line, and a collector quoting a reference
               back to a client is scanning, not reading.
             */}
+            {/* Both of the OTHER numbers, marked for what they are. The badge above is ours;
+                these two belong to the client and to the agreement, and a collector quoting one
+                back down the phone has to know which they are reading. */}
+            {account.accountNumber && (
+              <>
+                <span className="text-white/30">·</span>
+                <span title="The account number on the agreement, as the client gave it">
+                  account no. {account.accountNumber}
+                </span>
+              </>
+            )}
             {account.clientReference && (
               <>
                 <span className="text-white/30">·</span>

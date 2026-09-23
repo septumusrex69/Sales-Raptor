@@ -23,6 +23,16 @@ export interface DebtorAccount {
   id: string
   companyId: string
   handoverId: string | null
+  /**
+   * RAPTOR'S OWN REFERENCE, and the one every notice quotes.
+   *
+   * The firm: "so that we can find them easily. If they use the client reference, it's more
+   * difficult to find." The book agrees with a number -- the client's reference is used on more
+   * than one account 5,013 times over, so 21% of the book cannot be identified by it, and a
+   * debtor ringing in with theirs lands on several files at once. This one is unique and never
+   * reused. `accountNumber` below is the CREDITOR's, off the client's handover sheet.
+   */
+  caseNumber: string
   accountNumber: string | null
   swordfishReference: string | null
   clientReference: string | null
@@ -123,6 +133,9 @@ const toAccount = (r: any): DebtorAccount => ({
   id: r.id,
   companyId: r.company_id,
   handoverId: r.handover_id,
+  /* Named here like every other column: one missing from this mapper reads as undefined for ever
+     and nothing fails -- diary_capacity sat in that state for months. */
+  caseNumber: r.case_number,
   accountNumber: r.account_number,
   swordfishReference: r.swordfish_reference,
   clientReference: r.client_reference,
@@ -343,7 +356,10 @@ export function applyAccountFilters<T>(query: T, q: AccountQuery): T {
     // % and , are PostgREST's own syntax inside an `or`, so a surname containing either would
     // otherwise be read as a pattern or a second clause rather than as a name.
     const s = q.search.trim().replace(/[%,]/g, '')
-    out = out.or(`account_number.ilike.%${s}%,client_reference.ilike.%${s}%,debtor_surname.ilike.%${s}%`)
+    /* The case number FIRST, because it is the one on every notice and therefore the one a
+       debtor reads back down the phone. Searching without it would have left the clerk typing
+       the number off their own letter into a box that could not find it. */
+    out = out.or(`case_number.ilike.%${s}%,account_number.ilike.%${s}%,client_reference.ilike.%${s}%,debtor_surname.ilike.%${s}%`)
   }
 
   return out as T
