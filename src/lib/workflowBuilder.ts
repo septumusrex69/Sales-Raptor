@@ -13,7 +13,7 @@
  * (an absolute day, a wait after completion, and a next step) and any two of those can disagree
  * silently; this is the same shape with the disagreement made illegal.
  */
-import { addWorkingDays } from './workingDays.ts'
+import { addWorkingDays } from './workingDays.js'
 
 /* ---------------------------------------------------------------- what starts it */
 

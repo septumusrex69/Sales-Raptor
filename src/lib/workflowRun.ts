@@ -21,7 +21,7 @@
  *
  * Pure: no database, no clock, no network. What it returns is what gets inserted.
  */
-import { landsOn, type DayUnit, type WorkflowNode } from './workflowBuilder.ts'
+import { landsOn, type DayUnit, type WorkflowNode } from './workflowBuilder.js'
 
 export type RunStepState = 'pending' | 'held' | 'sent' | 'cancelled' | 'failed'
 

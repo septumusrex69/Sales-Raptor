@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useAuth } from '../../store/AuthContext'
 import { AlertTriangle, CalendarClock, Loader2, UserCheck } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { DictateButton } from '../../components/ui/Dictate'
@@ -84,6 +85,7 @@ export function HandOutModal({
    */
   const [pinned, setPinned] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
+  const { session } = useAuth()
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -289,6 +291,9 @@ export function HandOutModal({
     try {
       const res = await commitHandOut({
         plan, mode, actor, reason, handoverId,
+        /* So a single allocation's handover goes out now rather than on the next daily sweep.
+           See commitHandOut -- a batch is deliberately left to the sweep. */
+        accessToken: session?.access_token ?? null,
         onProgress: (done, total) => setBusy({ done, total }),
       })
       await onDone(handOutSummary(res, (id) =>

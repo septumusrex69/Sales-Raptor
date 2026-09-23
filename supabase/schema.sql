@@ -6753,3 +6753,81 @@ begin
   end if;
   return new;
 end $$;
+
+-- ---------- The handover starts when the account is first given to somebody ----------
+--
+-- The firm's own trigger, in their words: "Account loaded and first allocated to a legal clerk.
+-- Runs once per account. Reallocation does not restart it."
+--
+-- IN THE DATABASE BECAUSE THERE ARE THREE WRITERS. assigned_to is set by the bulk allocator, by
+-- the hand-out screen and by the handover import -- and the firm asked whether a workflow also
+-- starts for an account typed in by hand rather than imported. Written in the app it would have
+-- to be remembered in each of those, and the one that forgot would be the one nobody tested.
+-- Here it cannot be forgotten: whatever sets the column starts the workflow, including a path
+-- nobody has written yet.
+--
+-- FIRST ALLOCATION ONLY. An account moving from one collector to another is not a new handover
+-- and the debtor must not be introduced to the firm twice. `old.assigned_to is not null` is the
+-- whole test, and it is why this is an UPDATE OF trigger rather than something watching status.
+--
+-- THE RUN IS CREATED WITH NO STEPS, ON PURPOSE. Dating them means knowing which days are working
+-- days -- Easter, and the Monday a public holiday moves to when it falls on a Sunday -- and that
+-- calendar lives in workingDays.ts. Mirroring it here would be a second copy, and the schema's
+-- own note on workflow_run_steps says why that is refused: it would be the copy that is wrong
+-- about Heritage Day in the year nobody checks, on a sequence whose intervals are statutory. So
+-- this records that the workflow HAS STARTED and what day it started on; planning is done by the
+-- runner, which has the calendar.
+--
+-- SECURITY DEFINER, for the same reason the exit function is: whether a workflow starts cannot
+-- depend on who happened to do the allocating. The import runs as whoever pressed the button,
+-- and workflow_runs is writable by a narrower set of roles than debtor_accounts is.
+create or replace function public.workflow_start_on_allocation()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  -- Nothing to start: the account is being unallocated, or was never allocated.
+  if new.assigned_to is null then
+    return new;
+  end if;
+  -- Already had somebody. This is a reallocation, which the firm says must not restart it.
+  if tg_op = 'UPDATE' and old.assigned_to is not null then
+    return new;
+  end if;
+
+  /*
+   * EVERY ACTIVE VERSION THAT WAITS FOR THIS EVENT, not "the" one. Two workflows may both start
+   * on allocation the day the firm writes a second, and picking one of them arbitrarily is how a
+   * workflow silently never runs. Draft versions are excluded: a draft is being argued about.
+   *
+   * ONCE PER ACCOUNT AND VERSION, EVER -- in any state, not only while one is running. The
+   * partial unique index on workflow_runs stops a second LIVE run; it would happily allow a
+   * second after the first finished, which on a reallocation is exactly the case the firm ruled
+   * out.
+   *
+   * THE FIRM'S DAY, not the server's. The database is in UTC and the firm is two hours ahead in
+   * winter; around midnight the two disagree about the date, and started_on is what every step's
+   * date is counted from.
+   */
+  insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+  select new.id, v.id, (now() at time zone 'Africa/Johannesburg')::date, new.assigned_to
+    from public.workflow_versions v
+   where v.state = 'active'
+     and v.trigger_kind = 'allocated'
+     and not exists (
+       select 1 from public.workflow_runs r
+        where r.account_id = new.id and r.version_id = v.id
+     );
+
+  return new;
+end $$;
+
+drop trigger if exists workflow_start_on_allocation on public.debtor_accounts;
+create trigger workflow_start_on_allocation
+  after insert or update of assigned_to on public.debtor_accounts
+  for each row execute function public.workflow_start_on_allocation();
+
+comment on function public.workflow_start_on_allocation() is
+  'Starts every active workflow that waits for an allocation, once per account, on first allocation only. The run is created without steps; the runner dates them, because the working-day calendar lives in the app.';

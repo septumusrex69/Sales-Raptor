@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { adminClient } from '../auth.js'
+import { adminClient, requireCaller } from '../auth.js'
 import { todayInJohannesburg } from './locale.js'
+import { planUnplannedRuns } from './plan.js'
 import { runOneStep, type DueStep } from './step.js'
 
 /**
@@ -9,12 +10,18 @@ import { runOneStep, type DueStep } from './step.js'
  * The firm: "I'll send every letter by hand once and every SMS once. And then I want these things
  * working automatically in the workflow." This is the second half of that sentence.
  *
- * ONCE A DAY, AND THAT IS THE RIGHT GRAIN. Every step is dated to a DAY -- `landsOn` resolves
- * "business day 32" to a date when the run starts -- so nothing in the firm's sequence is finer
- * than daily, and a runner that woke every five minutes would spend the day asking a question
- * whose answer changes at midnight. It is a Vercel cron in vercel.json, like the mail sync
- * beside it, rather than pg_cron reaching back out over HTTP: one scheduler, already in the repo,
- * already understood.
+ * ONCE A DAY FOR THE WHOLE BOOK, AND ON DEMAND FOR ONE ACCOUNT. Every step of the section 129
+ * sequence is a whole day apart, so a daily sweep is the right grain for it -- a Vercel cron in
+ * vercel.json, like the mail sync beside it. But the HANDOVER is an email and then an SMS five to
+ * ten minutes later, and a daily sweep cannot do "ten minutes later": an account allocated at ten
+ * in the morning would be introduced to the firm the following dawn. So the app asks for one
+ * account the moment somebody is allocated, with a session rather than the cron's secret, and the
+ * daily sweep is the backstop for anything it missed.
+ *
+ * IT PLANS BEFORE IT SENDS. The allocation trigger creates a run with NO STEPS, because dating
+ * them needs the working-day calendar and that lives in the app rather than in SQL. This is where
+ * the two meet: plan whatever is unplanned, then send whatever is due -- which on a handover is
+ * the same pass.
  *
  * WHAT IT DOES NOT DO IS DECIDE. `planSend` decides, and it is pure and checked; this fetches
  * what planSend needs, does what it says, and writes down what happened. The division matters
@@ -26,18 +33,36 @@ import { runOneStep, type DueStep } from './step.js'
  * refused, which is `failed`: that is not something a collector can fix by filling in a field.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  /* Vercel sends `Authorization: Bearer $CRON_SECRET` on cron-triggered requests when the env var
-     is set. Same guard as the mail sync, which is the only other thing on a timer. */
-  const cronSecret = process.env.CRON_SECRET
-  if (cronSecret && req.headers.authorization !== `Bearer ${cronSecret}`) {
-    res.status(401).json({ error: 'Unauthorized' })
-    return
-  }
-
   const admin = adminClient()
   if (!admin) {
     res.status(500).json({ error: 'Server is missing Supabase configuration.' })
     return
+  }
+
+  /*
+   * TWO CALLERS, AND THE NARROWER ONE IS THE ONE A PERSON MAKES.
+   *
+   * The cron sweeps the whole book and proves itself with CRON_SECRET, which Vercel sends on a
+   * cron-triggered request. The app asks for ONE account, proves itself with the caller's own
+   * session, and gets only that account -- so a signed-in user nudging their own allocation
+   * cannot set the floor's sends going. Everything either of them touches is a step that was
+   * already due; this hurries the work, it never invents any.
+   */
+  const accountId = typeof (req.body ?? {}).accountId === 'string'
+    ? ((req.body as { accountId: string }).accountId)
+    : undefined
+  const cronSecret = process.env.CRON_SECRET
+  const isCron = !cronSecret || req.headers.authorization === `Bearer ${cronSecret}`
+  if (!isCron) {
+    const caller = await requireCaller(req, admin)
+    if (!caller) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+    if (!accountId) {
+      res.status(400).json({ error: 'Say which account. Only the timer sweeps the whole book.' })
+      return
+    }
   }
 
   /*
@@ -46,6 +71,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * two disagree about what day it is, and a step dated tomorrow would go out tonight.
    */
   const today = todayInJohannesburg()
+
+  /*
+   * DATE WHATEVER HAS NOT BEEN DATED, FIRST. A run created by the allocation trigger has no steps
+   * at all until this happens -- so on a handover, planning and sending are the same pass and the
+   * debtor hears from the firm within minutes rather than the next morning.
+   */
+  const planned = await planUnplannedRuns(admin, accountId)
 
   /*
    * EVERY STEP DUE, AND OVERDUE ONES WITH IT. `due_on <= today` rather than `= today`: a day the
@@ -66,7 +98,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * `failed` IS NOT RE-ASKED. That is a provider refusal, not something the account is missing,
    * and quietly retrying a message the network rejected is how a debtor gets four copies.
    */
-  const { data: due, error } = await admin
+  let query = admin
     .from('workflow_run_steps')
     .select('id, node_id, due_on, state, note, run_id, workflow_runs!inner(id, account_id, version_id, started_on, state)')
     .in('state', ['pending', 'held'])
@@ -74,6 +106,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .eq('workflow_runs.state', 'running')
     .order('due_on', { ascending: true })
     .limit(200)
+  if (accountId) query = query.eq('workflow_runs.account_id', accountId)
+  const { data: due, error } = await query
   if (error) {
     res.status(500).json({ error: error.message })
     return
@@ -107,6 +141,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  res.status(200).json({ ok: true, today, ...outcome })
+  res.status(200).json({
+    ok: true, today,
+    /* Runs dated on this pass, so a handover nudge can say "it started" rather than only
+       "nothing was due" -- which is what an unplanned run looks like from the outside. */
+    planned: planned.filter((p) => p.problem === null).length,
+    planProblems: planned.filter((p) => p.problem !== null).map((p) => `${p.runId}: ${p.problem}`),
+    ...outcome,
+  })
 }
 

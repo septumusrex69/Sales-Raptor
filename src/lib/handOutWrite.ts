@@ -12,6 +12,7 @@
  * happen, the diary entry is the one worth having last.
  */
 import { supabase } from './supabase'
+import { nudgeWorkflows } from './accountRun.ts'
 import { diarise } from './diary.ts'
 import type { HandOutPlan } from './handOut.ts'
 import { ID_CHUNK, idChunks } from './accountAllocation.ts'
@@ -68,6 +69,15 @@ export async function commitHandOut(input: {
   handoverId?: string | null
   /** Called after each account so a long hand-out can show progress rather than appear hung. */
   onProgress?: (done: number, total: number) => void
+  /**
+   * The caller's session, used for one thing only: hurrying a SINGLE account's workflow along.
+   *
+   * The database trigger starts the run whoever writes `assigned_to`, so the workflow happens
+   * with or without this. What it buys is promptness -- the handover is an email and then an SMS
+   * five to ten minutes later, and a once-daily sweep would introduce the firm to the debtor the
+   * following dawn. Optional, because a hand-out with no token still hands out.
+   */
+  accessToken?: string | null
 }): Promise<HandOutResult> {
   const { placements } = input.plan
   const result: HandOutResult = { allocated: 0, booked: 0, failed: [], notified: 0 }
@@ -109,6 +119,22 @@ export async function commitHandOut(input: {
         bump(allocatedBy, userId, chunk.length)
       }
     }
+  }
+
+  /*
+   * AND A SINGLE ALLOCATION IS HURRIED ALONG.
+   *
+   * ONE, NOT A BATCH, and the line is drawn here rather than at some size that looks safe: a
+   * hand-out of five hundred accounts would be five hundred calls out of somebody's browser,
+   * each one sending real email. A batch waits for the sweep, which is what the sweep is for.
+   * One account is the interactive case -- somebody is standing there having just given an
+   * account to a collector, and expecting the debtor to hear from the firm.
+   *
+   * NOT AWAITED. The accounts ARE allocated and the run IS created; a slow send must not make
+   * the hand-out look like it failed, and the sweep is the backstop either way.
+   */
+  if (input.mode === 'allocate_and_refer' && placements.length === 1 && input.accessToken) {
+    nudgeWorkflows(input.accessToken, placements[0].accountId)
   }
 
   /*

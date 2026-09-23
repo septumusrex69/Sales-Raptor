@@ -102,3 +102,29 @@ export async function releaseStep(accessToken: string, stepId: string): Promise<
     note: body.note ?? null,
   }
 }
+
+/**
+ * ASK THE SERVER TO GET ON WITH THIS ACCOUNT'S WORKFLOW NOW.
+ *
+ * The allocation trigger creates the run the moment somebody is given an account, but the run has
+ * no dates on it yet and nothing has been sent. Left to the daily sweep, an account allocated at
+ * ten in the morning is introduced to the firm the following dawn -- and the handover is an email
+ * followed by an SMS five to ten minutes later, which a once-a-day timer cannot express at all.
+ *
+ * FIRE AND FORGET, AND IT NEVER FAILS THE ALLOCATION. The account HAS been allocated; the
+ * workflow will be picked up by the sweep regardless. Surfacing a network error here would tell
+ * a team leader their allocation went wrong when it did not.
+ *
+ * ONE ACCOUNT. The endpoint refuses anything wider from a session -- only the timer sweeps the
+ * book -- so a bulk allocation of five thousand is left to the sweep rather than setting off five
+ * thousand calls from somebody's browser.
+ */
+export function nudgeWorkflows(accessToken: string, accountId: string): void {
+  void fetch('/api/workflow/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ accountId }),
+  }).catch(() => {
+    /* Ignored on purpose -- see above. The sweep is the backstop. */
+  })
+}
