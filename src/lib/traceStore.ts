@@ -612,3 +612,55 @@ export function linkedHow(label: string | null | undefined): string | null {
   const cleaned = words.replace(/^[\s··|-]+|[\s··|-]+$/g, '').trim()
   return cleaned === '' ? null : cleaned
 }
+
+/**
+ * Everything anybody connected to this account still owns, in one list.
+ *
+ * THE FIRM: "if the directors of these companies, and we see that they have properties, that is
+ * displayed on the main page."
+ *
+ * EACH TRACE ALREADY SHOWED ITS OWN. What it could not show was the ANSWER: a company account
+ * with three directors traced draws four panels, each naming one property, and the question a
+ * collector is actually asking -- is there anything here worth attaching -- is spread across
+ * them and never added up. A company with no assets whose director owns three houses is the
+ * whole reason a suretyship gets called in, and it read as four separate footnotes.
+ *
+ * WHOSE IT IS TRAVELS WITH IT, and that is not decoration. A judgment against the company does
+ * not attach a director's house; it takes a suretyship, or piercing, and a collector who cannot
+ * see whose name is on the deed cannot tell which of those they are looking at. The subject's
+ * own name is carried on every row.
+ *
+ * STILL OWNED ONLY -- see heldProperty. A deeds section lists every transaction a person ever
+ * made, including houses sold fifteen years ago, and a sold property in a list headed "property"
+ * reads as an asset to anybody skimming.
+ *
+ * BIGGEST FIRST, across all of them, because that is the order somebody deciding what to do
+ * next reads in.
+ */
+export interface OwnedProperty {
+  /** The trace it came off, so the panel can open the right one. */
+  traceId: string
+  /** Whose property it is, as the report named them. */
+  owner: string | null
+  ownerKind: 'debtor' | 'director'
+  item: TraceItem
+}
+
+export function propertyAcross(
+  traces: readonly { id: string; subjectKind: 'debtor' | 'director'; subjectName: string | null; items: TraceItem[] }[],
+): OwnedProperty[] {
+  const rows: OwnedProperty[] = []
+  /* De-duplicated on the deed itself: a property a director holds shows on the commercial report
+     and again on that director's own consumer one, and counted twice it doubles what the account
+     looks worth. The first one wins, which is the newest trace the caller handed in. */
+  const seen = new Set<string>()
+  for (const t of traces) {
+    for (const item of heldProperty(t.items)) {
+      const key = item.value.toLowerCase().replace(/[\s,.]+/g, ' ').trim()
+      if (seen.has(key)) continue
+      seen.add(key)
+      rows.push({ traceId: t.id, owner: t.subjectName, ownerKind: t.subjectKind, item })
+    }
+  }
+  return rows.sort((a, b) => (b.item.amount ?? 0) - (a.item.amount ?? 0))
+}

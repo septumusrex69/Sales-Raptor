@@ -47,7 +47,7 @@ import {
 } from '../../lib/accountStanding.ts'
 import { fetchStanding } from '../../lib/accountStandingData.ts'
 import { DirectorModal } from './DirectorModal'
-import { heldProperty, traceSummary, type FiledTrace } from '../../lib/traceStore.ts'
+import { heldProperty, propertyAcross, traceSummary, type FiledTrace } from '../../lib/traceStore.ts'
 import { fetchTraces } from '../../lib/traceStoreData.ts'
 import { TraceWorkspaceModal } from './TraceWorkspaceModal'
 import { TraceUploadModal } from './TraceUploadModal'
@@ -2012,6 +2012,9 @@ function StandingPanel({
    * one report for the company and one per director, and paired by date alone every finding on
    * both would be reported as new. See previousTraceFor.
    */
+  /* Everything still owned, across the company's own report and every director's. */
+  const ownedProperty = useMemo(() => propertyAcross(traces), [traces])
+
   const sinceLastTrace = useMemo(() => {
     const latest = traces[0]
     if (!latest) return null
@@ -2172,6 +2175,52 @@ function StandingPanel({
         and thirty directorships; the whole of it belongs behind the link, not on a panel a
         collector reads between calls.
       */}
+      {/*
+        WHAT ANYBODY CONNECTED TO THIS ACCOUNT STILL OWNS, ONCE, ABOVE THE REPORTS.
+        
+        THE FIRM: "if the directors of these companies, and we see that they have properties,
+        that is displayed on the main page."
+        
+        Each trace already showed its own. What it could not show was the answer: a company with
+        three directors traced draws four panels, each naming one property, and "is there
+        anything here worth attaching" was spread across them and never added up.
+        
+        WHOSE IT IS IS ON EVERY ROW. A judgment against the company does not attach a director's
+        house -- that takes a suretyship, or piercing -- so a collector who cannot see whose name
+        is on the deed cannot tell which of those they are looking at.
+        
+        ONLY WHERE THERE IS MORE THAN ONE OWNER IN PLAY. On a plain consumer account the one
+        trace panel below says it already, and a summary of one line above one line is noise.
+      */}
+      {ownedProperty.length > 0 && new Set(ownedProperty.map((p) => p.owner)).size > 1 && (
+        <div className="mb-3 rounded-lg border border-slate-200 overflow-hidden">
+          <Finding icon={<Home size={12} />} label="Property held, across every trace">
+            <ul className="space-y-1">
+              {ownedProperty.slice(0, 5).map((p) => (
+                <li key={`${p.traceId}:${p.item.id}`} className="min-w-0">
+                  <button type="button" onClick={() => onOpenTrace(p.traceId)}
+                    className="block text-left w-full hover:underline">
+                    <span className="block text-sm text-slate-800 break-words">{p.item.value}</span>
+                    <span className="block text-[11px] text-slate-400">
+                      {[
+                        p.owner ?? (p.ownerKind === 'director' ? 'a director' : 'the debtor'),
+                        p.ownerKind === 'director' ? 'director' : null,
+                        p.item.amount !== null ? `bought for ${formatMoney(p.item.amount)}` : null,
+                      ].filter(Boolean).join(' \u00b7 ')}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {ownedProperty.length > 5 && (
+              <p className="text-[11px] text-slate-400 mt-1">
+                and {ownedProperty.length - 5} more on the reports below
+              </p>
+            )}
+          </Finding>
+        </div>
+      )}
+
       {traces.map((trace) => (
         <TraceFound key={trace.id} trace={trace} onOpen={() => onOpenTrace(trace.id)} />
       ))}

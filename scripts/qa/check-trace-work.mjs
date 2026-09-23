@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs'
 import {
   TRACE_OUTCOMES, canPromote, contactKindFor, currentEmployer, heldProperty, outcomeLabel,
-  keepNewestPerThing, principalAddress, principalPhone, traceSummary,
+  keepNewestPerThing, principalAddress, principalPhone, propertyAcross, traceSummary,
 } from '../../src/lib/traceStore.ts'
 
 let pass = 0
@@ -136,6 +136,76 @@ const properties = [
 ]
 eq('only property they still hold counts', heldProperty(properties).map((p) => p.id), ['big', 'small'])
 eq('...biggest first', heldProperty(properties)[0].id, 'big')
+
+/* ---------- and everything anybody connected to the account still owns ---------- */
+
+/*
+ * THE FIRM: "if the directors of these companies, and we see that they have properties, that is
+ * displayed on the main page."
+ *
+ * Each trace already showed its own. What it could not show was the answer: a company with three
+ * directors traced draws four panels, each naming one property, and "is there anything here worth
+ * attaching" was spread across them and never added up. A company with no assets whose director
+ * owns three houses is the whole reason a suretyship gets called in.
+ */
+const T = (id, subjectKind, subjectName, items) => ({ id, subjectKind, subjectName, items })
+const across = propertyAcross([
+  T('t-co', 'debtor', 'Adowa Property Managers', [
+    I({ id: 'co-1', kind: 'property', value: 'Erf 21 Sunnyside', status: 'current owner', amount: 300000 }),
+    I({ id: 'co-sold', kind: 'property', value: 'Erf 99 Menlo', status: 'past', amount: 9000000 }),
+  ]),
+  T('t-dir', 'director', 'P Coetzee', [
+    I({ id: 'd-1', kind: 'property', value: '14 Protea Street', status: 'current owner', amount: 1800000 }),
+  ]),
+])
+eq('property is gathered off every trace', across.map((p) => p.item.id), ['d-1', 'co-1'])
+/* BIGGEST FIRST ACROSS ALL OF THEM, which is the order somebody deciding what to do next reads
+   in -- and it is what puts a director's house above the company's own erf. */
+eq('...biggest first, whoever owns it', across[0].item.id, 'd-1')
+/* WHOSE IT IS TRAVELS WITH IT. A judgment against the company does not attach a director's
+   house; that takes a suretyship, or piercing, and a collector who cannot see whose name is on
+   the deed cannot tell which of those they are looking at. */
+eq('...with whose it is', across[0].owner, 'P Coetzee')
+eq('...and what kind of owner that is', across[0].ownerKind, 'director')
+/* And the trace it came off, so the panel can open the right one of four. */
+eq('...and which report it came off', across[0].traceId, 't-dir')
+/* SOLD IS STILL EXCLUDED, through heldProperty, or the biggest number in the list is a house
+   somebody sold in 2011. */
+ok('a house they sold is not gathered', !across.some((p) => p.item.id === 'co-sold'))
+
+/*
+ * DE-DUPLICATED ON THE DEED. A property a director holds shows on the commercial report AND on
+ * that director's own consumer one; counted twice it doubles what the account appears to be
+ * worth, which is a number that ends up quoted to a client.
+ */
+const twice = propertyAcross([
+  T('t-1', 'debtor', 'A Company', [
+    I({ id: 'x1', kind: 'property', value: '14 Protea Street, Sunnyside', status: 'current owner', amount: 1800000 }),
+  ]),
+  T('t-2', 'director', 'P Coetzee', [
+    I({ id: 'x2', kind: 'property', value: '14 Protea Street Sunnyside', status: 'current owner', amount: 1800000 }),
+  ]),
+])
+eq('one deed on two reports is one property', twice.length, 1)
+/* The first trace handed in wins, which is the newest -- the caller passes them newest first. */
+eq('...and the newer report is the one kept', twice[0].traceId, 't-1')
+
+eq('no traces, nothing owned', propertyAcross([]), [])
+eq('a trace with no property contributes none',
+  propertyAcross([T('t', 'debtor', 'X', [I({ id: 'p', kind: 'mobile', value: '0821234567' })])]), [])
+
+/* AND IT IS ON THE SCREEN, above the per-trace panels rather than inside one of them. */
+{
+  const detail = readFileSync('src/pages/accounts/AccountDetail.tsx', 'utf8')
+  ok('the account page gathers property across the traces',
+    /propertyAcross\(traces\)/.test(detail))
+  ok('...and shows whose each one is',
+    /p\.ownerKind === 'director' \? 'director' : null/.test(detail))
+  /* ONLY WHERE THERE IS MORE THAN ONE OWNER IN PLAY. On a plain consumer account the single
+     trace panel below says it already, and a summary of one line above one line is noise. */
+  ok('...only where more than one person is in play',
+    /new Set\(ownedProperty\.map\(\(p\) => p\.owner\)\)\.size > 1/.test(detail))
+}
 
 /* ---------- the summary the panel shows ---------- */
 
