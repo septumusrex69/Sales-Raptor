@@ -114,7 +114,15 @@ ok('the builder labels its date box from the trigger rather than from a handover
 const { triggerMeta } = await import('../../src/lib/workflowBuilder.ts')
 check('a version with no trigger falls back to by hand rather than throwing',
   triggerMeta(undefined).label, TRIGGERS.by_hand.label)
-ok('...and the header says what sets the workflow off', /Starts when/.test(page))
+/*
+ * SAID ON THE SCREEN, WHEREVER THAT IS. The trigger used to be announced in the page header AND
+ * again in the banner under it -- two statements of one fact, free to disagree -- so the header's
+ * copy went and the banner keeps it. What matters is that the screen states it at all, which is
+ * why this now reads both files rather than one phrase in one of them.
+ */
+const rail = readFileSync('src/components/workflows/WorkflowSchedule.tsx', 'utf8')
+ok('...and the screen says what sets the workflow off',
+  /Starts when/.test(page + rail) && /\{trigger\.label\}/.test(rail))
 ok('a new workflow is asked what sets it off before anything else',
   /What sets it off/.test(page))
 

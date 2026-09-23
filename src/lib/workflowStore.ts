@@ -11,6 +11,7 @@ import type {
   Channel, DayUnit, DeadlineUnit, NodeKind, TriggerKind, Workflow, WorkflowConnection,
   WorkflowNode, WorkflowPhase, VersionState,
 } from './workflowBuilder.ts'
+import { sequenceLine } from './workflowBuilder.ts'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows arrive as untyped JSON from PostgREST. */
 
@@ -59,24 +60,66 @@ export interface WorkflowSummary {
   name: string
   description: string | null
   versions: { id: string; version: number; state: VersionState }[]
+  /**
+   * WHAT STARTS IT, AND WHAT IT THEN DOES — read off the version the list is showing.
+   *
+   * On the summary rather than fetched when somebody opens one, because these two facts ARE the
+   * list: a row carrying only a name and a state badge means opening each workflow to find out
+   * which one you meant, and opening the wrong one is the cost. Null where the version could not
+   * be read, which the row shows as a gap rather than as a guess.
+   */
+  trigger: TriggerKind | null
+  sequence: string | null
+  dayUnit: DayUnit | null
 }
 
-/** Every workflow, for the list. Versions come with it so the list can say draft or active. */
+/**
+ * Every workflow, for the list.
+ *
+ * ONE QUERY, INCLUDING THE STEPS. A workflow's row says what starts it and what it then does, and
+ * both come off the version being shown -- so the phases and nodes come with it. There are a
+ * handful of workflows and a dozen steps each; this is not the book, and a second round trip per
+ * row to draw a list would be the wrong trade in the other direction.
+ */
 export async function fetchWorkflows(): Promise<WorkflowSummary[]> {
   const { data, error } = await supabase
     .from('workflows')
-    .select('id, key, name, description, workflow_versions(id, version, state)')
+    .select(`id, key, name, description,
+      workflow_versions(id, version, state, trigger_kind, day_unit,
+        workflow_phases(id, ordinal, name, subtitle, from_day, to_day),
+        workflow_nodes(id, phase_id, key, kind, label, day, channel, after_minutes, ordinal))`)
     .order('name')
   if (error) throw new Error(error.message)
-  return (data ?? []).map((r: any) => ({
-    id: r.id,
-    key: r.key,
-    name: r.name,
-    description: r.description,
-    versions: (r.workflow_versions ?? [])
-      .map((v: any) => ({ id: v.id, version: v.version, state: v.state as VersionState }))
-      .sort((a: any, b: any) => b.version - a.version),
-  }))
+  return (data ?? []).map((r: any) => {
+    const versions = (r.workflow_versions ?? [])
+      .slice()
+      .sort((a: any, b: any) => b.version - a.version)
+    /* THE VERSION THE ROW IS ABOUT: the live one where there is one, otherwise the newest. The
+       same order the builder opens on, so the list and the screen it leads to agree. */
+    const shown = versions.find((v: any) => v.state === 'active') ?? versions[0]
+    return {
+      id: r.id,
+      key: r.key,
+      name: r.name,
+      description: r.description,
+      versions: versions.map((v: any) => ({
+        id: v.id, version: v.version, state: v.state as VersionState,
+      })),
+      trigger: (shown?.trigger_kind as TriggerKind) ?? null,
+      dayUnit: shown ? ((shown.day_unit ?? 'calendar') as DayUnit) : null,
+      sequence: shown ? sequenceLine({
+        id: r.id, key: r.key, name: r.name, description: r.description, teamName: null,
+        version: {
+          id: shown.id, version: shown.version, state: shown.state as VersionState,
+          publishedAt: null, dayUnit: (shown.day_unit ?? 'calendar') as DayUnit,
+          trigger: shown.trigger_kind as TriggerKind, triggerNote: null,
+        },
+        phases: (shown.workflow_phases ?? []).map(toPhase),
+        nodes: (shown.workflow_nodes ?? []).map(toNode),
+        connections: [],
+      }) : null,
+    }
+  })
 }
 
 /**

@@ -352,6 +352,46 @@ export function workflowFacts(workflow: Workflow): WorkflowFacts {
   }
 }
 
+/**
+ * WHAT A WORKFLOW DOES, IN ONE LINE, ON THE LIST.
+ *
+ * A list of names and state badges says nothing: a workflow's whole meaning is what starts it and
+ * what it then does, and a reader who has to open each one to find out is a reader who opens the
+ * wrong one. The firm's own charts read this way -- "Demand, then Listing, then Legal".
+ *
+ * DERIVED, NEVER WRITTEN. A hand-typed summary is a sentence that stops being true the first time
+ * somebody adds a step and nobody notices, and this list is exactly where nobody would.
+ *
+ * BY PHASE WHERE THERE ARE PHASES TO NAME, because that is the shape the firm drew and the only
+ * summary that stays short on an eleven-step sequence. Where a workflow is one phase -- the
+ * handover is three steps inside ten minutes -- the phase name says nothing the title did not, so
+ * it falls back to the CHANNELS in order, which is what actually happens: "Email, then SMS".
+ */
+export function sequenceLine(workflow: Workflow): string {
+  const named = [...workflow.phases]
+    .sort((a, b) => a.ordinal - b.ordinal)
+    .filter((p) => nodesOfPhase(workflow, p.id).length > 0)
+  if (named.length > 1) return named.map((p) => p.name).join(' \u2192 ')
+
+  const steps = orderedNodes(workflow)
+  if (steps.length === 0) return 'Nothing in it yet'
+  /*
+   * THE GAP IS PART OF THE SEQUENCE. The firm's rule and the reason afterMinutes exists: the
+   * handover SMS says "we emailed you", so it goes five to ten minutes AFTER the email. A list
+   * showing "Email, SMS" and hiding that is a list showing two things that could happen in
+   * either order.
+   */
+  const parts: string[] = []
+  for (const n of steps) {
+    /* typeof, not !== null: an absent column arrives as undefined and printed itself. */
+    if (typeof n.afterMinutes === 'number' && parts.length > 0) parts.push(`${n.afterMinutes} min`)
+    parts.push(n.channel ? CHANNELS[n.channel] : NODE_KINDS[n.kind].label)
+  }
+  /* "End" rather than trailing off, because whether a workflow stops or hands on is the thing
+     somebody is checking. */
+  return [...parts, 'End'].join(' \u2192 ')
+}
+
 /** What follows this step, or null at the end of the line. */
 export function nextOf(workflow: Workflow, nodeId: string): WorkflowNode | null {
   const edge = workflow.connections.find((c) => c.fromNodeId === nodeId && c.toNodeId !== null)

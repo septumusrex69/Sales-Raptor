@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { AlertTriangle, ChevronRight, Loader2, Play, Plus, Upload } from 'lucide-react'
+import { AlertTriangle, ArrowRight, ChevronRight, Loader2, Play, Plus, Upload } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { inputClass } from '../../components/ui/Modal'
-import { WorkflowCanvas } from '../../components/workflows/WorkflowCanvas'
+import { PhaseStrip, WorkflowSchedule } from '../../components/workflows/WorkflowSchedule'
 import { StepDrawer } from '../../components/workflows/StepDrawer'
 import { useAuth } from '../../store/AuthContext'
 import { canEditLibrary, canViewLibrary } from '../../lib/permissions'
@@ -100,30 +100,115 @@ export function LibraryWorkflows() {
           {mayEdit ? 'No workflows yet. Start one and say what sets it off.' : 'No workflows yet.'}
         </p>
       ) : (
-        <ul className="divide-y divide-slate-100">
-          {list.map((w) => {
-            const live = w.versions.find((v) => v.state === 'active') ?? w.versions[0]
-            return (
-              <li key={w.id}>
-                <button type="button" onClick={() => navigate(`/library/workflows/${w.key}`)}
-                  className="w-full flex items-center gap-3 py-3 text-left hover:bg-slate-50 -mx-2 px-2 rounded-lg">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-800">{w.name}</p>
-                    {w.description && <p className="text-xs text-slate-400 mt-0.5">{w.description}</p>}
-                  </div>
-                  <span className="ml-auto flex items-center gap-2 shrink-0">
-                    {live && <StateBadge state={live.state} />}
-                    {live && <span className="text-xs text-slate-400">Version {live.version}</span>}
-                    <ChevronRight size={15} className="text-slate-300" />
-                  </span>
-                </button>
-              </li>
-            )
-          })}
+        <ul className="space-y-3">
+          {list.map((w, i) => (
+            <WorkflowRow key={w.id} index={i + 1} workflow={w}
+              onOpen={() => navigate(`/library/workflows/${w.key}`)} />
+          ))}
         </ul>
       )}
+      {list !== null && list.length > 1 && <HowTheyConnect list={list} />}
       </Card>
     </div>
+  )
+}
+
+/**
+ * HOW THE WORKFLOWS FIT TOGETHER, which is the question the list itself cannot answer.
+ *
+ * Each row says what starts one workflow. Read down the list that is a series of unrelated
+ * events; read as an account's own journey it is one line -- allocated, so the handover goes;
+ * worked by a collector; then somebody decides to issue a section 129. The firm's chart draws it
+ * that way and it is what makes "the handover does NOT start the notice" visible rather than
+ * something you have to notice is missing.
+ *
+ * BUILT FROM THE TRIGGERS, not written. A sentence describing two particular workflows stops
+ * being true the day a third arrives, and this screen is exactly where nobody would go back and
+ * fix it. What is drawn is each workflow's own trigger and name, in the order they run.
+ */
+function HowTheyConnect({ list }: { list: WorkflowSummary[] }) {
+  const chain = list.filter((w) => w.trigger !== null)
+  if (chain.length < 2) return null
+  return (
+    <div className="mt-4 rounded-xl bg-[var(--tint-steel-alt)] px-4 py-3.5">
+      <p className="text-[13px] font-semibold text-slate-800">How they connect</p>
+      <p className="text-[12px] text-slate-500 mt-0.5">
+        Each one waits for its own event. Nothing here starts anything else.
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2">
+        {chain.map((w, i) => (
+          <span key={w.id} className="flex items-center gap-2">
+            {i > 0 && <ArrowRight size={13} className="text-slate-400" />}
+            <span className="rounded-lg bg-white px-2.5 py-1 text-[12px] text-slate-600 shadow-sm">
+              {triggerMeta(w.trigger!).label}
+            </span>
+            <ArrowRight size={13} className="text-slate-400" />
+            <span className="rounded-lg bg-white px-2.5 py-1 text-[12px] font-medium text-navy-950 shadow-sm">
+              {w.name}
+            </span>
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * ONE WORKFLOW ON THE LIST, SAYING WHAT IT IS FOR.
+ *
+ * A NAME AND A STATE BADGE SAY NOTHING. A workflow's whole meaning is the event that starts it
+ * and what it then does -- so both are on the row, under their own headings, rather than behind a
+ * click. The firm reads these as charts; a list that made them open each one to find out which
+ * was which is a list that gets the wrong one opened.
+ *
+ * NUMBERED, because the firm numbers them -- "Workflow 01", "Workflow 02" -- and because the
+ * order they are worked in is a real fact about them: an account meets the handover before it
+ * ever meets a section 129.
+ */
+function WorkflowRow({ index, workflow, onOpen }: {
+  index: number
+  workflow: WorkflowSummary
+  onOpen: () => void
+}) {
+  const live = workflow.versions.find((v) => v.state === 'active') ?? workflow.versions[0]
+  return (
+    <li>
+      <button type="button" onClick={onOpen}
+        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left
+          transition hover:border-[#c9a052] hover:shadow-sm">
+        <div className="flex items-start gap-3">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-navy-950
+            text-[12px] font-semibold text-gold-400 tabular-nums">
+            {String(index).padStart(2, '0')}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[15px] font-semibold text-slate-800">{workflow.name}</p>
+            {workflow.description && (
+              <p className="text-[13px] text-slate-400 mt-0.5">{workflow.description}</p>
+            )}
+          </div>
+          <span className="flex shrink-0 items-center gap-2">
+            {live && <StateBadge state={live.state} />}
+            <ChevronRight size={15} className="text-slate-300" />
+          </span>
+        </div>
+
+        {/* The two facts, under their own headings, on one rule. Nothing here is typed: the
+            trigger is the version's own column and the sequence is derived from its steps. */}
+        <div className="mt-3 border-t border-slate-100 pt-3 grid gap-3 sm:grid-cols-2">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Trigger</p>
+            <p className="text-[13px] font-medium text-slate-700 mt-0.5">
+              {workflow.trigger ? triggerMeta(workflow.trigger).label : '\u2014'}
+            </p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Sequence</p>
+            <p className="text-[13px] text-slate-600 mt-0.5">{workflow.sequence ?? '\u2014'}</p>
+          </div>
+        </div>
+      </button>
+    </li>
   )
 }
 
@@ -345,75 +430,18 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
       {/* ---------- the header ---------- */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs text-slate-400">
-            <button type="button" onClick={onBack} className="hover:text-slate-600">Workflows</button>
-            {' '}&rsaquo; {workflow.name}
-          </p>
-          <h2 className="text-lg font-semibold text-slate-800 mt-1 flex items-center gap-2.5">
+          <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2.5">
             {workflow.name}
             <StateBadge state={workflow.version.state} />
-            <span className="text-xs font-normal text-slate-400">Version {workflow.version.version}</span>
           </h2>
+          {/* Version, state and what kind of trigger it is, on one line under the name -- the
+              three facts you need to know which chart you are looking at before you read it. */}
+          <p className="text-xs text-slate-400 mt-0.5">
+            <button type="button" onClick={onBack} className="hover:text-slate-600">Workflows</button>
+            {' '}&rsaquo; Version {workflow.version.version}
+            {' '}&rsaquo; {workflow.version.trigger === 'by_hand' ? 'Manual trigger' : 'Event trigger'}
+          </p>
           {workflow.description && <p className="text-sm text-slate-500">{workflow.description}</p>}
-          {/*
-            WHAT SETS IT OFF, ON THE HEADER RATHER THAN IN A TAB.
-            It is the first thing anybody needs to know about a workflow and the thing that says
-            what every day number underneath it means. On a draft it is editable in place; on a
-            published version it is a sentence, because changing it would change which files are
-            in the workflow after the fact, and the database refuses it.
-          */}
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-            <span className="text-slate-400">Starts when</span>
-            {workflow.version.state === 'draft' && mayEdit ? (
-              <select className={`${inputClass} w-auto py-1 text-xs`} value={workflow.version.trigger}
-                disabled={busy}
-                onChange={(e) => {
-                  const next = e.target.value as TriggerKind
-                  void act(() => setTrigger(workflow.version.id, next, workflow.version.triggerNote))
-                }}>
-                {TRIGGER_ORDER.map((t) => (
-                  <option key={t} value={t}>{TRIGGERS[t].label.toLowerCase()}</option>
-                ))}
-              </select>
-            ) : (
-              <span className="font-medium text-slate-700">
-                {triggerMeta(workflow.version.trigger).label.toLowerCase()}
-              </span>
-            )}
-            <span className="text-slate-400">&middot; {dayZeroLabel(workflow.version.trigger)}</span>
-          </div>
-          {/*
-            AND WHAT KIND OF DAY THE CHART COUNTS IN, beside what starts it, because the two
-            together are what a day number MEANS. The firm corrected us on this once -- "this is
-            all working days, not normal days. Business days, not normal days" -- and the column
-            that came out of it was stored, applied and carried by the draft copier while
-            appearing on no screen and being settable from nowhere. A chart says "Day 32" either
-            way, and read as calendar days the firm's day 32 is a fortnight early.
-
-            Editable on a draft, a sentence on a published version: flipping it re-dates every
-            step of the chart at once, so the archived version an attorney reads back would no
-            longer say what the firm did. The database refuses it, and says so.
-          */}
-          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
-            <span className="text-slate-400">Counted in</span>
-            {workflow.version.state === 'draft' && mayEdit ? (
-              <select className={`${inputClass} w-auto py-1 text-xs`} value={workflow.version.dayUnit}
-                disabled={busy}
-                onChange={(e) => {
-                  const next = e.target.value as DayUnit
-                  void act(() => setDayUnit(workflow.version.id, next))
-                }}>
-                {(['business', 'calendar'] as DayUnit[]).map((u) => (
-                  <option key={u} value={u}>{DAY_UNITS[u].label}</option>
-                ))}
-              </select>
-            ) : (
-              <span className="font-medium text-slate-700">
-                {DAY_UNITS[workflow.version.dayUnit].label}
-              </span>
-            )}
-            <span className="text-slate-400">{DAY_UNITS[workflow.version.dayUnit].hint}</span>
-          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {/* Labelled from the TRIGGER, not from a handover. This box dates the whole chart, and
@@ -518,6 +546,56 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
               for somebody who will never be allowed to press it is a dead control plus two dead
               dropdowns, and it teaches people to stop reading disabled things.
             */}
+          </div>
+
+          <div className="flex flex-col xl:flex-row gap-4 items-start">
+            <div className="flex-1 min-w-0">
+              {/*
+                READ DOWN, NOT ACROSS. The horizontal strip of cards this replaces drew eleven
+                steps in a row you scrolled sideways through -- fine for a diagram, wrong for a
+                chart somebody reads. The firm's own document is a table of days, and the
+                intervals between them (seven, then five, then twenty) are the thing being
+                checked; sideways they were invisible.
+              */}
+              <WorkflowSchedule workflow={workflow} selected={selected} from={from}
+                onSelect={setSelected} problems={problems}
+                /* The firm's own phases, above the rail rather than grouping it. They are real
+                   -- Demand, then Listing, then Legal -- and they are what the list row's
+                   sequence line is built from; carved into the rail they broke the one thing the
+                   rail is for, which is reading the intervals down a single column. */
+                phases={<PhaseStrip workflow={workflow} unit={workflow.version.dayUnit} />}
+                controls={mayEdit && workflow.version.state === 'draft' ? (
+                  /*
+                    THE TWO THINGS THAT CHANGE WHAT THE CHART MEANS, on one row inside the banner
+                    that states them. Their labels and their explanations are the sentence above
+                    -- repeated beside the controls they were three statements of one fact.
+                    Drafts only: a published version is frozen and the database refuses both, so
+                    offering the controls would be offering a refusal.
+                  */
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <select className={`${inputClass} w-auto py-1 text-xs`} value={workflow.version.trigger}
+                      disabled={busy} aria-label="What starts this workflow"
+                      onChange={(e) => {
+                        const next = e.target.value as TriggerKind
+                        void act(() => setTrigger(workflow.version.id, next, workflow.version.triggerNote))
+                      }}>
+                      {TRIGGER_ORDER.map((t) => (
+                        <option key={t} value={t}>{TRIGGERS[t].label.toLowerCase()}</option>
+                      ))}
+                    </select>
+                    <span className="text-white/40">counted in</span>
+                    <select className={`${inputClass} w-auto py-1 text-xs`} value={workflow.version.dayUnit}
+                      disabled={busy} aria-label="What kind of day this workflow counts in"
+                      onChange={(e) => {
+                        void act(() => setDayUnit(workflow.version.id, e.target.value as DayUnit))
+                      }}>
+                      {(['business', 'calendar'] as DayUnit[]).map((u) => (
+                        <option key={u} value={u}>{DAY_UNITS[u].label}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : undefined} />
+            </div>
             {mayEdit && <AddStep disabled={readOnly || busy} workflow={workflow}
               onAdd={(kind, phaseId) => act(async () => {
                 const id = await addNode({
@@ -540,12 +618,8 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
               </p>
             )}
           </div>
-
           <div className="flex flex-col xl:flex-row gap-4 items-start">
-            <div className="flex-1 min-w-0">
-              <WorkflowCanvas workflow={workflow} selected={selected} from={from}
-                onSelect={setSelected} problems={problems} />
-            </div>
+            <div className="flex-1 min-w-0" />
             {node && (
               <StepDrawer workflow={workflow} node={node} readOnly={readOnly} templates={templates}
                 problems={problems.filter((p) => p.nodeId === node.id)}

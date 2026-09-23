@@ -259,10 +259,19 @@ try {
    * CANVAS, not the page — "Related workflows" names them below it on purpose, as the place they
    * will be linked from.
    */
+  /*
+   * READ OFF THE SCHEDULE ITSELF. This used to climb from a phase bar to its <section> and take
+   * the parent -- which worked while each phase was its own section of cards, and returned null
+   * the day the chart became one rail read downwards. Found by the list of steps instead, which
+   * is what the chart IS and what the rule is about; defensive, so a chart that failed to draw
+   * fails the assertions below rather than throwing inside the evaluate.
+   */
   const canvasText = await page.evaluate(() => {
-    const bar = [...document.querySelectorAll('p')].find((p) => /phase 1 · notice/i.test(p.innerText))
-    return bar.closest('section').parentElement.innerText
+    const rail = [...document.querySelectorAll('ol')]
+      .find((el) => /day \d+/i.test(el.innerText))
+    return rail ? rail.innerText : ''
   })
+  t.ok('the schedule is the thing being read', canvasText.length > 0)
   for (const gone of ['Payment Arrangement', 'Dispute', 'Sequestration', 'Liquidation', 'Validate', 'Collectable']) {
     t.ok(`the canvas does not draw ${gone}`, !new RegExp(gone, 'i').test(canvasText))
   }

@@ -150,7 +150,20 @@ const page = SCREENS['src/pages/library/LibraryWorkflows.tsx']
 ok('the builder offers it beside what starts the workflow', /setDayUnit\(workflow\.version\.id/.test(page))
 /* On a draft only. A published version is frozen, and the control has to agree with the database
    or the firm meets a refusal from a box that let them press it. */
-ok('...on a draft only', /state === 'draft' && mayEdit[\s\S]{0,400}?setDayUnit/.test(page))
+/*
+ * ASSERTED AS THE RULE, NOT AS THE ORDER THE TWO CONDITIONS HAPPEN TO BE WRITTEN IN. Pinned as
+ * `state === 'draft' && mayEdit`, this broke when the control moved into the trigger banner and
+ * the pair was written the other way round -- a correct change reported as a published version
+ * being editable.
+ */
+const at = page.indexOf('setDayUnit(workflow.version.id')
+/* Back to the opening of the block the control lives in, rather than a fixed number of
+   characters -- the gap is over 1 600 today and a guessed window is a check that silently stops
+   reading the condition the first time somebody adds a comment. */
+const unitControl = page.slice(page.lastIndexOf('controls={', at), at)
+ok('the unit control is inside a block this check can read', unitControl.length > 0)
+ok('...on a draft only',
+  /state === 'draft'/.test(unitControl) && /mayEdit/.test(unitControl))
 
 /*
  * AND THE DATABASE IS WHAT ACTUALLY REFUSES IT. A disabled select is a courtesy; the protection

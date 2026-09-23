@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, Trash2, X } from 'lucide-react'
 import { inputClass } from '../ui/Modal'
+import { accountFieldsNeeded } from '../../lib/messageTemplates'
 import {
   CHANNELS, DAY_UNITS, NODE_KINDS, dayLabel, orderedNodes, triggerMeta, type Channel,
   type DeadlineUnit, type NodeKind, type Workflow, type WorkflowNode, type WorkflowProblem,
@@ -79,6 +80,15 @@ export function StepDrawer({
         <button type="button" onClick={onClose} aria-label="Close step details"
           className="text-slate-400 hover:text-slate-600"><X size={15} /></button>
       </div>
+
+      {/*
+        WHAT THIS STEP WILL WAIT FOR, SAID IN ADVANCE.
+        The same rule planSend applies at send time, shown on the builder: a step quoting a fact
+        the account does not have holds and tells the collector, and somebody laying out a
+        workflow should be able to see that before it happens rather than discover it on day 39.
+        Read-only on purpose -- none of it is set here. It is what the wording asks for.
+      */}
+      <BeforeSending workflow={workflow} node={node} templates={templates} />
 
       <div className="mt-3 flex gap-4 border-b border-slate-100 px-4">
         {(['settings', 'conditions', 'actions'] as const).map((t) => (
@@ -340,6 +350,68 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div>
       <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">{label}</p>
       {children}
+    </div>
+  )
+}
+
+/**
+ * THE GUARD, DRAWN FROM THE WORDING RATHER THAN CONFIGURED.
+ *
+ * Three things, and none of them is a setting:
+ *
+ *   - WHAT IT WAITS FOR. The account facts the chosen wording quotes -- an address, a listing
+ *     reference -- which is exactly what planSend checks before it sends. The firm's own
+ *     instruction: "it must only send once the submission has actually happened and those three
+ *     values exist on the account."
+ *   - WHAT HAPPENS IF THEY ARE MISSING, which is the half people assume wrongly. It does not
+ *     skip and it does not send with a gap: it holds, and the collector is told.
+ *   - AND WHETHER A PERSON IS THE GATE. Separate from the facts, because it is a different kind
+ *     of waiting -- day 39 says a default HAS been reported, and only somebody who has checked
+ *     can say that it has.
+ */
+function BeforeSending({ workflow, node, templates }: {
+  workflow: Workflow
+  node: WorkflowNode
+  templates: LibraryTemplate[] | null
+}) {
+  const wording = templates?.find((t) => t.id === node.templateId) ?? null
+  const needed = wording
+    ? accountFieldsNeeded('collections', wording.subject, wording.body)
+    : []
+  if (!node.needsRelease && needed.length === 0) return null
+
+  return (
+    <div className="mx-4 mt-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2.5">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+        Before sending, require
+      </p>
+      <ul className="mt-1.5 space-y-1">
+        {node.needsRelease && (
+          <li className="flex items-start gap-2 text-[12px] text-slate-700">
+            <span className="mt-[3px] h-3 w-3 shrink-0 rounded-[3px] border border-[var(--c-gold-deep)] bg-gold-100" />
+            Somebody confirms it and sends it
+          </li>
+        )}
+        {needed.map((f) => (
+          <li key={f.key} className="flex items-start gap-2 text-[12px] text-slate-700">
+            <span className="mt-[3px] h-3 w-3 shrink-0 rounded-[3px] border border-slate-300 bg-white" />
+            {f.label}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 rounded bg-gold-50 px-2 py-1.5 text-[11px] text-slate-600">
+        <span className="font-medium text-navy-950">If anything is missing </span>
+        it holds here and the collector is told. Nothing goes out with a gap in it.
+      </p>
+      {/* What actually leaves, where there is a wording to say it with. */}
+      {node.channel && (
+        <p className="mt-1.5 text-[11px] text-slate-500">
+          <span className="font-medium text-slate-700">When it goes: </span>
+          {CHANNELS[node.channel].toLowerCase()}
+          {wording ? ` \u00b7 ${wording.name}` : ' \u00b7 no wording chosen yet'}
+          {' '}on {dayLabel(node.day, workflow.version.dayUnit).toLowerCase()}
+        </p>
+      )}
     </div>
   )
 }

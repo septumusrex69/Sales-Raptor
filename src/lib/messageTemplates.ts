@@ -483,6 +483,37 @@ export function fieldsUsed(...parts: (string | null | undefined)[]): string[] {
   return seen
 }
 
+/**
+ * WHAT THIS WORDING NEEDS THE ACCOUNT TO ALREADY KNOW.
+ *
+ * The firm's instruction about the listing step: "it must only send once the submission has
+ * actually happened and those three values exist on the account. If they are missing, hold the
+ * node and alert the collector." That rule is enforced by planSend at send time; this is the same
+ * rule said in advance, on the builder, so somebody laying out a workflow can see what a step
+ * will wait for before it waits.
+ *
+ * THE DEBTOR'S AND THE ACCOUNT'S FIELDS ONLY. The firm's own details, the sender and the
+ * collector always resolve -- they come off firm_settings and off a profile, and a step is never
+ * held for want of the firm's bank account. What can be missing is a fact about THIS debtor: an
+ * address nobody has captured, a listing reference that does not exist until the submission has
+ * gone. Read off FIELD_GROUPS rather than listed here, so a field added to the account group is
+ * covered without anybody remembering this.
+ */
+export function accountFieldsNeeded(
+  scope: TemplateScope, subject: string | null, body: string,
+): MergeField[] {
+  const ofTheAccount = new Set(
+    FIELD_GROUPS
+      .filter((g) => g.title === 'The debtor' || g.title === 'The account')
+      .flatMap((g) => g.keys),
+  )
+  const known = new Map(MERGE_FIELDS[scope].map((f) => [f.key, f]))
+  return fieldsUsed(subject, body)
+    .filter((k) => ofTheAccount.has(k))
+    .map((k) => known.get(k))
+    .filter((f): f is MergeField => f !== undefined)
+}
+
 /** The ones that are not fields at all. A typo, every time. */
 /**
  * Which kind of wording a workflow step's channel needs.
