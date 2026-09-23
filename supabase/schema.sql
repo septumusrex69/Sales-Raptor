@@ -6496,3 +6496,89 @@ comment on column public.debtor_accounts.case_number is
   'Raptor''s own reference for this account, and the one every notice quotes. Unique and never '
   'reused. The client''s reference is not unique -- 21% of the book shares one with another '
   'account -- which is why a notice cannot be identified by it.';
+
+-- ---------- A file going through a workflow ----------
+--
+-- The firm: "I'll send every letter by hand once and every SMS once. And then I want these things
+-- working automatically in the workflow."
+--
+-- A RUN IS PINNED TO A VERSION, not to a workflow. That is the whole reason versions are frozen:
+-- "what did this say when the file went through it" is a question an attorney asks eighteen
+-- months later, and a run that followed whatever the workflow says TODAY cannot answer it. A file
+-- that started on version 1 finishes on version 1 even after version 2 is published.
+create table if not exists public.workflow_runs (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  version_id uuid not null references public.workflow_versions (id),
+  -- The day the trigger fired. Every step's date is counted from here, in the version's own unit.
+  started_on date not null,
+  started_by uuid references public.profiles (id) on delete set null,
+  -- running    steps are still to come
+  -- finished   every step is sent, released or cancelled
+  -- left       the account left on an exit event: a promise, a dispute, payment, tracing
+  state text not null default 'running' check (state in ('running', 'finished', 'left')),
+  left_reason text,
+  left_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+-- ONE LIVE RUN PER ACCOUNT PER WORKFLOW VERSION, enforced rather than assumed. The firm's own
+-- rule about the handover is "it fires once per account. Re-allocating an account to a different
+-- collector must not fire it again" -- and two live runs of the section 129 is two statutory
+-- demands on one debtor, a fortnight apart, from the same firm.
+create unique index if not exists workflow_runs_one_live
+  on public.workflow_runs (account_id, version_id) where state = 'running';
+
+create index if not exists workflow_runs_account_idx on public.workflow_runs (account_id, state);
+
+-- EVERY STEP OF THE RUN, DATED WHEN THE RUN STARTS rather than worked out on the morning it is
+-- due. THE CALENDAR STAYS IN ONE PLACE: business days, weekends and the South African public
+-- holidays are workingDays.ts, and a scheduler that recomputed dates in SQL would be a second
+-- copy of that calendar -- the one that is wrong about Heritage Day in the year nobody checks, on
+-- a sequence whose intervals are statutory. Resolved once and stored, what wakes up each morning
+-- only compares a stored date with today, which SQL can do without knowing what a holiday is.
+create table if not exists public.workflow_run_steps (
+  id uuid primary key default gen_random_uuid(),
+  run_id uuid not null references public.workflow_runs (id) on delete cascade,
+  node_id uuid not null references public.workflow_nodes (id),
+  due_on date not null,
+  -- pending    waiting for its day
+  -- held       its day came and it needs a person: a statutory demand, or a step whose facts are
+  --            not on the account yet (a listing with no listing reference)
+  -- sent       it went
+  -- cancelled  the account left the workflow before its day
+  -- failed     it was tried and the send was refused
+  state text not null default 'pending'
+    check (state in ('pending', 'held', 'sent', 'cancelled', 'failed')),
+  note text,
+  sent_at timestamptz,
+  sent_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (run_id, node_id)
+);
+
+create index if not exists workflow_run_steps_due_idx
+  on public.workflow_run_steps (due_on, state) where state in ('pending', 'held');
+
+alter table public.workflow_runs enable row level security;
+alter table public.workflow_run_steps enable row level security;
+grant select, insert, update, delete on public.workflow_runs to authenticated;
+grant select, insert, update, delete on public.workflow_run_steps to authenticated;
+
+-- EVERYONE READS, because a collector holding the file has to see what is going to happen to it
+-- and when. Writing is narrower, and wider than the library's: a collector releases a held step
+-- on their own account, which the library's Administrator-and-team-leader rule would refuse.
+do $$
+declare t text;
+begin
+  foreach t in array array['workflow_runs', 'workflow_run_steps'] loop
+    execute format('drop policy if exists %1$s_select on public.%1$s', t);
+    execute format(
+      'create policy %1$s_select on public.%1$s for select to authenticated using (auth.uid() is not null)', t);
+    execute format('drop policy if exists %1$s_write on public.%1$s', t);
+    execute format(
+      'create policy %1$s_write on public.%1$s for all to authenticated
+         using (public.current_user_role() in (''Administrator'', ''Pre-legal Team Leader'', ''Pre-legal Agent''))
+         with check (public.current_user_role() in (''Administrator'', ''Pre-legal Team Leader'', ''Pre-legal Agent''))', t);
+  end loop;
+end $$;
