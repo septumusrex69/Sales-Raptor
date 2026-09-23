@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { credentialsKeyProblem } from '../_lib/crypto.js'
-import { adminClient, requireCaller } from '../_lib/auth.js'
-import { fetchAttachment, fetchMessageBody } from '../_lib/emailSync.js'
-import { findLinkedDetails } from '../../src/lib/signature.js'
+import { credentialsKeyProblem } from '../crypto.js'
+import { adminClient, requireCaller } from '../auth.js'
+import { fetchAttachment, fetchMessageBody } from '../emailSync.js'
+import { findLinkedDetails } from '../../../src/lib/signature.js'
 
 /**
  * Reaches into a connected mailbox for something that was never stored.

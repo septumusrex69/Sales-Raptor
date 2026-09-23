@@ -20,7 +20,11 @@
  * nothing, but the campaign that uses it raises an Annexure B fee per send, and a campaign built
  * over the sales side would raise fees the firm cannot bill.
  */
-import { smsCost } from './smsSegments.ts'
+/* A .js specifier, against the house style in src/, because this module is reachable at runtime
+   from api/ through accountMergeValues -- and a .ts specifier does not survive Vercel's
+   transpile, which takes the route down before its first line runs. check-api-imports is what
+   holds this. */
+import { smsCost } from './smsSegments.js'
 import type { DeskPosition } from './clientPosition.ts'
 
 /**

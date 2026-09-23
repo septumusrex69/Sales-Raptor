@@ -54,6 +54,8 @@ const compose = read('components/ComposeEmailModal.tsx')
 const sms = read('pages/accounts/SmsModal.tsx')
 const script = read('pages/accounts/CallScriptModal.tsx')
 const account = read('pages/accounts/AccountDetail.tsx')
+/* The assembly the page hands its rows to -- see the note on the address below. */
+const merge = read('lib/accountMergeValues.ts')
 
 /* ------------------------------------------------------------------ the warning */
 
@@ -107,18 +109,15 @@ ok('...and only the kind that was asked for', /\.filter\(\(r\) =>[^)]*r\.kind ==
  * drift is a debtor told one balance by SMS and another in the notice posted the same day.
  */
 ok('the account resolves its merge values once', /const letterContext = useMemo\(/.test(account))
-check('...and mergeValuesFor is called exactly once on the page',
-  (account.match(/mergeValuesFor\(\{/g) ?? []).length, 1)
-for (const [what, re] of [
-  ['the letter', /letterContext=\{letterContext\}/],
-  ['the SMS box', /values=\{letterContext\.values\}/],
-  /* Matched on the prop, not on the tag and its first attribute: the modals have since grown a
-     `debtorKind`, and an expression that assumed the argument order broke on a prop being
-     ADDED. */
-  ['the call script', /<CallScriptModal[\s\S]{0,120}?values=\{letterContext\.values\}/],
-]) {
-  ok(`...and ${what} is given that one`, re.test(account))
-}
+/*
+ * AND IT ASSEMBLES THEM IN ONE PLACE. This counted `mergeValuesFor(` on the page; the assembly
+ * moved into accountMergeValues when the workflow runner needed the same answer, so the page now
+ * calls that once and nothing calls mergeValuesFor directly. Counted the same way, on whichever
+ * call the page is making -- two would still be two resolutions that can drift.
+ */
+check('...and assembles them exactly once on the page',
+  (account.match(/accountMergeValues\(\{/g) ?? []).length, 1)
+ok('...and no longer assembles its own beside it', !/mergeValuesFor\(\{/.test(account))
 
 /* ------------------------------------------------------------------ the covering email */
 
@@ -232,25 +231,30 @@ check('a non-breaking space is what makes the difference',
  * notice using one printed the placeholder. check-message-templates proves mergeValuesFor can
  * answer them; only the PAGE can prove something passes them, which is what this reads.
  */
-ok('the account passes a debtor address to the merge',
-  /debtorAddress: addressOf\(/.test(account))
-ok('...taken from the account\u2019s own contacts rather than typed',
-  /addressOf\(workspace\?\.contacts/.test(account))
+/*
+ * READ IN TWO FILES, because that is where the answer now lives. The page passes the account's
+ * CONTACTS and the day; accountMergeValues derives the address and the date from them. Before the
+ * workflow runner needed the same assembly both halves were inline on the page.
+ */
+ok('the account hands its own contacts to the merge',
+  /contacts: workspace\?\.contacts/.test(account))
+ok('...and the assembly picks the address off them', /debtorAddress: addressOf\(input\.contacts\)/.test(merge))
 /* A retired address is one somebody established the debtor has left. Posting a statutory demand
    to it is worse than posting none, because it looks served. */
-ok('...and never a retired one',
-  /kind === 'address' && !c\.retiredAt/.test(account))
-ok('...preferring the one marked primary', /live\.find\(\(c\) => c\.isPrimary\)/.test(account))
+ok('...never a retired one', /kind === 'address' && !c\.retiredAt/.test(merge))
+ok('...preferring the one marked primary', /live\.find\(\(c\) => c\.isPrimary\)/.test(merge))
 
 /*
  * TEN WORKING DAYS, NOT TEN CALENDAR DAYS. addWorkingDays knows the public holidays -- Easter
  * included, and the Monday a holiday moves to when it falls on a Sunday. A demand giving a debtor
  * less time than the Act does is a demand that can be set aside.
  */
-ok('the account works out the date to respond by', /respondBy: addWorkingDays\(/.test(account))
-ok('...counting ten of them', /addWorkingDays\(dayKey\(new Date\(\)\), 10\)/.test(account))
+ok('the merge works out the date to respond by', /respondBy: respondBy\(input\.today\)/.test(merge))
+ok('...counting ten of them', /addWorkingDays\(today, 10\)/.test(merge))
+/* From the library that knows the public holidays, never counted by hand -- and now imported by
+   the assembly rather than by the page, since that is where the counting moved. */
 ok('...from the working-days library rather than by hand',
-  /from '\.\.\/\.\.\/lib\/workingDays'/.test(account))
+  /from '\.\/workingDays\.js'/.test(merge))
 
 /* The merge is a memo; a dependency left off means a letter naming last week's address. */
 ok('the contacts are in the merge\u2019s dependencies', /workspace\?\.contacts,/.test(account))

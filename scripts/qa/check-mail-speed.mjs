@@ -29,10 +29,18 @@ function check(name, actual, expected) {
 const ok = (name, actual) => check(name, actual, true)
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
-const sync = read('../../api/email/sync.ts')
-const syncAll = read('../../api/email/sync-all.ts')
+const sync = read('../../api/_lib/email/sync.ts')
+const syncAll = read('../../api/_lib/email/sync-all.ts')
 const lib = read('../../api/_lib/emailSync.ts')
-const send = read('../../api/email/send.ts')
+/*
+ * THE ROUTE AND THE SENDER, READ TOGETHER, because together they are what happens when somebody
+ * POSTs /api/email/send. The sending itself moved into sendAsUser when the workflow runner needed
+ * it -- the runner sends the same templates through the same mailboxes unattended, and two
+ * senders would drift with the unattended one drifting unseen. The rules below are unchanged;
+ * only which file holds them moved.
+ */
+const send = read('../../api/_lib/email/send.ts')
+  + read('../../api/_lib/email/sendAsUser.ts')
 const page = read('../../src/pages/mail/MailPage.tsx')
 const schema = read('../../supabase/schema.sql')
 

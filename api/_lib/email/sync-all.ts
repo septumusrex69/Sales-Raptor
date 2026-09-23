@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { adminClient } from '../_lib/auth.js'
-import { claimSync, releaseSync, syncConnection, type EmailConnectionRow } from '../_lib/emailSync.js'
+import { adminClient } from '../auth.js'
+import { claimSync, releaseSync, syncConnection, type EmailConnectionRow } from '../emailSync.js'
 
 /*
  * NOTHING IS PRUNED. Mail stays until somebody deals with it.

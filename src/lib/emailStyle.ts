@@ -9,7 +9,7 @@
  *
  * firmSettings re-exports all three, so nothing that used them had to move.
  */
-import { CHARTER_EMAIL_STACK } from './charter.ts'
+import { CHARTER_EMAIL_STACK } from './charter.js'
 
 /** Only the two fields the style needs, rather than the whole settings row. */
 export interface EmailFace {

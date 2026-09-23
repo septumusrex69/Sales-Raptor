@@ -257,7 +257,15 @@ check('one with no UID cannot', canReplyTo({ ...invite, uid: null }), false)
 /* ---------- it reaches the mail server as a calendar part, not an attachment ---------- */
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
-const send = read('../../api/email/send.ts')
+/*
+ * THE ROUTE AND THE SENDER, READ TOGETHER, because together they are what happens when somebody
+ * POSTs /api/email/send. The sending itself moved into sendAsUser when the workflow runner needed
+ * it -- the runner sends the same templates through the same mailboxes unattended, and two
+ * senders would drift with the unattended one drifting unseen. The rules below are unchanged;
+ * only which file holds them moved.
+ */
+const send = read('../../api/_lib/email/send.ts')
+  + read('../../api/_lib/email/sendAsUser.ts')
 const events = read('../../src/lib/calendarEvents.ts')
 const page = read('../../src/pages/mail/MailPage.tsx')
 
@@ -269,10 +277,16 @@ const page = read('../../src/pages/mail/MailPage.tsx')
  */
 ok('the endpoint takes a calendar reply', /calendarReply\?: string/.test(send))
 ok('...and sends it as a calendar part', /icalEvent: \{ method: 'REPLY'/.test(send))
-ok('...on the message itself', /sendMail\(\{[\s\S]{0,200}\.\.\.ical,/.test(send))
-/* The Sent copy must carry it too, or the sender's own mail client shows a different message
-   from the one the organiser got. */
-ok('...and on the Sent copy', /MailComposer\(\{[\s\S]{0,200}\.\.\.ical,/.test(send))
+/*
+ * ON BOTH, AND NOW BY CONSTRUCTION. This asserted `...ical` inside each of the two calls; when
+ * the sender was lifted out for the workflow runner they came to share one `envelope` object, so
+ * the invite is on both because there is only one thing to be on. Asserted as that instead --
+ * weaker read literally, stronger in fact: the old shape could put the invite on one call and not
+ * the other, and this one cannot.
+ */
+ok('...on the envelope both calls are built from', /const envelope = \{[\s\S]{0,600}?\.\.\.ical,/.test(send))
+ok('...which is what goes out', /sendMail\(envelope\)/.test(send))
+ok('...and what is filed in the Sent folder', /new MailComposer\(envelope\)/.test(send))
 
 /*
  * THE MAIL GOES FIRST. An email cannot be unsent, so the note in Raptor is written only once the

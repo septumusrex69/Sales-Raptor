@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { ImapFlow } from 'imapflow'
 import nodemailer from 'nodemailer'
-import { adminClient, callerIsAdmin, requireCaller } from '../_lib/auth.js'
-import { credentialsKeyProblem, encrypt } from '../_lib/crypto.js'
+import { adminClient, callerIsAdmin, requireCaller } from '../auth.js'
+import { credentialsKeyProblem, encrypt } from '../crypto.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {

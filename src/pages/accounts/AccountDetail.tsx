@@ -70,11 +70,9 @@ import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { CallButton } from './CallButton'
 import { feeCeiling, scheduleFor } from '../../lib/annexureB'
 import { formatMoney, formatDate } from '../../data/mockData'
-import { mergeValuesFor } from '../../lib/messageTemplates'
 import { FIRM_UNSET, fetchFirmSettings, type FirmSettings } from '../../lib/firmSettings'
 import { dayKey } from '../../lib/collectionPace'
-import { addWorkingDays } from '../../lib/workingDays'
-import type { AccountContact } from '../../lib/accountWorkspace'
+import { accountMergeValues } from '../../lib/accountMergeValues.ts'
 import { OtherAccountsPanel } from '../../components/collections/OtherAccountsPanel'
 import { debtorKey, type OtherAccount } from '../../lib/sameDebtor'
 import { fetchOtherAccounts } from '../../lib/accountBook'
@@ -396,69 +394,43 @@ export function AccountDetail() {
     /* So the email picker offers the half of the library written for this debtor. */
     audience: account?.debtorKind,
     values: account
-      ? Object.fromEntries(
-        Object.entries(mergeValuesFor({
-          account: {
-            caseNumber: account.caseNumber,
-            handoverDate: account.handoverDate,
-            paymentsToDate: account.paymentsToDate,
-            listingDate: account.listingDate,
-            listingReference: account.listingReference,
-            bureausListed: account.bureausListed,
-            debtorKind: account.debtorKind,
-            debtorTitle: account.debtorTitle,
-            debtorFirstName: account.debtorFirstName,
-            debtorSurname: account.debtorSurname,
-            accountNumber: account.accountNumber,
-            clientReference: account.clientReference,
-            capitalOutstanding: account.capitalOutstanding,
-            preferredLanguage: account.preferredLanguage,
-          },
-          balance: statement?.breakdown?.balance ?? null,
-          clientName: client?.name ?? null,
-          agentName: currentUser?.name ?? null,
-          agentPhone: currentUser?.phone ?? null,
-          agentEmail: currentUser?.email ?? null,
-          agentWhatsapp: currentUser?.whatsapp ?? null,
-          /*
-           * THE THREE PEOPLE A LETTER CAN NAME, and they are not the same person.
-           *
-           * `agent` is whoever is composing. `collector` is whoever the ACCOUNT is assigned to --
-           * which is the answer to "who is handling my account", and it follows the account when
-           * it is handed on. `liaison` is whoever looks after the CLIENT whose book it is.
-           *
-           * Both come out of `users`, which AppStore already holds, so naming them costs no
-           * request. Undefined where nobody is assigned, which merges as a placeholder left
-           * standing rather than a blank line -- caught here rather than posted.
-           */
-          collector: users.find((u) => u.id === account.assignedTo),
-          liaison: users.find((u) => u.id === client?.accountOwnerId),
-          today: dayKey(new Date()),
-          money: formatMoney,
-          debtorIdMasked: account.debtorIdNumber,
-          positionAsAt: dayKey(new Date()),
-          /*
-           * THE TWO FIELDS THAT WERE WRITTEN, CHECKED, EXPORTED AND FILLED BY NOTHING.
-           *
-           * {{debtor_address}} is the primary address on the account -- account_contacts already
-           * holds one, kind 'address', and every section 129 needs it to be posted at all. The
-           * PRIMARY one where a primary is marked, and otherwise the first that has not been
-           * retired: a retired address is one somebody established the debtor no longer lives at,
-           * and posting a statutory demand to it is worse than not posting one.
-           *
-           * {{respond_by}} is ten WORKING days from today, the day the notice goes out. Not ten
-           * calendar days, and not counted by hand -- addWorkingDays knows the public holidays,
-           * including the Easter dates and the Monday a holiday moves to when it falls on a
-           * Sunday. A demand that gives a debtor less time than the Act does is a demand that can
-           * be set aside.
-           */
-          debtorAddress: addressOf(workspace?.contacts ?? []),
-          respondBy: addWorkingDays(dayKey(new Date()), 10),
-          /* Passed whole. There is no list of the firm's fields here to fall behind the ones the
-             library grew -- see mergeValuesFor, which takes FirmSettings' own shape. */
-          firm,
-        })).filter((entry): entry is [string, string] => entry[1] !== null),
-      )
+      ? accountMergeValues({
+        account: {
+          caseNumber: account.caseNumber,
+          handoverDate: account.handoverDate,
+          paymentsToDate: account.paymentsToDate,
+          listingDate: account.listingDate,
+          listingReference: account.listingReference,
+          bureausListed: account.bureausListed,
+          debtorKind: account.debtorKind,
+          debtorTitle: account.debtorTitle,
+          debtorFirstName: account.debtorFirstName,
+          debtorSurname: account.debtorSurname,
+          accountNumber: account.accountNumber,
+          clientReference: account.clientReference,
+          capitalOutstanding: account.capitalOutstanding,
+          preferredLanguage: account.preferredLanguage,
+        },
+        balance: statement?.breakdown?.balance ?? null,
+        clientName: client?.name ?? null,
+        /*
+         * THE THREE PEOPLE A LETTER CAN NAME. `agent` is whoever is composing -- here, the person
+         * at the keyboard. `collector` is whoever the ACCOUNT is assigned to, which follows the
+         * account when it is handed on; `liaison` looks after the CLIENT whose book it is. Left
+         * off, a letter keeps naming whoever held the account before it moved.
+         *
+         * The workflow runner passes the COLLECTOR as the agent, because on that path there is
+         * nobody at a keyboard and the message leaves by the collector's mailbox.
+         */
+        agent: currentUser ?? null,
+        collector: users.find((u) => u.id === account.assignedTo) ?? null,
+        liaison: users.find((u) => u.id === client?.accountOwnerId) ?? null,
+        debtorIdNumber: account.debtorIdNumber,
+        contacts: workspace?.contacts ?? [],
+        firm,
+        today: dayKey(new Date()),
+        money: formatMoney,
+      })
       : {},
   /* Before the early returns below, because a hook cannot run conditionally -- which is also why
      it reads `statement` rather than the `b` shorthand, which is only defined past them. */
@@ -2934,19 +2906,3 @@ function StatementTable({ statement, account, breakdown }: {
   )
 }
 
-/**
- * The address a notice is posted to.
- *
- * THE PRIMARY ONE, AND NEVER A RETIRED ONE. `retiredAt` is set when somebody established the
- * debtor no longer lives there — posting a statutory demand to an address known to be wrong is
- * worse than posting none, because it looks served. Where nothing is marked primary the first
- * live address is used, which is the order they were captured in.
- *
- * Returned as typed, on its own lines, because that is how {{debtor_address}} is merged and how
- * an address is written on a page.
- */
-function addressOf(contacts: AccountContact[]): string | null {
-  const live = contacts.filter((c) => c.kind === 'address' && !c.retiredAt)
-  const pick = live.find((c) => c.isPrimary) ?? live[0]
-  return (pick?.value ?? '').trim() || null
-}

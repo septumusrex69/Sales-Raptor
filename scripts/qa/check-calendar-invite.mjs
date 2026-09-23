@@ -298,7 +298,7 @@ eq('a whole day stays a date',
 const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
 const mime = read('../../api/_lib/mime.ts')
 const sync = read('../../api/_lib/emailSync.ts')
-const route = read('../../api/email/attachment.ts')
+const route = read('../../api/_lib/email/attachment.ts')
 const userMail = read('../../src/lib/userMail.ts')
 const page = read('../../src/pages/mail/MailPage.tsx')
 const schema = read('../../supabase/schema.sql')

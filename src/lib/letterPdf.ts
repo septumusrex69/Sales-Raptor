@@ -33,10 +33,10 @@
  */
 import {
   footTextFor, mmToPt, planLetter, type DrawOp, type LetterPlan, type Measure,
-} from './letterLayout.ts'
+} from './letterLayout.js'
 import type { LetterDocument, PageSetup } from './letterDocument.ts'
-import { printableForPdf, unprintableMessage, type FaceGaps } from './winAnsi.ts'
-import { CHARTER_GAPS, isCharter, type CharterBytes } from './charter.ts'
+import { printableForPdf, unprintableMessage, type FaceGaps } from './winAnsi.js'
+import { CHARTER_GAPS, isCharter, type CharterBytes } from './charter.js'
 
 /** Which of the fourteen standard faces a document's font stack is drawn in. */
 export function standardFamilyFor(fontStack: string): 'Times' | 'Helvetica' | 'Courier' {

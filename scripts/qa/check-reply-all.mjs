@@ -36,7 +36,15 @@ const ok = (name, actual) => check(name, actual, true)
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8')
 const schema = read('../../supabase/schema.sql')
 const sync = read('../../api/_lib/emailSync.ts')
-const send = read('../../api/email/send.ts')
+/*
+ * THE ROUTE AND THE SENDER, READ TOGETHER, because together they are what happens when somebody
+ * POSTs /api/email/send. The sending itself moved into sendAsUser when the workflow runner needed
+ * it -- the runner sends the same templates through the same mailboxes unattended, and two
+ * senders would drift with the unattended one drifting unseen. The rules below are unchanged;
+ * only which file holds them moved.
+ */
+const send = read('../../api/_lib/email/send.ts')
+  + read('../../api/_lib/email/sendAsUser.ts')
 const mail = read('../../src/lib/userMail.ts')
 const page = read('../../src/pages/mail/MailPage.tsx')
 const composer = read('../../src/components/ComposeEmailModal.tsx')
@@ -257,20 +265,23 @@ ok('an emptied Cc box sends no Cc', /\.\.\.\(cc\.trim\(\) \? \{ cc: cc\.trim\(\)
  */
 ok('the endpoint accepts a Cc', /const \{[^}]*\bcc\b[^}]*\} = \(req\.body/.test(send))
 
-const SPREAD = /\.\.\.\(cc && cc\.trim\(\) \? \{ cc \} : \{\}\)/
+const SPREAD = /\.\.\.\(message\.cc && message\.cc\.trim\(\) \? \{ cc: message\.cc \} : \{\}\)/
 /*
- * BOTH PLACES. The message goes out through nodemailer and a second copy is composed for the
- * mailbox's own Sent folder. Cc on the first and not the second, and the Sent copy shows a
- * message that reached fewer people than it did -- which is the copy anybody checks months later
- * when a client asks whether their attorney was told.
+ * BOTH PLACES, AND NOW BY CONSTRUCTION. The message goes out through nodemailer and a second copy
+ * is composed for the mailbox's own Sent folder. Cc on the first and not the second, and the Sent
+ * copy shows a message that reached fewer people than it did -- which is the copy anybody checks
+ * months later when a client asks whether their attorney was told.
+ *
+ * THIS USED TO COUNT THE SPREAD TWICE, once per call. When the sender was lifted out for the
+ * workflow runner the two calls came to share ONE `envelope` object, so the property the count
+ * was standing in for is now impossible to get wrong rather than merely checked -- and the count
+ * of two became a count of one. Asserted as the rule instead: the Cc is decided once, and the
+ * thing it was decided on is what BOTH calls are given.
  */
-check('the Cc is put on the message and on the Sent copy',
-  (send.match(new RegExp(SPREAD, 'g')) ?? []).length, 2)
-/* Each call sliced out on its own, because two matches in the file could both be in one of them. */
-ok('...once in the send itself',
-  SPREAD.test(slice(send, 'await transporter.sendMail({', 'sentMessageId =', 'the send')))
-ok('...and once in the Sent-folder copy',
-  SPREAD.test(slice(send, 'new MailComposer({', '.compile()', 'the Sent copy')))
+check('the Cc is decided in exactly one place', (send.match(new RegExp(SPREAD, 'g')) ?? []).length, 1)
+ok('...on the envelope both calls are built from', /const envelope = \{[\s\S]{0,600}?\.\.\.\(message\.cc/.test(send))
+ok('...which is what actually goes out', /sendMail\(envelope\)/.test(send))
+ok('...and what is filed in the Sent folder', /new MailComposer\(envelope\)/.test(send))
 
 /* ---------- 8. three answers in front, the filing behind the dots ---------- */
 

@@ -26,9 +26,9 @@
  * flagged rather than silently absorbed: in duplum, where accrual stops at the ceiling, and
  * write-off, where the account stopped and accrual stopped with it.
  */
-import { receiptFeeInclVat, settlementReceiptFee, roundToCents, scheduleFor, type AnnexureBSchedule } from './annexureB.ts'
-import { accrueToDate, accrualEnd, coveredTo as lastCoveredDay } from './interestAccrual.ts'
-import { feeLabel } from './feeLabel.ts'
+import { receiptFeeInclVat, settlementReceiptFee, roundToCents, scheduleFor, type AnnexureBSchedule } from './annexureB.js'
+import { accrueToDate, accrualEnd, coveredTo as lastCoveredDay } from './interestAccrual.js'
+import { feeLabel } from './feeLabel.js'
 
 export interface LedgerLines {
   /**

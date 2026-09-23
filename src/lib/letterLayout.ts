@@ -20,8 +20,8 @@
  * once, at the drawing edge, beats carrying two systems through the arithmetic.
  */
 import type { Block, LetterDocument, PageSetup, Span } from './letterDocument.ts'
-import { autoColumnWidths } from './tableWidths.ts'
-import { renderTemplate } from './messageTemplates.ts'
+import { autoColumnWidths } from './tableWidths.js'
+import { renderTemplate } from './messageTemplates.js'
 
 /** A run of text on a line, already positioned. */
 export interface TextOp {

@@ -16,10 +16,10 @@
  * the account, and the step stays where it is until they do. Nothing here cancels anything; that
  * is `cancelRemaining`, and it happens for a different reason.
  */
-import { scheduleFor, itemAmountFor, type AnnexureBItemId } from './annexureB.ts'
-import { canUseLetter, letterProblems, type LetterDocument } from './letterDocument.ts'
-import { renderTemplate, type TemplateKind } from './messageTemplates.ts'
-import { smsCost, smsSafeValues } from './smsSegments.ts'
+import { scheduleFor, itemAmountFor, type AnnexureBItemId } from './annexureB.js'
+import { canUseLetter, letterProblems, type LetterDocument } from './letterDocument.js'
+import { renderTemplate, type TemplateKind } from './messageTemplates.js'
+import { smsCost, smsSafeValues } from './smsSegments.js'
 import type { WorkflowNode } from './workflowBuilder.ts'
 
 /**

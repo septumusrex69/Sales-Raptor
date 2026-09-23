@@ -38,7 +38,7 @@ const ok = (name, actual) => check(name, actual, true)
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8')
 const sync = read('../../api/_lib/emailSync.ts')
-const endpoint = read('../../api/email/sync.ts')
+const endpoint = read('../../api/_lib/email/sync.ts')
 const schema = read('../../supabase/schema.sql')
 const page = read('../../src/pages/mail/MailPage.tsx')
 

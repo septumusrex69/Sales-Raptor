@@ -40,7 +40,15 @@ const menu = read('../../src/components/ui/RowMenu.tsx')
 const composer = read('../../src/components/ComposeEmailModal.tsx')
 const sync = read('../../api/_lib/emailSync.ts')
 const mapper = read('../../src/lib/userMail.ts')
-const send = read('../../api/email/send.ts')
+/*
+ * THE ROUTE AND THE SENDER, READ TOGETHER, because together they are what happens when somebody
+ * POSTs /api/email/send. The sending itself moved into sendAsUser when the workflow runner needed
+ * it -- the runner sends the same templates through the same mailboxes unattended, and two
+ * senders would drift with the unattended one drifting unseen. The rules below are unchanged;
+ * only which file holds them moved.
+ */
+const send = read('../../api/_lib/email/send.ts')
+  + read('../../api/_lib/email/sendAsUser.ts')
 const quick = read('../../src/components/layout/QuickAdd.tsx')
 
 /* One function cut out before asserting on it -- a regex over a whole file is satisfied by any

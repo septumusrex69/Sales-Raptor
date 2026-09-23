@@ -26,8 +26,8 @@
  * — the same closed vocabulary the SMS and email templates use. A letter that invented its own
  * field names would be a second thing to keep in step with the resolver.
  */
-import { renderTemplate, unknownFields, type TemplateScope } from './messageTemplates.ts'
-import { CHARTER_STACK } from './charter.ts'
+import { renderTemplate, unknownFields, type TemplateScope } from './messageTemplates.js'
+import { CHARTER_STACK } from './charter.js'
 
 /* ------------------------------------------------------------------ inline */
 

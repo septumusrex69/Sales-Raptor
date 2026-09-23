@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { adminClient, requireCaller } from '../_lib/auth.js'
-import { claimSync, releaseSync, syncConnection, type EmailConnectionRow } from '../_lib/emailSync.js'
+import { adminClient, requireCaller } from '../auth.js'
+import { claimSync, releaseSync, syncConnection, type EmailConnectionRow } from '../emailSync.js'
 
 /** On-demand "Sync now" for the caller's own connection — the same logic Vercel Cron runs for everyone via sync-all. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
