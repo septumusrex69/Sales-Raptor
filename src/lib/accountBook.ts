@@ -84,6 +84,16 @@ export interface DebtorAccount {
   bucket: string | null
   writeOffReason: string | null
   handoverDate: string | null
+  /**
+   * When the ROW was written -- which for an imported account is the day the handover was
+   * approved, and is not the same question as handoverDate.
+   *
+   * `handover_date` is the day the debt fell due; everything the account is measured by runs from
+   * it. This is the day it reached Raptor. The timeline shows both, at the firm's asking: "on the
+   * activity timeline it doesn't show which date it's imported -- date it handed over, and
+   * imported."
+   */
+  createdAt: string | null
   paymentsToDate: number | null
   swordfishBalanceAtImport: number | null
   swordfishFeesAtImport: number | null
@@ -155,6 +165,7 @@ const toAccount = (r: any): DebtorAccount => ({
   bucket: r.bucket,
   writeOffReason: r.write_off_reason,
   handoverDate: r.handover_date,
+  createdAt: (r.created_at as string | null) ?? null,
   paymentsToDate: r.payments_to_date === null ? null : Number(r.payments_to_date),
   swordfishBalanceAtImport: r.swordfish_balance_at_import === null ? null : Number(r.swordfish_balance_at_import),
   swordfishFeesAtImport: r.swordfish_fees_at_import === null ? null : Number(r.swordfish_fees_at_import),

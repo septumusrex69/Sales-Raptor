@@ -346,8 +346,11 @@ export function AccountDetail() {
   }, [account, ledgers])
 
   const timeline = useMemo(
-    () => buildTimeline(ledgers, workspace?.notes ?? [], workspace?.promises ?? []),
-    [ledgers, workspace],
+    () => buildTimeline(ledgers, workspace?.notes ?? [], workspace?.promises ?? [], account && {
+      handoverDate: account.handoverDate,
+      importedAt: account.createdAt,
+    }),
+    [ledgers, workspace, account],
   )
 
   const ceiling = useMemo(() => {

@@ -52,6 +52,14 @@ export interface TimelineEntry {
 
 const dayOf = (iso: string) => iso.slice(0, 10)
 
+/* dd/mm/yyyy, which is how South Africa writes a date and how every other date on this screen is
+   drawn. Built by hand rather than through toLocaleDateString: en-ZA renders September as
+   "Sept" and groups with a non-breaking space, neither of which belongs in a sentence. */
+function displayDay(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split('-')
+  return y && m && d ? `${d}/${m}/${y}` : iso.slice(0, 10)
+}
+
 /**
  * Build the stream, newest first — and newest first WITHIN a day as well.
  *
@@ -89,12 +97,70 @@ const RANK: Record<TimelineKind, number> = {
   payment: 0, promise: 1, query: 2, action: 3, main_comment: 4, note: 5,
 }
 
+/**
+ * When the account opened and when it reached us. Both, because they are different days.
+ *
+ * THE FIRM: "on the activity timeline in a debtor, it doesn't show which date it's imported --
+ * date it handed over, and imported."
+ */
+export interface AccountOpening {
+  /** The day the debt fell due. Everything the account is measured by runs from it. */
+  handoverDate: string | null
+  /** The day the row was written -- for an imported account, when the handover was approved. */
+  importedAt: string | null
+  /** The batch it came in on, where it came in on one. */
+  batchReference?: string | null
+}
+
 export function buildTimeline(
   ledgers: AccountLedgers | null,
   notes: AccountNote[] = [],
   promises: PromiseToPay[] = [],
+  opening?: AccountOpening | null,
 ): TimelineEntry[] {
   const entries: TimelineEntry[] = []
+
+  /*
+   * ---- THE FIRST THING THAT EVER HAPPENED TO THIS ACCOUNT ----
+   *
+   * THE FIRM: "on the activity timeline in a debtor, it doesn't show which date it's imported --
+   * date it handed over, and imported."
+   *
+   * The timeline began at the first fee or the first note, so an account with neither had an
+   * empty one and an account with both started in the middle of its own story. Two dates, and
+   * they are genuinely different: `handoverDate` is the day the debt fell due -- interest, in
+   * duplum and prescription all run from it -- and the import date is the day it reached us.
+   * Somebody asking "why is this account only three weeks old and already at R13 000" needs both.
+   *
+   * DATED AT THE HANDOVER, not at the import, so it sits at the bottom where the story starts.
+   * Dated at the import it would jump to the top of a book brought across from Swordfish and
+   * bury six years of history under a row saying the account exists.
+   *
+   * NOT AUTOMATED, although Raptor wrote it. The flag hides bookkeeping about actions somebody
+   * else took -- a fee line beside the call that caused it. This is not bookkeeping; it is the
+   * account's first fact, and hidden it would take the answer with it.
+   */
+  if (opening && (opening.handoverDate || opening.importedAt)) {
+    const at = opening.handoverDate ?? opening.importedAt as string
+    entries.push({
+      id: 'opened',
+      kind: 'note',
+      date: dayOf(at),
+      at,
+      title: 'Handed over',
+      detail: [
+        opening.handoverDate
+          ? `The debt fell due on ${displayDay(opening.handoverDate)}, and the account is `
+            + 'measured from there.'
+          : 'No date of default is recorded.',
+        opening.importedAt
+          ? `It reached Raptor on ${displayDay(opening.importedAt)}${
+            opening.batchReference ? `, on ${opening.batchReference}` : ''}.`
+          : null,
+      ].filter(Boolean).join(' '),
+      automated: false,
+    })
+  }
 
   for (const f of ledgers?.fees ?? []) {
     entries.push({

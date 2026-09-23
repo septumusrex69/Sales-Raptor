@@ -175,6 +175,78 @@ check('reversed payment is kept and flagged',
     styleFor(row('Outbound Telephone Call', null)).ring === styleFor(row('x', 'phone_call')).ring)
 }
 
+
+/* ---------------------------------------------------- when the account opened, and when it came */
+
+/*
+ * THE FIRM: "on the activity timeline in a debtor, it doesn't show which date it's imported --
+ * date it handed over, and imported."
+ *
+ * The timeline began at the first fee or the first note, so an account with neither had an empty
+ * one and an account with both started in the middle of its own story.
+ */
+{
+  const opened = buildTimeline(null, [], [], {
+    handoverDate: '2026-03-18', importedAt: '2026-09-22T11:04:41Z', batchReference: 'handover 1.xlsx',
+  })
+  check('an account with no history still has its opening', opened.length === 1)
+  const first = opened[0]
+  check('...headed for what it is', first?.title === 'Handed over')
+  check('...naming the day the debt fell due', /18\/03\/2026/.test(first?.detail ?? ''),
+    first?.detail)
+  check('...and the day it reached us', /22\/09\/2026/.test(first?.detail ?? ''), first?.detail)
+  /* TWO DIFFERENT DAYS, and the entry is worthless if it conflates them: one is what interest,
+     in duplum and prescription run from, the other is when the sheet arrived. */
+  check('...which are not the same date', !/18\/03\/2026[\s\S]*18\/03\/2026/.test(first?.detail ?? ''))
+  check('...and the batch it came in on', /handover 1\.xlsx/.test(first?.detail ?? ''), first?.detail)
+  /*
+   * DATED AT THE HANDOVER, not at the import. Dated at the import it would jump to the TOP of a
+   * book brought across from Swordfish and bury six years of history under a row saying the
+   * account exists.
+   */
+  check('...dated at the handover so it sits where the story starts', first?.date === '2026-03-18')
+  /*
+   * NOT AUTOMATED, although Raptor wrote it. That flag hides bookkeeping about actions somebody
+   * else took; this is the account's first fact, and hidden it would take the answer with it.
+   */
+  check('...and not hidden with the automated bookkeeping', first?.automated === false)
+  check('...so it survives the filter the firm asked for',
+    filterTimeline(opened, { automated: false }).length === 1)
+}
+
+/* IT SITS UNDER EVERYTHING ELSE, which is the whole reason for dating it at the handover. */
+{
+  const withWork = buildTimeline(
+    { fees: [{
+      id: 'f1', incurredAt: '2026-06-01T09:00:00Z', description: 'Letter', amountExclVat: 25,
+      vatAmount: 3.75, billed: true, actionCode: 'letter', segments: null, cancelledAt: null,
+      performedBy: 'A Clerk',
+    }], payments: [], accruals: [] },
+    [], [],
+    { handoverDate: '2026-03-18', importedAt: '2026-09-22T11:04:41Z' },
+  )
+  check('the opening is the oldest thing on the account',
+    withWork[withWork.length - 1]?.id === 'opened', withWork.map((e) => e.id).join(','))
+}
+
+/*
+ * NOTHING TO SAY, NOTHING SAID. An account with neither date gets no entry rather than one
+ * reading "no date of default is recorded" over an empty timeline.
+ *
+ * CAUGHT, NOT CALLED BARE. Removing the guard does not make this return a bad entry -- it makes
+ * buildTimeline THROW, on `dayOf(null)`, which kills the process before anything is printed: a
+ * stack trace with no failing assertion in it. CLAUDE.md names that one, and this file earned it.
+ */
+const built = (...args) => { try { return buildTimeline(...args) } catch (e) { return String(e) } }
+check('an account with neither date gets no opening entry',
+  built(null, [], [], { handoverDate: null, importedAt: null }).length === 0,
+  built(null, [], [], { handoverDate: null, importedAt: null }))
+check('...and so does one that was never asked about the opening',
+  buildTimeline(null, [], []).length === 0)
+/* One of the two is enough: an account keyed in by hand has no import date worth showing. */
+check('one date alone is still worth an entry',
+  buildTimeline(null, [], [], { handoverDate: '2026-03-18', importedAt: null }).length === 1)
+
 /*
  * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
  * headline and is indistinguishable from a healthy one -- a review of this suite found 20
