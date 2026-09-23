@@ -269,7 +269,7 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
      * debtor. That is not tidiness: before this, {{debtor_id_masked}} masked a company's
      * registration number as though it were an identity number and printed it on a letter.
      */
-    { key: 'debtor_id_masked', label: 'Identity number, masked (a person)', sample: '850312 XXXX 08 X' },
+    { key: 'debtor_id_masked', label: 'Identity number, masked (a person)', sample: '850312XXXX08X' },
     { key: 'debtor_reg_no', label: 'Registration number (a company)', sample: '2019/940923/07' },
     { key: 'account_number', label: "The creditor's own account number", sample: '92322880' },
     { key: 'respond_by', label: 'The date the debtor must answer by, written out', sample: '5 October 2026' },
@@ -604,14 +604,22 @@ export function addressAs(account: TemplateAccount): string | null {
 }
 
 /**
- * "8503125009087" -> "850312 XXXX 08 X".
+ * "8503125009087" -> "850312XXXX08X".
  *
- * THE SHAPE IS THE ONE THE FIELD ALREADY ADVERTISED as its sample, so a template previewed before
- * this existed prints what it previewed. A South African ID is YYMMDD SSSS C A Z: the date of
- * birth, four digits that encode sex, a citizenship digit, and a check digit. The four that
- * encode sex are covered and so is the check digit; the date of birth is left, because it is what
- * lets a debtor recognise their own number on a notice, which is the whole point of printing part
- * of it.
+ * A South African ID is YYMMDD SSSS C A Z: the date of birth, four digits that encode sex, a
+ * citizenship digit, and a check digit. The four that encode sex are covered and so is the check
+ * digit; the date of birth is left, because it is what lets a debtor recognise their own number
+ * on a notice, which is the whole point of printing part of it.
+ *
+ * NO SPACES, AT THE FIRM'S INSTRUCTION -- "there's spaces in between the ID numbers. I don't
+ * think that's really necessary. It's wasting space." It was "850312 XXXX 08 X", which is
+ * sixteen characters for thirteen digits, and an SMS is billed in blocks of 160: every
+ * individual message in the collections library carries this field, so three characters back is
+ * three characters of headroom on each of them before the next one costs R7.00 instead of R3.50.
+ *
+ * ONE RENDERING EVERYWHERE, not a short one for SMS and a spaced one for letters. The same
+ * argument as the firm's bank account, which `bankLine` exists to write one way: a number printed
+ * two ways across two notices reads as two numbers.
  *
  * ANYTHING THAT IS NOT THIRTEEN DIGITS IS RETURNED UNTOUCHED rather than mangled into a shape it
  * does not have -- 45 rows of the firm's own import file had a telephone number in this column,
@@ -621,7 +629,7 @@ export function maskSaId(raw: string | null | undefined): string | null {
   const s = (raw ?? '').replace(/\s/g, '')
   if (!s) return null
   if (!/^\d{13}$/.test(s)) return s
-  return `${s.slice(0, 6)} XXXX ${s.slice(10, 12)} X`
+  return `${s.slice(0, 6)}XXXX${s.slice(10, 12)}X`
 }
 
 /** "2026-09-18" -> "18 September 2026". A date in a letter is never written in ISO. */

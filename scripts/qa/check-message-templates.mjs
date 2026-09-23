@@ -369,14 +369,20 @@ const asCompany = mergeValuesFor({
 check('a company answers with a registration number',
   [asCompany.debtor_reg_no, asCompany.debtor_id_masked], ['2019/940923/07', null])
 check('...and a person with an identity number, and no registration number',
-  [asPerson.debtor_reg_no, asPerson.debtor_id_masked], [null, '850312 XXXX 08 X'])
+  [asPerson.debtor_reg_no, asPerson.debtor_id_masked], [null, '850312XXXX08X'])
 
 /*
  * AND IT IS ACTUALLY MASKED. The field has been called debtor_id_masked since it was written and
  * nothing masked anything -- AccountDetail passed the whole thirteen digits through. A field
  * whose name promises a mask and prints the number is worse than one that never claimed to.
  */
-check('the four digits that encode sex are covered', maskSaId('8503125009089'), '850312 XXXX 08 X')
+check('the four digits that encode sex are covered', maskSaId('8503125009089'), '850312XXXX08X')
+/*
+ * AND NO SPACES, at the firm's instruction: "it's wasting space." Sixteen characters for thirteen
+ * digits, on a field every individual SMS in the library carries, against a 160-character block.
+ */
+check('the mask is as long as the number it masks', maskSaId('8503125009089').length, 13)
+ok('...with no spaces in it', !/\s/.test(maskSaId('8503125009089')))
 check('...and so is the check digit', maskSaId('8503125009089').slice(-1), 'X')
 /* The date of birth is deliberately left: it is what lets a debtor recognise their own number. */
 ok('...while the date of birth is left, so a debtor recognises it',
