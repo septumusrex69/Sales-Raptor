@@ -5,7 +5,7 @@ import { inputClass } from '../../components/ui/Modal'
 import { useAuth } from '../../store/AuthContext'
 import { canEditLibrary } from '../../lib/permissions'
 import {
-  EMAIL_FONTS, emailBodyStyle, fetchFirmSettings, saveFirmSettings, type FirmSettings,
+  EMAIL_FONTS, emailBodyCss, fetchFirmSettings, saveFirmSettings, type FirmSettings,
 } from '../../lib/firmSettings'
 
 /**
@@ -393,7 +393,7 @@ export function FirmSettingsPage() {
           <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-2">
             How a message will read
           </p>
-          <div style={{ ...styleObject(emailBodyStyle(draft)) }}>
+          <div style={emailBodyCss(draft) as React.CSSProperties}>
             Dear Mr Van Der Westhuizen,<br /><br />
             The balance outstanding on account GPS3/10103 is R&nbsp;48&nbsp;250.00. Please telephone
             this office to make an arrangement.
@@ -424,16 +424,6 @@ export function FirmSettingsPage() {
  * screen and the message that actually leaves could drift, and the whole reason the sample is
  * here is to answer "what will this look like".
  */
-function styleObject(css: string): React.CSSProperties {
-  const out: Record<string, string> = {}
-  for (const rule of css.split(';')) {
-    const at = rule.indexOf(':')
-    if (at === -1) continue
-    const prop = rule.slice(0, at).trim().replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())
-    out[prop] = rule.slice(at + 1).trim()
-  }
-  return out as React.CSSProperties
-}
 
 /**
  * What the trust account is still short of, in the firm's own words rather than column names.

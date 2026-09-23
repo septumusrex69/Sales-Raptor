@@ -28,6 +28,8 @@
  * that names the business account, so a debtor notice cannot print it even by mistake.
  */
 import { supabase } from './supabase'
+import { CHARTER_EMAIL_STACK } from './charter.ts'
+export { EMAIL_FONTS, emailBodyCss, emailBodyStyle } from './emailStyle.ts'
 
 /*
  * WRITTEN OUT, NOT BUILT FROM A LIST, and the reason is a check rather than taste:
@@ -152,7 +154,7 @@ export const FIRM_UNSET: FirmSettings = {
   businessAccountNumber: null,
   signatoryName: null,
   signatoryTitle: null,
-  emailFont: 'Georgia, "Times New Roman", Times, serif',
+  emailFont: CHARTER_EMAIL_STACK,
   emailSizePt: 10.5,
   updatedAt: '',
 }
@@ -245,32 +247,4 @@ export async function saveFirmSettings(next: Omit<FirmSettings, 'updatedAt'>): P
   if (error) throw new Error(error.message)
 }
 
-/**
- * THE FACES AN EMAIL MAY BE SET IN, and why the list is this short.
- *
- * A mail client cannot fetch a webfont. Gmail, Outlook and Apple Mail all ignore `@font-face`
- * entirely, so a face the reader does not already have installed silently becomes Times New
- * Roman — which means offering a long list would be offering choices that do not survive the
- * send. These are the faces that ship with Windows and macOS both.
- *
- * Stored as the whole stack rather than the family name, so the fallback travels with the choice
- * and a Linux reader gets a sensible substitute instead of the browser's default.
- */
-export const EMAIL_FONTS: { label: string; value: string }[] = [
-  { label: 'Georgia', value: 'Georgia, "Times New Roman", Times, serif' },
-  { label: 'Times New Roman', value: '"Times New Roman", Times, serif' },
-  { label: 'Arial', value: 'Arial, Helvetica, sans-serif' },
-  { label: 'Verdana', value: 'Verdana, Geneva, sans-serif' },
-  { label: 'Trebuchet MS', value: '"Trebuchet MS", Tahoma, sans-serif' },
-  { label: 'Courier New', value: '"Courier New", Courier, monospace' },
-]
 
-/**
- * The style an outgoing message is wrapped in.
- *
- * INLINE, AND ON A WRAPPER RATHER THAN IN A <style> BLOCK, because Gmail strips <head> and every
- * stylesheet in it. An inline style on a containing div is the only thing every mail client
- * honours, and it is what every newsletter in the world does for the same reason.
- */
-export const emailBodyStyle = (s: Pick<FirmSettings, 'emailFont' | 'emailSizePt'>): string =>
-  `font-family:${s.emailFont};font-size:${s.emailSizePt}pt;line-height:1.5;color:#1f2937`

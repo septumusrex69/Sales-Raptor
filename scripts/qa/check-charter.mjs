@@ -26,8 +26,9 @@ import { readFileSync, existsSync } from 'node:fs'
 import fontkit from '@pdf-lib/fontkit'
 import { PDFDocument } from 'pdf-lib'
 import {
-  CHARTER_GAPS, CHARTER_STACK, CHARTER_TTF, isCharter,
+  CHARTER_EMAIL_STACK, CHARTER_GAPS, CHARTER_STACK, CHARTER_TTF, isCharter,
 } from '../../src/lib/charter.ts'
+import { EMAIL_FONTS, emailBodyCss, emailBodyStyle } from '../../src/lib/emailStyle.ts'
 import { isPrintable, printableForPdf } from '../../src/lib/winAnsi.ts'
 import { letterToPdf, standardFamilyFor } from '../../src/lib/letterPdf.ts'
 import { A4_LETTERHEAD, blankLetter } from '../../src/lib/letterDocument.ts'
@@ -329,6 +330,72 @@ ok('the four .ttf paths the PDF fetches are the four files that are shipped',
 
 const editor = readFileSync('src/pages/library/LetterPageEditor.tsx', 'utf8')
 ok('Charter is offered in the editor\'s font picker', /label: 'Charter'/.test(editor))
+
+/* ------------------------------------------------------------------ and in an email */
+
+/*
+ * THE FIRM ASKED FOR CHARTER ON "THE LETTERS IN THE EMAILS" TOO, and an email is the one place
+ * this cannot be delivered outright: Gmail, Outlook and Apple Mail all ignore @font-face, so a
+ * reader without Charter installed sees whatever comes next in the stack. What is checked here is
+ * therefore not that emails are in Charter — they are not, for most readers — but that the two
+ * things that CAN be true are: Charter is asked for first, and what actually draws is Georgia,
+ * which is the same designer's screen face and the nearest thing every machine already has.
+ */
+const emailFamilies = CHARTER_EMAIL_STACK.split(',').map((f) => f.replace(/["']/g, '').trim())
+check('an email asks for Charter first', emailFamilies[0], 'Charter')
+ok('...and for Charter under its full name as well, which is how a Linux machine has it',
+  emailFamilies.includes('Bitstream Charter'))
+check('...and what almost every reader will actually draw is Georgia',
+  emailFamilies.find((f) => !/charter/i.test(f)), 'Georgia')
+ok('...never a sans-serif, which would make the covering email a different firm from the notice',
+  !emailFamilies.some((f) => /arial|helvetica|verdana|calibri|sans-serif/i.test(f)))
+ok('the stack ends in a generic, so a machine with none of them still gets a serif',
+  emailFamilies[emailFamilies.length - 1] === 'serif')
+
+const offered = EMAIL_FONTS.find((f) => f.value === CHARTER_EMAIL_STACK)
+ok('Charter is offered in the firm\'s email settings', offered !== undefined)
+/*
+ * AND THE LABEL SAYS WHAT WILL HAPPEN. A bare "Charter" in that picker would be promising the
+ * firm something a debtor's inbox cannot honour, and the first person to compare the sent folder
+ * with the attachment would be right to stop trusting the setting.
+ */
+ok('...labelled honestly, because most recipients will not see Charter',
+  /georgia/i.test(offered?.label ?? ''))
+/*
+ * READ BACK AS TEXT, not imported: firmSettings.ts pulls in the Supabase client, which a check
+ * cannot load — the same reason check-firm-settings reads that file rather than importing it.
+ */
+const settings = readFileSync('src/lib/firmSettings.ts', 'utf8')
+ok('a firm that has filled nothing in still writes in it',
+  /emailFont: CHARTER_EMAIL_STACK,/.test(settings))
+
+/*
+ * THE BOX SOMEBODY TYPES IN AND THE MESSAGE THAT GOES OUT ARE THE SAME RULE.
+ *
+ * They were not: the outgoing mail has always been wrapped in the firm's face at the firm's size
+ * and the compose box was the app's sans-serif, so where a paragraph ended on the screen had
+ * nothing to do with where it ended in the inbox.
+ */
+const face = { emailFont: CHARTER_EMAIL_STACK, emailSizePt: 10.5 }
+const style = emailBodyStyle(face)
+ok(`the outgoing message carries the stack (${style})`, style.includes(CHARTER_EMAIL_STACK))
+check('...and the box on the screen is the same rule, parsed rather than written twice',
+  emailBodyCss(face).fontFamily, CHARTER_EMAIL_STACK)
+check('...at the same size', emailBodyCss(face).fontSize, '10.5pt')
+
+const composer = readFileSync('src/components/ComposeEmailModal.tsx', 'utf8')
+ok('the compose box is typed in the firm\'s own face', /emailBodyCss\(firm\)/.test(composer))
+ok('...and that is on the message box, not on the dialog around it',
+  /<textarea[^>]*[\s\S]{0,200}?emailBodyCss\(firm\)/.test(composer))
+
+/*
+ * AND ONE EMAIL IS ONE FACE. The corrections sheet pinned Calibri on its heading and its table
+ * while the message around it was wrapped in the firm's face, so a client got a covering sentence
+ * in one hand and the table that IS the request in another.
+ */
+const corrections = readFileSync('src/lib/importCorrections.ts', 'utf8')
+ok('the corrections table inherits the firm\'s face rather than pinning one',
+  !/font-family:/.test(corrections.replace(/<!--[\s\S]*?-->/g, '')))
 
 /* ------------------------------------------------------------------ */
 

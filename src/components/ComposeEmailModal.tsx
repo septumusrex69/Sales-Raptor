@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
 import { Paperclip, Plus, X } from 'lucide-react'
 import { Modal, FormField, inputClass } from './ui/Modal'
 import { AttachLetter } from './letters/AttachLetter'
@@ -10,6 +10,7 @@ import { RecipientField } from './RecipientField'
 import { DictateButton } from './ui/Dictate'
 import { DICTATION_LANGUAGES, storedLanguage } from '../lib/dictation'
 import { useAuth } from '../store/AuthContext'
+import { FIRM_UNSET, emailBodyCss, fetchFirmSettings, type FirmSettings } from '../lib/firmSettings'
 
 /**
  * How much may travel with one message.
@@ -150,6 +151,22 @@ export function ComposeEmailModal({
   const [showCc, setShowCc] = useState(initialCc !== undefined)
   const [subject, setSubject] = useState(initialSubject ?? '')
   const [body, setBody] = useState(initialBody ?? '')
+  /*
+   * THE FIRM'S OWN FACE, IN THE BOX SOMEBODY TYPES IN.
+   *
+   * The firm asked for Charter "on the letters and… the letters in the emails", and the letters
+   * were the easy half -- a PDF carries its font. An email is read in whatever the recipient's
+   * machine has, which is why the stored stack names Georgia behind Charter; what this fixes is
+   * the end nearer home. The outgoing message has always been wrapped in the firm's face at the
+   * firm's size and this box has always been the app's sans-serif, so a paragraph that looked
+   * right while it was written broke somewhere else in the inbox.
+   *
+   * FIRM_UNSET UNTIL IT ARRIVES, which is the same default the account screen uses: the box is
+   * usable in the fallback face for the moment the fetch takes rather than blank or jumping in
+   * from something obviously wrong.
+   */
+  const [firm, setFirm] = useState<FirmSettings>(FIRM_UNSET)
+  useEffect(() => { void fetchFirmSettings().then(setFirm) }, [])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [files, setFiles] = useState<Attached[]>([])
@@ -377,6 +394,7 @@ export function ComposeEmailModal({
             writing in Afrikaans.
           */}
           <textarea className={inputClass} rows={quotedHtml ? 7 : 12} value={body} lang={lang}
+            style={emailBodyCss(firm) as CSSProperties}
             spellCheck onChange={(e) => setBody(e.target.value)} required={!quotedHtml}
             placeholder={quotedHtml ? 'Anything you want to say above the forwarded message — optional' : undefined}
             autoFocus={!!initialSubject} />

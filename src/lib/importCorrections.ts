@@ -154,9 +154,15 @@ function tableRows(rows: CorrectionRow[], labelFor: LabelFor): string {
 function table(heading: string, intro: string, rows: CorrectionRow[], labelFor: LabelFor): string {
   if (rows.length === 0) return ''
   return `
-<h3 style="font-family:Calibri,Arial,sans-serif;font-size:15px;margin:22px 0 4px">${esc(heading)}</h3>
+<h3 style="font-size:15px;margin:22px 0 4px">${esc(heading)}</h3>
 <p style="margin:0 0 8px">${intro}</p>
-<table style="border-collapse:collapse;font-size:13px;font-family:Calibri,Arial,sans-serif">
+<!-- NO font-family HERE, and that is the fix rather than the omission. These two carried
+     Calibri while the message around them was wrapped in whatever the firm chose in Settings,
+     so a correction sheet went out in two faces -- the covering sentence in the firm's, the
+     table that IS the request in somebody else's default. Inherited, one email is one face, and
+     changing it is one setting. The size stays, because a data table is meant to be smaller
+     than the prose above it. -->
+<table style="border-collapse:collapse;font-size:13px">
   <thead>
     <tr style="background:#1b2a4a;color:#ffffff;text-align:left">
       <th style="padding:6px 10px;border:1px solid #1b2a4a">Your reference</th>

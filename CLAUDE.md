@@ -149,6 +149,19 @@ is a word. A letter set in anything else is unchanged, and a Charter letter whos
 not load **falls back to Times rather than refusing** — a notice in the wrong serif went out; a
 notice that would not attach did not.
 
+**An email cannot carry a font, so Charter is asked for and Georgia is what draws.** Gmail,
+Outlook and Apple Mail all ignore `@font-face`, so `CHARTER_EMAIL_STACK` names Charter first and
+**Georgia second on purpose** — Georgia is Matthew Carter's too, the screen-drawn relative of
+Charter, so the attached notice and the covering email are one hand rather than two. Never a
+sans-serif in that stack. The picker **says so in the label**; a bare "Charter" there would
+promise the firm something a debtor's inbox cannot honour. And the **compose box is now set in
+the firm's own face** (`emailBodyCss`, parsed from the very rule that wraps the outgoing message,
+so the two cannot drift) — it was the app's sans-serif, which meant where a paragraph ended on
+screen had nothing to do with where it ended in the inbox. `emailStyle.ts` holds these apart from
+`firmSettings.ts` precisely so a check can import them: firmSettings pulls in the Supabase client
+and can only be read back as text. **An SMS has no font at all** — the thing that costs money
+there is the non-breaking space, above.
+
 **A table with no widths is sized to its CONTENT, not split evenly.** `autoColumnWidths`
 (`src/lib/tableWidths.ts`) is CSS `table-layout: auto`, near enough — a column is never narrower
 than its widest word, never wider than its longest cell on one line, and the slack is shared in

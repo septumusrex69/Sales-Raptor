@@ -30,6 +30,26 @@ import type { FaceGaps } from './winAnsi.ts'
 export const CHARTER_STACK = '"Charter", "Bitstream Charter", Georgia, serif'
 
 /**
+ * THE SAME FACE, ASKED FOR IN AN EMAIL, WHERE IT CANNOT BE SHIPPED.
+ *
+ * The firm asked for Charter "on the letters and… the letters in the emails". A letter carries
+ * its font inside the PDF; an email cannot. Gmail, Outlook and Apple Mail all ignore `@font-face`
+ * outright, so what a debtor's inbox draws is whatever of this stack their machine already has —
+ * and almost nobody has Charter.
+ *
+ * WHICH IS WHY GEORGIA IS SECOND AND IT IS NOT A CONCESSION. Georgia is Matthew Carter's too, a
+ * screen-drawn relative of Charter with the same colour on a page. So a notice attached in
+ * Charter and the covering email read in Georgia are the same firm writing, which a sans-serif
+ * fallback would not be. Times, where even Georgia is missing, is third for the same reason.
+ *
+ * SEPARATE FROM CHARTER_STACK on purpose. `isCharter` reads the first family to decide whether to
+ * embed, and this one is not for embedding — it is a hint to somebody else's mail client, with
+ * two named fallbacks because the odds are it will be one of those that draws.
+ */
+export const CHARTER_EMAIL_STACK =
+  '"Charter", "Bitstream Charter", Georgia, "Times New Roman", Times, serif'
+
+/**
  * Is this document set in Charter?
  *
  * READS THE FIRST FAMILY, like `standardFamilyFor` does, because that is the one the browser
