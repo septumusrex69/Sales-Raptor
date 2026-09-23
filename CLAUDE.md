@@ -162,6 +162,17 @@ screen had nothing to do with where it ended in the inbox. `emailStyle.ts` holds
 and can only be read back as text. **An SMS has no font at all** — the thing that costs money
 there is the non-breaking space, above.
 
+**In an email a blank line is a PARAGRAPH and a single newline is a LINE.** The firm, looking at
+a final notice that had gone out: "you should remember the spaces in the email. This is how it
+came out." The composer turned every newline into one `<br>`, so four paragraphs of a statutory
+notice drew as one block. `emailBodyHtml` (`emailStyle.ts`) splits on blank lines and joins with
+`<br><br>` — **two breaks rather than `<p>`**, because a `<p>`'s margin is a default every mail
+client picks for itself and two `<br>`s are the one construction all of them draw alike. It also
+**escapes**, which it did not: a debtor called "Smit & Seun" put a raw ampersand into the markup
+of a legal notice. The stored templates carry the blank lines, so the paragraphing is content the
+firm can see and edit rather than a guess in a renderer; **three runs stay tight** — "Label:
+value" lines, a numbered list and the colon line above it, and the signature.
+
 **A table with no widths is sized to its CONTENT, not split evenly.** `autoColumnWidths`
 (`src/lib/tableWidths.ts`) is CSS `table-layout: auto`, near enough — a column is never narrower
 than its widest word, never wider than its longest cell on one line, and the slack is shared in

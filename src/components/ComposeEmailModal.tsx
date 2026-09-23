@@ -11,6 +11,7 @@ import { DictateButton } from './ui/Dictate'
 import { DICTATION_LANGUAGES, storedLanguage } from '../lib/dictation'
 import { useAuth } from '../store/AuthContext'
 import { FIRM_UNSET, emailBodyCss, fetchFirmSettings, type FirmSettings } from '../lib/firmSettings'
+import { emailBodyHtml } from '../lib/emailStyle.ts'
 
 /**
  * How much may travel with one message.
@@ -318,7 +319,10 @@ export function ComposeEmailModal({
           subject: subject.trim(),
           /* The note somebody typed, then the original underneath it. The typed half is prose and
              becomes <br>s; the quoted half is markup that came in already cleaned. */
-          bodyHtml: body.trim().replace(/\n/g, '<br>') + (quotedHtml ?? ''),
+          /* A blank line is a paragraph and a single newline is a line -- see emailBodyHtml. It
+             was one <br> for every newline, which drew a four-paragraph statutory notice as one
+             unbroken block, and it did not escape what somebody typed. */
+          bodyHtml: emailBodyHtml(body) + (quotedHtml ?? ''),
           ...(files.length > 0
             ? { attachments: files.map(({ filename, contentType, content }) => ({ filename, contentType, content })) }
             : {}),

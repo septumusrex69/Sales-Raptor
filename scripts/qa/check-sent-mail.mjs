@@ -166,8 +166,17 @@ ok('a text-only message still quotes its text', /initialBody: forwardBody\(/.tes
 
 /* The composer joins the two halves, and only at the moment of sending. */
 const box = readFileSync(new URL('../../src/components/ComposeEmailModal.tsx', import.meta.url), 'utf8')
+/*
+ * THE JOIN, NOT THE RENDERING. This named the whole expression, `.replace(/\n/g, '<br>')` and
+ * all, so it failed the day the body started being rendered as paragraphs instead of as one
+ * break per line -- a correct change reported as a broken forward. What it is here to guard is
+ * that the typed note and the quoted original go out as ONE body, at the moment of sending, and
+ * that is what it asks now.
+ */
 ok('the typed note and the original are joined on send',
-  /bodyHtml: body\.trim\(\)\.replace\(\/\\n\/g, '<br>'\) \+ \(quotedHtml \?\? ''\)/.test(box))
+  /bodyHtml: [^\n]*\(quotedHtml \?\? ''\)/.test(box))
+ok('...and the note is rendered rather than concatenated raw',
+  /bodyHtml: emailBodyHtml\(body\)/.test(box))
 /* A forward may go out with nothing typed above it -- the original IS the message. Before this,
    "send" did nothing at all and said nothing about why. */
 ok('a forward can go with no covering note',

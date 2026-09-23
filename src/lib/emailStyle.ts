@@ -87,3 +87,33 @@ export function emailBodyCss(s: EmailFace): Record<string, string> {
   }
   return out
 }
+
+/**
+ * A TYPED MESSAGE, AS HTML A MAIL CLIENT WILL DRAW.
+ *
+ * The firm, looking at a final notice that had actually gone out: "you should remember the spaces
+ * in the email. This is how it came out." Every line of a four-paragraph statutory notice was
+ * jammed against the next one, because the composer turned every newline into a single <br> --
+ * so a blank line between paragraphs, which is what anybody typing an email puts there, drew as
+ * nothing at all.
+ *
+ * A BLANK LINE IS A PARAGRAPH, A SINGLE NEWLINE IS A LINE. That distinction is the whole fix, and
+ * it is the one a person typing already has in their head: the reference block at the top and the
+ * contact block at the bottom are each several lines of ONE thing, and the paragraphs between them
+ * are separate things.
+ *
+ * <br><br> RATHER THAN <p>, deliberately. A <p>'s margin is a default every mail client picks for
+ * itself, and Outlook's is not Gmail's; two <br>s are the one construction every client on earth
+ * draws the same way. The same argument as the inline style above.
+ *
+ * AND IT ESCAPES. This did not, and a debtor called "Smit & Seun" put a raw ampersand into the
+ * markup of a legal notice. Nothing typed into a message box can be allowed to become HTML.
+ */
+export function emailBodyHtml(text: string): string {
+  const esc = (s: string) => s
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return text.trim()
+    .split(/\n[ \t]*\n+/)
+    .map((block) => esc(block).replace(/\n/g, '<br>'))
+    .join('<br><br>')
+}

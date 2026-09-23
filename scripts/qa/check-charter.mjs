@@ -28,7 +28,9 @@ import { PDFDocument } from 'pdf-lib'
 import {
   CHARTER_EMAIL_STACK, CHARTER_GAPS, CHARTER_STACK, CHARTER_TTF, isCharter,
 } from '../../src/lib/charter.ts'
-import { EMAIL_FONTS, emailBodyCss, emailBodyStyle } from '../../src/lib/emailStyle.ts'
+import {
+  EMAIL_FONTS, emailBodyCss, emailBodyHtml, emailBodyStyle,
+} from '../../src/lib/emailStyle.ts'
 import { isPrintable, printableForPdf } from '../../src/lib/winAnsi.ts'
 import { letterToPdf, standardFamilyFor } from '../../src/lib/letterPdf.ts'
 import { A4_LETTERHEAD, blankLetter } from '../../src/lib/letterDocument.ts'
@@ -383,10 +385,48 @@ check('...and the box on the screen is the same rule, parsed rather than written
   emailBodyCss(face).fontFamily, CHARTER_EMAIL_STACK)
 check('...at the same size', emailBodyCss(face).fontSize, '10.5pt')
 
+/* ------------------------------------------------------------------ the spaces in the email */
+
+/*
+ * THE FIRM, LOOKING AT A FINAL NOTICE THAT HAD ACTUALLY GONE OUT: "you should remember the spaces
+ * in the email. This is how it came out." Every line of a four-paragraph statutory notice was
+ * jammed against the next, because the composer turned every newline into one <br> -- so the
+ * blank line between paragraphs, which is what anybody typing an email puts there, drew as
+ * nothing at all.
+ */
+check('a blank line is a paragraph',
+  emailBodyHtml('First paragraph.\n\nSecond paragraph.'),
+  'First paragraph.<br><br>Second paragraph.')
+check('...and a single newline is a line, so a contact block stays one block',
+  emailBodyHtml('Office line: 012\nEmail: a@b.test'),
+  'Office line: 012<br>Email: a@b.test')
+check('...and several blank lines are still one paragraph break',
+  emailBodyHtml('One.\n\n\n\nTwo.'), 'One.<br><br>Two.')
+check('...including one with spaces left on it, which is what a real draft has',
+  emailBodyHtml('One.\n   \nTwo.'), 'One.<br><br>Two.')
+check('a message with no blank lines is unchanged',
+  emailBodyHtml('Dear Sir\nThank you'), 'Dear Sir<br>Thank you')
+
+/*
+ * AND IT ESCAPES. This did not, so a debtor called "Smit & Seun" put a raw ampersand into the
+ * markup of a legal notice, and anything a collector typed between angle brackets became HTML.
+ */
+check('an ampersand in a debtor\'s name is not markup',
+  emailBodyHtml('Smit & Seun'), 'Smit &amp; Seun')
+check('...and nothing typed can become a tag',
+  emailBodyHtml('pay <b>now</b>'), 'pay &lt;b&gt;now&lt;/b&gt;')
+
 const composer = readFileSync('src/components/ComposeEmailModal.tsx', 'utf8')
 ok('the compose box is typed in the firm\'s own face', /emailBodyCss\(firm\)/.test(composer))
 ok('...and that is on the message box, not on the dialog around it',
   /<textarea[^>]*[\s\S]{0,200}?emailBodyCss\(firm\)/.test(composer))
+/*
+ * AND THE MESSAGE THAT LEAVES GOES THROUGH THE PARAGRAPH RULE. The composer had its own
+ * `.replace(/\n/g, '<br>')`, which is the line the firm was looking at.
+ */
+ok('the outgoing body is rendered as paragraphs', /emailBodyHtml\(body\)/.test(composer))
+ok('...and not by turning every newline into one break',
+  !/replace\(\/\\n\/g, '<br>'\)/.test(composer))
 
 /*
  * AND ONE EMAIL IS ONE FACE. The corrections sheet pinned Calibri on its heading and its table
