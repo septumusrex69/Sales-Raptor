@@ -79,6 +79,7 @@ import { OtherAccountsPanel } from '../../components/collections/OtherAccountsPa
 import { debtorKey, type OtherAccount } from '../../lib/sameDebtor'
 import { fetchOtherAccounts } from '../../lib/accountBook'
 import { useTitleSlot } from '../../components/layout/TitleSlot'
+import { compareTraceReports, comparisonLine, previousTraceFor } from '../../lib/traceCompare.ts'
 
 type Tab = 'Overview' | 'Transactions' | 'Emails' | 'Documents'
 
@@ -1995,6 +1996,33 @@ function StandingPanel({
   const bare = !hasPractitioner && directors.length === 0 && judgments.length === 0
     && traces.length === 0 && !claimNobodyCanMake
 
+  /*
+   * WHAT THE SECOND SEARCH BOUGHT.
+   *
+   * THE FIRM: "if we have to update a trace, let's say three months later we do a trace and we
+   * can update it -- like, okay, well, there's a new trace. And then it should compare it with
+   * the data from the old trace and show you if there's any new data."
+   *
+   * A profile pulled three months after the first is mostly the same profile, and a collector who
+   * has already worked those numbers is being asked to read forty lines to find the two that
+   * changed. The account is charged Annexure B item 4(c) for the second search, so what it bought
+   * is the fair question to answer here.
+   *
+   * READ AGAINST THE SAME SUBJECT, never simply the trace before it -- a company account carries
+   * one report for the company and one per director, and paired by date alone every finding on
+   * both would be reported as new. See previousTraceFor.
+   */
+  const sinceLastTrace = useMemo(() => {
+    const latest = traces[0]
+    if (!latest) return null
+    const earlier = previousTraceFor(traces, latest)
+    if (!earlier) return null
+    return {
+      when: earlier.enquiredOn ?? earlier.createdAt.slice(0, 10),
+      ...compareTraceReports(latest.items, earlier.items),
+    }
+  }, [traces])
+
   return (
     /*
       A CONTAINER, so the blocks inside can lay themselves out on THIS PANEL'S width rather than
@@ -2070,6 +2098,32 @@ function StandingPanel({
               Upload a trace I already have
             </button>
           </div>
+        </div>
+      )}
+
+      {/*
+        SAID ABOVE THE FINDINGS, because it is how to read them rather than one of them.
+        
+        NOTHING NEW IS STILL SAID OUT LOUD. A second search the account has been charged for that
+        found nothing the first one did not is a fact worth putting in front of whoever decides
+        to run a third -- and it is the answer to "why am I reading this again".
+        
+        AND NOTHING HERE CALLS A FINDING DEAD. A number missing from the newer report is not a
+        disconnected number: bureaux age records out and two profiles carry different columns.
+        Only a collector who dialled it may say otherwise, which is what an outcome is for.
+      */}
+      {sinceLastTrace && (
+        <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
+          <p className="text-[11px] text-slate-600">
+            <span className={`font-medium ${
+              sinceLastTrace.added > 0 ? 'text-[var(--c-green)]' : 'text-slate-500'}`}>
+              {comparisonLine(sinceLastTrace)}
+            </span>
+            {' '}
+            <span className="text-slate-400">
+              Compared with the report of {formatDate(sinceLastTrace.when)}.
+            </span>
+          </p>
         </div>
       )}
 
