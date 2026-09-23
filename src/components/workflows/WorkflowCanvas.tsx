@@ -3,6 +3,7 @@ import {
 } from 'lucide-react'
 import {
   nodesOfPhase, type Workflow, type WorkflowNode, type WorkflowPhase, type WorkflowProblem,
+  landsOn, type DayUnit,
 } from '../../lib/workflowBuilder.ts'
 import { shortDate } from '../../lib/dateLabels.ts'
 
@@ -33,23 +34,28 @@ export function WorkflowCanvas({ workflow, selected, onSelect, problems, from }:
    */
   from: string
 }) {
+  /* The version's own unit, carried down rather than looked up per card: every card on a chart
+     counts the same way, and reading it once is what makes that true rather than hoped for. */
+  const dayUnit = workflow.version.dayUnit
   return (
     <div className="space-y-6">
       {workflow.phases.map((phase) => (
         <PhaseRow key={phase.id} phase={phase} nodes={nodesOfPhase(workflow, phase.id)}
-          selected={selected} onSelect={onSelect} problems={problems} from={from} />
+          selected={selected} onSelect={onSelect} problems={problems} from={from}
+          dayUnit={dayUnit} />
       ))}
     </div>
   )
 }
 
-function PhaseRow({ phase, nodes, selected, onSelect, problems, from }: {
+function PhaseRow({ phase, nodes, selected, onSelect, problems, from, dayUnit }: {
   phase: WorkflowPhase
   nodes: WorkflowNode[]
   selected: string | null
   onSelect: (id: string) => void
   problems: WorkflowProblem[]
   from: string
+  dayUnit: DayUnit
 }) {
   return (
     <section>
@@ -80,6 +86,7 @@ function PhaseRow({ phase, nodes, selected, onSelect, problems, from }: {
           {nodes.map((node, i) => (
             <div key={node.id} className="flex items-center gap-2">
               <NodeCard node={node} selected={node.id === selected} onSelect={() => onSelect(node.id)}
+                dayUnit={dayUnit}
                 problems={problems.filter((p) => p.nodeId === node.id)} from={from} />
               {i < nodes.length - 1 && <ArrowRight size={15} className="shrink-0 text-slate-300" />}
             </div>
@@ -102,12 +109,13 @@ const ICONS = {
   wait: CalendarClock,
 }
 
-function NodeCard({ node, selected, onSelect, problems, from }: {
+function NodeCard({ node, selected, onSelect, problems, from, dayUnit }: {
   node: WorkflowNode
   selected: boolean
   onSelect: () => void
   problems: WorkflowProblem[]
   from: string
+  dayUnit: DayUnit
 }) {
   const Icon = ICONS[node.kind]
   const refused = problems.some((p) => p.level === 'refuse')
@@ -126,7 +134,7 @@ function NodeCard({ node, selected, onSelect, problems, from }: {
       <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
         Day {node.day}
       </p>
-      <p className="text-[11px] text-slate-400 tabular-nums">{shortDate(dayPlus(from, node.day))}</p>
+      <p className="text-[11px] text-slate-400 tabular-nums">{shortDate(landsOn(from, node.day, dayUnit))}</p>
       <p className="text-[13px] font-medium text-slate-800 leading-snug mt-0.5">{node.label}</p>
       {/*
         The one line under the label is the step's own second fact — "Registered post", "7 days to
@@ -158,11 +166,6 @@ function secondLine(node: WorkflowNode): string {
  * boundary, which is enough to land a step on the day before — South Africa has no DST, but the
  * browser reading this screen might not be in South Africa.
  */
-function dayPlus(from: string, days: number): string {
-  const d = new Date(`${from}T00:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + days)
-  return d.toISOString().slice(0, 10)
-}
 
 const CHANNEL_WORDS: Record<string, string> = {
   email: 'Email', sms: 'SMS', whatsapp: 'WhatsApp', post: 'Post',

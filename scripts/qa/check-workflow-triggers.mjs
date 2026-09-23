@@ -25,8 +25,9 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  TRIGGERS, TRIGGER_ORDER, dayZeroLabel, workflowProblems, canSave,
+  TRIGGERS, TRIGGER_ORDER, dayZeroLabel, landsOn, workflowProblems, canSave,
 } from '../../src/lib/workflowBuilder.ts'
+import { isWorkingDay } from '../../src/lib/workingDays.ts'
 import { DIARY_KINDS } from '../../src/lib/diaryPriority.ts'
 
 let pass = 0
@@ -117,6 +118,63 @@ ok('...and the header says what sets the workflow off', /Starts when/.test(page)
 ok('a new workflow is asked what sets it off before anything else',
   /What sets it off/.test(page))
 
+/* ------------------------------------------------------------------ business days */
+
+/*
+ * THE FIRM'S SECTION 129 SEQUENCE IS COUNTED IN WORKING DAYS. "This is all working days, not
+ * normal days. Business days, not normal days." A day number carrying no unit was read as
+ * calendar days everywhere, so day 32 meant a month where the firm meant a month and a half --
+ * and the interval that matters most, the twenty business days before a credit bureau listing,
+ * was a third of its real length.
+ *
+ * ASSERTED AGAINST REAL DATES, not against the arithmetic restated. Wednesday 23 September 2026
+ * is the anchor; Thursday 24 September is Heritage Day, which the firm's calendar already knows.
+ */
+check('business day 1 is the day the workflow starts, not the day after',
+  landsOn('2026-09-23', 1, 'business'), '2026-09-23')
+/* 23rd is day 1, the 24th is a public holiday, so day 2 is Friday the 25th. */
+check('...a public holiday is not one of the days', landsOn('2026-09-23', 2, 'business'), '2026-09-25')
+/* ...and day 3 skips the weekend to Monday the 28th. */
+check('...nor is a weekend', landsOn('2026-09-23', 3, 'business'), '2026-09-28')
+
+/*
+ * A WORKFLOW DOES NOT BEGIN ON A DAY THE OFFICE IS SHUT. Started on a Saturday, day 1 is the
+ * Monday -- otherwise the whole chart is dated from a day nobody worked.
+ */
+check('a workflow started on a Saturday has its day 1 on the Monday',
+  landsOn('2026-09-26', 1, 'business'), '2026-09-28')
+ok('...and every business day of a workflow is a working day',
+  [1, 7, 12, 32, 39, 49].every((d) => isWorkingDay(landsOn('2026-09-23', d, 'business'))))
+
+/*
+ * CALENDAR IS 0-BASED AND UNCHANGED, because every workflow written before this meant that, and
+ * moving it would silently re-date every step of one already drawn.
+ */
+check('a calendar day 0 is the day it started', landsOn('2026-09-23', 0, 'calendar'), '2026-09-23')
+check('...and calendar days do not skip anything',
+  landsOn('2026-09-23', 3, 'calendar'), '2026-09-26')
+
+/*
+ * AND THE TWO UNITS DISAGREE BY WEEKS OVER THE LENGTH OF THIS SEQUENCE, which is the whole
+ * reason the unit has to be carried. Day 49 read as calendar days is 11 November 2026; read as
+ * business days it is 2 December. Three weeks of difference on the step that tells a debtor
+ * their file has gone to the attorneys.
+ */
+check('day 49 in calendar days', landsOn('2026-09-23', 49, 'calendar'), '2026-11-11')
+/* 1 December, counted independently by walking the calendar and numbering the working days --
+   the first expected value written here was 2 December, and the check was right. */
+check('day 49 in business days', landsOn('2026-09-23', 49, 'business'), '2026-12-01')
+
+const canvas = readFileSync('src/components/workflows/WorkflowCanvas.tsx', 'utf8')
+/*
+ * THE CHART DATES ITS CARDS THROUGH THE SAME RULE. It had a dayPlus() of its own that added
+ * calendar days, so a business-day workflow would have drawn every card against the wrong date
+ * while the day numbers underneath were right -- the two disagreeing, with nothing saying which.
+ */
+ok('the canvas dates a card through the shared rule',
+  /landsOn\(from, node\.day, dayUnit\)/.test(canvas))
+ok('...and no longer has a calendar-only one of its own', !/function dayPlus/.test(canvas))
+
 /* ------------------------------------------------------------------ nothing drops the column */
 
 /*
@@ -155,10 +213,12 @@ ok('...and the firm\'s own narrowing with it', /o\.trigger_note/.test(draft))
  * what a debtor receives: the company wording, whether the SMS overtakes the email, and whether
  * a step that asserts something has already happened waits for a person to confirm it has.
  */
-for (const column of ['template_company_id', 'after_minutes', 'needs_release']) {
-  ok(`the node select asks for ${column}`, selects.some((q) => q.includes(column)))
-  ok(`...and the mapper reads ${column} back`,
-    new RegExp(`r\\.${column}`).test(store))
+for (const column of ['day_unit', 'template_company_id', 'after_minutes', 'needs_release']) {
+  ok(`the select asks for ${column}`, selects.some((q) => q.includes(column)))
+  /* Either mapper: the node's reads `r.x`, the version's reads `chosen.x`. Written as `r.` only,
+     this reported day_unit as dropped when it is plainly read two lines above the nodes. */
+  ok(`...and a mapper reads ${column} back`,
+    new RegExp(`(r|chosen)\\.${column}`).test(store))
   /* Named in the message: three identical "carries it over" lines said which check failed and
      not which column, which is a failure report somebody has to go and decode. */
   ok(`...and taking a draft carries ${column} over`, new RegExp(`o\\.${column}`).test(draft))

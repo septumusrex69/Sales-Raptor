@@ -6336,3 +6336,108 @@ end;
 $$;
 
 grant execute on function public.workflow_take_draft(uuid) to authenticated;
+
+-- ---------- What kind of day a step's day number is ----------
+--
+-- The firm, about the section 129 sequence: "this is all working days, not normal days. Business
+-- days, not normal days." A node carried an integer with no unit, and the whole table was read as
+-- calendar days -- so "day 32" meant a month where the firm meant a month and a half. Every
+-- interval in the statutory sequence moves by that difference.
+--
+-- ON THE VERSION, because the firm said it of the whole workflow, and because a version is the
+-- thing that is frozen when it is published. A workflow whose day numbers changed meaning after
+-- it went live would rewrite the dates of every file already running on it.
+--
+-- NOT THE SAME AS deadline_unit ON A NODE, and the two must not be confused. deadline_unit is the
+-- period a step gives the DEBTOR -- "twenty business days to pay". day_unit is how far down the
+-- workflow the step itself sits. One is the debtor's clock and the other is the firm's.
+--
+-- BUSINESS DAYS ARE COUNTED 1-BASED AND INCLUSIVE: day 1 is the day the workflow starts, which is
+-- how the firm writes their own chart ("the clerk triggers the section 129, workflow starts,
+-- that's day one"). Calendar days keep the old meaning, day 0 being the day it started, because
+-- changing that would move every step of a workflow already written.
+alter table public.workflow_versions
+  add column if not exists day_unit text not null default 'calendar';
+
+alter table public.workflow_versions drop constraint if exists workflow_versions_day_unit_check;
+alter table public.workflow_versions add constraint workflow_versions_day_unit_check
+  check (day_unit in ('calendar', 'business'));
+
+comment on column public.workflow_versions.day_unit is
+  'How a node''s day number is counted. business: 1-based and inclusive, day 1 is the day the '
+  'workflow starts, weekends and South African public holidays skipped. calendar: day 0 is the '
+  'day it started. Not deadline_unit, which is the period a step gives the debtor.';
+
+-- ---------- ...and the draft carries it, which is the third time for this function ----------
+--
+-- workflow_take_draft copies a version column by column: trigger_kind caught it, the three node
+-- columns caught it again, and day_unit is the same hole a third time. A draft taken off the
+-- published section 129 workflow would come back reading its day numbers as CALENDAR days --
+-- the same chart, every statutory interval a third of its real length, and nothing on screen
+-- saying so. ANY column added to workflow_versions or workflow_nodes from here has to be added
+-- to this function in the same migration.
+create or replace function public.workflow_take_draft(p_version uuid)
+returns uuid
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare
+  v_workflow uuid;
+  v_next integer;
+  v_draft uuid;
+begin
+  select workflow_id into v_workflow from public.workflow_versions where id = p_version;
+  if v_workflow is null then raise exception 'No such workflow version.'; end if;
+
+  select id into v_draft from public.workflow_versions
+   where workflow_id = v_workflow and state = 'draft' limit 1;
+  if v_draft is not null then return v_draft; end if;
+
+  select coalesce(max(version), 0) + 1 into v_next
+    from public.workflow_versions where workflow_id = v_workflow;
+
+  insert into public.workflow_versions (
+    workflow_id, version, state, created_by, trigger_kind, trigger_note, day_unit)
+  select v_workflow, v_next, 'draft', auth.uid(), o.trigger_kind, o.trigger_note, o.day_unit
+    from public.workflow_versions o where o.id = p_version
+  returning id into v_draft;
+
+  create temp table _phase_map (old uuid, new uuid) on commit drop;
+  create temp table _node_map (old uuid, new uuid) on commit drop;
+
+  insert into public.workflow_phases (version_id, ordinal, name, subtitle, from_day, to_day)
+  select v_draft, ordinal, name, subtitle, from_day, to_day
+    from public.workflow_phases where version_id = p_version order by ordinal;
+  insert into _phase_map
+  select o.id, n.id from public.workflow_phases o
+    join public.workflow_phases n on n.version_id = v_draft and n.ordinal = o.ordinal
+   where o.version_id = p_version;
+
+  insert into public.workflow_nodes (
+    version_id, phase_id, key, kind, label, description, day, deadline_days, deadline_unit,
+    channel, template_id, template_company_id, after_minutes, needs_release,
+    statutory, assign_to, x, y, ordinal)
+  select v_draft, m.new, o.key, o.kind, o.label, o.description, o.day, o.deadline_days,
+         o.deadline_unit, o.channel, o.template_id, o.template_company_id, o.after_minutes,
+         o.needs_release, o.statutory, o.assign_to, o.x, o.y, o.ordinal
+    from public.workflow_nodes o
+    left join _phase_map m on m.old = o.phase_id
+   where o.version_id = p_version;
+  insert into _node_map
+  select o.id, n.id from public.workflow_nodes o
+    join public.workflow_nodes n on n.version_id = v_draft and n.key = o.key
+   where o.version_id = p_version;
+
+  insert into public.workflow_connections (version_id, from_node_id, to_node_id, to_workflow_id, label)
+  select v_draft, f.new, t.new, o.to_workflow_id, o.label
+    from public.workflow_connections o
+    join _node_map f on f.old = o.from_node_id
+    left join _node_map t on t.old = o.to_node_id
+   where o.version_id = p_version;
+
+  return v_draft;
+end;
+$$;
+
+grant execute on function public.workflow_take_draft(uuid) to authenticated;

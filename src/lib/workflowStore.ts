@@ -8,8 +8,8 @@
  */
 import { supabase } from './supabase'
 import type {
-  Channel, DeadlineUnit, NodeKind, TriggerKind, Workflow, WorkflowConnection, WorkflowNode,
-  WorkflowPhase, VersionState,
+  Channel, DayUnit, DeadlineUnit, NodeKind, TriggerKind, Workflow, WorkflowConnection,
+  WorkflowNode, WorkflowPhase, VersionState,
 } from './workflowBuilder.ts'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows arrive as untyped JSON from PostgREST. */
@@ -90,7 +90,7 @@ export async function fetchWorkflows(): Promise<WorkflowSummary[]> {
 export async function fetchWorkflow(key: string, versionId?: string): Promise<Workflow | null> {
   const { data: wf, error } = await supabase
     .from('workflows')
-    .select('id, key, name, description, teams(name), workflow_versions(id, version, state, published_at, trigger_kind, trigger_note)')
+    .select('id, key, name, description, teams(name), workflow_versions(id, version, state, published_at, trigger_kind, trigger_note, day_unit)')
     .eq('key', key)
     .maybeSingle()
   if (error) throw new Error(error.message)
@@ -128,6 +128,7 @@ export async function fetchWorkflow(key: string, versionId?: string): Promise<Wo
       version: chosen.version,
       state: chosen.state as VersionState,
       publishedAt: chosen.published_at ?? null,
+      dayUnit: (chosen.day_unit ?? 'calendar') as DayUnit,
       /* Named here like every other column, and the reason to look twice: a trigger missing from
          this mapper reads as undefined for ever and the builder shows a workflow waiting for
          nothing. check-workflow-triggers holds the two lists together. */

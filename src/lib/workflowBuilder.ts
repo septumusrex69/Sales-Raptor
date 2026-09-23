@@ -13,6 +13,7 @@
  * (an absolute day, a wait after completion, and a next step) and any two of those can disagree
  * silently; this is the same shape with the disagreement made illegal.
  */
+import { addWorkingDays } from './workingDays.ts'
 
 /* ---------------------------------------------------------------- what starts it */
 
@@ -196,11 +197,53 @@ export interface WorkflowConnection {
 
 export type VersionState = 'draft' | 'active' | 'archived'
 
+/**
+ * WHAT KIND OF DAY A STEP'S DAY NUMBER IS.
+ *
+ * The firm, about the section 129 sequence: "this is all working days, not normal days. Business
+ * days, not normal days." The number carried no unit and the whole table was read as calendar
+ * days, so "day 32" meant a month where the firm meant a month and a half -- and every statutory
+ * interval in the sequence was a third short.
+ *
+ * NOT THE SAME AS a node's `deadlineUnit`, and confusing the two is the trap. deadlineUnit is the
+ * period a step gives the DEBTOR ("twenty business days to pay"); this is how far down the
+ * workflow the step itself sits. One is the debtor's clock, the other is the firm's.
+ */
+export type DayUnit = 'calendar' | 'business'
+
+/**
+ * The date a step actually falls on.
+ *
+ * THE TWO UNITS COUNT DIFFERENTLY ON PURPOSE, and the difference is off-by-one country:
+ *
+ *   - BUSINESS is 1-BASED AND INCLUSIVE. Day 1 is the day the workflow starts, because that is
+ *     how the firm writes their own chart: "the clerk triggers the section 129, workflow starts,
+ *     that's day one." So day 7 is the seventh working day counting that one, not seven days
+ *     later. A start that lands on a Saturday moves to the Monday first -- a workflow does not
+ *     begin on a day the office is shut.
+ *   - CALENDAR is 0-BASED, which is what every workflow written before this meant, and changing
+ *     it would silently move every step of one already drawn.
+ */
+export function landsOn(
+  from: string, day: number, unit: DayUnit, holidays: Record<string, string> = {},
+): string {
+  if (unit === 'calendar') {
+    const d = new Date(`${from}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() + day)
+    return d.toISOString().slice(0, 10)
+  }
+  /* addWorkingDays(x, 0) is "the next working day on or after x", which is the normalisation. */
+  const start = addWorkingDays(from, 0, holidays)
+  return addWorkingDays(start, Math.max(0, day - 1), holidays)
+}
+
 export interface WorkflowVersion {
   id: string
   version: number
   state: VersionState
   publishedAt: string | null
+  /** How this version's day numbers are counted. See DayUnit -- the firm's is business days. */
+  dayUnit: DayUnit
   /** What this version waits for. On the version, not the workflow: a published one is frozen. */
   trigger: TriggerKind
   /** The firm's own narrowing, in their words. Null on most. */

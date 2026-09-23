@@ -212,6 +212,23 @@ accounts, but their day is clients, leads and deals, and those records are on th
 `canLeadCollections` (not `canReassign`, which excludes the pre-legal team leader) decides who
 sees the floor's carried accounts rather than only their own.
 
+**A workflow day is a BUSINESS day, and the unit is on the version.** The firm, of the section
+129 sequence: "this is all working days, not normal days." A day number carried no unit and was
+read as calendar days everywhere, so day 32 meant a month where the firm meant a month and a half
+— and the twenty business days before a credit bureau listing was a third of its real length.
+`workflow_versions.day_unit` decides it and `landsOn()` is the only place it is applied. **Business
+is 1-based and inclusive** (day 1 is the day the workflow starts, as the firm writes their chart)
+and **calendar is 0-based**, unchanged, or every workflow already drawn would silently move. It is
+**not** a node's `deadlineUnit`, which is the period a step gives the *debtor*; one clock is the
+firm's and the other the debtor's. **The section 129 goes on day 1 and the final notice on day 12,
+not day 10** — day 1 + 10 business days is day 11, when the notice period *ends*, and the final
+notice opens "the period given in our Section 129 notice has ended".
+
+**`workflow_take_draft` copies a version column by column and has dropped one three times.**
+`trigger_kind`, then the three node columns, then `day_unit` — each time giving back a draft that
+looked right and meant something else. **Any column added to `workflow_versions` or
+`workflow_nodes` must be added to that function in the same migration.**
+
 **Things that bite:**
 - `protect_closed_diary_entries` **silently reverts** edits to `done`/`moved` entries. It does
   not raise.
