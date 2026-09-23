@@ -9,6 +9,7 @@ import { emailBodyHtml } from '../../../src/lib/emailStyle.js'
 import { A4_LETTERHEAD, type LetterDocument } from '../../../src/lib/letterDocument.js'
 import { charterFor } from './fonts.js'
 import { moneyZa } from './locale.js'
+import { toSettings as toFirmSettings } from '../../../src/lib/firmSettingsRow.js'
 import { notifyHeld } from './notify.js'
 
 /**
@@ -208,7 +209,13 @@ export async function runOneStep(
     contacts: (contactsRes.data ?? []).map((c: ContactRow) => ({
       kind: c.kind, value: c.value, isPrimary: c.is_primary, retiredAt: c.retired_at,
     })),
-    firm: firm as never,
+    /*
+     * MAPPED, NEVER CAST. The row is snake_case and FirmSettings is camelCase, so passing the
+     * raw row through `as never` made `firmName` and `officeHours` undefined -- and every notice
+     * held on "{{firm_name}} and {{firm_hours}}" while the firm's own details sat correctly in
+     * the table. The cast silenced the compiler on the one thing it could have caught.
+     */
+    firm: toFirmSettings(firm as never),
     today,
     money: moneyZa,
   })

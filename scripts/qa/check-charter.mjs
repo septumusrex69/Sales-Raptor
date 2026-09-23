@@ -368,6 +368,7 @@ ok('...labelled honestly, because most recipients will not see Charter',
  * cannot load — the same reason check-firm-settings reads that file rather than importing it.
  */
 const settings = readFileSync('src/lib/firmSettings.ts', 'utf8')
+  + readFileSync('src/lib/firmSettingsRow.ts', 'utf8')
 ok('a firm that has filled nothing in still writes in it',
   /emailFont: CHARTER_EMAIL_STACK,/.test(settings))
 

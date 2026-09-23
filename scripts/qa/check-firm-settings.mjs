@@ -40,7 +40,15 @@ const code = (t) => t
   .replace(/^\s*--.*$/gm, '')
 
 const schema = code(read('../../supabase/schema.sql'))
+/*
+ * BOTH FILES, because the five lists now span two. The Row, the shape and the mapper moved into
+ * firmSettingsRow.ts so the workflow runner could use the MAPPER on the server -- firmSettings.ts
+ * reaches the browser's Supabase client, which throws at import in Node. The lists themselves are
+ * unchanged and still have to agree with schema.sql in both directions; only which file holds
+ * them moved.
+ */
 const lib = read('../../src/lib/firmSettings.ts')
+  + read('../../src/lib/firmSettingsRow.ts')
 const libCode = code(lib)
 
 /* ---------- 1. what the table actually has ---------- */
@@ -75,7 +83,9 @@ const wanted = [...columns].filter((c) => !NOT_READ.has(c)).sort()
 
 /* ---------- 2. the select list, in both directions ---------- */
 
-const selectConst = libCode.match(/const COLUMNS = ([\s\S]*?)\n\ninterface Row/)
+/* `export` tolerated on both: the pair became importable when the mapper moved next door so the
+   server could use it. What is being read is still the one select list and the one Row. */
+const selectConst = libCode.match(/(?:export )?const COLUMNS = ([\s\S]*?)\n\n(?:export )?interface Row/)
 ok('the select list is a const of string literals', selectConst !== null)
 const selected = selectConst
   ? [...selectConst[1].matchAll(/'([^']*)'/g)].flatMap((m) => m[1].split(',')).map((c) => c.trim()).filter(Boolean)

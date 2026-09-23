@@ -235,6 +235,39 @@ ok('a provider refusal fails it instead', /state: 'failed'/.test(runner))
  */
 ok('one step throwing does not stop the run', /for \(const step of steps\)[\s\S]{0,200}?try \{/.test(runner))
 
+/* ------------------------------------------------ the firm's own details */
+
+/*
+ * MAPPED, NEVER CAST — and this one shipped.
+ *
+ * The runner read firm_settings with select('*') and handed the RAW ROW to mergeValuesFor through
+ * `as never`. The row is snake_case and FirmSettings is camelCase, so `firmName` and
+ * `officeHours` were undefined on every notice: the handover held on "it needs {{firm_name}} and
+ * {{firm_hours}}" while both sat correctly in the table. The firm found it on their first test
+ * import and reasonably assumed their own details were wrong.
+ *
+ * The cast is what did it. `as never` silences the compiler on precisely the mismatch it could
+ * have caught, and CLAUDE.md already names firmSettings' five hand-kept lists as the hazard.
+ */
+/* `runner` is the handler and the step machinery read together -- see the note above it. */
+ok('the runner maps the firm row rather than casting it',
+  /firm: toFirmSettings\(/.test(runner))
+ok('...through firmSettings\u2019 own mapper, not a second list',
+  /from '\.\.\/\.\.\/\.\.\/src\/lib\/firmSettingsRow\.js'/.test(runner))
+/*
+ * AND THE MAPPER IS SOMEWHERE THE SERVER CAN REACH. firmSettings.ts pulls in the browser's
+ * Supabase client, which throws at import in Node -- the same reason emailStyle.ts is held apart
+ * from it. A mapper that cannot be imported is a mapper that gets retyped.
+ */
+const firmRow = read('src/lib/firmSettingsRow.ts')
+ok('the mapper is held where a serverless function can import it', firmRow.length > 0)
+ok('...with no Supabase client in it', !/from '\.\/supabase'/.test(firmRow))
+/* The two fields the firm's first test held on, named, because those are the ones that were
+   undefined and the ones a reader will look for here. */
+for (const field of ['firmName', 'officeHours']) {
+  ok(`the mapper still names ${field}`, new RegExp(`${field}:`).test(firmRow))
+}
+
 /* ------------------------------------------------ one merge assembly */
 
 const shared = read('src/lib/accountMergeValues.ts')
