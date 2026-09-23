@@ -3,7 +3,7 @@ import { Loader2, MessageSquare } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { useAuth } from '../../store/AuthContext'
 import { recordSentSms, sendAccountSms } from '../../lib/accountSms'
-import { smsCost } from '../../lib/smsSegments'
+import { smsCost, smsSafeValues } from '../../lib/smsSegments'
 import { scheduleFor } from '../../lib/annexureB'
 import { missingFieldsNote } from '../../lib/messageTemplates'
 import { UseTemplate } from '../../components/library/UseTemplate'
@@ -66,7 +66,7 @@ export function SmsModal({ accountId, debtorKind, numbers, values, onClose, onDo
    * to break.
    */
   const smsValues = useMemo(
-    () => Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.replace(/\u00a0/g, ' ')])),
+    () => smsSafeValues(values),
     [values],
   )
 

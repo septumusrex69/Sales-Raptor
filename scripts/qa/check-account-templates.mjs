@@ -201,8 +201,16 @@ ok('...including wording that arrived from a template',
  * ONLY THE MERGED VALUES ARE TOUCHED, never what a collector typed: the box deliberately WARNS
  * about a curly apostrophe rather than silently rewriting somebody's words, and that stays true.
  */
+/*
+ * ASSERTED AS THE RULE, NOT AS THE LINE. This pinned the inline expression
+ * `.replace(/\u00a0/g, ' ')`, and broke the day the same stripping moved into `smsSafeValues` so
+ * the workflow runner -- which sends these templates with nobody watching -- could not drift from
+ * the screen. What matters is that the values reaching the box have been through it, wherever the
+ * doing lives.
+ */
 ok('the SMS box strips the app\u2019s own non-breaking spaces out of merged values',
-  /\.replace\(\/\\u00a0\/g, ' '\)/.test(code(sms)))
+  /smsValues\s*=\s*useMemo\(\s*\(\) => smsSafeValues\(values\)/.test(code(sms))
+  || /\.replace\(\/\\u00a0\/g, ' '\)/.test(code(sms)))
 ok('...and the picker is given those, not the raw ones',
   /<UseTemplate[\s\S]{0,120}?kind="sms"[\s\S]{0,120}?values=\{smsValues\}/.test(sms))
 /* The writer's own text is NOT rewritten -- the warning is still the mechanism for that. */

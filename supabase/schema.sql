@@ -6606,3 +6606,119 @@ comment on column public.debtor_accounts.listing_reference is
   'Our own reference for the submission, which a debtor quotes when querying it with a bureau.';
 comment on column public.debtor_accounts.bureaus_listed is
   'The bureaus it went to, as the notice prints them: "TransUnion, Experian and XDS".';
+-- ---------- Leaving a workflow ----------
+--
+-- The firm: "if there is a dispute raised or a PTP put in place, then a new workflow starts. And
+-- then that one ceases." An account that has promised to pay must stop receiving the sequence
+-- that ends in a summons, and it must stop the moment the promise is taken -- not the next time
+-- somebody opens the file.
+--
+-- SECURITY DEFINER, WITH A REASON. The write policy on workflow_run_steps is Administrator,
+-- Pre-legal Team Leader and Pre-legal Agent, but the write policy on promises_to_pay is
+-- deliberately as wide as its read policy, because taking a promise IS the job. So a Collections
+-- Liaison who takes a promise over the phone would, under invoker rights, update ZERO steps --
+-- and RLS filters silently rather than raising, which means the promise is recorded, the screen
+-- says it saved, and the section 129 goes out a fortnight later anyway. Whether a workflow stops
+-- cannot depend on who happened to answer the telephone.
+create or replace function public.workflow_exit_account(
+  p_account_id uuid, p_event text, p_reason text default null
+) returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_reason text;
+  v_cancelled integer := 0;
+begin
+  -- The firm's four, in their words. Checked here rather than by a column constraint because the
+  -- caller passes a name, and an unknown one is a bug in the caller that must not pass silently.
+  v_reason := coalesce(p_reason, case p_event
+    when 'promise'      then 'A promise to pay was made'
+    when 'dispute'      then 'A dispute was raised'
+    when 'paid_in_full' then 'The account was paid in full'
+    when 'tracing'      then 'The contact details are wrong and the file went for tracing'
+  end);
+  if v_reason is null then
+    raise exception 'Unknown workflow exit event "%". It is one of promise, dispute, paid_in_full, tracing.', p_event;
+  end if;
+
+  -- ONLY WHAT HAS NOT HAPPENED YET, which is cancelRemaining's rule and the reason it is written
+  -- down twice: a step that was SENT stays sent. It is the record of a notice that reached a
+  -- debtor, and rewriting it would be rewriting the file an attorney reads eighteen months later.
+  --
+  -- A HELD step is cancelled with the rest. It has not gone, and leaving it sitting on a
+  -- collector's list is exactly how a section 129 goes out three weeks after the debtor agreed to
+  -- pay.
+  with live as (
+    select id from public.workflow_runs
+     where account_id = p_account_id and state = 'running'
+  ), killed as (
+    update public.workflow_run_steps s
+       set state = 'cancelled', note = v_reason
+      from live
+     where s.run_id = live.id and s.state in ('pending', 'held')
+    returning s.id
+  )
+  select count(*) into v_cancelled from killed;
+
+  update public.workflow_runs
+     set state = 'left', left_reason = v_reason, left_at = now()
+   where account_id = p_account_id and state = 'running';
+
+  return v_cancelled;
+end $$;
+
+comment on function public.workflow_exit_account(uuid, text, text) is
+  'Takes an account out of every workflow it is running, cancelling what has not been sent. '
+  'Sent steps are never touched. Returns how many steps were cancelled.';
+
+revoke all on function public.workflow_exit_account(uuid, text, text) from public;
+grant execute on function public.workflow_exit_account(uuid, text, text) to authenticated;
+
+-- TWO OF THE FOUR ARE ROWS APPEARING, and those get triggers: a promise IS a promises_to_pay row
+-- and a dispute IS an account_queries row with kind 'dispute'. There is nothing to interpret, and
+-- a trigger is the only thing that cannot be forgotten by a caller.
+--
+-- 'help' AND 'litigation' ARE NOT DISPUTES and must not exit. account_queries carries all three
+-- because they need the same queue -- but 'help' is an agent asking a team leader what to do, and
+-- 'litigation' is the firm deciding to sue. Stopping the pre-legal sequence because somebody
+-- recommended suing is precisely backwards.
+create or replace function public.workflow_exit_on_promise() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+begin
+  -- Only a LIVE promise. A promise recorded as already broken or cancelled is history being
+  -- captured, not an undertaking that should stop anything.
+  if new.status = 'open' then
+    perform public.workflow_exit_account(new.account_id, 'promise');
+  end if;
+  return new;
+end $$;
+
+create or replace function public.workflow_exit_on_dispute() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+begin
+  if new.kind = 'dispute' then
+    perform public.workflow_exit_account(new.account_id, 'dispute');
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists workflow_exit_on_promise on public.promises_to_pay;
+create trigger workflow_exit_on_promise
+  after insert on public.promises_to_pay
+  for each row execute function public.workflow_exit_on_promise();
+
+drop trigger if exists workflow_exit_on_dispute on public.account_queries;
+create trigger workflow_exit_on_dispute
+  after insert on public.account_queries
+  for each row execute function public.workflow_exit_on_dispute();
+
+-- THE OTHER TWO ARE CONCLUSIONS, NOT ROWS, and they are deliberately left to an explicit call.
+--
+-- "Paid in full" is read off the ledgers against a balance, and "gone for tracing" is a position
+-- clientPosition.ts derives from sub_status with a regex. Mirroring either in SQL would be a
+-- SECOND copy of a rule that already exists in TypeScript -- the copy that is wrong the month
+-- somebody adds a sub-status -- and CLAUDE.md's whole argument for one clause builder is that
+-- written twice they drift and the failure is not a wrong list but changing accounts nobody saw.
+-- So the app calls workflow_exit_account() at the point where it already knows the answer.
