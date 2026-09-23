@@ -77,6 +77,16 @@ const WORKFLOW = {
   workflow_versions: [{
     id: VERSION, version: 1, state: 'draft', published_at: null,
     trigger_kind: 'handover', trigger_note: null,
+    /*
+     * AND SO IS THE DAY UNIT, for the same reason as the trigger above it. Left out, the mapper
+     * defaults to 'calendar' and the suite proves only that the fallback works.
+     *
+     * CALENDAR IS THE HONEST VALUE HERE, not a convenient one: this spine opens with a handover
+     * notice on DAY 0, and day 0 does not exist on a business chart -- business days are 1-based
+     * and inclusive, so `landsOn` clamps 0 to day 1. A fixture set to business days would be
+     * drawing a chart the rules say cannot exist, which is a worse test than a defaulted one.
+     */
+    day_unit: 'calendar',
   }],
 }
 
@@ -196,6 +206,52 @@ try {
   t.ok('all three phases are drawn',
     await page.locator('p', { hasText: /^Phase 3 · Open$/ }).first().isVisible())
   t.ok('...with their day ranges', await page.getByText(/day 80 – 160/i).first().isVisible())
+
+  /*
+   * ---------- WHICH KIND OF DAY THE CHART COUNTS IN ----------
+   *
+   * In the browser rather than only in the rules, because this is the failure this layer exists
+   * for: `day_unit` was stored, applied by `landsOn` and carried by the draft copier for weeks
+   * while appearing on NO SCREEN and being settable from NOWHERE. Every unit check passed the
+   * whole time. A chart reads "Day 32" either way, so the reader supplied the unit and half of
+   * them supplied the wrong one -- which is how twenty business days before a credit bureau
+   * listing became a third of their real length.
+   */
+  const header = await page.evaluate(() => document.body.innerText.replace(/\s+/g, ' '))
+  t.ok('the builder says which kind of day the chart counts in',
+    /counted in/i.test(header))
+  /* READ OFF THE CONTROL, not out of innerText: on a draft the unit is a <select>, and a
+     browser does not put an option's text into the body's innerText. Asserted against innerText
+     first, this reported red on a control that was plainly on the screen in the screenshot. */
+  const chosenUnit = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('select')]
+      .find((s) => [...s.options].some((o) => /calendar days/i.test(o.text)))
+    return el ? el.options[el.selectedIndex].text.trim() : null
+  })
+  t.check('...showing the unit this version actually uses', chosenUnit, 'calendar days')
+  /* The hint is the half that lets somebody count it themselves rather than trust the label. */
+  t.ok('...and says how to count it', /every day counts/i.test(header))
+
+  /*
+   * AND IT IS SETTABLE ON A DRAFT. A unit that can only be changed by a migration is one that is
+   * wrong on every workflow the firm draws next.
+   */
+  const units = await page.evaluate(() =>
+    [...document.querySelectorAll('select')]
+      .map((el) => [...el.options].map((o) => o.text.trim()))
+      .filter((opts) => opts.some((o) => /calendar days/i.test(o))))
+  /* JOINED, because the harness compares with Object.is and two arrays are never the same
+     object -- written as an array this failed while printing two identical-looking lists. */
+  t.check('the unit is a control on a draft, offering both',
+    (units[0] ?? []).slice().sort().join(', '), 'business days, calendar days')
+
+  /*
+   * AND THE CARDS ARE UNMARKED, which is correct for a calendar chart and is the convention:
+   * calendar is the model's default and what every workflow drawn before this meant, so an
+   * unlabelled "Day 32" is read correctly. Business days are the ones that announce themselves.
+   */
+  t.ok('a calendar chart leaves its numbers unmarked, as they have always read',
+    cards.every((c) => !/^business day/i.test(c)))
 
   /*
    * THE BRANCHES ARE NOT HERE, which is the firm's instruction and a design decision rather than

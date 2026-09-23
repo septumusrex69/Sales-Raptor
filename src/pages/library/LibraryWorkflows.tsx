@@ -9,12 +9,13 @@ import { useAuth } from '../../store/AuthContext'
 import { canEditLibrary, canViewLibrary } from '../../lib/permissions'
 import { LibraryHeader } from './LibraryHeader'
 import {
-  canSave, dayZeroLabel, triggerMeta, workflowFacts, workflowProblems, NODE_KINDS, TRIGGERS,
-  TRIGGER_ORDER, type NodeKind, type TriggerKind, type Workflow, type WorkflowNode,
+  canSave, dayZeroLabel, triggerMeta, workflowFacts, workflowProblems, DAY_UNITS, NODE_KINDS,
+  TRIGGERS, TRIGGER_ORDER, type DayUnit, type NodeKind, type TriggerKind, type Workflow,
+  type WorkflowNode,
 } from '../../lib/workflowBuilder.ts'
 import {
   addNode, createWorkflow, deleteNode, fetchWorkflow, fetchWorkflows, publish, saveNode,
-  setNextNode, setTrigger, takeDraft, type WorkflowSummary,
+  setDayUnit, setNextNode, setTrigger, takeDraft, type WorkflowSummary,
 } from '../../lib/workflowStore.ts'
 import { fetchLibrary, type LibraryTemplate } from '../../lib/templateLibrary.ts'
 import { clerksReached } from '../../lib/workflowSchedule.ts'
@@ -380,6 +381,38 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
               </span>
             )}
             <span className="text-slate-400">&middot; {dayZeroLabel(workflow.version.trigger)}</span>
+          </div>
+          {/*
+            AND WHAT KIND OF DAY THE CHART COUNTS IN, beside what starts it, because the two
+            together are what a day number MEANS. The firm corrected us on this once -- "this is
+            all working days, not normal days. Business days, not normal days" -- and the column
+            that came out of it was stored, applied and carried by the draft copier while
+            appearing on no screen and being settable from nowhere. A chart says "Day 32" either
+            way, and read as calendar days the firm's day 32 is a fortnight early.
+
+            Editable on a draft, a sentence on a published version: flipping it re-dates every
+            step of the chart at once, so the archived version an attorney reads back would no
+            longer say what the firm did. The database refuses it, and says so.
+          */}
+          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-slate-400">Counted in</span>
+            {workflow.version.state === 'draft' && mayEdit ? (
+              <select className={`${inputClass} w-auto py-1 text-xs`} value={workflow.version.dayUnit}
+                disabled={busy}
+                onChange={(e) => {
+                  const next = e.target.value as DayUnit
+                  void act(() => setDayUnit(workflow.version.id, next))
+                }}>
+                {(['business', 'calendar'] as DayUnit[]).map((u) => (
+                  <option key={u} value={u}>{DAY_UNITS[u].label}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="font-medium text-slate-700">
+                {DAY_UNITS[workflow.version.dayUnit].label}
+              </span>
+            )}
+            <span className="text-slate-400">{DAY_UNITS[workflow.version.dayUnit].hint}</span>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">

@@ -3,7 +3,7 @@ import {
 } from 'lucide-react'
 import {
   nodesOfPhase, type Workflow, type WorkflowNode, type WorkflowPhase, type WorkflowProblem,
-  landsOn, type DayUnit,
+  landsOn, dayLabel, dayRangeLabel, type DayUnit,
 } from '../../lib/workflowBuilder.ts'
 import { shortDate } from '../../lib/dateLabels.ts'
 
@@ -70,7 +70,13 @@ function PhaseRow({ phase, nodes, selected, onSelect, problems, from, dayUnit }:
         </span>
         <div>
           <p className="text-[13px] font-semibold uppercase tracking-[0.14em] text-white">{phase.name}</p>
-          <p className="text-[11px] text-white/50">Day {phase.fromDay} &ndash; {phase.toDay}</p>
+          {/* THE RANGE CARRIES THE UNIT, like every number under it. "Day 5 - 12" on a chart
+              counted in business days is the ambiguity that cost the firm a fortnight on the
+              listing interval, and a phase bar is the last place a reader looks before reading
+              six cards. */}
+          <p className="text-[11px] text-white/50">
+            {dayRangeLabel(phase.fromDay, phase.toDay, dayUnit)}
+          </p>
         </div>
         {phase.subtitle && (
           <p className="ml-auto hidden sm:block text-[11px] uppercase tracking-[0.18em] text-gold-400/80">
@@ -129,10 +135,21 @@ function NodeCard({ node, selected, onSelect, problems, from, dayUnit }: {
             : 'border-slate-200'
       }`}>
       <Icon size={16} className={refused ? 'text-rose-500' : selected ? 'text-gold-500' : 'text-brand-500'} />
-      {/* The day number and the date it lands on, together. The number is what the step IS; the
-          date is what makes it checkable against a calendar. Neither on its own does both. */}
+      {/*
+        THE DAY NUMBER, ITS UNIT AND THE DATE IT LANDS ON, all three, and each does a job the
+        other two cannot. The number is what the step IS and what the firm types off their chart.
+        The date is what makes it checkable against a calendar -- whether it lands in the December
+        shutdown is something anybody spots in a second and nobody spots in a number. And the UNIT
+        is what the number means: read as calendar days, the firm's "day 32" is a fortnight early,
+        which is how twenty business days before a credit bureau listing became a third of its
+        real length.
+
+        Said on every card rather than once in a corner. A chip on the header asserting "business
+        days" is only as true as the numbers below it, and the version this replaced had the unit
+        on no screen at all -- so the reader supplied it, and half of them supplied the wrong one.
+      */}
       <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-        Day {node.day}
+        {dayLabel(node.day, dayUnit)}
       </p>
       <p className="text-[11px] text-slate-400 tabular-nums">{shortDate(landsOn(from, node.day, dayUnit))}</p>
       <p className="text-[13px] font-medium text-slate-800 leading-snug mt-0.5">{node.label}</p>

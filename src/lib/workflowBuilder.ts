@@ -212,6 +212,53 @@ export type VersionState = 'draft' | 'active' | 'archived'
 export type DayUnit = 'calendar' | 'business'
 
 /**
+ * THE UNIT, IN WORDS, SO A DAY NUMBER IS NEVER READ WITHOUT IT.
+ *
+ * `day_unit` has been stored, applied by `landsOn` and carried by `workflow_take_draft` since the
+ * firm corrected us -- and it appeared on no screen at all. A chart labelled "Day 32" with the
+ * unit nowhere on the page is the same chart that was misread the first time: the reader supplies
+ * the unit themselves, and half of them supply the wrong one.
+ *
+ * WRITTEN ONCE because it is said in three places -- the header, the phase bar and every card --
+ * and three copies of "business days" is how one of them ends up saying something else.
+ *
+ * `short` is what prefixes a number. Calendar is deliberately the UNMARKED case: it is the
+ * model's default, it is what every workflow drawn before this meant, and an unlabelled "Day 32"
+ * read as calendar days is read correctly. Business days are the ones that have to announce
+ * themselves.
+ */
+export const DAY_UNITS: Record<DayUnit, {
+  /** For a sentence: "counted in business days". */
+  label: string
+  /** Prefixes a number: "Business day 32". */
+  short: string
+  /** What the reader has to know to count it themselves. */
+  hint: string
+}> = {
+  calendar: {
+    label: 'calendar days',
+    short: 'Day',
+    hint: 'Every day counts, weekends and public holidays included. Day 0 is the day it starts.',
+  },
+  business: {
+    label: 'business days',
+    short: 'Business day',
+    hint: 'Weekends and South African public holidays are skipped. Day 1 is the day it starts, '
+      + 'counting that day \u2014 which is how the firm writes their own chart.',
+  },
+}
+
+/** "Business day 32", or "Day 32" where the chart counts in calendar days. */
+export function dayLabel(day: number, unit: DayUnit): string {
+  return `${DAY_UNITS[unit].short} ${day}`
+}
+
+/** "Business day 5 \u2013 12". The phase bar's range, carrying the same unit as the cards under it. */
+export function dayRangeLabel(from: number, to: number, unit: DayUnit): string {
+  return `${DAY_UNITS[unit].short} ${from} \u2013 ${to}`
+}
+
+/**
  * The date a step actually falls on.
  *
  * THE TWO UNITS COUNT DIFFERENTLY ON PURPOSE, and the difference is off-by-one country:

@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom'
 import { AlertTriangle, Trash2, X } from 'lucide-react'
 import { inputClass } from '../ui/Modal'
 import {
-  CHANNELS, NODE_KINDS, orderedNodes, type Channel, type DeadlineUnit, type NodeKind,
-  type Workflow, type WorkflowNode, type WorkflowProblem,
+  CHANNELS, DAY_UNITS, NODE_KINDS, dayLabel, orderedNodes, triggerMeta, type Channel,
+  type DeadlineUnit, type NodeKind, type Workflow, type WorkflowNode, type WorkflowProblem,
 } from '../../lib/workflowBuilder.ts'
 import { TEMPLATE_KINDS, kindForChannel } from '../../lib/messageTemplates.ts'
 import type { LibraryTemplate } from '../../lib/templateLibrary.ts'
@@ -72,7 +72,9 @@ export function StepDrawer({
         <div>
           <p className="text-[11px] uppercase tracking-wide text-slate-400">Step details</p>
           <h3 className="font-semibold text-[15px] text-slate-800 mt-0.5">{node.label}</h3>
-          <p className="text-xs text-slate-400">Day {node.day} &middot; {NODE_KINDS[node.kind].label}</p>
+          <p className="text-xs text-slate-400">
+            {dayLabel(node.day, workflow.version.dayUnit)} &middot; {NODE_KINDS[node.kind].label}
+          </p>
         </div>
         <button type="button" onClick={onClose} aria-label="Close step details"
           className="text-slate-400 hover:text-slate-600"><X size={15} /></button>
@@ -206,11 +208,30 @@ export function StepDrawer({
 
           <fieldset className="rounded-lg border border-slate-200 p-3">
             <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-400">When</legend>
-            <Field label="Workflow day">
+            {/*
+              THE UNIT AND THE ZERO, BOTH READ OFF THE VERSION, because this box is where the
+              number is typed and it was telling everybody the wrong thing twice.
+
+              "days after the handover" was hard-coded. A workflow triggered by a broken
+              arrangement counts from the day the arrangement broke, and `triggerMeta().dayZero`
+              has said so since triggers were built -- the header prints it and this field, the
+              one somebody is actually typing into, did not.
+
+              AND THE FLOOR FOLLOWS THE UNIT. Business days are 1-based and inclusive, so day 0
+              does not exist on a business chart -- `landsOn` clamps it to day 1, which means a
+              step typed as 0 silently becomes a step on day 1 and the chart reads as though
+              something happens before the workflow starts. Calendar days are 0-based and
+              unchanged.
+            */}
+            <Field label={`Workflow day (${DAY_UNITS[workflow.version.dayUnit].label})`}>
               <div className="flex items-center gap-2">
-                <input type="number" min={0} className={`${inputClass} w-24`} value={draft.day} disabled={readOnly}
+                <input type="number" min={workflow.version.dayUnit === 'business' ? 1 : 0}
+                  className={`${inputClass} w-24`} value={draft.day} disabled={readOnly}
                   onChange={(e) => set('day', Number(e.target.value))} />
-                <span className="text-xs text-slate-500">days after the handover</span>
+                <span className="text-xs text-slate-500">
+                  {DAY_UNITS[workflow.version.dayUnit].label} from{' '}
+                  {triggerMeta(workflow.version.trigger).dayZero}
+                </span>
               </div>
             </Field>
           </fieldset>
@@ -262,7 +283,9 @@ export function StepDrawer({
               onChange={(e) => { void onNext(e.target.value || null) }}>
               <option value="">Nothing &mdash; the line ends here</option>
               {orderedNodes(workflow).filter((n) => n.id !== node.id).map((n) => (
-                <option key={n.id} value={n.id}>Day {n.day} &ndash; {n.label}</option>
+                <option key={n.id} value={n.id}>
+                  {dayLabel(n.day, workflow.version.dayUnit)} &ndash; {n.label}
+                </option>
               ))}
             </select>
           </Field>

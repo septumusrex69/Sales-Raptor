@@ -6722,3 +6722,34 @@ create trigger workflow_exit_on_dispute
 -- somebody adds a sub-status -- and CLAUDE.md's whole argument for one clause builder is that
 -- written twice they drift and the failure is not a wrong list but changing accounts nobody saw.
 -- So the app calls workflow_exit_account() at the point where it already knows the answer.
+
+-- ---------- ...and neither can what kind of day it counts in ----------
+--
+-- day_unit was left out of the freeze above, which was an oversight of exactly the kind that
+-- comment describes. It is not a cosmetic field either: flipping a published version from
+-- calendar to business days re-dates every step of the chart at once -- day 32 moves by a
+-- fortnight -- so the archived version an attorney reads back eighteen months later would no
+-- longer say what the firm actually did. Runs already in flight are safe, because
+-- workflow_run_steps stores the resolved date rather than re-deriving it; the chart is not.
+--
+-- Its own message rather than the trigger's. "Take a draft before changing what starts it" on
+-- somebody who changed the day unit is a sentence that sends them looking at the wrong control.
+create or replace function public.refuse_trigger_change_when_frozen()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  if old.state <> 'draft'
+     and (new.trigger_kind is distinct from old.trigger_kind
+          or new.trigger_note is distinct from old.trigger_note) then
+    raise exception 'This workflow version is published. Take a draft of it before changing what starts it.'
+      using errcode = 'check_violation';
+  end if;
+  if old.state <> 'draft' and new.day_unit is distinct from old.day_unit then
+    raise exception 'This workflow version is published. Take a draft of it before changing what kind of day it counts in.'
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end $$;

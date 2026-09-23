@@ -261,6 +261,24 @@ export async function setTrigger(
   if (error) throw new Error(friendly(error.message))
 }
 
+/**
+ * WHAT KIND OF DAY THIS VERSION'S NUMBERS ARE.
+ *
+ * Stored since the firm corrected us -- "this is all working days, not normal days" -- applied by
+ * `landsOn` and carried by `workflow_take_draft`, and settable from nowhere. A column only a
+ * migration can change is one that is wrong on every workflow the firm draws next.
+ *
+ * Refused on a published version by refuse_trigger_change_when_frozen, which is why the message
+ * comes back through `friendly` rather than being guessed at here.
+ */
+export async function setDayUnit(versionId: string, unit: DayUnit): Promise<void> {
+  const { error } = await supabase
+    .from('workflow_versions')
+    .update({ day_unit: unit })
+    .eq('id', versionId)
+  if (error) throw new Error(friendly(error.message))
+}
+
 /** "Click Edit: create a Draft version." The copy is done in the database, edges and all. */
 export async function takeDraft(versionId: string): Promise<string> {
   const { data, error } = await supabase.rpc('workflow_take_draft', { p_version: versionId })
