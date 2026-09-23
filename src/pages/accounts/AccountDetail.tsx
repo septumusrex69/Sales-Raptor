@@ -74,6 +74,7 @@ import { FIRM_UNSET, fetchFirmSettings, type FirmSettings } from '../../lib/firm
 import { dayKey } from '../../lib/collectionPace'
 import { accountMergeValues } from '../../lib/accountMergeValues.ts'
 import { OtherAccountsPanel } from '../../components/collections/OtherAccountsPanel'
+import { WorkflowRunPanel } from '../../components/collections/WorkflowRunPanel'
 import { debtorKey, type OtherAccount } from '../../lib/sameDebtor'
 import { fetchOtherAccounts } from '../../lib/accountBook'
 import { useTitleSlot } from '../../components/layout/TitleSlot'
@@ -616,6 +617,10 @@ export function AccountDetail() {
     openQueryWithClient: account.clientActionAsk !== null,
   })
   const otherAccountsPanel = <OtherAccountsPanel key="others" rows={otherAccounts} />
+  /* Reads itself -- one account's run is a handful of rows on the collections path, and nothing
+     else on this page needs them. Draws nothing where the account is in no workflow, which is
+     most of the book. */
+  const workflowPanel = <WorkflowRunPanel key="workflow" accountId={account.id} />
 
   const clientLinePanel = (
     <ClientLinePanel
@@ -1008,7 +1013,7 @@ export function AccountDetail() {
             three lines under it. A panel nobody scrolls to is a panel that does not exist, and
             this one only works if the person doing the work reads it.
           */
-          side={[clientLinePanel, summaryPanel, otherAccountsPanel, promisePanel,
+          side={[clientLinePanel, summaryPanel, workflowPanel, otherAccountsPanel, promisePanel,
             disputesPanel, positionPanel]}
         />
       )}

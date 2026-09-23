@@ -10,6 +10,7 @@ import { letterToPdf, letterFilename } from '../../../src/lib/letterPdf.js'
 import { emailBodyHtml } from '../../../src/lib/emailStyle.js'
 import { A4_LETTERHEAD, type LetterDocument } from '../../../src/lib/letterDocument.js'
 import { charterFor } from './fonts.js'
+import { notifyHeld } from './notify.js'
 import { todayInJohannesburg, moneyZa } from './locale.js'
 
 /**
@@ -61,11 +62,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * cron did not fire, or a step whose account was only reachable later, must not be skipped for
    * ever. The order is oldest first so a sequence that fell behind goes out in the order it was
    * written -- the reminder before the final notice, never the other way round.
+   *
+   * AND HELD STEPS ARE ASKED AGAIN, which is what makes the notification worth sending. A hold is
+   * "nothing on the account fills {{listing_reference}}" -- a sentence that tells somebody what to
+   * go and do. Looked at once and never again, doing it would change nothing and the notice would
+   * sit held for ever; asked each morning, filling the field is all the collector has to do.
+   *
+   * A STEP THAT WAITS FOR A PERSON STILL WAITS. planSend refuses a `needsRelease` step every time
+   * it is asked, so re-asking cannot send a section 129 nobody released -- it costs one decision
+   * a day and changes nothing until a person acts, which is the correct behaviour rather than a
+   * side effect of it.
+   *
+   * `failed` IS NOT RE-ASKED. That is a provider refusal, not something the account is missing,
+   * and quietly retrying a message the network rejected is how a debtor gets four copies.
    */
   const { data: due, error } = await admin
     .from('workflow_run_steps')
-    .select('id, node_id, due_on, state, run_id, workflow_runs!inner(id, account_id, version_id, started_on, state)')
-    .eq('state', 'pending')
+    .select('id, node_id, due_on, state, note, run_id, workflow_runs!inner(id, account_id, version_id, started_on, state)')
+    .in('state', ['pending', 'held'])
     .lte('due_on', today)
     .eq('workflow_runs.state', 'running')
     .order('due_on', { ascending: true })
@@ -76,13 +90,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const steps = (due ?? []) as unknown as DueStep[]
-  const outcome = { considered: steps.length, sent: 0, held: 0, failed: 0, notes: [] as string[] }
+  /* `held` is a NEW hold or one whose reason changed; `stillHeld` is one that has not moved.
+     Counted apart because the first is news and the second is the state of the floor -- a run
+     reporting "held: 40" every morning would read as forty things going wrong daily. */
+  const outcome = {
+    considered: steps.length, sent: 0, held: 0, stillHeld: 0, failed: 0,
+    told: 0, notes: [] as string[],
+  }
 
   for (const step of steps) {
     try {
       const what = await runOneStep(admin, step, today)
       outcome[what.result] += 1
-      if (what.note) outcome.notes.push(`${step.id}: ${what.note}`)
+      outcome.told += what.told ?? 0
+      /* Only what is new goes in the notes. A standing hold is already on the step. */
+      if (what.note && what.result !== 'stillHeld') outcome.notes.push(`${step.id}: ${what.note}`)
     } catch (e) {
       /*
        * ONE STEP'S FAILURE IS NOT THE RUN'S. Two hundred accounts are being worked here; a single
@@ -102,19 +124,48 @@ interface DueStep {
   id: string
   node_id: string
   due_on: string
+  state: 'pending' | 'held'
+  /** The reason already on it, if it is already held. What a new reason is compared against. */
+  note: string | null
   run_id: string
   workflow_runs: { id: string; account_id: string; version_id: string; started_on: string }
 }
 
-type StepOutcome = { result: 'sent' | 'held' | 'failed'; note: string | null }
+type StepOutcome = {
+  result: 'sent' | 'held' | 'stillHeld' | 'failed'
+  note: string | null
+  /** How many people were told, where this was news. */
+  told?: number
+}
 
 async function runOneStep(
   admin: SupabaseClient, step: DueStep, today: string,
 ): Promise<StepOutcome> {
   const run = step.workflow_runs
-  const hold = async (note: string): Promise<StepOutcome> => {
+
+  /*
+   * HOLD IT, AND TELL SOMEBODY ONLY IF THIS IS NEWS.
+   *
+   * The reason goes on the step every time, because that is the record. The NOTIFICATION goes out
+   * only when the reason is new or has changed -- CLAUDE.md's rule that a warning firing when
+   * nothing is wrong is worse than no warning, and here the cost is exact: a section 129 waiting
+   * for a person waits every morning until somebody releases it, so a daily notification would
+   * teach the collector to clear the bell without reading it. On the one message that means a
+   * statutory demand has not gone out.
+   *
+   * `account` and `debtorName` are passed in rather than read here because the early holds happen
+   * before the account has been fetched -- and a hold that cannot name the account is still a
+   * hold worth recording.
+   */
+  const hold = async (note: string, about?: {
+    accountId: string; collectorId: string | null; debtorName: string | null; caseNumber: string | null
+    stepLabel: string
+  }): Promise<StepOutcome> => {
+    const isNews = step.state !== 'held' || step.note !== note
     await admin.from('workflow_run_steps').update({ state: 'held', note }).eq('id', step.id)
-    return { result: 'held', note }
+    if (!isNews) return { result: 'stillHeld', note }
+    const told = about ? await notifyHeld(admin, { ...about, reason: note }) : 0
+    return { result: 'held', note, told }
   }
 
   /* ---------- everything planSend needs, in as few round trips as this will go ---------- */
@@ -133,7 +184,13 @@ async function runOneStep(
   const firm = firmRes.data
   if (!nodeRow) return hold('The step this run was built from is no longer in the workflow.')
   if (!account) return hold('The account this run belongs to could not be read.')
-  if (!firm) return hold('The firm’s own details have not been filled in, so a notice cannot be addressed.')
+  if (!firm) {
+    return hold('The firm’s own details have not been filled in, so a notice cannot be addressed.', {
+      accountId: account.id as string, collectorId: (account.assigned_to as string) ?? null,
+      debtorName: debtorNameOf(account), caseNumber: (account.case_number as string) ?? null,
+      stepLabel: (nodeRow.label as string) ?? 'A workflow step',
+    })
+  }
 
   const node = toNode(nodeRow)
 
@@ -171,7 +228,10 @@ async function runOneStep(
    * signed by the wrong person is not.
    */
   if (node.channel === 'email' && !collector?.id) {
-    return hold('Nobody is assigned to this account, so there is no mailbox for the notice to go out from.')
+    return hold(
+      'Nobody is assigned to this account, so there is no mailbox for the notice to go out from.',
+      about(account, node.label, null),
+    )
   }
 
   const rows = (templatesRes.data ?? []) as TemplateRow[]
@@ -247,7 +307,7 @@ async function runOneStep(
       : priorRes.data?.state === 'sent',
   })
 
-  if (!plan.can) return hold(plan.note ?? 'This step cannot go out yet.')
+  if (!plan.can) return hold(plan.note ?? 'This step cannot go out yet.', about(account, node.label, collector?.id ?? null))
 
   /* ---------- it goes ---------- */
 
@@ -354,6 +414,31 @@ async function runOneStep(
   }
 
   return { result: 'sent', note: null }
+}
+
+/** What a notification needs to name the account, gathered once rather than at each hold. */
+function about(account: Record<string, unknown>, stepLabel: string, collectorId: string | null) {
+  return {
+    accountId: account.id as string,
+    collectorId: collectorId ?? ((account.assigned_to as string) ?? null),
+    debtorName: debtorNameOf(account),
+    caseNumber: (account.case_number as string) ?? null,
+    stepLabel,
+  }
+}
+
+/**
+ * What the debtor is called, in a sentence somebody reads off a bell without opening anything.
+ *
+ * A COMPANY IS NOT A "FIRST NAME". The book holds a company's registered name in the surname
+ * field -- there is nowhere else for it to go -- so joining the two parts is right either way,
+ * and for a company the first part is simply empty.
+ */
+function debtorNameOf(account: Record<string, unknown>): string | null {
+  const name = [account.debtor_first_name, account.debtor_surname]
+    .map((p) => (typeof p === 'string' ? p.trim() : ''))
+    .filter(Boolean).join(' ')
+  return name || null
 }
 
 /* ---------------------------------------------------------------- the gathering */
