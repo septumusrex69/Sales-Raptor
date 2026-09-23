@@ -35,6 +35,9 @@ const toNode = (r: any): WorkflowNode => ({
   deadlineUnit: r.deadline_unit as DeadlineUnit | null,
   channel: r.channel as Channel | null,
   templateId: r.template_id,
+  templateCompanyId: r.template_company_id,
+  afterMinutes: r.after_minutes,
+  needsRelease: r.needs_release,
   statutory: r.statutory,
   assignTo: r.assign_to,
   x: r.x,
@@ -106,7 +109,7 @@ export async function fetchWorkflow(key: string, versionId?: string): Promise<Wo
       .select('id, ordinal, name, subtitle, from_day, to_day')
       .eq('version_id', chosen.id).order('ordinal'),
     supabase.from('workflow_nodes')
-      .select('id, phase_id, key, kind, label, description, day, deadline_days, deadline_unit, channel, template_id, statutory, assign_to, x, y, ordinal')
+      .select('id, phase_id, key, kind, label, description, day, deadline_days, deadline_unit, channel, template_id, template_company_id, after_minutes, needs_release, statutory, assign_to, x, y, ordinal')
       .eq('version_id', chosen.id).order('day').order('ordinal'),
     supabase.from('workflow_connections')
       .select('id, from_node_id, to_node_id, to_workflow_id, label')

@@ -31,6 +31,7 @@ const ok = (name, actual) => check(name, actual, true)
 const node = (over = {}) => ({
   id: 'n1', phaseId: 'p1', key: 'k', kind: 'action', label: 'A step', description: null,
   day: 0, deadlineDays: null, deadlineUnit: null, channel: null, templateId: null,
+  templateCompanyId: null, afterMinutes: null, needsRelease: false,
   statutory: false, assignTo: null, x: null, y: null, ordinal: 1, ...over,
 })
 const build = (nodes, connections = [], phases = [

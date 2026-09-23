@@ -6162,3 +6162,177 @@ end $$;
 drop trigger if exists workflow_versions_trigger_frozen on public.workflow_versions;
 create trigger workflow_versions_trigger_frozen before update on public.workflow_versions
   for each row execute function public.refuse_trigger_change_when_frozen();
+
+-- ---------- Who a template's wording is written for ----------
+--
+-- The firm's collections library is written twice all the way down -- "Dear {{debtor_name}}" and
+-- "To the directors of {{debtor_name}}", an ID number and a registration number, summons and
+-- liquidation. Twenty-six templates, thirteen pairs. Without this column the two versions of a
+-- notice are distinguishable only by the words in their names, and the workflow would be picking
+-- a statutory demand by string matching.
+--
+-- NULLABLE, because the templates already in the library suit either. A call script that opens
+-- "good morning" is not an individual template, and forcing a choice on it would make the column
+-- a lie on every row that has no view.
+alter table public.message_templates
+  add column if not exists audience text;
+
+alter table public.message_templates drop constraint if exists message_templates_audience_check;
+alter table public.message_templates add constraint message_templates_audience_check
+  check (audience is null or audience in ('individual', 'company'));
+
+comment on column public.message_templates.audience is
+  'Who the wording is for: individual, company, or null where it suits either. The workflow picks '
+  'the matching template from the debtor record -- debtor_accounts.debtor_kind.';
+
+-- AND AN ATTACHMENT MUST BE A LETTER.
+--
+-- attachment_id already said "an email may name another template whose PDF goes with it", and a
+-- CHECK cannot look at the row it points at -- so it could name an SMS, or a call script, or
+-- itself. Five of the firm's fourteen emails carry a letter; what makes them safe is that the
+-- thing they carry is one.
+--
+-- A TRIGGER, because this is a question about another row. Raised loudly rather than fixed: an
+-- email quietly stripped of its attachment is a section 129 cover note sent with no notice
+-- attached, which is the one failure in this set that costs the firm a case.
+create or replace function public.refuse_non_letter_attachment()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare k text;
+begin
+  if new.attachment_id is null then return new; end if;
+  if new.attachment_id = new.id then
+    raise exception 'A template cannot attach itself.' using errcode = 'check_violation';
+  end if;
+  select kind into k from public.message_templates where id = new.attachment_id;
+  if k is null then
+    raise exception 'That attachment is not a template in the library.' using errcode = 'check_violation';
+  end if;
+  if k <> 'letter' then
+    raise exception 'An email can only attach a letter, and that one is a %.', k
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists message_templates_attachment_is_letter on public.message_templates;
+create trigger message_templates_attachment_is_letter
+  before insert or update of attachment_id on public.message_templates
+  for each row execute function public.refuse_non_letter_attachment();
+
+-- ---------- Three things the firm's own workflow says and a node could not ----------
+--
+-- 1. THE STEP IS WRITTEN TWICE. Every template in the collections library exists in an
+--    -individual and a -company version -- "Dear" against "To the directors of", an ID number
+--    against a registration number, summons against liquidation. One step, two wordings, chosen
+--    from the debtor record. A node carried ONE template_id, so the alternatives were a chart
+--    with every step drawn twice, or a runner that swapped "-individual" for "-company" in a
+--    string. String-matching the wording of a statutory demand is not a thing to do.
+--
+--    template_id is the wording; template_company_id is the wording when the debtor is a company,
+--    null where one version serves both (every call script in the library is that).
+--
+-- 2. THE EMAIL LANDS BEFORE THE SMS. The firm's rule, and it is not a preference: the SMS says
+--    "we emailed you", so an SMS that arrives first is a message about something that has not
+--    happened. The document says 5 to 10 minutes. A day number cannot hold that.
+--
+-- 3. SOME STEPS MUST NOT SEND ON A TIMER. Day 32 tells a debtor their default HAS been reported
+--    and quotes the listing reference; day 37 tells them their file HAS gone to the attorneys.
+--    Sending either before it is true is a misrepresentation, and the firm's own note says it is
+--    the kind of thing the Council for Debt Collectors acts on. Those steps wait for a person.
+alter table public.workflow_nodes
+  add column if not exists template_company_id uuid
+    references public.message_templates (id) on delete set null,
+  add column if not exists after_minutes integer,
+  add column if not exists needs_release boolean not null default false;
+
+alter table public.workflow_nodes drop constraint if exists workflow_nodes_after_minutes_check;
+alter table public.workflow_nodes add constraint workflow_nodes_after_minutes_check
+  check (after_minutes is null or after_minutes >= 0);
+
+comment on column public.workflow_nodes.template_company_id is
+  'The wording for a company debtor, where the step is written twice. Null where template_id '
+  'serves both. The workflow picks by debtor_accounts.debtor_kind.';
+comment on column public.workflow_nodes.after_minutes is
+  'Minutes after the step before it, within the same day. The firm: the email must land 5 to 10 '
+  'minutes before the SMS, because the SMS says "we emailed you".';
+comment on column public.workflow_nodes.needs_release is
+  'This step is prepared and then waits for a person to send it. True for a statutory demand and '
+  'for any step that asserts something has already happened.';
+
+-- ---------- ...and the node's audience, timing and release with it ----------
+--
+-- THE SAME HAZARD, THE SAME FUNCTION, THE SECOND TIME IN A DAY. workflow_take_draft copies a
+-- version column by column. Adding trigger_kind to the VERSION caught it once; adding
+-- template_company_id, after_minutes and needs_release to the NODES is the same hole one table
+-- down. Without this, taking a draft of the section 129 workflow gives back a copy where every
+-- company debtor gets the individual wording, the SMS may overtake the email, and the two steps
+-- that must wait for a person send on a timer.
+create or replace function public.workflow_take_draft(p_version uuid)
+returns uuid
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare
+  v_workflow uuid;
+  v_next integer;
+  v_draft uuid;
+begin
+  select workflow_id into v_workflow from public.workflow_versions where id = p_version;
+  if v_workflow is null then raise exception 'No such workflow version.'; end if;
+
+  select id into v_draft from public.workflow_versions
+   where workflow_id = v_workflow and state = 'draft' limit 1;
+  if v_draft is not null then return v_draft; end if;
+
+  select coalesce(max(version), 0) + 1 into v_next
+    from public.workflow_versions where workflow_id = v_workflow;
+
+  insert into public.workflow_versions (
+    workflow_id, version, state, created_by, trigger_kind, trigger_note)
+  select v_workflow, v_next, 'draft', auth.uid(), o.trigger_kind, o.trigger_note
+    from public.workflow_versions o where o.id = p_version
+  returning id into v_draft;
+
+  create temp table _phase_map (old uuid, new uuid) on commit drop;
+  create temp table _node_map (old uuid, new uuid) on commit drop;
+
+  insert into public.workflow_phases (version_id, ordinal, name, subtitle, from_day, to_day)
+  select v_draft, ordinal, name, subtitle, from_day, to_day
+    from public.workflow_phases where version_id = p_version order by ordinal;
+  insert into _phase_map
+  select o.id, n.id from public.workflow_phases o
+    join public.workflow_phases n on n.version_id = v_draft and n.ordinal = o.ordinal
+   where o.version_id = p_version;
+
+  insert into public.workflow_nodes (
+    version_id, phase_id, key, kind, label, description, day, deadline_days, deadline_unit,
+    channel, template_id, template_company_id, after_minutes, needs_release,
+    statutory, assign_to, x, y, ordinal)
+  select v_draft, m.new, o.key, o.kind, o.label, o.description, o.day, o.deadline_days,
+         o.deadline_unit, o.channel, o.template_id, o.template_company_id, o.after_minutes,
+         o.needs_release, o.statutory, o.assign_to, o.x, o.y, o.ordinal
+    from public.workflow_nodes o
+    left join _phase_map m on m.old = o.phase_id
+   where o.version_id = p_version;
+  insert into _node_map
+  select o.id, n.id from public.workflow_nodes o
+    join public.workflow_nodes n on n.version_id = v_draft and n.key = o.key
+   where o.version_id = p_version;
+
+  insert into public.workflow_connections (version_id, from_node_id, to_node_id, to_workflow_id, label)
+  select v_draft, f.new, t.new, o.to_workflow_id, o.label
+    from public.workflow_connections o
+    join _node_map f on f.old = o.from_node_id
+    left join _node_map t on t.old = o.to_node_id
+   where o.version_id = p_version;
+
+  return v_draft;
+end;
+$$;
+
+grant execute on function public.workflow_take_draft(uuid) to authenticated;

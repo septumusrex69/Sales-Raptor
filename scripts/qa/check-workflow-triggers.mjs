@@ -131,6 +131,7 @@ ok('a new workflow is asked what sets it off before anything else',
  */
 const selects = [...store.matchAll(/\.select\('([^']*)'\)/g)].map((m) => m[1])
 ok('the store selects something at all', selects.length > 0)
+
 for (const column of ['trigger_kind', 'trigger_note']) {
   ok(`the workflow select asks for ${column}`, selects.some((q) => q.includes(column)))
   ok(`...and the mapper reads ${column} back`, new RegExp(`chosen\\.${column}`).test(store))
@@ -148,6 +149,20 @@ ok('workflow_take_draft is in the checked-in schema', drafts.length > 0)
 const draft = drafts[drafts.length - 1] ?? ''
 ok('...and the draft it takes carries the trigger over', /o\.trigger_kind/.test(draft))
 ok('...and the firm\'s own narrowing with it', /o\.trigger_note/.test(draft))
+
+/*
+ * THE NODE'S THREE NEW COLUMNS, held the same way and for the same reason. Each of them changes
+ * what a debtor receives: the company wording, whether the SMS overtakes the email, and whether
+ * a step that asserts something has already happened waits for a person to confirm it has.
+ */
+for (const column of ['template_company_id', 'after_minutes', 'needs_release']) {
+  ok(`the node select asks for ${column}`, selects.some((q) => q.includes(column)))
+  ok(`...and the mapper reads ${column} back`,
+    new RegExp(`r\\.${column}`).test(store))
+  /* Named in the message: three identical "carries it over" lines said which check failed and
+     not which column, which is a failure report somebody has to go and decode. */
+  ok(`...and taking a draft carries ${column} over`, new RegExp(`o\\.${column}`).test(draft))
+}
 
 ok('a workflow can be started from nothing', /function public\.workflow_create/.test(schema))
 ok('...and it comes with a phase, or the builder has nowhere to put the first step',
@@ -184,6 +199,7 @@ const withStep = {
   nodes: [{
     id: 'n', phaseId: 'p', key: 'first', kind: 'task', label: 'Open the file', description: null,
     day: 0, deadlineDays: null, deadlineUnit: null, channel: null, templateId: null,
+    templateCompanyId: null, afterMinutes: null, needsRelease: false,
     statutory: false, assignTo: null, x: null, y: null, ordinal: 0,
   }],
 }

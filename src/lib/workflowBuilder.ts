@@ -138,6 +138,36 @@ export interface WorkflowNode {
   deadlineUnit: DeadlineUnit | null
   channel: Channel | null
   templateId: string | null
+  /**
+   * THE SAME STEP, WRITTEN FOR A COMPANY.
+   *
+   * Every template in the firm's collections library exists twice -- "Dear" against "To the
+   * directors of", an ID number against a registration number, summons against liquidation. One
+   * step, two wordings, chosen from the debtor record. Null where one version serves both.
+   *
+   * A SECOND TEMPLATE RATHER THAN A SECOND NODE, and rather than a runner that swaps
+   * "-individual" for "-company" in a key: string-matching the wording of a statutory demand is
+   * not a thing to do, and a chart with every step drawn twice reads as though both send.
+   */
+  templateCompanyId: string | null
+  /**
+   * Minutes after the step before it, within the same day.
+   *
+   * The firm's rule and not a preference: the SMS says "we emailed you", so an SMS that arrives
+   * first is a message about something that has not happened. Their document says 5 to 10
+   * minutes. A day number cannot hold that.
+   */
+  afterMinutes: number | null
+  /**
+   * Prepared on its day, then held for a person to send.
+   *
+   * Day 32 tells a debtor their default HAS been reported and quotes the listing reference; day
+   * 37 tells them their file HAS gone to the attorneys. Sending either before it is true is a
+   * misrepresentation, and the firm's own note says it is the kind of thing the Council for Debt
+   * Collectors acts on. Separate from `statutory`, which means something else -- never re-issued
+   * when a file rejoins, and proof of dispatch kept.
+   */
+  needsRelease: boolean
   statutory: boolean
   assignTo: string | null
   /** Where the card sits on the canvas. Read by nothing that decides what runs. */
