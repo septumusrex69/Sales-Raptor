@@ -1,15 +1,18 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import release from '../_lib/workflow/release.js'
 import run from '../_lib/workflow/run.js'
 
 /**
  * One serverless function for every /api/workflow/* route.
  *
- * A dispatcher for one route today, which is not over-engineering: the next two are already
- * known -- releasing a held step from the account screen, and starting a run when a collector
- * issues a section 129 -- and Vercel's Hobby plan counts FILES, not routes. Adding them here
- * costs nothing; adding them as files costs a twelfth of the deployment each.
+ * Two routes and the same one function, which is the point: Vercel's Hobby plan counts FILES,
+ * not routes. `run` is the morning cron and answers to a cron secret; `release` is a person
+ * pressing a button and answers to their session. The next one -- starting a run when a collector
+ * issues a section 129 -- costs nothing here and a twelfth of the deployment as its own file.
  */
-const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promise<void>> = { run }
+const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promise<void>> = {
+  run, release,
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = typeof req.query.action === 'string' ? req.query.action : ''

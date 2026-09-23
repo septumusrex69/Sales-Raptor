@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
-import { AlertTriangle, Check, Clock, Minus } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { AlertTriangle, Check, Clock, Loader2, Minus, Send } from 'lucide-react'
 import { Card, CardHeader } from '../ui/Card'
-import { fetchAccountRuns, type AccountRun } from '../../lib/accountRun.ts'
+import { useAuth } from '../../store/AuthContext'
+import { fetchAccountRuns, releaseStep, type AccountRun } from '../../lib/accountRun.ts'
 import { RUN_STEP_WORDS, needsAttention, type RunStep } from '../../lib/runSteps.ts'
 import { dayLabel } from '../../lib/workflowBuilder.ts'
 import { shortDate } from '../../lib/dateLabels.ts'
@@ -27,18 +28,15 @@ export function WorkflowRunPanel({ accountId }: { accountId: string }) {
   const [runs, setRuns] = useState<AccountRun[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      try {
-        const rows = await fetchAccountRuns(accountId)
-        if (!cancelled) setRuns(rows)
-      } catch (e) {
-        if (!cancelled) { setRuns([]); setError(e instanceof Error ? e.message : String(e)) }
-      }
-    })()
-    return () => { cancelled = true }
+  const load = useCallback(async () => {
+    try {
+      setRuns(await fetchAccountRuns(accountId))
+    } catch (e) {
+      setRuns([]); setError(e instanceof Error ? e.message : String(e))
+    }
   }, [accountId])
+
+  useEffect(() => { void load() }, [load])
 
   /* Nothing at all while it loads, and nothing when there is nothing: a card that appears and
      then vanishes moves everything below it twice. */
@@ -52,13 +50,13 @@ export function WorkflowRunPanel({ accountId }: { accountId: string }) {
           : `${runs.length} runs on this account.`} />
       {error && <p className="text-xs text-negative-700">{error}</p>}
       <div className="space-y-4">
-        {runs.map((run) => <RunBlock key={run.id} run={run} />)}
+        {runs.map((run) => <RunBlock key={run.id} run={run} onSent={load} />)}
       </div>
     </Card>
   )
 }
 
-function RunBlock({ run }: { run: AccountRun }) {
+function RunBlock({ run, onSent }: { run: AccountRun; onSent: () => Promise<void> }) {
   const waiting = needsAttention(run.steps)
   return (
     <section>
@@ -83,13 +81,7 @@ function RunBlock({ run }: { run: AccountRun }) {
       {waiting.length > 0 && (
         <ul className="mt-2 space-y-1.5">
           {waiting.map((s) => (
-            <li key={s.id}
-              className="rounded-lg border border-[var(--c-gold-deep)]/30 bg-gold-50 px-3 py-2">
-              <p className="text-[12px] font-medium text-navy-950">
-                {s.label} &middot; {RUN_STEP_WORDS[s.state].label}
-              </p>
-              {s.note && <p className="text-[11px] text-slate-600 mt-0.5 leading-snug">{s.note}</p>}
-            </li>
+            <HeldStep key={s.id} step={s} live={run.state === 'running'} onSent={onSent} />
           ))}
         </ul>
       )}
@@ -98,6 +90,66 @@ function RunBlock({ run }: { run: AccountRun }) {
         {run.steps.map((s) => <StepRow key={s.id} step={s} run={run} />)}
       </ul>
     </section>
+  )
+}
+
+/**
+ * ONE HELD STEP, AND THE BUTTON THAT SENDS IT.
+ *
+ * THE LABEL IS THE TRUTH ABOUT WHAT PRESSING IT DOES. On a step that waits for a PERSON -- day 39
+ * saying a default has been reported, day 49 saying the file has gone to the attorneys -- the
+ * person is the gate, so "Send it now" is exactly what happens. On any other hold the gate is
+ * something missing from the account, and a button promising to send would be lying: pressing it
+ * asks again, and if the listing reference is still not there the step holds again with the same
+ * reason. So there it says "Try again", which is what it does.
+ *
+ * AND THE ANSWER COMES BACK IN PLACE. A release that holds again is the useful case -- somebody
+ * thought they had fixed it and had not -- so the new reason replaces the old one under the same
+ * card rather than the button simply going quiet.
+ */
+function HeldStep({ step, live, onSent }: {
+  step: RunStep
+  /** A run the account has already left sends nothing more, so it offers nothing. */
+  live: boolean
+  onSent: () => Promise<void>
+}) {
+  const { session } = useAuth()
+  const [busy, setBusy] = useState(false)
+  const [said, setSaid] = useState<string | null>(null)
+
+  async function release() {
+    if (!session?.access_token) return
+    setBusy(true); setSaid(null)
+    try {
+      const out = await releaseStep(session.access_token, step.id)
+      if (out.result === 'sent') { await onSent(); return }
+      /* Still held, or the provider refused. Either way the reason is the answer. */
+      setSaid(out.note ?? 'It still cannot go out.')
+      await onSent()
+    } catch (e) {
+      setSaid(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <li className="rounded-lg border border-[var(--c-gold-deep)]/30 bg-gold-50 px-3 py-2">
+      <p className="text-[12px] font-medium text-navy-950">
+        {step.label} &middot; {RUN_STEP_WORDS[step.state].label}
+      </p>
+      {step.note && <p className="text-[11px] text-slate-600 mt-0.5 leading-snug">{step.note}</p>}
+      {said && <p className="text-[11px] text-negative-700 mt-1 leading-snug">{said}</p>}
+      {live && (
+        <button type="button" onClick={() => { void release() }} disabled={busy}
+          className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-[#c9a052]
+            bg-white px-2.5 py-1 text-[11px] font-medium text-navy-950
+            hover:bg-gold-100 disabled:opacity-40">
+          {busy ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
+          {step.needsRelease ? 'Send it now' : 'Try again'}
+        </button>
+      )}
+    </li>
   )
 }
 

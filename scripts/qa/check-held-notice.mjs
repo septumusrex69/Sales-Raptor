@@ -52,7 +52,15 @@ try {
   vocabularyLoaded = true
 } catch { /* reported below, rather than thrown */ }
 
+/*
+ * THE CRON HANDLER AND THE STEP MACHINERY, READ TOGETHER, because together they are what the
+ * morning run is. The per-step work was lifted into step.ts when the release button needed to
+ * take exactly the same path -- one runOneStep, so the wording, the fee, the Sent copy and the
+ * record are identical whether a notice went out at six in the morning or because somebody
+ * pressed a button. The rules below are unchanged; only which file holds them moved.
+ */
 const runner = read('api/_lib/workflow/run.ts')
+  + read('api/_lib/workflow/step.ts')
 const notify = read('api/_lib/workflow/notify.ts')
 const panel = read('src/components/collections/WorkflowRunPanel.tsx')
 const store = read('src/lib/accountRun.ts')
@@ -156,7 +164,10 @@ ok('the notification links to the account', /link: `\/accounts\/\$\{notice\.acco
  */
 ok('the panel reads the run’s steps', /workflow_run_steps\(/.test(store))
 ok('...including the reason it is held', /note: s\.note \?\? null/.test(store))
-ok('...and prints that reason, not just a state', /\{s\.note\}/.test(panel))
+/* The held card became its own component when the release button went on it, so the step is
+   named `step` there rather than `s`. Asserted on the rule -- the note is rendered -- rather
+   than on whichever identifier the component happens to use. */
+ok('...and prints that reason, not just a state', /\{(s|step)\.note\}/.test(panel))
 /*
  * LIFTED OUT OF THE SEQUENCE. Left in the list with everything else, the one line that needs
  * doing reads as a row in a table.

@@ -122,6 +122,20 @@ export function planSend(input: {
    * fired when there was no dependency would hold every first step of every workflow.
    */
   afterStepSent?: boolean
+  /**
+   * A PERSON HAS LOOKED AT IT AND SAID SEND IT.
+   *
+   * Lifts the `waits_for_person` refusal and NOTHING ELSE. That distinction is the whole design:
+   * a held step waits either on a person or on a fact, and a button cannot supply a fact. Pressed
+   * on a listing notice whose reference is still missing, the step holds again with the same
+   * reason -- which is the honest answer, and the reason the button is safe to offer on every
+   * held step rather than only on the statutory ones.
+   *
+   * The firm's own instruction for these two steps is that sending them before they are true is
+   * a misrepresentation and the kind of thing the Council for Debt Collectors acts on. So what a
+   * release means is "I have checked": it does not mean the guards stop applying.
+   */
+  released?: boolean
 }): SendPlan {
   const { node, debtor, dueOn } = input
 
@@ -198,8 +212,9 @@ export function planSend(input: {
   }
 
   /* NOT A FAULT. Its day came and what it waits for is a person — which is what it was set to do
-     on the day the run started, so the note says the thing they have to do. */
-  if (node.needsRelease) {
+     on the day the run started, so the note says the thing they have to do. A release is that
+     person, having looked; every guard below it still applies to them. */
+  if (node.needsRelease && !input.released) {
     return hold('waits_for_person', node.statutory
       ? 'A statutory demand. Check the address, the balance and that no dispute or arrangement is '
         + 'live, then send it.'

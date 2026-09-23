@@ -28,6 +28,15 @@ export interface RunStep {
   sentAt: string | null
   /** The day number off the firm's own chart. The unit it is counted in is on the run. */
   day: number
+  /**
+   * Does this step wait for a PERSON, as opposed to waiting for a fact?
+   *
+   * What the button on a held step is allowed to say. On a `needsRelease` step the person IS the
+   * gate, so "Send it now" is the truth; on any other hold the gate is something missing from the
+   * account, and a button promising to send it would be a lie -- there it offers to try again,
+   * which is what pressing it actually does.
+   */
+  needsRelease: boolean
 }
 
 /**

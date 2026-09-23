@@ -40,7 +40,7 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
       id, state, left_reason, started_on,
       workflow_versions!inner(day_unit, workflows!inner(name)),
       workflow_run_steps(id, due_on, state, note, sent_at,
-        workflow_nodes!inner(label, channel, day))
+        workflow_nodes!inner(label, channel, day, needs_release))
     `)
     .eq('account_id', accountId)
     .order('started_on', { ascending: false })
@@ -65,6 +65,7 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
         label: s.workflow_nodes?.label ?? 'Step',
         channel: s.workflow_nodes?.channel ?? null,
         day: s.workflow_nodes?.day ?? 0,
+        needsRelease: Boolean(s.workflow_nodes?.needs_release),
         dueOn: s.due_on,
         state: s.state as RunStepState,
         note: s.note ?? null,
@@ -72,4 +73,32 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
       }))
       .sort((a: RunStep, b: RunStep) => a.dueOn.localeCompare(b.dueOn) || a.day - b.day),
   }))
+}
+
+/**
+ * SEND A HELD STEP NOW, because a person has looked at it and says it may go.
+ *
+ * THROUGH THE ENDPOINT, NOT BY WRITING THE ROW. Marking a step 'sent' from the browser would
+ * mark it sent and send nothing -- the wording, the PDF, the fee and the Sent copy all happen on
+ * the server, on the same path the morning run takes. The step's own state is the record of
+ * something that reached a debtor, and the only thing entitled to write it is the thing that
+ * reached them.
+ */
+export async function releaseStep(accessToken: string, stepId: string): Promise<{
+  result: 'sent' | 'held' | 'stillHeld' | 'failed'
+  note: string | null
+}> {
+  const res = await fetch('/api/workflow/release', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ stepId }),
+  })
+  const body = (await res.json().catch(() => ({}))) as {
+    ok?: boolean; error?: string; result?: string; note?: string | null
+  }
+  if (!res.ok || !body.ok) throw new Error(body.error ?? 'The notice could not be sent.')
+  return {
+    result: (body.result ?? 'held') as 'sent' | 'held' | 'stillHeld' | 'failed',
+    note: body.note ?? null,
+  }
 }

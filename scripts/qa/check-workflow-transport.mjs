@@ -134,7 +134,15 @@ ok('...and after the mail has come in',
 
 /* ------------------------------------------------ one sender, not two */
 
+/*
+ * THE CRON HANDLER AND THE STEP MACHINERY, READ TOGETHER, because together they are what the
+ * morning run is. The per-step work was lifted into step.ts when the release button needed to
+ * take exactly the same path -- one runOneStep, so the wording, the fee, the Sent copy and the
+ * record are identical whether a notice went out at six in the morning or because somebody
+ * pressed a button. The rules below are unchanged; only which file holds them moved.
+ */
 const runner = read('api/_lib/workflow/run.ts')
+  + read('api/_lib/workflow/step.ts')
 const sender = read('api/_lib/email/sendAsUser.ts')
 const route = read('api/_lib/email/send.ts')
 
