@@ -20,6 +20,17 @@ notices now lead with Raptor's own case number, because the client's is used on 
 account 5,013 times over, and the masked identity number lost its spaces because they cost an SMS
 three characters it does not have.
 
-Run `node scripts/letters/build.mjs` to regenerate. `check-letters.mjs` holds the output against
-what the library actually contains, so a letter edited in the database without being edited here
-is a failure rather than a drift nobody sees.
+**And `attachments.json` says which email posts which notice.** Ten of the firm's fourteen
+collections emails carry a PDF; the other four — the two handover messages and the two that warn a
+listing is being prepared — say what they have to say in their own words. The pairing itself lives
+on `message_templates.attachment_id`, where the composer reads it, but a column of UUIDs in one
+database is not a record anybody can review and a second environment starts with none of it. This
+file is the record, and it is what the wiring was applied from.
+
+Run `node scripts/letters/build.mjs` to regenerate. `check-letters.mjs` reads `letters.json` and
+`attachments.json` and asks of each notice what the composer will ask before it attaches one: that
+every merge field exists and is on the collections side, that it names the trust account and not
+the business one, that Charter can draw every character in it, that it paginates — and that the
+email posting it was written for the same debtor. It does **not** read the database. Loading a
+letter is a separate step, and each one was verified there by comparing `md5(body)` against the
+build; a letter edited in the database alone is a drift this cannot see.

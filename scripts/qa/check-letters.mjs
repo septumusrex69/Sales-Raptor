@@ -145,6 +145,41 @@ check('every notice names the trust account the same way', [...new Set(bankField
 ok('...and it is the TRUST account, never the business one',
   !bankFields[0].includes('business'))
 
+/*
+ * WHICH EMAIL POSTS WHICH NOTICE.
+ *
+ * Ten of the firm's fourteen collections emails carry a PDF; the other four are the two handover
+ * messages and the two that warn a listing is being prepared, and they say so in their own words
+ * rather than attaching anything. The pairing itself is set on `message_templates.attachment_id`
+ * in the database, where the composer reads it -- but the database is not a record anybody can
+ * review, and a second environment starts with none of it. attachments.json is that record, and
+ * it is what the wiring was applied from.
+ *
+ * WHAT IT GUARDS is the one mistake with a real cost: an email written to a person that posts the
+ * notice written for a company. Both exist for every step, their names differ by one word, and
+ * the company notice tells its reader their company may be wound up and its directors held
+ * personally liable. Sent to a pensioner it is not a typo.
+ *
+ * Read the other way, it also catches a notice nothing posts. A letter in the library that no
+ * email attaches is one the workflow will never send, which looks like a working library right up
+ * until the step that was supposed to carry it goes out bare.
+ */
+const attaches = JSON.parse(readFileSync('scripts/letters/attachments.json', 'utf8'))
+const wanted = new Set(WANTED)
+
+for (const [email, letter] of Object.entries(attaches)) {
+  ok(`${email}: posts a notice the firm has written`, wanted.has(letter))
+  /* The suffix is the audience on both sides -- it is how the library names the pair, and how a
+     collector tells them apart in the picker. */
+  const emailFor = email.endsWith('-company') ? 'company' : 'individual'
+  const letterFor = letter.endsWith('-company') ? 'company' : 'individual'
+  check(`${email}: ...written for the same debtor it is addressed to`, letterFor, emailFor)
+}
+
+const posted = new Set(Object.values(attaches))
+check('every notice is posted by at least one email',
+  WANTED.filter((k) => !posted.has(k)), [])
+
 /* ------------------------------------------------------------------ */
 
 for (const f of failures) console.error(`  ✗ ${f}`)
