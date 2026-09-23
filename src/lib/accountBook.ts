@@ -94,6 +94,10 @@ export interface DebtorAccount {
   bucket: string | null
   writeOffReason: string | null
   handoverDate: string | null
+  /** The three the listing notice is a record of. Null until the submission has actually gone. */
+  listingDate: string | null
+  listingReference: string | null
+  bureausListed: string | null
   /**
    * When the ROW was written -- which for an imported account is the day the handover was
    * approved, and is not the same question as handoverDate.
@@ -178,6 +182,11 @@ const toAccount = (r: any): DebtorAccount => ({
   bucket: r.bucket,
   writeOffReason: r.write_off_reason,
   handoverDate: r.handover_date,
+  /* Named here like every other column -- one missing from this mapper reads as undefined for
+     ever and the listing notice would quietly print a placeholder at a debtor. */
+  listingDate: r.listing_date,
+  listingReference: r.listing_reference,
+  bureausListed: r.bureaus_listed,
   createdAt: (r.created_at as string | null) ?? null,
   paymentsToDate: r.payments_to_date === null ? null : Number(r.payments_to_date),
   swordfishBalanceAtImport: r.swordfish_balance_at_import === null ? null : Number(r.swordfish_balance_at_import),

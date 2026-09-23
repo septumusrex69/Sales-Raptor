@@ -6582,3 +6582,27 @@ begin
          with check (public.current_user_role() in (''Administrator'', ''Pre-legal Team Leader'', ''Pre-legal Agent''))', t);
   end loop;
 end $$;
+
+-- ---------- What was submitted to the credit bureaus, and when ----------
+--
+-- The listing notice is a RECORD, not a warning: "your default has now been reported… this is the
+-- record of what was submitted, and the reference to quote if you query it with a bureau." It
+-- prints a date, a reference and the bureaus, and none of the three existed anywhere in Raptor.
+--
+-- NULLABLE, AND THAT IS THE POINT. A listing notice may not go out until all three are true, so
+-- their absence is what holds the step -- which is exactly what the firm asked for: "it must only
+-- send once the submission has actually happened and those three values exist on the account. If
+-- they are missing, hold the node and alert the collector." A default of today's date or an empty
+-- string would make the notice sendable and wrong.
+alter table public.debtor_accounts
+  add column if not exists listing_date date,
+  add column if not exists listing_reference text,
+  add column if not exists bureaus_listed text;
+
+comment on column public.debtor_accounts.listing_date is
+  'The day the default was actually submitted to the credit bureaus. Null until it has been: the '
+  'listing notice is held while any of these three is missing.';
+comment on column public.debtor_accounts.listing_reference is
+  'Our own reference for the submission, which a debtor quotes when querying it with a bureau.';
+comment on column public.debtor_accounts.bureaus_listed is
+  'The bureaus it went to, as the notice prints them: "TransUnion, Experian and XDS".';

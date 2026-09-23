@@ -400,6 +400,11 @@ export function AccountDetail() {
         Object.entries(mergeValuesFor({
           account: {
             caseNumber: account.caseNumber,
+            handoverDate: account.handoverDate,
+            paymentsToDate: account.paymentsToDate,
+            listingDate: account.listingDate,
+            listingReference: account.listingReference,
+            bureausListed: account.bureausListed,
             debtorKind: account.debtorKind,
             debtorTitle: account.debtorTitle,
             debtorFirstName: account.debtorFirstName,

@@ -275,6 +275,25 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
     { key: 'respond_by', label: 'The date the debtor must answer by, written out', sample: '5 October 2026' },
     { key: 'position_as_at', label: 'The date the balance was struck', sample: '18 September 2026' },
     /*
+     * THE FIVE THE LETTERS NEED AND THE SMSs NEVER DID.
+     *
+     * `handover_date` is the first station on the notice's timeline -- "account handed to us" --
+     * and `paid_to_date` is the figure beside it: what a debtor has paid since, shown against
+     * what is still outstanding. Zero is a real answer there and prints as R 0.00 rather than a
+     * blank, because a blank reads as "we have not looked".
+     *
+     * THE THREE LISTING FIELDS ARE A RECORD, NOT A PLAN. The notice says the default "has now
+     * been reported" and gives the reference to quote at a bureau. They are null until the
+     * submission has actually happened, and that absence is what holds the step -- the firm's own
+     * rule: "it must only send once the submission has actually happened and those three values
+     * exist on the account."
+     */
+    { key: 'handover_date', label: 'The day the account was handed to us', sample: '14 August 2026' },
+    { key: 'paid_to_date', label: 'Paid since the handover', sample: 'R 0.00' },
+    { key: 'listing_date', label: 'The day the default was reported to the bureaus', sample: '1 December 2026' },
+    { key: 'listing_reference', label: 'Our listing reference, to quote at a bureau', sample: 'BFL-2026-11482' },
+    { key: 'bureaus_listed', label: 'Which bureaus it went to', sample: 'TransUnion, Experian and XDS' },
+    /*
      * AND THE FIRM'S OWN DETAILS, which are not the agent's and not the client's. Raptor has no
      * table for them -- companies.banking_details is where REMITTANCE GOES, which is the opposite
      * direction from where a debtor pays -- so these resolve to nothing until it has one.
@@ -362,7 +381,8 @@ export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
   { title: 'The debtor', keys: ['debtor_name', 'debtor_first_name', 'debtor_address', 'debtor_id_masked',
     'debtor_reg_no'] },
   { title: 'The person', keys: ['contact_name', 'contact_first_name'] },
-  { title: 'The account', keys: ['case_number', 'reference', 'account_number', 'balance', 'capital', 'position_as_at', 'respond_by'] },
+  { title: 'The account', keys: ['case_number', 'reference', 'account_number', 'handover_date',
+    'paid_to_date', 'listing_date', 'listing_reference', 'bureaus_listed', 'balance', 'capital', 'position_as_at', 'respond_by'] },
   { title: 'Their business', keys: ['company_name', 'service_interested'] },
   { title: 'The deal', keys: ['deal_name', 'deal_value'] },
   { title: 'The client', keys: ['client_name'] },
@@ -570,6 +590,14 @@ export function missingFieldsNote(missing: string[]): string | null {
 export interface TemplateAccount {
   /** Raptor's own, unique and never reused. Not the creditor's accountNumber below. */
   caseNumber: string | null
+  /** The day the debt fell due and the account came to the firm. First station on the timeline. */
+  handoverDate: string | null
+  /** Paid SINCE the handover, which is what the notices show against what is still outstanding. */
+  paymentsToDate: number | null
+  /** The three the listing notice is a record of. Null until the submission has actually gone. */
+  listingDate: string | null
+  listingReference: string | null
+  bureausListed: string | null
   debtorKind: 'individual' | 'company'
   debtorTitle: string | null
   debtorFirstName: string | null
@@ -746,6 +774,18 @@ export function mergeValuesFor(input: {
      * reference the debtor knows" resolves to, silently, in every template already written.
      */
     case_number: (a.caseNumber ?? '').trim() || null,
+    handover_date: a.handoverDate ? longDate(a.handoverDate) : null,
+    /*
+     * ZERO IS AN ANSWER. `paid_to_date` is the figure the notices print against what is still
+     * outstanding, and a debtor who has paid nothing must read "R 0.00" -- a blank there reads as
+     * a field nobody filled in, on a statutory demand. Null only where the account genuinely does
+     * not know, which leaves the placeholder standing and the notice unsendable, as it should.
+     */
+    paid_to_date: a.paymentsToDate === null || a.paymentsToDate === undefined
+      ? null : input.money(a.paymentsToDate),
+    listing_date: a.listingDate ? longDate(a.listingDate) : null,
+    listing_reference: (a.listingReference ?? '').trim() || null,
+    bureaus_listed: (a.bureausListed ?? '').trim() || null,
     // The client's own reference is what appears on the debtor's paperwork; ours is the fallback.
     reference: (a.clientReference ?? '').trim() || (a.accountNumber ?? '').trim() || null,
     client_name: (input.clientName ?? '').trim() || null,
