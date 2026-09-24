@@ -365,10 +365,20 @@ ok('...which is what the search turns on', /forceOpen=\{searching\}/.test(settin
  */
 ok('the count says what is on screen while searching',
   /subtitle=\{searching[\s\S]{0,200}?team members match/.test(settingsSrc))
-/* Reading the list is not an administrator's privilege. */
+/*
+ * Reading the list is not an administrator's privilege, so the box sits OUTSIDE the isAdmin
+ * block and before the buttons inside it.
+ *
+ * ANCHORED ON SOMETHING THAT STILL EXISTS. This was ordered against "Add someone who has left",
+ * which has since been merged into Add User -- so indexOf returned -1, and `boxAt < -1` is false:
+ * the check went red on a correct change, by the exact mechanism CLAUDE.md warns about. Both
+ * sides are asserted present before they are ordered.
+ */
 const boxAt = settingsSrc.indexOf('Search people, email, role or team')
-ok('the search box is offered before the admin-only buttons',
-  boxAt > 0 && boxAt < settingsSrc.indexOf('Add someone who has left'))
+const adminOnlyAt = settingsSrc.indexOf('{isAdmin && (', boxAt)
+ok('the search box is there', boxAt > 0)
+ok('the admin-only block is there', adminOnlyAt > 0)
+ok('...and the box comes before it, so everybody gets it', boxAt < adminOnlyAt)
 
 /*
  * AND THE GLOBAL SEARCH FINDS PEOPLE, which is what the firm was actually looking at.

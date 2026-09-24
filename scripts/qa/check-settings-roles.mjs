@@ -68,8 +68,18 @@ ok('...including the role that leads the collections floor',
    fourth, which is exactly how the third one came to differ. */
 const literalLists = [...settings.matchAll(/\['Administrator',\s*'Sales Manager'/g)].length
 check('no screen keeps its own copy of the role list', literalLists, 0)
+/*
+ * EVERY ROLE PICKER READS THE SHARED LIST.
+ *
+ * Asserted as "at least two", not three: there were three pickers when the firm had a separate
+ * "Add someone who has left" form, and merging that into Add User correctly removed one. A count
+ * pinned to the old number reported that merge as a fault.
+ *
+ * The number is the weak half anyway -- the assertion that actually bites is the one above, that
+ * no screen keeps its own literal list. This only catches a picker built some third way.
+ */
 const uses = [...settings.matchAll(/ASSIGNABLE_ROLES\.map/g)].length
-ok('and every role picker reads the shared one', uses >= 3)
+ok('and every role picker reads the shared one', uses >= 2)
 
 /* ------------------------------------------------ a table that did not load says so */
 

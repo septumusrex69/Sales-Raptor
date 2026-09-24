@@ -107,6 +107,51 @@ for (const r of ['Pre-legal Agent', 'Pre-legal Team Leader', 'Call Centre Manage
 const adminAt = router.indexOf("currentUser?.role === 'Administrator'")
 ok('an administrator is still answered before either', adminAt > 0 && adminAt < roleAt)
 
+/* ------------------------------------------------ one door, not two */
+
+/*
+ * The firm: "the add someone who has left doesn't deserve its own button -- if you add a user,
+ * you can just select somewhere there, for example by the role, say that that person already
+ * left."
+ *
+ * They were two buttons and two forms over the same four fields, differing in one decision, and
+ * the second sat on the screen permanently for something done perhaps twice a year.
+ */
+ok('there is no second button for it', !/Add someone who has left/.test(settings))
+ok('...and the second form is gone with it', !/function FormerUserModal/.test(settings))
+ok('the decision lives in the one form instead', /const \[hasLeft, setHasLeft\] = useState\(false\)/.test(settings))
+ok('...as a tick beside the role', /This person has already left the firm/.test(settings))
+
+/*
+ * WHAT FOLLOWS FROM IT. A record gets no email and no password, so the fields change with the
+ * tick rather than the person being asked for things that mean nothing.
+ */
+ok('a record needs a name, where an invitation does not',
+  /label=\{hasLeft \? 'Full name' : 'Full Name \(optional\)'\} required=\{hasLeft\}/.test(settings))
+ok('...refused before anything is sent if it is missing',
+  /if \(hasLeft && !name\.trim\(\)\)/.test(settings))
+ok('...and the role is asked in the past tense', /label=\{hasLeft \? 'Role they had' : 'Role'\}/.test(settings))
+/* They are filed under "No longer here" rather than in a department, so a team changes nothing. */
+ok('a team is not asked for somebody who has left', /\{!hasLeft && \(\s*\n?\s*<FormField label="Team \(optional\)">/.test(settings))
+ok('the button says which of the two it is doing', /hasLeft \? 'Add record' : 'Send Invite'/.test(settings))
+
+/*
+ * AND IT IS STILL signIn:false THAT SEPARATES THEM, which is what the endpoint reads. Asserted on
+ * the body actually posted, because this is the one line that decides whether a real person is
+ * emailed a sign-in link.
+ */
+ok('a record posts signIn:false', /hasLeft\s*\n?\s*\? \{ email, name: name\.trim\(\), role, signIn: false \}/.test(settings))
+ok('...and an invitation still carries the team', /: \{ email, name: name \|\| undefined, role, teamId: teamId \|\| undefined \}/.test(settings))
+
+/*
+ * THE DUPLICATE GUARD NOW COVERS BOTH DOORS. It used to sit inside the invite path, below the
+ * fork, so adding somebody "who has left" on an address already in use reached createUser and
+ * came back with Supabase's own wording -- true, and no help about whose address it is.
+ */
+const forkAt = invite.indexOf('if (signIn === false) {')
+ok('the former-user fork is there', forkAt > 0)
+ok('...and the address is checked BEFORE it', lookupAt > 0 && lookupAt < forkAt)
+
 /* ------------------------------------------------ */
 
 for (const f of failures) console.error(`  ✗ ${f}`)

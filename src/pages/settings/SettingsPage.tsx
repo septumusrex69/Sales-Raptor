@@ -334,7 +334,6 @@ function UsersTab() {
   const [removingUser, setRemovingUser] = useState<User | null>(null)
   const [emailUser, setEmailUser] = useState<User | null>(null)
   const [signatureUser, setSignatureUser] = useState<User | null>(null)
-  const [formerOpen, setFormerOpen] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
   /*
    * SEEDED FROM THE URL, so a result in the global search can land here already narrowed to the
@@ -507,10 +506,15 @@ function UsersTab() {
           </div>
         {isAdmin && (
           <>
-            {/* A record rather than an invite — see FormerUserModal for why these are separate. */}
-            <button onClick={() => setFormerOpen(true)} className="text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 h-fit">
-              Add someone who has left
-            </button>
+            {/*
+              * ONE DOOR. The firm: "the add someone who has left doesn't deserve its own button --
+              * if you add a user, you can just select somewhere there, for example by the role,
+              * say that that person already left."
+              *
+              * They were two buttons and two forms for the same four fields, differing in one
+              * decision, and the second one sat on the screen permanently for something done
+              * perhaps twice a year. The decision moved inside, next to the role.
+            */}
             <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 h-fit">
               <Plus size={15} /> Add User
             </button>
@@ -574,7 +578,6 @@ function UsersTab() {
         </table>
       </div>
       {addOpen && session && <InviteUserModal accessToken={session.access_token} teams={teams} onClose={() => setAddOpen(false)} />}
-      {formerOpen && session && <FormerUserModal accessToken={session.access_token} onClose={() => setFormerOpen(false)} />}
       {editingUser && session && (
         <EditUserModal
           user={editingUser}
@@ -958,6 +961,17 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<UserRole>('Sales Representative')
+  /*
+   * WHETHER THIS PERSON STILL WORKS HERE, at the firm's asking: "the add someone who has left
+   * doesn't deserve its own button -- if you add a user, you can just select somewhere there,
+   * for example by the role, say that that person already left."
+   *
+   * The two used to be separate buttons and separate forms over the same four fields. What
+   * actually differs is ONE decision and what follows from it: a record gets no email, no
+   * password and a locked account, and exists so the leads, deals and accounts they worked can
+   * stay theirs.
+   */
+  const [hasLeft, setHasLeft] = useState(false)
   const [teamId, setTeamId] = useState('')
   /*
    * A TEAM CHOSEN BEFORE THE ROLE CHANGED IS DROPPED. Pick a sales team, then change the role to
@@ -974,19 +988,30 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!email) return
+    /* A record with no name is a row nobody can identify, which is the whole point of making one. */
+    if (hasLeft && !name.trim()) { setError('A name is needed. It is the whole point of the record.'); return }
     setSubmitting(true)
     setError(null)
     try {
       const res = await fetch('/api/invite-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ email, name: name || undefined, role, teamId: teamId || undefined }),
+        /* signIn:false is what separates a record from an invitation — see api/invite-user.ts. */
+        body: JSON.stringify(hasLeft
+          ? { email, name: name.trim(), role, signIn: false }
+          : { email, name: name || undefined, role, teamId: teamId || undefined }),
       })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {
         setError(body.error ?? 'Something went wrong sending the invite.')
         return
       }
+      /*
+       * A RECORD NEEDS THE LIST RE-READ. AppStore loads the people once at start-up, and a former
+       * colleague added here must appear under "No longer here" without somebody wondering why
+       * they cannot see them. An invitation does not: that person appears when they accept.
+       */
+      if (hasLeft) { window.location.reload(); return }
       setSent(true)
     } catch {
       setError('Could not reach the server. Please try again.')
@@ -1014,19 +1039,48 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
   return (
     <Modal title="Add User" onClose={onClose} width={420}>
       <form onSubmit={handleSubmit}>
-        <FormField label="Full Name (optional)">
-          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        <FormField label={hasLeft ? 'Full name' : 'Full Name (optional)'} required={hasLeft}>
+          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} autoFocus required={hasLeft} />
         </FormField>
         <FormField label="Email" required>
           <input type="email" className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} required />
+          {hasLeft && (
+            <p className="text-[11px] text-slate-400 mt-1">
+              Only used to tell one record from another — nothing is ever sent to it. Their old
+              work address is the usual answer.
+            </p>
+          )}
         </FormField>
-        <FormField label="Role" required>
+        <FormField label={hasLeft ? 'Role they had' : 'Role'} required>
           <select className={inputClass} value={role} onChange={(e) => setRole(e.target.value as UserRole)}>
             {ASSIGNABLE_ROLES.map((r) => (
               <option key={r}>{r}</option>
             ))}
           </select>
         </FormField>
+        {/*
+          * THE DECISION, BESIDE THE ROLE, where the firm asked for it. A tick rather than a second
+          * button: adding somebody who has left is done perhaps twice a year, and it was taking
+          * up permanent space on the screen for it.
+        */}
+        <label className="flex items-start gap-2.5 mb-3.5 cursor-pointer">
+          <input type="checkbox" className="mt-0.5" checked={hasLeft}
+            onChange={(e) => setHasLeft(e.target.checked)} />
+          <span className="text-sm text-slate-600">
+            This person has already left the firm
+            <span className="block text-[11px] text-slate-400">
+              A record, not a login. No email is sent, no password is ever set, and the account is
+              locked so it cannot be signed in to — it exists so the leads, deals and accounts they
+              worked can stay theirs.
+            </span>
+          </span>
+        </label>
+        {/*
+          * NO TEAM ON SOMEBODY WHO HAS LEFT. They are filed under "No longer here" rather than in
+          * a department -- byDepartment keeps them out of the headcounts on purpose -- so a team
+          * on the record would be a field that changes nothing anybody can see.
+        */}
+        {!hasLeft && (
         <FormField label="Team (optional)">
           <select className={inputClass} value={teamId} onChange={(e) => setTeamId(e.target.value)}>
             <option value="">No team</option>
@@ -1039,13 +1093,16 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
             ))}
           </select>
         </FormField>
+        )}
         {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
         <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
             Cancel
           </button>
           <button type="submit" disabled={submitting} className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed">
-            {submitting ? 'Sending…' : 'Send Invite'}
+            {submitting
+              ? (hasLeft ? 'Adding…' : 'Sending…')
+              : (hasLeft ? 'Add record' : 'Send Invite')}
           </button>
         </div>
       </form>
@@ -1053,105 +1110,6 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
   )
 }
 
-/**
- * Recording somebody who has left.
- *
- * Their work has to keep belonging to them. Three years of leads name eight people in the
- * Marketer column and several of them are no longer here; landing all of it on whoever runs the
- * import loses what that column was keeping, and moving it onto a colleague who is still here
- * misstates both their numbers.
- *
- * Adding them cannot mean inviting them. Send Invite emails a real person a real link asking
- * them to set a password on a system they have left.
- *
- * So this makes an account with no password, bans it, and marks the profile Inactive — three
- * separate locks, because each one alone has a gap. No password can still be reset by email;
- * a ban is what closes that. The Inactive flag is the one the app itself reads.
- */
-function FormerUserModal({ accessToken, onClose }: { accessToken: string; onClose: () => void }) {
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const [role, setRole] = useState<UserRole>('Sales Representative')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    if (!email || !name.trim()) return
-    setSubmitting(true)
-    setError(null)
-    try {
-      const res = await fetch('/api/invite-user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        // signIn:false is what separates a record from an invitation — see api/invite-user.ts.
-        body: JSON.stringify({ email, name, role, signIn: false }),
-      })
-      const body = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setError(body.error ?? 'Something went wrong adding the record.')
-        return
-      }
-      // The list is loaded once at start-up, so it has to be re-read to show the new person.
-      window.location.reload()
-    } catch {
-      setError('Could not reach the server. Please try again.')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  return (
-    <Modal title="Add someone who has left" onClose={onClose} width={440}>
-      <form onSubmit={handleSubmit}>
-        <p className="text-sm text-slate-600 leading-relaxed mb-4">
-          A record, not a login. No email is sent, no password is ever set, and the account is
-          locked so it cannot be signed in to. It exists so that leads, deals and accounts this
-          person worked can stay theirs.
-        </p>
-        <FormField label="Full name" required>
-          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} autoFocus required />
-        </FormField>
-        <FormField label="Email address" required>
-          <input type="email" className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} required />
-          <p className="text-[11px] text-slate-400 mt-1">
-            Only used to tell one record from another — nothing is ever sent to it. Their old work
-            address is the usual answer.
-          </p>
-        </FormField>
-        <FormField label="Role they had" required>
-          <select className={inputClass} value={role} onChange={(e) => setRole(e.target.value as UserRole)}>
-            {ASSIGNABLE_ROLES.map((r) => <option key={r}>{r}</option>)}
-          </select>
-        </FormField>
-        {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
-        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
-          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
-            Cancel
-          </button>
-          <button type="submit" disabled={submitting} className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
-            {submitting ? 'Adding…' : 'Add the record'}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  )
-}
-
-/**
- * Where the numbers get set.
- *
- * Two scopes on purpose. A target on the team is the team's total; a target on a person is
- * theirs alone. Neither implies the other and the business genuinely uses both — "we want 75
- * mandates a month" is a team number, while "nobody signs fewer than 15" is a personal one —
- * so this offers both rather than picking one and forcing the other to be derived from it.
- *
- * Each metric takes a goal and, optionally, a floor. That is how the targets were actually
- * described ("fifty is the minimum, we want seventy-five"), and a single figure would throw
- * away the half people are held to.
- *
- * A blank or zero goal clears the target rather than storing a goal of nothing.
- */
 function TargetsTab() {
   const { teams, users, targets, setTarget } = useAppStore()
   const { currentUser } = useAuth()

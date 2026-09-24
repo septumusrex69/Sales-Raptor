@@ -71,15 +71,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  if (signIn === false) {
-    if (!name || typeof name !== 'string' || !name.trim()) {
-      res.status(400).json({ error: 'A name is needed. It is the whole point of the record.' })
-      return
-    }
-    await addFormerUser(admin, res, email, name.trim(), role)
-    return
-  }
-
   /*
    * AN EMAIL THAT IS ALREADY SOMEBODY'S IS REFUSED, BY NAME.
    *
@@ -93,7 +84,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * So an administrator believed they had made a new colleague and had in fact quietly changed an
    * existing one. That is the worst shape a bug can have on a screen that manages people.
    *
-   * REFUSED RATHER THAN MERGED, and refused with WHO IT IS. "That email is taken" would leave
+   * BOTH DOORS, which is why it sits above the fork rather than inside the invite path. Adding
+ * somebody "who has left" on an address that is already in use hit createUser and came back
+ * with Supabase's own wording -- true, and no help at all about whose address it is.
+ *
+ * REFUSED RATHER THAN MERGED, and refused with WHO IT IS. "That email is taken" would leave
    * somebody guessing; naming them turns it into one decision -- edit that person, or use another
    * address. Re-sending an invitation has its own button on the list ("Send login link"), so
    * nothing is lost by this being a refusal.
@@ -107,6 +102,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         + `${who.role ? ` (${who.role})` : ''}. Change them in the list below, or use a different `
         + 'address. To send their sign-in link again, use "Send login link" on their row.',
     })
+    return
+  }
+
+  if (signIn === false) {
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      res.status(400).json({ error: 'A name is needed. It is the whole point of the record.' })
+      return
+    }
+    await addFormerUser(admin, res, email, name.trim(), role)
     return
   }
 
