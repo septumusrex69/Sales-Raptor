@@ -304,6 +304,44 @@ export async function runOneStep(
       await admin.from('workflow_run_steps').update({ state: 'failed', note: sent.error }).eq('id', step.id)
       return { result: 'failed', note: sent.error }
     }
+
+    /*
+     * FILED AS THE ACCOUNT'S OWN CORRESPONDENCE.
+     *
+     * The firm, on an account whose handover had gone out: the Emails tab read "No email with
+     * this debtor yet" while the same account carried an R25 charge under item 1(a) for sending
+     * one. Every by-hand send writes this row; the workflow did not, so a notice the firm has
+     * billed for was nowhere in the account's correspondence.
+     *
+     * ON THE ACCOUNT, NOT ON A MAILBOX. account_emails is keyed by account and readable by anyone
+     * signed in -- which is what makes it survive a reallocation, where a copy sitting only in
+     * the sender's own mailbox does not. That is the whole difference between the two, and this
+     * is the side that outlives whoever happened to be holding the file.
+     *
+     * THE MESSAGE ID IS RECORDED so the debtor's reply threads onto this message rather than
+     * arriving as an unrelated one; the mailbox the message LEFT BY is recorded for the reason
+     * sendAsUser gives about somebody leaving the firm.
+     *
+     * NEVER FAILS THE SEND. The message has gone and the fee is about to be raised; a red error
+     * after a debtor has in fact been written to would be false.
+     */
+    const { error: fileError } = await admin.from('account_emails').insert({
+      account_id: account.id,
+      direction: 'out',
+      debtor_address: pickContact(contacts, 'email'),
+      our_address: sent.from,
+      subject: plan.subject ?? '',
+      body: plan.body,
+      message_id: sent.messageId,
+      sent_by: collector?.id ?? null,
+      /* The workflow did this, not a person -- and it says so, because "sent by Itumeleng" on a
+         notice nobody typed would be wrong about who to ask. */
+      sent_by_name: 'Workflow',
+      charged_excl_vat: plan.charge?.rand ?? 0,
+    })
+    if (fileError) {
+      console.error(`[workflow] ${step.id}: the notice went but was not filed: ${fileError.message}`)
+    }
   }
 
   /*

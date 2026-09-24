@@ -287,6 +287,37 @@ ok('a value nothing can fill is dropped rather than blanked',
 
 /* ------------------------------------------------ */
 
+/* ------------------------------------------------ the notice is the account's correspondence */
+
+/*
+ * The firm asked whether an account's emails survive a reallocation: "if Itumeleng sends an email
+ * it shows in that section ... but if the account is reallocated to someone else, Itumeleng's
+ * emails are still in there as a record ... will the other person also be able to send from
+ * there, and it should also keep the records of those mails. Am I correct?"
+ *
+ * They are, for a by-hand send: account_emails is keyed by the ACCOUNT and readable by anyone
+ * signed in, so it outlives whoever was holding the file. The WORKFLOW was the exception -- it
+ * charged R25 under item 1(a) and filed nothing, so the Emails tab read "No email with this
+ * debtor yet" on an account that had been emailed and billed for it.
+ */
+ok('a workflow email is filed as the account’s own correspondence',
+  /from\('account_emails'\)\.insert\(\{/.test(runner))
+ok('...against the account, which is what survives a reallocation',
+  /account_id: account\.id,\s*\n\s*direction: 'out'/.test(runner))
+/* The reply has to thread onto it rather than arriving as an unrelated message. */
+ok('...carrying the message id the reply will quote', /message_id: sent\.messageId/.test(runner))
+/* Which mailbox it left by decides where the reply lands -- sendAsUser returns it for that. */
+ok('...and the mailbox it actually left by', /our_address: sent\.from/.test(runner))
+/* A notice nobody typed must not read as somebody's own words. */
+ok('...named as the workflow rather than as the collector', /sent_by_name: 'Workflow'/.test(runner))
+ok('...with what it cost on it', /charged_excl_vat: plan\.charge\?\.rand \?\? 0/.test(runner))
+/*
+ * AND FILING NEVER FAILS THE SEND. The message has gone and the fee is about to be raised; a red
+ * error after a debtor has in fact been written to would be false.
+ */
+ok('...and a filing failure does not undo a sent notice',
+  /the notice went but was not filed/.test(runner))
+
 /* ------------------------------------------------ a send leaves a record somebody reads */
 
 /*
