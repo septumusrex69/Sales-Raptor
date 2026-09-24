@@ -512,7 +512,15 @@ export interface User {
   diaryOrder?: string
 }
 
-export type TeamKind = 'Sales' | 'Communications'
+/*
+ * A team belongs to a department, and so does the person in it.
+ *
+ * 'Call centre' was missing, so the firm's five pre-legal teams were filed as SALES -- there was
+ * nothing else to file them as. That is what let a pre-legal agent sit in a Communications team
+ * and open Raptor on the Communications dashboard: the firm's own words, "a pre-legal agent can't
+ * be in a team that is for communications, they should be in the pre-legal division."
+ */
+export type TeamKind = 'Sales' | 'Communications' | 'Call centre'
 
 export interface Team {
   id: ID

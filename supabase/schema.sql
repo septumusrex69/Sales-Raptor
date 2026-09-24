@@ -6852,3 +6852,55 @@ alter table public.profiles add constraint profiles_role_check
     'Administrator','Sales Manager','Sales Representative',
     'Liaison Manager','Liaison',
     'Call Centre Manager','Pre-legal Team Leader','Pre-legal Agent','Read Only']));
+
+-- ---------- A person's team must belong to their own department ----------
+--
+-- The firm: "a pre-legal agent can't be in a team that is for communications -- they should be in
+-- the pre-legal division. And a liaison cannot be in a pre-legal team, they're in a liaison team.
+-- This is the glitch that was with Stefnova."
+--
+-- 'Call centre' was missing from TeamKind, so the firm's five pre-legal teams were all recorded as
+-- SALES because there was nothing else to record them as -- and a pre-legal agent could sit in a
+-- Communications team and open Raptor on the Communications dashboard.
+alter table public.teams drop constraint if exists teams_kind_check;
+alter table public.teams add constraint teams_kind_check
+  check (kind = any (array['Sales','Communications','Call centre']));
+
+-- IN THE DATABASE, NOT ONLY IN THE PICKER. src/lib/departments.ts narrows the dropdown to the
+-- teams a role may join, which is a courtesy: team_id is reachable by anything holding a session,
+-- and the pairing decides which dashboard somebody opens on and whose work they see.
+--
+-- ADMINISTRATOR AND READ ONLY ARE NOT CONSTRAINED. An administrator oversees every department
+-- rather than working in one, and the firm's rule was about the three that do the work; refusing
+-- them a team would be a rule nobody asked for. Same reading as departments.ts, deliberately.
+--
+-- ON INSERT OR A CHANGE OF EITHER SIDE. Narrowed to `update of role, team_id` so this stays off
+-- the path of every unrelated profile write -- a signature, a phone number, a diary capacity.
+create or replace function public.refuse_team_outside_department()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $fn$
+declare v_want text; v_kind text;
+begin
+  if new.team_id is null then return new; end if;
+  v_want := case
+    when new.role in ('Sales Manager','Sales Representative') then 'Sales'
+    when new.role in ('Liaison Manager','Liaison') then 'Communications'
+    when new.role in ('Call Centre Manager','Pre-legal Team Leader','Pre-legal Agent') then 'Call centre'
+    else null end;
+  if v_want is null then return new; end if;
+  select kind into v_kind from public.teams where id = new.team_id;
+  if v_kind is distinct from v_want then
+    raise exception '% works in %, so they cannot be in a % team.',
+      new.role, v_want, coalesce(v_kind, 'missing')
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end $fn$;
+
+drop trigger if exists profiles_team_matches_role on public.profiles;
+create trigger profiles_team_matches_role
+  before insert or update of role, team_id on public.profiles
+  for each row execute function public.refuse_team_outside_department();

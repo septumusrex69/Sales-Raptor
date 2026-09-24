@@ -30,7 +30,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-departments.mjs
  */
 import { readFileSync, existsSync } from 'node:fs'
-import { DEPARTMENTS, byDepartment, departmentOf, rankOf } from '../../src/lib/departments.ts'
+import { DEPARTMENTS, byDepartment, departmentOf, rankOf, teamKindForRole, teamsForRole } from '../../src/lib/departments.ts'
 import { canHandOutAccounts, canLeadCollections, mayPoolDisputes, visibleDisputeOwners } from '../../src/lib/permissions.ts'
 import { COLLECTING_ROLES } from '../../src/lib/collectorGrade.ts'
 
@@ -176,9 +176,85 @@ check('...and exactly the ones canLeadCollections allows',
 check('...with none of them missing',
   ROLES.filter((r) => canLeadCollections(r) && !namedInApi.includes(r)), [])
 
+/* ------------------------------------------------ a team belongs to a department */
+
+/*
+ * THE STEFNOVA GLITCH, AS A RULE. The firm: "a pre-legal agent can't be in a team that is for
+ * communications -- they should be in the pre-legal division. And a liaison cannot be in a
+ * pre-legal team." It was possible because TeamKind had no 'Call centre' at all, so the firm's
+ * five pre-legal teams were recorded as SALES for want of anywhere else to put them.
+ */
+check('the call centre roles need a call centre team', teamKindForRole('Pre-legal Agent'), 'Call centre')
+check('...their leader too', teamKindForRole('Pre-legal Team Leader'), 'Call centre')
+check('...and their manager', teamKindForRole('Call Centre Manager'), 'Call centre')
+check('a liaison needs a communications team', teamKindForRole('Liaison'), 'Communications')
+check('a sales rep needs a sales team', teamKindForRole('Sales Representative'), 'Sales')
+/*
+ * AN ADMINISTRATOR IS NOT CONSTRAINED, and that is a decision rather than an omission: they
+ * oversee every department instead of working in one, and the firm's rule named the three that do
+ * the work. The trigger reads it the same way.
+ */
+check('an administrator may be in any team, or none', teamKindForRole('Administrator'), null)
+
+const TEAMS = [
+  { id: 's', name: 'Team Raptor', kind: 'Sales' },
+  { id: 'c', name: 'Team Ballflick', kind: 'Communications' },
+  { id: 'p1', name: 'Pre-legal Alpha', kind: 'Call centre' },
+  { id: 'p2', name: 'Pre-legal Bravo', kind: 'Call centre' },
+]
+check('a pre-legal agent is offered only the pre-legal teams',
+  teamsForRole('Pre-legal Agent', TEAMS).map((t) => t.name), ['Pre-legal Alpha', 'Pre-legal Bravo'])
+/* The glitch, stated as the thing that must not be offered. */
+ok('...and never a communications team',
+  !teamsForRole('Pre-legal Agent', TEAMS).some((t) => t.kind === 'Communications'))
+check('a liaison is offered only the communications team',
+  teamsForRole('Liaison', TEAMS).map((t) => t.name), ['Team Ballflick'])
+ok('...and never a pre-legal team',
+  !teamsForRole('Liaison', TEAMS).some((t) => t.kind === 'Call centre'))
+check('an administrator is offered all of them', teamsForRole('Administrator', TEAMS).length, TEAMS.length)
+
+/*
+ * AND THE DATABASE IS WHAT ACTUALLY REFUSES IT. Narrowing the picker is a courtesy -- team_id is
+ * reachable by anything holding a session, and the pairing decides which dashboard somebody opens
+ * on. CLAUDE.md's rule: hiding a control is not a permission.
+ */
+/*
+ * SLICED FROM THE DECLARATION, not from the last mention of the name. `lastIndexOf` finds the
+ * CREATE TRIGGER line, which names the function and contains none of it -- so the four assertions
+ * below read an empty body and reported red on correct SQL. The same bounded-slice trap this
+ * suite has hit before.
+ */
+const fnAt = schema.indexOf('create or replace function public.refuse_team_outside_department')
+const body = fnAt < 0 ? '' : schema.slice(fnAt, schema.indexOf('end $fn$;', fnAt))
+ok('the database refuses a mismatch at all', body.length > 0)
+ok('...knowing which kind each department needs', /then 'Call centre'/.test(body) && /then 'Communications'/.test(body))
+ok('...and says why, in the firm’s terms', /cannot be in a % team/.test(body))
+/* Somebody with no team is not a violation -- it is the ordinary state of a new person. */
+ok('no team is not a mismatch', /if new\.team_id is null then return new/.test(body))
+/* An administrator falls through rather than being refused, matching teamKindForRole. */
+ok('...and neither is a role the rule does not cover', /if v_want is null then return new/.test(body))
+/*
+ * NARROWED TO THE TWO COLUMNS. Left on every update this would run on a signature change, a
+ * phone number, a diary capacity -- a lookup per write on a table every screen touches.
+ */
+ok('it watches the two columns rather than every write',
+  /before insert or update of role, team_id\s*\n?\s*on public\.profiles/.test(schema))
+/* And the kind the whole thing turns on must exist in the database. */
+ok('the database knows about a call centre team',
+  /teams_kind_check[\s\S]{0,200}?'Call centre'/.test(schema))
+
 /* ------------------------------------------------ the screen draws the groups */
 
 ok('the users screen groups people', /byDepartment\(users\)/.test(settings))
+/* The pickers offer only what the database will accept, in both places a team is chosen. */
+ok('the row picker offers only this role’s teams', /teamsForRole\(u\.role, teams\)/.test(settings))
+ok('the invite box follows the role chosen above it', /teamsForRole\(role, teams\)/.test(settings))
+ok('...and drops a team the new role cannot have', /setTeamId\(''\)/.test(settings))
+/* One list of team kinds, for the reason two lists of roles already taught this file. */
+ok('there is one list of team kinds', /const TEAM_KINDS: TeamKind\[\]/.test(settings))
+ok('...including the call centre', /'Call centre'/.test(settings))
+check('no screen keeps its own pair of kind options',
+  [...settings.matchAll(/<option value="Communications">/g)].length, 0)
 ok('...and folds away the ones who have left', /grouped\.archived\.length > 0/.test(settings))
 ok('...shown only when asked for', /showArchived && grouped\.archived\.map/.test(settings))
 ok('...under the firm’s own words for it', /No longer here/.test(settings))

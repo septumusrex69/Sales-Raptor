@@ -13,7 +13,7 @@ import { customFields as initialCustomFields, industries, leadSources as initial
 import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
-import { byDepartment } from '../../lib/departments'
+import { byDepartment, teamsForRole } from '../../lib/departments'
 import { useTheme } from '../../store/ThemeContext'
 import { useBuzzBox } from '../../store/BuzzBoxContext'
 import { THEMES } from '../../lib/themes'
@@ -265,6 +265,22 @@ function ProfileTab() {
   )
 }
 
+/*
+ * THE KINDS A TEAM CAN BE, in one place and drawn from the type.
+ *
+ * Written out twice as a pair of <option>s, 'Call centre' would have been added to one and
+ * forgotten in the other -- which is exactly how 'Pre-legal Team Leader' came to be missing from
+ * the invite box while the row dropdown had it.
+ */
+const TEAM_KINDS: TeamKind[] = ['Sales', 'Communications', 'Call centre']
+
+/** A tint each, so the department a team belongs to is legible at a glance. */
+const TEAM_KIND_TINT: Record<TeamKind, string> = {
+  Sales: 'bg-[var(--tint-gold)] text-[var(--c-gold-deep)]',
+  Communications: 'bg-[var(--tint-steel)] text-[var(--c-navy)]',
+  'Call centre': 'bg-[var(--tint-green)] text-[var(--c-green)]',
+}
+
 function UsersTab() {
   const { users, teams, updateUser, removeUserLocal } = useAppStore()
   const { currentUser, session } = useAuth()
@@ -314,7 +330,13 @@ function UsersTab() {
                       onChange={(e) => updateUser(u.id, { teamId: e.target.value || undefined })}
                     >
                       <option value="">No team</option>
-                      {teams.map((t) => (
+                      {/*
+                        * ONLY THE TEAMS THIS ROLE MAY BE IN. The firm: "a pre-legal agent can't be
+                        * in a team that is for communications." Offering a team and then having
+                        * the database refuse it is worse than never offering it -- the person
+                        * reads the refusal as a fault rather than as the rule.
+                      */}
+                      {teamsForRole(u.role, teams).map((t) => (
                         <option key={t.id} value={t.id}>
                           {t.name}
                         </option>
@@ -828,6 +850,14 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<UserRole>('Sales Representative')
   const [teamId, setTeamId] = useState('')
+  /*
+   * A TEAM CHOSEN BEFORE THE ROLE CHANGED IS DROPPED. Pick a sales team, then change the role to
+   * Pre-legal Agent, and the box would still be holding a team the database refuses -- the
+   * picker no longer offers it, so it is invisible and the invite fails on submit.
+   */
+  useEffect(() => {
+    if (teamId && !teamsForRole(role, teams).some((t) => t.id === teamId)) setTeamId('')
+  }, [role, teamId, teams])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sent, setSent] = useState(false)
@@ -891,7 +921,9 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
         <FormField label="Team (optional)">
           <select className={inputClass} value={teamId} onChange={(e) => setTeamId(e.target.value)}>
             <option value="">No team</option>
-            {teams.map((t) => (
+            {/* Follows the role chosen above: pick Pre-legal Agent and the communications teams
+                stop being offered, because the database will not accept that pairing. */}
+            {teamsForRole(role, teams).map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
               </option>
@@ -1233,7 +1265,7 @@ function TeamsTab() {
                     <div className="flex items-center gap-1.5">
                       <p className="text-sm font-semibold text-slate-700">{t.name}</p>
                       <span
-                        className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${t.kind === 'Communications' ? 'bg-[var(--tint-steel)] text-[var(--c-navy)]' : 'bg-[var(--tint-gold)] text-[var(--c-gold-deep)]'}`}
+                        className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${TEAM_KIND_TINT[t.kind] ?? TEAM_KIND_TINT.Sales}`}
                       >
                         {t.kind}
                       </span>
@@ -1249,8 +1281,7 @@ function TeamsTab() {
                       className="text-xs text-slate-500 border border-slate-200 rounded-lg px-2 py-1 bg-white outline-none"
                       title="Which dashboard this team's members land on"
                     >
-                      <option value="Sales">Sales</option>
-                      <option value="Communications">Communications</option>
+                      {TEAM_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
                     </select>
                     <button
                       onClick={() => {
@@ -1317,8 +1348,7 @@ function TeamsTab() {
         >
           <input className={inputClass} placeholder="New team name" value={name} onChange={(e) => setName(e.target.value)} />
           <select value={kind} onChange={(e) => setKind(e.target.value as TeamKind)} className={`${inputClass} w-40 shrink-0`}>
-            <option value="Sales">Sales</option>
-            <option value="Communications">Communications</option>
+            {TEAM_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
           </select>
           <button type="submit" className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 shrink-0">
             <Plus size={15} /> Add Team

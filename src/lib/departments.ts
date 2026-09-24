@@ -23,7 +23,7 @@
  * accountant -- and filing them under a department would put them in a headcount they are not
  * part of. They get their own heading at the bottom rather than being hidden.
  */
-import type { UserRole } from '../types'
+import type { TeamKind, UserRole } from '../types'
 
 export type Department = 'Administration' | 'Sales' | 'Communications' | 'Call centre' | 'Other'
 
@@ -124,4 +124,42 @@ export function byDepartment<T extends { role: UserRole; name: string; status?: 
   /* An empty department is not drawn. The firm has no Read Only people today and a heading with
      nothing under it reads as something missing rather than as something absent. */
   return { departments: departments.filter((d) => d.people.length > 0), archived }
+}
+
+/**
+ * THE KIND OF TEAM THIS ROLE MAY BE IN, or null where it does not matter.
+ *
+ * The firm: "a pre-legal agent can't be in a team that is for communications -- they should be in
+ * the pre-legal division. And a liaison cannot be in a pre-legal team, they're in a liaison team."
+ *
+ * This is the rule behind the Stefnova glitch. She was a Pre-legal Agent filed under a
+ * Communications team, so Raptor opened her on the Communications dashboard -- and there was no
+ * way to file her correctly, because TeamKind had no 'Call centre' and the firm's five pre-legal
+ * teams were all recorded as SALES.
+ *
+ * ADMINISTRATION AND READ ONLY RETURN NULL, meaning any team or none. An administrator oversees
+ * every department rather than sitting in one, and the firm did not put them in this rule --
+ * they spoke about the three departments that do the work. Refusing them a team would be a rule
+ * nobody asked for.
+ *
+ * THE DATABASE ENFORCES THIS TOO (profiles_team_matches_role). Filtering the picker is a
+ * courtesy; the trigger is the rule, because team_id is reachable by anything holding a session.
+ */
+export function teamKindForRole(role: UserRole | undefined): TeamKind | null {
+  const dept = departmentOf(role)
+  if (dept === 'Sales') return 'Sales'
+  if (dept === 'Communications') return 'Communications'
+  if (dept === 'Call centre') return 'Call centre'
+  return null
+}
+
+/**
+ * The teams this person may be put in. Everything, where their role has no department.
+ *
+ * Returned as a list rather than a boolean so a picker can be built from it -- a dropdown that
+ * offers a team and then refuses it is worse than one that never offered it.
+ */
+export function teamsForRole<T extends { kind: TeamKind }>(role: UserRole | undefined, teams: T[]): T[] {
+  const want = teamKindForRole(role)
+  return want === null ? teams : teams.filter((t) => t.kind === want)
 }
