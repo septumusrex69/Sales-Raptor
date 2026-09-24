@@ -44,6 +44,16 @@
  * QA script for this module runs with scripts/qa/tsresolve.mjs, which teaches it to.
  */
 import { isWrittenOff } from './accountStatus.js'
+/*
+ * FROM reminderTime, NOT diaryPriority, though both export this.
+ *
+ * chargeEngine is reachable from a serverless function (emailSync files an inbound message and
+ * charges item 6), and diaryPriority pulls in workingDays with a `.ts` specifier -- which does
+ * not survive Vercel's transpile and takes the route down at runtime. check-api-imports caught it
+ * the moment this import was added. reminderTime has no imports of its own, so it drags nothing
+ * into the function, and its own note says exactly why this is not toISOString().
+ */
+import { todayIso } from './reminderTime.js'
 import {
   itemAmountFor, itemTotalRemaining, monthlyLimit, monthlyRoom, recoverableFee, roundToCents,
   scheduleFor,
@@ -190,6 +200,41 @@ export async function chargeItemWith(db: ChargeDb, input: ChargeInput): Promise<
     created_by: input.createdBy ?? null,
   })
   if (error) throw new Error(error.message)
+
+  /*
+   * AND THE ACCOUNT COUNTS AS WORKED.
+   *
+   * `last_action_at` is what the client-facing narrative reads to decide whether anybody has been
+   * in touch, and what "Gone quiet" and "never worked" are filtered on across the whole book.
+   *
+   * NOTHING IN RAPTOR HAD EVER WRITTEN IT. Only the Swordfish import did, so every account worked
+   * inside Raptor since go-live still carried its imported "Last Action Date", and an account
+   * opened here carried none at all for ever -- emailed, telephoned and charged for, and still
+   * reading "No contact attempt has been made yet" to the client.
+   *
+   * HERE, BECAUSE THIS IS THE ONE PLACE AN ACTION IS RECORDED. Email, SMS, a call, a trace, a
+   * promise and a dispute all come through chargeItem, and the row is inserted even when a cap
+   * left nothing to charge -- the action happened, which is exactly what this column means.
+   * Hooked at the six call sites instead, the seventh would have been forgotten.
+   *
+   * IT ONLY EVER MOVES FORWARD. `at` can be backdated, and an older action must not drag the
+   * account's last-worked date backwards and make a live file look quiet. The `or` does that in
+   * the same request rather than reading the row first and racing another writer.
+   *
+   * THE LOCAL DAY, NOT A UTC INSTANT: the column is a DATE, and toISOString would file work done
+   * at one in the morning in Johannesburg under the day before.
+   */
+  const actionDay = todayIso(at)
+  const { error: stampError } = await db.from('debtor_accounts')
+    .update({ last_action_at: actionDay })
+    .eq('id', input.accountId)
+    .or(`last_action_at.is.null,last_action_at.lt.${actionDay}`)
+  /*
+   * NEVER FAILS THE ACTION. The work has been done and the fee is already written down; throwing
+   * here would report a failure for something that succeeded, and the worst case is a date that
+   * is a day stale.
+   */
+  if (stampError) console.error('[chargeEngine] could not mark the account worked:', stampError.message)
 
   return { exclVat, vat, reason }
 }

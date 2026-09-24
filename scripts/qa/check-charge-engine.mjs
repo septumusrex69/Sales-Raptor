@@ -16,11 +16,14 @@
  * The --import is not optional. chargeEngine.ts imports with `.js` specifiers because Vercel
  * needs them; tsresolve.mjs is what lets Node follow those to the `.ts` sources. See its header.
  */
+import { readFileSync, existsSync } from 'node:fs'
 import { chargeItemWith } from '../../src/lib/chargeEngine.ts'
 import { ENFORCE_ITEM_TOTALS } from '../../src/lib/annexureB.ts'
 
 let pass = 0
 const failures = []
+const read = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : '')
+const ok = (name, actual) => check(name, actual, true)
 const check = (name, actual, expected) => {
   const a = JSON.stringify(actual), e = JSON.stringify(expected)
   if (a === e) pass++
@@ -34,12 +37,23 @@ const check = (name, actual, expected) => {
  * thenable so an un-awaited chain resolves like a real query builder does.
  */
 function fakeDb({ capital = 100000, spentOnItem = 0, towardsCeiling = 0, status = 'active', monthCount = 0 } = {}) {
-  const log = { rpc: [], selects: [], inserted: null }
+  const log = { rpc: [], selects: [], inserted: null, updated: null, updateFilters: [] }
   const builder = (table) => {
     const b = {
       _table: table,
       select(cols, opts) { log.selects.push({ table, cols, opts }); return b },
-      eq(col, val) { log.selects.push({ filter: `eq:${col}=${val}` }); return b },
+      eq(col, val) {
+        log.selects.push({ filter: `eq:${col}=${val}` })
+        if (b._updating) log.updateFilters.push(`eq:${col}=${val}`)
+        return b
+      },
+      /*
+       * `update` and `or` exist here because the engine now marks the account worked. Added when
+       * that change made this file throw "db.from(...).update is not a function" -- which is the
+       * fake doing its job: it runs the engine, so it notices a call the real client would make.
+       */
+      update(row) { b._updating = true; log.updated = { table, row }; return b },
+      or(expr) { log.updateFilters.push(`or:${expr}`); return b },
       gte(col, val) { log.selects.push({ filter: `gte:${col}` , val }); return b },
       lt(col, val) { log.selects.push({ filter: `lt:${col}`, val }); return b },
       maybeSingle: async () => ({ data: table === 'debtor_accounts' ? { status } : null, error: null }),
@@ -178,5 +192,91 @@ const base = { accountId: 'acc-1', actionCode: 'consultation', description: 'Con
 }
 
 console.log(`\n${pass} passed, ${failures.length} failed`)
+/* ------------------------------------------------ the account counts as worked */
+
+/*
+ * RUN, NOT READ. The engine is exercised against the fake above, so this says what it actually
+ * DOES to the account rather than what the source appears to say.
+ */
+{
+  const db = fakeDb()
+  await chargeItemWith(db, { ...base, itemId: '7' })
+  check('recording an action marks the account worked', db.log.updated?.table, 'debtor_accounts')
+  /*
+   * THE LOCAL DAY OF THE ACTION, not the UTC instant and not today. The action above is dated
+   * 12 September; the column is a DATE, and toISOString would file a South African evening under
+   * the following day.
+   */
+  check('...dated by the action’s own local day', db.log.updated?.row?.last_action_at, '2026-09-12')
+  check('...on that account', db.log.updateFilters.includes('eq:id=acc-1'), true)
+  /*
+   * AND ONLY FORWARDS. `at` can be backdated, and an older action must not drag a live file's
+   * last-worked date backwards and make it look quiet.
+   */
+  check('...and only ever forwards',
+    db.log.updateFilters.some((f) => f.startsWith('or:last_action_at.is.null,last_action_at.lt.')), true)
+}
+
+/*
+ * IT HAPPENS EVEN WHEN NOTHING IS CHARGED. A written-off account earns nothing more, and a
+ * ceiling can leave nothing to bill -- but the work was still done, which is what this column
+ * means. An account worked and not billed must not read as never worked.
+ */
+{
+  const db = fakeDb({ status: 'Written-off' })
+  const r = await chargeItemWith(db, { ...base, itemId: '7' })
+  check('a written-off account still charges nothing', r.exclVat, 0)
+  check('...and is still marked worked', db.log.updated?.row?.last_action_at, '2026-09-12')
+}
+
+
+/*
+ * The firm, on an account whose handover had gone out: "the status is not correct -- it says no
+ * contact attempt has been made yet, however the handover messages already went out."
+ *
+ * NOTHING IN RAPTOR HAD EVER WRITTEN last_action_at. Only the Swordfish import did, so every
+ * account worked inside Raptor still carried its imported "Last Action Date", and one opened here
+ * carried none at all for ever -- emailed, telephoned and charged for, and still reading "No
+ * contact attempt has been made yet" to the client. It is also what "Gone quiet" and "never
+ * worked" filter the whole book on.
+ */
+const engine = read('src/lib/chargeEngine.ts')
+ok('the charge engine is readable at all', engine.length > 0)
+ok('recording an action marks the account worked', /last_action_at: actionDay/.test(engine))
+/*
+ * HERE, BECAUSE THIS IS THE ONE PLACE AN ACTION IS RECORDED. Email, SMS, a call, a trace, a
+ * promise and a dispute all come through chargeItem. Hooked at the call sites instead, the next
+ * one would have been forgotten -- which is how this column came to have no writer at all.
+ */
+const callers = [
+  'src/lib/accountEmails.ts', 'src/lib/accountSms.ts', 'src/lib/accountCalls.ts',
+  'src/lib/accountTrace.ts', 'src/lib/accountPromises.ts', 'src/lib/accountQueries.ts',
+]
+for (const f of callers) {
+  const src = read(f)
+  ok(`${f.split('/').pop()} records its action through the one engine`, /chargeItem\(/.test(src))
+  /* And does NOT stamp the column itself: two writers is how they drift apart. */
+  ok(`...and does not stamp the date itself`, !/last_action_at/.test(src))
+}
+
+/*
+ * IT ONLY EVER MOVES FORWARD. `at` can be backdated, and an older action must not drag a live
+ * file's last-worked date backwards and make it look quiet. Done in the same request rather than
+ * reading the row first and racing another writer.
+ */
+ok('an older action cannot drag the date backwards',
+  /\.or\(`last_action_at\.is\.null,last_action_at\.lt\.\$\{actionDay\}`\)/.test(engine))
+/*
+ * THE LOCAL DAY, NOT A UTC INSTANT. The column is a DATE and toISOString gives the UTC day, which
+ * files a South African evening under tomorrow -- reminderTime's own note says so.
+ */
+ok('...dated by the local day', /const actionDay = todayIso\(at\)/.test(engine))
+ok('...through the helper that has no imports of its own', /from '\.\/reminderTime\.js'/.test(engine))
+/*
+ * AND IT NEVER FAILS THE ACTION. The work is done and the fee is already written down; throwing
+ * would report a failure for something that succeeded.
+ */
+ok('a failed stamp does not undo the work', /could not mark the account worked/.test(engine))
+
 for (const f of failures) console.log(`  FAIL ${f}`)
 process.exit(failures.length ? 1 : 0)
