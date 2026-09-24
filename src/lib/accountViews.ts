@@ -84,7 +84,9 @@ export const ACCOUNT_VIEWS: AccountView[] = [
   {
     id: 'gone_quiet',
     label: 'Gone quiet',
-    hint: `Nothing logged in ${QUIET_VIEW_DAYS} days — including accounts never worked at all.`,
+    /* The firm's words: an account has ACTIONS logged against it. "Never worked" is what you do
+       to a construction site. accountBook's own note already said it the right way round. */
+    hint: `No action logged in ${QUIET_VIEW_DAYS} days — including accounts with none at all yet.`,
     countKey: 'gone_quiet',
   },
 ]

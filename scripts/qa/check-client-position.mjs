@@ -309,8 +309,31 @@ ok('no two kinds produce the same next action',
  */
 ok('a recorded non-answer says no reply',
   /no reply/.test(accountNarrative({ lastAttemptOn: '2026-09-12', reached: false })))
-ok('an unrecorded outcome says only what is known',
-  /We worked the account on/.test(accountNarrative({ lastAttemptOn: '2026-09-12' })))
+/*
+ * AND IT NAMES THE ACTION, NOT "WORK". The firm: "we don't say that an account was worked. It is
+ * a very vague and stupid way to say it ... we had actions. We got in touch, we negotiated, we
+ * made an arrangement, we attempted contact."
+ *
+ * So the channel becomes the verb. Asserted per channel, because a single case would pass on a
+ * map with four entries missing -- and asserted that the old vague wording is gone, because that
+ * is the sentence the client reads.
+ */
+for (const [channel, said] of [
+  ['phone', 'We telephoned the debtor on'],
+  ['email', 'We emailed the debtor on'],
+  ['sms', 'We sent the debtor an SMS on'],
+  ['letter', 'We wrote to the debtor on'],
+  ['whatsapp', 'We messaged the debtor on WhatsApp on'],
+]) {
+  ok(`an unrecorded outcome on ${channel} names what was done`,
+    accountNarrative({ lastAttemptOn: '2026-09-12', lastAttemptChannel: channel }).includes(said))
+}
+/* Where even the channel is unknown there is nothing descriptive left, so it names the fact it
+   has -- an action, on a date -- rather than dressing it up as contact. */
+ok('an unrecorded outcome with no channel still says only what is known',
+  /We logged an action on this account on/.test(accountNarrative({ lastAttemptOn: '2026-09-12' })))
+ok('...and the vague wording is gone from the client’s sentence',
+  !/worked the account/.test(accountNarrative({ lastAttemptOn: '2026-09-12', lastAttemptChannel: 'phone' })))
 ok('...and never claims the debtor failed to reply',
   !/no reply/.test(accountNarrative({ lastAttemptOn: '2026-09-12', reached: null })))
 

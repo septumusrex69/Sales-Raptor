@@ -215,8 +215,31 @@ function whatHappened(input: NarrativeInput): string {
       const nth = n > 1 ? ` This was the ${ordinal(n).toLowerCase()} attempt during the reporting period.` : ''
       return `We attempted to contact the debtor${channel} on ${onDate(input.lastAttemptOn)} but received no reply.${nth}`
     }
-    // Worked, and what came of it was never recorded. Say only what is known.
-    return `We worked the account on ${onDate(input.lastAttemptOn)}${channel}.`
+    /*
+     * AN ACTION WAS RECORDED AND ITS OUTCOME WAS NOT. Say the action, and nothing about how it
+     * went -- claiming contact would be inventing the outcome.
+     *
+     * THE FIRM ON THE OLD WORDING: "we don't say that an account was worked. It is a very vague
+     * and stupid way to say it. We worked on a construction site -- that's what we did. We didn't
+     * work on a debtor's account. We had actions. We got in touch, we negotiated, we made an
+     * arrangement, we attempted contact, the debtor was avoiding."
+     *
+     * So the channel becomes the verb rather than a trailing qualifier: "We telephoned the debtor
+     * on 16 September" says what was done. Where even the channel is unknown there is nothing
+     * descriptive left to say, so it names the fact it has -- an action, on a date -- rather than
+     * dressing it up as contact.
+     */
+    const ACTION_VERB: Record<ContactChannel, string> = {
+      phone: 'telephoned the debtor',
+      email: 'emailed the debtor',
+      sms: 'sent the debtor an SMS',
+      letter: 'wrote to the debtor',
+      whatsapp: 'messaged the debtor on WhatsApp',
+    }
+    const did = input.lastAttemptChannel ? ACTION_VERB[input.lastAttemptChannel] : null
+    return did
+      ? `We ${did} on ${onDate(input.lastAttemptOn)}.`
+      : `We logged an action on this account on ${onDate(input.lastAttemptOn)}.`
   }
 
   return 'No contact attempt has been made yet.'
