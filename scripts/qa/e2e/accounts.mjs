@@ -453,6 +453,77 @@ try {
    * RENDERED, not what is in the markup. Asserting the sentence case the source contains fails on
    * a header that is on the screen and perfectly readable.
    */
+  /*
+   * CHOOSING PEOPLE ONE AT A TIME. The firm: "when you go to individuals, there should be
+   * everyone, rank, team, and individual -- everybody should by standard be unselected and then
+   * you select the individuals that you want to hand over to."
+   *
+   * Driven rather than read, because whether a chip actually EMPTIES the selection, and whether
+   * the plan then refuses to go, are not questions source can answer.
+   */
+  {
+    /*
+     * READ OFF THE MODAL, not through a text locator. `text=/chosen/` matches the summary line,
+     * the "Show only chosen" button and the "1 set by hand" row, and a strict locator on three
+     * matches throws thirty seconds later with a timeout that says nothing about the cause.
+     */
+    const chosenLine = () => page.locator('body').innerText()
+    t.ok('the modal opens with everybody chosen', /of \d+ chosen/.test(await chosenLine()))
+    await page.getByRole('button', { name: 'Individual', exact: true }).click()
+    await page.waitForTimeout(300)
+    t.ok('picking Individual starts from nobody', /Nobody chosen/.test(await chosenLine()))
+    /*
+     * The group chips belong to Rank and Team; in Individual the list itself is the control.
+     *
+     * ASSERTED ON THE BUTTON, not on the page text. "Senior" is also the GRADE printed on every
+     * senior collector's row, so a text search finds it whatever mode is on -- the first version
+     * of this failed for that reason, on correct code.
+     */
+    const afterIndividual = await page.locator('body').innerText()
+    /*
+     * ASSERTED ON THE ROW ITSELF, not on a chip's text.
+     *
+     * The first version looked for a "Senior 8" button, which failed twice over: "Senior" is also
+     * the GRADE printed on every senior collector's row, and the broken code it was meant to
+     * catch renders the TEAM chips in this mode, not the rank ones -- so the break-test passed
+     * with the gate removed. The row has a hook now and there is nothing to be clever about.
+     */
+    t.check('...and no rank or team chips are offered with it',
+      await page.locator('[data-qa="who-groups"]').count(), 0)
+    /*
+     * AND NOTHING CAN BE HANDED OUT TO NOBODY. The firm: "obviously you would not be able to
+     * allocate without anybody being selected."
+     */
+    const commit = page.getByRole('button', { name: /Allocate and refer|Refer only/ }).last()
+    t.ok('with nobody chosen the hand-out is refused', await commit.isDisabled())
+    t.ok('...and says why rather than just greying out',
+      /Nobody chosen, so there is nothing to plan/.test(afterIndividual))
+
+    /* Ticking one name is enough to make a plan. */
+    await page.locator('[data-qa="collector-list"] input[type="checkbox"]').first().check()
+    await page.waitForTimeout(400)
+    t.ok('ticking one collector is enough', /1 of \d+ chosen/.test(await chosenLine()))
+    t.ok('...and the hand-out is allowed again', !(await commit.isDisabled()))
+
+    /* UNSELECT ALL says what it does -- it read "None", and the firm went looking for it by
+       another name. */
+    await page.getByRole('button', { name: /Unselect all/ }).click()
+    await page.waitForTimeout(300)
+    t.ok('unselect all empties the choice', /Nobody chosen/.test(await chosenLine()))
+
+    /* And it IS there in the two modes that own it -- an absence-only check passes vacuously
+       once the row is deleted outright. */
+    await page.getByRole('button', { name: 'Rank', exact: true }).click()
+    await page.waitForTimeout(250)
+    t.check('the chips are there in the modes that use them',
+      await page.locator('[data-qa="who-groups"]').count(), 1)
+
+    /* Back to everyone, so the rest of this file sees the modal it expects. */
+    await page.getByRole('button', { name: 'Everyone', exact: true }).click()
+    await page.waitForTimeout(400)
+    t.ok('Everyone fills it again', /of \d+ chosen/.test(await chosenLine()))
+  }
+
   const listHead = await page.locator('[data-qa="collector-list"]').locator('..').innerText()
   t.ok('the collector list says its columns are the book', /on the book/i.test(listHead))
   t.ok('...and what this plan gives them', /taking/i.test(listHead))
@@ -692,7 +763,10 @@ try {
   t.ok('everyone can be picked at once', await page.getByRole('button', { name: 'Everyone' }).isVisible())
   t.ok('...or by rank', await page.getByRole('button', { name: 'Rank', exact: true }).isVisible())
   t.ok('...or by team', await page.getByRole('button', { name: 'Team', exact: true }).isVisible())
-  t.ok('...or cleared', await page.getByRole('button', { name: 'None', exact: true }).isVisible())
+  /* Renamed from "None", which said what the selection BECOMES rather than what pressing it
+     does -- the firm went looking for it as "unselect all". */
+  t.ok('...or cleared', await page.getByRole('button', { name: 'Unselect all', exact: true }).isVisible())
+  t.ok('...or one at a time', await page.getByRole('button', { name: 'Individual', exact: true }).isVisible())
   /*
    * NEITHER ROW IS ON SCREEN until a mode is chosen. Asserted absent first, and for a rank AND a
    * team: a check that only looks afterwards passes on the flat row this replaced, and a check
@@ -737,7 +811,7 @@ try {
   await page.waitForTimeout(250)
 
   /* Picking nobody is reachable now, so it must read as a state rather than an empty panel. */
-  await page.getByRole('button', { name: 'None', exact: true }).click()
+  await page.getByRole('button', { name: 'Unselect all', exact: true }).click()
   await page.waitForTimeout(300)
   t.ok('picking nobody says so',
     /Nobody chosen, so there is nothing to plan/.test(await page.locator('body').innerText()))
@@ -793,8 +867,12 @@ try {
    * A failed wait must REPORT, not explode. A TimeoutError stack tells you a locator did not
    * appear; the request log and a screenshot tell you why, and the why is usually a fixture that
    * answered a URL the app never sent.
+   *
+   * SIX LINES OF IT, NOT ONE. Truncated to the first line, the message said only "locator.click
+   * timed out" -- true of any of the thirty clicks in this file. The call log names the
+   * locator, which is the whole answer.
    */
-  t.ok(`the run finished without throwing (${String(e).split('\n')[0].slice(0, 120)})`, false)
+  t.ok(`the run finished without throwing (${String(e).split('\n').slice(0, 6).join(' | ').slice(0, 400)})`, false)
   try {
     const pages = browser ? browser.contexts().flatMap((c) => c.pages()) : []
     if (pages[0]) await t.shot(pages[0], '99-where-it-stopped')

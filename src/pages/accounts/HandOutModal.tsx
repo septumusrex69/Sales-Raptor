@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../store/AuthContext'
 import { AlertTriangle, CalendarClock, Loader2, UserCheck } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
@@ -74,7 +74,18 @@ export function HandOutModal({
    * when everybody in that group is ticked, which means unticking one person turns the chip off
    * by itself rather than leaving it lying about what is selected.
    */
-  const [pickBy, setPickBy] = useState<'everyone' | 'rank' | 'team'>('everyone')
+  /*
+   * HOW SOMEBODY IS CHOOSING. The firm: "when you go to individuals, there should be everyone,
+   * rank, team, and individual -- everybody should by standard be unselected and then you select
+   * the individuals that you want to hand over to."
+   *
+   * Rank and Team already started from nobody and had you add groups; picking people one at a
+   * time was possible but had no mode of its own, so the only way in was to choose Everyone and
+   * untick thirty-nine names.
+   */
+  const [pickBy, setPickBy] = useState<'everyone' | 'rank' | 'team' | 'individual'>('everyone')
+  /* Named so the Individual chip can put the cursor where the next thing happens. */
+  const searchBox = useRef<HTMLInputElement>(null)
   const [onlyChosen, setOnlyChosen] = useState(false)
   const [evenSplit, setEvenSplit] = useState(false)
   const [keepKind, setKeepKind] = useState(false)
@@ -393,11 +404,37 @@ export function HandOutModal({
                         Team
                       </Pick>
                     )}
-                    <Pick onClick={() => setChosen(new Set())} quiet>None</Pick>
+                    {/*
+                      ONE AT A TIME, from nobody. It starts empty like Rank and Team do, and puts
+                      the cursor in the search box, because with forty collectors the next thing
+                      anybody does is type a name.
+                    */}
+                    <Pick on={pickBy === 'individual'}
+                      onClick={() => {
+                        setPickBy('individual')
+                        setChosen(new Set())
+                        /* After the render that hides the group row, or the focus lands on a
+                           box that is about to move up the modal. */
+                        requestAnimationFrame(() => searchBox.current?.focus())
+                      }}>
+                      Individual
+                    </Pick>
+                    {/*
+                      SAYS WHAT IT DOES. It read "None", which is what the selection BECOMES
+                      rather than what pressing it does, and the firm went looking for it by
+                      another name: "there should be an option ... to be unselected, unselect all".
+                      Kept in every mode: clearing is as useful after picking two teams as it is
+                      from Everyone.
+                    */}
+                    <Pick onClick={() => setChosen(new Set())} quiet>Unselect all</Pick>
                   </div>
 
-                  {pickBy !== 'everyone' && (
-                    <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                  {/*
+                    The group chips belong to Rank and Team only. Everyone has nothing to narrow,
+                    and Individual is the mode where the list itself is the control.
+                  */}
+                  {(pickBy === 'rank' || pickBy === 'team') && (
+                    <div data-qa="who-groups" className="flex flex-wrap items-center gap-1.5 mb-1.5">
                       {(pickBy === 'rank' ? grades : groups).map((g) => (
                         <Pick key={g.id} on={g.ids.every((id) => chosen.has(id))}
                           onClick={() => toggleGroup(g.ids)}>
@@ -409,6 +446,7 @@ export function HandOutModal({
                   )}
 
                   <input
+                    ref={searchBox}
                     className={`${inputClass} mb-1.5`}
                     placeholder={`Search ${context.collectors.length} collectors by name…`}
                     value={search}
