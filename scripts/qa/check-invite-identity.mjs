@@ -1,0 +1,105 @@
+/**
+ * AN INVITE MAKES A NEW PERSON, OR IT REFUSES — IT NEVER QUIETLY BECOMES AN EXISTING ONE.
+ *
+ * The firm: "I created a user called Raap Jasper ... it created the account ... and it shows me
+ * Stefnova. It's all weird."
+ *
+ * No user was created. That address had belonged to a profile since 5 September.
+ * `inviteUserByEmail` on an address that already exists SUCCEEDS — it re-invites them — so:
+ *
+ *   - the name typed into the box was dropped (handle_new_user fires on INSERT, and the row was
+ *     already there, so nothing ever applied it);
+ *   - the chosen role was stamped onto THAT person instead;
+ *   - and the box said "Invite sent ... they'll appear in this list with the role and team you
+ *     just set."
+ *
+ * An administrator believed they had made a colleague and had quietly changed one. That is the
+ * worst shape a bug can take on the screen that manages people.
+ *
+ * AND THE SECOND HALF OF THE SAME STORY: that profile's team was three weeks stale — a
+ * Communications team — while its role now said Pre-legal Agent. DashboardRouter asked the TEAM
+ * first, so a pre-legal agent opened Raptor on the Communications dashboard: courtesy calls,
+ * meetings and client servicing, without one collections figure. The file's own paragraph had
+ * said "THE ROLE DECIDES, because a team is optional and a role is not" since it was written.
+ *
+ * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-invite-identity.mjs
+ */
+import { readFileSync, existsSync } from 'node:fs'
+
+let pass = 0
+const failures = []
+function check(name, actual, expected) {
+  const a = JSON.stringify(actual)
+  const b = JSON.stringify(expected)
+  if (a === b) { pass += 1; return }
+  failures.push(`${name}\n    expected ${b}\n    got      ${a}`)
+}
+const ok = (name, actual) => check(name, actual, true)
+const read = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : '')
+
+const invite = read('api/invite-user.ts')
+const router = read('src/pages/DashboardRouter.tsx')
+const settings = read('src/pages/settings/SettingsPage.tsx')
+
+ok('the invite endpoint is readable at all', invite.length > 0)
+ok('the dashboard router is readable at all', router.length > 0)
+
+/* ------------------------------------------------ an address that is taken is refused */
+
+ok('the endpoint looks the address up before doing anything with it',
+  /from\('profiles'\)\.select\('name, role'\)\.ilike\('email', email\.trim\(\)\)/.test(invite))
+/*
+ * THE REFUSAL IS REACHED, not merely present. Written as a bare search for `res.status(409)` this
+ * passed with the guard changed to `if (false && taken)` -- the refusal was still in the file and
+ * could never run. Found by break-testing, which is the only reason it is written this way.
+ */
+ok('...and refuses rather than carrying on',
+  /\n  if \(taken\) \{[\s\S]{0,600}?res\.status\(409\)/.test(invite))
+/*
+ * BY NAME. "That email is taken" leaves somebody guessing which of fifty-eight people it is;
+ * naming them turns it into one decision — edit that person, or use another address.
+ */
+ok('...naming who it already belongs to', /already belongs to \$\{who\.name/.test(invite))
+ok('...and their role, so it is obvious whether it is the same person',
+  /who\.role \? ` \(\$\{who\.role\}\)`/.test(invite))
+/* Re-sending an invitation is a different action and already has its own button, so a refusal
+   here costs nothing. Said in the message rather than left for somebody to wonder about. */
+ok('...and points at the button that DOES re-send a link', /Send login link/.test(invite))
+
+/*
+ * CHECKED BEFORE THE INVITE IS SENT, not after. Ordered assertions are vacuous if the thing they
+ * order is gone -- indexOf returns -1 and -1 is less than everything -- so BOTH are asserted
+ * present first. This codebase has been caught by exactly that twice.
+ */
+const lookupAt = invite.indexOf("from('profiles').select('name, role')")
+const inviteAt = invite.indexOf('admin.auth.admin.inviteUserByEmail')
+ok('the lookup is there', lookupAt > 0)
+ok('the invite is there', inviteAt > 0)
+ok('...and nobody is emailed before the address is checked', lookupAt < inviteAt)
+
+/* The modal shows whatever the server said, so the sentence above actually reaches somebody. */
+ok('the box shows the server’s own words', /setError\(body\.error \?\? /.test(settings))
+
+/* ------------------------------------------------ the role outranks the team */
+
+/*
+ * ASSERTED PRESENT BEFORE ORDER, for the reason above: with the pre-legal branch deleted this
+ * would otherwise pass while every collector landed on the wrong dashboard.
+ */
+const roleAt = router.indexOf('PRE_LEGAL.includes(currentUser.role)')
+const teamAt = router.indexOf("myTeam?.kind === 'Communications'")
+ok('the pre-legal branch exists', roleAt > 0)
+ok('the communications branch exists', teamAt > 0)
+ok('...and the role is asked first', roleAt < teamAt)
+/* Both pre-legal roles, not just the agent: a team leader collects too. */
+ok('both pre-legal roles land on the collections floor',
+  /const PRE_LEGAL = \['Pre-legal Agent', 'Pre-legal Team Leader'\]/.test(router))
+/* An administrator still comes first: they oversee the firm, not a floor. */
+const adminAt = router.indexOf("currentUser?.role === 'Administrator'")
+ok('an administrator is still answered before either', adminAt > 0 && adminAt < roleAt)
+
+/* ------------------------------------------------ */
+
+for (const f of failures) console.error(`  ✗ ${f}`)
+console.log(`check-invite-identity: ${pass} passed, ${failures.length} failed`)
+process.exit(failures.length ? 1 : 0)

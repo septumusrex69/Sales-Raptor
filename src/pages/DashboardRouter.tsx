@@ -38,10 +38,21 @@ export function DashboardRouter() {
 
   if (currentUser?.role === 'Administrator') return <AdminOverview />
 
+  /*
+   * THE ROLE IS ASKED BEFORE THE TEAM, which is what the paragraph above always said and what the
+   * code did not do. The team was asked first, so a PRE-LEGAL AGENT filed under a Communications
+   * team opened Raptor on the Communications dashboard -- client servicing, courtesy calls and
+   * meetings -- with not one collections figure on it.
+   *
+   * The firm met this with a profile whose team was three weeks stale: the role said pre-legal,
+   * the team still said Communications, and the team won. A role is deliberate and a team is
+   * optional, so when the two disagree the role is the better evidence of what somebody does all
+   * day. Everyone else on a Communications team is unaffected.
+   */
+  if (currentUser?.role && PRE_LEGAL.includes(currentUser.role)) return <CollectorDashboard />
+
   const myTeam = teams.find((t) => t.id === currentUser?.teamId)
   if (myTeam?.kind === 'Communications') return <CommunicationsDashboard />
-
-  if (currentUser?.role && PRE_LEGAL.includes(currentUser.role)) return <CollectorDashboard />
 
   return <Dashboard />
 }

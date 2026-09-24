@@ -79,6 +79,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
+  /*
+   * AN EMAIL THAT IS ALREADY SOMEBODY'S IS REFUSED, BY NAME.
+   *
+   * The firm: "I created a user called Raap Jasper ... it created the account ... and it shows me
+   * Stefnova. It's all weird." No user was created. That address had belonged to a profile since
+   * 5 September, and inviteUserByEmail on an existing address SUCCEEDS -- it re-invites them. The
+   * name typed into the box was dropped on the floor (handle_new_user only fires on INSERT, and
+   * the row was already there), the chosen role was stamped onto that person instead, and the box
+   * said "Invite sent ... they'll appear in this list with the role and team you just set."
+   *
+   * So an administrator believed they had made a new colleague and had in fact quietly changed an
+   * existing one. That is the worst shape a bug can have on a screen that manages people.
+   *
+   * REFUSED RATHER THAN MERGED, and refused with WHO IT IS. "That email is taken" would leave
+   * somebody guessing; naming them turns it into one decision -- edit that person, or use another
+   * address. Re-sending an invitation has its own button on the list ("Send login link"), so
+   * nothing is lost by this being a refusal.
+   */
+  const { data: taken } = await admin
+    .from('profiles').select('name, role').ilike('email', email.trim()).maybeSingle()
+  if (taken) {
+    const who = (taken as { name?: string; role?: string })
+    res.status(409).json({
+      error: `${email.trim()} already belongs to ${who.name || 'somebody'}`
+        + `${who.role ? ` (${who.role})` : ''}. Change them in the list below, or use a different `
+        + 'address. To send their sign-in link again, use "Send login link" on their row.',
+    })
+    return
+  }
+
   // Hardcoded rather than derived from the request's Origin header: this email's redirect link
   // must always point at the real production site, never wherever the inviting admin happened
   // to be browsing from.
