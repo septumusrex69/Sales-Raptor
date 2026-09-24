@@ -746,7 +746,20 @@ ok('...as the same control the book uses', /aria-pressed=\{pageSize === n\}/.tes
   const setJunk = mail.slice(mail.indexOf('export async function setJunk'), mail.indexOf('\n/**\n * Move a message that was filed on the wrong debtor account.'))
   ok('setJunk exists', setJunk.length > 0)
   ok('...and only sets the junk flag', /is_junk: junk,/.test(setJunk))
-  ok('...blocking nobody', !/block/i.test(setJunk))
+  /*
+   * BLOCKING NOBODY -- asserted on the CODE, with the comments stripped out.
+   *
+   * A bare search for "block" over the raw source now reports the comment that exists precisely
+   * to keep the two apart ("Junk is not a block: mail_blocks stops mail reaching Raptor at all,
+   * and this files it"), which is the explanation being read as the offence. The rule is that
+   * junking calls nothing from the block feature, so that is what is asserted.
+   *
+   * Junking DOES now remember the sender, at the firm's asking -- "every time a new email is
+   * received from that email address, it should be moved to junk" -- and that is deliberately not
+   * a block: the mail still arrives, is still filed, and is still searchable under Junk.
+   */
+  const code = setJunk.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  ok('...blocking nobody', !/blockSender|mail_blocks/.test(code))
   /* Junking something already settled is a change of mind, and junk is the later decision. */
   ok('...clearing the settled flag, which is the one thing it does change',
     /no_record_at: null, no_record_by: null/.test(setJunk))

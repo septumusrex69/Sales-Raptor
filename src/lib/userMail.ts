@@ -509,6 +509,17 @@ export async function clearNoRecordNeeded(ids: string[]): Promise<number> {
   return (data ?? []).length
 }
 
+/**
+ * The two standing decisions that can be made about a sender.
+ *
+ *   no_record    real work mail -- a supplier, an accountant -- that belongs on nobody's file.
+ *   always_junk  spam. Their mail still arrives and is still filed; it lands under Junk.
+ *
+ * They are mutually exclusive by design, and the unique index on (user_id, pattern) makes them
+ * so: a sender cannot be both a supplier and spam, and junking one REPLACES the other.
+ */
+export type SenderRuleAction = 'no_record' | 'always_junk'
+
 /** A standing decision about one sender: their mail never needs matching. */
 export interface SenderRule {
   id: string
@@ -518,12 +529,16 @@ export interface SenderRule {
   createdAt: string
 }
 
-export async function fetchSenderRules(userId: string): Promise<SenderRule[]> {
+export async function fetchSenderRules(
+  userId: string,
+  /* Which standing decision. Defaulted so every existing caller keeps the list it asked for. */
+  action: SenderRuleAction = 'no_record',
+): Promise<SenderRule[]> {
   const { data, error } = await supabase
     .from('mail_sender_rules')
     .select('id, pattern, kind, label, created_at')
     .eq('user_id', userId)
-    .eq('action', 'no_record')
+    .eq('action', action)
     .order('created_at', { ascending: false })
   if (error) throw new Error(error.message)
   return (data ?? []).map((r) => ({
@@ -1326,8 +1341,22 @@ export async function linkMailToRecord(input: {
  * disagreeing about the same message, which is the thing the shared read state was built to
  * stop.
  */
-export async function setJunk(ids: string[], junk: boolean): Promise<number> {
-  if (ids.length === 0) return 0
+export async function setJunk(
+  ids: string[],
+  junk: boolean,
+  /*
+   * Whose mailbox. Given, the sender is remembered -- see junkSendersOf below. Optional so a
+   * caller with no session still moves the message; the standing rule is the extra, not the act.
+   */
+  userId?: string | null,
+): Promise<{ moved: number; remembered: string[]; kept: string[] }> {
+  if (ids.length === 0) return { moved: 0, remembered: [], kept: [] }
+  /*
+   * THE SENDERS, READ BEFORE THE UPDATE. Afterwards the rows are still there, but reading first
+   * means one query answers both "who wrote these" and "which of them may be ruled on", and the
+   * rule is written from the same list the person was looking at.
+   */
+  const senders = userId ? await sendersOf(ids) : []
   const { data, error } = await supabase
     .from('user_emails')
     .update({
@@ -1342,9 +1371,82 @@ export async function setJunk(ids: string[], junk: boolean): Promise<number> {
     .select('id')
   if (error) throw new Error(error.message)
 
+  /*
+   * AND THE SENDER IS REMEMBERED, OR FORGOTTEN. The firm: "every time a new email is received
+   * from that email address, it should be moved to junk. Stay there." Moving one message is a
+   * decision about the sender, so it is kept as one -- and "Not junk" takes it back, or the move
+   * could not be undone and the next message would return to Junk anyway.
+   */
+  let remembered: string[] = []
+  let kept: string[] = []
+  if (userId && senders.length > 0) {
+    if (junk) ({ remembered, kept } = await rememberJunkSenders(userId, senders))
+    else await forgetJunkSenders(userId, senders)
+  }
+
   // Junk is excluded from the sidebar count, so moving mail either way changes it.
   refreshNavCounts()
-  return data?.length ?? 0
+  return { moved: data?.length ?? 0, remembered, kept }
+}
+
+/** The distinct addresses these messages came from, lowercased and without blanks. */
+async function sendersOf(ids: string[]): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('user_emails').select('from_address').in('id', ids)
+  if (error) throw new Error(error.message)
+  const out = new Set<string>()
+  for (const r of data ?? []) {
+    const a = String((r as { from_address: string | null }).from_address ?? '').trim().toLowerCase()
+    if (a.includes('@')) out.add(a)
+  }
+  return [...out]
+}
+
+/**
+ * Make "always junk" stand for these senders.
+ *
+ * AN ADDRESS ON A DEBTOR'S FILE IS LEFT ALONE, and that is the one judgement in here. Junk is not
+ * a block -- the mail still arrives -- but this file already says why that is not enough: "junk
+ * is exactly where a message goes missing", and the junk tab is where a debtor writing from a
+ * free address lands often enough that the move was made reversible on purpose. A standing rule
+ * that quietly sent a debtor's every future reply to Junk could lose an arrangement, and nobody
+ * would see it go.
+ *
+ * So the MESSAGE still moves -- somebody asked for that and it is one message -- and the RULE is
+ * not made. The caller says which, so the person is told rather than left to assume.
+ */
+async function rememberJunkSenders(
+  userId: string, senders: string[],
+): Promise<{ remembered: string[]; kept: string[] }> {
+  const remembered: string[] = []
+  const kept: string[] = []
+  for (const address of senders) {
+    if (await debtorFileFor(address)) { kept.push(address); continue }
+    remembered.push(address)
+  }
+  if (remembered.length > 0) {
+    const { error } = await supabase.from('mail_sender_rules').upsert(
+      remembered.map((pattern) => ({
+        user_id: userId, pattern, kind: 'address' as const, action: 'always_junk', label: null,
+      })),
+      /*
+       * REPLACING whatever rule was there, rather than ignoring the conflict. A sender who was
+       * "needs no record" and has now been junked is spam: the later decision is the true one,
+       * which is the same reasoning as junking clearing no_record_at on the message itself.
+       */
+      { onConflict: 'user_id,pattern' },
+    )
+    if (error) throw new Error(error.message)
+  }
+  return { remembered, kept }
+}
+
+/** Stop junking them. "Not junk" has to undo the standing rule, or it undoes nothing. */
+async function forgetJunkSenders(userId: string, senders: string[]): Promise<void> {
+  const { error } = await supabase
+    .from('mail_sender_rules').delete()
+    .eq('user_id', userId).eq('action', 'always_junk').in('pattern', senders)
+  if (error) throw new Error(error.message)
 }
 
 /**

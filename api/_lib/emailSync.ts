@@ -168,16 +168,18 @@ function isBlocked(address: string | null, blocks: { addresses: Set<string>; dom
 async function loadSenderRules(
   admin: SupabaseClient,
   userId: string,
+  /* Which standing decision to load. Defaulted, so the existing caller is unchanged. */
+  action: 'no_record' | 'always_junk' = 'no_record',
 ): Promise<{ addresses: Set<string>; domains: Set<string> }> {
   const { data, error } = await admin
     .from('mail_sender_rules')
     .select('pattern, kind')
     .eq('user_id', userId)
-    .eq('action', 'no_record')
+    .eq('action', action)
   if (error) {
     // A rule we could not read must not stop the sync. Worst case is a supplier's mail asking to
     // be matched one more time, which is a nuisance rather than a loss.
-    console.error(`[emailSync] could not read sender rules for ${userId}: ${error.message}`)
+    console.error(`[emailSync] could not read ${action} sender rules for ${userId}: ${error.message}`)
     return { addresses: new Set(), domains: new Set() }
   }
   const addresses = new Set<string>()
@@ -938,6 +940,13 @@ async function syncMailbox(
   // Once per folder, not once per message.
   const blocks = await loadBlocks(admin, conn.user_id)
   const senderRules = await loadSenderRules(admin, conn.user_id)
+  /*
+   * SENDERS THIS AGENT HAS ALREADY JUNKED. The firm: "every time a new email is received from
+   * that email address, it should be moved to junk. Stay there."
+   *
+   * Once per folder, like the blocks and the no-record rules beside it -- not once per message.
+   */
+  const junkRules = await loadSenderRules(admin, conn.user_id, 'always_junk')
   const lock = await client.getMailboxLock(path)
   try {
     let uids: number[]
@@ -1001,6 +1010,23 @@ async function syncMailbox(
       if (blocked) console.log(`[emailSync] ${path} UID ${uid}: sender blocked, no mailbox row`)
 
       /*
+       * A SENDER THIS AGENT HAS JUNKED BEFORE STAYS JUNK, wherever the server put the message.
+       *
+       * The firm: "if you move something to junk, it should be pretty much almost junk, always
+       * junk -- and then every time a new email is received from that email address, it should be
+       * moved to junk. Stay there." The folder still decides for everybody else; this only ever
+       * ADDS to what the folder said, so a message already in Spam cannot be un-junked by it.
+       *
+       * Matched exactly like a block, and kept apart from one for the reason the block list gives:
+       * a block stops the mail becoming a row at all, and this files it -- under Junk, where it is
+       * still readable, still searchable and still reversible.
+       */
+      const junkedSender = isBlocked(normaliseAddress(fromAddress), junkRules)
+      if (junkedSender && !isJunk) {
+        console.log(`[emailSync] ${path} UID ${uid}: sender is on the always-junk list`)
+      }
+
+      /*
        * EVERYONE, not the first one.
        *
        * mailparser gives an AddressObject or an array of them depending on how the header was
@@ -1053,7 +1079,8 @@ async function syncMailbox(
         subject: parsed.subject || '(no subject)',
         body: parsed.text || '',
         attachmentNames: realAttachmentNames(parsed.attachments),
-        isJunk,
+        /* The folder's answer, or the agent's standing one. Either is enough to make it junk. */
+        isJunk: isJunk || junkedSender,
         isSent,
         toAddress: firstTo?.address ? normaliseAddress(firstTo.address) ?? firstTo.address : null,
         toName: firstTo?.name || null,

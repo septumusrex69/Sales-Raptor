@@ -703,16 +703,40 @@ export function MailPage() {
    * debtor writing from a free address lands in Junk often enough that a one-way move would be
    * a trap.
    */
+  /*
+   * WHAT THE STANDING RULE NOW DOES, said at the moment it is made.
+   *
+   * A rule nobody is told about is a rule that surprises somebody in a fortnight when a sender's
+   * mail is "missing". And where the rule was NOT made -- an address on a debtor's file -- saying
+   * so is the whole point: it is the case where somebody would otherwise assume it had been.
+   */
+  function junkRuleNote(junk: boolean, remembered: string[], kept: string[]): string {
+    const parts: string[] = []
+    if (junk && remembered.length > 0) {
+      parts.push(remembered.length === 1
+        ? ` Anything new from ${remembered[0]} will go straight to junk.`
+        : ` Anything new from those ${remembered.length} senders will go straight to junk.`)
+    }
+    if (junk && kept.length > 0) {
+      parts.push(kept.length === 1
+        ? ` ${kept[0]} is on a debtor's file, so their future mail is left in your inbox.`
+        : ` ${kept.length} of them are on debtors' files, so their future mail is left in your inbox.`)
+    }
+    if (!junk && remembered.length === 0 && kept.length === 0) parts.push('')
+    return parts.join('')
+  }
+
   async function junkChosen(junk: boolean) {
     const ids = [...chosen]
     if (ids.length === 0) return
     try {
-      const moved = await setJunk(ids, junk)
+      const { moved, remembered, kept } = await setJunk(ids, junk, currentUser?.id ?? null)
       const refused = ids.length - moved
       setStatus(
         `${moved} ${moved === 1 ? 'email' : 'emails'} ${junk ? 'moved to junk' : 'moved back to your mailbox'}.`
         + (refused > 0 ? ` ${refused} left alone — already matched to a record.` : '')
-        + (junk ? ' Nothing deleted; delete all junk when you want it gone.' : ''),
+        + (junk ? ' Nothing deleted; delete all junk when you want it gone.' : '')
+        + junkRuleNote(junk, remembered, kept),
       )
       await afterBulk()
     } catch (e) {
@@ -723,12 +747,12 @@ export function MailPage() {
   /** The same, for the one message somebody has open. */
   async function junkOne(mail: MailItem, junk: boolean) {
     try {
-      const moved = await setJunk([mail.id], junk)
+      const { moved, remembered, kept } = await setJunk([mail.id], junk, currentUser?.id ?? null)
       setStatus(moved === 0
         ? 'That email is matched to a record, so it stays out of junk.'
-        : junk
+        : (junk
           ? 'Moved to junk. Nothing deleted — it is under the Junk tab.'
-          : 'Moved back to your mailbox.')
+          : 'Moved back to your mailbox.') + junkRuleNote(junk, remembered, kept))
       setOpen(null)
       await load(page)
     } catch (e) {

@@ -6904,3 +6904,24 @@ drop trigger if exists profiles_team_matches_role on public.profiles;
 create trigger profiles_team_matches_role
   before insert or update of role, team_id on public.profiles
   for each row execute function public.refuse_team_outside_department();
+
+-- ---------- Moving something to junk remembers the sender ----------
+--
+-- The firm: "if you move something to junk, it should be pretty much almost junk, always junk --
+-- and then every time a new email is received from that email address, it should be moved to
+-- junk. Stay there."
+--
+-- The table's own note said this was coming: "Room to grow. Today there is one rule; 'always_junk'
+-- is the obvious next one, and adding it should not need a second table." It did not.
+--
+-- ONE RULE PER SENDER, which the existing unique index already enforces on (user_id, pattern).
+-- That is right rather than a limitation: 'no_record' means real work mail that needs no debtor
+-- record, and 'always_junk' means spam. A sender cannot sensibly be both, so junking somebody
+-- REPLACES a no-record rule rather than sitting beside it.
+--
+-- NOT A BLOCK. mail_blocks stops mail reaching Raptor at all, which is why blockSender refuses an
+-- address that is on a debtor's file. A junk rule still files the message -- it just lands under
+-- the Junk tab -- so it is the softer answer, and the reversible one.
+alter table public.mail_sender_rules drop constraint if exists mail_sender_rules_action_check;
+alter table public.mail_sender_rules add constraint mail_sender_rules_action_check
+  check (action in ('no_record', 'always_junk'));
