@@ -321,7 +321,7 @@ function UsersTab() {
                       value={u.role}
                       onChange={(e) => updateUser(u.id, { role: e.target.value as UserRole })}
                     >
-                      {(['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Team Leader', 'Pre-legal Agent', 'Read Only'] as UserRole[]).map((r) => (
+                      {ASSIGNABLE_ROLES.map((r) => (
                         <option key={r}>{r}</option>
                       ))}
                     </select>
@@ -749,7 +749,22 @@ function RemoveUserModal({
   )
 }
 
-const INVITE_ROLES: UserRole[] = ['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Agent', 'Read Only']
+/*
+ * EVERY ROLE SOMEBODY CAN BE GIVEN, IN ONE PLACE.
+ *
+ * There were two of these lists in this file -- one on the row dropdown, one in the invite box --
+ * and they differed by a single entry: the invite box had no 'Pre-legal Team Leader', so the one
+ * role that leads the collections floor was the one role nobody could be invited AS. You had to
+ * invite them as something else and change it afterwards, which is the sort of thing people do
+ * once and then forget the second half of.
+ *
+ * Held against the UserRole union by check-settings-roles, so a role added to the type and
+ * forgotten here fails rather than quietly never being offered.
+ */
+export const ASSIGNABLE_ROLES: UserRole[] = [
+  'Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison',
+  'Pre-legal Team Leader', 'Pre-legal Agent', 'Read Only',
+]
 
 function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string; teams: Team[]; onClose: () => void }) {
   const [name, setName] = useState('')
@@ -811,7 +826,7 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
         </FormField>
         <FormField label="Role" required>
           <select className={inputClass} value={role} onChange={(e) => setRole(e.target.value as UserRole)}>
-            {INVITE_ROLES.map((r) => (
+            {ASSIGNABLE_ROLES.map((r) => (
               <option key={r}>{r}</option>
             ))}
           </select>
@@ -908,7 +923,7 @@ function FormerUserModal({ accessToken, onClose }: { accessToken: string; onClos
         </FormField>
         <FormField label="Role they had" required>
           <select className={inputClass} value={role} onChange={(e) => setRole(e.target.value as UserRole)}>
-            {INVITE_ROLES.map((r) => <option key={r}>{r}</option>)}
+            {ASSIGNABLE_ROLES.map((r) => <option key={r}>{r}</option>)}
           </select>
         </FormField>
         {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}

@@ -38,10 +38,26 @@ function appToRow<T extends object>(patch: T): Record<string, unknown> {
   return out
 }
 
-async function fetchTable<T>(table: string, orderBy: string): Promise<T[]> {
+/**
+ * One table, or an empty list and a note of which table it was.
+ *
+ * A TABLE THAT FAILS TO LOAD USED TO LOOK EXACTLY LIKE A TABLE WITH NOTHING IN IT. The error went
+ * to the console -- which nobody has open, least of all on the iPad the firm works on -- and the
+ * empty array went to the screen. The firm met this as "when I load a user, I can't add it to a
+ * team": `teams` had come back empty, so every team picker in Settings collapsed to its one
+ * hard-coded "No team" option and the seven teams in the database were simply not offered. The
+ * app looked like it had been built without teams rather than like something had gone wrong.
+ *
+ * So `failed` collects the tables that did not load and the caller says so. Still an empty array
+ * rather than a throw: one table failing must not take the other eleven down with it -- that is
+ * the whole reason the errors were swallowed in the first place, and it was right. What was wrong
+ * was swallowing them SILENTLY.
+ */
+async function fetchTable<T>(table: string, orderBy: string, failed?: string[]): Promise<T[]> {
   const { data, error } = await supabase.from(table).select('*').order(orderBy, { ascending: false })
   if (error) {
     console.error(`[AppStore] failed to load ${table}:`, error.message)
+    failed?.push(table)
     return []
   }
   return (data ?? []).map((row) => rowToApp<T>(row as Record<string, unknown>))
@@ -436,19 +452,21 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }
     let active = true
     setDataLoading(true)
+    /* Which tables did not load. Collected rather than thrown -- see fetchTable. */
+    const failed: string[] = []
     Promise.all([
-      fetchTable<Lead>('leads', 'created_at'),
-      fetchTable<Deal>('deals', 'created_at'),
-      fetchTable<Contact>('contacts', 'created_at'),
-      fetchTable<Company>('companies', 'created_at'),
-      fetchTable<Task>('tasks', 'created_at'),
-      fetchTable<Activity>('activities', 'activity_date'),
-      fetchTable<Proposal>('proposals', 'created_at'),
-      fetchTable<Handover>('handovers', 'received_at'),
-      fetchTable<User>('profiles', 'created_at'),
-      fetchTable<{ id: ID; name: string; kind: TeamKind }>('teams', 'created_at'),
-      fetchTable<AppNotification>('notifications', 'created_at'),
-      fetchTable<Target>('targets', 'created_at'),
+      fetchTable<Lead>('leads', 'created_at', failed),
+      fetchTable<Deal>('deals', 'created_at', failed),
+      fetchTable<Contact>('contacts', 'created_at', failed),
+      fetchTable<Company>('companies', 'created_at', failed),
+      fetchTable<Task>('tasks', 'created_at', failed),
+      fetchTable<Activity>('activities', 'activity_date', failed),
+      fetchTable<Proposal>('proposals', 'created_at', failed),
+      fetchTable<Handover>('handovers', 'received_at', failed),
+      fetchTable<User>('profiles', 'created_at', failed),
+      fetchTable<{ id: ID; name: string; kind: TeamKind }>('teams', 'created_at', failed),
+      fetchTable<AppNotification>('notifications', 'created_at', failed),
+      fetchTable<Target>('targets', 'created_at', failed),
     ])
       .then(([l, d, ct, co, tk, ac, pr, hv, us, tm, nt, tg]) => {
         if (!active) return
@@ -467,6 +485,17 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         setNotifications(nt)
         setTargets(tg)
         setDataLoading(false)
+        /*
+         * SAID, NOT LOGGED. Named tables rather than "something went wrong", because the whole
+         * failure is that the screen shows an empty list and looks correct -- the person needs to
+         * know WHICH list is lying to them before they act on it.
+         */
+        if (failed.length > 0) {
+          showError(
+            `Some of your data did not load: ${failed.join(', ')}. Those lists are showing as empty `
+            + 'rather than showing what is there. Reload the page before changing anything on them.',
+          )
+        }
       })
       .catch((err: unknown) => {
         if (!active) return

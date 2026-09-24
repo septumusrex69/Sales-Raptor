@@ -99,12 +99,20 @@ ok('...and says when somebody is over', /over their ceiling|over<\/span>|\} over
  * reachable by nobody until this was fixed.
  */
 /*
- * Matched inside the ROLE DROPDOWN's own array, not anywhere in the file. A bare search for the
- * string passes vacuously — the same name appears in the canEdit test two lines below — so
- * deleting it from the only list that assigns roles would leave this check green while nobody
- * could be made a team leader. Assert the thing, not a mention of the thing.
+ * Matched inside the ROLE LIST itself, not anywhere in the file. A bare search for the string
+ * passes vacuously — the same name appears in the canEdit test two lines below — so deleting it
+ * from the only list that assigns roles would leave this check green while nobody could be made
+ * a team leader. Assert the thing, not a mention of the thing.
+ *
+ * READ OFF `ASSIGNABLE_ROLES` NOW. This used to match the dropdown's own inline array, and there
+ * turned out to be THREE such arrays in the file differing by one entry — the invite box and the
+ * "someone who has left" box both left the team leader out, so the role could be set on an
+ * existing person and given to nobody new. They are one list now, and this reads it. Sliced from
+ * the `= [` because the `UserRole[]` annotation carries a `]` of its own.
  */
-const roleList = /\[([^\]]*)\] as UserRole\[\]/.exec(settings)?.[1] ?? ''
+const listAt = settings.indexOf('export const ASSIGNABLE_ROLES')
+const arrayAt = settings.indexOf('= [', listAt)
+const roleList = listAt < 0 ? '' : settings.slice(arrayAt, settings.indexOf(']', arrayAt))
 ok('the role dropdown exists at all', roleList.includes("'Administrator'"))
 ok('a team leader can actually be appointed', roleList.includes("'Pre-legal Team Leader'"))
 ok('the collectors panel is mounted', /<CollectorsPanel/.test(settings))
