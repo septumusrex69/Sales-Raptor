@@ -21,6 +21,20 @@ export function canReassign(user: Pick<User, 'role'> | null | undefined): boolea
 }
 
 /**
+ * Whether this person may put an ACCOUNT on somebody's desk.
+ *
+ * NOT canReassign, which is the sales side's test and leaves out the pre-legal team leader — the
+ * person who actually shares the collections floor's work out. It lived as a bare array inside
+ * AccountsList and the account screen needed the same answer, which is how a permission ends up
+ * written twice and enforced once: the list would offer it to a team leader and the account
+ * screen would not, for the same action on the same account.
+ */
+export function canHandOutAccounts(role: Pick<User, 'role'>['role'] | undefined): boolean {
+  return role === 'Administrator' || role === 'Sales Manager'
+    || role === 'Liaison Manager' || role === 'Pre-legal Team Leader'
+}
+
+/**
  * Whether this person may look at a client.
  *
  * A pre-legal agent works debtors, not the firm's relationships. They see the account, the

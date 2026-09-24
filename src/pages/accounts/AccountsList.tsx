@@ -18,6 +18,7 @@ import { CLIENT_FLAGS, DESK_POSITIONS, clientFlag, deskPosition } from '../../li
 import { AccountFilters } from './AccountFilters'
 import { HandOutModal } from './HandOutModal'
 import type { Selection } from '../../lib/accountAllocation'
+import { canHandOutAccounts } from '../../lib/permissions'
 import { formatCurrency, formatDate } from '../../data/mockData'
 
 /*
@@ -34,7 +35,6 @@ const PAGE_SIZES = [100, 500, 1000, 2000] as const
 const PAGE_SIZE = PAGE_SIZES[0]
 
 /** Who may ask for somebody else's desk. An agent's book is their own. */
-const CAN_SEE_OTHER_DESKS = ['Administrator', 'Sales Manager', 'Liaison Manager', 'Pre-legal Team Leader']
 
 /**
  * The collections book.
@@ -74,7 +74,7 @@ export function AccountsList() {
 
   const companyId = params.get('client') ?? undefined
   const companyName = companies.find((c) => c.id === companyId)?.name
-  const canSeeOthers = CAN_SEE_OTHER_DESKS.includes(currentUser?.role ?? '')
+  const canSeeOthers = canHandOutAccounts(currentUser?.role)
 
   const setParam = useCallback((key: string, value: string | null) => {
     const next = new URLSearchParams(params)

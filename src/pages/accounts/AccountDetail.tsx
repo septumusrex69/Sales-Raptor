@@ -27,7 +27,9 @@ import {
 } from '../../lib/accountWorkspace'
 import { buildTimeline, filterTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
 import { isWrittenOff } from '../../lib/accountStatus'
-import { canFreezeAccounts, canViewClients } from '../../lib/permissions'
+import { canFreezeAccounts, canHandOutAccounts, canViewClients } from '../../lib/permissions'
+import { HandOutModal } from './HandOutModal'
+import type { Selection } from '../../lib/accountAllocation'
 import { timeOnDesk } from '../../lib/dateLabels'
 import { styleFor, PROMISE_CHIP } from './timelineStyle'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
@@ -116,9 +118,11 @@ const TODAY = new Date().toISOString().slice(0, 10)
  */
 export function AccountDetail() {
   const { id } = useParams<{ id: string }>()
-  const { companies, users } = useAppStore()
+  const { companies, users, teams } = useAppStore()
   const { currentUser, session } = useAuth()
   const [account, setAccount] = useState<DebtorAccount | null>(null)
+  /* The assign-and-refer screen, opened off the name in the band. */
+  const [handOut, setHandOut] = useState(false)
   const [ledgers, setLedgers] = useState<AccountLedgers | null>(null)
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const [documents, setDocuments] = useState<AccountDocument[]>([])
@@ -516,6 +520,16 @@ export function AccountDetail() {
 
   const b = statement?.breakdown
   const drift = hasCommissionDrift(account)
+  /*
+   * THE CLERK THE ACCOUNT IS ACTUALLY ON, resolved from `assignedTo` -- the column allocating,
+   * the diary, the workflow and every desk list already turn on. `users` is the profiles AppStore
+   * already holds, so this costs no query.
+   */
+  const assignedName = account.assignedTo
+    ? (users.find((u) => u.id === account.assignedTo)?.name ?? 'Someone no longer here')
+    : null
+  /* The same authority as handing out from the accounts list, and now literally the same test. */
+  const mayHandOut = canHandOutAccounts(currentUser?.role)
   const name = [account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ') || 'Unnamed debtor'
   const due = workspace ? nextPromise(workspace.promises) : undefined
   const emailContact = workspace?.contacts.find((c) => c.kind === 'email' && !c.retiredAt)
@@ -796,16 +810,62 @@ export function AccountDetail() {
           a different relationship, and it sits in the strip below with the other facts you check
           before picking up the phone — the band was starting to hold two of everything.
         */}
+        {/*
+          WHO HOLDS IT, AND THE WAY TO CHANGE THAT.
+
+          THE NAME WAS THE WRONG ONE. This read `swordfishAssignedTo`, which is the free-text name
+          off the legacy book — not `assignedTo`, which is the clerk the account is actually on in
+          Raptor. 20 302 accounts had a Raptor clerk and said "Unassigned" here, and on 670 more
+          it named a DIFFERENT person from the one holding the file. Allocating, the diary, the
+          workflow and the collector's own list all turn on `assigned_to`; only this line did not,
+          so the one place a person looks to see who has the account was the one place not
+          answering from the book.
+
+          THE FIRM: "if I'm an administrator and I want to reassign an account, I can click there
+          ... reassign and diarise". So it is the control as well as the label — and it opens the
+          SAME assign-and-refer screen the accounts list and the client screen use, because
+          commitHandOut is the only thing that allocates and it always diarises with it.
+        */}
         <div className="mt-2.5 text-right leading-tight ml-2">
           <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-gold-500">Pre-legal agent</p>
-          {/*
-            The name, and nothing under it. It used to say "from Swordfish" — which named the
-            system the book came out of, not anything about the account. The firm is moving off
-            Swordfish, and a debtor's file is not the place to keep mentioning it.
-          */}
-          <p className="text-sm font-semibold text-white">{account.swordfishAssignedTo ?? 'Unassigned'}</p>
+          {mayHandOut ? (
+            <button type="button" onClick={() => setHandOut(true)}
+              /* The name IS the button. A separate "reassign" link beside it would be a second
+                 thing to find, and the firm pointed at the name itself. */
+              className="text-sm font-semibold text-white underline decoration-white/30 underline-offset-4 hover:decoration-white"
+              title={assignedName ? `${assignedName} holds this account. Give it to somebody else.` : 'Nobody holds this account. Give it to somebody.'}>
+              {assignedName ?? 'Unassigned'}
+            </button>
+          ) : (
+            <p className="text-sm font-semibold text-white">{assignedName ?? 'Unassigned'}</p>
+          )}
         </div>
       </DashboardHero>
+
+      {/*
+        ASSIGN AND REFER, on this one account.
+
+        The same screen as the accounts list and the client screen -- not a third allocation form.
+        `allocate_and_refer` is the only mode that can allocate (see HandOutMode), so reassigning
+        from here books the new clerk a diary date at the same time, which is the firm's rule:
+        an account with a clerk is an account in a diary.
+      */}
+      {handOut && (
+        <HandOutModal
+          selection={{ kind: 'ids', ids: [account.id] } as Selection}
+          selectedCount={1}
+          users={users}
+          teams={teams}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setHandOut(false)}
+          onDone={async () => {
+            setHandOut(false)
+            /* Re-read rather than patch the row in place: the diary entry, the position and the
+               timeline all move with the allocation, and half of them are derived. */
+            await reload()
+          }}
+        />
+      )}
 
       {/*
         Only when the account was opened FROM the diary. An account looked up by name is just an
