@@ -163,3 +163,32 @@ export function teamsForRole<T extends { kind: TeamKind }>(role: UserRole | unde
   const want = teamKindForRole(role)
   return want === null ? teams : teams.filter((t) => t.kind === want)
 }
+
+/**
+ * Does this person match what somebody typed?
+ *
+ * The firm, looking at the search box while standing on the Users screen: "here we are in the
+ * user section, but we're searching only for other stuff -- it should be for users." Fifty-seven
+ * people today and more than a hundred coming, grouped into four departments that fold: finding
+ * one person meant unfolding everything and reading.
+ *
+ * NAME, EMAIL, ROLE AND TEAM, because those are the four things somebody actually knows when they
+ * go looking. "Who is the team leader on Bravo" is a real question and the answer is not a name.
+ *
+ * TOKENISED, so "kamini sales" finds the sales rep called Kamini and "bravo leader" finds the
+ * leader of Pre-legal Bravo. Every word must match something; a search that ORs its words gets
+ * longer as you type, which is backwards.
+ *
+ * Pure, so the rule can be tested without a browser anywhere near it.
+ */
+export function matchesPerson(
+  person: { name?: string | null; email?: string | null; role?: string | null },
+  teamName: string | null,
+  query: string,
+): boolean {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return true
+  const hay = [person.name, person.email, person.role, teamName]
+    .filter(Boolean).join(' ').toLowerCase()
+  return words.every((w) => hay.includes(w))
+}

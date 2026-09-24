@@ -30,7 +30,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-departments.mjs
  */
 import { readFileSync, existsSync } from 'node:fs'
-import { DEPARTMENTS, byDepartment, departmentOf, rankOf, teamKindForRole, teamsForRole } from '../../src/lib/departments.ts'
+import { DEPARTMENTS, byDepartment, departmentOf, matchesPerson, rankOf, teamKindForRole, teamsForRole } from '../../src/lib/departments.ts'
 import { canHandOutAccounts, canLeadCollections, mayPoolDisputes, visibleDisputeOwners } from '../../src/lib/permissions.ts'
 import { COLLECTING_ROLES } from '../../src/lib/collectorGrade.ts'
 
@@ -245,7 +245,13 @@ ok('the database knows about a call centre team',
 
 /* ------------------------------------------------ the screen draws the groups */
 
-ok('the users screen groups people', /byDepartment\(users\)/.test(settings))
+/*
+ * GROUPS WHAT IT SHOWS. Pinned to `byDepartment(users)`, this broke the moment a search was added
+ * and the screen began grouping the FILTERED list -- a correct change reported as a fault. What
+ * must be true is that the grouping is fed the set being displayed, whatever it is called.
+ */
+ok('the users screen groups people', /byDepartment\(\w+\)/.test(settings))
+ok('...grouping what the search left, not the whole firm', /const grouped = useMemo\(\(\) => byDepartment\(found\)/.test(settings))
 /* The pickers offer only what the database will accept, in both places a team is chosen. */
 ok('the row picker offers only this role’s teams', /teamsForRole\(u\.role, teams\)/.test(settings))
 ok('the invite box follows the role chosen above it', /teamsForRole\(role, teams\)/.test(settings))
@@ -274,8 +280,14 @@ ok('...while the heading still says how many', /\{group\.people\.length\}/.test(
  * load is not a preference, and this is about the screen somebody is sitting at.
  */
 ok('...and the fold is remembered per department', /useCollapsed\(`users:\$\{group\.meta\.id\}`\)/.test(settings))
-/* Open unless somebody folded it: a screen that hides everything on arrival answers nothing. */
-ok('...starting open, since useCollapsed is false until set', /const \[folded, toggle\] = useCollapsed/.test(settings))
+/*
+ * Open unless somebody folded it: a screen that hides everything on arrival answers nothing.
+ *
+ * Asserted on the HOOK rather than on the name it destructures into. Pinned to
+ * `const [folded, toggle]`, this broke when a search made the fold conditional and the variable
+ * became `collapsed` -- again, a correct change reported as a fault.
+ */
+ok('...starting open, since useCollapsed is false until set', /= useCollapsed\(`users:/.test(settings))
 
 /*
  * THE RANK, BESIDE THE TEAM: "you can put their rank, their grade -- rather call it a rank --
@@ -307,6 +319,74 @@ ok('the stored field is still the grade', /collectorGrade/.test(panel))
  */
 ok('the collectors panel asks the shared permission', /canEdit=\{canLeadCollections\(currentUser\?\.role\)\}/.test(settings))
 ok('...so the call centre manager may set a rank', canLeadCollections('Call Centre Manager'))
+
+/* ------------------------------------------------ finding one person among a hundred */
+
+/*
+ * The firm, standing on the Users screen: "here we are in the user section, but we're searching
+ * only for other stuff -- it should be for users."
+ */
+const KAMINI = { name: 'Kamini Reddy', email: 'kamini.reddy@raptor.test', role: 'Sales Representative' }
+const YOLANDA = { name: 'Yolanda Leader', email: 'yolanda@raptor.test', role: 'Pre-legal Team Leader' }
+
+check('an empty search matches everybody', matchesPerson(KAMINI, 'Team Raptor', '   '), true)
+check('by name', matchesPerson(KAMINI, 'Team Raptor', 'kamini'), true)
+check('by email', matchesPerson(KAMINI, 'Team Raptor', 'kamini.reddy@'), true)
+/* "Who is the team leader on Bravo" is a real question whose answer is not a name. */
+check('by role', matchesPerson(YOLANDA, 'Pre-legal Bravo', 'team leader'), true)
+check('by team', matchesPerson(YOLANDA, 'Pre-legal Bravo', 'bravo'), true)
+/*
+ * EVERY WORD MUST MATCH SOMETHING. A search that ORs its words gets LONGER as you type, which is
+ * backwards -- and "bravo leader" would then return every leader in the firm.
+ */
+check('...and the words are ANDed, across fields', matchesPerson(YOLANDA, 'Pre-legal Bravo', 'bravo leader'), true)
+check('...so a word that matches nothing rules the person out',
+  matchesPerson(YOLANDA, 'Pre-legal Bravo', 'bravo alpha'), false)
+check('somebody else’s team does not match', matchesPerson(KAMINI, 'Team Raptor', 'bravo'), false)
+check('case does not matter', matchesPerson(KAMINI, 'Team Raptor', 'KAMINI'), true)
+/* Somebody with no team is still findable by everything else. */
+check('no team is not a reason to be unfindable', matchesPerson(KAMINI, null, 'kamini'), true)
+
+const settingsSrc = read('src/pages/settings/SettingsPage.tsx')
+ok('the users screen has a search of its own', /placeholder="Search people, email, role or team"/.test(settingsSrc))
+ok('...matched by the same rule, not a second one', /matchesPerson\(u, teamName\(u\.teamId\), search\)/.test(settingsSrc))
+/*
+ * A SEARCH IGNORES THE FOLDS. Somebody who folded the call centre away and then typed a name
+ * would be told there is nobody by that name -- wrong, and it looks authoritative.
+ */
+ok('a search ignores a folded department', /const folded = collapsed && !forceOpen/.test(settingsSrc))
+ok('...which is what the search turns on', /forceOpen=\{searching\}/.test(settingsSrc))
+/*
+ * The header must describe the table under it, not the firm.
+ *
+ * ASSERTED ON THE CONDITION, not just on the sentence. Written as a search for the wording
+ * alone, this passed with the condition hard-coded to false -- the sentence sat in the file,
+ * complete and unreachable, while the header went back to claiming fifty-seven over four rows.
+ */
+ok('the count says what is on screen while searching',
+  /subtitle=\{searching[\s\S]{0,200}?team members match/.test(settingsSrc))
+/* Reading the list is not an administrator's privilege. */
+const boxAt = settingsSrc.indexOf('Search people, email, role or team')
+ok('the search box is offered before the admin-only buttons',
+  boxAt > 0 && boxAt < settingsSrc.indexOf('Add someone who has left'))
+
+/*
+ * AND THE GLOBAL SEARCH FINDS PEOPLE, which is what the firm was actually looking at.
+ */
+const global = read('src/components/layout/GlobalSearch.tsx')
+ok('the global search is readable at all', global.length > 0)
+ok('it searches people too', /for \(const u of users\)/.test(global))
+ok('...by the same rule as the Users screen', /matchesPerson\(u, team, q\)/.test(global))
+ok('...and says so in the box', /companies, deals, people/.test(global))
+/*
+ * IT LANDS ON THE LIST ALREADY NARROWED. There is no page for one person, and sending somebody to
+ * a screen of a hundred rows having just picked one of them is worse than no result.
+ */
+ok('a person result opens the users list filtered to them',
+  /\/settings\?tab=Users&q=\$\{encodeURIComponent\(u\.name\)\}/.test(global))
+ok('...and the users screen reads that back', /new URLSearchParams\(window\.location\.search\)\.get\('q'\)/.test(settingsSrc))
+/* Somebody who has left is a record, not a colleague you are trying to reach. */
+ok('people who have left are not offered', /if \(u\.status === 'Inactive'\) continue/.test(global))
 
 /* ------------------------------------------------ */
 

@@ -1,8 +1,8 @@
-import { Fragment, type FormEvent, useEffect, useMemo, useState } from 'react'
+import { Fragment, type FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useCollapsed, useSettingsNavCollapsed } from '../../lib/sidebarCollapsed'
-import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall, ChevronDown, ChevronRight } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall, ChevronDown, ChevronRight, Search } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
@@ -13,7 +13,7 @@ import { customFields as initialCustomFields, industries, leadSources as initial
 import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
-import { byDepartment, teamsForRole } from '../../lib/departments'
+import { byDepartment, matchesPerson, teamsForRole } from '../../lib/departments'
 import { canLeadCollections } from '../../lib/permissions'
 import { COLLECTING_ROLES } from '../../lib/collectorGrade'
 import { useTheme } from '../../store/ThemeContext'
@@ -297,12 +297,15 @@ const TEAM_KIND_TINT: Record<TeamKind, string> = {
  *
  * THE COUNT IS ON THE HEADING, so a folded department still says how many are in it.
  */
-function DepartmentGroup({ group, columns, renderRow }: {
+function DepartmentGroup({ group, columns, renderRow, forceOpen = false }: {
   group: { meta: { id: string; label: string; blurb: string }; people: User[] }
   columns: number
   renderRow: (u: User) => React.ReactNode
+  /** A search is on, so the fold is ignored -- see `searching` in UsersTab. */
+  forceOpen?: boolean
 }) {
-  const [folded, toggle] = useCollapsed(`users:${group.meta.id}`)
+  const [collapsed, toggle] = useCollapsed(`users:${group.meta.id}`)
+  const folded = collapsed && !forceOpen
   return (
     <Fragment>
       <tr className="border-t border-slate-100 bg-slate-50/70">
@@ -333,9 +336,29 @@ function UsersTab() {
   const [signatureUser, setSignatureUser] = useState<User | null>(null)
   const [formerOpen, setFormerOpen] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
+  /*
+   * SEEDED FROM THE URL, so a result in the global search can land here already narrowed to the
+   * person somebody was looking for. Held as ordinary state afterwards -- the first thing anybody
+   * does is clear it to see who else is there, and that should not be a history entry.
+   */
+  const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '')
 
   /* Derived, never stored -- see departments.ts. */
-  const grouped = useMemo(() => byDepartment(users), [users])
+  const teamName = useCallback(
+    (id: string | undefined) => teams.find((t) => t.id === id)?.name ?? null,
+    [teams],
+  )
+  const found = useMemo(
+    () => users.filter((u) => matchesPerson(u, teamName(u.teamId), search)),
+    [users, search, teamName],
+  )
+  const grouped = useMemo(() => byDepartment(found), [found])
+  /*
+   * A SEARCH IGNORES THE FOLDS. Somebody who folded the call centre away and then typed a name
+   * would be told there is nobody by that name, which is the worst possible answer: it is wrong,
+   * and it looks authoritative.
+   */
+  const searching = search.trim().length > 0
   /* The heading rows span the table, and the table is two columns wider for an administrator. */
   const columns = isAdmin ? 7 : 5
 
@@ -449,9 +472,41 @@ function UsersTab() {
     <div className="space-y-5">
     <Card padded={false}>
       <div className="p-5 flex items-center justify-between">
-        <CardHeader title="Users" subtitle={`${users.length} team members`} />
+        <CardHeader
+          title="Users"
+          /*
+           * SAYS WHAT IS ON SCREEN, not what exists. Searching and still reading "57 team
+           * members" over four rows is the header disagreeing with the table under it.
+           */
+          subtitle={searching
+            ? `${found.length} of ${users.length} team members match “${search.trim()}”`
+            : `${users.length} team members`}
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          {/*
+            * FINDING ONE PERSON AMONG A HUNDRED. The firm: "here we are in the user section, but
+            * we're searching only for other stuff -- it should be for users."
+            *
+            * Offered to everybody, not only an administrator: reading the list is not an
+            * administrator's privilege, and somebody looking up a colleague's team is the
+            * commonest reason to open this screen at all.
+          */}
+          <div className="flex items-center gap-2 bg-slate-100 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-brand-500/40">
+            <Search size={15} className="text-slate-400 shrink-0" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search people, email, role or team"
+              className="bg-transparent text-sm outline-none w-56 placeholder:text-slate-400"
+            />
+            {searching && (
+              <button type="button" onClick={() => setSearch('')} title="Clear" className="text-slate-400 hover:text-slate-600">
+                <X size={14} />
+              </button>
+            )}
+          </div>
         {isAdmin && (
-          <div className="flex flex-wrap items-center gap-2">
+          <>
             {/* A record rather than an invite — see FormerUserModal for why these are separate. */}
             <button onClick={() => setFormerOpen(true)} className="text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 h-fit">
               Add someone who has left
@@ -459,8 +514,9 @@ function UsersTab() {
             <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 h-fit">
               <Plus size={15} /> Add User
             </button>
-          </div>
+          </>
         )}
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -484,7 +540,8 @@ function UsersTab() {
               * entirely. The row markup is unchanged; only what wraps it is new.
             */}
             {grouped.departments.map((d) => (
-              <DepartmentGroup key={d.meta.id} group={d} columns={columns} renderRow={renderRow} />
+              <DepartmentGroup key={d.meta.id} group={d} columns={columns} renderRow={renderRow}
+                forceOpen={searching} />
             ))}
             {/*
               * AND THE PEOPLE WHO HAVE LEFT, KEPT RATHER THAN REMOVED. The firm: "if somebody

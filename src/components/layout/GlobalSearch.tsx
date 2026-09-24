@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Search, X } from 'lucide-react'
 import { formatLeadNumber } from '../../data/mockData'
 import { useAppStore } from '../../store/AppStore'
+import { departmentOf, matchesPerson } from '../../lib/departments'
 
 interface Result {
   id: string
@@ -13,7 +14,7 @@ interface Result {
 }
 
 export function GlobalSearch() {
-  const { leads, contacts, companies, deals } = useAppStore()
+  const { leads, contacts, companies, deals, users, teams } = useAppStore()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)
@@ -54,8 +55,36 @@ export function GlobalSearch() {
         out.push({ id: d.id, label: d.name, sub: `Deal · ${d.stage}`, path: `/deals/${d.id}`, kind: 'Deal' })
       }
     }
+    /*
+     * AND THE PEOPLE WHO WORK HERE. The firm, standing on the Users screen: "we're searching only
+     * for other stuff -- it should be for users."
+     *
+     * MATCHED BY THE SAME RULE the Users screen uses, so a search that finds somebody here finds
+     * them there too. Written twice they drift, and the one nobody tests is the one that stops
+     * matching on team.
+     *
+     * IT LANDS ON THE LIST, ALREADY NARROWED. There is no page for one person, and sending
+     * somebody to a screen of a hundred rows having just picked one of them would be a worse
+     * answer than none -- so the result carries ?q= and the Users screen opens filtered to them.
+     *
+     * PEOPLE WHO HAVE LEFT ARE NOT OFFERED. Their record is kept so old work still has a name on
+     * it; it is not somebody you are trying to reach.
+     */
+    for (const u of users) {
+      if (u.status === 'Inactive') continue
+      const team = teams.find((t) => t.id === u.teamId)?.name ?? null
+      if (matchesPerson(u, team, q)) {
+        out.push({
+          id: u.id,
+          label: u.name,
+          sub: `${u.role}${team ? ` · ${team}` : ''}`,
+          path: `/settings?tab=Users&q=${encodeURIComponent(u.name)}`,
+          kind: departmentOf(u.role),
+        })
+      }
+    }
     return out.slice(0, 8)
-  }, [query, leads, contacts, companies, deals])
+  }, [query, leads, contacts, companies, deals, users, teams])
 
   return (
     <div ref={ref} className="relative w-full max-w-sm">
@@ -68,7 +97,7 @@ export function GlobalSearch() {
             setOpen(true)
           }}
           onFocus={() => setOpen(true)}
-          placeholder="Search leads, contacts, companies, deals..."
+          placeholder="Search leads, contacts, companies, deals, people..."
           className="bg-transparent text-sm outline-none flex-1 min-w-0 placeholder:text-slate-400"
         />
         {query && (
