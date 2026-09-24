@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { departmentOf } from './departments.ts'
 import type { User } from '../types'
 
 /**
@@ -31,7 +32,8 @@ export function canReassign(user: Pick<User, 'role'> | null | undefined): boolea
  */
 export function canHandOutAccounts(role: Pick<User, 'role'>['role'] | undefined): boolean {
   return role === 'Administrator' || role === 'Sales Manager'
-    || role === 'Liaison Manager' || role === 'Pre-legal Team Leader'
+    || role === 'Liaison Manager' || role === 'Call Centre Manager'
+    || role === 'Pre-legal Team Leader'
 }
 
 /**
@@ -95,7 +97,8 @@ export function canFreezeAccounts(role: Pick<User, 'role'>['role'] | undefined):
  * collections team leader nothing and a sales manager the collections floor.
  */
 export function canLeadCollections(role: Pick<User, 'role'>['role'] | undefined): boolean {
-  return role === 'Administrator' || role === 'Pre-legal Team Leader'
+  return role === 'Administrator' || role === 'Call Centre Manager'
+    || role === 'Pre-legal Team Leader'
 }
 
 /**
@@ -130,6 +133,18 @@ export function visibleDisputeOwners<T extends Pick<User, 'id' | 'role' | 'teamI
   const self = everyone.filter((u) => u.id === me.id)
   if (me.role === 'Administrator') {
     return [...self, ...everyone.filter((u) => u.id !== me.id)]
+  }
+  /*
+   * THE CALL CENTRE MANAGER LEADS THE FLOOR, NOT A TEAM. The firm: "the call centre manager is
+   * the manager of the team leaders." A team leader's reach is their own team; theirs is every
+   * team, so it is the department rather than teamId that answers this.
+   *
+   * INFERRED FROM THE SHAPE, NOT INSTRUCTED. The firm described the ladder and not the disputes
+   * board specifically. Still one person at a time -- mayPoolDisputes refuses them the pooled
+   * view for the same reason it refuses a team leader.
+   */
+  if (me.role === 'Call Centre Manager') {
+    return [...self, ...everyone.filter((u) => u.id !== me.id && departmentOf(u.role) === 'Call centre')]
   }
   if (me.role === 'Pre-legal Team Leader' || me.role === 'Liaison Manager') {
     /*

@@ -123,8 +123,16 @@ async function mayRelease(
     admin.from('debtor_accounts').select('assigned_to').eq('id', accountId).maybeSingle(),
   ])
   if (!profile) return false
-  /* canLeadCollections' two roles, named here rather than imported: permissions.ts is browser
-     code and reaching into it from a route would put the app's module graph inside a function. */
-  if (profile.role === 'Administrator' || profile.role === 'Pre-legal Team Leader') return true
+  /*
+   * canLeadCollections' roles, named here rather than imported: permissions.ts is browser code
+   * and reaching into it from a route would put the app's module graph inside a function.
+   *
+   * A COPY, SO IT HAS TO BE KEPT. Adding 'Call Centre Manager' to canLeadCollections left this
+   * one behind -- the manager could hand accounts out and lead the floor everywhere except here,
+   * where releasing a held notice would have refused them with no explanation. check-departments
+   * holds the two lists against each other now, which is the only reason it was found.
+   */
+  if (profile.role === 'Administrator' || profile.role === 'Call Centre Manager'
+    || profile.role === 'Pre-legal Team Leader') return true
   return Boolean(account?.assigned_to) && account?.assigned_to === userId
 }

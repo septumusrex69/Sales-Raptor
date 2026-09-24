@@ -22,10 +22,19 @@ const ADMIN = { ...PROFILE, role: 'Administrator', name: 'The Administrator' }
 const TEAMS = ['Team Raptor', 'Team Ballflick', 'Pre-legal Alpha', 'Pre-legal Bravo',
   'Pre-legal Charlie', 'Pre-legal Delta', 'Pre-legal Echo']
   .map((name, i) => ({ id: `t-${i}`, name, kind: 'Sales', created_at: '2026-09-15T00:00:00Z' }))
-const PEOPLE = [ADMIN, {
-  ...PROFILE, id: 'u-2', name: 'A Collector', email: 'collector@raptor.test',
-  role: 'Pre-legal Agent', team_id: 't-2',
-}]
+const person = (id, name, role, status = 'Active') => ({
+  ...PROFILE, id, name, email: `${id}@raptor.test`, role, status, team_id: 't-2',
+})
+/* A floor with a ladder on it, and two people who have left. */
+const PEOPLE = [ADMIN,
+  person('u-2', 'A Collector', 'Pre-legal Agent'),
+  person('u-3', 'Zed Agent', 'Pre-legal Agent'),
+  person('u-4', 'Yolanda Leader', 'Pre-legal Team Leader'),
+  person('u-5', 'Mandla Manager', 'Call Centre Manager'),
+  person('u-6', 'Sipho Sales', 'Sales Manager'),
+  person('u-7', 'Gone Person', 'Sales Representative', 'Inactive'),
+  person('u-8', 'Also Gone', 'Pre-legal Agent', 'Inactive'),
+]
 
 const base = [
   [(u) => /\/rest\/v1\/profiles.*id=eq\./.test(u), () => ({ body: [ADMIN] })],
@@ -67,6 +76,44 @@ try {
     t.check('...offering every team there is', opts.length, TEAMS.length + 1)
     t.ok('...with "No team" still first, since a team is optional', opts[0] === 'No team')
     for (const team of TEAMS) t.ok(`...including ${team.name}`, opts.includes(team.name))
+    await context.close()
+  }
+
+  /* ---------- a hundred people, organised ---------- */
+  {
+    const { context, page } = await open(browser, [(u) => /\/rest\/v1\/teams/.test(u), () => ({ body: TEAMS })])
+    await page.waitForTimeout(500)
+    /* The users table is the first on the page; the collectors panel has one of its own. */
+    const rows = await page.evaluate(() => Array.from(
+      document.querySelectorAll('table')[0].querySelectorAll('tbody tr'),
+    ).map((tr) => (tr.querySelector('th')
+      ? `HEAD ${tr.innerText.replace(/\s+/g, ' ').trim()}`
+      : `ROW ${(tr.querySelector('td')?.innerText || '').split('\n').pop().trim()}`)))
+
+    const heads = rows.filter((r) => r.startsWith('HEAD'))
+    t.ok('the list is grouped rather than one run of a hundred', heads.length >= 4)
+    /* The firm's own order. */
+    const order = ['ADMINISTRATION', 'SALES', 'CALL CENTRE'].map((d) => heads.findIndex((h) => h.includes(d)))
+    t.ok('every department this fixture has is drawn', order.every((i) => i >= 0))
+    t.ok('...in the firm’s order: the office, then sales, then the floor',
+      order[0] < order[1] && order[1] < order[2])
+
+    /*
+     * THE LADDER, which is the part a name-sorted list destroys: manager above leader above
+     * agents. Read as positions in the rendered table, not from the model.
+     */
+    const at = (name) => rows.findIndex((r) => r.includes(name))
+    t.ok('the call centre manager is drawn above the team leader', at('Mandla Manager') < at('Yolanda Leader'))
+    t.ok('...and the team leader above the agents', at('Yolanda Leader') < at('A Collector'))
+    t.ok('...with the agents in their own order', at('A Collector') < at('Zed Agent'))
+
+    /* Folded away, and the fold really is closed. */
+    t.ok('the people who have left have their own heading', rows.some((r) => /NO LONGER HERE/.test(r)))
+    t.ok('...and are not drawn until it is opened', at('Gone Person') < 0)
+    await page.getByRole('button', { name: /No longer here/ }).click()
+    await page.waitForTimeout(300)
+    const opened = await page.evaluate(() => document.querySelectorAll('table')[0].querySelectorAll('tbody tr').length)
+    t.check('...and appear when it is', opened, rows.length + 2)
     await context.close()
   }
 

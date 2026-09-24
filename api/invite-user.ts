@@ -34,7 +34,8 @@ import { adminClient, callerIsAdmin, requireCaller } from './_lib/auth.js'
  * browser.
  */
 const ALLOWED_ROLES = ['Administrator', 'Sales Manager', 'Sales Representative',
-  'Liaison Manager', 'Liaison', 'Pre-legal Team Leader', 'Pre-legal Agent', 'Read Only']
+  'Liaison Manager', 'Liaison', 'Call Centre Manager', 'Pre-legal Team Leader',
+  'Pre-legal Agent', 'Read Only']
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {

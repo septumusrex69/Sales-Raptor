@@ -6831,3 +6831,24 @@ create trigger workflow_start_on_allocation
 
 comment on function public.workflow_start_on_allocation() is
   'Starts every active workflow that waits for an allocation, once per account, on first allocation only. The run is created without steps; the runner dates them, because the working-day calendar lives in the app.';
+
+-- ---------- The top of the collections ladder: Call Centre Manager ----------
+--
+-- The firm, organising a list that had passed a hundred people: "the call centre has a call
+-- centre manager, which is the manager of the team leaders; then we get team leaders and then we
+-- get pre-legal agents. The call centre manager is also a pre-legal agent and the team leaders
+-- are also pre-legal agents -- they just have reduced books."
+--
+-- So they COLLECT: they are in COLLECTING_ROLES, they land on the collections dashboard, and the
+-- reduced book is a per-person `book_ceiling`, NOT a property of the role. The company standard
+-- stays 500 for everybody, which is the rule CLAUDE.md states and the reason a role must never
+-- decide how many accounts somebody carries.
+--
+-- The DEPARTMENT a role belongs to is derived in src/lib/departments.ts and never stored -- the
+-- same rule this schema applies to a client's position and a diary kind.
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check
+  check (role = any (array[
+    'Administrator','Sales Manager','Sales Representative',
+    'Liaison Manager','Liaison',
+    'Call Centre Manager','Pre-legal Team Leader','Pre-legal Agent','Read Only']));

@@ -159,6 +159,11 @@ export function mayTake(grade: CollectorGrade, band: AccountBand): boolean {
  * new collector proves themselves anyway. A team leader raises it when they have seen the work.
  */
 export const COLLECTING_ROLES = [
+  /* The firm on the call centre manager and the team leaders: "they're also pre-legal agents,
+     they just have reduced books" -- so they collect, and the reduction is a per-person
+     book_ceiling rather than anything about the role. The company standard stays 500 for
+     everybody; see CLAUDE.md on why a role must not decide how many. */
+  'Call Centre Manager',
   'Pre-legal Agent', 'Pre-legal Team Leader', 'Liaison', 'Liaison Manager',
 ]
 

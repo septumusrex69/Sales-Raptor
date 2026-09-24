@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { Fragment, type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useSettingsNavCollapsed } from '../../lib/sidebarCollapsed'
-import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall, ChevronDown, ChevronRight } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
@@ -13,6 +13,7 @@ import { customFields as initialCustomFields, industries, leadSources as initial
 import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
+import { byDepartment } from '../../lib/departments'
 import { useTheme } from '../../store/ThemeContext'
 import { useBuzzBox } from '../../store/BuzzBoxContext'
 import { THEMES } from '../../lib/themes'
@@ -274,39 +275,15 @@ function UsersTab() {
   const [emailUser, setEmailUser] = useState<User | null>(null)
   const [signatureUser, setSignatureUser] = useState<User | null>(null)
   const [formerOpen, setFormerOpen] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
 
-  return (
-    <div className="space-y-5">
-    <Card padded={false}>
-      <div className="p-5 flex items-center justify-between">
-        <CardHeader title="Users" subtitle={`${users.length} team members`} />
-        {isAdmin && (
-          <div className="flex flex-wrap items-center gap-2">
-            {/* A record rather than an invite — see FormerUserModal for why these are separate. */}
-            <button onClick={() => setFormerOpen(true)} className="text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 h-fit">
-              Add someone who has left
-            </button>
-            <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 h-fit">
-              <Plus size={15} /> Add User
-            </button>
-          </div>
-        )}
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
-              <th className="font-medium px-5 py-2.5">User</th>
-              <th className="font-medium px-3 py-2.5">Role</th>
-              <th className="font-medium px-3 py-2.5">Team</th>
-              <th className="font-medium px-3 py-2.5">Email</th>
-              <th className="font-medium px-3 py-2.5">Status</th>
-              {isAdmin && <th className="font-medium px-3 py-2.5">Login</th>}
-              {isAdmin && <th className="font-medium px-3 py-2.5"></th>}
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => (
+  /* Derived, never stored -- see departments.ts. */
+  const grouped = useMemo(() => byDepartment(users), [users])
+  /* The heading rows span the table, and the table is two columns wider for an administrator. */
+  const columns = isAdmin ? 7 : 5
+
+  /* The row exactly as it was, lifted so the groups below can each draw their own people. */
+  const renderRow = (u: User) => (
               <tr key={u.id} className="border-t border-slate-50">
                 <td className="px-5 py-2.5">
                   <div className="flex items-center gap-2.5">
@@ -386,7 +363,87 @@ function UsersTab() {
                   </td>
                 )}
               </tr>
+  )
+
+  return (
+    <div className="space-y-5">
+    <Card padded={false}>
+      <div className="p-5 flex items-center justify-between">
+        <CardHeader title="Users" subtitle={`${users.length} team members`} />
+        {isAdmin && (
+          <div className="flex flex-wrap items-center gap-2">
+            {/* A record rather than an invite — see FormerUserModal for why these are separate. */}
+            <button onClick={() => setFormerOpen(true)} className="text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 h-fit">
+              Add someone who has left
+            </button>
+            <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 h-fit">
+              <Plus size={15} /> Add User
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
+              <th className="font-medium px-5 py-2.5">User</th>
+              <th className="font-medium px-3 py-2.5">Role</th>
+              <th className="font-medium px-3 py-2.5">Team</th>
+              <th className="font-medium px-3 py-2.5">Email</th>
+              <th className="font-medium px-3 py-2.5">Status</th>
+              {isAdmin && <th className="font-medium px-3 py-2.5">Login</th>}
+              {isAdmin && <th className="font-medium px-3 py-2.5"></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {/*
+              * GROUPED, NOT ONE LIST OF A HUNDRED. The firm: "there are more than 100 users ...
+              * we need to categorise them." A heading row per department, in the firm's own
+              * order, and inside the call centre the ladder they described -- manager, then team
+              * leaders, then agents -- because a list sorted by name alone hides the structure
+              * entirely. The row markup is unchanged; only what wraps it is new.
+            */}
+            {grouped.departments.map((d) => (
+              <Fragment key={d.meta.id}>
+                <tr className="border-t border-slate-100 bg-slate-50/70">
+                  <th colSpan={columns} className="text-left px-5 py-2">
+                    <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600">
+                      {d.meta.label}
+                    </span>
+                    <span className="ml-2 text-[11px] text-slate-400">{d.people.length}</span>
+                    <span className="ml-3 text-[11px] font-normal text-slate-400">{d.meta.blurb}</span>
+                  </th>
+                </tr>
+                {d.people.map((u) => renderRow(u))}
+              </Fragment>
             ))}
+            {/*
+              * AND THE PEOPLE WHO HAVE LEFT, KEPT RATHER THAN REMOVED. The firm: "if somebody
+              * left the company we archive the user, just to understand if there's a timestamp
+              * about someone that did something or an action that can be checked."
+              *
+              * Out of the departments so a headcount means the people doing that job, and folded
+              * away rather than hidden, so the answer to "who was that?" is one click and not a
+              * setting somebody has to know exists.
+            */}
+            {grouped.archived.length > 0 && (
+              <Fragment>
+                <tr className="border-t border-slate-100 bg-slate-50/70">
+                  <th colSpan={columns} className="text-left px-5 py-2">
+                    <button type="button" onClick={() => setShowArchived((v) => !v)}
+                      className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 hover:text-slate-700">
+                      {showArchived ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                      No longer here
+                      <span className="font-normal text-slate-400">{grouped.archived.length}</span>
+                    </button>
+                    <span className="ml-3 text-[11px] font-normal text-slate-400">
+                      Kept so anything they did still has a name on it.
+                    </span>
+                  </th>
+                </tr>
+                {showArchived && grouped.archived.map((u) => renderRow(u))}
+              </Fragment>
+            )}
           </tbody>
         </table>
       </div>
@@ -763,7 +820,7 @@ function RemoveUserModal({
  */
 export const ASSIGNABLE_ROLES: UserRole[] = [
   'Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison',
-  'Pre-legal Team Leader', 'Pre-legal Agent', 'Read Only',
+  'Call Centre Manager', 'Pre-legal Team Leader', 'Pre-legal Agent', 'Read Only',
 ]
 
 function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string; teams: Team[]; onClose: () => void }) {

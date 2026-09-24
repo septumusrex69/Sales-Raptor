@@ -91,9 +91,18 @@ const teamAt = router.indexOf("myTeam?.kind === 'Communications'")
 ok('the pre-legal branch exists', roleAt > 0)
 ok('the communications branch exists', teamAt > 0)
 ok('...and the role is asked first', roleAt < teamAt)
-/* Both pre-legal roles, not just the agent: a team leader collects too. */
-ok('both pre-legal roles land on the collections floor',
-  /const PRE_LEGAL = \['Pre-legal Agent', 'Pre-legal Team Leader'\]/.test(router))
+/*
+ * EVERY COLLECTIONS ROLE, not just the agent -- a team leader and the call centre manager carry
+ * a book too. Read out of the array rather than matched as a literal: pinned to the exact two
+ * roles it had, this broke the moment 'Call Centre Manager' was added, which is a correct change
+ * reported as a fault. Assert what must be TRUE of the list, not how it is written.
+ */
+const preLegal = [...(/const PRE_LEGAL = \[([^\]]*)\]/.exec(router)?.[1] ?? '')
+  .matchAll(/'([^']+)'/g)].map((m) => m[1])
+ok('the collections roles are listed at all', preLegal.length > 0)
+for (const r of ['Pre-legal Agent', 'Pre-legal Team Leader', 'Call Centre Manager']) {
+  ok(`...including ${r}, who lands on the collections floor`, preLegal.includes(r))
+}
 /* An administrator still comes first: they oversee the firm, not a floor. */
 const adminAt = router.indexOf("currentUser?.role === 'Administrator'")
 ok('an administrator is still answered before either', adminAt > 0 && adminAt < roleAt)

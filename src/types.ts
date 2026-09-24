@@ -455,6 +455,10 @@ export type UserRole =
   | 'Sales Representative'
   | 'Liaison Manager'
   | 'Liaison'
+  // The top of the collections ladder: the firm's own words, "the manager of the team leaders".
+  // They carry a book like everybody else on the floor -- a reduced one, which is a per-person
+  // ceiling and not a property of the role (see book_ceiling).
+  | 'Call Centre Manager'
   // The rung between the collector and the client liaison: a dispute an agent cannot answer
   // goes to one of those two and to nobody else.
   | 'Pre-legal Team Leader'

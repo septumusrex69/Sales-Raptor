@@ -31,7 +31,9 @@ import { AdminOverview } from './AdminOverview'
  * away the screen their own work is on. The two pre-legal roles are the ones who open Raptor to
  * collect, so they are the two that move.
  */
-const PRE_LEGAL = ['Pre-legal Agent', 'Pre-legal Team Leader']
+/* All three collections roles: the manager and the leaders carry a book like the agents do,
+   so the collections floor is the screen they open Raptor on. */
+const PRE_LEGAL = ['Pre-legal Agent', 'Pre-legal Team Leader', 'Call Centre Manager']
 export function DashboardRouter() {
   const { teams } = useAppStore()
   const { currentUser } = useAuth()
