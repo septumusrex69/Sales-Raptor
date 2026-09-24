@@ -44,6 +44,8 @@ import { CommissionCard } from '../../components/companies/CommissionCard'
 import { createDebtorAccount, fetchAccountReferences, fetchClientCommissionRate } from '../../lib/accountBook'
 import { toAccountRow, toContactRows, type NewDebtorInput } from '../../lib/newDebtor'
 import { HandoverBook } from '../../components/companies/HandoverBook'
+import { HandOutModal } from '../accounts/HandOutModal'
+import type { Selection } from '../../lib/accountAllocation'
 import type { Company, Contact, ProductService } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
 import { summaryLine } from '../../lib/summaryLine'
@@ -73,6 +75,7 @@ export function CompanyDetail() {
     activities,
     tasks,
     users,
+    teams,
     addActivity,
     updateCompany,
     updateContact,
@@ -93,6 +96,19 @@ export function CompanyDetail() {
   const [debtorRefs, setDebtorRefs] = useState<string[]>([])
   const [debtorBusy, setDebtorBusy] = useState(false)
   const [debtorError, setDebtorError] = useState<string | null>(null)
+  /*
+   * THE ACCOUNT JUST OPENED BY HAND, WAITING TO BE GIVEN TO SOMEBODY.
+   *
+   * The firm: "once you've added an account manually in a client it should do the same thing --
+   * it should take you to the assign and refer page to diarise, and it should be allocated to a
+   * person." Adding by hand used to write the row and drop the person on the account screen, so
+   * an account phoned in by a client arrived on nobody's desk and in nobody's diary -- the exact
+   * state the hand-out screen exists to end, reached by the one door that skipped it.
+   *
+   * The id rather than a boolean, because it IS the selection the hand-out screen works on.
+   */
+  const [handOutNew, setHandOutNew] = useState<string | null>(null)
+  const [handOutNote, setHandOutNote] = useState<string | null>(null)
   const [ownerOpen, setOwnerOpen] = useState(false)
   const [dealOpen, setDealOpen] = useState(false)
   const [followUpOpen, setFollowUpOpen] = useState(false)
@@ -757,6 +773,28 @@ export function CompanyDetail() {
             <div className="space-y-5">
               {/* Above the deals: for a debt collection client this IS the relationship. What
                   they signed is one line on a deal; what they actually send is the work. */}
+              {/*
+                * AN ACCOUNT OPENED BY HAND AND NOT YET HANDED OUT.
+                *
+                * The row exists the moment it is created -- it has to, before anybody can be
+                * given it -- so closing the assign-and-refer screen cannot roll it back. What it
+                * must not do is leave quietly: an account on nobody's desk is in nobody's diary,
+                * and the firm's rule is that an active account always has both. So it is said
+                * here, in the client where it was opened, with the way to finish it.
+                */}
+              {handOutNote && (
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
+                  <p className="text-sm text-amber-900">
+                    The account is open, but it is on nobody&rsquo;s desk and in nobody&rsquo;s
+                    diary. An active account needs a clerk and a date.
+                  </p>
+                  <button type="button"
+                    className="shrink-0 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700"
+                    onClick={() => { setHandOutNew(handOutNote); setHandOutNote(null) }}>
+                    Assign and refer
+                  </button>
+                </div>
+              )}
               <HandoverBook company={company}
                 onUpload={() => navigate(`/settings?tab=Data+Import&client=${company.id}`)} />
               {/* Notes in the middle, and still on their own tab — both places, at the firm's
@@ -923,13 +961,58 @@ export function CompanyDetail() {
                   return
                 }
               }
+              /*
+               * STRAIGHT ON TO ASSIGN AND REFER, rather than to the account.
+               *
+               * A new account needs a person and a date, and this is the moment somebody has the
+               * client on the telephone and knows which of the two it is. Landing on the account
+               * screen instead put it on nobody's desk and in nobody's diary, and left the
+               * finding of that to a report nobody was reading.
+               *
+               * THE SAME SCREEN THE ACCOUNTS LIST USES, on a selection of exactly this one
+               * account -- not a second allocation form written next to the first. commitHandOut
+               * is the only thing that allocates, so the diary entry, the notification and the
+               * handover workflow all follow from it the way they do for a batch.
+               */
               setDebtorOpen(false)
-              navigate(`/accounts/${account.id}`)
+              setHandOutNew(account.id)
             } catch (e) {
               setDebtorError(e instanceof Error ? e.message : String(e))
             } finally {
               setDebtorBusy(false)
             }
+          }}
+        />
+      )}
+
+      {/*
+        * THE ASSIGN-AND-REFER SCREEN, on the one account just opened.
+        *
+        * `allocate_and_refer` is the mode it opens in and there is deliberately no allocate-only
+        * (see HandOutMode), so finishing here gives the account a clerk AND a diary date -- and
+        * the allocation trigger starts the handover workflow off the back of it, exactly as it
+        * does for an account handed out of a batch.
+        */}
+      {handOutNew && (
+        <HandOutModal
+          selection={{ kind: 'ids', ids: [handOutNew] } as Selection}
+          selectedCount={1}
+          users={users}
+          teams={teams}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => {
+            /* Dismissed without handing it out. The account stands; say so rather than
+               navigating away from the only place that knows. */
+            setHandOutNote(handOutNew)
+            setHandOutNew(null)
+          }}
+          onDone={() => {
+            const id = handOutNew
+            setHandOutNew(null)
+            setHandOutNote(null)
+            /* On to the account itself, which is where somebody wants to be once it has a
+               person and a date on it. */
+            if (id) navigate(`/accounts/${id}`)
           }}
         />
       )}
