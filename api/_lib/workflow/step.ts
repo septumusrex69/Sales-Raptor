@@ -338,6 +338,59 @@ export async function runOneStep(
     .update({ state: 'sent', sent_at: sentAt, sent_by: releasedBy ?? null, note: null })
     .eq('id', step.id)
 
+  /*
+   * AND IT GOES ON THE ACCOUNT'S OWN TIMELINE.
+   *
+   * The firm, looking at an account whose handover had gone out: "I don't see that there's any
+   * charges for any SMS nor any notes for the workflow that has gone out."
+   *
+   * The charges WERE raised -- items 1(a) and 1(c), correctly -- but the only trace of any of it
+   * was a fee row and a tick inside the workflow panel. The collector's timeline, which is the
+   * thing somebody actually reads before picking up the telephone, said nothing had happened.
+   *
+   * SAME TABLE AND SAME SOURCE AS EVERYTHING ELSE, so the collector reads one timeline rather
+   * than two -- the reason the by-hand debtor note was put there too.
+   *
+   * IT NAMES THE CHARGE. A fee the debtor will be asked to pay should be legible where the action
+   * is, not only in a total on the position panel.
+   */
+  const charged = plan.charge
+    ? ` R${plan.charge.rand.toFixed(2)} raised under item ${plan.charge.item}.`
+    : ''
+  /* The same fallback the SMS send itself uses, or the note names a number the message did not
+     go to on an account whose only number is filed as a landline. */
+  const toWhom = node.channel === 'sms'
+    ? (pickContact(contacts, 'mobile') ?? pickContact(contacts, 'phone'))
+    : pickContact(contacts, 'email')
+  await admin.from('account_notes').insert({
+    account_id: account.id,
+    body: `${node.label} sent${toWhom ? ` to ${toWhom}` : ''}.${charged}`,
+    author_name: 'Workflow',
+    created_by: releasedBy ?? null,
+    source: 'workflow',
+  })
+
+  /*
+   * AND THE ACCOUNT COUNTS AS WORKED.
+   *
+   * `last_action_at` is what the client-facing narrative reads to decide whether anybody has been
+   * in touch, and what "Gone quiet" and "never worked" are filtered on. The firm: "the status is
+   * not correct -- it says no contact attempt has been made yet, however the handover messages
+   * already went out."
+   *
+   * Two notices to a debtor is a contact attempt by any reading, so the account is stamped. Dated
+   * with the ACTION rather than with now, for the same reason the fee is.
+   */
+  await admin.from('debtor_accounts')
+    /*
+     * THE FIRM'S DATE, NOT THE SERVER'S. last_action_at is a DATE, and sentAt is a UTC timestamp:
+     * an action at one in the morning in Johannesburg is eleven the previous night in UTC, so
+     * casting it would file the work under yesterday. `today` is already the firm's own day --
+     * the runner computes it once for exactly this reason.
+     */
+    .update({ last_action_at: today })
+    .eq('id', account.id)
+
   /* The run is over when nothing is waiting. Checked here rather than on a timer, because the
      step that just went is the only thing that can have changed the answer. */
   const { data: left } = await admin.from('workflow_run_steps')

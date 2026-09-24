@@ -1073,8 +1073,16 @@ export function AccountDetail() {
             three lines under it. A panel nobody scrolls to is a panel that does not exist, and
             this one only works if the person doing the work reads it.
           */
-          side={[clientLinePanel, summaryPanel, workflowPanel, otherAccountsPanel, promisePanel,
-            disputesPanel, positionPanel]}
+          /*
+           * THE WORKFLOW SITS BELOW THE PROMISE AND THE DISPUTE, at the firm's asking: "I think a
+           * promise to pay and a dispute holds more weight than that."
+           *
+           * They are right about which is which. A promise is the thing this account is measured
+           * by and a dispute is the thing that stops it; the workflow is a record of what has
+           * already gone out by itself, which is worth seeing and never the first thing to act on.
+           */
+          side={[clientLinePanel, summaryPanel, otherAccountsPanel, promisePanel,
+            disputesPanel, workflowPanel, positionPanel]}
         />
       )}
 

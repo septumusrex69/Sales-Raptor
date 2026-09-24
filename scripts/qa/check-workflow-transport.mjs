@@ -287,6 +287,45 @@ ok('a value nothing can fill is dropped rather than blanked',
 
 /* ------------------------------------------------ */
 
+/* ------------------------------------------------ a send leaves a record somebody reads */
+
+/*
+ * The firm, looking at an account whose handover had gone out: "I don't see that there's any
+ * charges for any SMS nor any notes for the workflow that has gone out ... the status is not
+ * correct, it says no contact attempt has been made yet, however the handover messages already
+ * went out."
+ *
+ * The charges WERE raised -- items 1(a) and 1(c), correctly -- and the only trace of any of it
+ * was a fee row and a tick inside the workflow panel. The collector's timeline, which is what
+ * somebody reads before picking up the telephone, said nothing had happened at all.
+ */
+ok('a sent step goes on the account timeline', /from\('account_notes'\)\.insert\(/.test(runner))
+ok('...named as the workflow rather than as a person', /author_name: 'Workflow'/.test(runner))
+/* One timeline, not two -- the same table and source the by-hand debtor note uses. */
+ok('...on the same table everything else is on', /source: 'workflow',/.test(runner))
+/*
+ * AND IT NAMES THE CHARGE. A fee the debtor will be asked to pay should be legible where the
+ * action is, not only inside a total on the position panel.
+ */
+ok('the note says what it cost', /raised under item \$\{plan\.charge\.item\}/.test(runner))
+ok('...and says who it went to', /sent\$\{toWhom \? ` to \$\{toWhom\}` : ''\}/.test(runner))
+/* The same fallback the SMS send uses, or the note names a number the message did not go to. */
+ok('...falling back the way the SMS send does',
+  /pickContact\(contacts, 'mobile'\) \?\? pickContact\(contacts, 'phone'\)[\s\S]{0,60}?: pickContact\(contacts, 'email'\)/.test(runner))
+
+/*
+ * AND THE ACCOUNT COUNTS AS WORKED. last_action_at is what the client-facing narrative reads to
+ * decide whether anybody has been in touch, and what "Gone quiet" and "never worked" filter on.
+ * Two notices to a debtor is a contact attempt by any reading.
+ */
+ok('a sent step marks the account as worked', /\.update\(\{ last_action_at: today \}\)/.test(runner))
+/*
+ * THE FIRM'S DATE, NOT THE SERVER'S. It is a DATE column and sentAt is a UTC timestamp, so an
+ * action at one in the morning in Johannesburg would be filed under the previous day.
+ */
+ok('...dated in the firm’s own day', !/last_action_at: sentAt/.test(runner))
+
+
 for (const f of failures) console.error(`  ✗ ${f}`)
 console.log(`check-workflow-transport: ${pass} passed, ${failures.length} failed`)
 process.exit(failures.length ? 1 : 0)
