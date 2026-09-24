@@ -10,6 +10,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-collector-settings.mjs
  */
 import { readFileSync } from 'node:fs'
+import { canLeadCollections } from '../../src/lib/permissions.ts'
 import {
   COLLECTOR_GRADES, DEFAULT_BOOK_CEILING, DEFAULT_DIARY_RESERVE,
   bookCeilingOf, diaryReserveOf, selfBookingLimit,
@@ -116,8 +117,23 @@ const roleList = listAt < 0 ? '' : settings.slice(arrayAt, settings.indexOf(']',
 ok('the role dropdown exists at all', roleList.includes("'Administrator'"))
 ok('a team leader can actually be appointed', roleList.includes("'Pre-legal Team Leader'"))
 ok('the collectors panel is mounted', /<CollectorsPanel/.test(settings))
-ok('...and a team leader may edit it, not only an administrator',
-  /canEdit=\{isAdmin \|\| currentUser\?\.role === 'Pre-legal Team Leader'\}/.test(settings))
+/*
+ * ASSERTED THROUGH canLeadCollections, NOT AS THE PAIR OF ROLES IT USED TO BE WRITTEN AS.
+ *
+ * Pinned to `isAdmin || role === 'Pre-legal Team Leader'`, this broke the moment the panel
+ * started asking the shared permission -- a correct change reported as a fault. Worse, the
+ * hand-written pair was itself the bug: it was left behind when Call Centre Manager was added, so
+ * the person who runs the floor could lead it everywhere except the screen where ranks are set.
+ *
+ * Run rather than read, so this says what must be TRUE of the permission rather than how the
+ * call happens to be spelt.
+ */
+ok('the panel asks the shared collections permission',
+  /canEdit=\{canLeadCollections\(/.test(settings))
+ok('...so a team leader may edit it, not only an administrator',
+  canLeadCollections('Pre-legal Team Leader') && canLeadCollections('Administrator'))
+ok('...and so may the person who runs the floor', canLeadCollections('Call Centre Manager'))
+ok('...while a collector may not', !canLeadCollections('Pre-legal Agent'))
 
 /* ---------- the mapper carries the columns ---------- */
 

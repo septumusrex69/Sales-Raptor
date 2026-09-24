@@ -30,7 +30,8 @@ const PEOPLE = [ADMIN,
   person('u-2', 'A Collector', 'Pre-legal Agent'),
   person('u-3', 'Zed Agent', 'Pre-legal Agent'),
   person('u-4', 'Yolanda Leader', 'Pre-legal Team Leader'),
-  person('u-5', 'Mandla Manager', 'Call Centre Manager'),
+  { ...person('u-5', 'Mandla Manager', 'Call Centre Manager'), collector_grade: 'Elite' },
+  { ...person('u-9', 'Unranked One', 'Pre-legal Agent'), collector_grade: null },
   person('u-6', 'Sipho Sales', 'Sales Manager'),
   person('u-7', 'Gone Person', 'Sales Representative', 'Inactive'),
   person('u-8', 'Also Gone', 'Pre-legal Agent', 'Inactive'),
@@ -106,6 +107,42 @@ try {
     t.ok('the call centre manager is drawn above the team leader', at('Mandla Manager') < at('Yolanda Leader'))
     t.ok('...and the team leader above the agents', at('Yolanda Leader') < at('A Collector'))
     t.ok('...with the agents in their own order', at('A Collector') < at('Zed Agent'))
+
+    /*
+     * THE RANK, BESIDE THE TEAM. The firm: "you can put their rank, their grade -- rather call it
+     * a rank -- next to the team that they're in." Read out of the rendered cell, because whether
+     * a badge is actually drawn next to the team is not a question source can answer.
+     */
+    const teamCell = (name) => page.evaluate((who) => {
+      const rows = Array.from(document.querySelectorAll('table')[0].querySelectorAll('tbody tr'))
+      const row = rows.find((tr) => (tr.querySelector('td')?.innerText || '').includes(who))
+      return row ? (row.querySelectorAll('td')[2]?.innerText || '').replace(/\s+/g, ' ').trim() : ''
+    }, name)
+    t.ok('a ranked collector shows their rank beside the team',
+      /Elite/i.test(await teamCell('Mandla Manager')))
+    /* An unranked collector is offered NO accounts at all, so a blank would hide a thing to fix. */
+    t.ok('...and an unranked one says "no rank" rather than nothing',
+      /no rank/i.test(await teamCell('Unranked One')))
+    /* A rank on a sales rep would be a column of dashes down two thirds of the list. */
+    t.ok('...while somebody who does not collect has no rank at all',
+      !/rank|elite|senior|junior|skilled/i.test(await teamCell('Sipho Sales')))
+
+    /*
+     * AND A DEPARTMENT FOLDS. "Now it's just one long big list ... drop downs would be nice."
+     * Asserted by counting rows, not by looking for a class: what matters is that the people
+     * stop being drawn and the heading keeps its count.
+     */
+    const bodyRows = () => page.evaluate(() => document.querySelectorAll('table')[0].querySelectorAll('tbody tr').length)
+    const before = await bodyRows()
+    await page.getByRole('button', { name: /CALL CENTRE/i }).click()
+    await page.waitForTimeout(300)
+    const after = await bodyRows()
+    t.ok('folding a department hides its people', after < before)
+    t.ok('...and the heading is still there with its count',
+      /CALL CENTRE/i.test(await page.locator('table').first().innerText()))
+    await page.getByRole('button', { name: /CALL CENTRE/i }).click()
+    await page.waitForTimeout(300)
+    t.check('...and unfolding brings them back', await bodyRows(), before)
 
     /* Folded away, and the fold really is closed. */
     t.ok('the people who have left have their own heading', rows.some((r) => /NO LONGER HERE/.test(r)))

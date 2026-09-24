@@ -66,8 +66,9 @@ export function CollectorsPanel({ canEdit }: { canEdit: boolean }) {
 
       {collectors.length === 0 ? (
         <p className="px-5 pb-5 text-sm text-slate-500">
-          Nobody here works a collections book yet. Give somebody the Pre-legal Agent or
-          Pre-legal Team Leader role above, and they will appear here to be graded.
+          Nobody here works a collections book yet. Give somebody a call centre role above —
+          Pre-legal Agent, Pre-legal Team Leader or Call Centre Manager — and they will appear
+          here to be ranked.
         </p>
       ) : (
         <div className="overflow-x-auto">
@@ -76,8 +77,14 @@ export function CollectorsPanel({ canEdit }: { canEdit: boolean }) {
               <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
                 <th className="font-medium px-5 py-2.5">Collector</th>
                 <th className="font-medium px-3 py-2.5">
-                  Grade
-                  {/* What the grade is FOR, said where it is set. It is the commonest thing to
+                  {/*
+                    * RANK, WHICH IS THE FIRM'S WORD FOR IT: "you can put their rank, their grade
+                    * -- rather call it a rank." The column is still collector_grade and the type
+                    * is still CollectorGrade; what changed is what a person reads, which is the
+                    * rule CLAUDE.md states about user-facing words.
+                  */}
+                  Rank
+                  {/* What the rank is FOR, said where it is set. It is the commonest thing to
                       get wrong about this model. */}
                   <span className="block font-normal text-slate-300">which accounts</span>
                 </th>
@@ -108,7 +115,7 @@ export function CollectorsPanel({ canEdit }: { canEdit: boolean }) {
       )}
 
       <p className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
-        Grade decides <span className="font-medium text-slate-500">which</span> accounts somebody
+        Rank decides <span className="font-medium text-slate-500">which</span> accounts somebody
         may be given, never how many — a junior and an elite carry the same book and differ only
         in what is on it. Generic work goes to anyone; high value from R25&nbsp;000 needs Skilled
         or better; major accounts from R50&nbsp;000 need Senior or Elite. Anything disputed, in

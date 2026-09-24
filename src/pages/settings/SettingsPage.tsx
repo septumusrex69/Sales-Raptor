@@ -1,7 +1,7 @@
 import { Fragment, type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
-import { useSettingsNavCollapsed } from '../../lib/sidebarCollapsed'
+import { useCollapsed, useSettingsNavCollapsed } from '../../lib/sidebarCollapsed'
 import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall, ChevronDown, ChevronRight } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
@@ -14,6 +14,8 @@ import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { byDepartment, teamsForRole } from '../../lib/departments'
+import { canLeadCollections } from '../../lib/permissions'
+import { COLLECTING_ROLES } from '../../lib/collectorGrade'
 import { useTheme } from '../../store/ThemeContext'
 import { useBuzzBox } from '../../store/BuzzBoxContext'
 import { THEMES } from '../../lib/themes'
@@ -281,6 +283,45 @@ const TEAM_KIND_TINT: Record<TeamKind, string> = {
   'Call centre': 'bg-[var(--tint-green)] text-[var(--c-green)]',
 }
 
+/**
+ * One department, foldable.
+ *
+ * The firm, looking at the organised list: "now it's just one long big list. It's nice that it's
+ * organised, but drop downs would be nice." Thirty-eight people in the call centre is most of the
+ * screen, and somebody looking for a liaison should not have to scroll past all of them.
+ *
+ * OPEN UNLESS SOMEBODY FOLDED IT. A screen that hides everything on arrival answers nothing; one
+ * that stays folded once you have folded it is a preference. useCollapsed keeps that in
+ * localStorage per department -- it is about the screen somebody is sitting at, which is the same
+ * reason the two nav panes keep theirs there.
+ *
+ * THE COUNT IS ON THE HEADING, so a folded department still says how many are in it.
+ */
+function DepartmentGroup({ group, columns, renderRow }: {
+  group: { meta: { id: string; label: string; blurb: string }; people: User[] }
+  columns: number
+  renderRow: (u: User) => React.ReactNode
+}) {
+  const [folded, toggle] = useCollapsed(`users:${group.meta.id}`)
+  return (
+    <Fragment>
+      <tr className="border-t border-slate-100 bg-slate-50/70">
+        <th colSpan={columns} className="text-left px-5 py-2">
+          <button type="button" onClick={toggle}
+            className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 hover:text-slate-900"
+            aria-expanded={!folded}>
+            {folded ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+            {group.meta.label}
+            <span className="font-normal text-slate-400">{group.people.length}</span>
+          </button>
+          <span className="ml-3 text-[11px] font-normal text-slate-400">{group.meta.blurb}</span>
+        </th>
+      </tr>
+      {!folded && group.people.map((u) => renderRow(u))}
+    </Fragment>
+  )
+}
+
 function UsersTab() {
   const { users, teams, updateUser, removeUserLocal } = useAppStore()
   const { currentUser, session } = useAuth()
@@ -344,6 +385,23 @@ function UsersTab() {
                     </select>
                   ) : (
                     <span className="text-slate-500">{teams.find((t) => t.id === u.teamId)?.name ?? '—'}</span>
+                  )}
+                  {/*
+                    * THE RANK, BESIDE THE TEAM, at the firm's asking: "you can put their rank,
+                    * their grade -- rather call it a rank -- next to the team that they're in."
+                    *
+                    * ONLY FOR SOMEBODY WHO COLLECTS. A rank on a sales rep would be a column of
+                    * dashes down two thirds of the list. An unranked collector shows "no rank"
+                    * rather than nothing, because that is a thing to go and fix: an unranked
+                    * person is offered no accounts at all.
+                  */}
+                  {COLLECTING_ROLES.includes(u.role) && (
+                    <span className={`ml-2 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${u.collectorGrade ? 'bg-[var(--tint-steel)] text-[var(--c-navy)]' : 'bg-slate-100 text-slate-400'}`}
+                      title={u.collectorGrade
+                        ? `${u.collectorGrade} — decides which accounts they may be given, never how many`
+                        : 'No rank yet, so they can be given no accounts at all'}>
+                      {u.collectorGrade ?? 'no rank'}
+                    </span>
                   )}
                 </td>
                 <td className="px-3 py-2.5 text-slate-500">{u.email}</td>
@@ -426,18 +484,7 @@ function UsersTab() {
               * entirely. The row markup is unchanged; only what wraps it is new.
             */}
             {grouped.departments.map((d) => (
-              <Fragment key={d.meta.id}>
-                <tr className="border-t border-slate-100 bg-slate-50/70">
-                  <th colSpan={columns} className="text-left px-5 py-2">
-                    <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600">
-                      {d.meta.label}
-                    </span>
-                    <span className="ml-2 text-[11px] text-slate-400">{d.people.length}</span>
-                    <span className="ml-3 text-[11px] font-normal text-slate-400">{d.meta.blurb}</span>
-                  </th>
-                </tr>
-                {d.people.map((u) => renderRow(u))}
-              </Fragment>
+              <DepartmentGroup key={d.meta.id} group={d} columns={columns} renderRow={renderRow} />
             ))}
             {/*
               * AND THE PEOPLE WHO HAVE LEFT, KEPT RATHER THAN REMOVED. The firm: "if somebody
@@ -501,7 +548,12 @@ function UsersTab() {
       work at all -- and four more columns on a table that is already seven wide would put the
       thing being changed off the right-hand edge of an iPad.
     */}
-    <CollectorsPanel canEdit={isAdmin || currentUser?.role === 'Pre-legal Team Leader'} />
+    {/*
+      * canLeadCollections, NOT a hand-written pair of roles. Written out, this one was left
+      * behind when Call Centre Manager was added -- the person who runs the floor could hand
+      * accounts out and lead it everywhere except here, where the ranks are actually set.
+    */}
+    <CollectorsPanel canEdit={canLeadCollections(currentUser?.role)} />
     </div>
   )
 }

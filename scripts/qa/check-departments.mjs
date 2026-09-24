@@ -259,6 +259,55 @@ ok('...and folds away the ones who have left', /grouped\.archived\.length > 0/.t
 ok('...shown only when asked for', /showArchived && grouped\.archived\.map/.test(settings))
 ok('...under the firm’s own words for it', /No longer here/.test(settings))
 
+/* ------------------------------------------------ folding, and the rank beside the team */
+
+/*
+ * THE FIRM: "now it's just one long big list. It's nice that it's organised, but drop downs would
+ * be nice." Thirty-eight people in the call centre is most of the screen.
+ */
+ok('a department can be folded away', /function DepartmentGroup/.test(settings))
+ok('...and its rows are not drawn when it is', /\{!folded && group\.people\.map/.test(settings))
+/* The count stays on the heading, so a folded department still says how many are in it. */
+ok('...while the heading still says how many', /\{group\.people\.length\}/.test(settings))
+/*
+ * REMEMBERED, through the hook the two nav panes already use. A fold that resets on every page
+ * load is not a preference, and this is about the screen somebody is sitting at.
+ */
+ok('...and the fold is remembered per department', /useCollapsed\(`users:\$\{group\.meta\.id\}`\)/.test(settings))
+/* Open unless somebody folded it: a screen that hides everything on arrival answers nothing. */
+ok('...starting open, since useCollapsed is false until set', /const \[folded, toggle\] = useCollapsed/.test(settings))
+
+/*
+ * THE RANK, BESIDE THE TEAM: "you can put their rank, their grade -- rather call it a rank --
+ * next to the team that they're in."
+ */
+ok('the rank is drawn beside the team', /COLLECTING_ROLES\.includes\(u\.role\) && \(/.test(settings))
+ok('...only for somebody who collects', /COLLECTING_ROLES/.test(settings))
+/* An unranked collector is offered NO accounts at all, so a blank is a thing to go and fix. */
+ok('...and an unranked collector says so rather than showing nothing',
+  /\{u\.collectorGrade \?\? 'no rank'\}/.test(settings))
+
+/*
+ * AND IT IS CALLED A RANK WHERE IT IS SET. CLAUDE.md: user-facing words are the firm's. The
+ * column is still collector_grade and the type is still CollectorGrade -- only what a person
+ * reads changed.
+ */
+const panel = read('src/components/settings/CollectorsPanel.tsx')
+ok('the collectors panel is readable at all', panel.length > 0)
+ok('the column is called Rank', /^\s*Rank$/m.test(panel))
+ok('...and the explanation underneath agrees', /Rank decides <span/.test(panel))
+ok('...with no "Grade" left for somebody to read', !/>\s*Grade\b/.test(panel) && !/\bGrade decides/.test(panel))
+/* The model is untouched: this was a wording change, not a rename of the data. */
+ok('the stored field is still the grade', /collectorGrade/.test(panel))
+
+/*
+ * AND THE PERSON WHO RUNS THE FLOOR CAN SET THEM. Written as a hand-made pair of roles, this was
+ * left behind when Call Centre Manager was added -- they could hand accounts out and lead the
+ * floor everywhere except the screen where ranks are actually set.
+ */
+ok('the collectors panel asks the shared permission', /canEdit=\{canLeadCollections\(currentUser\?\.role\)\}/.test(settings))
+ok('...so the call centre manager may set a rank', canLeadCollections('Call Centre Manager'))
+
 /* ------------------------------------------------ */
 
 for (const f of failures) console.error(`  ✗ ${f}`)
