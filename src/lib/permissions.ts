@@ -98,6 +98,65 @@ export function canLeadCollections(role: Pick<User, 'role'>['role'] | undefined)
   return role === 'Administrator' || role === 'Pre-legal Team Leader'
 }
 
+/**
+ * WHOSE DISPUTES THIS PERSON MAY LOOK AT.
+ *
+ * The firm, having made a new user and opened the board: "I went into the disputes pane and I saw
+ * everybody's dispute. I think by default it should be related to the user." The owner filter
+ * started on "All Owners" and offered every person in the firm, so a collector on their first
+ * morning was reading the whole floor's disputes.
+ *
+ * THREE ANSWERS, AND THE MIDDLE ONE IS THE FIRM'S OWN SHAPE:
+ *
+ *   - An ADMINISTRATOR sees anybody's. "As an administrator, you should be able to see other
+ *     people's disputes."
+ *   - A LEADER sees their own and, ONE AT A TIME, anybody in their team. The firm was explicit
+ *     that this is per person rather than pooled: "for any individual in your team — I can't see
+ *     how it would benefit to look at a bird's eye view at the entire team's tickets." So this
+ *     returns the people, and `mayPoolDisputes` refuses the pooled view.
+ *   - EVERYBODY ELSE sees their own, and the picker has nobody else in it.
+ *
+ * A SALES MANAGER IS NOT A LEADER HERE. They lead the sales side and a dispute is a collections
+ * record; nothing the firm said puts the floor's disputes in front of them. Inferred rather than
+ * instructed — say so if it is wrong.
+ *
+ * ORDERED WITH THE PERSON THEMSELVES FIRST, because that is the one they open every morning.
+ */
+export function visibleDisputeOwners<T extends Pick<User, 'id' | 'role' | 'teamId'>>(
+  me: Pick<User, 'id' | 'role' | 'teamId'> | null | undefined,
+  everyone: T[],
+): T[] {
+  if (!me) return []
+  const self = everyone.filter((u) => u.id === me.id)
+  if (me.role === 'Administrator') {
+    return [...self, ...everyone.filter((u) => u.id !== me.id)]
+  }
+  if (me.role === 'Pre-legal Team Leader' || me.role === 'Liaison Manager') {
+    /*
+     * A LEADER WITH NO TEAM LEADS NOBODY, which is the safe way round: `teamId` is optional and
+     * eleven of the firm's people have none, so matching undefined to undefined would hand every
+     * teamless leader every other teamless person.
+     */
+    const mates = me.teamId
+      ? everyone.filter((u) => u.id !== me.id && !!u.teamId && u.teamId === me.teamId)
+      : []
+    return [...self, ...mates]
+  }
+  return self
+}
+
+/**
+ * Whether the board may be looked at as a whole rather than one person at a time.
+ *
+ * ONLY AN ADMINISTRATOR. The firm ruled the pooled view out for a leader in the same breath as
+ * granting them their team: a leader picks a person. Keeping "All Owners" for them would be the
+ * bird's-eye view they said they had no use for, sitting at the top of the list as the easiest
+ * thing to click.
+ */
+export function mayPoolDisputes(role: Pick<User, 'role'>['role'] | undefined): boolean {
+  return role === 'Administrator'
+}
+
 /** Roles eligible to own a Lead/Deal/Task/Contact/Company — i.e. show up in "assign to" / "Client Liaison" pickers. */
 export function isAssignableOwner(role: Pick<User, 'role'>['role']): boolean {
   return role === 'Administrator' || role.includes('Sales') || role === 'Liaison' || role === 'Liaison Manager'

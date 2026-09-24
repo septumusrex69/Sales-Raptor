@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { LayoutGrid, List, Loader2, Search } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
+import { mayPoolDisputes, visibleDisputeOwners } from '../../lib/permissions'
 import { formatDate } from '../../data/mockData'
 import {
   ageInDays, canSendToClient, fetchAllQueries, isStale, updateQuery,
@@ -71,7 +72,19 @@ export function DisputesBoard() {
    * filter: the first thing anyone does is clear it to see what else is queued.
    */
   const [search, setSearch] = useState(() => searchParams.get('q') ?? '')
+  /*
+   * STARTS ON THE PERSON THEMSELVES, not on "All Owners" -- the firm opened the board as a new
+   * user and read the whole floor's disputes. Applied in an effect rather than as the initial
+   * value because `currentUser` is null on the first render (the profile fetch is async), and
+   * only ONCE, so it never stomps on a filter somebody has since changed by hand.
+   */
   const [owner, setOwner] = useState('All')
+  const defaulted = useRef(false)
+  useEffect(() => {
+    if (defaulted.current || !currentUser) return
+    defaulted.current = true
+    setOwner(currentUser.id)
+  }, [currentUser])
   const [stage, setStage] = useState<'' | Column>('')
   const [dragging, setDragging] = useState<string | null>(null)
   const [moving, setMoving] = useState<string | null>(null)
@@ -86,11 +99,31 @@ export function DisputesBoard() {
 
   useEffect(() => { void load() }, [load])
 
+  /*
+   * Whose disputes this person may look at -- themselves, their team one at a time, or everybody
+   * if they are an Administrator. See visibleDisputeOwners for the firm's wording.
+   */
+  const owners = useMemo(
+    () => visibleDisputeOwners(currentUser, users),
+    [currentUser, users],
+  )
+  const mayPool = mayPoolDisputes(currentUser?.role)
+
+  /*
+   * AND THE FILTER IS HELD TO THAT LIST. Without this the scope would be a dropdown rather than a
+   * rule: ?owner= in the URL, or a stale value left over from a role change, would put somebody
+   * else's board on the screen. Falls back to the person themselves, never to "All".
+   */
+  const scope = useMemo(() => {
+    if (owner === 'All') return mayPool ? 'All' : (currentUser?.id ?? 'All')
+    return owners.some((u) => u.id === owner) ? owner : (currentUser?.id ?? 'All')
+  }, [owner, owners, mayPool, currentUser])
+
   const filtered = useMemo(() => {
     if (!rows) return []
     const q = search.trim().toLowerCase()
     return rows.filter((r) => {
-      if (owner !== 'All' && r.ownerId !== owner) return false
+      if (scope !== 'All' && r.ownerId !== scope) return false
       if (stage && columnOf(r) !== stage) return false
       if (q) {
         const haystack = `${r.debtorName} ${r.accountNumber ?? ''} ${r.description} ${r.category ?? ''} ${r.kind}`.toLowerCase()
@@ -98,7 +131,7 @@ export function DisputesBoard() {
       }
       return true
     })
-  }, [rows, owner, stage, search])
+  }, [rows, scope, stage, search])
 
   /*
    * Three numbers, and none of them is money.
@@ -108,7 +141,16 @@ export function DisputesBoard() {
    * one about to become a complaint.
    */
   const totals = useMemo(() => {
-    const all = rows ?? []
+    /*
+     * COUNTED OVER WHOSE BOARD THIS IS, not over the firm. The strip said "Total Disputes 26"
+     * above four cards the moment the board stopped showing everybody -- a number that belongs
+     * to somebody else's work, at the top of yours.
+     *
+     * SCOPED BY OWNER ONLY, deliberately: the stage and search boxes narrow what you are LOOKING
+     * at, and "how much is open, how much has gone quiet, how old is the oldest" is a fact about
+     * the work you carry, not about the box you just typed in.
+     */
+    const all = (rows ?? []).filter((r) => scope === 'All' || r.ownerId === scope)
     const open = all.filter((r) => r.status !== 'closed')
     return {
       count: all.length,
@@ -116,7 +158,7 @@ export function DisputesBoard() {
       stale: open.filter((r) => isStale(r, TODAY)).length,
       oldest: open.reduce((m, r) => Math.max(m, ageInDays(r)), 0),
     }
-  }, [rows])
+  }, [rows, scope])
 
   async function moveTo(id: string, to: Column) {
     const row = rows?.find((r) => r.id === id)
@@ -167,10 +209,22 @@ export function DisputesBoard() {
           <option value="">All Stages</option>
           {COLUMNS.map((c) => <option key={c} value={c}>{COLUMN_LABEL[c]}</option>)}
         </select>
-        <select value={owner} onChange={(e) => setOwner(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none">
-          <option value="All">All Owners</option>
-          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-        </select>
+        {/*
+          * ONE PERSON AT A TIME, unless you are an Administrator. "All Owners" is not offered to a
+          * leader at all -- the firm ruled the pooled view out in the same breath as granting them
+          * their team, and leaving it in would put it at the top of the list as the easiest thing
+          * to click. Hidden entirely rather than disabled: a control that refuses reads as a fault.
+          *
+          * A person with nobody else to look at gets no picker, not a picker with one name in it.
+        */}
+        {owners.length > 1 && (
+          <select value={scope} onChange={(e) => setOwner(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none">
+            {mayPool && <option value="All">All Owners</option>}
+            {owners.map((u) => (
+              <option key={u.id} value={u.id}>{u.id === currentUser?.id ? `${u.name} (me)` : u.name}</option>
+            ))}
+          </select>
+        )}
         <div className="flex items-center bg-slate-100 rounded-lg p-1">
           <button onClick={() => setView('kanban')} title="Board" className={`p-1.5 rounded-md ${view === 'kanban' ? 'bg-white shadow-sm text-slate-700' : 'text-slate-400'}`}>
             <LayoutGrid size={15} />
