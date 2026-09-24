@@ -21,15 +21,26 @@ import {
 /**
  * The first day a hand-out plan can put anything on: the next working day on or after today.
  *
- * The same rule as handOut.ts's nextWorkingDay, so the fixture and the planner cannot disagree
- * about which day the grid opens on.
+ * THROUGH THE REAL CALENDAR, NOT A SECOND COPY OF IT. This used to walk the days itself and skip
+ * Saturday and Sunday -- which is the same rule as handOut.ts's nextWorkingDay only if you forget
+ * that nextWorkingDay asks isWorkingDay, and isWorkingDay knows about PUBLIC HOLIDAYS.
+ *
+ * So the two agreed for months and then disagreed on 24 September 2026: Heritage Day. The planner
+ * opened its grid on Friday the 25th, the fixture booked its overfull diary onto Thursday the
+ * 24th, and three checks went red over a calendar rather than over the code they guard. CLAUDE.md
+ * names this exact failure -- a second copy of the calendar "would be the one that is wrong about
+ * Heritage Day in the year nobody checks" -- and this was that copy, in the suite that exists to
+ * catch it.
+ *
+ * workingDays.ts is pure and imports with no loader, so there is no reason to have a copy.
  */
+import { isWorkingDay } from '../../../src/lib/workingDays.ts'
+
 const FIRST_PLAN_DAY = (() => {
   const d = new Date()
   for (let i = 0; i < 30; i += 1) {
     const iso = d.toISOString().slice(0, 10)
-    const day = new Date(`${iso}T00:00:00Z`).getUTCDay()
-    if (day !== 0 && day !== 6) return iso
+    if (isWorkingDay(iso)) return iso
     d.setUTCDate(d.getUTCDate() + 1)
   }
   return d.toISOString().slice(0, 10)
