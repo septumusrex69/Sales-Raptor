@@ -126,7 +126,28 @@ ok('a step that never waited for anybody is unaffected', ordinary.can)
 
 ok('the step machinery is its own module', step.length > 0)
 ok('the morning run goes through it', /runOneStep\(admin, step, today\)/.test(runner))
-ok('...and so does the release', /runOneStep\(admin, step, todayInJohannesburg\(\), caller\.id\)/.test(route))
+ok('...and so does the release', /runOneStep\(admin, step, today, caller\.id\)/.test(route))
+ok('...on the firm\u2019s day rather than the server\u2019s',
+  /const today = todayInJohannesburg\(\)/.test(route))
+
+/*
+ * AND NOT BEFORE THE DAY IT FALLS ON.
+ *
+ * A release lifts the one refusal that waits for a person; it must not also move the date. Day 39
+ * says the default HAS been reported and day 49 says the file HAS gone to the attorneys, so
+ * sending either early is a misrepresentation -- the firm's own note calls it the kind of thing
+ * the Council for Debt Collectors acts on.
+ *
+ * THE FIRM MET THIS. Starting a section 129 drew four notices "waiting on you" with a button
+ * under each, the furthest dated two and a half months out, because planRun marked every
+ * needs-release step held on day one. That is fixed in the planner -- and this is the guard that
+ * holds when one bad row gets past it, on the decision that tells a debtor something untrue.
+ */
+ok('a step cannot be sent before its day', /if \(step\.due_on > today\) \{/.test(route))
+ok('...and says when it is due rather than refusing blankly',
+  /not due until \$\{step\.due_on\}/.test(route))
+/* OVERDUE IS FINE, and is most of the point: a step held on Tuesday goes out today. */
+ok('...while one that is late still goes', !/step\.due_on !== today/.test(route))
 /*
  * AND NEITHER CALLER SENDS ANYTHING ITSELF. Two sends is two paths however they are spelled --
  * a fee, a Sent copy or the firm's font added to one and not the other is the drift this exists

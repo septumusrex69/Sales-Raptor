@@ -300,6 +300,19 @@ from the Annexure B fees. We'll do that on another place, which is not even for 
 administrator."* Every figure on it is the client's money to recover or a count of work.
 `check-company-dashboard` asserts the absence, comments stripped first.
 
+**A STEP IS BORN PENDING, AND `held` IS SOMETHING THAT HAPPENED TO IT.** `planRun` used to mark
+every `needsRelease` step held on day one, so that a collector could read "day 39 · waits for
+you" beside the dates. What the firm saw on their first section 129 was **four notices "waiting
+on you" with a Send it now button under each** — the credit bureau listing dated 18 November and
+the intended summons dated 2 December, ten weeks out. Pressing one would have told a debtor their
+default HAS been listed before it had been. Every other hold is written by the runner on the
+morning the step falls due, out of a reason true that morning, and these are no different. The
+fact that a step waits for a person lives on the NODE, which is where the library's chart reads
+it. **And a release refuses a step before its `due_on`** — the intervals are statutory, "sent
+early" on day 39 or day 49 is a misrepresentation, and a guard that lives only in the planner is
+one bad row away from telling a debtor something untrue. Overdue still sends: the comparison is
+`>`, never `!==`.
+
 **THREE THINGS TAKE AN ACCOUNT OUT OF A WORKFLOW, AND TRACING IS NOT ONE OF THEM.** A promise, a
 dispute, payment in full — each is the debtor or the money doing something that makes the next
 notice wrong. Tracing was a fourth and the firm removed it: *"the contact details are wrong and

@@ -54,12 +54,26 @@ export function planRun(input: {
       nodeId: node.id,
       dueOn: landsOn(startedOn, node.day, dayUnit, holidays),
       /*
-       * HELD FROM THE START, not decided on the day. A step that needs a person is a fact about
-       * the step, and saying so on day one is what lets a collector see "day 39 — waits for you"
-       * beside the dates rather than discovering it when nothing happens.
+       * PENDING, EVEN WHERE IT WAITS FOR A PERSON — and it used to be born `held`.
+       *
+       * The reasoning was that a step needing a person is a fact about the step, so saying it on
+       * day one shows a collector "day 39 · waits for you" beside the dates. What it actually
+       * produced: the firm started a section 129 and the account showed FOUR notices waiting on
+       * them with a Send it now button under each — the credit bureau listing dated 18 November
+       * and the intended summons dated 2 December, both two and a half months out. Pressing one
+       * would have told a debtor their default HAS been listed before it had been.
+       *
+       * HELD IS A THING THAT HAPPENED, NOT A PROPERTY. Every other hold is written by the runner
+       * on the morning the step comes due, from a reason that is true that morning; this one was
+       * a label applied months early to steps nobody had looked at. The runner holds these the
+       * same way on the day they fall due — planSend refuses a needsRelease step every time it is
+       * asked — so nothing is lost but the false urgency.
+       *
+       * WHAT THE CHART SAYS IS UNAFFECTED: the library's schedule reads `needsRelease` off the
+       * NODE and draws "Waits for you" on the row, which is where that fact belongs.
        */
-      state: node.needsRelease ? 'held' : 'pending',
-      note: node.needsRelease ? holdReason(node) : null,
+      state: 'pending',
+      note: null,
     }))
 }
 

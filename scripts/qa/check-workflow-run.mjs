@@ -89,19 +89,32 @@ check('a calendar day 0 is the day it started', calendar[0].dueOn, '2026-09-26')
 
 /* ------------------------------------------------------------------ what waits for a person */
 
-const held = plan.filter((s) => s.state === 'held').map((s) => s.nodeId)
-check('the steps that wait for a person are marked from day one',
-  held, ['s129', 's129-sms', 'listed', 'summons'])
-ok('...and everything else is simply pending',
-  plan.filter((s) => s.state === 'pending').length === plan.length - held.length)
 /*
- * SAID FROM THE START rather than decided on the day, so a collector reads "day 39 -- waits for
- * you" beside the dates instead of discovering it when nothing happens.
+ * NOTHING IS BORN HELD, NOT EVEN THE STEPS THAT WAIT FOR A PERSON — and they used to be.
+ *
+ * The reasoning was that needing a person is a fact about the step, so saying it on day one lets
+ * a collector read "day 39 · waits for you" beside the dates. What the firm actually saw when
+ * they started their first section 129: FOUR notices "waiting on you" with a Send it now button
+ * under each, the credit bureau listing dated 18 November and the intended summons dated 2
+ * December — both two and a half months out. Pressing one would have told a debtor their default
+ * HAS been listed before it had been.
+ *
+ * HELD IS A THING THAT HAPPENED, not a property of a step. Every other hold is written by the
+ * runner on the morning the step comes due, out of a reason that is true that morning; the runner
+ * holds these the same way on the day they fall due, so nothing is lost but the false urgency.
  */
-ok('a held step says what the person has to do',
-  plan.filter((s) => s.state === 'held').every((s) => s.note !== null && s.note.length > 20))
-ok('...and a pending one says nothing, because there is nothing to say',
-  plan.filter((s) => s.state === 'pending').every((s) => s.note === null))
+check('nothing is held before anybody has looked at it',
+  plan.filter((s) => s.state === 'held').map((s) => s.nodeId), [])
+check('...every step starts pending', plan.filter((s) => s.state === 'pending').length, plan.length)
+ok('...and carries no reason, because nothing has happened to it yet',
+  plan.every((s) => s.note === null))
+/*
+ * AND THE FACT ITSELF IS NOT LOST: it lives on the NODE, which is where the library's chart reads
+ * it to draw "Waits for you" on the row. A step's state is what has happened to it; the node says
+ * what it is.
+ */
+ok('what waits for a person is still readable off the workflow',
+  S129.filter((n) => n.needsRelease).length > 0)
 
 /*
  * THE SENTENCE NAMES THE CHECK, NOT THE STATE. "Needs release" is the database talking to

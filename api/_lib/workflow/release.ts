@@ -86,6 +86,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
+  /*
+   * AND NOT BEFORE THE DAY IT FALLS ON.
+   *
+   * A release lifts the one refusal that waits for a person; it must not also move the date. The
+   * intervals in this sequence are statutory — ten business days to answer the demand, twenty
+   * before a bureau listing — and a step sent early does not merely arrive early: day 39 says the
+   * default HAS been reported and day 49 says the file HAS gone to the attorneys, so sending
+   * either before its day is a misrepresentation, which the firm's own note calls the kind of
+   * thing the Council for Debt Collectors acts on.
+   *
+   * THE FIRM MET THIS. Starting a section 129 drew four notices "waiting on you" with a button
+   * under each, the furthest dated two and a half months out, because planRun used to mark every
+   * needs-release step held on day one. That is fixed where it was made — but a guard that only
+   * lives in the planner is a guard one bad row gets past, and the row here decides whether a
+   * debtor is told something untrue.
+   *
+   * OVERDUE IS FINE, and is most of the point: a step that came due on Tuesday and was held goes
+   * out today, which is why this is `>` and not `!==`.
+   */
+  const today = todayInJohannesburg()
+  if (step.due_on > today) {
+    res.status(409).json({
+      error: `That step is not due until ${step.due_on}. It says something that is not true yet, `
+        + 'so it cannot be sent early.',
+    })
+    return
+  }
+
   if (!await mayActOnAccount(admin, caller.id, run.account_id)) {
     res.status(403).json({
       error: 'This account is not yours, and you do not lead the floor it is on.',
@@ -98,6 +126,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * -- {{today}} is merged from here. Its CHARGE is still priced on the step's own due date,
    * which planSend decides and which is CLAUDE.md's rule about the action's date.
    */
-  const outcome = await runOneStep(admin, step, todayInJohannesburg(), caller.id)
+  const outcome = await runOneStep(admin, step, today, caller.id)
   res.status(200).json({ ok: true, ...outcome })
 }
