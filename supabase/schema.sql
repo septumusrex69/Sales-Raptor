@@ -6993,3 +6993,71 @@ as $$
 $$;
 
 grant execute on function public.company_snapshot(date, date, integer) to authenticated;
+
+-- ---------- Tracing no longer takes an account out of a workflow ----------
+--
+-- THE FIRM, READING THE FOUR EXIT RULES BACK: "the contact details are wrong and the file went
+-- for tracing -- no. That can just continue... sometimes we trace and even though we trace, the
+-- email address was right. So it just continues going on to the right email address. The people
+-- just ignore it."
+--
+-- WHICH IS THE DIFFERENCE BETWEEN UNREACHABLE AND IGNORING. A trace is lodged because a NUMBER or
+-- a physical ADDRESS is wrong; the email the sequence actually runs on is usually the one thing
+-- still working, and stopping a statutory sequence because somebody moved house rewards not
+-- answering it. The other three are the debtor or the money doing something -- a promise, an
+-- objection, payment in full -- and each is a reason to stop saying what the sequence says next.
+--
+-- AND IF TRACING DOES TURN UP A NEW ADDRESS, the firm's answer is to start again rather than
+-- resume: "we can just shoot the new section 129 and press the button again." A fresh sequence
+-- dated from the day the new notice goes is the honest clock; a paused one resumed weeks later
+-- quotes ten business days that ran while nobody could be reached.
+--
+-- NOTHING HAS EVER LEFT FOR IT. No workflow_runs row carries this reason, so there is nothing to
+-- migrate and no account's history changes -- checked before this was written.
+create or replace function public.workflow_exit_account(
+  p_account_id uuid, p_event text, p_reason text default null
+) returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_reason text;
+  v_cancelled integer := 0;
+begin
+  -- The firm's three, in their words. Checked here rather than by a column constraint because the
+  -- caller passes a name, and an unknown one is a bug in the caller that must not pass silently.
+  v_reason := coalesce(p_reason, case p_event
+    when 'promise'      then 'A promise to pay was made'
+    when 'dispute'      then 'A dispute was raised'
+    when 'paid_in_full' then 'The account was paid in full'
+  end);
+  if v_reason is null then
+    raise exception 'Unknown workflow exit event "%". It is one of promise, dispute, paid_in_full.', p_event;
+  end if;
+
+  -- ONLY WHAT HAS NOT HAPPENED YET, which is cancelRemaining's rule and the reason it is written
+  -- down twice: a step that was SENT stays sent. It is the record of a notice that reached a
+  -- debtor, and rewriting it would be rewriting the file an attorney reads eighteen months later.
+  --
+  -- A HELD step is cancelled with the rest. It has not gone, and leaving it sitting on a
+  -- collector's list is exactly how a section 129 goes out three weeks after the debtor agreed to
+  -- pay.
+  with live as (
+    select id from public.workflow_runs
+     where account_id = p_account_id and state = 'running'
+  ), killed as (
+    update public.workflow_run_steps s
+       set state = 'cancelled', note = v_reason
+      from live
+     where s.run_id = live.id and s.state in ('pending', 'held')
+    returning s.id
+  )
+  select count(*) into v_cancelled from killed;
+
+  update public.workflow_runs
+     set state = 'left', left_reason = v_reason, left_at = now()
+   where account_id = p_account_id and state = 'running';
+
+  return v_cancelled;
+end $$;

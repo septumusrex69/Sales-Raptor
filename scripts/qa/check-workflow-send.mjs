@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs'
 import { planSend } from '../../src/lib/workflowSend.ts'
 import { smsSafeValues } from '../../src/lib/smsSegments.ts'
 import { sampleValues } from '../../src/lib/messageTemplates.ts'
+import { EXIT_EVENTS } from '../../src/lib/workflowRun.ts'
 
 let pass = 0
 const failures = []
@@ -211,11 +212,27 @@ const schema = readFileSync('supabase/schema.sql', 'utf8')
  * functions three declarations below. It reported green on precisely the break it exists to
  * catch. Bounded, and every assertion below reads one function.
  */
+/*
+ * AND THE LAST DEFINITION, NOT THE FIRST. schema.sql is APPEND-ONLY -- CLAUDE.md's rule, so that
+ * two sessions conflict at the end of the file rather than all through it -- which means a
+ * function changed by a later migration appears in it TWICE, and the one the database is running
+ * is the last. Read from the first, this check went on asserting a definition that had been
+ * replaced: it failed on correct code the day `tracing` was taken out of the exit list, because
+ * the superseded copy above still had it.
+ *
+ * MATCHED ON `create or replace`, not on the bare name. The name also appears in the grant, the
+ * revoke and the comment beside each copy, so a plain lastIndexOf lands on a one-line statement
+ * and returns nothing -- the same shape of mistake this file's own note describes.
+ */
 function fnText(name) {
-  const at = schema.indexOf(`function public.${name}(`)
+  const opener = `create or replace function public.${name}(`
+  const at = schema.lastIndexOf(opener)
   if (at < 0) return ''
   const end = schema.indexOf('end $$;', at)
-  return end < 0 ? schema.slice(at) : schema.slice(at, end)
+  /* A `language sql` function has no `end $$;` at all, so bound it at its own `$$;` instead. */
+  const close = schema.indexOf('$$;', at)
+  const stop = end < 0 ? close : Math.min(end, close < 0 ? end : close)
+  return stop < 0 ? schema.slice(at) : schema.slice(at, stop)
 }
 
 const exitFn = fnText('workflow_exit_account')
@@ -228,6 +245,26 @@ ok('the run itself is marked as having left, with the reason on it',
   /state = 'left'/.test(exitFn) && /left_reason = v_reason/.test(exitFn))
 ok('an unknown exit event raises rather than passing silently',
   /raise exception 'Unknown workflow exit event/.test(exitFn))
+
+/*
+ * AND THE DATABASE'S LIST IS THE APP'S LIST.
+ *
+ * The three reasons are written twice -- once in SQL, where the triggers call them by name, and
+ * once in EXIT_EVENTS, which is what the chart shows the firm. Written twice they drift, and the
+ * drift is invisible: the screen would promise that something stops the sequence while the
+ * database went on sending. Held in both directions.
+ */
+const inSql = [...exitFn.matchAll(/when '([a-z_]+)'\s+then/g)].map((m) => m[1]).sort()
+check('the database and the app agree on what takes an account out',
+  inSql.join(', '), Object.keys(EXIT_EVENTS).sort().join(', '))
+/*
+ * TRACING IS NOT ONE OF THEM, and it was. The firm: "the contact details are wrong and the file
+ * went for tracing -- no. That can just continue... sometimes we trace and even though we trace,
+ * the email address was right." Asserted by name as well as by the whole list, because this one
+ * was removed on purpose and putting it back is the mistake worth catching.
+ */
+ok('a trace does not take an account out of a workflow', !/when 'tracing'/.test(exitFn))
+ok('...and the sentence that raises says so too', !/paid_in_full, tracing/.test(exitFn))
 
 /*
  * SECURITY DEFINER, AND THE REASON MATTERS. promises_to_pay is writable by anyone who can read

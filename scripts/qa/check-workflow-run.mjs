@@ -119,8 +119,21 @@ ok('a step that asserts something says so',
  * THE FIRM: "if there is a dispute raised or a PTP put in place, then a new workflow starts. And
  * then that one ceases."
  */
-check('the four events that take an account out', Object.keys(EXIT_EVENTS).sort(),
-  ['dispute', 'paid_in_full', 'promise', 'tracing'])
+/*
+ * THE THREE EVENTS THAT TAKE AN ACCOUNT OUT, and tracing is deliberately not one of them.
+ *
+ * The firm, reading the four back: "the contact details are wrong and the file went for tracing
+ * -- no. That can just continue... sometimes we trace and even though we trace, the email address
+ * was right. So it just continues going on to the right email address. The people just ignore
+ * it." A trace is lodged because a NUMBER or an ADDRESS is wrong; the email the sequence runs on
+ * is usually the one thing still working, and stopping for it rewards not answering.
+ *
+ * Asserted as the WHOLE list rather than as "tracing is absent": compared whole, this cannot pass
+ * with a fourth quietly added back under another name.
+ */
+check('the three events that take an account out', Object.keys(EXIT_EVENTS).sort(),
+  ['dispute', 'paid_in_full', 'promise'])
+ok('a trace does not stop the sequence', !Object.keys(EXIT_EVENTS).includes('tracing'))
 /*
  * PART PAYMENT IS NOT ONE, at the firm's own instruction: "part payment without a PTP does not
  * exit the workflow. Flag those to the collector." A debtor who pays R500 off R48,000 and then

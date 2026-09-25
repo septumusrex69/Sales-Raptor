@@ -165,7 +165,7 @@ ok('...in the words the collector will act on', /Waits for you/.test(rail))
  * promising that a promise stops the sequence is promising what the database actually does.
  */
 ok('the exit rules are on the chart', /EXIT_EVENTS/.test(rail))
-ok('...all four of them', Object.keys(EXIT_EVENTS).length === 4)
+ok('...all three of them', Object.keys(EXIT_EVENTS).length === 3)
 ok('...and none of them is retyped into the component',
   Object.values(EXIT_EVENTS).every((label) => !rail.includes(label)))
 

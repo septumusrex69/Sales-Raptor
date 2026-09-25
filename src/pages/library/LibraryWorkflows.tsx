@@ -549,6 +549,17 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
           </div>
 
           <div className="flex flex-col xl:flex-row gap-4 items-start">
+            {/*
+              THE CHART AND WHAT BELONGS UNDER IT, IN ONE COLUMN.
+
+              "Add step" and the read-only note used to be SIBLINGS of this column inside the same
+              flex row, so on a wide screen they took their content's width out of the chart: at
+              1280px the schedule drew 611px of a 1040px row and every step label wrapped one word
+              to a line, with a field of empty white beside it. The firm saw it on an iPad and said
+              so. Neither of them is a side panel -- one is a control for the chart and the other
+              is a sentence about it -- and the thing that genuinely belongs beside it is the
+              drawer, which is now the row's second child.
+            */}
             <div className="flex-1 min-w-0">
               {/*
                 READ DOWN, NOT ACROSS. The horizontal strip of cards this replaces drew eleven
@@ -595,7 +606,6 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
                     </select>
                   </div>
                 ) : undefined} />
-            </div>
             {mayEdit && <AddStep disabled={readOnly || busy} workflow={workflow}
               onAdd={(kind, phaseId) => act(async () => {
                 const id = await addNode({
@@ -617,9 +627,13 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
                   : 'Published versions are frozen. Press Edit to take a draft.'}
               </p>
             )}
-          </div>
-          <div className="flex flex-col xl:flex-row gap-4 items-start">
-            <div className="flex-1 min-w-0" />
+            </div>
+            {/*
+              THE DRAWER SITS BESIDE THE CHART, which is the only place it makes sense: it is the
+              step you just clicked on the chart, and reading the two together is the whole point.
+              It was in a row of its own underneath with an EMPTY flex-1 spacer pushing it right,
+              so opening a step scrolled the chart away to show it.
+            */}
             {node && (
               <StepDrawer workflow={workflow} node={node} readOnly={readOnly} templates={templates}
                 problems={problems.filter((p) => p.nodeId === node.id)}

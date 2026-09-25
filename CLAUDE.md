@@ -300,6 +300,26 @@ from the Annexure B fees. We'll do that on another place, which is not even for 
 administrator."* Every figure on it is the client's money to recover or a count of work.
 `check-company-dashboard` asserts the absence, comments stripped first.
 
+**THREE THINGS TAKE AN ACCOUNT OUT OF A WORKFLOW, AND TRACING IS NOT ONE OF THEM.** A promise, a
+dispute, payment in full — each is the debtor or the money doing something that makes the next
+notice wrong. Tracing was a fourth and the firm removed it: *"the contact details are wrong and
+the file went for tracing — no. That can just continue... sometimes we trace and even though we
+trace, the email address was right. So it just continues going on to the right email address. The
+people just ignore it."* A trace is lodged because a NUMBER or an ADDRESS is wrong; the email the
+sequence runs on is usually the one thing still working, and stopping for it rewards not
+answering. If tracing does turn up a new address the firm starts again rather than resumes —
+*"we can just shoot the new section 129 and press the button again"* — because a paused sequence
+resumed weeks later quotes ten business days that ran while nobody could be reached. The list is
+written twice, in `EXIT_EVENTS` and in `workflow_exit_account`, and `check-workflow-send` holds
+the two against each other in both directions.
+
+**`schema.sql` IS APPEND-ONLY, SO THE LAST DEFINITION IS THE LIVE ONE.** A function a later
+migration replaced appears in the file twice, and a check reading it with `indexOf` asserts
+against the superseded copy — which is how removing `tracing` failed a check on correct code.
+Read the LAST `create or replace function public.<name>(`, never the bare name: the name also
+appears in that function's grant, revoke and comment, so a plain `lastIndexOf` lands on a
+one-line statement and returns nothing.
+
 **A WORKFLOW STARTS ONE OF TWO WAYS, AND THE SECTION 129 IS THE SECOND.** An `allocated`
 workflow starts itself: `workflow_start_on_allocation` fires in the database the first time an
 account lands on somebody's desk, once per account and version ever, and that is what the

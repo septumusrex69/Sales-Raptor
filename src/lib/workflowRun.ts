@@ -88,14 +88,29 @@ export function holdReason(node: WorkflowNode): string {
  * PART PAYMENT IS NOT ONE OF THEM, at the firm's own instruction — "part payment without a PTP
  * does not exit the workflow. Flag those to the collector." A debtor who pays R500 off R48,000
  * and then hears nothing more is a debtor nobody is collecting from.
+ *
+ * NOR IS TRACING, and it used to be. The firm, reading the four back: "the contact details are
+ * wrong and the file went for tracing — no. That can just continue... sometimes we trace and even
+ * though we trace, the email address was right. So it just continues going on to the right email
+ * address. The people just ignore it."
+ *
+ * WHICH IS THE DIFFERENCE BETWEEN UNREACHABLE AND IGNORING. A trace is lodged because a NUMBER or
+ * an ADDRESS is wrong; the email the sequence runs on is usually the one thing still working, and
+ * stopping a statutory sequence because somebody moved house rewards not answering it. The other
+ * three are the debtor or the money doing something — a promise, an objection, payment in full —
+ * and each is a reason to stop saying what the sequence says next.
+ *
+ * AND IF TRACING DOES TURN UP A NEW ADDRESS, the firm's own answer is to start again rather than
+ * resume: "we can just shoot the new section 129 and press the button again." A fresh sequence
+ * from the day the new notice goes is the honest clock; a paused one resumed weeks later quotes
+ * ten business days that ran while nobody could be reached.
  */
-export type ExitEvent = 'promise' | 'dispute' | 'paid_in_full' | 'tracing'
+export type ExitEvent = 'promise' | 'dispute' | 'paid_in_full'
 
 export const EXIT_EVENTS: Record<ExitEvent, string> = {
   promise: 'A promise to pay was made',
   dispute: 'A dispute was raised',
   paid_in_full: 'The account was paid in full',
-  tracing: 'The contact details are wrong and the file went for tracing',
 }
 
 export interface Cancellation {

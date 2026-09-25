@@ -511,6 +511,49 @@ try {
   await reader.page.goto(`http://localhost:${PORT}/library/workflows/standard-collections`)
   await reader.page.locator('p', { hasText: /^Phase 1 · Notice$/ }).first().waitFor({ timeout: 20000 })
   t.ok('a team leader reads the workflow', true)
+
+  /*
+   * THE CHART GETS THE WIDTH, which is not a matter of taste.
+   *
+   * "Add step" and the read-only sentence used to be SIBLINGS of the chart's column inside the
+   * same xl:flex-row, so on a wide screen each took its content's width out of the chart: at
+   * 1280px the schedule drew 611px of a 1040px row, every step label wrapped one word to a line,
+   * and a field of empty white sat beside it. The firm found it on an iPad and said so.
+   *
+   * MEASURED, NOT READ OFF THE CLASSES. Which element wins a flex row is decided by the browser
+   * from its children's intrinsic widths -- exactly the kind of thing CLAUDE.md says to suspect
+   * when the source looks right and the screen does not.
+   */
+  for (const width of [1280, 1440]) {
+    await reader.page.setViewportSize({ width, height: 1000 })
+    await reader.page.waitForTimeout(400)
+    const box = await reader.page.evaluate(() => {
+      const heading = [...document.querySelectorAll('p')]
+        .find((p) => p.textContent.trim() === 'Schedule' || p.textContent.trim() === 'What happens')
+      const card = heading?.closest('div.rounded-xl')
+      /* card -> the schedule component's own wrapper -> the column -> the flex row. */
+      const row = card?.parentElement?.parentElement?.parentElement
+      const label = document.querySelector('ol li button span.min-w-0')
+      return {
+        card: card ? card.getBoundingClientRect().width : 0,
+        row: row ? row.getBoundingClientRect().width : 0,
+        label: label ? label.getBoundingClientRect().width : 0,
+      }
+    })
+    t.ok(`there is a chart and a row to measure at ${width} (${Math.round(box.card)} of ${Math.round(box.row)})`,
+      box.card > 0 && box.row > 0)
+    t.ok(`...and the chart has the row to itself at ${width} (${Math.round((box.card / box.row) * 100)}%)`,
+      box.card / box.row > 0.9)
+    /*
+     * AND THE NAME COLUMN IS WIDE, which is the half the reader actually sees. The label span is
+     * flex-1, so its width is whatever the chart was left with rather than a property of the
+     * words in it: 341px in the state the firm photographed, 722px once the chart has the row.
+     * The threshold sits between the two on purpose -- set below both, it is an assertion that
+     * cannot fail, which is worse than none.
+     */
+    t.ok(`...and a step's name has room at ${width} (${Math.round(box.label)}px)`, box.label > 500)
+  }
+  await reader.page.setViewportSize({ width: 1440, height: 1000 })
   /* The whole thing, not a stub of it: the canvas is what says what happens to their file. */
   t.ok('...the whole canvas, which is what says what happens to their file',
     await reader.page.getByRole('button', { name: /day 35 .*Final notice/is }).isVisible())
