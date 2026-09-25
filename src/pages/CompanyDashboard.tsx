@@ -4,6 +4,7 @@ import { ArrowRight, Loader2 } from 'lucide-react'
 import { Card } from '../components/ui/Card'
 import { StatTile } from '../components/ui/StatTile'
 import { CollectionsHero } from '../components/collections/CollectionsHero'
+import { MyDetailsMissing } from '../components/dashboard/MyDetailsMissing'
 import { MonthControls } from '../components/collections/MonthControls'
 import { MonthProgress } from '../components/collections/MonthProgress'
 import { useAppStore } from '../store/AppStore'
@@ -103,6 +104,14 @@ export function CompanyDashboard() {
           <p className="text-sm text-rose-700">{month.error}</p>
         </Card>
       )}
+
+      {/*
+        THE ONE THING ON THIS SCREEN THAT IS ABOUT YOU RATHER THAN THE FIRM, and it is here
+        because this is the screen everybody lands on. The firm: "if someone doesn't have a phone
+        number entered, it should be on their dashboard as a warning." It draws nothing at all
+        where there is nothing missing, so the collective screen stays the collective screen.
+      */}
+      <MyDetailsMissing />
 
       {/* ---------- what came in ---------- */}
       <Section title="Work coming in" why={`Handed to us in ${month.period.label}`}>

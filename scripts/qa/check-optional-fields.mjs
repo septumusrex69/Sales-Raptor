@@ -18,10 +18,20 @@
  * and only the clause goes, because dropping the line there would drop the whole message. Both
  * shapes are in the firm's own templates today, so both are checked against the real wording.
  *
+ * AND THEN IT HAPPENED AGAIN WITH THE PHONE NUMBER. Not one of the fifty live profiles carries
+ * one, and fifteen templates quote {{collector_phone}}, so the next two notices held on that
+ * instead. The firm: "if someone doesn't have a phone number entered, it should be on their
+ * dashboard as a warning... but then what it should do is it should give the company's default
+ * details as contact." Two different answers, and which one a field gets depends on ONE fact —
+ * whether the notice still carries a number when that line goes. The collector's line drops,
+ * because all fifteen of those templates print the firm's number underneath it. The sender's
+ * line does not, because none of the eight templates that quote {{agent_phone}} carry the firm's
+ * number at all; it falls back to the firm's own instead. Both ends are held below.
+ *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-optional-fields.mjs
  */
 import { readFileSync } from 'node:fs'
-import { MERGE_FIELDS, isOptionalField, renderTemplate } from '../../src/lib/messageTemplates.ts'
+import { MERGE_FIELDS, isOptionalField, mergeValuesFor, renderTemplate } from '../../src/lib/messageTemplates.ts'
 import { documentWithoutOptional, letterToHtml } from '../../src/lib/letterDocument.ts'
 import { smsCost } from '../../src/lib/smsSegments.ts'
 
@@ -43,6 +53,28 @@ ok('the debtor’s identity number is optional', isOptionalField('debtor_id_mask
 ok('...and a company’s registration number with it', isOptionalField('debtor_reg_no'))
 
 /*
+ * AND THE SECOND THING NOBODY HAS: A PHONE NUMBER. Not one of the fifty live profiles carries
+ * one, so {{collector_phone}} held exactly as many notices as the identity number did. The firm:
+ * "if someone doesn't have a phone number entered... it should give the company's default details
+ * as contact."
+ *
+ * WHICH IS ONLY SAFE BECAUSE OF WHAT IS ON THE LINE BELOW IT — all fifteen templates that quote
+ * the collector's direct line also quote {{firm_phone}}, so dropping the line always leaves the
+ * debtor a number to ring. The templates are rows in the database and no check here can read
+ * them; what CAN be held is the other end of that sentence, below: {{firm_phone}} must never
+ * itself become optional, or the fallback goes with the thing it was the fallback for.
+ */
+ok('the collector’s direct line is optional', isOptionalField('collector_phone'))
+
+/*
+ * A WHATSAPP NUMBER IS AN EXTRA CHANNEL AND NEVER THE ONLY ONE, on any of the three people a
+ * notice can name, so its line may go wherever it appears.
+ */
+for (const key of ['collector_whatsapp', 'agent_whatsapp', 'liaison_whatsapp']) {
+  ok(`${key} may drop out`, isOptionalField(key))
+}
+
+/*
  * AND ALMOST NOTHING ELSE IS, which is the half that keeps this honest. Optional is not "nice to
  * have" — it is "this may be printed without, and the notice is still the notice". A balance, a
  * case number or a respond-by date quietly dropping out of a section 129 is a defective demand,
@@ -51,10 +83,64 @@ ok('...and a company’s registration number with it', isOptionalField('debtor_r
 const optional = Object.values(MERGE_FIELDS)
   .flatMap((list) => list.filter((f) => f.optional).map((f) => f.key))
 check('nothing else has been quietly marked optional',
-  [...new Set(optional)].sort().join(', '), 'debtor_id_masked, debtor_reg_no')
+  [...new Set(optional)].sort().join(', '),
+  'agent_whatsapp, collector_phone, collector_whatsapp, debtor_id_masked, debtor_reg_no, liaison_whatsapp')
 for (const key of ['balance', 'case_number', 'respond_by', 'debtor_name', 'firm_name']) {
   check(`${key} still holds the notice`, isOptionalField(key), false)
 }
+
+/*
+ * THE TWO NUMBERS THAT MAY NOT DROP, each for its own reason and both worth naming.
+ *
+ * {{firm_phone}} is what is LEFT when the collector's direct line goes. Marked optional it would
+ * go too, and a section 129 would be posted with no telephone number on it at all — the exact
+ * failure the change above is meant to prevent, arrived at from the other side.
+ *
+ * {{agent_phone}} is the only number on the eight templates that quote it: not one of them also
+ * carries the firm's. So it holds, and mergeValuesFor gives it the firm's number where the person
+ * signed in has none, which is the firm's own instruction — the contact falls back, it does not
+ * vanish.
+ */
+for (const key of ['firm_phone', 'agent_phone', 'liaison_phone', 'collector_email', 'agent_email']) {
+  check(`${key} is not optional`, isOptionalField(key), false)
+}
+
+/*
+ * AND THE FALLBACK ITSELF, run rather than described. Whoever is signed in has no number on any
+ * of the fifty live profiles, so this is the ordinary case and not the edge one.
+ */
+const ACCOUNT = {
+  caseNumber: 'RAP-100735',
+  debtorKind: 'individual',
+  debtorTitle: null,
+  debtorFirstName: 'ryno',
+  debtorSurname: 'buitendag',
+  accountNumber: 'Abc1111',
+  clientReference: 'dens',
+  capitalOutstanding: 6030.79,
+  preferredLanguage: 'en',
+}
+/* The whole shape, formatter included: half of it dies inside the function rather than reporting
+   anything useful here. */
+const MERGE_INPUT = {
+  account: ACCOUNT, balance: null, clientName: 'Tjobecom', agentName: 'Stephan', agentPhone: null,
+  today: '2026-09-23', money: (n) => `R ${n}`,
+  firm: { firmName: 'Bredell Ferreira', phone: '010 594 5065' },
+}
+const noNumber = mergeValuesFor(MERGE_INPUT)
+check('a sender with no number is given the firm’s', noNumber.agent_phone, '010 594 5065')
+/* Their own number when they have one, or the fallback is a rewrite rather than a fallback. */
+const ownNumber = mergeValuesFor({ ...MERGE_INPUT, agentPhone: '012 111 2222' })
+check('...and their own where they have one', ownNumber.agent_phone, '012 111 2222')
+/*
+ * NULL WHERE THE FIRM HAS NO NUMBER EITHER. An unresolved {{agent_phone}} on the page gets
+ * noticed; an empty line under somebody's name reads as finished and gets posted.
+ */
+const neither = mergeValuesFor({ ...MERGE_INPUT, firm: { firmName: 'Bredell Ferreira' } })
+check('...and nothing invented where the firm has none', neither.agent_phone, null)
+/* The collector's line is NOT given the firm's number: it is dropped instead, and printing the
+   firm's number twice on one notice reads as two different numbers to somebody skimming. */
+check('the collector’s line is dropped rather than doubled', noNumber.collector_phone, null)
 
 /* ---------- an email: the whole line goes ---------- */
 

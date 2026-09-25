@@ -192,9 +192,16 @@ const EVERYWHERE: MergeField[] = [
    * of meaning here, because a template already written means what it said when it was written.
    */
   { key: 'agent_name', label: 'Who is sending this', sample: 'Stephan Bredell' },
+  /*
+   * NOT OPTIONAL, AND THE ONE FIELD WHERE THAT MATTERS. Eight templates quote this and not one of
+   * them quotes {{firm_phone}} as well -- it IS the number on those notices -- so letting the line
+   * drop would post a demand with no way to ring anybody. It falls back to the firm's own number
+   * instead; see mergeValuesFor.
+   */
   { key: 'agent_phone', label: 'Their number', sample: '012 111 2222' },
   { key: 'agent_email', label: 'Their email address', sample: 'stephan@bredellferreira.co.za' },
-  { key: 'agent_whatsapp', label: 'Their WhatsApp number', sample: '082 123 4567' },
+  /* A WhatsApp number is an extra channel, never the only one, so its line may go. */
+  { key: 'agent_whatsapp', label: 'Their WhatsApp number', sample: '082 123 4567', optional: true },
   { key: 'firm_name', label: 'The firm', sample: 'Bredell Ferreira' },
   { key: 'today', label: "Today's date, written out", sample: '18 September 2026' },
   /*
@@ -250,9 +257,22 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
      * gap -- an unassigned account naming nobody is caught before it is posted.
      */
     { key: 'collector_name', label: 'The collector this account is assigned to', sample: 'Rinda Ferreira' },
-    { key: 'collector_phone', label: "The collector's number", sample: '012 348 2156' },
+    /*
+     * THE DIRECT LINE IS OPTIONAL, AND THE FIRM'S NUMBER IS WHAT IS LEFT. Not one of the fifty
+     * live profiles has a phone number on it, and fifteen collections templates quote this field
+     * -- so held-on-{{collector_phone}} was every notice on the book, for the same reason the
+     * identity number was. The firm: "if someone doesn't have a phone number entered... it should
+     * give the company's default details as contact."
+     *
+     * IT IS SAFE HERE AND NOWHERE ELSE BECAUSE OF WHAT IS ON THE LINE BELOW. All fifteen of those
+     * templates also quote {{firm_phone}}, so dropping the direct line always leaves the debtor a
+     * number to ring. {{agent_phone}} is the opposite case -- none of the eight templates that
+     * quote it carry the firm's number -- so that one is not optional; it falls back to the firm's
+     * number instead, in mergeValuesFor.
+     */
+    { key: 'collector_phone', label: "The collector's number", sample: '012 348 2156', optional: true },
     { key: 'collector_email', label: "The collector's email address", sample: 'rinda@bredellferreira.co.za' },
-    { key: 'collector_whatsapp', label: "The collector's WhatsApp number", sample: '082 123 4567' },
+    { key: 'collector_whatsapp', label: "The collector's WhatsApp number", sample: '082 123 4567', optional: true },
     /*
      * THE LIAISON ON THE CLIENT, which is the firm's own word -- Liaison and Liaison Manager are
      * roles in profiles.role. Read from companies.account_owner_id: the person who looks after
@@ -265,7 +285,9 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
     { key: 'liaison_name', label: 'The liaison who looks after this client', sample: 'Camile Bredell' },
     { key: 'liaison_phone', label: "The liaison's number", sample: '012 348 2157' },
     { key: 'liaison_email', label: "The liaison's email address", sample: 'camile@bredellferreira.co.za' },
-    { key: 'liaison_whatsapp', label: "The liaison's WhatsApp number", sample: '082 987 6543' },
+    /* A WhatsApp number is an EXTRA channel and never the only one, so its line may go the way
+       the collector's does. profiles.whatsapp is empty on nearly every profile. */
+    { key: 'liaison_whatsapp', label: "The liaison's WhatsApp number", sample: '082 987 6543', optional: true },
     { key: 'balance', label: 'Balance outstanding', sample: 'R 48,250.00' },
     { key: 'capital', label: 'Capital outstanding', sample: 'R 31,900.00' },
     /*
@@ -956,7 +978,21 @@ export function mergeValuesFor(input: {
     balance: input.balance === null ? null : input.money(input.balance),
     capital: input.money(a.capitalOutstanding),
     agent_name: (input.agentName ?? '').trim() || null,
-    agent_phone: (input.agentPhone ?? '').trim() || null,
+    /*
+     * THE FIRM'S NUMBER WHERE THE PERSON HAS NONE. The firm, told that not one of the fifty live
+     * profiles carries a phone number: "it should give the company's default details as contact,
+     * for example, Peter on 012 348 2156."
+     *
+     * A FALLBACK RATHER THAN AN OPTIONAL FIELD, because of what quotes it: eight templates use
+     * {{agent_phone}} and none of them also quote {{firm_phone}}, so this is the only number on
+     * those notices and a dropped line would leave a debtor no way to ring. The collector's
+     * direct line is the other way round -- all fifteen templates that quote it print the firm's
+     * number on the line below -- so that one is marked optional and its line goes.
+     *
+     * Still null where the firm itself has no number: a placeholder left standing gets caught,
+     * and an empty line under somebody's name reads as finished.
+     */
+    agent_phone: (input.agentPhone ?? '').trim() || some(input.firm.phone),
     agent_email: some(input.agentEmail),
     agent_whatsapp: some(input.agentWhatsapp),
     collector_name: some(input.collector?.name),
