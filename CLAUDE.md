@@ -243,6 +243,26 @@ the sum of everybody's targets; `MonthControls` and `MonthProgress` draw them. W
 both pages the failure is not a wrong screen, it is the company dashboard and the floor quietly
 disagreeing about what the firm collected this month.
 
+**A department dashboard is read DEPARTMENT → TEAM → ME, and each level says whose it is.** The
+firm, of every department: *"their own statistics is important, their team statistics is
+important, and their department statistics is important for them to see."* The collections floor
+had all three figures on it and named none of them — the "How the work is going" card was the
+FLOOR's promise-kept rate drawn in exactly the shape a collector reads as their own, and nobody
+can tell those apart by looking harder. `Level` heads each block and `Measures` draws the four
+fair figures for whichever it is about. Two rules there: **the team level is the signed-in
+person's team, read off the whole floor rather than the filtered view** (a leader inspecting
+another team must not find their own section quietly describing somebody else's people), and it
+is **absent rather than empty** where somebody has no team — the call centre manager leads every
+team and belongs to none, and a panel of dashes reads as a screen that failed. The floor's tables
+come **last**: everything above them is already summed, and they are where somebody goes to find
+one row.
+
+**The floor has no menu item.** The firm, once the company dashboard landed: *"that tab can be
+removed."* It is a department dashboard like the other three, reached from the company screen —
+a menu item for one department and none for the rest was the sales dashboard's old privilege in a
+new place. **Both routes stay**: `/performance` is what every collector's name on every table
+links to, and `/dashboard/collections` is what the button opens.
+
 **No commission and no Annexure B income on the company dashboard, ever.** The condition the firm
 attached to one screen for everybody: *"we're not going to be disclosing commission and income
 from the Annexure B fees. We'll do that on another place, which is not even for an

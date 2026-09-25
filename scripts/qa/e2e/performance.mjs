@@ -621,6 +621,44 @@ try {
      against, so a slow machine does not turn a working screen into a failure. */
   await page.locator('table').first().waitFor({ timeout: 20000 })
 
+  /* ---------- three levels, named, in the firm's order ---------- */
+
+  /*
+   * THE FIRM, of every department: "their own statistics is important, their team statistics is
+   * important, and their department statistics is important for them to see."
+   *
+   * ASSERTED AS ORDER ON THE RENDERED PAGE, and present before order -- an indexOf comparison is
+   * vacuous once the thing it orders is deleted, because -1 is less than everything, which is the
+   * trap this repository has a name for.
+   */
+  const levels = (await page.locator('h2').allInnerTexts()).map((h) => h.trim())
+  t.ok(`the floor's level is named (${levels.join(' | ')})`, levels.includes('The floor'))
+  t.ok('...the team\u2019s after it', levels.some((h) => h.startsWith('Your team')))
+  t.ok('...and the person\u2019s after that', levels.includes('You'))
+  t.check('...in the firm\u2019s own order',
+    levels.indexOf('The floor') < levels.findIndex((h) => h.startsWith('Your team'))
+      && levels.findIndex((h) => h.startsWith('Your team')) < levels.indexOf('You'), true)
+  /* The reference tables come last: everything above is already summed, and this is where
+     somebody goes to find one row. */
+  t.check('...with the floor\u2019s detail under all three',
+    levels.indexOf('You') < levels.indexOf('The floor, in detail'), true)
+
+  /*
+   * AND THE TEAM LEVEL IS THE PERSON'S OWN TEAM, with their row marked. The fixture puts the
+   * signed-in leader and one colleague on Pre-legal and leaves a third collector unteamed, so a
+   * section reading off the whole floor rather than the team fails here.
+   */
+  const teamPanel = page.locator('h2', { hasText: 'Your team' })
+    /* The heading is an h2 inside the level's own div, so the cards are the PARENT's siblings:
+       [1] is the team's figures and [2] is the list of its people. */
+    .locator('xpath=../following-sibling::div[2]')
+  t.ok('the team\u2019s people are listed', (await teamPanel.locator('li').count()) > 0)
+  const teamNames = (await teamPanel.locator('li').allInnerTexts()).join(' | ')
+  t.ok(`...the person themselves among them (${teamNames.replace(/\n/g, ' ').slice(0, 80)})`,
+    teamNames.includes(PROFILE.name) && teamNames.includes('(you)'))
+  t.ok('...and their teammate', teamNames.includes(COLLEAGUE.name))
+  t.check('...and nobody from outside the team', teamNames.includes(LOOSE.name), false)
+
   /* ---------- the clerk sheet ---------- */
 
   const headers = async () => (await page.locator('th').allInnerTexts()).map((h) => h.trim())

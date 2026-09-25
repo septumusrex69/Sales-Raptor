@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useNavCounts, type NavCounts } from '../../lib/navCounts'
 import {
-  Activity, BarChart3, BookOpen, Building2, Calendar, CalendarClock, CheckSquare, ChevronDown, Handshake, Inbox, LayoutDashboard, Library, LogOut, MessageCircleQuestion, PanelLeftClose, PanelLeftOpen, Settings, Target, TrendingUp, Users, type LucideIcon,
+  Activity, BarChart3, BookOpen, Building2, Calendar, CalendarClock, CheckSquare, ChevronDown, Handshake, Inbox, LayoutDashboard, Library, LogOut, MessageCircleQuestion, PanelLeftClose, PanelLeftOpen, Settings, Target, Users, type LucideIcon,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../store/AuthContext'
@@ -35,14 +35,15 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean; badge?:
   // The collections work queue: which accounts this person is due to work today, and what they
   // are behind on. Badged, because it is the definition of something one person clears in a day.
   { to: '/diary', label: 'Diary', icon: CalendarClock, badge: 'diary' },
-  // How the collections work is actually going. Beside the diary, because the diary is today's
-  // work and this is whether the month's is landing.
   //
-  // CALLED "COLLECTIONS", AT THE FIRM'S INSTRUCTION. "Performance" said nothing about which half
-  // of the firm it was: the sales side has its own figures on the Dashboard, and a rep clicking
-  // "Performance" expecting theirs found a book they do not work. The route stays /performance so
-  // nobody's bookmark breaks.
-  { to: '/performance', label: 'Collections', icon: TrendingUp },
+  // NO "COLLECTIONS" ITEM ANY MORE, at the firm's instruction once the company dashboard landed:
+  // "that tab can be removed." The floor's own screen is a DEPARTMENT dashboard now, reached the
+  // way every department dashboard is -- "Go to my dashboard" on the company screen, or the
+  // department's card under it. A menu item for one department's dashboard and none for the
+  // other three was the sales dashboard's old privilege in a new place.
+  //
+  // THE ROUTES BOTH STAY. /performance is what every collector's name on every table links to,
+  // and /dashboard/collections is what the button opens; nobody's bookmark breaks either way.
   { to: '/queries', label: 'Disputes', icon: MessageCircleQuestion, badge: 'disputes' },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare, badge: 'tasks' },
   { to: '/calendar', label: 'Calendar', icon: Calendar },

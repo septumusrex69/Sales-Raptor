@@ -302,7 +302,18 @@ ok('there is a caption on the fair card to read', fairCaption.length > 100)
 ok('...naming what the ranking is for', /the month the firm is run on/.test(fairCaption))
 ok('...and what these figures survive', /survive being given a different/.test(fairCaption))
 ok('...and what they are for', /should decide who is promoted/.test(fairCaption))
-ok('the fair figures are separated from the money', /These compare fairly across unlike books/.test(page))
+/*
+ * THE FAIR FIGURES ARE DRAWN TWICE AND LABELLED BOTH TIMES -- once for the floor and once for the
+ * person. They were on the screen once, as the FLOOR's, in exactly the shape a collector reads as
+ * their own; a person cannot tell those apart by looking harder, and the fix is the caption.
+ */
+ok('the fair figures are a component, not two copies of four tiles',
+  /function Measures\(\{ score, caption \}/.test(page))
+ok('...drawn for the floor', /<Measures score=\{score\}/.test(page))
+ok('...and for the person reading it', /<Measures score=\{myScore\}/.test(page))
+ok('...each saying whose they are',
+  /Across the whole floor/.test(page) && /Yours, on the same four measures/.test(page))
+ok('the fair figures are separated from the money', /compare fairly/.test(page))
 
 /*
  * The over-book notice belongs where a collector will see it. It also sits on the Collectors

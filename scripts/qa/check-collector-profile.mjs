@@ -194,7 +194,36 @@ ok('the floor list is not gated by role', !/SEES_EVERYONE/.test(board))
 ok('...and the headline is the company’s',
   /totalStats\(shownRows\)/.test(read('../../src/hooks/useCollectionsMonth.ts'))
   && /useCollectionsMonth\(\)/.test(board))
-ok('...with the reader’s own month beside it', /Your month/.test(board))
+/*
+ * THREE LEVELS, NAMED. The firm: "their own statistics is important, their team statistics is
+ * important, and their department statistics is important for them to see." Asserted as the three
+ * headings rather than as the figures, because the figures were all on the screen before this and
+ * the thing that was missing was any way to tell whose each block was.
+ */
+ok('the floor’s level is named', /<Level title="The floor"/.test(board))
+ok('...the team’s is named after the team', /<Level title=\{`Your team — \$\{myTeam\.name\}`\}/.test(board))
+ok('...and the person’s own', /<Level title="You"/.test(board))
+
+/*
+ * THE TEAM LEVEL DOES NOT FOLLOW THE TEAM PICKER. My team is my team whatever the filter above is
+ * set to -- a leader inspecting another team would otherwise find their own section quietly
+ * describing somebody else's people, with nothing on it saying so.
+ */
+ok('the team level is read off the whole floor, not the filtered view',
+  /const teamRows = useMemo\(\s*\n\s*\(\) => \(myTeamId \? \(rows \?\? \[\]\)/.test(board))
+ok('...and it is the signed-in person’s team, not the picker’s',
+  /const myTeamId = currentUser\?\.teamId \?\? ''/.test(board))
+/*
+ * AND IT IS ABSENT, NOT EMPTY, WHERE THERE IS NO TEAM. The call centre manager leads every team
+ * and belongs to none; a panel of dashes reads as a screen that failed rather than as a record
+ * that was never set.
+ */
+ok('...and nothing is drawn at all without one', /\{myTeam && teamStats && teamLine && \(/.test(board))
+/* The person's own measures are scored by the same function the floor's are. */
+ok('the person’s measures come from the shared scorer',
+  /const myScore = mine \? scoreCollector\(mine\) : null/.test(board))
+/* A team's place is among TEAMS -- collectors with no team are a filing gap, not a competitor. */
+ok('a collector with no team is not ranked as a team', /if \(!id\) continue/.test(board))
 ok('...and their place on it', /placeLabel\(myPlace\)/.test(board))
 ok('...and their own row marked in the list', /\(you\)/.test(board))
 

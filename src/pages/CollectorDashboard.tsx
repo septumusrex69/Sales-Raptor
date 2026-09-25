@@ -7,7 +7,7 @@ import { UserAvatar } from '../components/ui/Avatar'
 import { useAppStore } from '../store/AppStore'
 import { useAuth } from '../store/AuthContext'
 import {
-  THRESHOLDS, band, overBookBy, scoreCollector,
+  THRESHOLDS, band, overBookBy, scoreCollector, totalStats,
   type Band, type CollectorScore, type CollectorStats,
 } from '../lib/collectorScore.ts'
 import { bookCeilingOf } from '../lib/collectorGrade.ts'
@@ -67,9 +67,9 @@ export function CollectorDashboard() {
    */
   const month = useCollectionsMonth()
   const {
-    period, asAt, rows, error,
+    period, asAt, teamId, rows, error,
     shownRows, shownToday, score, priorScore, mine,
-    pace, floor, line, myLine, targetFor,
+    pace, floor, line, myLine, targetFor, teamOf,
   } = month
 
   const myPlace = useMemo(
@@ -120,6 +120,74 @@ export function CollectorDashboard() {
   const over = mine ? overBookBy(mine, ceiling) : 0
 
   /*
+   * ---------- THE THREE LEVELS ----------
+   *
+   * The firm, of every department: "their own statistics is important, their team statistics is
+   * important, and their department statistics is important for them to see."
+   *
+   * SO THE SCREEN IS READ DOWNWARDS, DEPARTMENT FIRST. It used to open with the floor's totals
+   * and then mix the person in among them -- the measures card and the four tiles under it are
+   * the FLOOR's, drawn in the same shape a collector reads as their own, and nothing on the page
+   * said which was which. Three named levels cost nothing and answer that question before it is
+   * asked.
+   *
+   * COMPUTED HERE, NOT IN THE SHARED HOOK. useCollectionsMonth holds what both dashboards read --
+   * the period, the pace, the floor's total -- and a team's line and a person's are this screen's
+   * alone. Same lib functions either way, so nothing is a second implementation of anything.
+   */
+  const myTeamId = currentUser?.teamId ?? ''
+  const myTeam = teams.find((t) => t.id === myTeamId) ?? null
+
+  /* Everybody on my team, out of the WHOLE floor rather than the filtered view: my team is my
+     team whatever the picker above is set to, and a leader inspecting another team should not
+     see their own section change under them. */
+  const teamRows = useMemo(
+    () => (myTeamId ? (rows ?? []).filter((r) => teamOf(r.userId) === myTeamId) : []),
+    [rows, myTeamId, teamOf],
+  )
+  const teamStats = teamRows.length > 0 ? totalStats(teamRows) : null
+  const teamTargets = useMemo(
+    () => teamTotal(teamRows.map((r) => ({
+      collected: r.collected,
+      target: targetFor(r.userId, r.inPlayAccounts > 0 || r.collected > 0).target,
+    }))),
+    [teamRows, targetFor],
+  )
+  const teamLine = teamStats ? paceLine(teamStats.collected, teamTargets.target, pace) : null
+
+  /*
+   * WHERE MY TEAM SITS AMONG THE TEAMS, on rand collected -- the same figure the teams table is
+   * ordered on. Collectors with no team are left out rather than counted as a team: "No team" is
+   * a gap in the records, and ranking it against Team Alpha would put a filing mistake on the
+   * board as a competitor.
+   */
+  const teamPlace = useMemo(() => {
+    const totals = new Map<string, number>()
+    for (const r of rows ?? []) {
+      const id = teamOf(r.userId)
+      if (!id) continue
+      totals.set(id, (totals.get(id) ?? 0) + r.collected)
+    }
+    const lines = [...totals].map(([userId, collected]) => ({ userId, collected }))
+    return standings(lines, (t) => t.collected).get(myTeamId)
+  }, [rows, teamOf, myTeamId])
+
+  /* My team, ranked on rand like the floor is -- and my own row marked, because a list of eight
+     names is one a person reads looking for themselves. */
+  const teamPeople = useMemo(() => teamRows
+    .map((r) => ({
+      row: r,
+      name: users.find((u) => u.id === r.userId)?.name ?? 'Somebody',
+      line: paceLine(r.collected, targetFor(r.userId, r.inPlayAccounts > 0 || r.collected > 0).target, pace),
+    }))
+    .sort((a, b) => b.row.collected - a.row.collected || a.name.localeCompare(b.name, 'en-ZA')),
+    [teamRows, users, targetFor, pace])
+
+  /* My own month, scored the same way the floor's is. scoreCollector is the one place the derived
+     measures are worked out, so mine and the floor's cannot be computed differently. */
+  const myScore = mine ? scoreCollector(mine) : null
+
+  /*
    * pctDelta, not arithmetic of my own. StatTile prints the number it is given verbatim, so a
    * raw ratio renders as "0.6666666666666666%" — and the helper already handles the zero prior
    * period by returning null, which the tile says in words rather than as a fabricated 100%.
@@ -153,49 +221,6 @@ export function CollectorDashboard() {
             pace={pace} asAt={asAt} period={period} targetFor={targetFor} />
         )}
       </DashboardHero>
-
-      {/*
-        THE SAME FOUR FIGURES THE COMPANY DASHBOARD LEADS WITH, repeated here at the firm's
-        instruction — "we can repeat the same figures". They come off the same hook, so the two
-        screens cannot drift; what changes is only how they are drawn, because a tile over a
-        photograph and a tile on a page are the same fact in two frames.
-      */}
-      <div data-qa="collections-figures" className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatTile size="secondary" label={month.figures.todayLabel}
-          value={moneyText(month.figures.today)}
-          pctChange={month.figures.changeOnPrevious === null
-            ? undefined : month.figures.changeOnPrevious * 100}
-          compareLabel={month.figures.previousLabel ? `vs ${month.figures.previousLabel}` : undefined}
-          hint="What came in on the day being read." />
-        <StatTile size="secondary" label="Collected this period"
-          value={moneyText(month.figures.collected)}
-          hint={month.figures.target === null
-            ? 'No target set for this period.'
-            : `${pctText(month.figures.achieved)} of ${moneyText(month.figures.target)}.`} />
-        <StatTile size="secondary"
-          label={month.figures.againstPace === null ? 'Against pace'
-            : month.figures.againstPace >= 0 ? 'Ahead of pace' : 'Behind pace'}
-          value={month.figures.againstPace === null ? '—' : moneyText(Math.abs(month.figures.againstPace))}
-          hint={month.figures.expectedByNow === null
-            ? 'Nothing to measure against yet.'
-            : `Expected by now ${moneyText(month.figures.expectedByNow)}.`} />
-        <StatTile size="secondary" label="Needed per working day"
-          value={moneyText(month.figures.neededADay)}
-          hint={month.figures.stillNeeded === null
-            ? 'No target set for this period.'
-            : `${moneyText(month.figures.stillNeeded)} still to find.`} />
-      </div>
-
-      {/*
-        THE MONTH BAR, back as a card of its own now that there is no panel for it to sit inside.
-        The same element the company dashboard draws in the hero's glass, in its light colours —
-        one implementation, because a second "how far through the month are we" is a second answer
-        to that question.
-      */}
-      <MonthProgress pace={pace} line={line}
-        note={floor.withTarget < floor.members
-          ? `${floor.members - floor.withTarget} of ${floor.members} have no target, so the total is short by their share.`
-          : undefined} />
 
       {/*
         THE NOTICE A COLLECTOR ACTUALLY SEES. It also appears on the Collectors table in Settings,
@@ -297,69 +322,75 @@ export function CollectorDashboard() {
         </Card>
       ) : (
         <>
-          {/*
-            THE OTHER HALF OF THE ANSWER. The headline above is the company's; this is the person
-            reading it. The firm wanted both on one screen rather than behind a toggle — "they
-            should see their own thing, but they should also be able to see the entire company's
-            performance, and where they stand relative to everybody else."
-          */}
-          {mine && myLine && (
-            <Card padded={false}>
-              <div className="flex flex-wrap items-center gap-x-8 gap-y-3 px-4 py-3">
-                <p className="text-[11px] uppercase tracking-wide text-slate-400">Your month</p>
-                <Fact label="Collected" value={formatCurrency(mine.collected)} />
-                <Fact label="Of target" value={pctText(myLine.achieved)} />
-                <Fact label="Payments" value={mine.payments.toLocaleString('en-ZA')} />
-                <Fact label="On the floor" value={placeLabel(myPlace)} />
-                {myLine.target !== null && <StatusPill standing={myLine.standing} />}
-                <Link to={`/performance/${mine.userId}`}
-                  className="ml-auto text-xs font-medium text-brand-600 hover:underline">
-                  Open my dashboard &rarr;
-                </Link>
-              </div>
-            </Card>
-          )}
+          {/* ============================ 1. THE DEPARTMENT ============================ */}
 
-          {shownRows.length > 0 && (
-            <>
-              <TeamTable rows={shownRows} users={users} teams={teams} targets={targets}
-                periodKey={period.key} pace={pace} targetFor={targetFor} />
-              <ClerkTable rows={shownRows} today={shownToday} users={users} teams={teams}
-                pace={pace} targetFor={targetFor} me={currentUser?.id ?? null} />
-            </>
-          )}
+          {/*
+            THREE LEVELS, NAMED, AND IN THIS ORDER. The firm, of every department in the firm:
+            "their own statistics is important, their team statistics is important, and their
+            department statistics is important for them to see."
+
+            THE DEPARTMENT LEADS because that is how the firm reads the floor — and because the
+            screen above it is the company's. The person's own month is not buried by that: it
+            has a level of its own further down with its own measures, which it did not have
+            before. What it had was the FLOOR's measures drawn in the shape of somebody's own,
+            with nothing on the page saying whose they were.
+          */}
+          <Level title="The floor" why={teamId
+            ? `${teams.find((t) => t.id === teamId)?.name ?? 'One team'}, ${period.label}`
+            : `Every collector, ${period.label}`} />
+
+          {/*
+            THE SAME FOUR FIGURES THE COMPANY DASHBOARD LEADS WITH, repeated here at the firm's
+            instruction — "we can repeat the same figures". They come off the same hook, so the
+            two screens cannot drift; what changes is only how they are drawn, because a tile
+            over a photograph and a tile on a page are the same fact in two frames.
+          */}
+          <div data-qa="collections-figures" className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatTile size="secondary" label={month.figures.todayLabel}
+              value={moneyText(month.figures.today)}
+              pctChange={month.figures.changeOnPrevious === null
+                ? undefined : month.figures.changeOnPrevious * 100}
+              compareLabel={month.figures.previousLabel ? `vs ${month.figures.previousLabel}` : undefined}
+              hint="What came in on the day being read." />
+            <StatTile size="secondary" label="Collected this period"
+              value={moneyText(month.figures.collected)}
+              hint={month.figures.target === null
+                ? 'No target set for this period.'
+                : `${pctText(month.figures.achieved)} of ${moneyText(month.figures.target)}.`} />
+            <StatTile size="secondary"
+              label={month.figures.againstPace === null ? 'Against pace'
+                : month.figures.againstPace >= 0 ? 'Ahead of pace' : 'Behind pace'}
+              value={month.figures.againstPace === null ? '—' : moneyText(Math.abs(month.figures.againstPace))}
+              hint={month.figures.expectedByNow === null
+                ? 'Nothing to measure against yet.'
+                : `Expected by now ${moneyText(month.figures.expectedByNow)}.`} />
+            <StatTile size="secondary" label="Needed per working day"
+              value={moneyText(month.figures.neededADay)}
+              hint={month.figures.stillNeeded === null
+                ? 'No target set for this period.'
+                : `${moneyText(month.figures.stillNeeded)} still to find.`} />
+          </div>
+
+          {/*
+            THE MONTH BAR, a card of its own now that there is no panel for it to sit inside. The
+            same element the company dashboard draws in the hero's glass, in its light colours —
+            one implementation, because a second "how far through the month are we" is a second
+            answer to that question.
+          */}
+          <MonthProgress pace={pace} line={line}
+            note={floor.withTarget < floor.members
+              ? `${floor.members - floor.withTarget} of ${floor.members} have no target, so the total is short by their share.`
+              : undefined} />
 
           {/*
             The card that compares people fairly, and it says so. Kept apart from the money above
             rather than mixed in with it, because the two answer different questions and a
-            collector should be able to tell which is which.
+            collector should be able to tell which is which. THE FLOOR'S, and now labelled as the
+            floor's — the same four appear again under "You" with the person's own figures in
+            them, and until the levels were named nothing distinguished the two.
           */}
-          <Card padded={false}>
-            <p className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wide text-slate-400">
-              How the work is going
-              <span className="block normal-case tracking-normal text-slate-400 text-xs mt-0.5">
-                These compare fairly across unlike books. Rand collected does not — it measures the
-                book as much as the collector.
-              </span>
-            </p>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4 pt-2">
-              <Measure label="Promises kept" value={score.promiseKeptRate} asPercent
-                note={`${score.promisesKept} of ${score.promisesResolved} resolved · ${score.promisesMade} taken`}
-                tone={band(score.promiseKeptRate, THRESHOLDS.promiseKeptRate)}
-                hint="Of the promises that have come due. One not yet due is neither kept nor broken." />
-              <Measure label="Book reached" value={score.coverage} asPercent
-                note={`${score.accountsTouched.toLocaleString('en-ZA')} of ${score.inPlayAccounts.toLocaleString('en-ZA')} accounts`}
-                tone={band(score.coverage, THRESHOLDS.coverage)}
-                hint="Distinct accounts worked at least once this period, over the whole book." />
-              <Measure label="Payments per 100" value={score.paymentsPerHundred}
-                note={`${score.payments} from ${score.inPlayAccounts.toLocaleString('en-ZA')} accounts`}
-                hint="The fairest single figure across books of very different sizes." />
-              <Measure label="Calls answered" value={score.callAnswerRate} asPercent
-                note={`${score.callsAnswered} of ${score.calls} calls`}
-                tone={band(score.callAnswerRate, THRESHOLDS.callAnswerRate)}
-                hint="How often somebody picked up. Low usually means the numbers need tracing." />
-            </div>
-          </Card>
+          <Measures score={score} caption="Across the whole floor. These compare fairly over
+            unlike books; rand collected does not — it measures the book as much as the collector." />
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <StatTile size="secondary" label="Payments"
@@ -383,8 +414,142 @@ export function CollectorDashboard() {
             <StatTile size="secondary" label="Emails" value={score.emailsSent.toLocaleString('en-ZA')} />
             <StatTile size="secondary" label="SMS" value={score.smsSent.toLocaleString('en-ZA')} />
             <StatTile size="secondary" label="Notes written" value={score.notesWritten.toLocaleString('en-ZA')}
-              hint="Your own words. Notes Raptor composes itself are not counted." />
+              hint="Work somebody typed. Notes Raptor composes itself are not counted." />
           </div>
+
+          {/* ============================== 2. YOUR TEAM ============================== */}
+
+          {/*
+            ONLY WHERE THERE IS ONE, and quietly absent otherwise. The call centre manager leads
+            every team and belongs to none, and a collector whose team was never set would get a
+            panel of dashes — which reads as a broken screen rather than as a missing record.
+            What is wrong in that case is a profile, and Settings is where it is fixed.
+
+            IT DOES NOT FOLLOW THE TEAM PICKER. My team is my team whatever the filter above is
+            set to: a leader looking at another team's figures should not find their own section
+            quietly describing somebody else's.
+          */}
+          {myTeam && teamStats && teamLine && (
+            <>
+              <Level title={`Your team — ${myTeam.name}`}
+                /* The place is only said where there is something to be placed against: "1st of
+                   1" on a floor with one team is not a standing, it is arithmetic about nothing. */
+                why={`${teamPeople.length === 1 ? '1 collector' : `${teamPeople.length} collectors`}${
+                  teamPlace && teamPlace.outOf > 1
+                    ? ` · ${placeLabel(teamPlace)} on rand collected` : ''}`} />
+              <Card padded={false}>
+                <div className="flex flex-wrap items-center gap-x-8 gap-y-3 px-4 py-3">
+                  <Fact label="Collected" value={formatCurrency(teamStats.collected)} />
+                  <Fact label="Target" value={moneyText(teamTargets.target)} />
+                  <Fact label="Of target" value={pctText(teamLine.achieved)} />
+                  <Fact label="Gap vs pace" value={gapText(teamLine.gap)} />
+                  <Fact label="Needed a day" value={moneyText(teamLine.neededADay)} />
+                  {teamLine.target !== null && <StatusPill standing={teamLine.standing} />}
+                </div>
+                {/*
+                  Said where the total is read rather than in a footnote: a team target is the sum
+                  of the people's own, so one person without a target makes the whole line short by
+                  their share — and a leader comparing two teams has no way to see that otherwise.
+                */}
+                {teamTargets.withTarget < teamTargets.members && (
+                  <p className="px-4 pb-3 -mt-1 text-xs text-amber-700">
+                    {teamTargets.members - teamTargets.withTarget} of {teamTargets.members} have no
+                    target set, so the team's is short by their share.
+                  </p>
+                )}
+              </Card>
+
+              {/* The team, ranked on rand like the floor is — short enough to read as a list
+                  rather than a table, and the person's own row marked. */}
+              <Card padded={false}>
+                <ul className="divide-y divide-slate-100">
+                  {teamPeople.map(({ row, name, line: theirs }, i) => (
+                    <li key={row.userId}
+                      className={`flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-sm ${
+                        row.userId === currentUser?.id ? 'bg-amber-50/50' : ''}`}>
+                      <span className="w-5 shrink-0 tabular-nums text-slate-400">{i + 1}</span>
+                      <Link to={`/performance/${row.userId}`}
+                        className="min-w-[10rem] font-medium text-slate-800 hover:underline">
+                        {name}
+                        {row.userId === currentUser?.id && (
+                          <span className="ml-1.5 text-[11px] font-normal text-slate-400">(you)</span>
+                        )}
+                      </Link>
+                      <span className="tabular-nums text-slate-700">{formatCurrency(row.collected)}</span>
+                      <span className="tabular-nums text-slate-500">{pctText(theirs.achieved)}</span>
+                      <ProgressBar achieved={theirs.achieved} />
+                      <span className="ml-auto"><StatusPill standing={theirs.standing} /></span>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            </>
+          )}
+
+          {/* ================================= 3. YOU ================================= */}
+
+          {/*
+            THE PERSON READING IT, with their own measures rather than the floor's. The firm
+            wanted both on one screen rather than behind a toggle — "they should see their own
+            thing, but they should also be able to see the entire company's performance, and
+            where they stand relative to everybody else."
+          */}
+          {mine && myLine && myScore ? (
+            <>
+              <Level title="You" why={`Your own month · ${period.label}`} />
+              <Card padded={false}>
+                <div className="flex flex-wrap items-center gap-x-8 gap-y-3 px-4 py-3">
+                  <Fact label="Collected" value={formatCurrency(mine.collected)} />
+                  <Fact label="Of target" value={pctText(myLine.achieved)} />
+                  <Fact label="Gap vs pace" value={gapText(myLine.gap)} />
+                  <Fact label="Needed a day" value={moneyText(myLine.neededADay)} />
+                  <Fact label="Payments" value={mine.payments.toLocaleString('en-ZA')} />
+                  <Fact label="On the floor" value={placeLabel(myPlace)} />
+                  {myLine.target !== null && <StatusPill standing={myLine.standing} />}
+                  <Link to={`/performance/${mine.userId}`}
+                    className="ml-auto text-xs font-medium text-brand-600 hover:underline">
+                    My twelve months &rarr;
+                  </Link>
+                </div>
+              </Card>
+
+              <Measures score={myScore} caption="Yours, on the same four measures the floor is read
+                on above — so the comparison is like for like rather than two different sums." />
+
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <StatTile size="secondary" label="Your calls" value={myScore.calls.toLocaleString('en-ZA')} />
+                <StatTile size="secondary" label="Your emails" value={myScore.emailsSent.toLocaleString('en-ZA')} />
+                <StatTile size="secondary" label="Your SMS" value={myScore.smsSent.toLocaleString('en-ZA')} />
+                <StatTile size="secondary" label="Your notes" value={myScore.notesWritten.toLocaleString('en-ZA')}
+                  hint="Your own words. Notes Raptor composes itself are not counted." />
+              </div>
+            </>
+          ) : (
+            /* A leader or a manager with no book of their own. Said once, plainly, rather than
+               drawing an empty level that looks like a screen that failed to load. */
+            <p className="px-1 text-xs text-slate-400">
+              You have no accounts of your own this period, so there is no personal level to show.
+            </p>
+          )}
+
+          {/* ========================= THE FLOOR, IN DETAIL ========================= */}
+
+          {/*
+            LAST, because it is reference rather than reading. Every collector and every team is
+            already summed above; this is where somebody goes to find one person's row. It stayed
+            on the screen rather than moving behind a link at the firm's instruction that everyone
+            can see everyone: "they should also be able to see where they stand relative to
+            everybody else."
+          */}
+          {shownRows.length > 0 && (
+            <>
+              <Level title="The floor, in detail" why="Every team and every collector, ranked" />
+              <TeamTable rows={shownRows} users={users} teams={teams} targets={targets}
+                periodKey={period.key} pace={pace} targetFor={targetFor} />
+              <ClerkTable rows={shownRows} today={shownToday} users={users} teams={teams}
+                pace={pace} targetFor={targetFor} me={currentUser?.id ?? null} />
+            </>
+          )}
 
           {shownRows.length > 0 && <FairTable rows={shownRows} users={users} />}
         </>
@@ -411,6 +576,64 @@ const STANDING_STYLE: Record<PaceStanding, string> = {
   behind: 'bg-amber-50 text-amber-800',
   critical: 'bg-rose-50 text-rose-700',
   'no-target': 'bg-slate-100 text-slate-500',
+}
+
+/**
+ * THE HEADING ON ONE OF THE THREE LEVELS.
+ *
+ * The firm asked for a department's figures, a team's and a person's on one screen, and the thing
+ * that makes that readable is not the figures — it is saying whose each block is. This screen
+ * already drew the FLOOR's promise-kept rate in exactly the shape a collector reads as their own,
+ * and a person cannot tell those apart by looking harder.
+ *
+ * Deliberately plainer than a Card: a heading over a group, not another box around it. Three more
+ * boxes on a screen that already has eleven would make the levels harder to see, not easier.
+ */
+function Level({ title, why }: { title: string; why: string }) {
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 pt-3">
+      <h2 className="text-base font-bold text-slate-800">{title}</h2>
+      <p className="text-xs text-slate-400">{why}</p>
+    </div>
+  )
+}
+
+/**
+ * The four figures that compare fairly across unlike books, drawn for whoever they are about.
+ *
+ * ONE COMPONENT, TWO LEVELS. The floor's copy and the person's are the same four measures on the
+ * same thresholds; written out twice they would eventually be two different definitions of
+ * "promises kept" on one screen, which is the failure this codebase keeps meeting in other
+ * shapes. The caption is what says whose they are.
+ */
+function Measures({ score, caption }: { score: CollectorScore; caption: string }) {
+  return (
+    <Card padded={false}>
+      <p className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wide text-slate-400">
+        How the work is going
+        <span className="block normal-case tracking-normal text-slate-400 text-xs mt-0.5">
+          {caption}
+        </span>
+      </p>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4 pt-2">
+        <Measure label="Promises kept" value={score.promiseKeptRate} asPercent
+          note={`${score.promisesKept} of ${score.promisesResolved} resolved · ${score.promisesMade} taken`}
+          tone={band(score.promiseKeptRate, THRESHOLDS.promiseKeptRate)}
+          hint="Of the promises that have come due. One not yet due is neither kept nor broken." />
+        <Measure label="Book reached" value={score.coverage} asPercent
+          note={`${score.accountsTouched.toLocaleString('en-ZA')} of ${score.inPlayAccounts.toLocaleString('en-ZA')} accounts`}
+          tone={band(score.coverage, THRESHOLDS.coverage)}
+          hint="Distinct accounts worked at least once this period, over the whole book." />
+        <Measure label="Payments per 100" value={score.paymentsPerHundred}
+          note={`${score.payments} from ${score.inPlayAccounts.toLocaleString('en-ZA')} accounts`}
+          hint="The fairest single figure across books of very different sizes." />
+        <Measure label="Calls answered" value={score.callAnswerRate} asPercent
+          note={`${score.callsAnswered} of ${score.calls} calls`}
+          tone={band(score.callAnswerRate, THRESHOLDS.callAnswerRate)}
+          hint="How often somebody picked up. Low usually means the numbers need tracing." />
+      </div>
+    </Card>
+  )
 }
 
 /** A label and its figure, side by side. The shape the personal strip is made of. */

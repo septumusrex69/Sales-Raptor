@@ -445,13 +445,30 @@ ok('...and the file says which period and day it is of', /\['As at', dayKey\(asA
    figure on the row one to the left. */
 ok('...with its cells quoted', /String\(v\)\.replace\(\/"\/g, '""'\)/.test(page))
 
-/* ---------- the tab is called what the firm calls the work ---------- */
+/* ---------- the floor has no menu item of its own any more ---------- */
 
+/*
+ * THE FIRM, once the company dashboard landed: "that tab can be removed." The floor's screen is a
+ * DEPARTMENT dashboard now, opened the way every department dashboard is -- the button on the
+ * company screen, or the department's own card under it. A menu item for one department and none
+ * for the other three is the sales dashboard's old privilege in a new place.
+ *
+ * ASSERTED WITH THE ROUTES, NOT ALONE. "No tab" on its own is also satisfied by deleting the
+ * screen, so both ways in are held up beside it: an item removed while its route still answers is
+ * a tidy-up, and one removed with nothing behind it is a page nobody can reach.
+ */
 const sidebar = readFileSync(new URL('../../src/components/layout/Sidebar.tsx', import.meta.url), 'utf8')
-ok('the tab says Collections', /label: 'Collections'/.test(sidebar))
-ok('...and no longer says Performance', !/label: 'Performance'/.test(sidebar))
-/* The route is unchanged on purpose: renaming it would break every bookmark for a word. */
-ok('...on the same route as before', /to: '\/performance', label: 'Collections'/.test(sidebar))
+const menu = sidebar.slice(sidebar.indexOf('const NAV:'), sidebar.indexOf(']\n', sidebar.indexOf('const NAV:')))
+ok('there is a menu to read', menu.length > 500)
+ok('the floor has no menu item of its own', !/label: 'Collections'/.test(menu))
+ok('...nor the older name it went by', !/label: 'Performance'/.test(menu))
+const appRoutes = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8')
+/* Both routes stay: /performance is what every collector's name on every table links to, and
+   /dashboard/collections is what "Go to my dashboard" opens. */
+ok('...but the route every table links to still answers',
+  /path="\/performance" element=\{<CollectorDashboard \/>\}/.test(appRoutes))
+ok('...and so does the one the button opens',
+  /path="\/dashboard\/collections" element=\{<CollectorDashboard \/>\}/.test(appRoutes))
 
 /* ---------- a collections target can be set and stored ---------- */
 
