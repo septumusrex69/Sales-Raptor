@@ -153,6 +153,26 @@ export interface MergeField {
   key: string
   label: string
   sample: string
+  /**
+   * A FIELD MOST ACCOUNTS CANNOT ANSWER, AND THAT MUST NOT HOLD A NOTICE.
+   *
+   * The firm hit this on the first workflow they ran: a handover held on day 0 because the
+   * account had no identity number, and 19 668 of the 19 912 live accounts have none — 97% of
+   * the book. Every collections template quotes it, so the guard that exists to stop a notice
+   * going out with "{{debtor_id_masked}}" in it would have stopped nearly every notice the firm
+   * sends. The firm's answer: "we should account for people that don't have ID numbers... in all
+   * of the writings."
+   *
+   * SO AN UNFILLED OPTIONAL FIELD IS REMOVED RATHER THAN REPORTED. The line it sits on goes with
+   * it where it is a label line, and only the clause goes where it sits inside a sentence — see
+   * `renderTemplate`. It is NOT blanked in place: "Identity number:" with nothing after it is a
+   * fact the firm does not have, printed as though it forgot to fill it in.
+   *
+   * MARKED ON THE FIELD, NOT IN THE WORDING. A per-use syntax would mean the firm remembering to
+   * type it on thirty-two templates, and forgetting it on the thirty-third is a held workflow
+   * nobody can explain. Whether a field is answerable is a fact about the column behind it.
+   */
+  optional?: true
 }
 
 /**
@@ -273,8 +293,9 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
      * debtor. That is not tidiness: before this, {{debtor_id_masked}} masked a company's
      * registration number as though it were an identity number and printed it on a letter.
      */
-    { key: 'debtor_id_masked', label: 'Identity number, masked (a person)', sample: '850312XXXX08X' },
-    { key: 'debtor_reg_no', label: 'Registration number (a company)', sample: '2019/940923/07' },
+    /* Optional, both of them: they are the same column, and it is empty on 97% of the book. */
+    { key: 'debtor_id_masked', label: 'Identity number, masked (a person)', sample: '850312XXXX08X', optional: true },
+    { key: 'debtor_reg_no', label: 'Registration number (a company)', sample: '2019/940923/07', optional: true },
     { key: 'account_number', label: "The creditor's own account number", sample: '92322880' },
     { key: 'respond_by', label: 'The date the debtor must answer by, written out', sample: '5 October 2026' },
     { key: 'position_as_at', label: 'The date the balance was struck', sample: '18 September 2026' },
@@ -571,13 +592,121 @@ export interface Rendered {
   missing: string[]
 }
 
-/** Substitute what is known and report what is not. Never invents, never leaves "undefined". */
+/**
+ * EVERY FIELD MARKED OPTIONAL, ACROSS BOTH LIBRARIES.
+ *
+ * Read off MERGE_FIELDS rather than written out again, so a field marked optional in the
+ * vocabulary is optional everywhere it is used and a second list cannot disagree with the first.
+ */
+const OPTIONAL_FIELDS: ReadonlySet<string> = new Set(
+  Object.values(MERGE_FIELDS).flatMap((list) => list.filter((f) => f.optional).map((f) => f.key)),
+)
+
+export function isOptionalField(key: string): boolean {
+  return OPTIONAL_FIELDS.has(key)
+}
+
+/**
+ * Take out an optional field the account cannot answer, and the words that only existed to
+ * introduce it.
+ *
+ * TWO SHAPES, BECAUSE THE FIRM'S TEMPLATES HAVE TWO. An email or a letter puts it on a line of
+ * its own under the references — "Identity number: {{debtor_id_masked}}" — and the whole line
+ * goes, because a label with nothing after it reads as a fact somebody forgot to type. An SMS
+ * has it inside the sentence — "{{debtor_name}}, {{debtor_id_masked}}. We emailed you" — where
+ * dropping the line would drop the entire message, so only the field and the comma holding it in
+ * go, leaving "Strand Van der see. We emailed you".
+ *
+ * IT NEVER EMPTIES THE MESSAGE. A template that is nothing but the optional field would render
+ * as an empty SMS — sent, and charged to the debtor under item 1(c), saying nothing. Where the
+ * removal would leave nothing behind, the field is treated as missing after all and the notice
+ * holds, which is the outcome that gets somebody to look.
+ */
+function withoutOptional(template: string, key: string): string | null {
+  const one = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`)
+  const lines = template.split('\n')
+  const out: string[] = []
+  for (const line of lines) {
+    if (!one.test(line)) { out.push(line); continue }
+    /*
+     * A LABEL LINE, or a line that is only the field. What is left once the field is gone is
+     * either nothing, or a label ending in a colon; either way the line was about the field.
+     */
+    const rest = line.replace(new RegExp(one.source, 'g'), '').trim()
+    if (rest === '' || /^[^{}]*:$/.test(rest)) continue
+    /*
+     * INSIDE A SENTENCE. The separator in front of it goes with it — a comma or a semicolon and
+     * the space around it — and failing that, one after it. Without that, "Name, . We emailed"
+     * is what the debtor reads.
+     */
+    const inline = line
+      .replace(new RegExp(`\\s*[,;]\\s*${one.source}`, 'g'), '')
+      .replace(new RegExp(`${one.source}\\s*[,;]\\s*`, 'g'), '')
+      .replace(new RegExp(one.source, 'g'), '')
+      .replace(/[ \t]{2,}/g, ' ')
+    out.push(inline)
+  }
+  /* A line removed from the middle of a block can leave two blank lines where there was one, and
+     in an email a blank line is a PARAGRAPH — see emailBodyHtml. Collapsed back to one. */
+  const text = out.join('\n').replace(/\n{3,}/g, '\n\n')
+  return text.trim() === '' ? null : text
+}
+
+/**
+ * The same removal, for one span of a NOTICE rather than for a message.
+ *
+ * WHY THE DOCUMENT NEEDS ITS OWN DOOR. The firm's four letters carry the field as a paragraph of
+ * its own — "Identity number: {{debtor_id_masked}}" — and a letter is rendered span by span, so
+ * the span is the whole of that paragraph. renderTemplate refuses to empty a message, which is
+ * right for an SMS and wrong here: an empty span is exactly what should happen, and it is the
+ * DOCUMENT's job to then drop the paragraph around it rather than print a gap on a statutory
+ * demand. See documentWithoutOptional in letterDocument.ts, which is the only caller.
+ *
+ * Returns the text unchanged where there is nothing optional to take out.
+ */
+export function spanWithoutOptional(
+  text: string,
+  values: Partial<Record<string, string | null>>,
+): string {
+  let out = text
+  for (const key of fieldsUsed(out)) {
+    if (!OPTIONAL_FIELDS.has(key)) continue
+    const value = values[key]
+    if (!(value === undefined || value === null || value.trim() === '')) continue
+    out = withoutOptional(out, key) ?? ''
+  }
+  return out
+}
+
+/**
+ * Substitute what is known and report what is not. Never invents, never leaves "undefined".
+ *
+ * AN OPTIONAL FIELD NOTHING FILLS IS REMOVED RATHER THAN REPORTED, so it does not hold a notice
+ * — see MergeField.optional, and withoutOptional above for what "removed" means.
+ */
 export function renderTemplate(
   template: string | null | undefined,
   values: Partial<Record<string, string | null>>,
 ): Rendered {
+  const unfilled = (key: string): boolean => {
+    const value = values[key]
+    return value === undefined || value === null || value.trim() === ''
+  }
+
+  /* Cut the optional gaps out FIRST, so what is measured below is the text that will actually
+     go — an SMS is priced per segment on the merged words, and a clause removed after the
+     count would be a quote the debtor is charged against and never reads. */
+  let source = template ?? ''
+  for (const key of fieldsUsed(source)) {
+    if (!OPTIONAL_FIELDS.has(key) || !unfilled(key)) continue
+    const trimmed = withoutOptional(source, key)
+    /* Null means removing it would leave nothing at all. Left standing, so it is reported as
+       missing below and somebody looks at the template rather than a debtor getting silence. */
+    if (trimmed !== null) source = trimmed
+  }
+
   const missing: string[] = []
-  const text = (template ?? '').replace(fieldPattern(), (whole, key: string) => {
+  const text = source.replace(fieldPattern(), (whole, key: string) => {
     const value = values[key]
     if (value === undefined || value === null || value.trim() === '') {
       if (!missing.includes(key)) missing.push(key)

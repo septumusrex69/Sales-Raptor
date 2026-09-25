@@ -26,7 +26,7 @@
  * — the same closed vocabulary the SMS and email templates use. A letter that invented its own
  * field names would be a second thing to keep in step with the resolver.
  */
-import { renderTemplate, unknownFields, type TemplateScope } from './messageTemplates.js'
+import { renderTemplate, spanWithoutOptional, unknownFields, type TemplateScope } from './messageTemplates.js'
 import { CHARTER_STACK } from './charter.js'
 
 /* ------------------------------------------------------------------ inline */
@@ -437,11 +437,68 @@ const spacingStyle = (s?: Spacing): string =>
  * edit, the same fields resolved are what the debtor reads, and neither answers the other's
  * question.
  */
+/**
+ * THE NOTICE WITH ITS UNANSWERABLE OPTIONAL LINES TAKEN OUT.
+ *
+ * THE FIRM'S FOUR LETTERS ALL CARRY ONE. Under the debtor's name, each of the section 129, the
+ * final notice, the listing notice and the intended summons has a paragraph reading "Identity
+ * number: {{debtor_id_masked}}" — and 97% of the book has no identity number. Leaving the field
+ * standing prints braces on a statutory demand; blanking it prints "Identity number:" with
+ * nothing after it, which reads as a fact somebody forgot to type; rendering the paragraph empty
+ * leaves a gap in the middle of the notice. So the paragraph goes.
+ *
+ * APPLIED TO THE DOCUMENT, ONCE, BEFORE ANYTHING IS LAID OUT. Both renderers — this file for the
+ * screen and letterLayout for the PDF — run it first, so the two cannot disagree about how many
+ * paragraphs the notice has. Page breaks are measured after it, which is the only order that
+ * works: a block removed after the breaks were planned moves every one of them.
+ *
+ * A BLOCK GOES ONLY IF IT IS EMPTY *BECAUSE* OF THE REMOVAL. An empty paragraph somebody typed as
+ * a spacer is left exactly where it is — this is not a tidy-up pass, and a notice that quietly
+ * loses the author's spacing is a notice they did not write.
+ */
+export function documentWithoutOptional(
+  doc: LetterDocument,
+  values: Record<string, string>,
+): LetterDocument {
+  /** The spans with the gaps cut out, and whether cutting them emptied the whole run. */
+  const cut = (spans: Span[]): { spans: Span[]; emptied: boolean } => {
+    const had = spans.some((s) => spanWithoutOptional(s.text, values) !== s.text)
+    const next = spans.map((s) => ({ ...s, text: spanWithoutOptional(s.text, values) }))
+    return { spans: next, emptied: had && next.every((s) => s.text.trim() === '') }
+  }
+
+  const blocks: LetterDocument['blocks'] = []
+  for (const block of doc.blocks) {
+    if (block.kind === 'table') {
+      const rows = block.rows
+        .map((row) => row.map((cell) => ({ cell, done: cut(cell.spans) })))
+        .filter((row) => !row.every((c) => c.done.emptied))
+        .map((row) => row.map(({ cell, done }) => ({ ...cell, spans: done.spans })))
+      blocks.push({ ...block, rows })
+      continue
+    }
+    if (block.kind === 'list') {
+      const items = block.items.map((item) => cut(item)).filter((i) => !i.emptied).map((i) => i.spans)
+      if (items.length > 0) blocks.push({ ...block, items })
+      continue
+    }
+    const spans = (block as { spans?: Span[] }).spans
+    if (!spans) { blocks.push(block); continue }
+    const done = cut(spans)
+    if (done.emptied) continue
+    blocks.push({ ...block, spans: done.spans } as typeof block)
+  }
+  return { ...doc, blocks }
+}
+
 export function letterToHtml(doc: LetterDocument, input: {
   filled: boolean
   values: Record<string, string>
 }): string {
   const { filled, values } = input
+  /* The unanswerable optional lines go before anything is drawn — see documentWithoutOptional.
+     Only when the letter is FILLED: unfilled is the editing view, where every field must stand. */
+  if (filled) doc = documentWithoutOptional(doc, values)
   const inline = (spans: Span[]) => spans.map((s) => spanHtml(s, filled, values)).join('')
   /* The heading numbers are counted HERE rather than stored, so inserting a section renumbers the
      ones after it. A typed "3." left over from before an insertion is the classic letter fault. */

@@ -288,17 +288,33 @@ export function TemplateEditor({
               <div className="flex flex-wrap gap-1.5">
                 {g.fields.map((f) => (
                   <button key={f.key} type="button" onClick={() => insert(f.key)}
-                    title={`${f.label} — e.g. ${f.sample}`}
+                    title={f.optional
+                      ? `${f.label} — e.g. ${f.sample}. Optional: where the account has none, the `
+                        + 'line it sits on is left out and the notice still goes.'
+                      : `${f.label} — e.g. ${f.sample}`}
                     className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded
                       border border-slate-200 bg-white text-navy-700 hover:border-[#c9a052] hover:bg-gold-50">
                     <Plus size={10} className="text-slate-400" />
                     {`{{${f.key}}}`}
+                    {/* Marked, because whether a field can hold a whole workflow is the one thing
+                        about it somebody writing a statutory notice has to know. */}
+                    {f.optional && <span className="text-slate-400" aria-hidden="true">°</span>}
                   </button>
                 ))}
               </div>
             </div>
           ))}
         </div>
+        {/*
+          WHAT THE MARK MEANS, said once under the chips rather than on each of them. Most
+          accounts cannot answer these — 97% of the book carries no identity number — so a
+          notice that held until one was typed in would be a notice that never went.
+        */}
+        <p className="mt-2 text-[11px] text-slate-400">
+          <span aria-hidden="true">°</span> Optional: where the account cannot answer it, the line
+          it sits on is left out and the notice still goes. Everything else holds the workflow
+          until it can be filled.
+        </p>
         {/*
           AND THE ONES THAT ARE NOT FIELDS. Typed by hand, or borrowed from the other library.
           renderTemplate leaves an unresolved placeholder STANDING rather than printing a gap, so

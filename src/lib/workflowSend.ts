@@ -17,7 +17,7 @@
  * is `cancelRemaining`, and it happens for a different reason.
  */
 import { scheduleFor, itemAmountFor, type AnnexureBItemId } from './annexureB.js'
-import { canUseLetter, letterProblems, type LetterDocument } from './letterDocument.js'
+import { canUseLetter, documentWithoutOptional, letterProblems, type LetterDocument } from './letterDocument.js'
 import { renderTemplate, type TemplateKind } from './messageTemplates.js'
 import { smsCost, smsSafeValues } from './smsSegments.js'
 import type { WorkflowNode } from './workflowBuilder.ts'
@@ -182,7 +182,15 @@ export function planSend(input: {
    * special case naming listing_date would have to be maintained beside the wording, and would
    * not catch the next notice the firm writes that quotes a fact the account does not have yet.
    */
-  const attachmentText = template?.attachment ? documentText(template.attachment.doc) : ''
+  /*
+   * MEASURED ON THE NOTICE THAT WILL ACTUALLY BE DRAWN. An optional line the account cannot
+   * answer is taken out of the document before it is laid out, so reading the fields off the
+   * document as written would report a gap in a paragraph the debtor never sees — and hold the
+   * step for it. The same function both renderers run, so all three agree.
+   */
+  const attachmentText = template?.attachment
+    ? documentText(documentWithoutOptional(template.attachment.doc, asStrings(values)))
+    : ''
   const attachmentMerged = renderTemplate(attachmentText, values)
   const unfilled = [...new Set([
     ...(merged?.missing ?? []),
@@ -289,6 +297,13 @@ function quote(node: WorkflowNode, body: string, dueOn: string): StepCharge | nu
   /* A call, a document, a task: chargeable in their own right where they happen, but not by a
      scheduler sending something. Null rather than zero — "no charge" and "free" differ. */
   return null
+}
+
+/** The filled values only, which is all the removal has to ask about. */
+function asStrings(values: Partial<Record<string, string | null>>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(values)) if (typeof v === 'string') out[k] = v
+  return out
 }
 
 /** Every span of a notice, so its merge fields can be read the way the message's are. */

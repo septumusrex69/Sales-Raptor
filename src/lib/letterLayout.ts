@@ -19,6 +19,7 @@
  * margins are already expressed. PDF's own coordinate system is bottom-left in points; converting
  * once, at the drawing edge, beats carrying two systems through the arithmetic.
  */
+import { documentWithoutOptional } from './letterDocument.js'
 import type { Block, LetterDocument, PageSetup, Span } from './letterDocument.ts'
 import { autoColumnWidths } from './tableWidths.js'
 import { renderTemplate } from './messageTemplates.js'
@@ -199,6 +200,14 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
   values: Record<string, string>
 }): LetterPlan {
   const { measure, filled, values } = input
+  /*
+   * THE SAME REMOVAL THE SCREEN DOES, and before the page breaks are planned.
+   *
+   * This is the half that reaches the debtor: the PDF is the only page-accurate view, and a
+   * paragraph dropped after the breaks were measured would move every break after it. Run here,
+   * the notice is laid out on the blocks that will actually print.
+   */
+  if (filled) doc = documentWithoutOptional(doc, values)
   const left = page.marginLeftMm
   const right = page.widthMm - page.marginRightMm
   const textWidth = right - left

@@ -173,6 +173,37 @@ of a legal notice. The stored templates carry the blank lines, so the paragraphi
 firm can see and edit rather than a guess in a renderer; **three runs stay tight** — "Label:
 value" lines, a numbered list and the colon line above it, and the signature.
 
+**A MERGE FIELD THE BOOK CANNOT ANSWER IS OPTIONAL, AND ITS LINE LEAVES WITH IT.** The firm ran
+their first handover workflow and both steps held on day 0: the email because the account had no
+identity number, the SMS because the email had not gone. The account was not unusual — **19 668
+of the 19 912 live accounts have no ID number, 97% of the book**, and all 32 collections
+templates quote it — so the guard that stops a notice going out with `{{debtor_id_masked}}` in it
+would have stopped nearly every notice the firm sends. The firm: *"we should account for people
+that don't have ID numbers... in all of the writings."* `MergeField.optional` marks such a field
+and `renderTemplate` REMOVES it rather than reporting it, so nothing holds. **Two shapes, because
+the firm's templates have two**: on a label line of its own (`Identity number: {{…}}`) the whole
+line goes, and inside a sentence (`{{debtor_name}}, {{…}}. We emailed you`) only the field and
+the comma holding it in go. **It never empties the message** — a template that is nothing but the
+optional field holds instead, because an empty SMS still costs the debtor a segment under item
+1(c). It is **marked on the FIELD, not per use**: whether a field is answerable is a fact about
+the column behind it, and a per-use syntax means remembering it on thirty-two templates. Only
+`debtor_id_masked` and `debtor_reg_no` are optional — the same column read two ways — and
+`check-optional-fields` holds that list to exactly those two, because a balance or a respond-by
+date quietly dropping out of a section 129 is a defective demand. **Cut before the SMS is
+measured**, or the segments quoted are for words the debtor never reads.
+
+**A NOTICE NEEDS THE SAME THING DONE A BLOCK AT A TIME.** All four letters — section 129, final
+notice, listing notice, intended summons — carry the identity number as a PARAGRAPH of its own
+under the debtor's name, and a letter is rendered span by span, so that paragraph *is* the span.
+The message rule refuses to empty what it is given (an empty SMS still costs a segment), which
+would leave the braces standing on a statutory demand. So `documentWithoutOptional`
+(`letterDocument.ts`) takes the block out, and **both renderers run it** — `letterToHtml` for the
+screen and `planLetter` for the PDF — **before the page breaks are measured**, because a block
+removed afterwards moves every break after it. It is **not a tidy-up pass**: a block goes only if
+the removal is what emptied it, so a blank paragraph the author typed as spacing stays exactly
+where they put it. `workflowSend` reads the attachment's fields off the thinned document too, so
+what is measured is what is drawn.
+
 **A table with no widths is sized to its CONTENT, not split evenly.** `autoColumnWidths`
 (`src/lib/tableWidths.ts`) is CSS `table-layout: auto`, near enough — a column is never narrower
 than its widest word, never wider than its longest cell on one line, and the slack is shared in
