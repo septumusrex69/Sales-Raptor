@@ -300,6 +300,23 @@ from the Annexure B fees. We'll do that on another place, which is not even for 
 administrator."* Every figure on it is the client's money to recover or a count of work.
 `check-company-dashboard` asserts the absence, comments stripped first.
 
+**A WORKFLOW STARTS ONE OF TWO WAYS, AND THE SECTION 129 IS THE SECOND.** An `allocated`
+workflow starts itself: `workflow_start_on_allocation` fires in the database the first time an
+account lands on somebody's desk, once per account and version ever, and that is what the
+**Handover** runs on. Everything else was unreachable until `api/_lib/workflow/start` — the
+section 129 sequence was eleven steps nothing could create a run for. The firm, asked how it
+should work: *"the moment the section 129 is sent out via email, that is when the workflow is
+triggered."* So the button that starts it is the press that issues the demand: `start` creates
+the run dated today, `planUnplannedRuns` dates the steps in **business** days, and the steps due
+on that day are sent **with the caller passed to `runOneStep`**, which is what lifts `needsRelease`
+for them. Day 39 (listed) and day 49 (summons) still wait for their own press, because each
+asserts a fact that has to be true before it is said. **It refuses a live promise and an open
+dispute** — those are exactly the two events that take an account OUT of a workflow, and the exit
+triggers cannot see one that already exists, which is this order. Only `by_hand` versions are
+offered, only `active` ones, and only where the account has not been through it: **once per
+account and version, ever**, because two runs of a statutory sequence is two clocks on one debt.
+The browser filters on the same three so a button is never offered and then refused.
+
 **A workflow day is a BUSINESS day, and the unit is on the version.** The firm, of the section
 129 sequence: "this is all working days, not normal days." A day number carried no unit and was
 read as calendar days everywhere, so day 32 meant a month where the firm meant a month and a half

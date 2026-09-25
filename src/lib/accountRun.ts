@@ -128,3 +128,83 @@ export function nudgeWorkflows(accessToken: string, accountId: string): void {
     /* Ignored on purpose -- see above. The sweep is the backstop. */
   })
 }
+
+/**
+ * THE WORKFLOWS A PERSON MAY START ON THIS ACCOUNT.
+ *
+ * Only the published ones that wait for a person -- `by_hand`. Everything else starts itself in
+ * the database the moment its event happens, and offering to start one by hand would give an
+ * account two runs of the same sequence.
+ *
+ * AND ONLY THE ONES IT HAS NOT BEEN THROUGH. The rule the allocation trigger states in SQL and
+ * the start route enforces again: once per account and version, EVER, not merely once at a time.
+ * A section 129 sequence begun twice on one account is two statutory clocks on one debt. Filtered
+ * here as well so the button is not offered and then refused -- a button that appears to work and
+ * does not is worse than one that is not there.
+ */
+export interface StartableWorkflow {
+  versionId: string
+  name: string
+  /** The firm's own sentence about when it should be started. Shown, never interpreted. */
+  note: string | null
+}
+
+export async function fetchStartableWorkflows(accountId: string): Promise<StartableWorkflow[]> {
+  const [versions, runs] = await Promise.all([
+    supabase.from('workflow_versions')
+      .select('id, trigger_note, workflows!inner(name)')
+      .eq('state', 'active')
+      .eq('trigger_kind', 'by_hand'),
+    supabase.from('workflow_runs').select('version_id').eq('account_id', accountId),
+  ])
+  if (versions.error) throw new Error(versions.error.message)
+  if (runs.error) throw new Error(runs.error.message)
+
+  const been = new Set((runs.data ?? []).map((r) => r.version_id as string))
+  /* eslint-disable-next-line @typescript-eslint/no-explicit-any -- rows arrive as untyped JSON. */
+  return (versions.data ?? [] as any[])
+    .filter((v: any) => !been.has(v.id))
+    .map((v: any) => ({
+      versionId: v.id as string,
+      name: (v.workflows?.name as string) ?? 'Workflow',
+      note: (v.trigger_note as string) ?? null,
+    }))
+}
+
+/**
+ * START ONE, WHICH SENDS ITS FIRST STEP.
+ *
+ * THE FIRM: "the moment the section 129 is sent out via email, that is when the workflow is
+ * triggered." So the press that starts the sequence is the press that issues the demand, and the
+ * clock runs from that day -- ten business days to answer, the final notice after it, the bureau
+ * twenty business days later.
+ *
+ * THROUGH THE ENDPOINT, for the same reason releaseStep is: the wording, the PDF, the fee and the
+ * Sent copy all happen on the server. A run inserted from the browser would be a clock started
+ * against a notice nobody sent.
+ */
+export async function startWorkflow(accessToken: string, accountId: string, versionId: string): Promise<{
+  workflow: string
+  startedOn: string
+  sent: number
+  held: number
+  notes: string[]
+}> {
+  const res = await fetch('/api/workflow/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ accountId, versionId }),
+  })
+  const body = (await res.json().catch(() => ({}))) as {
+    ok?: boolean; error?: string; workflow?: string; startedOn?: string
+    sent?: number; held?: number; stillHeld?: number; notes?: string[]
+  }
+  if (!res.ok || !body.ok) throw new Error(body.error ?? 'The workflow could not be started.')
+  return {
+    workflow: body.workflow ?? 'Workflow',
+    startedOn: body.startedOn ?? '',
+    sent: body.sent ?? 0,
+    held: (body.held ?? 0) + (body.stillHeld ?? 0),
+    notes: body.notes ?? [],
+  }
+}

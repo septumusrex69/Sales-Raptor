@@ -182,11 +182,17 @@ check('...and what needs a person is the held and the failed',
   ]).map((s) => s.state).sort(), ['failed', 'held'])
 
 /*
- * NOTHING AT ALL WHERE THERE IS NO RUN. An empty "Workflow" card on every account in the book
- * pushes the figures down the page in order to say nothing.
+ * NOTHING AT ALL WHERE THERE IS NOTHING TO SAY. An empty "Workflow" card on every account in the
+ * book pushes the figures down the page in order to say nothing.
+ *
+ * "NOTHING TO SAY" NOW INCLUDES A WORKFLOW WAITING TO BE STARTED. The section 129 sequence begins
+ * on a file that has no run on it at all, so a panel that drew only where a run existed was a
+ * panel the button could never appear in. Both halves are asserted, because the useful version of
+ * this rule is the narrow one: draw for a run, draw for an offer, and otherwise draw nothing.
  */
-ok('the panel draws nothing on an account with no run',
-  /if \(runs === null \|\| \(runs\.length === 0 && !error\)\) return null/.test(panel))
+ok('the panel draws nothing with no run and nothing to start',
+  /if \(runs === null \|\| \(runs\.length === 0 && offers\.length === 0 && !error\)\) return null/.test(panel))
+ok('...and an offer alone is enough to draw it', /const offers = startable \?\? \[\]/.test(panel))
 
 /* ------------------------------------------------ the firm's words */
 

@@ -192,12 +192,16 @@ ok('no role decides how many accounts somebody carries',
 /*
  * AND THE API'S OWN COPY OF canLeadCollections AGREES WITH IT.
  *
- * release.ts cannot import permissions.ts -- that is browser code and would drag React into a
+ * The api cannot import permissions.ts -- that is browser code and would drag React into a
  * serverless function -- so it names the roles itself. A copy is a thing that drifts, and this
  * one did: the manager could lead the floor everywhere except when releasing a held notice, which
  * would have refused them silently. Held against the real function rather than against a literal.
+ *
+ * IN who.ts NOW, not in release.ts, because a SECOND route asks the same question: starting a
+ * workflow by hand. One caller is a copy waiting to happen; two is where it happens, so the rule
+ * moved to a file of its own before the second caller was written.
  */
-const release = read('api/_lib/workflow/release.ts')
+const release = read('api/_lib/workflow/who.ts')
 const namedInApi = [...release.matchAll(/profile\.role === '([^']+)'/g)].map((m) => m[1])
 ok('the api names some roles for this', namedInApi.length > 0)
 check('...and exactly the ones canLeadCollections allows',

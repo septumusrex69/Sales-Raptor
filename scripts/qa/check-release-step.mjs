@@ -162,16 +162,24 @@ ok('a run the account has left sends nothing more', /run\.state !== 'running'/.t
 /*
  * AND IT IS THE ACCOUNT'S OWN COLLECTOR, OR SOMEBODY WHO LEADS THE FLOOR. Not any pre-legal
  * agent, which is what the row-level policy alone would allow.
+ *
+ * READ FROM who.ts, WHERE THE RULE NOW LIVES. It moved out of this route when a second one began
+ * asking the same question -- starting a workflow by hand -- because this exact rule has already
+ * drifted once as a copy. Both halves are asserted: that the rule is right, and that this route
+ * is the thing that calls it rather than keeping a version of its own.
  */
-ok('the caller must hold the account or lead the floor', /async function mayRelease/.test(route))
-ok('...the collector it is assigned to', /account\?\.assigned_to === userId/.test(route))
-ok('...or a team leader', /'Pre-legal Team Leader'/.test(route))
+const who = read('api/_lib/workflow/who.ts')
+ok('there is one rule about who may act on an account', /export async function mayActOnAccount/.test(who))
+ok('...and this route asks it', /mayActOnAccount\(admin, caller\.id, run\.account_id\)/.test(route))
+ok('...rather than keeping its own copy', !/async function mayRelease/.test(route))
+ok('...the collector it is assigned to', /account\?\.assigned_to === userId/.test(who))
+ok('...or a team leader', /'Pre-legal Team Leader'/.test(who))
 ok('...and an agent who holds nothing is refused',
-  /Boolean\(account\?\.assigned_to\) && account\?\.assigned_to === userId/.test(route))
+  /Boolean\(account\?\.assigned_to\) && account\?\.assigned_to === userId/.test(who))
 /* A step with no assignee must not be released by anybody who happens to be an agent: the
    Boolean() guard is what stops null === null passing. */
 ok('...with an unassigned account refused rather than open to all',
-  /Boolean\(account\?\.assigned_to\)/.test(route))
+  /Boolean\(account\?\.assigned_to\)/.test(who))
 
 /* ------------------------------------------------ the button */
 

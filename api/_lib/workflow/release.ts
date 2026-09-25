@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { adminClient, requireCaller } from '../auth.js'
 import { todayInJohannesburg } from './locale.js'
 import { runOneStep, type DueStep } from './step.js'
+import { mayActOnAccount } from './who.js'
 
 /**
  * A PERSON SAYS SEND IT.
@@ -85,7 +86,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  if (!await mayRelease(admin, caller.id, run.account_id)) {
+  if (!await mayActOnAccount(admin, caller.id, run.account_id)) {
     res.status(403).json({
       error: 'This account is not yours, and you do not lead the floor it is on.',
     })
@@ -99,40 +100,4 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    */
   const outcome = await runOneStep(admin, step, todayInJohannesburg(), caller.id)
   res.status(200).json({ ok: true, ...outcome })
-}
-
-/**
- * Whose account this is, and who else may act on it.
- *
- * THE COLLECTOR HOLDING IT, OR SOMEBODY WHO LEADS THE FLOOR. The schema's own note on
- * workflow_run_steps says as much -- "a collector releases a held step on their own account,
- * which the library's Administrator-and-team-leader rule would refuse" -- so the row-level policy
- * is deliberately wide and this is where the narrowing happens.
- *
- * NOT ANY PRE-LEGAL AGENT. The write policy admits every agent, because RLS cannot see which
- * account a step belongs to without a join it would have to do on every row. Left at that, any of
- * thirty-two agents could issue a statutory demand on any of twenty-three thousand accounts --
- * and the record would name them, having never seen the file.
- */
-async function mayRelease(
-  admin: ReturnType<typeof adminClient>, userId: string, accountId: string,
-): Promise<boolean> {
-  if (!admin) return false
-  const [{ data: profile }, { data: account }] = await Promise.all([
-    admin.from('profiles').select('role').eq('id', userId).maybeSingle(),
-    admin.from('debtor_accounts').select('assigned_to').eq('id', accountId).maybeSingle(),
-  ])
-  if (!profile) return false
-  /*
-   * canLeadCollections' roles, named here rather than imported: permissions.ts is browser code
-   * and reaching into it from a route would put the app's module graph inside a function.
-   *
-   * A COPY, SO IT HAS TO BE KEPT. Adding 'Call Centre Manager' to canLeadCollections left this
-   * one behind -- the manager could hand accounts out and lead the floor everywhere except here,
-   * where releasing a held notice would have refused them with no explanation. check-departments
-   * holds the two lists against each other now, which is the only reason it was found.
-   */
-  if (profile.role === 'Administrator' || profile.role === 'Call Centre Manager'
-    || profile.role === 'Pre-legal Team Leader') return true
-  return Boolean(account?.assigned_to) && account?.assigned_to === userId
 }

@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, Check, Clock, Loader2, Minus, Send } from 'lucide-react'
 import { Card, CardHeader } from '../ui/Card'
 import { useAuth } from '../../store/AuthContext'
-import { fetchAccountRuns, releaseStep, type AccountRun } from '../../lib/accountRun.ts'
+import {
+  fetchAccountRuns, fetchStartableWorkflows, releaseStep, startWorkflow,
+  type AccountRun, type StartableWorkflow,
+} from '../../lib/accountRun.ts'
 import { RUN_STEP_WORDS, needsAttention, type RunStep } from '../../lib/runSteps.ts'
 import { dayLabel } from '../../lib/workflowBuilder.ts'
 import { shortDate } from '../../lib/dateLabels.ts'
@@ -26,11 +29,20 @@ import { shortDate } from '../../lib/dateLabels.ts'
  */
 export function WorkflowRunPanel({ accountId }: { accountId: string }) {
   const [runs, setRuns] = useState<AccountRun[] | null>(null)
+  /* The workflows a person may start here. Null while loading, [] where there are none -- which
+     is the ordinary case and draws nothing. */
+  const [startable, setStartable] = useState<StartableWorkflow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
-      setRuns(await fetchAccountRuns(accountId))
+      const [ran, canStart] = await Promise.all([
+        fetchAccountRuns(accountId),
+        /* Its own failure. A workflow list that cannot be read must not hide the runs that can:
+           what has already gone to this debtor is the more important half of the panel. */
+        fetchStartableWorkflows(accountId).catch(() => [] as StartableWorkflow[]),
+      ])
+      setRuns(ran); setStartable(canStart)
     } catch (e) {
       setRuns([]); setError(e instanceof Error ? e.message : String(e))
     }
@@ -39,20 +51,113 @@ export function WorkflowRunPanel({ accountId }: { accountId: string }) {
   useEffect(() => { void load() }, [load])
 
   /* Nothing at all while it loads, and nothing when there is nothing: a card that appears and
-     then vanishes moves everything below it twice. */
-  if (runs === null || (runs.length === 0 && !error)) return null
+     then vanishes moves everything below it twice.
+
+     THE CARD NOW APPEARS FOR A WORKFLOW THAT HAS NOT STARTED, which it did not before -- an
+     account with no run drew no panel, and the section 129 is a sequence that begins on a file
+     with nothing on it yet. */
+  const offers = startable ?? []
+  if (runs === null || (runs.length === 0 && offers.length === 0 && !error)) return null
 
   return (
     <Card>
       <CardHeader title="Workflow"
         subtitle={runs.length === 1
           ? 'What has gone out, and what is waiting.'
-          : `${runs.length} runs on this account.`} />
+          : runs.length === 0
+            ? 'Nothing has started on this account yet.'
+            : `${runs.length} runs on this account.`} />
       {error && <p className="text-xs text-negative-700">{error}</p>}
       <div className="space-y-4">
         {runs.map((run) => <RunBlock key={run.id} run={run} onSent={load} />)}
+        {offers.length > 0 && (
+          <div className="space-y-2">
+            {offers.map((w) => (
+              <StartWorkflow key={w.versionId} accountId={accountId} offer={w} onStarted={load} />
+            ))}
+          </div>
+        )}
       </div>
     </Card>
+  )
+}
+
+/**
+ * STARTING A SEQUENCE, WHICH ISSUES ITS FIRST NOTICE.
+ *
+ * THE FIRM, ON THE SECTION 129: "the moment the section 129 is sent out via email, that is when
+ * the workflow is triggered." So this is one press, not two -- it starts the run AND sends what
+ * falls on day one, which for that sequence is the demand itself. The ten business days the
+ * debtor has run from today, and every step after it is dated from here.
+ *
+ * ASKED TWICE, BECAUSE IT CANNOT BE UNDONE. A statutory demand that has gone has gone: it is an
+ * email in somebody's inbox, an SMS on their phone, a fee on the account and the start of a
+ * clock. The second press says what will happen in the firm's own words rather than asking
+ * "are you sure", which is a question nobody reads.
+ */
+function StartWorkflow({ accountId, offer, onStarted }: {
+  accountId: string
+  offer: StartableWorkflow
+  onStarted: () => Promise<void>
+}) {
+  const { session } = useAuth()
+  const [asking, setAsking] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState<string | null>(null)
+
+  async function go() {
+    if (!session?.access_token) return
+    setBusy(true); setFailed(null)
+    try {
+      await startWorkflow(session.access_token, accountId, offer.versionId)
+      setAsking(false)
+      await onStarted()
+    } catch (e) {
+      /* The reason the server gave, verbatim -- "there is a live promise to pay on this account"
+         is a sentence that says what to do, and a generic failure is not. */
+      setFailed(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!asking) {
+    return (
+      <div>
+        <button type="button" onClick={() => { setAsking(true); setFailed(null) }}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-[#c9a052]
+            bg-white px-2.5 py-1 text-[11px] font-medium text-navy-950 hover:bg-gold-100">
+          <Send size={11} /> Start: {offer.name}
+        </button>
+        {failed && <p className="mt-1 text-[11px] text-negative-700 leading-snug">{failed}</p>}
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-[var(--c-gold-deep)]/30 bg-gold-50 px-3 py-2">
+      <p className="text-[12px] font-medium text-navy-950">Start {offer.name}?</p>
+      <p className="text-[11px] text-slate-600 mt-0.5 leading-snug">
+        The first step goes out now, and everything after it is dated from today. Later steps that
+        say something has already happened still wait for you.
+      </p>
+      {/* The firm's own sentence about when this should be started, where they wrote it. */}
+      {offer.note && <p className="text-[11px] text-slate-500 mt-1 leading-snug">{offer.note}</p>}
+      {failed && <p className="mt-1 text-[11px] text-negative-700 leading-snug">{failed}</p>}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button type="button" onClick={() => { void go() }} disabled={busy}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-[#c9a052]
+            bg-white px-2.5 py-1 text-[11px] font-medium text-navy-950
+            hover:bg-gold-100 disabled:opacity-40">
+          {busy ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
+          Yes, send it now
+        </button>
+        <button type="button" onClick={() => setAsking(false)} disabled={busy}
+          className="text-[11px] font-medium text-slate-500 hover:text-slate-700 disabled:opacity-40">
+          Not yet
+        </button>
+      </div>
+    </div>
   )
 }
 
