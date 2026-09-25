@@ -103,9 +103,19 @@ function RunBlock({ run, onSent }: { run: AccountRun; onSent: () => Promise<void
  * asks again, and if the listing reference is still not there the step holds again with the same
  * reason. So there it says "Try again", which is what it does.
  *
- * AND THE ANSWER COMES BACK IN PLACE. A release that holds again is the useful case -- somebody
- * thought they had fixed it and had not -- so the new reason replaces the old one under the same
- * card rather than the button simply going quiet.
+ * AND THE ANSWER COMES BACK IN PLACE, WITHOUT THE CARD REPEATING ITSELF. A release that holds
+ * again is the useful case -- somebody thought they had fixed it and had not -- so the answer
+ * has to land under the same card rather than the button simply going quiet.
+ *
+ * IT USED TO LAND TWICE. The reason from the attempt was printed UNDER the reason already on the
+ * card, and holding again for the SAME reason is the ordinary case -- so the firm read the same
+ * sentence twice, in the same words, and asked whether that was a bug. It was. onSent refetches
+ * the run, so the reason above is already the new one; all this line adds is what the reader
+ * cannot otherwise know -- that the attempt happened just now, and whether the answer moved.
+ *
+ * COMPARED AGAINST THE REASON AS IT WAS BEFORE THE ATTEMPT, never against the refreshed one. By
+ * the time the answer is in hand, step.note IS the answer -- so comparing the two always says
+ * "the same", including on the attempt that changed it, which is the one worth pointing at.
  */
 function HeldStep({ step, live, onSent }: {
   step: RunStep
@@ -115,19 +125,26 @@ function HeldStep({ step, live, onSent }: {
 }) {
   const { session } = useAuth()
   const [busy, setBusy] = useState(false)
-  const [said, setSaid] = useState<string | null>(null)
+  /* Held: it went nowhere, and whether the reason moved. Error: the request itself failed, which
+     is not a reason a step holds and is not on the card above. */
+  const [said, setSaid] = useState<
+    { kind: 'held'; changed: boolean } | { kind: 'error'; text: string } | null
+  >(null)
 
   async function release() {
     if (!session?.access_token) return
+    /* Read BEFORE the attempt. onSent refreshes step.note to whatever the answer was. */
+    const before = (step.note ?? '').trim()
     setBusy(true); setSaid(null)
     try {
       const out = await releaseStep(session.access_token, step.id)
       if (out.result === 'sent') { await onSent(); return }
-      /* Still held, or the provider refused. Either way the reason is the answer. */
-      setSaid(out.note ?? 'It still cannot go out.')
+      /* Still held, or the provider refused. The reason itself is drawn from the refreshed step
+         above; what is said here is that it was tried and whether anything moved. */
+      setSaid({ kind: 'held', changed: (out.note ?? '').trim() !== before })
       await onSent()
     } catch (e) {
-      setSaid(e instanceof Error ? e.message : String(e))
+      setSaid({ kind: 'error', text: e instanceof Error ? e.message : String(e) })
     } finally {
       setBusy(false)
     }
@@ -139,7 +156,16 @@ function HeldStep({ step, live, onSent }: {
         {step.label} &middot; {RUN_STEP_WORDS[step.state].label}
       </p>
       {step.note && <p className="text-[11px] text-slate-600 mt-0.5 leading-snug">{step.note}</p>}
-      {said && <p className="text-[11px] text-negative-700 mt-1 leading-snug">{said}</p>}
+      {said?.kind === 'held' && (
+        <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+          {said.changed
+            ? 'Tried just now — the reason above is new.'
+            : 'Tried just now — the reason above has not changed.'}
+        </p>
+      )}
+      {said?.kind === 'error' && (
+        <p className="text-[11px] text-negative-700 mt-1 leading-snug">{said.text}</p>
+      )}
       {live && (
         <button type="button" onClick={() => { void release() }} disabled={busy}
           className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-[#c9a052]

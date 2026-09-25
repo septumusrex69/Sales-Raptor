@@ -195,8 +195,36 @@ ok('no button on a run the account has left', /live=\{run\.state === 'running'\}
 ok('the browser never marks a step sent itself',
   !/from\('workflow_run_steps'\)[\s\S]{0,200}?update\(/.test(store))
 ok('...it asks the endpoint', /fetch\('\/api\/workflow\/release'/.test(store))
-/* A release that holds again is the useful case -- somebody thought they had fixed it. */
-ok('a release that holds again says why, in place', /setSaid\(out\.note/.test(panel))
+/*
+ * A RELEASE THAT HOLDS AGAIN SAYS SO, AND SAYS IT ONCE.
+ *
+ * The reason printed twice, in the same words, under the same card: once as the reason stored on
+ * the step and once as the answer the attempt came back with. Holding again for the same reason
+ * is the ORDINARY case, so that is what the firm saw, and they asked whether it was a bug. It
+ * was. The reason above is refreshed from the database, so all this line adds is that the
+ * attempt happened and whether the answer moved.
+ */
+ok('a release that holds again reports the attempt', /kind: 'held', changed:/.test(panel))
+ok('...and does not print the reason a second time',
+  !/setSaid\(out\.note/.test(panel) && !/\{said\}<\/p>/.test(panel))
+ok('...saying plainly that nothing moved',
+  /the reason above has not changed/.test(panel))
+ok('...and pointing at it when it did', /the reason above is new/.test(panel))
+/*
+ * COMPARED AGAINST THE REASON AS IT WAS BEFORE THE ATTEMPT. By the time the answer is in hand,
+ * onSent has refreshed step.note to that same answer -- so a comparison against the refreshed
+ * note reads "the same" every time, including on the attempt that changed it, which is the one
+ * worth pointing at. Asserted on the read happening BEFORE the request, not merely existing.
+ */
+const beforeAt = panel.indexOf("const before = (step.note ?? '').trim()")
+const askAt = panel.indexOf('await releaseStep(session.access_token, step.id)')
+ok('the old reason is read at all', beforeAt > 0)
+ok('...and the request is there to order it against', askAt > 0)
+ok('...and it is read before the request, not after', beforeAt > 0 && beforeAt < askAt)
+/* A failed REQUEST is not a reason a step holds, and is not on the card above, so it is still
+   printed in full. */
+ok('a request that failed outright still says what went wrong',
+  /kind: 'error', text: e instanceof Error/.test(panel))
 
 /* ------------------------------------------------ */
 
