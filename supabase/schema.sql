@@ -6925,3 +6925,71 @@ create trigger profiles_team_matches_role
 alter table public.mail_sender_rules drop constraint if exists mail_sender_rules_action_check;
 alter table public.mail_sender_rules add constraint mail_sender_rules_action_check
   check (action in ('no_record', 'always_junk'));
+
+-- ---------- The company dashboard's figures ----------
+--
+-- The firm's own figures, counted in the database, for the one screen everybody in the firm
+-- lands on.
+--
+-- ONE ROUND TRIP, AND NOT A ROW OF THE BOOK CROSSES THE WIRE. That dashboard asks eleven
+-- questions of a table heading for six figures; asked from the browser that is either eleven
+-- requests or the whole book downloaded to be counted, which is the thing CLAUDE.md names as the
+-- list that stops working the month it matters.
+--
+-- WHAT COUNTS AS THE BOOK'S VALUE IS capital_handed_over, the SAME expression book_summary uses,
+-- so the company dashboard and the account list can never print two different books. The active
+-- side is capital_outstanding, which is a different question honestly asked: what is still owed
+-- on the accounts being worked.
+--
+-- TWO KINDS OF QUIET, COUNTED APART. An account whose last action is older than p_quiet_days has
+-- gone quiet; an account with NO recorded action has never been actioned in Raptor at all, and
+-- most of the imported book is in that state because last_action_at was only ever written by the
+-- Swordfish import. Summed together they would read as a firm that has abandoned 18 000 accounts.
+-- The screen shows the first and explains the second.
+--
+-- security invoker, so the figures describe the accounts the caller may actually see.
+create or replace function public.company_snapshot(
+  p_from date,
+  p_to date,
+  p_quiet_days integer default 30
+)
+returns table (
+  intake_accounts integer,
+  intake_clients integer,
+  intake_capital numeric,
+  book_accounts integer,
+  book_capital numeric,
+  book_clients integer,
+  active_accounts integer,
+  active_capital numeric,
+  active_clients integer,
+  unallocated_active integer,
+  quiet_accounts integer,
+  never_actioned integer
+)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    count(*) filter (where handover_date between p_from and p_to)::integer,
+    count(distinct company_id) filter (where handover_date between p_from and p_to)::integer,
+    coalesce(sum(capital_handed_over) filter (where handover_date between p_from and p_to), 0),
+    count(*)::integer,
+    coalesce(sum(capital_handed_over), 0),
+    count(distinct company_id)::integer,
+    count(*) filter (where status ilike 'Active%')::integer,
+    coalesce(sum(capital_outstanding) filter (where status ilike 'Active%'), 0),
+    count(distinct company_id) filter (where status ilike 'Active%')::integer,
+    count(*) filter (where status ilike 'Active%' and assigned_to is null)::integer,
+    count(*) filter (
+      where status ilike 'Active%'
+        and last_action_at is not null
+        and last_action_at < (current_date - p_quiet_days)
+    )::integer,
+    count(*) filter (where status ilike 'Active%' and last_action_at is null)::integer
+  from public.debtor_accounts;
+$$;
+
+grant execute on function public.company_snapshot(date, date, integer) to authenticated;

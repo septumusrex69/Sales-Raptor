@@ -30,7 +30,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-departments.mjs
  */
 import { readFileSync, existsSync } from 'node:fs'
-import { DEPARTMENTS, byDepartment, departmentOf, matchesPerson, rankOf, teamKindForRole, teamsForRole } from '../../src/lib/departments.ts'
+import { DEPARTMENTS, byDepartment, dashboardPathFor, departmentOf, matchesPerson, myDashboardPath, rankOf, teamKindForRole, teamsForRole } from '../../src/lib/departments.ts'
 import { canHandOutAccounts, canLeadCollections, mayPoolDisputes, visibleDisputeOwners } from '../../src/lib/permissions.ts'
 import { COLLECTING_ROLES } from '../../src/lib/collectorGrade.ts'
 
@@ -141,8 +141,37 @@ ok('...and not the sales side, which is not their floor', !ccmSees.includes('sal
 check('a team leader still sees only their team',
   visibleDisputeOwners(FLOOR[2], FLOOR).map((u) => u.id), ['lead-b', 'agent-b'])
 
+/*
+ * WHERE EACH DEPARTMENT'S OWN DASHBOARD IS.
+ *
+ * Nobody is routed by role on "/" any more -- everyone lands on the company dashboard, at the
+ * firm's instruction ("it's important for everybody in the company to understand that we are a
+ * collective"). What the role decides now is where "Go to my dashboard" goes, so THAT is what is
+ * held up here: every department has a path, and every path is a route App.tsx actually serves.
+ * A button pointing at a route that does not exist lands somebody on a blank page, which is the
+ * failure this replaces the old routing assertions with.
+ */
 const router = read('src/pages/DashboardRouter.tsx')
-ok('they open Raptor on the collections floor', /'Call Centre Manager'/.test(router))
+ok('everybody lands on the company dashboard', /<CompanyDashboard \/>/.test(router))
+ok('...and nothing on "/" branches on a role any more', !/currentUser\?\.role/.test(router))
+const routes = read('src/App.tsx')
+for (const meta of DEPARTMENTS) {
+  const path = dashboardPathFor(meta.id)
+  ok(`${meta.label} has a dashboard to open`, typeof path === 'string' && path.length > 0)
+  /* 'Other' -- an auditor with no department -- goes back to the company screen, which is the
+     route they are already on rather than somebody else's floor. */
+  if (path === '/') continue
+  ok(`...and App.tsx serves ${path}`, routes.includes(`path="${path}"`))
+}
+/* The floor's three roles all land on the same floor, which is the thing the Stefnova glitch got
+   wrong from the other end. */
+check('the call centre manager opens the collections dashboard',
+  myDashboardPath('Call Centre Manager'), '/dashboard/collections')
+check('...and so does a team leader', myDashboardPath('Pre-legal Team Leader'), '/dashboard/collections')
+check('...and so does an agent', myDashboardPath('Pre-legal Agent'), '/dashboard/collections')
+check('a liaison opens communications', myDashboardPath('Liaison'), '/dashboard/communications')
+check('a sales rep opens sales', myDashboardPath('Sales Representative'), '/dashboard/sales')
+check('an administrator opens the office', myDashboardPath('Administrator'), '/dashboard/admin')
 const settings = read('src/pages/settings/SettingsPage.tsx')
 ok('they can be given the role on the screen', /'Call Centre Manager'/.test(settings))
 const api = read('api/invite-user.ts')

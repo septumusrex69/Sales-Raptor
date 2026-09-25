@@ -189,7 +189,11 @@ ok('...and from your own strip', /to=\{`\/performance\/\$\{mine\.userId\}`\}/.te
  * The role gate that used to hide the tables from an agent is gone, not merely widened.
  */
 ok('the floor list is not gated by role', !/SEES_EVERYONE/.test(board))
-ok('...and the headline is the company’s', /totalStats\(shownRows\)/.test(board))
+/* The headline is the company's, and it is the same total the shared hook gives the company
+   dashboard -- the floor list and the firm's own screen cannot be reading two different months. */
+ok('...and the headline is the company’s',
+  /totalStats\(shownRows\)/.test(read('../../src/hooks/useCollectionsMonth.ts'))
+  && /useCollectionsMonth\(\)/.test(board))
 ok('...with the reader’s own month beside it', /Your month/.test(board))
 ok('...and their place on it', /placeLabel\(myPlace\)/.test(board))
 ok('...and their own row marked in the list', /\(you\)/.test(board))

@@ -6,7 +6,21 @@ import { greetingLine } from '../../lib/greeting.ts'
 import { formatCurrency } from '../../data/mockData'
 
 /**
- * The Collections hero, to the firm's own design.
+ * The hero, to the firm's own design — and it belongs to the COMPANY dashboard.
+ *
+ * IT WAS BUILT FOR THE COLLECTIONS SCREEN AND THE FIRM MOVED IT WHOLE. "I want the epicness of
+ * the collections dashboard, that picture that we made. That should be the main. When you open
+ * the company, you should see epicness" — and then, of everything else: "all of the other
+ * dashboards can just have the other hero section. There should only be one very special page."
+ * So this renders on CompanyDashboard and nowhere else; the collections floor, and every other
+ * department screen, wears the ordinary DashboardHero. A second screen putting this back on is
+ * what makes the first one ordinary.
+ *
+ * NOTHING ABOUT IT CHANGED IN THE MOVE, and that was the instruction too — the firm sent back a
+ * version with the photograph shortened and the controls pulled out into white cards below it:
+ * "you changed some shit... I asked you not to change that. You put the progress bar below the
+ * thing. You made the picture smaller. Keep that." The picture is full height, the four figures
+ * sit over it, and the controls and the month bar stay INSIDE the dark panel.
  *
  * WHY THIS ONE IS NOT DashboardHero. The shared hero is a band with a title and a controls row,
  * and eight screens use it. This carries the four figures the floor is run on, the filters that

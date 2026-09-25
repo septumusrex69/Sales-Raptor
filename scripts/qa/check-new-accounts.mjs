@@ -16,6 +16,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-new-accounts.mjs
  */
 import { readFileSync } from 'node:fs'
+import { myDashboardPath } from '../../src/lib/departments.ts'
 import {
   carriedLine, dayWeight, daysCarried, isCarried, lateForLeaders, splitCarried, stillInTime,
 } from '../../src/lib/newAccounts.ts'
@@ -250,26 +251,32 @@ const leadFn = /export function canLeadCollections[\s\S]*?\n}/.exec(permissions)
 ok('...and the pre-legal team leader is in it', /Pre-legal Team Leader/.test(leadFn))
 
 /*
- * AND COLLECTIONS PEOPLE LAND ON THE COLLECTIONS DASHBOARD. "/" had no collections branch at
- * all: an Administrator got the admin overview, Communications got theirs, and everybody else
- * -- including every pre-legal agent -- got the SALES dashboard.
+ * AND COLLECTIONS PEOPLE CAN GET TO THE COLLECTIONS DASHBOARD IN ONE CLICK.
+ *
+ * This used to assert that they LANDED on it. They no longer do, and nor does anybody else: the
+ * firm moved the landing page to a company dashboard everyone in the firm opens -- "it's
+ * important for everybody in the company to understand that we are a collective" -- with a
+ * button into your own department. So what has to be true is that the button takes a collector
+ * to the floor, and that the floor still carries this panel, which is the thing this file is
+ * about: new accounts nobody has worked.
  */
 const router = readFileSync('src/pages/DashboardRouter.tsx', 'utf8')
-/*
- * ASSERTED ON THE BRANCH, NOT ON THE NAME. Written as /CollectorDashboard/ this passed with the
- * branch deleted -- the import line alone satisfied it, and so did the list of roles sitting
- * unused above. Exactly the vacuous assertion CLAUDE.md warns about, caught by deleting the line
- * it guards and watching the check stay green.
- */
 const routerBody = router.slice(router.indexOf('export function DashboardRouter'))
-ok('the landing page actually returns the collections dashboard',
-  /return <CollectorDashboard \/>/.test(routerBody))
-ok('...for somebody whose role is a pre-legal one',
-  /PRE_LEGAL\.includes\(currentUser\.role\)[\s\S]{0,80}?<CollectorDashboard/.test(routerBody))
-ok('...and both pre-legal roles are on that list',
-  /Pre-legal Agent/.test(router) && /Pre-legal Team Leader/.test(router))
-ok('...and the sales dashboard is still there for the people whose work is on it',
-  /return <Dashboard \/>/.test(routerBody))
+ok('the landing page is the company dashboard', /return <CompanyDashboard \/>/.test(routerBody))
+/*
+ * ASSERTED ON THE BRANCH, NOT ON THE NAME -- the lesson the old version of these lines learned by
+ * being broken: written as /CollectorDashboard/ it passed with the branch deleted, because the
+ * import line alone satisfied it.
+ */
+check('a pre-legal agent\u2019s own dashboard is the collections floor',
+  myDashboardPath('Pre-legal Agent'), '/dashboard/collections')
+check('...and a team leader\u2019s is too', myDashboardPath('Pre-legal Team Leader'), '/dashboard/collections')
+const app = readFileSync('src/App.tsx', 'utf8')
+ok('...and that route serves the collections dashboard',
+  /path="\/dashboard\/collections" element=\{<CollectorDashboard \/>\}/.test(app))
+/* The panel itself is still on that screen, which is what all of the above is in service of. */
+ok('the new-account panel is still on the floor\u2019s own screen',
+  /lateForLeaders\(/.test(board))
 
 /* ------------------------------------------------------------------ */
 

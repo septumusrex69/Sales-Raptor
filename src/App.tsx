@@ -26,6 +26,11 @@ import { CollectorDashboard } from './pages/CollectorDashboard'
  * rather than remove it. CollectorProfile is split because it, not Reports, is what was dragging
  * the charting library into the first download.
  */
+/* The three other department dashboards. Split because they are no longer what anybody lands
+   on -- "/" is the company dashboard now, and these are one click further in. */
+const Dashboard = lazy(() => import('./pages/Dashboard').then((m) => ({ default: m.Dashboard })))
+const CommunicationsDashboard = lazy(() => import('./pages/CommunicationsDashboard').then((m) => ({ default: m.CommunicationsDashboard })))
+const AdminOverview = lazy(() => import('./pages/AdminOverview').then((m) => ({ default: m.AdminOverview })))
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const LibraryPage = lazy(() => import('./pages/library/LibraryPage').then((m) => ({ default: m.LibraryPage })))
 const SettingsPage = lazy(() => import('./pages/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
@@ -72,6 +77,20 @@ function App() {
               }
             >
               <Route path="/" element={<DashboardRouter />} handle={{ title: 'Dashboard' }} />
+              {/*
+                ONE DASHBOARD PER DEPARTMENT, behind "Go to my dashboard" on the company screen.
+                The paths are the ones DEPARTMENT_DASHBOARD names in src/lib/departments.ts, and
+                check-departments holds the two against each other -- a button pointing at a route
+                that does not exist would land somebody on a blank page rather than their floor.
+
+                /performance stays as it was: it is the link every collector's name on every table
+                already points at, and breaking those to tidy a URL would be a change nobody asked
+                for.
+              */}
+              <Route path="/dashboard/collections" element={<CollectorDashboard />} handle={{ title: 'Collections' }} />
+              <Route path="/dashboard/sales" element={<Dashboard />} handle={{ title: 'Sales' }} />
+              <Route path="/dashboard/communications" element={<CommunicationsDashboard />} handle={{ title: 'Communications' }} />
+              <Route path="/dashboard/admin" element={<AdminOverview />} handle={{ title: 'Administration' }} />
               <Route path="/leads" element={<LeadsList />} handle={{ title: 'Leads' }} />
               <Route path="/leads/:id" element={<LeadDetail />} handle={{ title: 'Lead Details' }} />
               <Route path="/deals" element={<DealsBoard />} handle={{ title: 'Deals' }} />

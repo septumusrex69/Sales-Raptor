@@ -1,27 +1,28 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, CalendarClock, Download, Loader2, Search, Users } from 'lucide-react'
+import { AlertTriangle, Download, Loader2, Search } from 'lucide-react'
 import { Card } from '../components/ui/Card'
 import { StatTile } from '../components/ui/StatTile'
-import { SalesMonthPicker } from '../components/ui/SalesMonthPicker'
 import { UserAvatar } from '../components/ui/Avatar'
 import { useAppStore } from '../store/AppStore'
 import { useAuth } from '../store/AuthContext'
-import { fetchCollectorPerformance } from '../lib/collectorStats.ts'
 import {
-  THRESHOLDS, band, overBookBy, scoreCollector, totalStats,
+  THRESHOLDS, band, overBookBy, scoreCollector,
   type Band, type CollectorScore, type CollectorStats,
 } from '../lib/collectorScore.ts'
-import { bookCeilingOf, monthTargetFor } from '../lib/collectorGrade.ts'
-import { getCurrentSalesMonth, getPreviousSalesMonth, type SalesMonthPeriod } from '../lib/salesMonth'
+import { bookCeilingOf } from '../lib/collectorGrade.ts'
+import { getPreviousSalesMonth, type SalesMonthPeriod } from '../lib/salesMonth'
 import { pctDelta } from '../lib/pctDelta'
 import { resolveTarget } from '../lib/targets'
 import {
-  dayKey, monthPace, paceLine, previousWorkingDay, standingLabel, targetLaps, teamTotal,
+  dayKey, paceLine, standingLabel, targetLaps, teamTotal,
   type MonthPace, type PaceLine, type PaceStanding,
 } from '../lib/collectionPace.ts'
 import { placeLabel, standings } from '../lib/collectorTrend.ts'
-import { CollectionsHero } from '../components/collections/CollectionsHero'
+import { DashboardHero } from '../components/dashboard/DashboardHero'
+import { MonthControls } from '../components/collections/MonthControls'
+import { MonthProgress, pctText } from '../components/collections/MonthProgress'
+import { useCollectionsMonth } from '../hooks/useCollectionsMonth'
 import { formatCurrency } from '../data/mockData'
 import type { ID, Target, Team, User } from '../types'
 import { canLeadCollections } from '../lib/permissions'
@@ -54,151 +55,23 @@ interface ResolvedTarget { target: number | null; origin: 'set' | 'grade' }
 export function CollectorDashboard() {
   const { users, teams, targets } = useAppStore()
   const { currentUser } = useAuth()
-  const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(new Date()))
-  /* Null means "the latest day this period has", which is today for the month in progress and
-     the last day of it for a month that has closed. Cleared whenever the period changes. */
-  const [asAtKey, setAsAtKey] = useState<string | null>(null)
-  const [teamId, setTeamId] = useState<string>('')
-  const [rows, setRows] = useState<CollectorStats[] | null>(null)
-  const [todayRows, setTodayRows] = useState<CollectorStats[] | null>(null)
-  const [previous, setPrevious] = useState<CollectorStats[] | null>(null)
-  const [beforeRows, setBeforeRows] = useState<CollectorStats[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
 
   /*
-   * The day the report is read as at, kept inside the period whatever is asked for.
+   * THE MONTH COMES FROM THE SHARED HOOK, not from a second copy of the arithmetic.
    *
-   * A date outside the month would produce a report with more work days behind it than the month
-   * has, or none at all, and every percentage on the screen would be nonsense rather than wrong
-   * in a way somebody could spot.
+   * The company dashboard leads with these same figures, at the firm's instruction — "we can
+   * repeat the same figures" — and a period, a working-day pace and a sum of everybody's targets
+   * written out on both screens is two implementations of eleven decisions. The failure would not
+   * be a wrong page; it would be the company dashboard and this one disagreeing about what the
+   * firm collected this month. See useCollectionsMonth.
    */
-  const asAt = useMemo(() => {
-    const latest = new Date() > period.end ? period.end : new Date()
-    if (!asAtKey) return latest
-    const picked = new Date(`${asAtKey}T12:00:00`)
-    if (Number.isNaN(picked.getTime())) return latest
-    if (picked < period.start) return period.start
-    return picked > latest ? latest : picked
-  }, [asAtKey, period])
+  const month = useCollectionsMonth()
+  const {
+    period, asAt, rows, error,
+    shownRows, shownToday, score, priorScore, mine,
+    pace, floor, line, myLine, targetFor,
+  } = month
 
-  /* The instant the period's figures are counted up to: the end of the day being read. */
-  const asAtEnd = useMemo(() => {
-    const end = new Date(asAt)
-    end.setHours(23, 59, 59, 999)
-    return end > period.end ? period.end : end
-  }, [asAt, period.end])
-
-  const dayStart = useMemo(() => {
-    const start = new Date(asAt)
-    start.setHours(0, 0, 0, 0)
-    return start
-  }, [asAt])
-
-  /*
-   * The working day before the one being read, so the hero's comparison is not a Monday against
-   * a Sunday. Null on the rare day that has none within reach — see previousWorkingDay.
-   */
-  const beforeDay = useMemo(() => {
-    const key = previousWorkingDay(dayKey(asAt))
-    if (!key) return null
-    const start = new Date(`${key}T00:00:00`)
-    const end = new Date(`${key}T23:59:59.999`)
-    return { key, start, end }
-  }, [asAt])
-
-  useEffect(() => {
-    let cancelled = false
-    setRows(null); setError(null)
-    const prior = getPreviousSalesMonth(period)
-    void Promise.all([
-      fetchCollectorPerformance(period.start, asAtEnd),
-      /* The day on its own, for "collected today". The firm's sheet leads with it and so does
-         theirs: the first question every morning is what came in yesterday. */
-      fetchCollectorPerformance(dayStart, asAtEnd),
-      fetchCollectorPerformance(prior.start, prior.end),
-      beforeDay
-        ? fetchCollectorPerformance(beforeDay.start, beforeDay.end)
-        : Promise.resolve([] as CollectorStats[]),
-    ])
-      .then(([now, day, before, dayBefore]) => {
-        if (cancelled) return
-        setRows(now); setTodayRows(day); setPrevious(before); setBeforeRows(dayBefore)
-      })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
-    return () => { cancelled = true }
-  }, [period, asAtEnd, dayStart, beforeDay])
-
-  /*
-   * The month in WORK DAYS, as at the day being read. Every percentage below is read against it:
-   * ten per cent collected is exactly on pace on the second working day and a crisis on the
-   * eighteenth, and without this the screen cannot tell the two apart.
-   */
-  const pace = useMemo(() => monthPace(period.start, period.end, asAt), [period, asAt])
-
-  /** What a person was set, or what their grade says before anybody sets anything. */
-  const targetFor = useCallback((userId: ID, collects: boolean): ResolvedTarget => {
-    const set = resolveTarget(targets, 'user', userId, 'collected', period.key)?.targetValue ?? null
-    const grade = users.find((u) => u.id === userId)?.collectorGrade ?? null
-    return monthTargetFor({ set, grade, collects })
-  }, [targets, users, period.key])
-
-  /* A collector's own team, for the filter and for the team roll-up. */
-  const teamOf = useCallback(
-    (userId: ID): string => users.find((u) => u.id === userId)?.teamId ?? '',
-    [users],
-  )
-
-  /*
-   * THE TEAM FILTER NARROWS EVERYTHING BELOW IT, including the totals at the top. A filter that
-   * changed the table and left the headline figures showing the whole floor would have a team
-   * leader reading their team's list against the firm's numbers.
-   */
-  const shownRows = useMemo(
-    () => (rows ?? []).filter((r) => !teamId || teamOf(r.userId) === teamId),
-    [rows, teamId, teamOf],
-  )
-  const shownToday = useMemo(
-    () => (todayRows ?? []).filter((r) => !teamId || teamOf(r.userId) === teamId),
-    [todayRows, teamId, teamOf],
-  )
-
-  const mine = rows?.find((r) => r.userId === currentUser?.id) ?? null
-
-  /*
-   * An agent sees their own figures; a team leader sees the floor's, with everybody listed. Both
-   * read the same numbers — visibility here is about whose totals lead the page, not about
-   * hiding anything, which the firm settled early.
-   */
-  const shown = rows ? totalStats(shownRows) : null
-  const shownPrior = previous ? totalStats(previous) : null
-  const score = shown ? scoreCollector(shown) : null
-  const priorScore = shownPrior ? scoreCollector(shownPrior) : null
-
-  const collectedToday = shownToday.reduce((t, r) => t + r.collected, 0)
-  /*
-   * The day before, through the same team filter as everything else — otherwise a team leader
-   * filtered to one team would see their team's day compared with the whole floor's.
-   */
-  const collectedBefore = (beforeRows ?? [])
-    .filter((r) => !teamId || teamOf(r.userId) === teamId)
-    .reduce((t, r) => t + r.collected, 0)
-
-  /*
-   * The target the headline is read against: the sum of the people's own, never a figure typed in
-   * separately. A total a team leader cannot take apart again and explain to the person it is
-   * made of is no use to them.
-   */
-  const floor = useMemo(
-    () => teamTotal(shownRows.map((r) => ({
-      collected: r.collected,
-      target: targetFor(r.userId, r.inPlayAccounts > 0 || r.collected > 0).target,
-    }))),
-    [shownRows, targetFor],
-  )
-  const myTarget = targetFor(currentUser?.id ?? '', (mine?.inPlayAccounts ?? 0) > 0).target
-  const line = shown ? paceLine(shown.collected, floor.target, pace) : null
-  /* The agent's own month, for the strip under the floor's — and their place on it. */
-  const myLine = mine ? paceLine(mine.collected, myTarget, pace) : null
   const myPlace = useMemo(
     () => standings(
       shownRows.filter((r) => r.inPlayAccounts > 0 || r.collected > 0),
@@ -254,99 +127,75 @@ export function CollectorDashboard() {
   const pct = (now: number, before: number | undefined) =>
     (before === undefined ? undefined : pctDelta(now, before))
 
-  /** Teams that actually have somebody collecting, so the filter offers nothing empty. */
-  const teamOptions = useMemo(() => {
-    const present = new Set((rows ?? []).map((r) => teamOf(r.userId)))
-    return teams.filter((t) => present.has(t.id))
-  }, [rows, teams, teamOf])
-
   return (
     <div className="space-y-4">
       {/*
-        THE HERO IS THE REPORT'S OWN HEADER, to the firm's design: the four figures the floor is
-        run on, over the three controls that decide what those figures mean. Those controls used
-        to sit in a card of their own below the title, and a number read under the wrong one of
-        them is not slightly wrong — it is about somebody else, or about a different month. They
-        belong in the same frame as the figures they qualify.
+        THE ORDINARY BRAND BAND, AND THAT IS THE POINT.
 
-        EVERY FIGURE ON IT COMES FROM THE SAME QUERY AS THE TABLES UNDERNEATH. The mockup carried
-        round numbers; a hero that shows a figure nothing else on the page produces is decoration,
-        and people stop reading decoration.
+        This screen used to wear the photograph. The firm moved it to the company dashboard whole
+        — "I want the epicness of the collections dashboard, that picture that we made. That
+        should be the main. When you open the company, you should see epicness" — and then: "all
+        of the other dashboards can just have the other hero section. There should only be one
+        very special page." So there is exactly one, and every department screen, this one
+        included, wears the same band as the rest of Raptor. Landing on the company dashboard has
+        to feel like arriving somewhere, and it cannot if four screens look the same.
+
+        THE CONTROLS STAY IN THE BAND. A number read under the wrong period, or under somebody
+        else's team, is not slightly wrong — it is about a different month or a different floor.
+        They belong in the same frame as the figures they qualify, which is why they are in the
+        hero here exactly as they are in the hero on the company screen, drawn by one component.
       */}
-      <CollectionsHero
-        figures={{
-          today: collectedToday,
-          todayLabel: isToday(asAt) ? 'Collected today' : `Collected on ${shortDay(asAt)}`,
-          /* Null rather than a fabricated percentage where the day before brought in nothing —
-             every increase on nought is infinite, and "+100%" would be the screen inventing one. */
-          changeOnPrevious: beforeRows === null || collectedBefore <= 0
-            ? null
-            : collectedToday / collectedBefore - 1,
-          previousLabel: beforeDay === null ? null
-            : beforeDay.key === dayKey(new Date(asAt.getTime() - 86400000))
-              ? 'yesterday' : shortDay(beforeDay.start),
-          collected: score?.collected ?? 0,
-          target: line?.target ?? null,
-          achieved: line?.achieved ?? null,
-          againstPace: line?.target == null ? null : line.collected - line.target * line.expected,
-          expectedByNow: line?.target == null ? null : line.target * line.expected,
-          neededADay: line?.neededADay ?? null,
-          stillNeeded: line?.stillNeeded ?? null,
-        }}
-        filters={
-          /*
-            DRAWN AS TEXT, NOT AS A ROW OF FIELDS. The firm's own design has this line reading
-            "Collection period: 11 Sep – 10 Oct 2026 | As at: 18 Sep 2026 | All teams" with an
-            icon in front of each — three facts, not three boxes. The chrome comes off in the
-            .hero-controls skin rather than here, so the shared SalesMonthPicker is untouched on
-            the eight other screens that render it; the affordance does not come off with it,
-            because the skin puts the box back on hover and focus.
-          */
-          <>
-            <SalesMonthPicker value={period} onChange={(p) => { setPeriod(p); setAsAtKey(null) }}
-              referenceDate={new Date()} variant="dark" />
-            <span className="hidden sm:block h-4 w-px bg-white/20" />
-            <span className="flex items-center gap-2 text-xs text-white/60">
-              <CalendarClock size={14} className="shrink-0 text-white/50" />
-              <label htmlFor="collections-as-at">As at</label>
-              <input id="collections-as-at" type="date" value={dayKey(asAt)}
-                onChange={(e) => setAsAtKey(e.target.value || null)}
-                min={dayKey(period.start)}
-                max={dayKey(new Date() > period.end ? period.end : new Date())}
-                aria-label="Read the report as at"
-                className="rounded-lg border border-white/15 bg-white/10 px-2 py-1.5 text-xs text-white [color-scheme:dark]" />
-            </span>
-            {teamOptions.length > 0 && (
-              <>
-                <span className="hidden sm:block h-4 w-px bg-white/20" />
-                <span className="flex items-center gap-2 text-xs text-white/60">
-                  <Users size={14} className="shrink-0 text-white/50" />
-                  <select value={teamId} onChange={(e) => setTeamId(e.target.value)}
-                    aria-label="Team"
-                    className="rounded-lg border border-white/15 bg-white/10 px-2 py-1.5 text-xs text-white [color-scheme:dark]">
-                    <option value="">All teams</option>
-                    {teamOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
-                </span>
-              </>
-            )}
-          </>
-        }
-        action={rows && rows.length > 0 ? (
+      <DashboardHero title="Collections" eyebrow="Bredell Ferreira · The floor"
+        subtitle={`${period.label} · read as at ${shortDay(asAt)}`}>
+        <MonthControls month={month} />
+        {rows && rows.length > 0 && (
           <ExportButton rows={shownRows} today={shownToday} users={users} teams={teams}
             pace={pace} asAt={asAt} period={period} targetFor={targetFor} />
-        ) : undefined}
-        /*
-          THE MONTH BAR MOVES INTO THE PANEL, at the firm's instruction — it was "another bulky
-          white card immediately underneath". Rendered here rather than inside the hero so that
-          the arithmetic stays in the one place that already does it: this is the same element
-          that used to sit below, with its colours changed.
-        */
-        progress={<MonthProgress pace={pace} line={line} tone="dark"
-          note={floor.withTarget < floor.members
-            ? `${floor.members - floor.withTarget} of ${floor.members} have no target, so the total is short by their share.`
-            : undefined} />}
-      />
+        )}
+      </DashboardHero>
+
+      {/*
+        THE SAME FOUR FIGURES THE COMPANY DASHBOARD LEADS WITH, repeated here at the firm's
+        instruction — "we can repeat the same figures". They come off the same hook, so the two
+        screens cannot drift; what changes is only how they are drawn, because a tile over a
+        photograph and a tile on a page are the same fact in two frames.
+      */}
+      <div data-qa="collections-figures" className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatTile size="secondary" label={month.figures.todayLabel}
+          value={moneyText(month.figures.today)}
+          pctChange={month.figures.changeOnPrevious === null
+            ? undefined : month.figures.changeOnPrevious * 100}
+          compareLabel={month.figures.previousLabel ? `vs ${month.figures.previousLabel}` : undefined}
+          hint="What came in on the day being read." />
+        <StatTile size="secondary" label="Collected this period"
+          value={moneyText(month.figures.collected)}
+          hint={month.figures.target === null
+            ? 'No target set for this period.'
+            : `${pctText(month.figures.achieved)} of ${moneyText(month.figures.target)}.`} />
+        <StatTile size="secondary"
+          label={month.figures.againstPace === null ? 'Against pace'
+            : month.figures.againstPace >= 0 ? 'Ahead of pace' : 'Behind pace'}
+          value={month.figures.againstPace === null ? '—' : moneyText(Math.abs(month.figures.againstPace))}
+          hint={month.figures.expectedByNow === null
+            ? 'Nothing to measure against yet.'
+            : `Expected by now ${moneyText(month.figures.expectedByNow)}.`} />
+        <StatTile size="secondary" label="Needed per working day"
+          value={moneyText(month.figures.neededADay)}
+          hint={month.figures.stillNeeded === null
+            ? 'No target set for this period.'
+            : `${moneyText(month.figures.stillNeeded)} still to find.`} />
+      </div>
+
+      {/*
+        THE MONTH BAR, back as a card of its own now that there is no panel for it to sit inside.
+        The same element the company dashboard draws in the hero's glass, in its light colours —
+        one implementation, because a second "how far through the month are we" is a second answer
+        to that question.
+      */}
+      <MonthProgress pace={pace} line={line}
+        note={floor.withTarget < floor.members
+          ? `${floor.members - floor.withTarget} of ${floor.members} have no target, so the total is short by their share.`
+          : undefined} />
 
       {/*
         THE NOTICE A COLLECTOR ACTUALLY SEES. It also appears on the Collectors table in Settings,
@@ -546,8 +395,6 @@ export function CollectorDashboard() {
 
 /* ---------- reading the numbers ---------- */
 
-/** A ratio as the firm writes it. One decimal, because 0.8% and 1.2% are different problems. */
-const pctText = (v: number | null): string => (v === null ? '—' : `${(v * 100).toFixed(1)}%`)
 /** The gap always carries its sign: "+9.9%" is ahead of pace and "-6.9%" is behind it. */
 const gapText = (v: number | null): string =>
   v === null ? '—' : `${v >= 0 ? '+' : '−'}${(Math.abs(v) * 100).toFixed(1)}%`
@@ -557,7 +404,6 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 /* Written out rather than through Intl: en-ZA renders September as "Sept", which is neither the
    full month nor a normal abbreviation, and this codebase has been bitten by it before. */
 const shortDay = (d: Date): string => `${d.getDate()} ${MONTHS[d.getMonth()]}`
-const isToday = (d: Date): boolean => dayKey(d) === dayKey(new Date())
 
 const STANDING_STYLE: Record<PaceStanding, string> = {
   met: 'bg-emerald-100 text-emerald-800',
@@ -610,84 +456,6 @@ function ProgressBar({ achieved, width = 'w-24' }: { achieved: number | null; wi
       {laps > 1 && <span className="text-[11px] font-medium text-emerald-700">&times;{laps}</span>}
     </span>
   )
-}
-
-/**
- * The month on one bar, with the day's pace marked on it.
- *
- * THE MARKER IS THE POINT. A bar alone says 36% and leaves the reader to work out whether that is
- * good; the line at 30% says it is ahead, on the day it is being read. It is the same comparison
- * the status pills make, drawn once for the whole floor.
- */
-function MonthProgress({ pace, line, note, tone = 'light' }: {
-  pace: MonthPace
-  line: PaceLine | null
-  note?: string
-  /**
-   * 'dark' renders it inside the Collections hero's glass panel rather than as a card of its own.
-   *
-   * A VARIANT RATHER THAN A SECOND COMPONENT, deliberately. The month bar is the same three facts
-   * wherever it is drawn — what was achieved, what was expected by now, how many days are left —
-   * and a second implementation for the dark panel is a second place for those to disagree with
-   * the tables underneath. Only the colours change; every figure comes from the same pace object.
-   */
-  tone?: 'light' | 'dark'
-}) {
-  const { fill, laps, over } = targetLaps(line?.achieved ?? null)
-  const marker = Math.min(100, Math.round(pace.expected * 100))
-  const dark = tone === 'dark'
-
-  const body = (
-    <>
-      <div className={`px-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 ${dark ? 'pt-2' : 'pt-3'}`}>
-        <p className={dark ? 'text-sm text-white/60' : 'text-sm text-slate-500'}>
-          Monthly progress{' '}
-          <span className={`font-semibold tabular-nums ${dark ? 'text-white' : 'text-slate-800'}`}>
-            {line?.achieved === null || line?.achieved === undefined
-              ? 'no target set'
-              : `${pctText(line.achieved)} achieved`}
-          </span>
-          {laps > 0 && (
-            <span className={`ml-2 text-xs font-medium ${dark ? 'text-[#3ecf8e]' : 'text-emerald-700'}`}>
-              {laps === 1 ? 'past target' : `${laps} targets over`}
-            </span>
-          )}
-        </p>
-        <p className={`text-xs tabular-nums ${dark ? 'text-white/45' : 'text-slate-400'}`}>
-          {pace.daysWorked} of {pace.workDays} working days completed
-          {pace.finished ? ' · month closed' : ` · ${pace.daysLeft} remaining`}
-        </p>
-      </div>
-      <div className={`px-4 pb-1 ${dark ? 'pt-2' : 'pt-3'}`}>
-        {/* Thinner on the dark panel, at the firm's instruction: over a photograph a 10px bar
-            reads as a widget, and the figure beside it is what anybody actually reads. */}
-        <div className={`relative rounded-full ${dark ? 'h-1.5 bg-white/12' : 'h-2.5 bg-slate-200'}`}>
-          <div className={`h-full rounded-full ${
-            over ? (dark ? 'bg-[#3ecf8e]' : 'bg-emerald-500') : (dark ? 'bg-[#d8b76b]' : 'bg-gold-400')
-          }`} style={{ width: `${Math.round(fill * 100)}%` }} />
-          {/* Hidden once the month is over: there is no pace left to keep, only a result. */}
-          {!pace.finished && (
-            <div className={`absolute inset-y-[-3px] w-px ${dark ? 'bg-white/55' : 'bg-slate-500'}`}
-              style={{ left: `${marker}%` }} />
-          )}
-        </div>
-      </div>
-      <div className={`px-4 relative ${dark ? 'pb-2 h-4' : 'pb-3 h-4'}`}>
-        {!pace.finished && (
-          <span className={`absolute text-[11px] tabular-nums -translate-x-1/2 whitespace-nowrap ${
-            dark ? 'text-white/45' : 'text-slate-500'
-          }`} style={{ left: `calc(${marker}% + 1rem)` }}>
-            {marker}% expected by now
-          </span>
-        )}
-      </div>
-      {note && (
-        <p className={`px-4 pb-3 -mt-1 text-xs ${dark ? 'text-[#e4c68a]' : 'text-amber-700'}`}>{note}</p>
-      )}
-    </>
-  )
-
-  return dark ? <div>{body}</div> : <Card padded={false}>{body}</Card>
 }
 
 /* ---------- the clerks ---------- */

@@ -224,7 +224,12 @@ try {
   }
   t.ok('the dev server answers', up)
 
-  await page.getByRole('heading', { name: /The sky is only/ }).waitFor({ timeout: 20000 })
+  /*
+   * THE FLOOR WEARS THE ORDINARY BAND NOW. The photograph moved to the company dashboard whole,
+   * at the firm's instruction -- "there should only be one very special page" -- so what this
+   * screen opens with is its own title and the month bar under the figures.
+   */
+  await page.getByRole('heading', { name: 'Collections', exact: true }).first().waitFor({ timeout: 20000 })
   await page.getByText('Monthly progress').waitFor({ timeout: 20000 })
   await t.shot(page, '40-collections')
 
@@ -259,7 +264,34 @@ try {
   t.check('...and the leader is not in their own list',
     await floorList.getByText(PROFILE.name, { exact: false }).count(), 0)
 
+  /* ---------- the same figures, repeated on the floor ---------- */
+
+  /*
+   * THE FIRM ASKED FOR THE REPETITION -- "we can repeat the same figures" -- and the repetition
+   * is only safe while it is one calculation. The fixture answers the DAY with R27 000 and the
+   * PERIOD with R127 500, so a screen showing one figure under both labels fails here rather
+   * than looking plausible for a month.
+   */
+  const floorFigures = await page.locator('[data-qa="collections-figures"]').innerText()
+  t.ok(`the day's own figure is on the floor (${floorFigures.replace(/\n/g, ' ').slice(0, 60)})`,
+    /27[,\s\u00a0]000/.test(floorFigures))
+  t.ok('...beside the period\u2019s, and they are not the same number',
+    /127[,\s\u00a0]500/.test(floorFigures))
+  /* And the photograph is NOT here. One special page; a second one makes the first ordinary. */
+  t.check('the floor does not wear the company hero',
+    await page.locator('.collections-hero').count(), 0)
+
   /* ---------- the hero renders, and renders the real figures ---------- */
+
+  /*
+   * MEASURED ON THE COMPANY DASHBOARD, which is where the firm moved it: "I want the epicness of
+   * the collections dashboard, that picture that we made. That should be the main." Same session,
+   * same stub, one navigation -- the alternative is a second copy of these fixtures, and a
+   * fixture written twice is a fixture that drifts.
+   */
+  await page.goto(`http://localhost:${PORT}/`)
+  await page.getByRole('heading', { name: /The sky is only/ }).waitFor({ timeout: 20000 })
+  await t.shot(page, '39-company')
 
   /*
    * A HERO IS THE ONE PANEL THAT CAN SHIP INVISIBLE AND NOBODY NOTICE for a week — it is a
@@ -457,8 +489,8 @@ try {
    */
   const heroWords = (await heroBox.innerText()).match(/Collections/gi) ?? []
   t.check(`the panel leaves the naming to the bar (${heroWords.length})`, heroWords.length, 0)
-  t.ok('...and the bar does name it',
-    await page.getByRole('heading', { name: 'Collections', exact: true }).isVisible())
+  t.ok('...and the bar does name the screen',
+    await page.getByRole('heading', { name: 'Dashboard', exact: true }).isVisible())
 
   /*
    * IT IS A CARD, INSET AND ROUNDED LIKE EVERY OTHER HERO. It ran full bleed with square corners
@@ -545,6 +577,8 @@ try {
     await page.locator('input[type="date"]').count(), 1)
 
   /* ---------- the day and the period are different questions ---------- */
+  /* Read off the hero, on the company dashboard -- the floor's own copy of the pair is asserted
+     above, and the two must agree because they come off one hook. */
 
   /*
    * THE FIRST QUESTION EVERY MORNING is what came in yesterday, which is why the firm's own sheet
@@ -574,6 +608,18 @@ try {
   t.ok('...and the pace expected by now is marked on the bar',
     await page.getByText(/% expected by now/).first().isVisible())
   t.ok('the report can be read as at a day', await page.locator('input[type="date"]').first().isVisible())
+
+  /* ---------- back to the floor, which is where the tables are ---------- */
+
+  /*
+   * The month bar and the controls above were measured on the company dashboard because that is
+   * where the hero is; everything below belongs to the collections floor and only renders there.
+   */
+  await page.goto(`http://localhost:${PORT}/performance`)
+  await page.getByRole('heading', { name: 'Collections', exact: true }).first().waitFor({ timeout: 20000 })
+  /* The tables arrive with the second fetch, not with the frame -- waited for rather than slept
+     against, so a slow machine does not turn a working screen into a failure. */
+  await page.locator('table').first().waitFor({ timeout: 20000 })
 
   /* ---------- the clerk sheet ---------- */
 
@@ -696,8 +742,11 @@ try {
    */
   await page.getByRole('combobox').last().selectOption({ label: TEAM.name })
   await page.waitForTimeout(400)
-  const filteredTile = await tile('Collected this period')
-  t.ok(`the headline follows the filter (${filteredTile})`, /120[,\s\u00a0]500/.test(filteredTile))
+  /* Read out of the floor's own tiles rather than with tile() above, which walks from a label to
+     its sibling -- the hero draws the pair that way and a StatTile does not. */
+  const filteredTile = (await page.locator('[data-qa="collections-figures"]').innerText()).replace(/\n/g, ' ')
+  t.ok(`the headline follows the filter (${filteredTile.slice(0, 70)})`,
+    /120[,\s\u00a0]500/.test(filteredTile))
   t.check('...and the unteamed collector is gone from the list',
     await page.getByText(LOOSE.name).count(), 0)
   await page.getByRole('combobox').last().selectOption({ label: 'All teams' })
@@ -785,7 +834,7 @@ try {
   t.check('no console errors', real.length, 0)
   if (real.length) console.log('  console:', real.slice(0, 5))
 } catch (e) {
-  t.ok(`the run finished without throwing (${String(e).split('\n')[0].slice(0, 140)})`, false)
+  t.ok(`the run finished without throwing (${String(e).slice(0, 140)})`, false)
   try {
     const pages = browser ? browser.contexts().flatMap((c) => c.pages()) : []
     if (pages[0]) await t.shot(pages[0], '49-where-it-stopped')

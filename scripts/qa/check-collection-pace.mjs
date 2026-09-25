@@ -251,29 +251,45 @@ check('a negative draws nothing rather than overflowing', targetLaps(-0.4).fill,
 /* ---------- the numbers reach the screen ---------- */
 
 const page = readFileSync(new URL('../../src/pages/CollectorDashboard.tsx', import.meta.url), 'utf8')
+/*
+ * THE ARITHMETIC MOVED OFF THE PAGE, and the assertions follow it to where it went rather than
+ * widening to "somewhere in these four files". The company dashboard now leads with these same
+ * figures, so the month is worked out once in useCollectionsMonth and drawn by MonthControls and
+ * MonthProgress; a regex allowed to match any of them would pass with the hook deleted and the
+ * page doing its own sums again, which is the exact drift this file exists to catch.
+ */
+const hook = readFileSync(new URL('../../src/hooks/useCollectionsMonth.ts', import.meta.url), 'utf8')
+const controls = readFileSync(new URL('../../src/components/collections/MonthControls.tsx', import.meta.url), 'utf8')
+const bar = readFileSync(new URL('../../src/components/collections/MonthProgress.tsx', import.meta.url), 'utf8')
+const company = readFileSync(new URL('../../src/pages/CompanyDashboard.tsx', import.meta.url), 'utf8')
 
-ok('the Collections screen computes the month in work days', /monthPace\(period\.start, period\.end, asAt\)/.test(page))
+ok('the month is computed in work days', /monthPace\(period\.start, period\.end, asAt\)/.test(hook))
+ok('...in ONE place, not on the page as well', !/monthPace\(/.test(page) && !/monthPace\(/.test(company))
+ok('both dashboards read it from there',
+  /useCollectionsMonth\(\)/.test(page) && /useCollectionsMonth\(\)/.test(company))
 
 /*
  * READ AS AT A DAY, which is what makes it the firm's report rather than a dashboard. Their own
  * sheet is headed "Date: 14/09/2026" and every percentage on it is read against how far into the
  * month's work days that date is.
  */
-ok('the report can be read as at a day', /type="date" value=\{dayKey\(asAt\)\}/.test(page))
-ok('...and the pace is taken at that day, not at today', /monthPace\(period\.start, period\.end, asAt\)/.test(page))
+ok('the report can be read as at a day', /type="date" value=\{dayKey\(asAt\)\}/.test(controls))
+ok('...and both screens offer that control',
+  /<MonthControls/.test(page) && /<MonthControls/.test(company))
 /*
  * CLAMPED INTO THE PERIOD. A date outside the month would produce a report with more work days
  * behind it than the month has, and every percentage on the screen would be nonsense rather than
  * wrong in a way somebody could spot.
  */
 ok('...and a date outside the period is pulled back into it',
-  /if \(picked < period\.start\) return period\.start/.test(page))
-ok('...and never past today', /new Date\(\) > period\.end \? period\.end : new Date\(\)/.test(page))
+  /if \(picked < period\.start\) return period\.start/.test(hook))
+ok('...and never past today', /new Date\(\) > period\.end \? period\.end : new Date\(\)/.test(hook))
 
 ok('the month header is a progress bar', /<MonthProgress/.test(page))
-ok('...carrying the work days behind and ahead', /working days completed/.test(page))
-ok('...and marking the pace expected by now', /% expected by now/.test(page))
-ok('the day\u2019s own figure leads', /Collected today/.test(page))
+ok('...and the company screen draws the same one', /<MonthProgress/.test(company))
+ok('...carrying the work days behind and ahead', /working days completed/.test(bar))
+ok('...and marking the pace expected by now', /% expected by now/.test(bar))
+ok('the day\u2019s own figure leads', /Collected today/.test(hook))
 ok('the teams sheet is rendered', /<TeamTable/.test(page))
 ok('the clerk sheet is rendered', /<ClerkTable/.test(page))
 ok('needed a week is on the teams table only', /Needed a week/.test(page))
@@ -403,8 +419,11 @@ ok('...and what they are for', /should decide who is promoted/.test(fairCaption)
 
 /* The team filter narrows the totals as well as the table: a team leader reading their team's
    list against the firm's headline figures is reading two different things. */
-ok('the team filter narrows the rows', /const shownRows = useMemo/.test(page))
-ok('...and the totals are taken from the narrowed rows', /totalStats\(shownRows\)/.test(page))
+ok('the team filter narrows the rows', /const shownRows = useMemo/.test(hook))
+ok('...and the totals are taken from the narrowed rows', /totalStats\(shownRows\)/.test(hook))
+/* And the page reads the narrowed rows rather than the raw ones, which is the half of it that
+   can still be got wrong now that both live on the same object. */
+ok('...and the page tables are given the narrowed rows', /rows=\{shownRows\}/.test(page))
 
 /*
  * THE EXPORT IS BUILT IN THE BROWSER. No new endpoint -- Vercel's Hobby plan caps this project at

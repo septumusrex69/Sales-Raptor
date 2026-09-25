@@ -25,6 +25,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-invite-identity.mjs
  */
 import { readFileSync, existsSync } from 'node:fs'
+import { myDashboardPath } from '../../src/lib/departments.ts'
 
 let pass = 0
 const failures = []
@@ -83,29 +84,30 @@ ok('the box shows the server’s own words', /setError\(body\.error \?\? /.test(
 /* ------------------------------------------------ the role outranks the team */
 
 /*
- * ASSERTED PRESENT BEFORE ORDER, for the reason above: with the pre-legal branch deleted this
- * would otherwise pass while every collector landed on the wrong dashboard.
+ * THE STEFNOVA GLITCH, GUARDED WHERE IT NOW LIVES.
+ *
+ * She was a Pre-legal Agent filed under a Communications team, and "/" asked the team before the
+ * role -- so Raptor opened her on the Communications dashboard, client servicing and courtesy
+ * calls, with not one collections figure on it. The routing that got that wrong is gone:
+ * everybody lands on the company dashboard now, and where "Go to my dashboard" goes is derived
+ * from the ROLE alone, in departments.ts.
+ *
+ * SO THE ASSERTION IS STRONGER THAN THE ONE IT REPLACES. It is no longer "the role is asked
+ * first" -- it is that the team is never asked at all, which is a property a person can break
+ * only by putting it back.
  */
-const roleAt = router.indexOf('PRE_LEGAL.includes(currentUser.role)')
-const teamAt = router.indexOf("myTeam?.kind === 'Communications'")
-ok('the pre-legal branch exists', roleAt > 0)
-ok('the communications branch exists', teamAt > 0)
-ok('...and the role is asked first', roleAt < teamAt)
-/*
- * EVERY COLLECTIONS ROLE, not just the agent -- a team leader and the call centre manager carry
- * a book too. Read out of the array rather than matched as a literal: pinned to the exact two
- * roles it had, this broke the moment 'Call Centre Manager' was added, which is a correct change
- * reported as a fault. Assert what must be TRUE of the list, not how it is written.
- */
-const preLegal = [...(/const PRE_LEGAL = \[([^\]]*)\]/.exec(router)?.[1] ?? '')
-  .matchAll(/'([^']+)'/g)].map((m) => m[1])
-ok('the collections roles are listed at all', preLegal.length > 0)
+ok('nothing on "/" reads a team', !/teams|teamId|myTeam/.test(router))
+ok('...or a role either -- everybody lands on the same screen', !/currentUser/.test(router))
+check('a pre-legal agent on a communications team still opens the collections floor',
+  myDashboardPath('Pre-legal Agent'), '/dashboard/collections')
+/* Read out of the map rather than matched as a literal, for the reason the old version learned:
+   pinned to the exact two roles it had, this broke the day 'Call Centre Manager' was added --
+   a correct change reported as a fault. */
 for (const r of ['Pre-legal Agent', 'Pre-legal Team Leader', 'Call Centre Manager']) {
-  ok(`...including ${r}, who lands on the collections floor`, preLegal.includes(r))
+  check(`...as does ${r}`, myDashboardPath(r), '/dashboard/collections')
 }
-/* An administrator still comes first: they oversee the firm, not a floor. */
-const adminAt = router.indexOf("currentUser?.role === 'Administrator'")
-ok('an administrator is still answered before either', adminAt > 0 && adminAt < roleAt)
+/* And an administrator opens the office rather than a floor. */
+check('an administrator opens the office', myDashboardPath('Administrator'), '/dashboard/admin')
 
 /* ------------------------------------------------ one door, not two */
 

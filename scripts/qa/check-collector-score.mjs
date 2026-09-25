@@ -247,7 +247,10 @@ const page = readFileSync(new URL('../../src/pages/CollectorDashboard.tsx', impo
  * remittance run against. A dashboard on the calendar month would give two true answers to "how
  * much did we collect in September".
  */
-ok('the period is the sales month', /getCurrentSalesMonth|SalesMonthPicker/.test(page))
+/* Asked of the hook that now holds the period for both dashboards, rather than of the page it
+   used to live on -- the firm's month is one decision and it is made once. */
+ok('the period is the sales month',
+  /getCurrentSalesMonth/.test(readFileSync(new URL('../../src/hooks/useCollectionsMonth.ts', import.meta.url), 'utf8')))
 ok('...and the previous one is fetched to compare', /getPreviousSalesMonth\(period\)/.test(page))
 
 /*

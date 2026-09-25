@@ -53,15 +53,37 @@ check('...and it crosses out of a month without complaining', previousWorkingDay
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
 const hero = read('../../src/components/collections/CollectionsHero.tsx')
-const page = read('../../src/pages/CollectorDashboard.tsx')
+/*
+ * THE HERO MOVED HOUSE. It was built for the collections dashboard and the firm moved it whole
+ * onto the company dashboard -- "I want the epicness of the collections dashboard, that picture
+ * that we made. That should be the main" -- so the screen that renders it is CompanyDashboard,
+ * and the figures it is given come off the shared hook rather than out of the page. The reads
+ * below follow each assertion to the file that now owns it; see check-collection-pace on why
+ * they are not widened into one haystack.
+ */
+const page = read('../../src/pages/CompanyDashboard.tsx')
+const hook = read('../../src/hooks/useCollectionsMonth.ts')
+const controls = read('../../src/components/collections/MonthControls.tsx')
+const floor = read('../../src/pages/CollectorDashboard.tsx')
 const css = read('../../src/index.css')
+
+/*
+ * ONE SCREEN WEARS THE PHOTOGRAPH, and that is the firm's instruction: "all of the other
+ * dashboards can just have the other hero section. There should only be one very special page."
+ * Asserted as an absence as well as a presence, because the failure is not a missing hero -- it
+ * is a second screen quietly putting it back on and the company dashboard no longer being the
+ * place you arrive.
+ */
+ok('the company dashboard wears the photograph', /<CollectionsHero/.test(page))
+ok('...and the collections floor wears the ordinary band instead',
+  !/<CollectionsHero/.test(floor) && /<DashboardHero/.test(floor))
 
 /*
  * NOTHING IS INVENTED WHERE NOTHING IS KNOWN. Every increase on nought is infinite, so a day
  * following a blank one gets no percentage at all rather than a confident "+100%".
  */
 ok('a day after a blank one shows no comparison',
-  /collectedBefore <= 0\s*\n\s*\? null/.test(page))
+  /collectedBefore <= 0\s*\n\s*\? null/.test(hook))
 ok('...and the hero says so in words rather than leaving a gap',
   /No working day before it to compare/.test(hero))
 /*
@@ -79,7 +101,7 @@ ok('...and the pace tile too', /Nothing to measure against yet/.test(hero))
  * filtered to one team would see their team's day set against the whole floor's day before.
  */
 ok('the day before is filtered by team as well',
-  /const collectedBefore = \(beforeRows \?\? \[\]\)\s*\n\s*\.filter\(\(r\) => !teamId \|\| teamOf\(r\.userId\) === teamId\)/.test(page))
+  /const collectedBefore = \(beforeRows \?\? \[\]\)\s*\n\s*\.filter\(\(r\) => !teamId \|\| teamOf\(r\.userId\) === teamId\)/.test(hook))
 
 /*
  * ONE FORMATTER AND ONE BAR. The hero had its own money formatter, grouping thousands with a hard
@@ -93,20 +115,29 @@ ok('...including the colour it changes to',
   /over \? 'bg-\[#3ecf8e\]' : 'bg-\[var\(--ch-champagne\)\]'/.test(hero))
 
 /* Every figure comes from the page's own `line`, which is what the tables are drawn from. */
-ok('collected comes from the same total as the tables', /collected: score\?\.collected \?\? 0/.test(page))
-ok('the target comes from the same resolution', /target: line\?\.target \?\? null/.test(page))
+ok('collected comes from the same total as the tables', /collected: score\?\.collected \?\? 0/.test(hook))
+ok('the target comes from the same resolution', /target: line\?\.target \?\? null/.test(hook))
 ok('ahead-or-behind is measured against the day’s pace',
-  /againstPace: line\?\.target == null \? null : line\.collected - line\.target \* line\.expected/.test(page))
+  /againstPace: line\?\.target == null \? null : line\.collected - line\.target \* line\.expected/.test(hook))
 ok('...and what was expected by now is the same arithmetic',
-  /expectedByNow: line\?\.target == null \? null : line\.target \* line\.expected/.test(page))
+  /expectedByNow: line\?\.target == null \? null : line\.target \* line\.expected/.test(hook))
+/*
+ * AND THE TWO SCREENS ARE GIVEN THE SAME OBJECT. The firm asked for the figures to be repeated --
+ * "we can repeat the same figures" -- which is only safe while they are one calculation. A page
+ * assembling its own HeroFigures would satisfy every assertion above and still print a different
+ * month from the one the floor is reading.
+ */
+ok('the hero is handed the shared figures', /figures=\{month\.figures\}/.test(page))
+ok('...and the collections floor prints the same ones', /month\.figures\.collected/.test(floor))
 
 /*
  * THE CONTROLS LIVE IN THE HERO. They used to sit in a card below the title, and a figure read
  * under the wrong month or the wrong team is not slightly wrong, it is about somebody else.
  */
-ok('the period picker is in the hero', /<SalesMonthPicker[\s\S]{0,200}variant="dark"/.test(page))
-ok('...with the as-at date', /aria-label="Read the report as at"/.test(page))
-ok('...and the team filter', /aria-label="Team"/.test(page))
+ok('the period picker is in the hero', /<SalesMonthPicker[\s\S]{0,200}variant="dark"/.test(controls))
+ok('...with the as-at date', /aria-label="Read the report as at"/.test(controls))
+ok('...and the team filter', /aria-label="Team"/.test(controls))
+ok('...and they are rendered into the hero’s own strip', /filters=\{<MonthControls/.test(page))
 /* And the caption that used to duplicate them is gone: two rows saying the same thing leaves the
    reader working out which one is live. */
 ok('the controls are not captioned by a copy of themselves',

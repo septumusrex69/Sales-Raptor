@@ -192,3 +192,36 @@ export function matchesPerson(
     .filter(Boolean).join(' ').toLowerCase()
   return words.every((w) => hay.includes(w))
 }
+
+/**
+ * WHERE EACH DEPARTMENT'S OWN DASHBOARD LIVES.
+ *
+ * Everybody in the firm now lands on the company dashboard — the firm: "it's important for
+ * everybody in the company to understand that we are a collective, so it's important to go into
+ * the company dashboard as the first thing that you see. And then you should go to your own
+ * stuff." This is the second half of that sentence: which screen "your own stuff" is.
+ *
+ * A MAP, NOT A CHAIN OF IFS, for the same reason OF_ROLE is one — a department added to the union
+ * and forgotten here is a type error rather than a button that quietly goes to the wrong floor.
+ * check-departments holds it against the union and against App.tsx's routes.
+ *
+ * READ ONLY GOES NOWHERE ELSE. An auditor has no department to open, so their dashboard is the
+ * company one they are already on, rather than a screen belonging to people whose work is not
+ * theirs.
+ */
+export const DEPARTMENT_DASHBOARD: Record<Department, string> = {
+  Administration: '/dashboard/admin',
+  Sales: '/dashboard/sales',
+  Communications: '/dashboard/communications',
+  'Call centre': '/dashboard/collections',
+  Other: '/',
+}
+
+export function dashboardPathFor(department: Department): string {
+  return DEPARTMENT_DASHBOARD[department]
+}
+
+/** The dashboard behind "Go to my dashboard", for whoever is signed in. */
+export function myDashboardPath(role: UserRole | undefined): string {
+  return dashboardPathFor(departmentOf(role))
+}

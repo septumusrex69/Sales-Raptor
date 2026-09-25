@@ -215,13 +215,39 @@ narrow exception the firm asked for. The over-capacity number is **shown, not so
 carried onto fifty is sixty, and quietly pushing routine reviews out to make it read fifty would
 remove the only signal that somebody is underwater.
 
-**Collections people land on the collections dashboard.** `/` had no collections branch at all —
-Administrator to the admin overview, Communications to theirs, and *everybody else*, including
-every pre-legal agent, to the SALES dashboard. `DashboardRouter` now sends the two **pre-legal**
-roles to `CollectorDashboard`. Not every role in `COLLECTING_ROLES`: a liaison may be given
-accounts, but their day is clients, leads and deals, and those records are on the sales screen.
-`canLeadCollections` (not `canReassign`, which excludes the pre-legal team leader) decides who
-sees the floor's carried accounts rather than only their own.
+**EVERYBODY LANDS ON THE COMPANY DASHBOARD, and exactly one screen wears the photograph.** The
+firm: *"it's important for everybody in the company to understand that we are a collective. So
+it's important to go into the company dashboard as the first thing that you see. And then you
+should go to your own stuff."* `/` used to route by role — Administrator to the admin overview,
+Communications to theirs, the pre-legal roles to the floor, everybody else to SALES — so a rep
+and a collector had no screen in common and nobody could see what the rest of the firm was doing.
+`DashboardRouter` now returns `CompanyDashboard` for everyone; what the role decides is where
+**Go to my dashboard** goes, and that is `DEPARTMENT_DASHBOARD` in `departments.ts`, derived from
+the role and never from the team (the Stefnova glitch, moved onto the button).
+`canLeadCollections` (not `canReassign`, which excludes the pre-legal team leader) still decides
+who sees the floor's carried accounts rather than only their own.
+
+**THE HERO MOVED HOUSE AND DID NOT CHANGE.** `CollectionsHero` was built for the collections
+screen and the firm moved it whole: *"I want the epicness of the collections dashboard, that
+picture that we made. That should be the main. When you open the company, you should see
+epicness"* — then *"all of the other dashboards can just have the other hero section. There
+should only be one very special page."* So the photograph, the four figures over it and the
+controls-plus-month-bar **inside** the dark panel belong to `CompanyDashboard`; every department
+screen, the collections floor included, wears the ordinary `DashboardHero`. Redrawing the hero
+rather than moving it is a change the firm has already sent back once.
+
+**The same figures on two screens, ONE calculation.** The firm asked for the repetition — *"we
+can repeat the same figures"* — which is only safe while it is one piece of arithmetic.
+`useCollectionsMonth` owns the period, the as-at day, the team filter, the working-day pace and
+the sum of everybody's targets; `MonthControls` and `MonthProgress` draw them. Written out on
+both pages the failure is not a wrong screen, it is the company dashboard and the floor quietly
+disagreeing about what the firm collected this month.
+
+**No commission and no Annexure B income on the company dashboard, ever.** The condition the firm
+attached to one screen for everybody: *"we're not going to be disclosing commission and income
+from the Annexure B fees. We'll do that on another place, which is not even for an
+administrator."* Every figure on it is the client's money to recover or a count of work.
+`check-company-dashboard` asserts the absence, comments stripped first.
 
 **A workflow day is a BUSINESS day, and the unit is on the version.** The firm, of the section
 129 sequence: "this is all working days, not normal days." A day number carried no unit and was
