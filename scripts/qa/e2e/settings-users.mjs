@@ -176,6 +176,34 @@ try {
     t.check('the picker shows what it actually has', opts.join(' | '), 'No team')
     await context.close()
   }
+  /* ---------- the number every notice gives a debtor ---------- */
+
+  /*
+   * A COLLECTOR'S PHONE IS NOT A PERSONAL DETAIL, it is what a section 129 prints on the line
+   * "Direct line:" — and a merge field nothing fills holds the notice rather than posting braces
+   * to a debtor. All fifty live profiles had no number, so no statutory demand could go out on
+   * any account, and the only place to set one was the person's OWN Settings → Profile: fifty
+   * people logging in before the first demand is sent.
+   *
+   * ASKED OF THE RENDERED MODAL, because "an administrator can fill these in" is a claim about a
+   * form somebody has to open, not about a field existing in a file.
+   */
+  {
+    const { context, page } = await open(browser,
+      [(u) => /\/rest\/v1\/teams/.test(u), () => ({ body: TEAMS })])
+    await page.waitForTimeout(1500)
+    await page.getByTitle('Edit user').first().click()
+    await page.getByText('Edit User', { exact: true }).waitFor({ timeout: 10000 })
+    const modal = await page.locator('body').innerText()
+    t.ok('an administrator can edit somebody else\u2019s details', /Edit User/.test(modal))
+    t.ok('...including the phone a notice quotes', /Phone/.test(modal))
+    /* Said where it is typed: the consequence is not obvious from a field called "Phone". */
+    t.ok('...and why it matters, beside the field itself',
+      /section 129 on this person's\s*accounts holds/.test(modal))
+    t.ok('...and WhatsApp, which is its own number', /WhatsApp/.test(modal))
+    await context.close()
+  }
+
 } finally {
   if (browser) await browser.close()
   await stopServer(server)

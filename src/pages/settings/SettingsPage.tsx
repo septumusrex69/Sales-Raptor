@@ -584,6 +584,7 @@ function UsersTab() {
           accessToken={session.access_token}
           onClose={() => setEditingUser(null)}
           onSaveName={(name) => updateUser(editingUser.id, { name })}
+          onSaveDetails={(patch) => updateUser(editingUser.id, patch)}
         />
       )}
       {removingUser && session && (
@@ -804,19 +805,36 @@ function ResetLoginButton({ email }: { email: string }) {
   )
 }
 
+/**
+ * EDITING SOMEBODY ELSE'S DETAILS, INCLUDING THE NUMBER A DEBTOR IS GIVEN.
+ *
+ * THE PHONE IS HERE BECAUSE OF WHAT IT HOLDS UP. Every notice the firm sends carries "Direct
+ * line: {{collector_phone}}", and a field nothing fills stops the notice rather than posting
+ * braces to a debtor — so a collector with no number on their profile cannot have a section 129
+ * go out on any of their accounts. All fifty live profiles were in that state.
+ *
+ * AND ONLY THE PERSON THEMSELVES COULD FIX IT, on Settings → Profile, which means fifty people
+ * each logging in before the first statutory demand can be sent. An administrator filling them in
+ * is one afternoon; the other way is a plan that does not happen.
+ */
 function EditUserModal({
   user,
   accessToken,
   onClose,
   onSaveName,
+  onSaveDetails,
 }: {
   user: User
   accessToken: string
   onClose: () => void
   onSaveName: (name: string) => void
+  /** Phone and WhatsApp, written straight to the profile like the name is. */
+  onSaveDetails: (patch: { phone?: string; whatsapp?: string }) => void
 }) {
   const [name, setName] = useState(user.name)
   const [email, setEmail] = useState(user.email)
+  const [phone, setPhone] = useState(user.phone ?? '')
+  const [whatsapp, setWhatsapp] = useState(user.whatsapp ?? '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -826,6 +844,12 @@ function EditUserModal({
     setSubmitting(true)
     setError(null)
     if (name.trim() !== user.name) onSaveName(name.trim())
+    /* Only what changed, and `undefined` where a field was cleared — updateUser patches the row,
+       so sending an empty string would write one rather than emptying the column. */
+    const details: { phone?: string; whatsapp?: string } = {}
+    if (phone.trim() !== (user.phone ?? '')) details.phone = phone.trim() || undefined
+    if (whatsapp.trim() !== (user.whatsapp ?? '')) details.whatsapp = whatsapp.trim() || undefined
+    if (Object.keys(details).length > 0) onSaveDetails(details)
     if (email.trim() !== user.email) {
       try {
         const res = await fetch('/api/update-user-email', {
@@ -861,6 +885,21 @@ function EditUserModal({
         {email.trim() !== user.email && (
           <p className="text-xs text-slate-400 mb-3.5 -mt-2">Changing the email changes their login — they'll need to sign in with the new address.</p>
         )}
+        <FormField label="Phone">
+          <input className={inputClass} value={phone} onChange={(e) => setPhone(e.target.value)} />
+        </FormField>
+        {/* SAID WHERE IT IS TYPED, because the consequence is not obvious from the field. */}
+        <p className="text-xs text-slate-400 mb-3.5 -mt-2">
+          The direct line every notice gives the debtor. Without it a section 129 on this person's
+          accounts holds rather than going out with the brackets in it.
+        </p>
+        {/* Its own number, not the desk line: a debtor messaged on a landline is a message nobody
+            receives. Fills {{collector_whatsapp}} on an account this person holds. */}
+        <FormField label="WhatsApp">
+          <input className={inputClass} value={whatsapp}
+            placeholder="Only if it differs from the number above"
+            onChange={(e) => setWhatsapp(e.target.value)} />
+        </FormField>
         {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
