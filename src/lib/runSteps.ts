@@ -64,3 +64,48 @@ export const RUN_STEP_WORDS: Record<RunStepState, { label: string; tone: 'done' 
 export function needsAttention(steps: RunStep[]): RunStep[] {
   return steps.filter((s) => s.state === 'held' || s.state === 'failed')
 }
+
+/**
+ * HOW A STEP IS DRAWN ON THE TRACK — filled, hollow, or crossed off.
+ *
+ * THE FIRM DREW THIS. The sequence is a row of dots joined by a line, and what a dot looks like
+ * is the whole message: "it'll be little things and it'll have different like colours if it's
+ * been successful or not successful."
+ *
+ * FOUR SHAPES AND NOT FIVE. `held` and `failed` are different rows in the database -- one is a
+ * step the runner would not send and the other is a step a provider refused -- and on the track
+ * they are the same dot, because the reading is identical: this one stopped, go and look. The
+ * difference is a sentence in the detail underneath, where there is room to say it.
+ */
+export type StepShape = 'sent' | 'stopped' | 'waiting' | 'cancelled'
+
+export function shapeOf(step: RunStep): StepShape {
+  if (step.state === 'sent') return 'sent'
+  if (step.state === 'held' || step.state === 'failed') return 'stopped'
+  if (step.state === 'cancelled') return 'cancelled'
+  return 'waiting'
+}
+
+/**
+ * WHICH STEP THE TRACK OPENS ON.
+ *
+ * THE ONE SOMEBODY CAME HERE FOR, in the order they would ask for it. Anything stopped comes
+ * first: a held section 129 is the reason the notification sent them to this account, and a
+ * track that opens on the finished handover at the far left makes them hunt for it.
+ *
+ * THEN THE NEXT THING DUE, which answers "what happens next and when" — the question on a run
+ * where nothing is wrong. Only when a sequence is over does it fall back to the LAST thing sent,
+ * because on a finished run the useful fact is what the debtor last received.
+ *
+ * ITS OWN FUNCTION, AND PURE, so the choice can be asserted without a browser. Written inline in
+ * the component it would be a useState initialiser nothing can reach.
+ */
+export function stepInFocus(steps: RunStep[]): string | null {
+  const stopped = steps.find((s) => shapeOf(s) === 'stopped')
+  if (stopped) return stopped.id
+  const next = steps.find((s) => s.state === 'pending')
+  if (next) return next.id
+  /* Last SENT, not last of all: a cancelled tail is not what the debtor received. */
+  const sent = steps.filter((s) => s.state === 'sent')
+  return sent.length > 0 ? sent[sent.length - 1].id : (steps[0]?.id ?? null)
+}

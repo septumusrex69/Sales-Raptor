@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, Check, Clock, Loader2, Minus, Send } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, Clock, Loader2, Minus, Send } from 'lucide-react'
 import { Card, CardHeader } from '../ui/Card'
+import { WorkflowTrack } from './WorkflowTrack'
 import { useAuth } from '../../store/AuthContext'
 import {
   fetchAccountRuns, fetchStartableWorkflows, releaseStep, startWorkflow,
   type AccountRun, type StartableWorkflow,
 } from '../../lib/accountRun.ts'
-import { RUN_STEP_WORDS, needsAttention, type RunStep } from '../../lib/runSteps.ts'
+import { RUN_STEP_WORDS, needsAttention, shapeOf, stepInFocus, type RunStep } from '../../lib/runSteps.ts'
 import { dayLabel } from '../../lib/workflowBuilder.ts'
 import { shortDate } from '../../lib/dateLabels.ts'
 
@@ -161,14 +162,41 @@ function StartWorkflow({ accountId, offer, onStarted }: {
   )
 }
 
+/**
+ * ONE RUN, DRAWN AS THE FIRM DRAWS IT: a row of dots, then the one step that is asking for
+ * something, then everything else behind a drop-down.
+ *
+ * THE FIRM, OF THE LIST THIS REPLACED: "this doesn't work for me... the layout here, it's long."
+ * They were right about why. An eleven-step sequence written out is eleven rows of equal weight,
+ * and an account carries two runs of one — so the section 129 that had stopped was a row in a
+ * twenty-row table, drawn exactly like the nine steps that were simply not due yet.
+ *
+ * SO THE STEPS ARE A TRACK AND THE WORDS ARE ONE AT A TIME. The dots say how far this debtor is
+ * and whether anything has stopped; the detail under them says what to do about whichever dot is
+ * in focus, which opens on the stopped one because that is what somebody came here for. Nothing
+ * is hidden: "you can also like extend it to show every single step in the process" is the
+ * drop-down, and it is the same list as before, moved out of the way rather than removed.
+ *
+ * THE COUNT IS ON THE HEADER, NOT ONLY IN THE COLOUR. Two steps waiting and one dot in focus
+ * would otherwise leave the second one as a gold dot nobody counted — and "2 waiting on you" is
+ * the sentence that makes somebody press the other one.
+ */
 function RunBlock({ run, onSent }: { run: AccountRun; onSent: () => Promise<void> }) {
   const waiting = needsAttention(run.steps)
+  /* What the READER chose, which is null until they choose. The default is worked out from the
+     run every time it is drawn, so sending the step in focus moves the focus on rather than
+     leaving it on something finished. */
+  const [picked, setPicked] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+  const focusId = picked ?? stepInFocus(run.steps)
+  const inFocus = run.steps.find((s) => s.id === focusId) ?? null
+
   return (
     <section>
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
         <p className="text-[13px] font-medium text-slate-800">{run.workflowName}</p>
         <p className="text-[11px] text-slate-400">
-          {/* The date it started, because every day number on the list below counts from it. */}
+          {/* The date it started, because every day number below counts from it. */}
           Started {shortDate(run.startedOn)}
           {run.state === 'left' && run.leftReason && (
             /* WHY IT STOPPED, IN THE FIRM'S WORDS. "left" is how the row got into that state;
@@ -179,27 +207,44 @@ function RunBlock({ run, onSent }: { run: AccountRun; onSent: () => Promise<void
         </p>
       </div>
 
-      {/*
-        WHAT IS WAITING ON A PERSON, FIRST AND IN FULL. Buried in the sequence with everything
-        else, the one line that needs doing reads as a row in a table.
-      */}
       {waiting.length > 0 && (
-        <ul className="mt-2 space-y-1.5">
-          {waiting.map((s) => (
-            <HeldStep key={s.id} step={s} live={run.state === 'running'} onSent={onSent} />
+        <p className="mt-1 text-[11px] font-medium text-[var(--c-gold-deep)]">
+          {waiting.length === 1 ? '1 step is waiting on you' : `${waiting.length} steps are waiting on you`}
+        </p>
+      )}
+
+      <div className="mt-2">
+        <WorkflowTrack steps={run.steps} selectedId={focusId} onSelect={setPicked} />
+      </div>
+
+      {inFocus && (
+        <StepDetail step={inFocus} run={run} live={run.state === 'running'} onSent={onSent} />
+      )}
+
+      {/*
+        EVERY STEP, WHEN SOMEBODY ASKS FOR IT. Shut by default and not removed: "what have we
+        actually sent this person, and when" is a question an attorney asks eighteen months later,
+        and the answer is a list with dates on it.
+      */}
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
+        className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-slate-700">
+        <ChevronDown size={12} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
+        {open ? 'Hide the steps' : `Every step (${run.steps.length})`}
+      </button>
+      {open && (
+        <ul className="mt-1 divide-y divide-slate-100">
+          {run.steps.map((s) => (
+            <StepRow key={s.id} step={s} run={run}
+              selected={s.id === focusId} onSelect={() => setPicked(s.id)} />
           ))}
         </ul>
       )}
-
-      <ul className="mt-2 divide-y divide-slate-100">
-        {run.steps.map((s) => <StepRow key={s.id} step={s} run={run} />)}
-      </ul>
     </section>
   )
 }
 
 /**
- * ONE HELD STEP, AND THE BUTTON THAT SENDS IT.
+ * THE ONE STEP IN FOCUS, AND — WHERE IT IS STOPPED — THE BUTTON THAT SENDS IT.
  *
  * THE LABEL IS THE TRUTH ABOUT WHAT PRESSING IT DOES. On a step that waits for a PERSON -- day 39
  * saying a default has been reported, day 49 saying the file has gone to the attorneys -- the
@@ -221,9 +266,14 @@ function RunBlock({ run, onSent }: { run: AccountRun; onSent: () => Promise<void
  * COMPARED AGAINST THE REASON AS IT WAS BEFORE THE ATTEMPT, never against the refreshed one. By
  * the time the answer is in hand, step.note IS the answer -- so comparing the two always says
  * "the same", including on the attempt that changed it, which is the one worth pointing at.
+ *
+ * IT DRAWS FOR EVERY STEP NOW, NOT ONLY A HELD ONE, because the track put the sentences behind a
+ * dot: a step nobody is waiting on still has to be able to say what it is, when it goes and
+ * whether it has gone. Only the button is conditional.
  */
-function HeldStep({ step, live, onSent }: {
+function StepDetail({ step, run, live, onSent }: {
   step: RunStep
+  run: AccountRun
   /** A run the account has already left sends nothing more, so it offers nothing. */
   live: boolean
   onSent: () => Promise<void>
@@ -235,6 +285,7 @@ function HeldStep({ step, live, onSent }: {
   const [said, setSaid] = useState<
     { kind: 'held'; changed: boolean } | { kind: 'error'; text: string } | null
   >(null)
+  const stopped = shapeOf(step) === 'stopped'
 
   async function release() {
     if (!session?.access_token) return
@@ -256,11 +307,23 @@ function HeldStep({ step, live, onSent }: {
   }
 
   return (
-    <li className="rounded-lg border border-[var(--c-gold-deep)]/30 bg-gold-50 px-3 py-2">
+    <div className={`mt-2 rounded-lg border px-3 py-2 ${stopped
+      ? 'border-[var(--c-gold-deep)]/30 bg-gold-50'
+      : 'border-slate-200 bg-slate-50/60'}`}>
       <p className="text-[12px] font-medium text-navy-950">
         {step.label} &middot; {RUN_STEP_WORDS[step.state].label}
       </p>
-      {step.note && <p className="text-[11px] text-slate-600 mt-0.5 leading-snug">{step.note}</p>}
+      {/*
+        THE DAY NUMBER WITH ITS UNIT, AND THE DATE IT LANDS ON. The same rule as the builder: a
+        number read as calendar days on a business-day chart is a fortnight out, and this is the
+        screen where somebody checks what actually happened against what was meant to.
+      */}
+      <p className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
+        {dayLabel(step.day, run.dayUnit)}
+        {' · '}
+        {step.sentAt ? `sent ${shortDate(step.sentAt.slice(0, 10))}` : `due ${shortDate(step.dueOn)}`}
+      </p>
+      {step.note && <p className="text-[11px] text-slate-600 mt-1 leading-snug">{step.note}</p>}
       {said?.kind === 'held' && (
         <p className="text-[11px] text-slate-500 mt-1 leading-snug">
           {said.changed
@@ -271,7 +334,7 @@ function HeldStep({ step, live, onSent }: {
       {said?.kind === 'error' && (
         <p className="text-[11px] text-negative-700 mt-1 leading-snug">{said.text}</p>
       )}
-      {live && (
+      {stopped && live && (
         <button type="button" onClick={() => { void release() }} disabled={busy}
           className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-[#c9a052]
             bg-white px-2.5 py-1 text-[11px] font-medium text-navy-950
@@ -280,7 +343,7 @@ function HeldStep({ step, live, onSent }: {
           {step.needsRelease ? 'Send it now' : 'Try again'}
         </button>
       )}
-    </li>
+    </div>
   )
 }
 
@@ -298,28 +361,49 @@ const TONES = {
   off: 'text-slate-300',
 } as const
 
-function StepRow({ step, run }: { step: RunStep; run: AccountRun }) {
+/**
+ * ONE ROW OF THE DROP-DOWN — the whole sequence, in order, with its dates.
+ *
+ * IT SELECTS THE STEP RATHER THAN EXPANDING ITSELF. The detail lives in one place above, so a
+ * row here is a way of reaching a dot whose label is too small to be sure of — not a second
+ * place the same sentences are drawn, which is how the panel came to print a held reason twice.
+ */
+function StepRow({ step, run, selected, onSelect }: {
+  step: RunStep
+  run: AccountRun
+  selected: boolean
+  onSelect: () => void
+}) {
   const word = RUN_STEP_WORDS[step.state]
   const Icon = ICONS[word.tone]
   return (
-    <li className="flex items-baseline gap-2.5 py-1.5">
-      <Icon size={12} className={`shrink-0 translate-y-0.5 ${TONES[word.tone]}`} />
-      <span className={`min-w-0 flex-1 text-[12px] leading-snug ${
-        step.state === 'cancelled' ? 'text-slate-400 line-through' : 'text-slate-700'
-      }`}>
-        {step.label}
-      </span>
-      {/*
-        THE DAY NUMBER WITH ITS UNIT, AND THE DATE IT LANDS ON. The same rule as the builder: a
-        number read as calendar days on a business-day chart is a fortnight out, and this is the
-        screen where somebody checks what actually happened against what was meant to.
-      */}
-      <span className="shrink-0 text-[11px] text-slate-400 tabular-nums">
-        {dayLabel(step.day, run.dayUnit)}
-      </span>
-      <span className="shrink-0 w-[68px] text-right text-[11px] text-slate-400 tabular-nums">
-        {shortDate(step.sentAt ? step.sentAt.slice(0, 10) : step.dueOn)}
-      </span>
+    <li>
+      <button type="button" onClick={onSelect}
+        className="flex w-full items-start gap-2 py-1.5 text-left">
+        <Icon size={12} className={`mt-[3px] shrink-0 ${TONES[word.tone]}`} />
+        <span className="min-w-0 flex-1">
+          <span className={`block text-[12px] leading-snug ${
+            step.state === 'cancelled' ? 'text-slate-400 line-through'
+              : selected ? 'font-medium text-navy-950' : 'text-slate-700'
+          }`}>
+            {step.label}
+          </span>
+          {/*
+            THE DAY NUMBER WITH ITS UNIT, AND THE DATE IT LANDS ON, ON THEIR OWN LINE. The same
+            rule as the builder: a number read as calendar days on a business-day chart is a
+            fortnight out, and this is the screen where somebody checks what actually happened
+            against what was meant to.
+
+            UNDER THE NAME RATHER THAN BESIDE IT, because of where this list lives. Three columns
+            in the account's rail left about thirty pixels for the name, and "Section 129 / letter
+            of demand" came out as five lines of one word each with the dates alongside it. Two
+            short lines read; one cramped row does not.
+          */}
+          <span className="block text-[10px] leading-tight text-slate-400 tabular-nums">
+            {dayLabel(step.day, run.dayUnit)} &middot; {shortDate(step.sentAt ? step.sentAt.slice(0, 10) : step.dueOn)}
+          </span>
+        </span>
+      </button>
     </li>
   )
 }
