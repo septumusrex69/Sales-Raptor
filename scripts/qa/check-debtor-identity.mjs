@@ -30,6 +30,7 @@ import {
   looksLikeRegistrationNumber, normaliseRegistrationNumber,
 } from '../../src/lib/debtorIdentity.ts'
 import { isValidSaId } from '../../src/lib/newDebtor.ts'
+import { fullDebtorName } from '../../src/lib/debtorName.ts'
 
 let pass = 0
 const failures = []
@@ -151,7 +152,7 @@ const sql = read('../../supabase/schema.sql')
 ok('a debtor can be marked a person or a company',
   /\[\['individual', 'A person'\], \['company', 'A company'\]\] as const/.test(panels))
 ok('...and the write reaches the column', /row\.debtor_kind = patch\.debtorKind/.test(workspace))
-ok('...and the field it governs is relabelled', /isCompany \? 'Registration Number' : 'ID Number'/.test(panels))
+ok('...and the field it governs is relabelled', /isCompany \? 'Registration number' : 'ID number'/.test(panels))
 /* Suggested, never switched: flipping an account under somebody mid-call would relabel their
    panel and refuse their trace search without anybody asking. */
 ok('a registration number on a person is pointed out', /kindFromIdentity\(account\.debtorIdNumber\)/.test(panels))
@@ -222,18 +223,48 @@ const statement = backfill.replace(/--[^\n]*/g, '')
 ok('...and never on the name alone', !/debtor_surname|debtor_first_name/.test(statement))
 ok('...nor on a company-shaped word in the name', !/\(pty\)|\\bcc\\b/i.test(statement))
 
-/* ---------- the five parts of a name are five things on the screen ---------- */
+/* ---------- the name is one line at rest and five columns when you press it ---------- */
 
 /*
- * THE FIRM: "I imported some of this data, but it shows, for example, the full name Zanele
- * Sithole. It doesn't show the surname and the name, stuff like that."
+ * THE FIRM ASKED FOR THE PARTS AND THEN ASKED FOR THEM BACK TOGETHER.
  *
- * It printed the joined name and, under it, the title, initials and surname joined together with
- * nothing saying what that second line was -- so a blank title and blank initials made it read as
- * the bare surname. Somebody checking an import could not tell which column a value had landed
- * in. THAT IS NOT HYPOTHETICAL ON THIS BOOK: the client sheet we were sent held all 45 of its
- * surnames in "Debtor Initials", and every letter is addressed from the surname.
+ * First: "I imported some of this data, but it shows, for example, the full name Zanele Sithole.
+ * It doesn't show the surname and the name, stuff like that." So the panel drew all five columns.
+ * THAT WAS NOT A COSMETIC REQUEST: the client sheet we were sent held all 45 of its surnames in
+ * "Debtor Initials", and every letter is addressed from the surname, so seeing which field holds
+ * what IS checking an import.
+ *
+ * Then, looking at it in use: "I know previously I told you to separate the surname and the
+ * things, but rather do it like this. It looks better."
+ *
+ * SO WHAT THIS FILE NOW HOLDS IS THAT NOTHING WAS LOST, IT MOVED ONE CLICK. The resting state is
+ * a name; the editor is still one box per column; and INITIALS — the column the import got wrong
+ * — has a field of its own beside the name rather than being folded into it.
  */
+
+/* The string the panel leads with, run rather than described. */
+check('a name is written out in full', fullDebtorName({
+  debtorTitle: 'Mr', debtorFirstName: 'Ryno', debtorSecondName: null, debtorSurname: 'Buitendag',
+}), 'Mr Ryno Buitendag')
+/*
+ * THE TITLE IS PART OF IT. addressAs falls back to the surname alone when there is none, and the
+ * firm found a section 129 of their own opening "Dear buitendag" — so a name with no title in
+ * front of it is a thing somebody should see at rest, not only in the editor.
+ */
+check('...and a missing title is visibly missing', fullDebtorName({
+  debtorFirstName: 'Ryno', debtorSurname: 'Buitendag',
+}), 'Ryno Buitendag')
+check('...with the second given name in its place', fullDebtorName({
+  debtorTitle: 'Mrs', debtorFirstName: 'Anna', debtorSecondName: 'Maria', debtorSurname: 'Venter',
+}), 'Mrs Anna Maria Venter')
+/*
+ * EMPTY RATHER THAN A GAP. A name assembled out of nothing must not come back as a space: a blank
+ * that occupies a line reads as a name somebody half-finished, and the caller cannot tell it from
+ * a real one to say "Not recorded" instead.
+ */
+check('a name with nothing in it is empty, not blank', fullDebtorName({}), '')
+check('...and whitespace counts as nothing', fullDebtorName({ debtorSurname: '   ' }), '')
+
 /*
  * READ OUT OF NameSlot ALONE, not the whole file.
  *
@@ -248,38 +279,45 @@ const nameSlot = panels.slice(
 ok('NameSlot was actually found, or everything below is about an empty string',
   nameSlot.length > 500)
 
-for (const part of ['Title', 'Initials', 'First name', 'Second name', 'Surname']) {
-  ok(`the debtor panel names the ${part.toLowerCase()} as its own field`,
-    new RegExp(`\\['${part}', account\\.debtor`).test(nameSlot))
+ok('the panel leads with the whole name', /fullDebtorName\(account\)/.test(nameSlot))
+ok('...called what it is', /'Business name' : 'Full name'/.test(nameSlot))
+/* A blank is shown as a blank, which is this panel's rule everywhere else. */
+ok('...and an empty one says so rather than disappearing', /\{full \|\| 'Not recorded'\}/.test(nameSlot))
+
+/*
+ * AND THE COLUMNS ARE STILL FOUR BOXES BEHIND IT. This is the half that keeps the firm's FIRST
+ * instruction true: a surname filed under initials is still something a person can see, they
+ * press the name to see it. One box per column, each named.
+ */
+for (const part of ['Title', 'First name', 'Second name', 'Surname']) {
+  ok(`the editor still has a box for the ${part.toLowerCase()}`,
+    new RegExp(`aria-label="${part}"`).test(nameSlot))
 }
-/* A blank is shown as a blank, which is this panel's rule everywhere else -- and a blank title
-   is why the firm found a section 129 of their own opening "Dear buitendag". */
-ok('...and an empty one says so rather than disappearing',
-  /\{value \|\| 'Not recorded'\}/.test(nameSlot))
-/* The old second line was the bug, not a smaller version of it: joined, unlabelled, and shrinking
-   to just the surname whenever the title and initials were empty. */
-ok('...and the unlabelled joined line is gone',
+/*
+ * INITIALS IS ITS OWN SLOT, NOT ONE OF THOSE BOXES — and the two must not both write it. The
+ * same column written from two places is the thing CLAUDE.md is a list of.
+ */
+ok('initials has a field of its own beside the name',
+  /label="Initials" value=\{account\.debtorInitials\}/.test(panels))
+ok('...saving to the same column', /saveDebtorIdentity\(account\.id, \{ initials: v \}\)/.test(panels))
+ok('...and not written from the name editor as well',
+  !/aria-label="Initials"/.test(nameSlot) && !/initials,/.test(nameSlot))
+/* A company has a name, not a person's shape -- the same rule that keeps "Residential address"
+   off a company, and it must keep initials off one too. */
+ok('a company has no initials', /\{!isCompany && \(\s*<TextSlot icon="name" label="Initials"/.test(panels))
+ok('a company is not broken into a title and a surname',
+  /isCompany \? name : fullDebtorName\(account\)/.test(nameSlot))
+
+/* The old unlabelled joined line was the bug, not a smaller version of it: joined, unlabelled,
+   and shrinking to just the surname whenever the title and initials were empty. */
+ok('...and the unlabelled joined line is still gone',
   !/const formal = \[account\.debtorTitle/.test(nameSlot))
+
 /*
- * A COMPANY HAS A NAME, NOT A SURNAME. Five labels over a business would be the same mistake this
- * panel already avoids with "Residential Address" on a company. Matched on the guard TOGETHER
- * with what it guards: `{!isCompany && (` on its own also matches the contact slots below.
+ * AND THE NAME IS IN THE TOP BAR AS WELL, which is where the firm put it: "the full name,
+ * Johannes van der Merwe -- you can put it in the hero section up there."
  */
-ok('a company is not broken into a title and initials',
-  /isCompany \? \(\s*<button onClick=\{\(\) => setEditing\(true\)\}/.test(nameSlot))
-ok('...and its one field is called what it is', /'Business Name' : 'Name'/.test(nameSlot))
-/*
- * AND A PERSON'S NAME IS NOT PRINTED TWICE. THE FIRM: "the full name, Johannes van der Merwe --
- * you can put it in the hero section up there. And then where the debtor's details is, you can
- * just say title, surname, first name, initials."
- *
- * The panel used to print the assembled name and, directly under it, the five parts it was
- * assembled from. The name now lives once, in the top bar beside the page's heading, where it
- * stays on screen while the panel scrolls.
- */
-ok('a person\u2019s panel shows the parts rather than the name again',
-  /\{parts\.map\(\(\[partLabel, value\]\) => \(/.test(nameSlot))
-ok('...and the name is in the top bar instead', /useTitleSlot\(/.test(detail))
+ok('the name is in the top bar', /useTitleSlot\(/.test(detail))
 ok('...with the account number beside it', /account\?\.accountNumber && \(/.test(detail))
 /* A hook cannot live behind an early return: called after the loading branch it would run on
    some renders and not others, which React refuses outright. */

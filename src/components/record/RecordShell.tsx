@@ -237,6 +237,15 @@ export interface RecordTab<T extends string> {
   label: string
   /** Shown beside the label, so you can see there is nothing in there without opening it. */
   count?: number
+  /**
+   * SOMETHING IN THERE IS WAITING ON A PERSON.
+   *
+   * A COUNT CANNOT SAY THIS. "Workflow 2" is two runs on the account and says nothing about
+   * whether either of them has stopped — and the held section 129 that used to shout from the
+   * Overview rail is now behind a tab, so without a mark on the tab itself the move would have
+   * hidden the one thing on this page that is somebody's work.
+   */
+  alert?: boolean
 }
 
 /**
@@ -271,6 +280,10 @@ export function RecordTabs<T extends string>({ tabs, active, onChange, trailing 
             {t.label}
             {t.count !== undefined && (
               <span className="ml-1.5 text-[11px] text-slate-400 tabular-nums">{t.count}</span>
+            )}
+            {t.alert && (
+              <span aria-label="Waiting on you"
+                className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--c-gold)] align-middle" />
             )}
           </button>
         ))}

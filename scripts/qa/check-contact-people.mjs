@@ -108,7 +108,7 @@ ok('...and a next of kin is filed as one', /personRole: asNextOfKin \? 'Next of 
 ok('a company is not given a person\'s slots', /\{!isCompany && \(\s*\n\s*<>\s*\n\s*<ContactSlot icon="mobile"/.test(panels))
 ok('...and says so in the heading', /isCompany \? 'Company details' : 'Debtor details'/.test(panels))
 ok('...calling the number a registration number',
-  /isCompany \? 'Registration Number' : 'ID Number'/.test(panels))
+  /isCompany \? 'Registration number' : 'ID number'/.test(panels))
 /*
  * Thirteen digits is an ID and a registration number is not, so the warning is for people only.
  *

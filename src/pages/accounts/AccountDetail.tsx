@@ -77,6 +77,10 @@ import { dayKey } from '../../lib/collectionPace'
 import { accountMergeValues } from '../../lib/accountMergeValues.ts'
 import { OtherAccountsPanel } from '../../components/collections/OtherAccountsPanel'
 import { WorkflowRunPanel } from '../../components/collections/WorkflowRunPanel'
+import {
+  fetchAccountRuns, fetchStartableWorkflows, type AccountRun, type StartableWorkflow,
+} from '../../lib/accountRun.ts'
+import { needsAttention } from '../../lib/runSteps.ts'
 import { debtorKey, type OtherAccount } from '../../lib/sameDebtor'
 import { fetchOtherAccounts } from '../../lib/accountBook'
 import { useTitleSlot } from '../../components/layout/TitleSlot'
@@ -86,7 +90,7 @@ import {
 } from '../../lib/paymentProgress.ts'
 import { instalmentsDue } from '../../lib/arrangements'
 
-type Tab = 'Overview' | 'Transactions' | 'Emails' | 'Documents'
+type Tab = 'Overview' | 'Workflow' | 'Transactions' | 'Emails' | 'Documents'
 
 /**
  * How the Overview arranges its six panels.
@@ -292,6 +296,42 @@ export function AccountDetail() {
       .catch(() => { /* a status we could not read just leaves the buttons disabled. */ })
     return () => { cancelled = true }
   }, [session])
+
+  /*
+   * THE WORKFLOW'S RUNS, READ HERE RATHER THAN IN THE PANEL THAT DRAWS THEM.
+   *
+   * The panel used to fetch its own, which was right while it lived in the Overview rail and is
+   * wrong now that it is a tab: a tab only mounts when it is opened, so a panel holding its own
+   * rows cannot put a mark on the tab that opens it — and the held section 129 would be a thing
+   * you had to go looking for.
+   *
+   * ITS OWN EFFECT, NOT THE PAGE'S BIG ONE. A workflow list that cannot be read must not stop the
+   * account loading: what a debtor owes is the page, and this is one tab of it.
+   */
+  const [runs, setRuns] = useState<AccountRun[]>([])
+  const [startable, setStartable] = useState<StartableWorkflow[]>([])
+  const [runsError, setRunsError] = useState<string | null>(null)
+
+  const loadRuns = useCallback(async () => {
+    if (!id) return
+    try {
+      const [ran, canStart] = await Promise.all([
+        fetchAccountRuns(id),
+        /* Its own failure again. A list of what can be STARTED that cannot be read must not hide
+           what has already gone to this debtor, which is the more important half. */
+        fetchStartableWorkflows(id).catch(() => [] as StartableWorkflow[]),
+      ])
+      setRuns(ran); setStartable(canStart); setRunsError(null)
+    } catch (e) {
+      setRuns([]); setRunsError(e instanceof Error ? e.message : String(e))
+    }
+  }, [id])
+
+  useEffect(() => { void loadRuns() }, [loadRuns])
+
+  /* Anything on any run that is waiting for a person. Read from the one function that decides
+     it, so the tab's mark and the words over the track can never disagree. */
+  const waitingOnMe = runs.reduce((n, r) => n + needsAttention(r.steps).length, 0)
 
   const reload = useCallback(async () => {
     if (!account) return
@@ -631,11 +671,6 @@ export function AccountDetail() {
     openQueryWithClient: account.clientActionAsk !== null,
   })
   const otherAccountsPanel = <OtherAccountsPanel key="others" rows={otherAccounts} />
-  /* Reads itself -- one account's run is a handful of rows on the collections path, and nothing
-     else on this page needs them. Draws nothing where the account is in no workflow, which is
-     most of the book. */
-  const workflowPanel = <WorkflowRunPanel key="workflow" accountId={account.id} />
-
   const clientLinePanel = (
     <ClientLinePanel
       line={clientLine({
@@ -972,6 +1007,16 @@ export function AccountDetail() {
       <RecordTabs<Tab>
         tabs={[
           { id: 'Overview', label: 'Overview' },
+          /*
+            THE FIRM: "we should make like a separate little tab there for the workflow. Then we
+            have a whole pane there where we can see with the past workflows. And current ones."
+
+            THE COUNT IS RUNS AND THE MARK IS WORK. "Workflow 2" says two sequences have been on
+            this account and nothing about whether either has stopped — so the gold dot carries
+            what the rail used to shout, and the one thing here that is somebody's job is not
+            something you have to open a tab to find.
+          */
+          { id: 'Workflow', label: 'Workflow', count: runs.length, alert: waitingOnMe > 0 },
           { id: 'Transactions', label: 'Transactions', count: statement?.lines.length ?? 0 },
           { id: 'Emails', label: 'Emails', count: emails.length },
           { id: 'Documents', label: 'Documents', count: documents.length },
@@ -984,6 +1029,11 @@ export function AccountDetail() {
           ? <RecordLayoutSwitcher layout={layout} onChange={chooseLayout} />
           : undefined}
       />
+
+      {tab === 'Workflow' && (
+        <WorkflowRunPanel accountId={account.id} runs={runs} offers={startable}
+          error={runsError} onChanged={loadRuns} />
+      )}
 
       {tab === 'Transactions' && (
         <Card><StatementTable statement={statement?.lines ?? []} account={account} breakdown={b} /></Card>
@@ -1082,7 +1132,7 @@ export function AccountDetail() {
            * already gone out by itself, which is worth seeing and never the first thing to act on.
            */
           side={[clientLinePanel, summaryPanel, otherAccountsPanel, promisePanel,
-            disputesPanel, workflowPanel, positionPanel]}
+            disputesPanel, positionPanel]}
         />
       )}
 

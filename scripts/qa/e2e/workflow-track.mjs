@@ -72,7 +72,14 @@ try {
     try { await page.goto(`http://localhost:${PORT}/accounts/${ACCOUNT.id}`, { timeout: 2000 }); break }
     catch { await new Promise((r) => setTimeout(r, 500)) }
   }
-  await page.getByText('Workflow', { exact: true }).first().waitFor({ timeout: 20000 })
+  /*
+     * THE WORKFLOW IS A TAB OF ITS OWN NOW. The firm: "we should make like a separate little tab
+     * there for the workflow. Then we have a whole pane there where we can see with the past
+     * workflows. And current ones." It was a card in the account's two-hundred-pixel rail, which
+     * is what every compromise in the track was paying for.
+     */
+  await page.getByRole('button', { name: /^Workflow/ }).first().click({ timeout: 20000 })
+  await page.waitForTimeout(400)
   await page.waitForTimeout(600)
 
   /* THE RUN, NOT THE CARD. The panel draws both of this account's runs inside one card, so a

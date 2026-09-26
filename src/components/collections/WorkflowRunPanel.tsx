@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, Clock, Loader2, Minus, Send } from 'lucide-react'
 import { Card, CardHeader } from '../ui/Card'
 import { WorkflowTrack } from './WorkflowTrack'
 import { useAuth } from '../../store/AuthContext'
 import {
-  fetchAccountRuns, fetchStartableWorkflows, releaseStep, startWorkflow,
-  type AccountRun, type StartableWorkflow,
+  releaseStep, startWorkflow, type AccountRun, type StartableWorkflow,
 } from '../../lib/accountRun.ts'
 import { RUN_STEP_WORDS, needsAttention, shapeOf, stepInFocus, type RunStep } from '../../lib/runSteps.ts'
 import { dayLabel, dayNumberOn } from '../../lib/workflowBuilder.ts'
@@ -13,74 +12,107 @@ import { shortDate } from '../../lib/dateLabels.ts'
 import { todayIso } from '../../lib/reminderTime.ts'
 
 /**
- * WHAT THE WORKFLOW HAS SENT THIS DEBTOR, AND WHAT IT IS WAITING FOR.
+ * THE WORKFLOW TAB — WHAT IS RUNNING ON THIS DEBTOR, AND WHAT HAS ALREADY RUN.
  *
- * The runner has written to `workflow_run_steps` every morning since the transport went in, and
- * nothing read it back. A held step carried its reason in a column nobody opens; the notification
- * raised beside it said "go to the account", and the account said nothing about it. This is the
- * screen that notification points at.
+ * THE FIRM: "I think we should make like a separate little tab there for the workflow. Then we
+ * have a whole pane there where we can see with the past workflows. And current ones."
  *
- * THE HELD STEPS ARE THE POINT, and they are lifted out of the list rather than left in it. A
- * collector opening an account is not auditing a sequence -- they want to know whether anything
- * is waiting on them, and "nothing on the account fills {{listing_reference}}" is a sentence that
- * says exactly what to go and do. The rest of the run is underneath, because "what have we
- * actually sent this person" is the other question anybody asks here.
+ * IT WAS A CARD IN THE ACCOUNT'S RAIL and the rail is two hundred pixels wide, which is what
+ * every compromise in the track was paying for: dots shrunk to fit, step names dropped, dates
+ * dropped. Given the page it keeps all three — the same component, the same container query,
+ * more room. Nothing about the track changed to move house.
  *
- * NOT SHOWN AT ALL WHERE THERE IS NO RUN, which is most of the book today. An empty "Workflow"
- * card on every account pushes the figures down the page in order to say nothing.
+ * RUNNING FIRST, THEN WHAT IS OVER, under headings that say which is which. A finished handover
+ * and a live section 129 drawn one after another in the same weight is how somebody reads a
+ * sequence that stopped in March as the one they are working today.
+ *
+ * THE HELD STEPS ARE STILL THE POINT. They are gold on the track, counted over it in words, and
+ * marked on the TAB itself — because the one thing on this page that is somebody's work must not
+ * be the thing you have to open a tab to discover.
+ *
+ * IT IS GIVEN ITS ROWS RATHER THAN FETCHING THEM. The tab only mounts when it is opened, and a
+ * panel that fetched its own runs could not put a mark on the tab that opens it. The account
+ * page reads them once, for the badge and for this.
  */
-export function WorkflowRunPanel({ accountId }: { accountId: string }) {
-  const [runs, setRuns] = useState<AccountRun[] | null>(null)
-  /* The workflows a person may start here. Null while loading, [] where there are none -- which
-     is the ordinary case and draws nothing. */
-  const [startable, setStartable] = useState<StartableWorkflow[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    try {
-      const [ran, canStart] = await Promise.all([
-        fetchAccountRuns(accountId),
-        /* Its own failure. A workflow list that cannot be read must not hide the runs that can:
-           what has already gone to this debtor is the more important half of the panel. */
-        fetchStartableWorkflows(accountId).catch(() => [] as StartableWorkflow[]),
-      ])
-      setRuns(ran); setStartable(canStart)
-    } catch (e) {
-      setRuns([]); setError(e instanceof Error ? e.message : String(e))
-    }
-  }, [accountId])
-
-  useEffect(() => { void load() }, [load])
-
-  /* Nothing at all while it loads, and nothing when there is nothing: a card that appears and
-     then vanishes moves everything below it twice.
-
-     THE CARD NOW APPEARS FOR A WORKFLOW THAT HAS NOT STARTED, which it did not before -- an
-     account with no run drew no panel, and the section 129 is a sequence that begins on a file
-     with nothing on it yet. */
-  const offers = startable ?? []
-  if (runs === null || (runs.length === 0 && offers.length === 0 && !error)) return null
+export function WorkflowRunPanel({ accountId, runs, offers, error, onChanged }: {
+  accountId: string
+  runs: AccountRun[]
+  /** The workflows a person may start here. Empty is the ordinary case. */
+  offers: StartableWorkflow[]
+  error: string | null
+  onChanged: () => Promise<void>
+}) {
+  /* Running, and then everything else. `left` and `finished` are different rows and the same
+     fact on this screen: it is over, and nothing more goes out on it. */
+  const live = runs.filter((r) => r.state === 'running')
+  const past = runs.filter((r) => r.state !== 'running')
 
   return (
     <Card>
       <CardHeader title="Workflow"
-        subtitle={runs.length === 1
-          ? 'What has gone out, and what is waiting.'
-          : runs.length === 0
-            ? 'Nothing has started on this account yet.'
-            : `${runs.length} runs on this account.`} />
+        subtitle={runs.length === 0
+          ? 'Nothing has run on this account yet.'
+          : live.length === 0
+            ? `${past.length === 1 ? 'One sequence has' : `${past.length} sequences have`} run on this account.`
+            : `${live.length === 1 ? 'One sequence is' : `${live.length} sequences are`} running on this account.`} />
       {error && <p className="text-xs text-negative-700">{error}</p>}
-      <div className="space-y-4">
-        {runs.map((run) => <RunBlock key={run.id} run={run} onSent={load} />)}
+
+      <div className="space-y-5">
+        {live.length > 0 && (
+          <section>
+            <Heading>Running now</Heading>
+            <div className="mt-3 space-y-5">
+              {live.map((run) => <RunBlock key={run.id} run={run} onSent={onChanged} />)}
+            </div>
+          </section>
+        )}
+
+        {/*
+          WHAT CAN BE STARTED, BETWEEN THE TWO. Above what is over, because starting one is a
+          thing somebody does today; below what is running, because a live sequence is the more
+          important fact on the page.
+        */}
         {offers.length > 0 && (
-          <div className="space-y-2">
-            {offers.map((w) => (
-              <StartWorkflow key={w.versionId} accountId={accountId} offer={w} onStarted={load} />
-            ))}
-          </div>
+          <section>
+            <Heading>{runs.length === 0 ? 'Nothing has started yet' : 'Start another'}</Heading>
+            <div className="mt-3 space-y-2">
+              {offers.map((w) => (
+                <StartWorkflow key={w.versionId} accountId={accountId} offer={w} onStarted={onChanged} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {past.length > 0 && (
+          <section>
+            <Heading>Already run</Heading>
+            <div className="mt-3 space-y-5">
+              {past.map((run) => <RunBlock key={run.id} run={run} onSent={onChanged} />)}
+            </div>
+          </section>
+        )}
+
+        {/*
+          AND THE EMPTY CASE SAID PLAINLY. In the rail this card drew nothing at all where there
+          was no run -- an empty card on every account pushed the figures down in order to say
+          nothing. A TAB somebody opened cannot do that: a blank pane reads as a screen that
+          failed.
+        */}
+        {runs.length === 0 && offers.length === 0 && !error && (
+          <p className="text-sm text-slate-500">
+            No workflow has been started on this account, and there is none published for a person
+            to start. Sequences are written in the Library.
+          </p>
         )}
       </div>
     </Card>
+  )
+}
+
+/** The one heading style these sections share, so "Running now" and "Already run" weigh alike. */
+function Heading({ children }: { children: React.ReactNode }) {
+  return (
+    <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{children}</h4>
   )
 }
 

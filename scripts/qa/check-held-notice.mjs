@@ -72,8 +72,14 @@ ok('the notifier exists', notify.length > 0)
 ok('the step vocabulary can be imported by a check at all', vocabularyLoaded)
 ok('the panel exists', panel.length > 0)
 ok('the account screen draws it', /<WorkflowRunPanel/.test(account))
-ok('...and it is actually in the layout, not merely defined',
-  /side=\{\[[^\]]*workflowPanel/.test(account))
+/*
+ * AND IT IS ACTUALLY REACHABLE, NOT MERELY DEFINED. A panel written, imported and never placed is
+ * the failure this line exists for — it was a rail panel asserted into the layout array, and it is
+ * a tab now, so the assertion follows it: the tab exists in the strip AND something renders the
+ * panel when it is the one selected.
+ */
+ok('...and there is a tab that opens it', /\{ id: 'Workflow', label: 'Workflow'/.test(account))
+ok('...which actually draws the panel', /tab === 'Workflow' && \(\s*<WorkflowRunPanel/.test(account))
 
 /* ------------------------------------------------ once, not every morning */
 
@@ -182,17 +188,40 @@ check('...and what needs a person is the held and the failed',
   ]).map((s) => s.state).sort(), ['failed', 'held'])
 
 /*
- * NOTHING AT ALL WHERE THERE IS NOTHING TO SAY. An empty "Workflow" card on every account in the
- * book pushes the figures down the page in order to say nothing.
+ * IT IS A TAB OF ITS OWN NOW, AND THAT CHANGED WHAT THE EMPTY CASE HAS TO DO.
  *
- * "NOTHING TO SAY" NOW INCLUDES A WORKFLOW WAITING TO BE STARTED. The section 129 sequence begins
- * on a file that has no run on it at all, so a panel that drew only where a run existed was a
- * panel the button could never appear in. Both halves are asserted, because the useful version of
- * this rule is the narrow one: draw for a run, draw for an offer, and otherwise draw nothing.
+ * The firm: "we should make like a separate little tab there for the workflow. Then we have a
+ * whole pane there where we can see with the past workflows. And current ones." In the account's
+ * rail the panel drew NOTHING where there was no run, because an empty card on every account in
+ * the book pushed the figures down the page in order to say nothing. A tab somebody has opened
+ * cannot do that: a blank pane reads as a screen that failed. So the emptiness is now said.
  */
-ok('the panel draws nothing with no run and nothing to start',
-  /if \(runs === null \|\| \(runs\.length === 0 && offers\.length === 0 && !error\)\) return null/.test(panel))
-ok('...and an offer alone is enough to draw it', /const offers = startable \?\? \[\]/.test(panel))
+ok('an account with no workflow at all says so rather than drawing nothing',
+  /No workflow has been started on this account/.test(panel))
+ok('...and says where sequences come from', /written in the Library/.test(panel))
+/* Running first, then what is over, under headings that say which is which -- a finished handover
+   and a live section 129 in the same weight is how somebody works a sequence that stopped in
+   March. */
+ok('what is running is separated from what has run',
+  /runs\.filter\(\(r\) => r\.state === 'running'\)/.test(panel)
+  && /runs\.filter\(\(r\) => r\.state !== 'running'\)/.test(panel))
+ok('...under headings in the firm’s words',
+  /Running now/.test(panel) && /Already run/.test(panel))
+
+/*
+ * AND THE ONE THING THAT IS SOMEBODY'S WORK IS MARKED ON THE TAB.
+ *
+ * This is what the move cost and had to buy back. A held section 129 used to shout from the
+ * Overview rail; behind a tab it is invisible until somebody opens it. A COUNT CANNOT SAY IT --
+ * "Workflow 2" is two runs and nothing about whether either has stopped -- so the tab carries a
+ * mark of its own, fed by the same needsAttention the panel counts with.
+ */
+ok('the account reads the runs itself, so the tab can be marked',
+  /fetchAccountRuns\(id\)/.test(account))
+ok('...counting what waits on a person with the one function that decides it',
+  /needsAttention\(r\.steps\)\.length/.test(account))
+ok('...and marking the tab with it', /alert: waitingOnMe > 0/.test(account))
+ok('...which the tab strip actually draws', /\{t\.alert && \(/.test(read('src/components/record/RecordShell.tsx')))
 
 /* ------------------------------------------------ the firm's words */
 
