@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, Clock, Loader2, Minus, Send } from 'lucide-react'
-import { Card, CardHeader } from '../ui/Card'
+import { AlertTriangle, Check, ChevronDown, Clock, History, Loader2, Minus, Pause, Play, Send, XCircle } from 'lucide-react'
+import { Card } from '../ui/Card'
 import { WorkflowTrack } from './WorkflowTrack'
 import { useAuth } from '../../store/AuthContext'
 import {
@@ -9,6 +9,9 @@ import {
 import { RUN_STEP_WORDS, needsAttention, shapeOf, stepInFocus, type RunStep } from '../../lib/runSteps.ts'
 import { dayLabel, dayNumberOn } from '../../lib/workflowBuilder.ts'
 import { shortDate } from '../../lib/dateLabels.ts'
+import {
+  workflowHeadline, workflowStory, type StoryEvent, type StoryKind, type WorkflowHeadline,
+} from '../../lib/workflowStory.ts'
 import { todayIso } from '../../lib/reminderTime.ts'
 
 /**
@@ -42,78 +45,288 @@ export function WorkflowRunPanel({ accountId, runs, offers, error, onChanged }: 
   error: string | null
   onChanged: () => Promise<void>
 }) {
-  /* Running, and then everything else. `left` and `finished` are different rows and the same
-     fact on this screen: it is over, and nothing more goes out on it. */
-  const live = runs.filter((r) => r.state === 'running')
-  const past = runs.filter((r) => r.state !== 'running')
+  const head = workflowHeadline(runs)
+  const story = workflowStory(runs)
+  const byId = new Map(runs.map((r) => [r.id, r]))
 
   return (
     <Card>
-      <CardHeader title="Workflow"
-        subtitle={runs.length === 0
-          ? 'Nothing has run on this account yet.'
-          : live.length === 0
-            ? `${past.length === 1 ? 'One sequence has' : `${past.length} sequences have`} run on this account.`
-            : `${live.length === 1 ? 'One sequence is' : `${live.length} sequences are`} running on this account.`} />
-      {error && <p className="text-xs text-negative-700">{error}</p>}
-
-      <div className="space-y-5">
-        {live.length > 0 && (
-          <section>
-            <Heading>Running now</Heading>
-            <div className="mt-3 space-y-5">
-              {live.map((run) => <RunBlock key={run.id} run={run} onSent={onChanged} />)}
-            </div>
-          </section>
-        )}
-
-        {/*
-          WHAT CAN BE STARTED, BETWEEN THE TWO. Above what is over, because starting one is a
-          thing somebody does today; below what is running, because a live sequence is the more
-          important fact on the page.
-        */}
-        {offers.length > 0 && (
-          <section>
-            <Heading>{runs.length === 0 ? 'Nothing has started yet' : 'Start another'}</Heading>
-            <div className="mt-3 space-y-2">
-              {offers.map((w) => (
-                <StartWorkflow key={w.versionId} accountId={accountId} offer={w} onStarted={onChanged} />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {past.length > 0 && (
-          <section>
-            <Heading>Already run</Heading>
-            <div className="mt-3 space-y-5">
-              {past.map((run) => <RunBlock key={run.id} run={run} onSent={onChanged} />)}
-            </div>
-          </section>
-        )}
-
-        {/*
-          AND THE EMPTY CASE SAID PLAINLY. In the rail this card drew nothing at all where there
-          was no run -- an empty card on every account pushed the figures down in order to say
-          nothing. A TAB somebody opened cannot do that: a blank pane reads as a screen that
-          failed.
-        */}
-        {runs.length === 0 && offers.length === 0 && !error && (
-          <p className="text-sm text-slate-500">
-            No workflow has been started on this account, and there is none published for a person
-            to start. Sequences are written in the Library.
-          </p>
-        )}
+      <div className="mb-4">
+        <h3 className="text-lg font-semibold text-slate-800">Workflows</h3>
+        {/* The firm's own words off their mockup, and they are the right ones: the pane is read
+            to find out what is happening, not to audit a sequence. */}
+        <p className="mt-0.5 text-[13px] text-slate-500">Follow what is active, paused, and next.</p>
       </div>
+      {error && <p className="mb-3 text-xs text-negative-700">{error}</p>}
+
+      {runs.length > 0 && <Headline head={head} />}
+
+      {/*
+        THE DATED RAIL. One row per thing that HAPPENED, which is not one row per run: a paused
+        section 129 and the promise that paused it are one row each on the day it happened, and
+        the same section 129 is a third row on the day it was let go. workflowStory makes that
+        stream; this draws it.
+      */}
+      {story.length > 0 && (
+        <ol className="mt-5 space-y-4">
+          {story.map((e) => (
+            <StoryRow key={e.id} event={e} run={byId.get(e.runId) ?? null} onSent={onChanged} />
+          ))}
+        </ol>
+      )}
+
+      {/*
+        WHAT CAN BE STARTED, under the story rather than over it. Starting one is a thing somebody
+        does today, and what is already happening to the debtor is the more important fact.
+      */}
+      {offers.length > 0 && (
+        <section className="mt-5 border-t border-slate-100 pt-4">
+          <Heading>{runs.length === 0 ? 'Nothing has started yet' : 'Start another'}</Heading>
+          <div className="mt-3 space-y-2">
+            {offers.map((w) => (
+              <StartWorkflow key={w.versionId} accountId={accountId} offer={w} onStarted={onChanged} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/*
+        AND THE EMPTY CASE SAID PLAINLY. In the account's rail this card drew nothing at all where
+        there was no run -- an empty card on every account pushed the figures down in order to say
+        nothing. A TAB somebody opened cannot do that: a blank pane reads as a screen that failed.
+      */}
+      {runs.length === 0 && offers.length === 0 && !error && (
+        <p className="text-sm text-slate-500">
+          No workflow has been started on this account, and there is none published for a person
+          to start. Sequences are written in the Library.
+        </p>
+      )}
+
+      {story.length > 1 && <PastHistory story={story} />}
     </Card>
   )
 }
 
-/** The one heading style these sections share, so "Running now" and "Already run" weigh alike. */
+/**
+ * THE THREE FACTS ACROSS THE TOP: what is running, what is paused, and what happens next.
+ *
+ * THE FIRM'S MOCKUP LEADS WITH THIS, and it is the right thing to lead with on the case they
+ * drew: an account carrying a paused section 129 AND a live promise at the same time. Reading
+ * down the rail you would find those two facts four inches apart.
+ *
+ * A CELL IS ABSENT RATHER THAN EMPTY. "Paused — none" on the thousands of accounts where nothing
+ * is paused is a column of dashes that teaches people to stop reading the strip.
+ */
+function Headline({ head }: { head: WorkflowHeadline }) {
+  const cells: { icon: typeof Play; tone: string; label: string; title: string; detail: string }[] = []
+  for (const run of head.active) {
+    cells.push({
+      icon: Play, tone: 'text-positive-700 bg-positive-50',
+      label: 'Active', title: run.workflowName, detail: `Started ${shortDate(run.startedOn)}`,
+    })
+  }
+  for (const run of head.paused) {
+    const hold = run.holds.find((h) => !h.endedOn)
+    cells.push({
+      icon: Pause, tone: 'text-[var(--c-gold-deep)] bg-gold-50',
+      label: 'Paused', title: run.workflowName,
+      detail: hold ? `Paused on ${shortDate(hold.startedOn)}` : 'Paused',
+    })
+  }
+  /*
+   * WHAT IS WAITING ON A PERSON BEATS WHAT IS MERELY NEXT. A step the runner will send on the
+   * 5th is not work; a held section 129 is, and it is the reason somebody opened this tab.
+   */
+  if (head.waiting.length > 0) {
+    cells.push({
+      icon: AlertTriangle, tone: 'text-[var(--c-gold-deep)] bg-gold-50',
+      label: 'Waiting on you',
+      title: head.waiting.length === 1 ? head.waiting[0].step.label : `${head.waiting.length} steps`,
+      detail: head.waiting.length === 1
+        ? head.waiting[0].run.workflowName
+        : 'Across this account’s sequences',
+    })
+  } else if (head.next) {
+    cells.push({
+      icon: Clock, tone: 'text-slate-500 bg-slate-100',
+      label: 'Next', title: head.next.step.label,
+      detail: `${shortDate(head.next.step.dueOn)} · ${head.next.run.workflowName}`,
+    })
+  }
+  if (cells.length === 0) return null
+
+  return (
+    <div className="grid gap-3 rounded-xl border border-gold-200 bg-gold-50/40 p-4 @lg/details:grid-cols-3 sm:grid-cols-3">
+      {cells.map((c) => (
+        <div key={`${c.label}:${c.title}`} className="flex items-start gap-2.5 min-w-0">
+          <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full ${c.tone}`}>
+            <c.icon size={14} />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[11px] uppercase tracking-wide text-slate-400">{c.label}</span>
+            <span className="block truncate text-[13px] font-medium text-slate-800">{c.title}</span>
+            <span className="block truncate text-[11px] text-slate-500">{c.detail}</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+const STORY_MARK: Record<StoryKind, { icon: typeof Play; tone: string }> = {
+  started: { icon: Play, tone: 'bg-positive-50 text-positive-700 border-positive-100' },
+  paused: { icon: Pause, tone: 'bg-gold-50 text-[var(--c-gold-deep)] border-gold-200' },
+  resumed: { icon: Play, tone: 'bg-gold-50 text-[var(--c-gold-deep)] border-gold-200' },
+  left: { icon: XCircle, tone: 'bg-negative-50 text-negative-700 border-negative-100' },
+  finished: { icon: Check, tone: 'bg-slate-100 text-slate-500 border-slate-200' },
+}
+
+/**
+ * ONE THING THAT HAPPENED: the date on the left, a mark on the line, the card on the right.
+ *
+ * THE TRACK IS ONLY ON THE CARD THAT IS STILL THE RUN'S LATEST STATE. A section 129 that was
+ * started, paused and resumed is three rows, and drawing all eleven dots three times would be
+ * the wall of steps this pane was redesigned to stop being. The event that IS where the run
+ * stands today carries the track; the others are a line each.
+ */
+function StoryRow({ event, run, onSent }: {
+  event: StoryEvent
+  run: AccountRun | null
+  onSent: () => Promise<void>
+}) {
+  const mark = STORY_MARK[event.kind]
+  const latest = run !== null && isCurrentState(run, event)
+  return (
+    <li className="flex gap-3">
+      <div className="w-[72px] shrink-0 pt-1 text-right sm:w-[86px]">
+        <p className="text-[11px] font-medium text-slate-600 tabular-nums">{shortDate(event.on)}</p>
+        <p className="text-[10px] text-slate-400">{weekdayOf(event.on)}</p>
+      </div>
+      <div className={`mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full border ${mark.tone}`}>
+        <mark.icon size={13} />
+      </div>
+      <div className={`min-w-0 flex-1 rounded-xl border px-4 py-3 ${
+        latest ? 'border-gold-200 bg-gold-50/40' : 'border-slate-200 bg-white'}`}>
+        {/*
+          THE CARD THAT IS THE RUN'S STATE TODAY IS TITLED WITH THE RUN, and the chip says the
+          state; every other card is titled with the EVENT. That is what the firm drew: the live
+          card reads "Section 129 / letter of demand" + Paused, and the card above it reads
+          "Section 129 resumed" with no chip at all.
+
+          Titled by the event, the live card said it twice -- "Section 129 paused" beside a chip
+          reading "Paused".
+        */}
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-[14px] font-semibold text-slate-800">
+            {latest && run ? run.workflowName : event.title}
+          </p>
+          {latest && run && <StateChip state={run.state} />}
+        </div>
+        {event.detail && (
+          <p className="mt-1 text-[12px] leading-snug text-slate-600">{event.detail}</p>
+        )}
+        {latest && run && <RunBlock run={run} onSent={onSent} />}
+      </div>
+    </li>
+  )
+}
+
+/**
+ * Is this event where the run stands today?
+ *
+ * ASKED OF THE EVENT AND THE RUN TOGETHER, because the same run appears several times on the
+ * rail and exactly one of those appearances is the current one. A held run's latest event is the
+ * hold that has not ended; a running one's is its most recent resume, or its start if it has
+ * never been held.
+ */
+export function isCurrentState(run: AccountRun, event: StoryEvent): boolean {
+  if (run.state === 'held') return event.kind === 'paused' && isLatestHoldEvent(run, event)
+  if (run.state === 'left') return event.kind === 'left'
+  if (run.state === 'finished') return event.kind === 'finished'
+  /* running: the last resume, or the start where nothing ever held it. */
+  const ended = run.holds.filter((h) => h.endedOn)
+  if (ended.length === 0) return event.kind === 'started'
+  return event.id === `release:${ended[ended.length - 1].id}`
+}
+
+function isLatestHoldEvent(run: AccountRun, event: StoryEvent): boolean {
+  const open = run.holds.find((h) => !h.endedOn)
+  return open ? event.id === `hold:${open.id}` : false
+}
+
+function StateChip({ state }: { state: string }) {
+  const word = state === 'running' ? 'Active'
+    : state === 'held' ? 'Paused'
+      : state === 'left' ? 'Ended' : 'Finished'
+  const tone = state === 'running' ? 'bg-positive-50 text-positive-700'
+    : state === 'held' ? 'bg-gold-100 text-[var(--c-gold-deep)]'
+      : state === 'left' ? 'bg-negative-50 text-negative-700' : 'bg-slate-100 text-slate-500'
+  return <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${tone}`}>{word}</span>
+}
+
+/**
+ * THE SAME EVENTS AGAIN, ONE LINE EACH, OLDEST FIRST.
+ *
+ * THE FIRM'S MOCKUP HAS BOTH and they are not a duplication: the rail above is where you read
+ * what is happening now, and this is where you read the STORY -- promise captured, sequence
+ * paused, payment missed, sequence resumed -- in the order it happened, which is the order an
+ * attorney would want it in eighteen months from now.
+ *
+ * IT REVERSES THE SAME STREAM rather than building its own, so the two can never disagree about
+ * what happened. Shut by default past a handful, because on a long-running account it is the
+ * longest thing on the page.
+ */
+function PastHistory({ story }: { story: StoryEvent[] }) {
+  const [open, setOpen] = useState(false)
+  const oldest = [...story].reverse()
+  return (
+    <section className="mt-5 rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
+        className="flex w-full items-center gap-2 text-left">
+        <History size={15} className="shrink-0 text-slate-400" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-[13px] font-semibold text-slate-700">Past workflow history</span>
+          <span className="block text-[11px] text-slate-400">
+            {oldest.length} {oldest.length === 1 ? 'event' : 'events'}
+          </span>
+        </span>
+        <ChevronDown size={14}
+          className={`shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <ul className="mt-3 space-y-2">
+          {oldest.map((e) => {
+            const mark = STORY_MARK[e.kind]
+            return (
+              <li key={`h:${e.id}`} className="flex items-start gap-2.5">
+                <span className="w-[74px] shrink-0 text-[11px] text-slate-500 tabular-nums">
+                  {shortDate(e.on)}
+                </span>
+                <mark.icon size={12} className="mt-0.5 shrink-0 text-slate-400" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[12px] text-slate-700">{e.title}</span>
+                  {e.detail && <span className="block text-[11px] leading-snug text-slate-400">{e.detail}</span>}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+/** The one heading style these sections share, so they weigh alike. */
 function Heading({ children }: { children: React.ReactNode }) {
   return (
     <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{children}</h4>
   )
+}
+
+/** "Thu", off a yyyy-mm-dd, without dragging a date library in for three letters. */
+function weekdayOf(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`)
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()] ?? ''
 }
 
 /**
@@ -231,20 +444,21 @@ function RunBlock({ run, onSent }: { run: AccountRun; onSent: () => Promise<void
   const next = run.steps.find((s) => s.state === 'pending') ?? null
 
   return (
-    <section>
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-        <p className="text-[13px] font-medium text-slate-800">{run.workflowName}</p>
-        <p className="text-[11px] text-slate-400">
-          {/* The date it started, because every day number below counts from it. */}
-          Started {shortDate(run.startedOn)}
-          {run.state === 'left' && run.leftReason && (
-            /* WHY IT STOPPED, IN THE FIRM'S WORDS. "left" is how the row got into that state;
-               "A promise to pay was made" is the thing somebody needs to know. */
-            <> &middot; <span className="text-slate-500">{run.leftReason}</span></>
-          )}
-          {run.state === 'finished' && <> &middot; finished</>}
-        </p>
-      </div>
+    <section className="mt-2">
+      {/*
+        NO NAME AND NO STATE HERE ANY MORE. The card this sits inside carries both -- "Section 129
+        resumed", "Paused" -- and printing them again two lines down was the shape the firm sent
+        back: "this email is taking a lot of space". One fact, one place.
+
+        WHAT IT DOES STILL SAY is the day it started, because every day number under the dots
+        counts from it and a track with no anchor is a row of numbers.
+      */}
+      <p className="text-[11px] text-slate-400">
+        Started {shortDate(run.startedOn)}
+        {run.state === 'held' && run.holds.some((h) => !h.endedOn) && (
+          <> &middot; paused since {shortDate(run.holds.find((h) => !h.endedOn)!.startedOn)}</>
+        )}
+      </p>
 
       {waiting.length > 0 && (
         <p className="mt-1 text-[11px] font-medium text-[var(--c-gold-deep)]">
@@ -270,6 +484,12 @@ function RunBlock({ run, onSent }: { run: AccountRun; onSent: () => Promise<void
 
         AND THE NEXT DATE BESIDE IT, which is the other half of the firm's sentence. A dot says
         a step has not gone; this says when it will.
+      */}
+      {/*
+        NOT ON A PAUSED RUN. A held sequence's dates are the dates it had when it stopped, and
+        every one of them moves when it is let go -- so "next: Reminder, 5 Oct" would be quoting a
+        date already known to be wrong, and a "today" caret would be counting a clock that is not
+        running. What happens next on a paused run is the pause ending.
       */}
       {run.state === 'running' && (
         <p className="mt-1.5 text-[11px] text-slate-500 tabular-nums">

@@ -15,15 +15,42 @@ import { supabase } from './supabase'
 import type { DayUnit } from './workflowBuilder.ts'
 import type { RunStep, RunStepState } from './runSteps.ts'
 
+/**
+ * One time a sequence was stopped and let go again.
+ *
+ * HELD IS NOT LEFT. A run that LEFT cancelled everything still to come and will never send
+ * another notice; a run that is HELD cancelled nothing and carries on where it stopped. The
+ * difference is the whole of the firm's pause rule -- a promise broken after six weeks has to
+ * find its sequence where it left it.
+ */
+export interface RunHold {
+  id: string
+  /** promise | dispute. They behave differently: a promise may hold a run once, ever. */
+  cause: string
+  reason: string
+  startedOn: string
+  /** Null while the hold is still on. */
+  endedOn: string | null
+  endedReason: string | null
+}
+
 export interface AccountRun {
   id: string
   workflowName: string
-  /** running | finished | left -- and `leftReason` says which event took it out. */
+  /** running | held | finished | left -- and `leftReason` says which event took it out. */
   state: string
   leftReason: string | null
   startedOn: string
   dayUnit: DayUnit
   steps: RunStep[]
+  /**
+   * Every hold this run has had, oldest first.
+   *
+   * ALL OF THEM, not the live one. The screen's history reads back "paused / payment missed /
+   * resumed" from these, and the clock adds them up -- so a run that has been held twice needs
+   * both, not the last.
+   */
+  holds: RunHold[]
 }
 
 /**
@@ -39,6 +66,7 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
     .select(`
       id, state, left_reason, started_on,
       workflow_versions!inner(day_unit, workflows!inner(name)),
+      workflow_run_holds(id, cause, reason, started_on, ended_on, ended_reason),
       workflow_run_steps(id, due_on, state, note, sent_at,
         workflow_nodes!inner(label, channel, day, needs_release))
     `)
@@ -72,6 +100,18 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
         sentAt: s.sent_at ?? null,
       }))
       .sort((a: RunStep, b: RunStep) => a.dueOn.localeCompare(b.dueOn) || a.day - b.day),
+    /* OLDEST FIRST, which is the order the history reads in and the order the clock adds them
+       up in. PostgREST hands an embed over in no order at all. */
+    holds: (r.workflow_run_holds ?? [])
+      .map((h: any): RunHold => ({
+        id: h.id,
+        cause: h.cause,
+        reason: h.reason,
+        startedOn: h.started_on,
+        endedOn: h.ended_on ?? null,
+        endedReason: h.ended_reason ?? null,
+      }))
+      .sort((a: RunHold, b: RunHold) => a.startedOn.localeCompare(b.startedOn)),
   }))
 }
 

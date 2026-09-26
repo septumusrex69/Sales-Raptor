@@ -236,14 +236,21 @@ check('...and what needs a person is the held and the failed',
 ok('an account with no workflow at all says so rather than drawing nothing',
   /No workflow has been started on this account/.test(panel))
 ok('...and says where sequences come from', /written in the Library/.test(panel))
-/* Running first, then what is over, under headings that say which is which -- a finished handover
-   and a live section 129 in the same weight is how somebody works a sequence that stopped in
-   March. */
-ok('what is running is separated from what has run',
-  /runs\.filter\(\(r\) => r\.state === 'running'\)/.test(panel)
-  && /runs\.filter\(\(r\) => r\.state !== 'running'\)/.test(panel))
-ok('...under headings in the firm’s words',
-  /Running now/.test(panel) && /Already run/.test(panel))
+/*
+ * AND WHAT IS RUNNING IS TOLD APART FROM WHAT IS OVER, which the firm's own pane does with a
+ * chip on each card rather than two headings: "Active", "Paused", "Ended", "Finished". A
+ * finished handover and a live section 129 in the same weight is how somebody works a sequence
+ * that stopped in March.
+ *
+ * THE STRIP ACROSS THE TOP IS THE OTHER HALF, and it is the one that matters on the case the
+ * firm drew -- a paused section 129 and a live promise on one account, four inches apart down
+ * the rail. workflowHeadline sorts them; check-workflow-story runs it.
+ */
+ok('every card says which state its run is in', /function StateChip/.test(panel))
+ok('...in the firm’s words rather than the column’s',
+  /'running' \? 'Active'/.test(panel) && /'held' \? 'Paused'/.test(panel))
+ok('...and the strip leads with active, paused and next',
+  /workflowHeadline\(runs\)/.test(panel) && /Follow what is active, paused, and next/.test(panel))
 
 /*
  * AND THE ONE THING THAT IS SOMEBODY'S WORK IS MARKED ON THE TAB.
