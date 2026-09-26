@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { adminClient, requireCaller } from '../auth.js'
 import { todayInJohannesburg } from './locale.js'
-import { planUnplannedRuns } from './plan.js'
+import { planUnplannedRuns, redateResumedRuns } from './plan.js'
 import { runOneStep, type DueStep } from './step.js'
 
 /**
@@ -80,6 +80,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const planned = await planUnplannedRuns(admin, accountId)
 
   /*
+   * AND MOVE WHAT A PAUSE PUSHED BACK, BEFORE ANYTHING IS PICKED AS DUE.
+   *
+   * ORDER IS THE WHOLE POINT OF THIS LINE. A section 129 paused on day 1 for six weeks resumes
+   * with its reminder still dated five weeks ago, because workflow_resume_account sets the run
+   * running and touches no step -- the working-day calendar it would need lives here, not in the
+   * database. Picked up before re-dating, `due_on <= today` would fire four notices at once on
+   * the morning after a promise broke, which is the opposite of what the pause was for.
+   *
+   * IT IS IDEMPOTENT, so running it on every sweep costs one read and writes nothing where
+   * nothing moved. That is what lets it live here at all: the resume happens in a database
+   * trigger the app never sees, so there is no moment to hook other than the next pass.
+   */
+  const redated = await redateResumedRuns(admin, accountId)
+
+  /*
    * EVERY STEP DUE, AND OVERDUE ONES WITH IT. `due_on <= today` rather than `= today`: a day the
    * cron did not fire, or a step whose account was only reachable later, must not be skipped for
    * ever. The order is oldest first so a sequence that fell behind goes out in the order it was
@@ -146,6 +161,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     /* Runs dated on this pass, so a handover nudge can say "it started" rather than only
        "nothing was due" -- which is what an unplanned run looks like from the outside. */
     planned: planned.filter((p) => p.problem === null).length,
+    /* REPORTED, because a pause moving dates is a thing somebody will be asked about. "Nine
+       steps moved on Tuesday" is the answer to "why did the reminder go out in November". */
+    redated: redated.reduce((n, r) => n + r.moved, 0),
     planProblems: planned.filter((p) => p.problem !== null).map((p) => `${p.runId}: ${p.problem}`),
     ...outcome,
   })
