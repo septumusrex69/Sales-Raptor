@@ -8,8 +8,9 @@ import {
   type AccountRun, type StartableWorkflow,
 } from '../../lib/accountRun.ts'
 import { RUN_STEP_WORDS, needsAttention, shapeOf, stepInFocus, type RunStep } from '../../lib/runSteps.ts'
-import { dayLabel } from '../../lib/workflowBuilder.ts'
+import { dayLabel, dayNumberOn } from '../../lib/workflowBuilder.ts'
 import { shortDate } from '../../lib/dateLabels.ts'
+import { todayIso } from '../../lib/reminderTime.ts'
 
 /**
  * WHAT THE WORKFLOW HAS SENT THIS DEBTOR, AND WHAT IT IS WAITING FOR.
@@ -190,6 +191,12 @@ function RunBlock({ run, onSent }: { run: AccountRun; onSent: () => Promise<void
   const [open, setOpen] = useState(false)
   const focusId = picked ?? stepInFocus(run.steps)
   const inFocus = run.steps.find((s) => s.id === focusId) ?? null
+  /* The firm's day, read once. Not a state: nothing here re-renders at midnight, and a panel
+     open overnight is a panel somebody reloads before they act on it. */
+  const today = todayIso()
+  /* The first thing still to go, which is what "what happens next" means -- a held step is not
+     it, because that one is not waiting for a date, it is waiting for a person. */
+  const next = run.steps.find((s) => s.state === 'pending') ?? null
 
   return (
     <section>
@@ -214,8 +221,34 @@ function RunBlock({ run, onSent }: { run: AccountRun; onSent: () => Promise<void
       )}
 
       <div className="mt-2">
-        <WorkflowTrack steps={run.steps} selectedId={focusId} onSelect={setPicked} />
+        <WorkflowTrack steps={run.steps} selectedId={focusId} onSelect={setPicked}
+          today={run.state === 'running' ? today : null} />
       </div>
+
+      {/*
+        WHERE THE SEQUENCE IS TODAY, IN WORDS. The firm: "it's important to show where in the
+        workflow is it currently and on which day... also to know when it has gone out."
+
+        THE MARK ON THE TRACK SAYS WHERE AND THIS SAYS WHICH DAY, because a day number is the
+        one thing a dot cannot carry -- nothing in the database moves as the day turns, so
+        today's number is arithmetic off the day the run started, in the unit the run counts in.
+        dayNumberOn is landsOn read backwards, which is why it lives beside it: worked out any
+        other way the caret and the caption would eventually disagree about which side of a step
+        today is on.
+
+        AND THE NEXT DATE BESIDE IT, which is the other half of the firm's sentence. A dot says
+        a step has not gone; this says when it will.
+      */}
+      {run.state === 'running' && (
+        <p className="mt-1.5 text-[11px] text-slate-500 tabular-nums">
+          <span className="font-medium text-[var(--c-gold-deep)]">
+            Today &middot; {dayLabel(dayNumberOn(run.startedOn, today, run.dayUnit), run.dayUnit).toLowerCase()}
+          </span>
+          {next
+            ? <> &middot; next: {next.label}, {shortDate(next.dueOn)}</>
+            : <> &middot; nothing left to send</>}
+        </p>
+      )}
 
       {inFocus && (
         <StepDetail step={inFocus} run={run} live={run.state === 'running'} onSent={onSent} />

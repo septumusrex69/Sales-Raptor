@@ -1,5 +1,9 @@
+import { Fragment } from 'react'
 import { Mail, MessageSquare, Phone } from 'lucide-react'
-import { RUN_STEP_WORDS, shapeOf, type RunStep, type StepShape } from '../../lib/runSteps.ts'
+import { shortDate } from '../../lib/dateLabels.ts'
+import {
+  markerIndex, shapeOf, words, type RunStep, type StepShape,
+} from '../../lib/runSteps.ts'
 
 /**
  * THE SEQUENCE AS A ROW OF DOTS, WHICH IS HOW THE FIRM DRAWS IT.
@@ -52,62 +56,115 @@ const LABEL: Record<StepShape, string> = {
   cancelled: 'text-slate-300 line-through',
 }
 
-export function WorkflowTrack({ steps, selectedId, onSelect }: {
+/**
+ * WHERE TODAY FALLS ON THE TRACK.
+ *
+ * AFTER THE LAST STEP THAT HAS COME DUE, which is the reading somebody wants: everything to the
+ * left of the mark should have happened, everything to the right has not. A step due TODAY sits
+ * on the left of it, because today is its day — it is late only tomorrow.
+ *
+ * Returns steps.length where the whole sequence is behind us, and 0 on a run dated into the
+ * future, so the mark is drawn at one end rather than not at all.
+ */
+export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
   steps: RunStep[]
   selectedId: string | null
   onSelect: (id: string) => void
+  /**
+   * The firm's today, or null on a run that is over.
+   *
+   * NULL RATHER THAN A MARK AT THE END. A run the account has left stopped where it stopped, and
+   * a "today" caret past the last dot of a finished sequence says the sequence is still counting
+   * when it is not.
+   */
+  today: string | null
 }) {
+  const at = today === null ? -1 : markerIndex(steps, today)
+  const mark = (key: string) => (
+    <li key={key} className="flex items-start" aria-label="Today">
+      {/*
+        TODAY, AS A LINE THROUGH THE TRACK. The firm: "it's important to show where in the
+        workflow is it currently." Drawn taller than the dots rather than as a dot of its own,
+        because it is not a step and must not be counted as one -- and in gold, which is the
+        colour the rest of Raptor uses for "this is where you are wanted".
+      */}
+      <span aria-hidden className="mx-1 mt-[-2px] h-7 w-[2px] shrink-0 rounded-full bg-[var(--c-gold)]" />
+    </li>
+  )
   return (
-    <div className="@container -mx-1 overflow-x-auto px-1 pb-1">
-      <ol className="flex items-start">
+    <div className="@container -mx-1 px-1 pb-1">
+      {/*
+        IT WRAPS RATHER THAN SCROLLING, AND THAT IS WHAT BOUGHT THE SIZE. The firm: "it could be
+        maybe a little bit bigger those little circles because it's not filling the whole screen."
+        Eleven dots big enough to press do not fit across the account's rail on one line -- at
+        twenty pixels they need two hundred and twenty and the rail gives two hundred -- so a
+        single scrolling line forced them down to sixteen and still left the right-hand end empty.
+        Wrapped, seven sit on a line, the line fills, and the dots are the size of a fingertip.
+
+        EACH STEP CARRIES THE CONNECTOR ON ITS LEFT, so a wrapped line begins with a short stub
+        and reads as a continuation rather than a new sequence -- and no tail hangs off the end.
+      */}
+      <ol className="flex flex-wrap items-start gap-y-2">
         {steps.map((step, i) => {
           const shape = shapeOf(step)
           const Icon = CHANNELS[step.channel ?? '']
           const selected = step.id === selectedId
           return (
-            <li key={step.id} className="flex items-start">
-              {/*
-                THE LINE BETWEEN, drawn by the step on its right rather than as its own element:
-                one connector per gap, and never a stray tail past the last dot. It is coloured by
-                the step BEFORE it, so the filled part of the track is the part that has happened.
-              */}
-              {i > 0 && (
-                <span aria-hidden className={`mt-[7px] h-[2px] w-1 shrink-0 @sm:mt-[9px] @sm:w-5 ${
-                  shapeOf(steps[i - 1]) === 'sent' ? 'bg-[var(--color-positive)]/40' : 'bg-slate-200'
-                }`} />
-              )}
-              <button type="button" onClick={() => onSelect(step.id)}
-                title={`${step.label} — ${RUN_STEP_WORDS[step.state].label}`}
-                aria-label={`${step.label} — ${RUN_STEP_WORDS[step.state].label}`}
-                aria-current={selected ? 'step' : undefined}
-                className="group flex w-4 shrink-0 flex-col items-center gap-0.5 @sm:w-[76px] @sm:gap-1">
-                <span className={`flex h-4 w-4 items-center justify-center rounded-full border-2
-                  @sm:h-5 @sm:w-5 ${DOT[shape]} ${
-                  selected ? 'ring-2 ring-navy-950/25 ring-offset-1' : 'group-hover:ring-2 group-hover:ring-slate-200'
-                }`}>
-                  {/* The channel inside the dot, where there is one -- an email and an SMS on the
-                      same day are two dots that otherwise look identical, and they are the pair
-                      the firm's sequences are built out of. */}
-                  {Icon && <Icon size={8} className={shape === 'waiting' || shape === 'cancelled'
-                    ? 'text-slate-400' : 'text-white'} />}
-                </span>
+            <Fragment key={step.id}>
+              {at === i && mark(`mark-${i}`)}
+              <li className="flex items-start">
                 {/*
-                  THE DAY NUMBER, WHICH IS HOW THE FIRM WRITES THEIR OWN CHART. It is the one
-                  thing short enough to sit under a dot in the rail, and it is what makes the
-                  track a sequence rather than a row of beads -- two dots reading "1 1" are the
-                  email and the SMS that go out together. The unit it counts in is spelled out in
-                  the detail below, where "Business day 39" has room to be written.
+                  THE LINE BETWEEN, drawn by the step on its right rather than as its own element:
+                  one connector per gap, and never a stray tail past the last dot. It is coloured
+                  by the step BEFORE it, so the filled part of the track is the part that has
+                  happened.
                 */}
-                <span className={`text-[9px] leading-none tabular-nums ${LABEL[shape]}`}>
-                  {step.day}
-                </span>
-                <span className={`hidden text-center text-[10px] leading-tight @sm:line-clamp-2 @sm:block ${LABEL[shape]}`}>
-                  {step.label}
-                </span>
-              </button>
-            </li>
+                {i > 0 && (
+                  <span aria-hidden className={`mt-[9px] h-[2px] w-2 shrink-0 @sm:w-5 ${
+                    shapeOf(steps[i - 1]) === 'sent' ? 'bg-[var(--color-positive)]/40' : 'bg-slate-200'
+                  }`} />
+                )}
+                <button type="button" onClick={() => onSelect(step.id)}
+                  title={words(step)}
+                  aria-label={words(step)}
+                  aria-current={selected ? 'step' : undefined}
+                  className="group flex w-5 shrink-0 flex-col items-center gap-0.5 @sm:w-[76px] @sm:gap-1">
+                  <span className={`flex h-5 w-5 items-center justify-center rounded-full border-2
+                    ${DOT[shape]} ${
+                    selected ? 'ring-2 ring-navy-950/25 ring-offset-1' : 'group-hover:ring-2 group-hover:ring-slate-200'
+                  }`}>
+                    {/* The channel inside the dot, where there is one -- an email and an SMS on
+                        the same day are two dots that otherwise look identical, and they are the
+                        pair the firm's sequences are built out of. */}
+                    {Icon && <Icon size={10} className={shape === 'waiting' || shape === 'cancelled'
+                      ? 'text-slate-400' : 'text-white'} />}
+                  </span>
+                  {/*
+                    THE DAY NUMBER, WHICH IS HOW THE FIRM WRITES THEIR OWN CHART. It is the one
+                    thing short enough to sit under a dot in the rail, and it is what makes the
+                    track a sequence rather than a row of beads -- two dots reading "1 1" are the
+                    email and the SMS that go out together. The unit it counts in is spelled out
+                    under the track and again in the detail, where there is room to write it.
+                  */}
+                  <span className={`text-[9px] leading-none tabular-nums ${LABEL[shape]}`}>
+                    {step.day}
+                  </span>
+                  <span className={`hidden text-center text-[10px] leading-tight @sm:line-clamp-2 @sm:block ${LABEL[shape]}`}>
+                    {step.label}
+                  </span>
+                  {/* AND THE DATE, WHERE THERE IS ROOM FOR IT. In the rail there is not -- a date
+                      is twice the width of a dot -- so there it is carried by the dot's own
+                      label, which a long press reads out, and spelled in full in the detail
+                      under the track. */}
+                  <span className="hidden text-center text-[9px] leading-none text-slate-400 tabular-nums @sm:block">
+                    {shortDate(step.sentAt ? step.sentAt.slice(0, 10) : step.dueOn)}
+                  </span>
+                </button>
+              </li>
+            </Fragment>
           )
         })}
+        {at === steps.length && mark('mark-end')}
       </ol>
     </div>
   )

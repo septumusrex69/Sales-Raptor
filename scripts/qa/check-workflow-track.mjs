@@ -20,7 +20,8 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-workflow-track.mjs
  */
 import { readFileSync } from 'node:fs'
-import { shapeOf, stepInFocus } from '../../src/lib/runSteps.ts'
+import { markerIndex, shapeOf, stepInFocus, words } from '../../src/lib/runSteps.ts'
+import { dayNumberOn, landsOn } from '../../src/lib/workflowBuilder.ts'
 
 let pass = 0
 const failures = []
@@ -82,6 +83,69 @@ check('a finished run opens on the last thing sent', stepInFocus([SENT, SENT2, O
    into it would throw two lines below the check that should have reported it. */
 check('a run with no steps chooses nothing', stepInFocus([]), null)
 
+/* ------------------------------------------------ where today is */
+
+/*
+ * THE FIRM, ON THE TRACK: "it's important to show where in the workflow is it currently and on
+ * which day." Two halves, and they are worked out in two places — the caret's position from the
+ * steps' own dates, the day number from the day the run started — so the thing worth holding is
+ * that they cannot disagree about which side of a step today is on.
+ */
+
+const due = (id, d) => step({ id, dueOn: d })
+const WEEK = [due('a', '2026-09-25'), due('b', '2026-09-28'), due('c', '2026-10-05'), due('d', '2026-10-12')]
+
+/* AFTER THE LAST STEP THAT HAS COME DUE: everything left of the mark should have happened. */
+check('the mark sits after what has come due', markerIndex(WEEK, '2026-09-29'), 2)
+/*
+ * A STEP DUE TODAY IS ON THE LEFT OF IT, because today IS its day — it is late only tomorrow,
+ * and a caret drawn in front of a step the runner is sending this morning reads as "not yet".
+ */
+check('...with a step due today behind it', markerIndex(WEEK, '2026-09-25'), 1)
+check('...and a run dated into the future marked at the front', markerIndex(WEEK, '2026-09-01'), 0)
+check('...and a finished sequence marked at the end', markerIndex(WEEK, '2027-01-01'), 4)
+/* Read defensively: a run the planner has not dated yet has no steps to sit between. */
+check('a run with no steps marks at nothing', markerIndex([], '2026-09-25'), 0)
+
+/*
+ * AND TODAY'S DAY NUMBER IS landsOn READ BACKWARDS. Nothing in the database moves as the day
+ * turns, so this is arithmetic — and worked out by any other arithmetic than the one that dated
+ * the steps, the caption and the caret eventually disagree.
+ */
+for (const unit of ['business', 'calendar']) {
+  for (const n of [1, 2, 7, 12, 39, 49]) {
+    check(`${unit} day ${n} reads back as itself`,
+      dayNumberOn('2026-09-25', landsOn('2026-09-25', n, unit), unit), n)
+  }
+}
+/* Business is 1-based and inclusive, so the day a run starts is day 1 — and a Saturday is still
+   the Friday's business day, because no business day has passed. */
+check('the day a run starts is business day 1', dayNumberOn('2026-09-25', '2026-09-25', 'business'), 1)
+check('...and so is the Saturday after it', dayNumberOn('2026-09-25', '2026-09-26', 'business'), 1)
+/* Calendar is 0-based, unchanged, or every workflow already drawn would silently move. */
+check('calendar still counts from zero', dayNumberOn('2026-09-25', '2026-09-25', 'calendar'), 0)
+
+/* Drawn as a line rather than a dot of its own: today is not a step and must not be counted as
+   one, and the track is a row of steps. */
+ok('today is a line through the track, not another dot', /aria-label="Today"/.test(track))
+ok('...in the colour the rest of Raptor asks with', /bg-\[var\(--c-gold\)\]/.test(track))
+/*
+ * AND NOT DRAWN AT ALL ON A RUN THAT IS OVER. A caret past the last dot of a finished sequence
+ * says it is still counting when it is not.
+ */
+ok('a run that is over has no today on it', /today=\{run\.state === 'running' \? today : null\}/.test(panel))
+ok('...which the track reads as no mark', /today === null \? -1/.test(track))
+
+/* THE DAY NUMBER IN WORDS, under the track, because a dot cannot carry one. */
+ok('the panel says which day of the workflow today is',
+  /dayNumberOn\(run\.startedOn, today, run\.dayUnit\)/.test(panel))
+ok('...with the unit it counts in', /dayLabel\(dayNumberOn/.test(panel))
+/* AND WHEN THE NEXT ONE GOES, which is the other half of the firm's sentence: a dot says a step
+   has not gone, this says when it will. A HELD step is not "next" — it waits for a person. */
+ok('...and when the next step goes out', /next: \{next\.label\}, \{shortDate\(next\.dueOn\)\}/.test(panel))
+ok('...which is the next one still waiting for its date',
+  /run\.steps\.find\(\(s\) => s\.state === 'pending'\)/.test(panel))
+
 /* ------------------------------------------------ what the track draws */
 
 /*
@@ -99,8 +163,7 @@ ok('...and one still to come is hollow', /waiting: 'bg-white border-slate-300'/.
  * unreadable to anybody using a screen reader.
  */
 ok('a dot is a button', /<button type="button" onClick=\{\(\) => onSelect\(step\.id\)\}/.test(track))
-ok('...that says its step and its state in words',
-  /aria-label=\{`\$\{step\.label\} — \$\{RUN_STEP_WORDS\[step\.state\]\.label\}`\}/.test(track))
+ok('...that says its step, its state and its date in words', /aria-label=\{words\(step\)\}/.test(track))
 /*
  * THE CONNECTOR IS COLOURED BY THE STEP BEFORE IT, so the filled part of the line is the part
  * that has happened — and it is drawn by the step on its RIGHT, which is what stops a stray tail
@@ -119,6 +182,30 @@ ok('...and the name appears only where there is room for it', /hidden[^"]*@sm:bl
 /* THE DAY NUMBER IS WHAT SURVIVES THE NARROW READING, because it is the one thing short enough
    to sit under a dot — and two dots reading "1 1" are the email and the SMS that go together. */
 ok('the day number is always under the dot', /\{step\.day\}/.test(track))
+
+/*
+ * BIG ENOUGH TO PRESS, AND FILLING THE WIDTH IT IS GIVEN. The firm: "it could be maybe a little
+ * bit bigger those little circles because it's not filling the whole screen." Eleven dots at a
+ * pressable size do not fit across the account's rail on one line, so the row WRAPS — which is
+ * what bought the size. Scrolling was the trade that made them too small and left the right-hand
+ * end of the rail empty at the same time.
+ */
+ok('the track wraps rather than scrolling', /flex flex-wrap items-start/.test(track)
+  && !/overflow-x-auto/.test(track))
+ok('...and a dot is a fingertip, not a bead', /h-5 w-5 items-center justify-center rounded-full/.test(track))
+
+/*
+ * AND A DOT SAYS WHEN IT WENT, read rather than looked at. There is no room for a date under a
+ * dot in the rail — it is twice the width — so the date rides on the label a long press reads
+ * out, and "sent" and "due" are kept apart: printing them in the same words is how a step that
+ * never went comes to look like one that did.
+ */
+check('a dot carries the date it went out',
+  words(step({ state: 'sent', sentAt: '2026-09-25T08:00:00Z' })),
+  'Section 129 — Sent, sent 25 Sep 2026')
+check('...and one that has not gone says what it is due for',
+  words(step({ state: 'pending', dueOn: '2026-10-05' })),
+  'Section 129 — Due, due 5 Oct 2026')
 
 /* ------------------------------------------------ and nothing is hidden */
 

@@ -8,6 +8,7 @@
  *
  * Pure: no database, no clock, no network.
  */
+import { shortDate } from './dateLabels.ts'
 import type { RunStepState } from './workflowRun.ts'
 
 /* Re-exported so the screen side can name a step's state without reaching past this file into
@@ -108,4 +109,28 @@ export function stepInFocus(steps: RunStep[]): string | null {
   /* Last SENT, not last of all: a cancelled tail is not what the debtor received. */
   const sent = steps.filter((s) => s.state === 'sent')
   return sent.length > 0 ? sent[sent.length - 1].id : (steps[0]?.id ?? null)
+}
+
+/**
+ * WHAT A DOT SAYS WHEN IT IS READ RATHER THAN LOOKED AT.
+ *
+ * THE FIRM WANTED TO KNOW WHEN A STEP WENT OUT, and in the rail a dot has no room for a date --
+ * it is twice the width of the dot itself. So the date rides on the dot's own label, which is
+ * both the tooltip and what a screen reader announces, and is spelled out in full in the detail
+ * under the track as soon as the dot is pressed.
+ *
+ * SENT SAYS WHEN IT WENT, everything else says when it is FOR. Those are different facts and
+ * printing them in the same words is how a step that never went comes to look like one that did.
+ */
+export function words(step: RunStep): string {
+  const when = step.sentAt
+    ? `sent ${shortDate(step.sentAt.slice(0, 10))}`
+    : `due ${shortDate(step.dueOn)}`
+  return `${step.label} — ${RUN_STEP_WORDS[step.state].label}, ${when}`
+}
+
+export function markerIndex(steps: RunStep[], today: string): number {
+  let i = 0
+  while (i < steps.length && steps[i].dueOn <= today) i += 1
+  return i
 }

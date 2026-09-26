@@ -13,7 +13,7 @@
  * (an absolute day, a wait after completion, and a next step) and any two of those can disagree
  * silently; this is the same shape with the disagreement made illegal.
  */
-import { addWorkingDays } from './workingDays.js'
+import { addWorkingDays, workingDaysBetween } from './workingDays.js'
 
 /* ---------------------------------------------------------------- what starts it */
 
@@ -282,6 +282,35 @@ export function landsOn(
   /* addWorkingDays(x, 0) is "the next working day on or after x", which is the normalisation. */
   const start = addWorkingDays(from, 0, holidays)
   return addWorkingDays(start, Math.max(0, day - 1), holidays)
+}
+
+/**
+ * WHICH DAY OF THE WORKFLOW A DATE IS — landsOn read backwards.
+ *
+ * THE FIRM, LOOKING AT THE TRACK: "it's important to show where in the workflow is it currently
+ * and on which day." A step's day number is on the step; TODAY's is not on anything, because
+ * nothing in the database moves as the day turns. It is arithmetic off the day the run started,
+ * and it has to be the SAME arithmetic that dated the steps or the marker sits on the wrong side
+ * of one — which is why it lives here, beside landsOn, rather than in the panel that draws it.
+ *
+ * THE INVERSE HOLDS IN BOTH UNITS: dayNumberOn(from, landsOn(from, n)) === n. Business is
+ * 1-based and inclusive, so the day a run starts is day 1 and a Saturday start normalises
+ * forward to the Monday, exactly as landsOn does. Calendar is 0-based, unchanged.
+ *
+ * BEFORE THE RUN STARTED IT IS 0 in calendar days and 1 in business days — the first day of the
+ * chart, because a business run cannot have a day before its first.
+ */
+export function dayNumberOn(
+  from: string, date: string, unit: DayUnit, holidays: Record<string, string> = {},
+): number {
+  if (unit === 'calendar') {
+    const a = Date.UTC(+from.slice(0, 4), +from.slice(5, 7) - 1, +from.slice(8, 10))
+    const b = Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10))
+    return Math.max(0, Math.round((b - a) / 86400000))
+  }
+  const start = addWorkingDays(from, 0, holidays)
+  if (date <= start) return 1
+  return workingDaysBetween(start, date, holidays) + 1
 }
 
 export interface WorkflowVersion {

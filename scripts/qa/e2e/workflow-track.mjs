@@ -103,6 +103,29 @@ try {
    */
   t.ok('...and says how many are waiting altogether', /2 steps are waiting on you/.test(body))
 
+  /* ---------- where today is ---------- */
+
+  /*
+   * THE FIRM: "it's important to show where in the workflow is it currently and on which day...
+   * also to know when it has gone out." The caret's position and the day number are worked out
+   * in two different places — the steps' dates, and arithmetic off the day the run started — and
+   * check-workflow-track holds those against each other. What only a browser can say is that
+   * both of them actually reach the screen.
+   */
+  t.check('today is marked on the track', await card.locator('[aria-label="Today"]').count(), 1)
+  t.ok('...and the panel says which day of the workflow that is', /Today · business day \d+/.test(body))
+  /* AND WHEN THE NEXT ONE GOES. A dot says a step has not gone; this says when it will. */
+  t.ok('...and when the next step goes out', /next: Reminder, 5 Oct 2026/.test(body))
+
+  /*
+   * A DOT SAYS WHEN IT WENT, read rather than looked at — there is no room for a date under a
+   * dot in the account's rail, so it rides on the label a long press reads out. "Sent" and "due"
+   * are kept apart: printed in the same words, a step that never went looks like one that did.
+   */
+  const labels = await dots.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
+  t.ok('a dot that has not gone says what it is due for',
+    labels.some((l) => (l ?? '').includes('Reminder — Due, due 5 Oct 2026')))
+
   /* ---------- it is short ---------- */
 
   /*
