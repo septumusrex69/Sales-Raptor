@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, GitBranch, Loader2, Search, UserCheck, X } from 'lucide-react'
+import { AlertTriangle, Loader2, Search, UserCheck, X } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { inputClass } from '../../components/ui/Modal'
 import { useAppStore } from '../../store/AppStore'
@@ -264,20 +264,18 @@ export function AccountsList() {
   return (
     <div className="space-y-4">
       {/*
-        THE WAY IN TO THE WORKFLOWS, KEPT, but pointing at the library where they now live.
+        NO LINK TO THE WORKFLOWS HERE. The firm, looking at the book: "you can see the workflow
+        thing. I think you can remove it from there. It's already in the library."
 
-        It stays on this page rather than moving wholly to the sidebar because the instinct it
-        serves is real: a workflow IS what happens to an account after it is handed over, and
-        somebody wondering about it is looking at the book. The link follows the thing; it does
-        not become a second place the thing lives.
+        It was kept on this page when the workflows moved, on the argument that a workflow IS
+        what happens to an account and somebody wondering about it is looking at the book. That
+        argument was answered by the two places a workflow is now actually reached from: the
+        Library, where they are written, and the account's own Workflow tab, which says what is
+        running on the file in front of you. A third door into the same room, on a page about
+        twenty-three thousand accounts, is a link that belongs to none of them.
+
+        /accounts/workflows still redirects, for anyone holding the old bookmark.
       */}
-      <div className="flex justify-end">
-        <Link to="/library/workflows"
-          className="text-xs text-slate-500 hover:text-slate-800 inline-flex items-center gap-1.5">
-          <GitBranch size={13} /> Workflows
-        </Link>
-      </div>
-
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {/*
