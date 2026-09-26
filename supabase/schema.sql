@@ -7318,3 +7318,196 @@ revoke all on function public.workflow_hold_account(uuid, text, text, uuid) from
 revoke all on function public.workflow_resume_account(uuid, text) from public;
 grant execute on function public.workflow_hold_account(uuid, text, text, uuid) to authenticated;
 grant execute on function public.workflow_resume_account(uuid, text) to authenticated;
+
+/* ================================================================================
+ * A PROMISE AND A WRITTEN DISPUTE NOW PAUSE A SEQUENCE INSTEAD OF KILLING IT.
+ *
+ * WHAT THIS REPLACES, AND THE FIRM FOUND IT ON A SCREEN: seeding a promise onto a test account
+ * ended the account's Handover run with "A promise to pay was made". That is workflow_exit_account
+ * doing what it has always done -- cancel everything still to come and hand the file back -- to an
+ * event the firm has since said is a pause: "a payment was made, it's not an exit rule, it's kind
+ * of a pause rule... unless we can stop it only once. Not twice."
+ *
+ *   HOLD    a promise (the FIRST one on a run, ever) and a dispute RAISED IN WRITING.
+ *   RESUME  the promise broken; the written dispute closed not_valid or withdrawn.
+ *   EXIT    the written dispute UPHELD -- valid or partly valid. The debt or its amount is wrong,
+ *           so every notice after it would quote a figure the firm has conceded.
+ *
+ * A VERBAL DISPUTE DOES NEITHER. The firm: "I don't think verbal ones hold really anything. They
+ * need to put it in writing. A lot of people say a lot of things."
+ * ================================================================================ */
+
+create or replace function public.workflow_exit_on_promise() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+begin
+  /*
+   * ONLY A LIVE PROMISE HOLDS. A promise recorded as already broken or cancelled is history being
+   * captured, not an undertaking that should stop anything -- which is also how a seed or an
+   * import of past arrangements stays harmless.
+   */
+  if new.status = 'open' then
+    /* workflow_hold_account is the one that knows "once per run, ever": a second promise finds
+       the run has already been held by one and leaves it running. */
+    perform public.workflow_hold_account(
+      new.account_id, 'promise', 'A promise to pay was made', new.id);
+  end if;
+  return new;
+end $$;
+
+comment on function public.workflow_exit_on_promise() is
+  'Kept its name so the trigger on promises_to_pay did not have to be dropped and recreated. It '
+  'no longer exits anything: a promise HOLDS a sequence, and only the first one on a run does.';
+
+/*
+ * AND A BROKEN PROMISE LETS IT GO AGAIN.
+ *
+ * THE FIRM: "if a promise is broken... I think it's normal, just continue with the section 129
+ * process then. Like, listen, remember, I'm going to draw your attention to the section 129 sent
+ * to you on this day, and we're proceeding with the process due to your default of payment."
+ *
+ * ON UPDATE, NOT INSERT, because breaking is something that happens to a promise that already
+ * exists. A promise inserted already broken is history and moves nothing.
+ */
+create or replace function public.workflow_resume_on_promise_broken() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+begin
+  if new.status = 'broken' and coalesce(old.status, '') <> 'broken' then
+    perform public.workflow_resume_account(new.account_id, 'promise_broken');
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists workflow_resume_on_promise_broken on public.promises_to_pay;
+create trigger workflow_resume_on_promise_broken
+  after update of status on public.promises_to_pay
+  for each row execute function public.workflow_resume_on_promise_broken();
+
+create or replace function public.workflow_exit_on_dispute() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+begin
+  /*
+   * IN WRITING, OR IT DOES NOTHING. The firm drew this line and then closed the one gap in it
+   * themselves: asked about a debtor ringing to ask for a document the firm has not got, "they
+   * also have to put that in writing to request that. Then that will be a valid dispute. Because
+   * they might dispute something that's not on the documentation provided."
+   *
+   * So a written request for papers IS a dispute, and there is one rule rather than two.
+   */
+  if new.kind = 'dispute' and new.in_writing then
+    perform public.workflow_hold_account(
+      new.account_id, 'dispute', 'A dispute was raised in writing', new.id);
+  end if;
+  return new;
+end $$;
+
+comment on function public.workflow_exit_on_dispute() is
+  'Kept its name so the trigger on account_queries did not have to be dropped and recreated. A '
+  'dispute in writing HOLDS a sequence; a verbal one is logged and worked while it runs on.';
+
+/*
+ * AND THE ANSWER DECIDES WHICH WAY IT GOES.
+ *
+ *   valid / partly_valid   the debt or its amount is wrong. EXIT.
+ *   not_valid / withdrawn  the objection did not stand. RESUME, and the debtor is told.
+ *
+ * A DISPUTE PUT IN WRITING AFTER IT WAS LOGGED still holds, which is the other half of the same
+ * trigger: a collector ticks "in writing" when the email arrives, and that is the moment the
+ * sequence should stop.
+ */
+create or replace function public.workflow_on_dispute_answered() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+begin
+  if new.kind <> 'dispute' then return new; end if;
+
+  if new.in_writing and not coalesce(old.in_writing, false) and new.status <> 'closed' then
+    perform public.workflow_hold_account(
+      new.account_id, 'dispute', 'A dispute was raised in writing', new.id);
+    return new;
+  end if;
+
+  if new.status = 'closed' and coalesce(old.status, '') <> 'closed' then
+    if new.outcome in ('valid', 'partly_valid') then
+      perform public.workflow_exit_account(
+        new.account_id, 'dispute', 'The dispute was upheld');
+    else
+      perform public.workflow_resume_account(new.account_id, 'dispute_closed');
+    end if;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists workflow_on_dispute_answered on public.account_queries;
+create trigger workflow_on_dispute_answered
+  after update on public.account_queries
+  for each row execute function public.workflow_on_dispute_answered();
+
+revoke all on function public.workflow_resume_on_promise_broken() from public;
+revoke all on function public.workflow_on_dispute_answered() from public;
+
+/*
+ * AN ENDING ENDS A SEQUENCE WHATEVER STATE IT IS IN, INCLUDING A PAUSED ONE.
+ *
+ * FOUND BY DRIVING THE NEW TRIGGERS: a written dispute HOLDS the section 129, and then the
+ * dispute is upheld -- which is an ending, the debt or its amount being wrong. The exit did
+ * nothing, because it only ever looked at runs in state 'running', and this one was 'held'. The
+ * sequence sat paused for ever with its steps intact, waiting for a resume that must never come.
+ *
+ * That is the single most likely ending there is: almost every dispute that ends a sequence ends
+ * one it is already holding, because raising it in writing is what paused it.
+ *
+ * AND THE OPEN HOLD IS CLOSED WITH IT. A hold with no end date on a run that has ended is a
+ * pause that never lifted -- it would read on the screen as a sequence still waiting, and the
+ * clock would go on counting a run that will never send anything again.
+ */
+create or replace function public.workflow_exit_account(
+  p_account_id uuid, p_event text, p_reason text default null
+) returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_reason text;
+  v_cancelled integer := 0;
+begin
+  v_reason := coalesce(p_reason, case p_event
+    when 'promise'      then 'A promise to pay was made'
+    when 'dispute'      then 'A dispute was raised'
+    when 'paid_in_full' then 'The account was paid in full'
+  end);
+  if v_reason is null then
+    raise exception 'Unknown workflow exit event "%". It is one of promise, dispute, paid_in_full.', p_event;
+  end if;
+
+  -- ONLY WHAT HAS NOT HAPPENED YET: a step that was SENT stays sent. It is the record of a notice
+  -- that reached a debtor, and rewriting it would be rewriting the file an attorney reads
+  -- eighteen months later. A HELD step is cancelled with the rest -- it has not gone, and leaving
+  -- it on a collector's list is how a section 129 goes out three weeks after the debtor agreed
+  -- to pay.
+  with live as (
+    select id from public.workflow_runs
+     where account_id = p_account_id and state in ('running', 'held')
+  ), killed as (
+    update public.workflow_run_steps s
+       set state = 'cancelled', note = v_reason
+      from live
+     where s.run_id = live.id and s.state in ('pending', 'held')
+    returning s.id
+  )
+  select count(*) into v_cancelled from killed;
+
+  update public.workflow_run_holds h
+     set ended_on = (now() at time zone 'Africa/Johannesburg')::date,
+         ended_reason = coalesce(h.ended_reason, 'The sequence ended')
+    from public.workflow_runs r
+   where h.run_id = r.id
+     and r.account_id = p_account_id
+     and r.state in ('running', 'held')
+     and h.ended_on is null;
+
+  update public.workflow_runs
+     set state = 'left', left_reason = v_reason, left_at = now()
+   where account_id = p_account_id and state in ('running', 'held');
+
+  return v_cancelled;
+end $$;

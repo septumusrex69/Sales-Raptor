@@ -225,7 +225,13 @@ function StoryRow({ event, run, onSent }: {
         {event.detail && (
           <p className="mt-1 text-[12px] leading-snug text-slate-600">{event.detail}</p>
         )}
-        {latest && run && <RunBlock run={run} onSent={onSent} />}
+        {/*
+        A RUN WITH NO STEPS DRAWS NOTHING BUT ITS CARD. The handover on an imported account is a
+        row with no steps on it -- the sequence was written after the account arrived -- and the
+        block under it read "Every step (0)" over an empty track, which is a control that opens
+        nothing. Said by the card's own title and state instead.
+      */}
+      {latest && run && run.steps.length > 0 && <RunBlock run={run} onSent={onSent} />}
       </div>
     </li>
   )

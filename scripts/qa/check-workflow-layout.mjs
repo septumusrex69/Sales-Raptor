@@ -161,10 +161,22 @@ ok('a step that waits for a person says so on its row', /node\.needsRelease &&/.
 ok('...in the words the collector will act on', /Waits for you/.test(rail))
 
 /*
- * AND WHAT TAKES AN ACCOUNT OUT. Drawn from the runner's own list rather than typed, so a screen
- * promising that a promise stops the sequence is promising what the database actually does.
+ * AND WHAT STOPS AN ACCOUNT, IN BOTH OF THE TWO WAYS IT CAN BE STOPPED.
+ *
+ * THE FIRM'S OWN CORRECTION: "a payment was made, it's not an exit rule, it's kind of a pause
+ * rule." Drawn as one list the chart told a collector that a promise CANCELS a statutory
+ * sequence -- which it did, and no longer does: a promise and a written dispute hold a run, and
+ * only payment in full or a dispute upheld ends one.
+ *
+ * DRAWN FROM THE RUNNER'S OWN LISTS rather than typed, so a screen promising that a promise
+ * pauses the sequence is promising what the database actually does.
  */
-ok('the exit rules are on the chart', /EXIT_EVENTS/.test(rail))
+/* ASSERTED ON THE USE, NOT THE MENTION. Written as /PAUSES_IT/ this passed with the list spliced
+   out of the render, because the import line alone satisfied it -- found by break-testing. */
+ok('what ends a sequence is on the chart', /ENDS_IT\.map/.test(rail))
+ok('...and what merely pauses it, apart from it', /PAUSES_IT\.map/.test(rail))
+ok('...under headings that tell them apart',
+  /Ends the sequence/.test(rail) && /Pauses it/.test(rail))
 ok('...all three of them', Object.keys(EXIT_EVENTS).length === 3)
 ok('...and none of them is retyped into the component',
   Object.values(EXIT_EVENTS).every((label) => !rail.includes(label)))

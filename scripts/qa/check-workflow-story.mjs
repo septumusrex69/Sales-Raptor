@@ -146,7 +146,12 @@ ok('...under the firm’s own heading', /Follow what is active, paused, and next
  * is three rows; eleven dots three times is the wall of steps this redesign exists to stop being.
  * Only the card that IS the run's state today carries the track.
  */
-ok('only the current-state card carries the track', /\{latest && run && <RunBlock/.test(panel))
+ok('only the current-state card carries the track',
+  /\{latest && run && run\.steps\.length > 0 && <RunBlock/.test(panel))
+/* AND A RUN WITH NO STEPS DRAWS NOTHING BUT ITS CARD. The handover on an imported account is a
+   row with no steps -- the sequence was written after the account arrived -- and the block under
+   it read "Every step (0)" over an empty track, which is a control that opens nothing. */
+ok('...and a run with no steps draws no track at all', /run\.steps\.length > 0 && <RunBlock/.test(panel))
 ok('...decided by one function', /function isCurrentState/.test(panel))
 /*
  * AND THAT CARD IS TITLED WITH THE RUN, not the event, or it says the state twice — "Section 129
@@ -158,6 +163,41 @@ ok('the live card is titled with the run and chipped with the state',
 /* Both halves read the SAME stream, reversed, so they cannot disagree about what happened. */
 ok('the history is the same stream, oldest first', /\[\.\.\.story\]\.reverse\(\)/.test(panel))
 ok('...under the firm’s own heading', /Past workflow history/.test(panel))
+
+/* ------------------------------------------------ ends it vs pauses it */
+
+/*
+ * THE FIRM'S OWN CORRECTION, ON THE SCREEN THEY CIRCLED. The Library's exit-rules panel listed
+ * all three events under one heading, which told a collector that a promise CANCELS a statutory
+ * sequence -- which it did, and no longer does. "A payment was made, it's not an exit rule, it's
+ * kind of a pause rule."
+ */
+const store = read('../../src/lib/workflowRun.ts')
+const schedule = read('../../src/components/workflows/WorkflowSchedule.tsx')
+
+ok('the two kinds are named apart', /export const ENDS_IT/.test(store) && /export const PAUSES_IT/.test(store))
+/* PAID IN FULL FIRST, at the firm's asking: "I think that should be the first rule." */
+ok('paid in full leads what ends it', /ENDS_IT: string\[\] = \[\s*\n\s*'The account was paid in full'/.test(store))
+ok('...with a dispute upheld beside it', /A dispute was upheld/.test(store))
+/* ONCE, NOT TWICE, said on the chip itself -- it is the rule a collector most needs to know
+   before recording a second promise. */
+ok('the promise chip says it holds only once', /the first one only/.test(store))
+ok('...and the dispute chip says it must be in writing', /A dispute raised in writing/.test(store))
+
+ok('the panel draws both lists', /ENDS_IT\.map/.test(schedule) && /PAUSES_IT\.map/.test(schedule))
+ok('...under headings that say which is which',
+  /Ends the sequence/.test(schedule) && /Pauses it/.test(schedule))
+/* And says what a pause DOES, because "paused" alone leaves somebody wondering what happened to
+   the dates -- which is the question the firm asked of their own mockup. */
+ok('...saying a pause cancels nothing', /Nothing is cancelled/.test(schedule))
+ok('...and what it does to the dates', /moves on by the working days the pause lasted/.test(schedule))
+/*
+ * EXIT_EVENTS IS STILL THE SET workflow_exit_account ACCEPTS, untouched. It is not the list of
+ * things that end a run any more -- nothing calls it with 'promise' -- but check-workflow-send
+ * compares it against the SQL in both directions, and narrowing it here would break a comparison
+ * that is still true and still worth having.
+ */
+ok('the runner’s accepted-name list is left alone', /export const EXIT_EVENTS/.test(store))
 
 /* ------------------------------------------------------------------ */
 

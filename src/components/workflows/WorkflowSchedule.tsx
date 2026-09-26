@@ -4,7 +4,7 @@ import {
   CHANNELS, DAY_UNITS, NODE_KINDS, dayLabel, dayZeroLabel, landsOn, nodesOfPhase, orderedNodes,
   triggerMeta, type Workflow, type WorkflowNode, type WorkflowProblem,
 } from '../../lib/workflowBuilder.ts'
-import { EXIT_EVENTS } from '../../lib/workflowRun.ts'
+import { ENDS_IT, PAUSES_IT } from '../../lib/workflowRun.ts'
 import { shortDate } from '../../lib/dateLabels.ts'
 
 /**
@@ -105,18 +105,37 @@ export function WorkflowSchedule({
       </div>
 
       {/*
-        WHAT TAKES AN ACCOUNT OUT, at the bottom, because it is true of every row above it.
-        Drawn from EXIT_EVENTS rather than typed -- the runner's own list, so a screen promising
-        that a promise stops the sequence is promising what the database actually does.
+        WHAT STOPS A SEQUENCE, AND IN WHICH OF THE TWO WAYS. At the bottom, because it is true of
+        every row above it.
+
+        TWO LISTS RATHER THAN ONE, which is the firm's own correction: "a payment was made, it's
+        not an exit rule, it's kind of a pause rule." Drawn one list, the screen told a collector
+        that a promise cancels a statutory sequence -- which it did, and no longer does. What ends
+        a run cancels everything still to come and cannot be undone; what pauses one cancels
+        nothing and carries on where it stopped.
       */}
       <div className="rounded-xl bg-[var(--tint-steel-alt)] px-4 py-3.5">
-        <p className="text-[13px] font-semibold text-slate-800">Exit rules</p>
+        <p className="text-[13px] font-semibold text-slate-800">Ends the sequence</p>
         <p className="text-[12px] text-slate-500 mt-0.5">
-          Any of these stops the sequence. What has already gone stays sent; what has not is
-          cancelled, and the account goes back to the collector.
+          What has already gone stays sent; what has not is cancelled, and the account goes back
+          to the collector. Nothing more is ever sent on it.
         </p>
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
-          {Object.values(EXIT_EVENTS).map((label) => (
+          {ENDS_IT.map((label) => (
+            <span key={label}
+              className="rounded-lg bg-white px-2.5 py-1 text-[12px] text-slate-600 shadow-sm">
+              {label}
+            </span>
+          ))}
+        </div>
+
+        <p className="mt-4 text-[13px] font-semibold text-slate-800">Pauses it</p>
+        <p className="text-[12px] text-slate-500 mt-0.5">
+          Nothing is cancelled. When the pause lifts the sequence carries on where it stopped, and
+          everything still to come moves on by the working days the pause lasted.
+        </p>
+        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+          {PAUSES_IT.map((label) => (
             <span key={label}
               className="rounded-lg bg-white px-2.5 py-1 text-[12px] text-slate-600 shadow-sm">
               {label}

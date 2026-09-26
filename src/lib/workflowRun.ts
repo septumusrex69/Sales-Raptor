@@ -127,6 +127,31 @@ export const EXIT_EVENTS: Record<ExitEvent, string> = {
   paid_in_full: 'The account was paid in full',
 }
 
+/**
+ * WHAT ENDS A SEQUENCE, AND WHAT MERELY PAUSES IT — the firm's own split, in the order they put
+ * them in.
+ *
+ * EXIT_EVENTS ABOVE IS NOT THIS LIST. It is the set of names workflow_exit_account ACCEPTS, and
+ * it has to stay that set or check-workflow-send's two-way comparison stops meaning anything.
+ * What changed is which of them anything still calls: the promise and dispute triggers now hold a
+ * run rather than ending it, and the only thing that reaches the exit through a dispute is the
+ * dispute being UPHELD.
+ *
+ * THE FIRM: "the account was paid in full, I agree with that, I think that should be the first
+ * rule... a payment was made, it's not an exit rule, it's kind of a pause rule." And on stopping
+ * for every promise: "if we stop it for all of that time, then that's a problem. Unless we can
+ * stop it only once. Not twice."
+ */
+export const ENDS_IT: string[] = [
+  'The account was paid in full',
+  'A dispute was upheld',
+]
+
+export const PAUSES_IT: string[] = [
+  'A promise to pay — the first one only',
+  'A dispute raised in writing',
+]
+
 export interface Cancellation {
   /** The steps to cancel: everything not already done. */
   cancel: string[]
