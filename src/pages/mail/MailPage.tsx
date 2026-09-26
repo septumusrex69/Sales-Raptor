@@ -192,6 +192,15 @@ export function MailPage() {
   /** The message being settled — the box that also offers to settle the sender for good. */
   const [settling, setSettling] = useState<MailItem | null>(null)
   const [senderRules, setSenderRules] = useState<SenderRule[]>([])
+  /*
+   * The senders already set to "always junk", held so the box that offers to make that rule can
+   * say when it is already there rather than offering to make it twice. Loaded beside the
+   * no-record rules, off the same version counter, because it is the same question asked of the
+   * same table.
+   */
+  const [alwaysJunked, setAlwaysJunked] = useState<Set<string>>(new Set())
+  /** The messages somebody has pressed Junk on, while the box asks how far it should go. */
+  const [junking, setJunking] = useState<MailItem[] | null>(null)
   const [emptying, setEmptying] = useState(false)
   /*
    * WHAT IS IN THE BOX, AND WHAT HAS BEEN ASKED OF THE DATABASE. They are not the same thing
@@ -482,6 +491,11 @@ export function MailPage() {
     void fetchSenderRules(currentUser.id)
       .then((list) => { if (!cancelled) setSenderRules(list) })
       .catch(() => {})
+    /* And the other standing decision: whose mail always goes to Junk. Same table, same counter.
+       A list we could not read costs a sentence on the junk box, not the mailbox. */
+    void fetchSenderRules(currentUser.id, 'always_junk')
+      .then((list) => { if (!cancelled) setAlwaysJunked(new Set(list.map((r) => r.pattern))) })
+      .catch(() => {})
     return () => { cancelled = true }
   }, [currentUser, blocksVersion])
 
@@ -703,40 +717,21 @@ export function MailPage() {
    * debtor writing from a free address lands in Junk often enough that a one-way move would be
    * a trap.
    */
-  /*
-   * WHAT THE STANDING RULE NOW DOES, said at the moment it is made.
-   *
-   * A rule nobody is told about is a rule that surprises somebody in a fortnight when a sender's
-   * mail is "missing". And where the rule was NOT made -- an address on a debtor's file -- saying
-   * so is the whole point: it is the case where somebody would otherwise assume it had been.
-   */
-  function junkRuleNote(junk: boolean, remembered: string[], kept: string[]): string {
-    const parts: string[] = []
-    if (junk && remembered.length > 0) {
-      parts.push(remembered.length === 1
-        ? ` Anything new from ${remembered[0]} will go straight to junk.`
-        : ` Anything new from those ${remembered.length} senders will go straight to junk.`)
-    }
-    if (junk && kept.length > 0) {
-      parts.push(kept.length === 1
-        ? ` ${kept[0]} is on a debtor's file, so their future mail is left in your inbox.`
-        : ` ${kept.length} of them are on debtors' files, so their future mail is left in your inbox.`)
-    }
-    if (!junk && remembered.length === 0 && kept.length === 0) parts.push('')
-    return parts.join('')
-  }
-
   async function junkChosen(junk: boolean) {
     const ids = [...chosen]
     if (ids.length === 0) return
+    if (junk) { setJunking(items.filter((m) => chosen.has(m.id))); return }
     try {
-      const { moved, remembered, kept } = await setJunk(ids, junk, currentUser?.id ?? null)
+      /* Un-junking only: the junking direction went to the box above and never reaches here. */
+      const { moved } = await setJunk(ids, junk, currentUser?.id ?? null)
       const refused = ids.length - moved
       setStatus(
-        `${moved} ${moved === 1 ? 'email' : 'emails'} ${junk ? 'moved to junk' : 'moved back to your mailbox'}.`
+        `${moved} ${moved === 1 ? 'email' : 'emails'} moved back to your mailbox.`
         + (refused > 0 ? ` ${refused} left alone — already matched to a record.` : '')
-        + (junk ? ' Nothing deleted; delete all junk when you want it gone.' : '')
-        + junkRuleNote(junk, remembered, kept),
+        /* AND THE STANDING RULE IS GONE WITH IT, said plainly. "Not junk" that left the rule
+           standing would send the sender's next message straight back, and the undo would look
+           broken with nothing on screen explaining it. */
+        + ' Anything new from them lands in your mailbox again.',
       )
       await afterBulk()
     } catch (e) {
@@ -746,13 +741,12 @@ export function MailPage() {
 
   /** The same, for the one message somebody has open. */
   async function junkOne(mail: MailItem, junk: boolean) {
+    if (junk) { setJunking([mail]); setOpen(null); return }
     try {
-      const { moved, remembered, kept } = await setJunk([mail.id], junk, currentUser?.id ?? null)
+      const { moved } = await setJunk([mail.id], junk, currentUser?.id ?? null)
       setStatus(moved === 0
         ? 'That email is matched to a record, so it stays out of junk.'
-        : (junk
-          ? 'Moved to junk. Nothing deleted — it is under the Junk tab.'
-          : 'Moved back to your mailbox.') + junkRuleNote(junk, remembered, kept))
+        : 'Moved back to your mailbox. Anything new from them lands there again.')
       setOpen(null)
       await load(page)
     } catch (e) {
@@ -1504,6 +1498,24 @@ export function MailPage() {
           onClose={() => setSettling(null)}
           onDone={(message) => {
             setSettling(null); setStatus(message); setBlocksVersion((v) => v + 1); void load(0)
+          }}
+        />
+      )}
+
+      {junking && junking.length > 0 && (
+        <JunkModal
+          mails={junking}
+          userId={currentUser?.id ?? null}
+          alwaysJunked={alwaysJunked}
+          onClose={() => setJunking(null)}
+          onDone={(message) => {
+            setJunking(null)
+            setStatus(message)
+            /* A rule may have been made, so the standing-decision lists are re-read off the same
+               counter the blocklist uses -- and the page reloads, because what was junked has
+               left whichever tab it was on. */
+            setBlocksVersion((v) => v + 1)
+            void afterBulk()
           }}
         />
       )}
@@ -3439,6 +3451,169 @@ function NoRecordModal({ mail, userId, rule, onClose, onDone }: {
           <Loader2 size={12} className="animate-spin" /> Settling&hellip;
         </p>
       )}
+    </Modal>
+  )
+}
+
+/**
+ * MOVING TO JUNK ASKS WHETHER IT IS ABOUT THE MESSAGE OR ABOUT THE SENDER.
+ *
+ * THE FIRM: "if I say move to junk, can it also ask me if I can move and always send those things
+ * to junk?" It always made the standing rule and told you afterwards. That is right for the
+ * sender you are junking BECAUSE they are a nuisance, and wrong for the other kind of junk move
+ * the firm described in the same breath: "sometimes I get like stuff that I want to see but it's
+ * junk, so I don't want to see it in my main inbox — I'll get to it later — it's cluttering my
+ * main mailbox because it's actually junk but it's kind of semi-important, otherwise I would have
+ * blocked it."
+ *
+ * WHICH IS THE WHOLE SHAPE OF JUNK IN RAPTOR, AND WORTH SAYING ON THE BOX. Junk is a SHELF, not a
+ * bin and not a block: the message still arrives, keeps its row, stays searchable and can be
+ * rescued. That is exactly the thing the firm wants for semi-important mail — out of the way,
+ * still there. A block is the other decision and lives on its own button, because a blocked
+ * sender never becomes a row at all and nobody sees it go missing.
+ *
+ * TWO CHOICES AND NOT A TICK BOX, in the shape of the block box beside it: a tick box defaulted
+ * one way is how the silent rule happened in the first place, and the two answers here are
+ * genuinely different decisions rather than one with an option on it.
+ *
+ * AND WHERE A RULE WOULD NOT BE MADE, IT IS SAID BEFORE THE PRESS. An address on a debtor's file
+ * is never given a standing junk rule — a rule that quietly sent a debtor's every future reply to
+ * Junk could lose an arrangement, and junk is exactly where a message goes missing. That refusal
+ * used to arrive in the status line after the fact.
+ */
+function JunkModal({ mails, userId, alwaysJunked, onClose, onDone }: {
+  /** The messages being shelved: one from the reading pane, or a selection from the list. */
+  mails: MailItem[]
+  userId: string | null
+  /** The senders that already have a standing rule, so the box does not offer to make it twice. */
+  alwaysJunked: Set<string>
+  onClose: () => void
+  onDone: (message: string) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  /* The distinct senders, worked out the same way the writer does it: lowercased, blanks out. */
+  const senders = [...new Set(mails
+    .map((m) => (m.fromAddress ?? '').trim().toLowerCase())
+    .filter((a) => a.includes('@')))]
+  const one = senders.length === 1 ? senders[0] : null
+  const already = senders.filter((a) => alwaysJunked.has(a))
+  const newRule = senders.filter((a) => !alwaysJunked.has(a))
+
+  /*
+   * Whether a rule COULD be made, asked when the box opens rather than after the click — the same
+   * correction the block box already carries. Undefined while it is being looked up, so the
+   * second choice is not offered as available and then refused.
+   */
+  const [onFile, setOnFile] = useState<string[] | undefined>(undefined)
+  useEffect(() => {
+    let alive = true
+    void Promise.all(senders.map(async (a) => (await debtorFileFor(a) ? a : null)))
+      .then((found) => { if (alive) setOnFile(found.filter((a): a is string => a !== null)) })
+      /* A lookup that fails must not turn the guard off: rememberJunkSenders checks again and
+         keeps the address, so the worst case is the old wording, not a wrong rule. */
+      .catch(() => { if (alive) setOnFile([]) })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [senders.join(',')])
+
+  const blockedByFile = (onFile ?? []).length > 0
+  const ruleWouldDoNothing = newRule.length === 0 || (onFile !== undefined && newRule.every((a) => onFile.includes(a)))
+
+  async function go(remember: boolean) {
+    if (!userId && remember) return
+    setBusy(true); setError(null)
+    try {
+      const ids = mails.map((m) => m.id)
+      const { moved, remembered, kept } = await setJunk(ids, true, userId, remember)
+      const refused = ids.length - moved
+      onDone(
+        `${moved} ${moved === 1 ? 'email' : 'emails'} moved to junk.`
+        + (refused > 0 ? ` ${refused} left alone — already matched to a record.` : '')
+        + ' Nothing deleted; delete all junk when you want it gone.'
+        + (remembered.length > 0
+          ? (remembered.length === 1
+            ? ` Anything new from ${remembered[0]} will go straight to junk.`
+            : ` Anything new from those ${remembered.length} senders will go straight to junk.`)
+          : '')
+        + (kept.length > 0
+          ? (kept.length === 1
+            ? ` ${kept[0]} is on a debtor's file, so their future mail is left in your inbox.`
+            : ` ${kept.length} of them are on debtors' files, so their future mail is left in your inbox.`)
+          : ''),
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title={mails.length === 1 ? 'Move to junk' : `Move ${mails.length} emails to junk`}
+      onClose={onClose} width={480}>
+      {blockedByFile && (
+        <div className="rounded-lg border border-gold-200 bg-gold-50 p-3.5 mb-4">
+          <p className="text-sm text-navy-950 flex items-start gap-1.5">
+            <AlertTriangle size={14} className="shrink-0 mt-0.5 text-gold-600" />
+            <span>
+              {(onFile ?? []).length === 1
+                ? <><span className="font-medium">{(onFile ?? [])[0]}</span> is on a debtor&rsquo;s file.</>
+                : <><span className="font-medium">{(onFile ?? []).length} of these senders</span> are on debtors&rsquo; files.</>}
+            </span>
+          </p>
+          <p className="text-xs text-slate-500 mt-2">
+            The message still moves, but no standing rule is made for them &mdash; a debtor&rsquo;s
+            reply arriving straight into Junk is how an arrangement goes missing.
+          </p>
+        </div>
+      )}
+
+      <p className="text-sm text-slate-500">
+        Junk is a shelf, not a bin. The message stays in Raptor, stays searchable and can be
+        pulled back out &mdash; it just leaves your main mailbox.
+      </p>
+
+      <div className="mt-4 space-y-2">
+        <button disabled={busy} onClick={() => void go(false)}
+          className="w-full text-left px-3.5 py-3 rounded-lg border border-slate-200 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40">
+          <span className="block text-sm font-medium text-slate-800">
+            {mails.length === 1 ? 'Just this message' : 'Just these messages'}
+          </span>
+          <span className="block text-xs text-slate-400 mt-0.5">
+            Their next one still lands in your mailbox.
+          </span>
+        </button>
+
+        <button disabled={busy || !userId || ruleWouldDoNothing || onFile === undefined}
+          onClick={() => void go(true)}
+          className="w-full text-left px-3.5 py-3 rounded-lg border border-slate-200 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-transparent">
+          <span className="block text-sm font-medium text-slate-800">
+            {one ? <>Always junk {one}</> : <>Always junk these {senders.length} senders</>}
+          </span>
+          <span className="block text-xs text-slate-400 mt-0.5 truncate">
+            {already.length > 0 && newRule.length === 0
+              ? 'Already set for them — nothing to add.'
+              : 'Everything they send goes straight to Junk from now on. Still arrives, still searchable.'}
+          </span>
+        </button>
+      </div>
+
+      {error && (
+        <p className="text-sm text-negative-700 mt-3 flex items-start gap-1.5">
+          <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+          {error}
+        </p>
+      )}
+
+      {/*
+        THE THIRD DECISION, NAMED SO NOBODY REACHES FOR JUNK TO GET IT. The firm drew the line
+        themselves: semi-important mail goes to Junk, "otherwise I would have blocked it".
+      */}
+      <p className="text-xs text-slate-400 mt-4">
+        Neither of these blocks anyone. To stop their mail reaching Raptor at all, open the
+        message and use Block sender.
+      </p>
     </Modal>
   )
 }

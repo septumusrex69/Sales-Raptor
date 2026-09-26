@@ -692,6 +692,36 @@ try {
    */
   t.check('...and no way to block them all at once',
     await page.getByRole('button', { name: /Block sender/ }).count(), 0)
+
+  /* ---------- junking asks whether it is about the message or the sender ---------- */
+
+  /*
+   * THE FIRM: "if I say move to junk, can it also ask me if I can move and always send those
+   * things to junk?" It always made the standing rule, silently, and said so afterwards — which
+   * is right for a nuisance sender and wrong for the other kind of junk move the firm described
+   * in the same breath: "sometimes I get like stuff that I want to see but it's junk... it's kind
+   * of semi-important, otherwise I would have blocked it."
+   *
+   * ASKED HERE because the question is whether the box REACHES THE SCREEN. A source check can say
+   * a modal is written and rendered and still pass on a button that moves the mail without ever
+   * opening it — which is exactly what the button did before.
+   */
+  await page.getByRole('button', { name: 'Move to junk' }).click()
+  await page.waitForTimeout(500)
+  const junkBox = await page.locator('body').innerText()
+  t.ok('moving to junk asks first', /Move \d+ emails to junk|Move to junk/.test(junkBox))
+  t.ok('...offering the messages on their own', /Just these messages|Just this message/.test(junkBox))
+  t.ok('...and the standing rule as the other answer', /Always junk/.test(junkBox))
+  /* WHAT JUNK IS, on the box, because that is what makes the choice legible: a shelf the firm
+     puts semi-important mail on, not a bin and not a block. */
+  t.ok('...saying junk is a shelf rather than a bin', /Junk is a shelf, not a bin/.test(junkBox))
+  /* AND THAT NEITHER ANSWER BLOCKS ANYBODY. The firm drew that line themselves — "otherwise I
+     would have blocked it" — so nobody should reach for junk to get a block, or the reverse. */
+  t.ok('...and that neither of them blocks anybody', /Neither of these blocks anyone/.test(junkBox))
+  /* A way out that does not junk anything. */
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+  t.ok('...with a way out', !/Neither of these blocks anyone/.test(await page.locator('body').innerText()))
   await page.getByRole('button', { name: 'Done' }).click()
   await page.waitForTimeout(500)
   await page.getByRole('button', { name: 'List' }).click()

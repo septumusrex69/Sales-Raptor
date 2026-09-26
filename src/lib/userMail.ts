@@ -1340,15 +1340,35 @@ export async function linkMailToRecord(input: {
  * hiding it in Junk would take it out of All while leaving it on the account — two places
  * disagreeing about the same message, which is the thing the shared read state was built to
  * stop.
+ *
+ * AND MOVING ONE MESSAGE IS NOT AUTOMATICALLY A VERDICT ON ITS SENDER ANY MORE. See `remember`.
  */
 export async function setJunk(
   ids: string[],
   junk: boolean,
   /*
-   * Whose mailbox. Given, the sender is remembered -- see junkSendersOf below. Optional so a
-   * caller with no session still moves the message; the standing rule is the extra, not the act.
+   * Whose mailbox. Given, the sender can be remembered -- see rememberJunkSenders below. Optional
+   * so a caller with no session still moves the message; the standing rule is the extra, not the
+   * act.
    */
   userId?: string | null,
+  /**
+   * MAKE THE STANDING RULE, OR JUST MOVE THIS ONE.
+   *
+   * THE FIRM: "if I say move to junk, can it also ask me if I can move and always send those
+   * things to junk?" It always made the rule, silently, and said so afterwards -- which was the
+   * firm's own earlier instruction ("every time a new email is received from that email address,
+   * it should be moved to junk") and is right for the sender you are junking BECAUSE they are a
+   * nuisance. It is wrong for the other kind of junk move, which the firm described in the same
+   * breath: "sometimes I get like stuff that I want to see but it's junk... it's kind of
+   * semi-important otherwise I would have blocked it." Shelving one message is not a verdict on
+   * a sender, and a rule made on that move quietly diverts mail somebody wanted.
+   *
+   * SO THE CALLER SAYS, and true is the default: every caller that predates the question meant
+   * the rule, and a silent change of that would leave the firm's nuisance senders arriving in the
+   * inbox again with nothing to explain it.
+   */
+  remember: boolean = true,
 ): Promise<{ moved: number; remembered: string[]; kept: string[] }> {
   if (ids.length === 0) return { moved: 0, remembered: [], kept: [] }
   /*
@@ -1380,8 +1400,15 @@ export async function setJunk(
   let remembered: string[] = []
   let kept: string[] = []
   if (userId && senders.length > 0) {
-    if (junk) ({ remembered, kept } = await rememberJunkSenders(userId, senders))
-    else await forgetJunkSenders(userId, senders)
+    if (junk) {
+      if (remember) ({ remembered, kept } = await rememberJunkSenders(userId, senders))
+      /*
+       * "Just this one" LEAVES A RULE THAT IS ALREADY THERE. It is a decision about this message,
+       * not a change of mind about the sender -- and quietly cancelling a standing rule from a
+       * button that says "move it" is the kind of thing nobody would connect to the mail that
+       * starts arriving again a week later. "Not junk" is the undo, and it is explicit.
+       */
+    } else await forgetJunkSenders(userId, senders)
   }
 
   // Junk is excluded from the sidebar count, so moving mail either way changes it.

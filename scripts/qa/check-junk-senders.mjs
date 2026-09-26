@@ -65,7 +65,7 @@ ok('junking writes the rule', /action: 'always_junk'/.test(mail))
  * break-testing, which is the only reason it is written this way.
  */
 ok('...and junking actually calls it',
-  /if \(junk\) \(\{ remembered, kept \} = await rememberJunkSenders\(userId, senders\)\)/.test(mail))
+  /if \(remember\) \(\{ remembered, kept \} = await rememberJunkSenders\(userId, senders\)\)/.test(mail))
 ok('...replacing whatever rule was there rather than ignoring it',
   /onConflict: 'user_id,pattern' \}/.test(mail.slice(mail.indexOf('rememberJunkSenders'))))
 /*
@@ -78,6 +78,64 @@ const updateAt = remembering.indexOf(".from('user_emails')")
 ok('the senders are read', sendersAt > 0)
 ok('the update happens', updateAt > 0)
 ok('...and the senders are read before the messages move', sendersAt < updateAt)
+
+/* ------------------------------------------------ but only if you said so */
+
+/*
+ * THE FIRM, HAVING LIVED WITH THE RULE BEING AUTOMATIC: "if I say move to junk, can it also ask
+ * me if I can move and always send those things to junk?"
+ *
+ * WHY IT IS A QUESTION AND NOT A SETTING. The firm described both answers in one breath. One is
+ * the nuisance sender — the reason the rule exists at all, and the instruction at the top of this
+ * file. The other is the mail they actually want: "sometimes I get like stuff that I want to see
+ * but it's junk, so I don't want to see it in my main inbox — I'll get to it later — it's
+ * cluttering my main mailbox because it's actually junk but it's kind of semi-important,
+ * otherwise I would have blocked it." Shelving one of those is not a verdict on its sender, and
+ * a standing rule made on that move quietly diverts mail somebody wanted.
+ */
+ok('the mover can be told not to make a rule', /remember: boolean = true/.test(mail))
+/*
+ * TRUE BY DEFAULT, and that is deliberate rather than convenient: every caller that predates the
+ * question meant the rule, and flipping the default silently would put the firm's nuisance
+ * senders back in the inbox with nothing on screen to explain it.
+ */
+ok('...and the default is still to make it', /remember: boolean = true/.test(mail))
+/*
+ * "JUST THIS ONE" LEAVES A RULE THAT IS ALREADY THERE. It is a decision about this message, not
+ * a change of mind about the sender — and a button saying "move it" that quietly cancelled a
+ * standing rule is the kind of thing nobody connects to the mail that starts arriving a week
+ * later. "Not junk" is the undo, and it says so.
+ */
+ok('...and never quietly cancels one', !/if \(!remember\)[\s\S]{0,200}forgetJunkSenders/.test(mail))
+
+/* The box that asks, and both answers on it. */
+ok('the screen asks before it decides for you', /function JunkModal/.test(page))
+ok('...offering the one message on its own', /Just this message/.test(page))
+ok('...and the standing rule as the other answer', /Always junk \{one\}/.test(page))
+ok('...calling the mover with what was chosen', /setJunk\(ids, true, userId, remember\)/.test(page))
+/*
+ * AND JUNKING IS WHAT GOES THROUGH THE BOX, both ways in. Asserted on both paths because the
+ * reading pane and the bulk bar are separate buttons, and one of them left unasked is the
+ * silent rule still being made.
+ */
+ok('the bulk bar asks', /if \(junk\) \{ setJunking\(items\.filter/.test(page))
+ok('...and so does the open message', /if \(junk\) \{ setJunking\(\[mail\]\)/.test(page))
+ok('...and the box is actually rendered', /<JunkModal/.test(page))
+/*
+ * "NOT JUNK" IS NOT ASKED ABOUT, because it has one meaning: it takes the message back AND drops
+ * the rule, or the next message returns to Junk and the undo looks broken. Nothing to choose.
+ */
+ok('un-junking goes straight through', /setJunk\(ids, junk, currentUser\?\.id \?\? null\)/.test(page))
+ok('...and says the rule went with it', /lands in your mailbox again/.test(page))
+
+/*
+ * THE THIRD DECISION IS NAMED ON THE BOX so nobody reaches for junk to get it. The firm drew the
+ * line themselves: semi-important mail goes to Junk, "otherwise I would have blocked it".
+ */
+ok('the box says neither answer blocks anybody', /Neither of these blocks anyone/.test(page))
+ok('...and points at the thing that does', /use Block sender/.test(page))
+/* And says what junk IS, which is the sentence that makes the choice above make sense. */
+ok('...and that junk is a shelf rather than a bin', /Junk is a shelf, not a bin/.test(page))
 
 /* ------------------------------------------------ and undone */
 
@@ -113,18 +171,27 @@ ok('a rule can only make something junk, never un-junk it', /isJunk: isJunk \|\|
  */
 ok('an address on a debtor file is checked for', /if \(await debtorFileFor\(address\)\) \{ kept\.push\(address\); continue \}/.test(mail))
 ok('...and reported back rather than swallowed', /remembered: string\[\]; kept: string\[\]/.test(mail))
-ok('the screen says what the standing rule now does', /function junkRuleNote/.test(page))
 /*
- * AND THE SENTENCE REACHES THE SCREEN. Same hole as above: asserting the helper exists passed
- * with it spliced out of both status messages, leaving a rule nobody is told about.
+ * AND IT IS SAID BEFORE THE PRESS NOW, NOT AFTER IT. The refusal used to arrive in the status
+ * line once the move had happened — which is the one case where somebody would otherwise assume
+ * the rule HAD been made. The box looks the address up as it opens, the same correction the
+ * block box beside it already carries.
  */
-check('...on both the bulk and the single-message paths',
-  [...page.matchAll(/junkRuleNote\(junk, remembered, kept\)/g)].length, 2)
+ok('the box looks up whether a rule may be made at all', /debtorFileFor\(a\)/.test(page))
+ok('...and says so before anything moves', /is on a debtor.rsquo;s file/.test(page))
+ok('...naming what is withheld and why', /no standing rule is made for them/.test(page))
+/* And afterwards, what the rule now does — a rule nobody is told about surprises somebody in a
+   fortnight when a sender's mail is "missing". */
 ok('...naming the sender it will junk from now on', /will go straight to junk/.test(page))
-/* The case somebody would otherwise assume had been done. */
-ok('...and saying plainly where no rule was made', /is on a debtor's file, so their future mail is left in your inbox/.test(page))
-ok('the screen passes who is asking, or no rule could be made', /setJunk\(ids, junk, currentUser\?\.id \?\? null\)/.test(page))
-ok('...from the single-message path too', /setJunk\(\[mail\.id\], junk, currentUser\?\.id \?\? null\)/.test(page))
+ok('...and reporting the ones left alone', /so their future mail is left in your inbox/.test(page))
+ok('the screen passes who is asking, or no rule could be made',
+  /setJunk\(ids, true, userId, remember\)/.test(page))
+/*
+ * IT DOES NOT OFFER TO MAKE A RULE THAT IS ALREADY THERE. Pressing "always junk" on a sender
+ * already junked does nothing and reads as a button that failed.
+ */
+ok('...and knows which senders already have one', /alwaysJunked: Set<string>/.test(page))
+ok('...read from the same table', /fetchSenderRules\(currentUser\.id, 'always_junk'\)/.test(page))
 
 /* ------------------------------------------------ it is not a block */
 
