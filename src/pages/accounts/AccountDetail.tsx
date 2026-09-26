@@ -77,6 +77,7 @@ import { dayKey } from '../../lib/collectionPace'
 import { accountMergeValues } from '../../lib/accountMergeValues.ts'
 import { OtherAccountsPanel } from '../../components/collections/OtherAccountsPanel'
 import { WorkflowRunPanel } from '../../components/collections/WorkflowRunPanel'
+import { WorkflowNowPanel } from '../../components/collections/WorkflowNowPanel'
 import {
   fetchAccountRuns, fetchStartableWorkflows, type AccountRun, type StartableWorkflow,
 } from '../../lib/accountRun.ts'
@@ -671,6 +672,10 @@ export function AccountDetail() {
     openQueryWithClient: account.clientActionAsk !== null,
   })
   const otherAccountsPanel = <OtherAccountsPanel key="others" rows={otherAccounts} />
+  /* Four lines saying which sequence is running, for the rail the track was too big for. See
+     WorkflowNowPanel: the tab keeps the work, the rail keeps the fact. */
+  const workflowNowPanel = <WorkflowNowPanel key="workflow-now" accountId={account.id} runs={runs} />
+
   const clientLinePanel = (
     <ClientLinePanel
       line={clientLine({
@@ -1007,9 +1012,18 @@ export function AccountDetail() {
       <RecordTabs<Tab>
         tabs={[
           { id: 'Overview', label: 'Overview' },
+          { id: 'Transactions', label: 'Transactions', count: statement?.lines.length ?? 0 },
+          { id: 'Emails', label: 'Emails', count: emails.length },
+          { id: 'Documents', label: 'Documents', count: documents.length },
           /*
             THE FIRM: "we should make like a separate little tab there for the workflow. Then we
             have a whole pane there where we can see with the past workflows. And current ones."
+            And then, on where it sits: "move the tab behind the documents tab. So to the right of
+            the documents tab is the last tab there."
+
+            LAST, WHICH IS ALSO WHAT IT IS. The four before it are the account's own record --
+            what it owes, what was written, what was filed. A workflow is a thing being DONE to
+            the account, and the one line of it anybody needs before acting is on the Overview.
 
             THE COUNT IS RUNS AND THE MARK IS WORK. "Workflow 2" says two sequences have been on
             this account and nothing about whether either has stopped — so the gold dot carries
@@ -1017,9 +1031,6 @@ export function AccountDetail() {
             something you have to open a tab to find.
           */
           { id: 'Workflow', label: 'Workflow', count: runs.length, alert: waitingOnMe > 0 },
-          { id: 'Transactions', label: 'Transactions', count: statement?.lines.length ?? 0 },
-          { id: 'Emails', label: 'Emails', count: emails.length },
-          { id: 'Documents', label: 'Documents', count: documents.length },
         ]}
         active={tab}
         onChange={setTab}
@@ -1132,7 +1143,7 @@ export function AccountDetail() {
            * already gone out by itself, which is worth seeing and never the first thing to act on.
            */
           side={[clientLinePanel, summaryPanel, otherAccountsPanel, promisePanel,
-            disputesPanel, positionPanel]}
+            disputesPanel, workflowNowPanel, positionPanel]}
         />
       )}
 

@@ -79,6 +79,43 @@ ok('the account screen draws it', /<WorkflowRunPanel/.test(account))
  * panel when it is the one selected.
  */
 ok('...and there is a tab that opens it', /\{ id: 'Workflow', label: 'Workflow'/.test(account))
+/*
+ * LAST IN THE STRIP, at the firm's asking: "move the tab behind the documents tab. So to the
+ * right of the documents tab is the last tab there." Asserted as an ORDER, with both present
+ * first -- indexOf returns -1, so an order-only assertion passes vacuously the day one of them
+ * is deleted. CLAUDE.md names this trap by name.
+ */
+const docsAt = account.indexOf("id: 'Documents'")
+const flowAt = account.indexOf("id: 'Workflow'")
+ok('the documents tab is there to be behind', docsAt > 0)
+ok('...and the workflow tab is there to be after it', flowAt > 0)
+ok('...with the workflow last', docsAt < flowAt)
+
+/*
+ * AND THE ONE LINE THAT STAYED ON THE OVERVIEW. The firm, once it moved: "you took away the
+ * current workflow. So it can show like just the current workflow that it's in, like something
+ * small, that's still on the main debtor's page, somewhere below the promise and the dispute."
+ *
+ * The tab keeps the eleven-step track, which needed a page; the rail keeps the FACT, because
+ * "is this account in the middle of a statutory sequence" is something you have to know before
+ * you ring somebody and cannot be behind a tab.
+ */
+const now = read('src/components/collections/WorkflowNowPanel.tsx')
+ok('the overview still says which sequence is running', now.length > 500)
+ok('...drawn on the account', /<WorkflowNowPanel/.test(account))
+/* BELOW THE PROMISE AND THE DISPUTE, at the firm's earlier asking -- "a promise to pay and a
+   dispute holds more weight than that". Asserted as the order they are placed in. */
+const sideAt = account.indexOf('side={[clientLinePanel')
+const side = account.slice(sideAt, sideAt + 220)
+ok('...below the promise and the dispute', /promisePanel,\s*\n?\s*disputesPanel, workflowNowPanel/.test(side))
+/* AND NOTHING WHERE NOTHING IS RUNNING, which is most of the book: a card saying "no workflow"
+   on twenty-three thousand accounts pushes the figures down to say nothing. A FINISHED run is
+   not drawn either -- what the debtor was sent is history, and history lives on the tab. */
+ok('...and nothing at all where no sequence is running',
+  /const live = runs\.filter\(\(r\) => r\.state === 'running'\)/.test(now)
+  && /if \(live\.length === 0\) return null/.test(now))
+/* One function decides "what next" for both, or the rail and the tab name different steps. */
+ok('...reading the step in focus from the one function that decides it', /stepInFocus\(run\.steps\)/.test(now))
 ok('...which actually draws the panel', /tab === 'Workflow' && \(\s*<WorkflowRunPanel/.test(account))
 
 /* ------------------------------------------------ once, not every morning */
