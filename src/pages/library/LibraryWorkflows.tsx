@@ -417,10 +417,26 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
     )
   }
 
-  async function act(fn: () => Promise<unknown>) {
+  /**
+   * Run something that changes the version, then show what it left behind.
+   *
+   * IT USED TO RELOAD THE VERSION IT STARTED ON, which is how "Edit — takes a draft" came to look
+   * like a button that did nothing. The handler took the draft and loaded it; this then reloaded
+   * `workflow.version.id` — the PUBLISHED version, captured in the closure when the button was
+   * pressed — and the screen snapped straight back to the frozen one. The draft was created every
+   * time. The firm pressed it repeatedly and reported a dead button; staging had the draft sitting
+   * there, eleven nodes and all.
+   *
+   * SO A HANDLER THAT MOVES YOU SOMEWHERE SAYS SO, by returning the id it moved to, and nothing is
+   * reloaded on top of it. Returning nothing means "same version, just reload it".
+   */
+  async function act(fn: () => Promise<string | void | unknown>) {
     setBusy(true)
     setError(null)
-    try { await fn(); await load(workflow!.version.id) }
+    try {
+      const went = await fn()
+      await load(typeof went === 'string' ? went : workflow!.version.id)
+    }
     catch (e) { setError((e as Error).message) }
     finally { setBusy(false) }
   }
@@ -463,7 +479,9 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
           </button>
           {!mayEdit ? null : workflow.version.state !== 'draft' ? (
             <button type="button" disabled={busy}
-              onClick={() => { void act(async () => { const id = await takeDraft(workflow.version.id); await load(id) }) }}
+              /* Returns the draft's id, which is what act() then opens. Loading it here as well
+                 would be the second load that used to be overwritten by the first. */
+              onClick={() => { void act(() => takeDraft(workflow.version.id)) }}
               className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50">
               Edit &mdash; takes a draft
             </button>

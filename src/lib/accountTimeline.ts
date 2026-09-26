@@ -11,7 +11,7 @@
  * of money; this is the record of contact.
  */
 import type { AccountLedgers } from './accountBook'
-import type { AccountNote, PromiseToPay } from './accountWorkspace'
+import type { AccountContact, AccountNote, PromiseToPay } from './accountWorkspace'
 import { feeLabel } from './feeLabel.ts'
 
 export type TimelineKind = 'action' | 'payment' | 'note' | 'promise' | 'query' | 'main_comment'
@@ -112,11 +112,35 @@ export interface AccountOpening {
   batchReference?: string | null
 }
 
+/** What a contact is called in a sentence: "Verified the mobile 082...", not "verified mobile". */
+function contactWord(kind: string): string {
+  if (kind === 'email') return 'the email address'
+  if (kind === 'address') return 'the address'
+  if (kind === 'employer') return 'the employer'
+  if (kind === 'work') return 'the work number'
+  if (kind === 'other') return ''
+  return `the ${kind} number`
+}
+
 export function buildTimeline(
   ledgers: AccountLedgers | null,
   notes: AccountNote[] = [],
   promises: PromiseToPay[] = [],
   opening?: AccountOpening | null,
+  /**
+   * The debtor's numbers and addresses, for the two things a PERSON does to them.
+   *
+   * THE FIRM, having retired an email as a wrong address: "it doesn't show in my activity
+   * timeline. It should show things like this — oh, I just verified an email address on this
+   * date, or I just retired this and the retire reason is there."
+   *
+   * WHY IT MATTERS MORE THAN IT LOOKS. Both of these change what the firm may do next. A verified
+   * number is the one the Call button dials and the one a notice quotes; a retired one is
+   * deliberately never offered again. Neither left a trace anywhere, so an address that stopped
+   * being used had no answer to "who decided that, and why" — which is the question asked
+   * eighteen months later when a debtor says they were never contacted.
+   */
+  contacts: AccountContact[] = [],
 ): TimelineEntry[] {
   const entries: TimelineEntry[] = []
 
@@ -160,6 +184,45 @@ export function buildTimeline(
       ].filter(Boolean).join(' '),
       automated: false,
     })
+  }
+
+  /*
+   * ---- WHAT SOMEBODY DECIDED ABOUT A NUMBER OR AN ADDRESS ----
+   *
+   * TWO EVENTS, NOT THREE. Verifying and retiring are decisions a person made on a day; ADDING a
+   * contact is not, most of the time — the book came across from Swordfish with its numbers
+   * already on it, and one entry per imported contact would bury six years of history under a
+   * list of telephone numbers on the day of the import.
+   *
+   * NOT AUTOMATED, because the "just what people wrote" filter exists to hide bookkeeping about
+   * actions somebody else took. This IS the action: a person looked at a number, rang it, and
+   * decided.
+   */
+  for (const c of contacts) {
+    if (c.verifiedAt) {
+      entries.push({
+        id: `contact-ok:${c.id}`,
+        kind: 'action',
+        date: dayOf(c.verifiedAt),
+        at: c.verifiedAt,
+        title: `Verified ${contactWord(c.kind)} ${c.value}`,
+        detail: c.label,
+        automated: false,
+      })
+    }
+    if (c.retiredAt) {
+      entries.push({
+        id: `contact-off:${c.id}`,
+        kind: 'action',
+        date: dayOf(c.retiredAt),
+        at: c.retiredAt,
+        title: `Stopped using ${contactWord(c.kind)} ${c.value}`,
+        /* THE REASON IS THE POINT. "Retired" says a thing happened; "wrong number" says why, and
+           it is the only thing that stops the next collector tracing it all over again. */
+        detail: c.retiredReason,
+        automated: false,
+      })
+    }
   }
 
   for (const f of ledgers?.fees ?? []) {

@@ -221,7 +221,20 @@ export interface Workspace {
 
 export async function fetchWorkspace(accountId: string): Promise<Workspace> {
   const [contacts, notes, promises] = await Promise.all([
-    supabase.from('account_contacts').select('*').eq('account_id', accountId).order('is_primary', { ascending: false }),
+    /*
+     * PRIMARY FIRST, THEN OLDEST, AND THE SECOND HALF IS NOT TIDINESS.
+     *
+     * Sorted on is_primary alone, two contacts of the same kind TIE — and Postgres returns tied
+     * rows in whatever physical order they happen to sit in. An UPDATE writes a new tuple at the
+     * end of the table, so editing one contact silently reorders them. The firm found it exactly
+     * that way: an account with two email addresses, one slot showing the first of them, and
+     * saving a change to one address made the OTHER one appear. Nothing was lost and nothing
+     * looked wrong — the panel was simply showing a different row.
+     *
+     * created_at is the tiebreak because it is the only thing about a contact that never moves.
+     */
+    supabase.from('account_contacts').select('*').eq('account_id', accountId)
+      .order('is_primary', { ascending: false }).order('created_at', { ascending: true }),
     supabase.from('account_notes').select('*').eq('account_id', accountId).order('created_at', { ascending: false }),
     supabase.from('promises_to_pay').select('*').eq('account_id', accountId).order('due_on', { ascending: false }),
   ])

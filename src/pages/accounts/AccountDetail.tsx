@@ -397,7 +397,7 @@ export function AccountDetail() {
     () => buildTimeline(ledgers, workspace?.notes ?? [], workspace?.promises ?? [], account && {
       handoverDate: account.handoverDate,
       importedAt: account.createdAt,
-    }),
+    }, workspace?.contacts ?? []),
     [ledgers, workspace, account],
   )
 
@@ -1706,15 +1706,30 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
                 : null}
           </span>
         </div>
-        {long && (
-          <button onClick={() => setOpen((v) => !v)} className="text-[11px] text-brand-600 hover:underline">
-            {open ? 'Show less' : 'Show more'}
-          </button>
-        )}
-        {(entry.detail || entry.by) && (
-          <p className="text-[11px] text-slate-400 mt-0.5">
-            {[entry.detail, entry.by].filter(Boolean).join(' · ')}
-          </p>
+        {/*
+          SHOW MORE SITS ON THE LINE THAT WAS ALREADY THERE, hard right.
+
+          THE FIRM, looking at a timeline of filed emails: "this email is taking a lot of space...
+          maybe the show more can be more on the right to make this smaller. It's starting to
+          become very big." It had a line of its own under every clamped entry, so a filed email
+          cost five lines: two of subject, the ellipsis, Show more, and the author. Moved onto the
+          author's line it costs four, and the eye has one column to run down instead of two.
+
+          The row is drawn whenever there is EITHER something to say or something to open, so an
+          entry with no author still gets its button.
+        */}
+        {(entry.detail || entry.by || long) && (
+          <div className="mt-0.5 flex items-baseline justify-between gap-3">
+            <p className="min-w-0 truncate text-[11px] text-slate-400">
+              {[entry.detail, entry.by].filter(Boolean).join(' · ')}
+            </p>
+            {long && (
+              <button onClick={() => setOpen((v) => !v)}
+                className="shrink-0 text-[11px] text-brand-600 hover:underline">
+                {open ? 'Show less' : 'Show more'}
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

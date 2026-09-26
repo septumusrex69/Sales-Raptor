@@ -247,6 +247,76 @@ check('...and so does one that was never asked about the opening',
 check('one date alone is still worth an entry',
   buildTimeline(null, [], [], { handoverDate: '2026-03-18', importedAt: null }).length === 1)
 
+/* ---------------------------------------------------------------- what somebody decided ---- */
+
+/*
+ * VERIFYING AND RETIRING A NUMBER ARE THINGS A PERSON DID, AND THEY LEFT NO TRACE.
+ *
+ * THE FIRM, having retired an email as a wrong address: "it doesn't show in my activity timeline.
+ * It should show things like this -- oh, I just verified an email address on this date, or I just
+ * retired this and the retire reason is there."
+ *
+ * IT MATTERS MORE THAN IT LOOKS. A verified number is the one the Call button dials and the one a
+ * notice quotes; a retired one is deliberately never offered again. Neither was recorded
+ * anywhere a person reads, so an address that stopped being used had no answer to "who decided
+ * that, and why" -- which is the question asked eighteen months later when a debtor says nobody
+ * ever contacted them.
+ */
+const contact = (over) => ({
+  id: 'c1', accountId: 'a', kind: 'email', value: 'debtor@example.co.za', label: null,
+  personName: null, personRole: null, isPrimary: false,
+  verifiedAt: null, retiredAt: null, retiredReason: null, notes: null,
+  createdAt: '2026-01-01T00:00:00Z', ...over,
+})
+
+const verified = buildTimeline(null, [], [], null, [
+  contact({ verifiedAt: '2026-09-20T10:00:00Z' }),
+])
+check('verifying a contact lands on the timeline', verified.length === 1,
+  JSON.stringify(verified))
+check('...saying what was verified, in words',
+  verified[0]?.title === 'Verified the email address debtor@example.co.za',
+  verified[0]?.title)
+/*
+ * NOT AUTOMATED. The "just what people wrote" filter exists to hide bookkeeping about actions
+ * somebody else took -- a fee line beside the call that caused it. This IS the action.
+ */
+check('...and survives the "just what people wrote" filter',
+  filterTimeline(verified, false).length === 1)
+
+const retired = buildTimeline(null, [], [], null, [
+  contact({ retiredAt: '2026-09-26T16:40:00Z', retiredReason: 'wrong email' }),
+])
+check('retiring a contact lands on the timeline too', retired.length === 1)
+/* THE REASON IS THE POINT. "Retired" says a thing happened; "wrong email" says why, and it is
+   the only thing that stops the next collector using it all over again. */
+check('...carrying the reason somebody typed', retired[0]?.detail === 'wrong email',
+  retired[0]?.detail)
+check('...dated when it was retired, not when it was added',
+  retired[0]?.date === '2026-09-26', retired[0]?.date)
+
+/* Both, on one contact, are two entries: they happened on different days and each is a decision. */
+const both = buildTimeline(null, [], [], null, [
+  contact({ verifiedAt: '2026-09-20T10:00:00Z', retiredAt: '2026-09-26T16:40:00Z', retiredReason: 'wrong email' }),
+])
+check('a contact verified and later retired is two entries', both.length === 2)
+check('...newest first, like everything else', both[0]?.date === '2026-09-26')
+
+/*
+ * AND ADDING ONE IS NOT AN ENTRY, which is the half that keeps the timeline readable. The book
+ * came across from Swordfish with its numbers already on it; one entry per imported contact would
+ * bury six years of history under a list of telephone numbers dated the day of the import.
+ */
+/*
+ * READ DEFENSIVELY. Removing the two guards makes buildTimeline hand a null date to dayOf, which
+ * throws -- and a thrown check file prints a stack and NO COUNT, which run-all reads as zero and
+ * cannot tell from a healthy file. Found by break-testing this very assertion.
+ */
+let untouched = null
+try { untouched = buildTimeline(null, [], [], null, [contact({})]).length }
+catch (e) { untouched = `threw: ${String(e).slice(0, 80)}` }
+check('a contact nobody has acted on says nothing', untouched === 0, String(untouched))
+
 /*
  * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
  * headline and is indistinguishable from a healthy one -- a review of this suite found 20

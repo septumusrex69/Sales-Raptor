@@ -100,7 +100,19 @@ export function DebtorDetailsPanel({ account, name, workspace, properties, onCha
   // Shared with the action bar's Call button, so both ring the same number.
   const primaryPhone = dialableNumber(live)
   const altPhone = phones.find((c) => c.id !== primaryPhone?.id)
-  const email = live.find((c) => c.kind === 'email')
+  /*
+   * EVERY EMAIL ADDRESS, NOT THE FIRST ONE FOUND.
+   *
+   * THE FIRM: "if a debtor has more than one email address, it should be shown. It's important.
+   * If they have, for example, a work and a personal one." They hit it the hard way — an account
+   * carrying two addresses, one slot, and editing one of them made the other appear.
+   *
+   * 105 ACCOUNTS ON THE BOOK CARRY MORE THAN ONE, and until now each had an address that could
+   * not be seen on this screen at all. Most came in the way the second one on that account did:
+   * a collector matched an email and ticked "save the address".
+   */
+  const emails = live.filter((c) => c.kind === 'email')
+  const email = emails[0]
   const address = live.find((c) => c.kind === 'address')
   const employer = live.find((c) => c.kind === 'employer')
 
@@ -389,6 +401,24 @@ export function DebtorDetailsPanel({ account, name, workspace, properties, onCha
       )}
 
       {/*
+        ADDRESSES BEYOND THE ONE SLOT ABOVE, the same way the numbers are handled below it — a
+        work one and a personal one are both the debtor's, and which of them the slot happened to
+        show was a coin toss until the ordering was fixed.
+
+        Not on a company: a company's addresses belong to named people and are listed above, under
+        whoever they belong to.
+      */}
+      {!isCompany && emails.length > 1 && (
+        <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400">Other email addresses</p>
+          {emails.slice(1).map((c) => (
+            <ContactValue key={c.id} contact={c} userId={userId} busy={busy} run={run}
+              onOpen={() => onEmail(c.value)} />
+          ))}
+        </div>
+      )}
+
+      {/*
         Numbers beyond the two slots above. An account can carry several.
         Not on a company: they are already listed above, under whoever they belong to.
       */}
@@ -404,7 +434,7 @@ export function DebtorDetailsPanel({ account, name, workspace, properties, onCha
       {retired.length > 0 && (
         <details className="mt-3 pt-3 border-t border-slate-100">
           <summary className="text-[11px] text-slate-400 cursor-pointer hover:text-slate-600">
-            {retired.length} retired
+            {retired.length} no longer used
           </summary>
           <div className="space-y-1.5 mt-2">
             {retired.map((c) => (
@@ -673,13 +703,26 @@ function ContactValue({ contact, userId, busy, run, onOpen }: {
             mark verified
           </button>
         )}
+        {/*
+          "STOP USING" RATHER THAN "RETIRE", because retire says one of the two things this does.
+          THE FIRM, having just used it: "I retired an email, and I said I'm retiring it because
+          it's a wrong email. Maybe we should say unlink rather than retire."
+
+          BOTH READINGS ARE REAL AND THE REASON IS WHERE THEY SEPARATE. A number the debtor had
+          and no longer uses is retired; a number that was never theirs was wrongly linked. The
+          row is kept either way — the whole point is that the next collector does not trace the
+          same dead line again — so the ACT is the same and only the reason differs. "Stop using"
+          is true of both, which "retire" and "unlink" each are not, and the prompt asks for the
+          reason first so the difference is recorded rather than guessed from the word.
+        */}
         <button disabled={busy}
           onClick={() => {
-            const reason = window.prompt('Why is this being retired? (wrong number, disconnected, ...)')
+            const reason = window.prompt(
+              'Why are we no longer using this? (wrong number, not this debtor\'s, disconnected, ...)')
             if (reason !== null) run(() => retireContact(contact.id, reason))
           }}
           className="text-[10px] text-slate-400 hover:text-negative disabled:opacity-50">
-          retire
+          stop using
         </button>
       </div>
     </div>
