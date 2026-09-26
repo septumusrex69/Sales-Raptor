@@ -40,17 +40,19 @@ export type QueryStatus = 'open' | 'closed'
  */
 import {
   canSendToClient, stageForAssignee, escalationChargeable, escalationNote, clientSection,
-  CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL, ESCALATION_KINDS, ESCALATION_KIND_ORDER,
-  type DisputeStage as QueryStage, type QueryOutcome, type EscalationKind,
+  CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL, QUERY_EFFECT_LABEL, QUERY_EFFECT_HINT,
+  ESCALATION_KINDS, ESCALATION_KIND_ORDER,
+  type DisputeStage as QueryStage, type QueryOutcome, type QueryEffect, type EscalationKind,
   type ClientSection,
 } from './disputeCategories'
 
 export {
   canSendToClient, stageForAssignee, escalationChargeable, escalationNote, clientSection,
-  CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL, ESCALATION_KINDS, ESCALATION_KIND_ORDER,
+  CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL, QUERY_EFFECT_LABEL, QUERY_EFFECT_HINT,
+  ESCALATION_KINDS, ESCALATION_KIND_ORDER,
 }
 export type { EscalationKind, ClientSection }
-export type { QueryStage, QueryOutcome }
+export type { QueryStage, QueryOutcome, QueryEffect }
 
 /**
  * Who is being waited on.
@@ -564,7 +566,19 @@ export async function updateQuery(
  */
 export async function closeQuery(
   id: string,
-  decision: { outcome: QueryOutcome; action?: string | null; amount?: number | null },
+  decision: {
+    outcome: QueryOutcome
+    action?: string | null
+    amount?: number | null
+    /**
+     * WHAT IT DID TO THE ACCOUNT, on an upheld dispute. Null on one that was not upheld.
+     *
+     * THE DATABASE READS THIS AND NOTHING ELSE. workflow_on_dispute_answered branches on it to
+     * decide whether the sequence resumes, ends, or ends and may be re-issued -- so the free-text
+     * `action` beside it stays what it always was, a note for a person.
+     */
+    effect?: QueryEffect | null
+  },
   /** `accountId` is null on a sheet-level query: there is no account timeline to write to. */
   context: { accountId: string | null; actorId: string | null; actorName: string | null },
 ): Promise<AccountQuery> {
@@ -575,6 +589,7 @@ export async function closeQuery(
       outcome: decision.outcome,
       outcome_action: decision.action?.trim() || null,
       outcome_amount: decision.amount ?? null,
+      outcome_effect: decision.effect ?? null,
       closed_at: new Date().toISOString(),
       closed_by: context.actorId,
       closed_by_name: context.actorName,
@@ -587,6 +602,9 @@ export async function closeQuery(
 
   if (context.accountId) {
     const parts = [`Query closed — ${QUERY_OUTCOME_LABEL[decision.outcome].toLowerCase()}`]
+    /* The effect on the ACCOUNT goes on the timeline in the firm's words, because it is the
+       part that decides what happens next and the part somebody will be asked about. */
+    if (decision.effect) parts.push(QUERY_EFFECT_LABEL[decision.effect])
     if (decision.action) parts.push(decision.action.trim())
     await addNote({
       accountId: context.accountId,

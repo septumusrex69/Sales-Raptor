@@ -110,6 +110,37 @@ export const QUERY_OUTCOME_LABEL: Record<QueryOutcome, string> = {
   withdrawn: 'Withdrawn by debtor',
 }
 
+/**
+ * WHAT AN UPHELD DISPUTE DID TO THE ACCOUNT, which is not the same question as whether it was
+ * valid — and the firm named all three: "either the account can be withdrawn or the account can
+ * stay with new terms and conditions... or the dispute can be valid but nothing changes."
+ *
+ * IT DECIDES WHAT HAPPENS TO THE SEQUENCE, which is why it is a stored answer and not a sentence
+ * typed in the box beside it. Nothing changed and the section 129 resumes; the client takes the
+ * account back and it ends; the amount changed and it ends AND has to be issued again, because a
+ * demand stating a figure the firm has since conceded was wrong never started a good clock.
+ */
+export type QueryEffect = 'no_change' | 'withdrawn' | 'amount_changed'
+
+/**
+ * THE WORDS AVOID A COLLISION THAT WOULD COST A DEMAND. `outcome` already has a 'withdrawn' and
+ * it means the DEBTOR withdrew the dispute — the opposite of the firm's "the account can be
+ * withdrawn". Two withdrawns on one screen is how somebody ends a sequence that should have
+ * resumed, so neither of these says the word on its own.
+ */
+export const QUERY_EFFECT_LABEL: Record<QueryEffect, string> = {
+  no_change: 'Nothing changes on the account',
+  withdrawn: 'The client takes the account back',
+  amount_changed: 'The amount is corrected',
+}
+
+export const QUERY_EFFECT_HINT: Record<QueryEffect, string> = {
+  no_change: 'The debt stands. Any sequence that was paused carries on where it stopped.',
+  withdrawn: 'Nothing more is ever sent. Everything still to come is cancelled.',
+  amount_changed: 'The sequence ends and a fresh section 129 can be issued on the new figure — '
+    + 'the one already sent quoted an amount the firm has now corrected.',
+}
+
 /* ---------- what kind of escalation this is ---------- */
 
 /**

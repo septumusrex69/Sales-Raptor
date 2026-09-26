@@ -181,6 +181,16 @@ export function nudgeWorkflows(accessToken: string, accountId: string): void {
  * A section 129 sequence begun twice on one account is two statutory clocks on one debt. Filtered
  * here as well so the button is not offered and then refused -- a button that appears to work and
  * does not is worse than one that is not there.
+ *
+ * WITH ONE NARROWING, AND IT IS NOT A HOLE IN THE RULE. A run whose DEMAND WAS DEFECTIVE may be
+ * issued again: the firm upheld a dispute, the amount was corrected, and a section 129 that
+ * stated a figure the firm has since conceded was wrong never started a good clock. So a fresh
+ * sequence there is ONE clock, not two. `reissue_allowed` is set by the dispute trigger and by
+ * nothing else; every other ending is final.
+ *
+ * ALL OF THEM, NOT ANY. A version is offered again only if EVERY run of it on this account allows
+ * re-issue -- one good run among them means the account has had a valid demand, and that is the
+ * clock the rule is protecting.
  */
 export interface StartableWorkflow {
   versionId: string
@@ -195,12 +205,16 @@ export async function fetchStartableWorkflows(accountId: string): Promise<Starta
       .select('id, trigger_note, workflows!inner(name)')
       .eq('state', 'active')
       .eq('trigger_kind', 'by_hand'),
-    supabase.from('workflow_runs').select('version_id').eq('account_id', accountId),
+    supabase.from('workflow_runs').select('version_id, reissue_allowed').eq('account_id', accountId),
   ])
   if (versions.error) throw new Error(versions.error.message)
   if (runs.error) throw new Error(runs.error.message)
 
-  const been = new Set((runs.data ?? []).map((r) => r.version_id as string))
+  /* A version is closed to this account unless every run of it was a defective demand. */
+  const been = new Set<string>()
+  for (const r of (runs.data ?? []) as { version_id: string; reissue_allowed: boolean }[]) {
+    if (!r.reissue_allowed) been.add(r.version_id)
+  }
   /* eslint-disable-next-line @typescript-eslint/no-explicit-any -- rows arrive as untyped JSON. */
   return (versions.data ?? [] as any[])
     .filter((v: any) => !been.has(v.id))

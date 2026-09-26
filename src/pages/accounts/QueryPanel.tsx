@@ -6,8 +6,8 @@ import { formatMoney, formatDate } from '../../data/mockData'
 import { chargeMessage } from '../../lib/accountCharges'
 import {
   closeQuery, isStale, markOutcomeDone, raiseQuery, updateQuery,
-  stageForAssignee, QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
-  type AccountQuery, type QueryOutcome, type QueryStage,
+  stageForAssignee, QUERY_OUTCOME_LABEL, QUERY_EFFECT_LABEL, QUERY_EFFECT_HINT, QUERY_STAGE_LABEL,
+  type AccountQuery, type QueryOutcome, type QueryEffect, type QueryStage,
 } from '../../lib/accountQueries'
 import type { User } from '../../types'
 import { canViewClients } from '../../lib/permissions'
@@ -289,8 +289,8 @@ function QueryCard({ query: q, accountId, accountLabel, users, actor, busy, run,
         <CloseForm
           onCancel={() => setClosing(false)}
           busy={busy}
-          onClose={async (outcome, action, amount) => {
-            const ok = await run(() => closeQuery(q.id, { outcome, action, amount }, ctx))
+          onClose={async (outcome, action, amount, effect) => {
+            const ok = await run(() => closeQuery(q.id, { outcome, action, amount, effect }, ctx))
             if (ok) setClosing(false)
             await onChange()
           }}
@@ -461,13 +461,24 @@ function RaiseForm({ accountId, users, actor, busy, run, onDone }: {
 }
 
 function CloseForm({ onClose, onCancel, busy }: {
-  onClose: (outcome: QueryOutcome, action: string, amount: number | null) => void
+  onClose: (outcome: QueryOutcome, action: string, amount: number | null, effect: QueryEffect | null) => void
   onCancel: () => void
   busy: boolean
 }) {
   const [outcome, setOutcome] = useState<QueryOutcome>('valid')
   const [action, setAction] = useState('')
   const [amount, setAmount] = useState('')
+  /*
+   * WHAT IT DID TO THE ACCOUNT, and it decides what happens to the sequence -- so it is asked as
+   * three answers rather than typed into the box below. The firm named all three: "either the
+   * account can be withdrawn or the account can stay with new terms and conditions... or the
+   * dispute can be valid but nothing changes."
+   *
+   * DEFAULTED TO "nothing changes", which is the safe direction. Resuming a sequence that should
+   * have ended is visible on the account; ending one that should have resumed loses a demand the
+   * firm properly issued and nobody notices.
+   */
+  const [effect, setEffect] = useState<QueryEffect>('no_change')
   const needsAction = outcome === 'valid' || outcome === 'partly_valid'
 
   return (
@@ -480,6 +491,26 @@ function CloseForm({ onClose, onCancel, busy }: {
       </select>
       {needsAction && (
         <>
+          {/*
+            THE THREE ENDINGS, AS BUTTONS, WITH WHAT EACH ONE DOES UNDER IT. A collector closing a
+            dispute is deciding whether a statutory sequence resumes, ends, or has to be issued
+            again -- which is not a thing to infer from a sentence somebody typed.
+          */}
+          <fieldset className="space-y-1.5">
+            <legend className="text-[11px] font-medium text-slate-600">What happens to the account?</legend>
+            {(Object.keys(QUERY_EFFECT_LABEL) as QueryEffect[]).map((e) => (
+              <label key={e} className={`flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 ${
+                effect === e ? 'border-[#c9a052] bg-gold-50' : 'border-slate-200 bg-white hover:border-slate-300'
+              }`}>
+                <input type="radio" name="query-effect" value={e} checked={effect === e}
+                  onChange={() => setEffect(e)} className="mt-0.5 shrink-0" />
+                <span className="min-w-0">
+                  <span className="block text-[12px] font-medium text-slate-800">{QUERY_EFFECT_LABEL[e]}</span>
+                  <span className="block text-[10px] leading-snug text-slate-500">{QUERY_EFFECT_HINT[e]}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
           <input value={action} onChange={(e) => setAction(e.target.value)}
             placeholder="What must happen now? e.g. reduce to R4,200, withdraw the account"
             className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
@@ -495,7 +526,8 @@ function CloseForm({ onClose, onCancel, busy }: {
       <div className="flex items-center gap-2">
         <button
           disabled={busy}
-          onClick={() => onClose(outcome, action, amount.trim() ? Number(amount) : null)}
+          onClick={() => onClose(
+            outcome, action, amount.trim() ? Number(amount) : null, needsAction ? effect : null)}
           className="text-[11px] font-medium px-2.5 py-1 rounded bg-brand-600 text-white disabled:opacity-50 inline-flex items-center gap-1"
         >
           <MessageCircleQuestion size={12} /> Close query

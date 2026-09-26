@@ -7511,3 +7511,109 @@ begin
 
   return v_cancelled;
 end $$;
+
+/* ================================================================================
+ * A DISPUTE UPHELD DOES ONE OF THREE THINGS, AND ONLY ONE OF THEM ENDS THE DEBT.
+ *
+ * THE FIRM: "for a valid dispute, two things can happen. Either the account can be withdrawn or
+ * the account can stay with new terms and conditions. So, for example, the handover amount can
+ * change... or the dispute can be valid but nothing changes."
+ *
+ *   no_change       the debtor was right to ask, the firm answered, the debt stands. RESUME --
+ *                   the notice they received was correct and the clock that ran was honest.
+ *   withdrawn       the client takes the account back. EXIT. Nothing more is ever sent.
+ *   amount_changed  the account stays on a corrected figure. EXIT, AND RE-ISSUE.
+ *
+ * WHY A CHANGED AMOUNT CANNOT SIMPLY RESUME. A section 129 is a statutory demand that STATES AN
+ * AMOUNT and gives the debtor ten business days to remedy it. If the firm now concedes the amount
+ * was wrong, the debtor was given ten days to remedy a figure the firm has since accepted was
+ * incorrect -- and everything downstream inherits it, because the final notice says "the period
+ * given in our Section 129 notice has ended" and that period ran against the wrong number. A
+ * credit bureau listing on a conceded-wrong amount is the least defensible thing in the sequence.
+ *
+ * So the run ends and a FRESH demand goes out on the corrected figure -- the firm's own rule for
+ * tracing, in their words: "we can just shoot the new section 129 and press the button again."
+ *
+ * AND THE NAMING TRAP, WHICH IS WHY THIS IS NOT A VALUE ON `outcome`. That column already has a
+ * 'withdrawn' and it means the DEBTOR withdrew the dispute -- the opposite of the firm's "the
+ * account can be withdrawn". Two withdrawns on one screen is how somebody ends a sequence that
+ * should have resumed.
+ * ================================================================================ */
+alter table public.account_queries
+  add column if not exists outcome_effect text
+    check (outcome_effect is null or outcome_effect in ('no_change', 'withdrawn', 'amount_changed'));
+
+comment on column public.account_queries.outcome_effect is
+  'What an upheld dispute did to the ACCOUNT, which is not the same question as whether the '
+  'dispute was valid. Null on a dispute that was not upheld, and on the 11 answered before the '
+  'question was asked -- those resume, which is what they did at the time.';
+
+/*
+ * AND A RUN THAT ENDED ON A DEFECTIVE DEMAND MAY BE RE-ISSUED.
+ *
+ * THE RULE THIS NARROWS, AND WHY THE NARROWING IS NOT A HOLE IN IT: a workflow runs once per
+ * account and version, EVER, because "two runs of a statutory sequence is two clocks on one
+ * debt". That reasoning assumes the first clock was valid. Where the firm has conceded the amount
+ * was wrong, the first demand was defective and the clock it started was never good -- so a fresh
+ * sequence is one clock, not two.
+ */
+alter table public.workflow_runs
+  add column if not exists reissue_allowed boolean not null default false;
+
+comment on column public.workflow_runs.reissue_allowed is
+  'This run ended because the demand it made was defective -- the amount was corrected under a '
+  'dispute -- so the account may be put through the same workflow again. The once-per-account '
+  'rule holds everywhere else.';
+
+/*
+ * THE TRIGGER, REWRITTEN AROUND THE THREE ENDINGS.
+ *
+ * NOTE WHICH CASE WAS WRONG BEFORE: a dispute upheld with nothing changed ENDED the sequence. The
+ * debtor asked a fair question, got an answer, and the debt stood -- and the firm lost the
+ * section 129 it had properly issued.
+ */
+create or replace function public.workflow_on_dispute_answered() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+declare v_upheld boolean;
+begin
+  if new.kind <> 'dispute' then return new; end if;
+
+  if new.in_writing and not coalesce(old.in_writing, false) and new.status <> 'closed' then
+    perform public.workflow_hold_account(
+      new.account_id, 'dispute', 'A dispute was raised in writing', new.id);
+    return new;
+  end if;
+
+  if new.status <> 'closed' or coalesce(old.status, '') = 'closed' then return new; end if;
+
+  v_upheld := new.outcome in ('valid', 'partly_valid');
+
+  /*
+   * NOT UPHELD, OR UPHELD AND NOTHING CHANGED: the sequence carries on where it stopped.
+   *
+   * AN UPHELD DISPUTE WITH NO EFFECT RECORDED resumes too, which is the safe direction: the 11
+   * answered before this column existed all resume, and resuming a sequence that should have
+   * ended is visible on the account, while ending one that should have resumed loses a demand
+   * the firm properly issued and nobody notices.
+   */
+  if not v_upheld or coalesce(new.outcome_effect, 'no_change') = 'no_change' then
+    perform public.workflow_resume_account(new.account_id, 'dispute_closed');
+    return new;
+  end if;
+
+  if new.outcome_effect = 'withdrawn' then
+    perform public.workflow_exit_account(
+      new.account_id, 'dispute', 'The client took the account back');
+    return new;
+  end if;
+
+  -- amount_changed: the demand was defective, so it ends AND may be issued again.
+  perform public.workflow_exit_account(
+    new.account_id, 'dispute', 'The amount was corrected, so the demand has to be re-issued');
+  update public.workflow_runs
+     set reissue_allowed = true
+   where account_id = new.account_id
+     and state = 'left'
+     and left_reason = 'The amount was corrected, so the demand has to be re-issued';
+  return new;
+end $$;

@@ -111,9 +111,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
+  /*
+   * ONCE PER ACCOUNT AND VERSION, EVER -- WITH ONE NARROWING.
+   *
+   * A run whose DEMAND WAS DEFECTIVE may be issued again. The firm upheld a dispute, the amount
+   * was corrected, and a section 129 that stated a figure the firm has since conceded was wrong
+   * never started a good clock -- so the fresh sequence is one clock, not two. reissue_allowed is
+   * written by the dispute trigger and by nothing else.
+   *
+   * EVERY RUN, NOT ANY. One good run among them means this account has had a valid demand, and
+   * that is the clock the rule exists to protect.
+   */
   const { data: already } = await admin.from('workflow_runs')
-    .select('id').eq('account_id', accountId).eq('version_id', versionId).limit(1)
-  if ((already ?? []).length > 0) {
+    .select('id, reissue_allowed').eq('account_id', accountId).eq('version_id', versionId)
+  const blocking = (already ?? []).filter((r) => !(r as { reissue_allowed?: boolean }).reissue_allowed)
+  if (blocking.length > 0) {
     res.status(409).json({
       error: 'This account has already been through this workflow. A second run would be a second clock on one debt.',
     })
