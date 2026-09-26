@@ -7061,3 +7061,260 @@ begin
 
   return v_cancelled;
 end $$;
+
+/* ================================================================================
+ * A SEQUENCE CAN NOW BE HELD, AND HELD IS NOT LEFT.
+ *
+ * THE FIRM, ASKED HOW THE EXIT RULES SHOULD WORK: "the account was paid in full, I agree with
+ * that, I think that should be the first rule... a payment was made, it's not an exit rule, it's
+ * kind of a pause rule." And on a promise: "if we stop it for all of that time, then that's a
+ * problem. Unless we can stop it only once. Not twice."
+ *
+ * THREE EVENTS WERE BEING FORCED INTO ONE LIST. workflow_exit_account cancels every step that has
+ * not gone and hands the file back -- which is right for an ending and wrong for a pause, because
+ * a cancelled step cannot come back. A promise kept for six weeks and then broken has to find its
+ * sequence where it left it.
+ *
+ *   ENDS IT     paid in full; a dispute upheld. Nothing more ever goes.
+ *   HOLDS IT    a WRITTEN dispute while it is being looked at; the FIRST promise to pay.
+ *   NOTHING     anything verbal, a payment that does not settle, tracing.
+ *
+ * WHY THE CLOCK STOPS RATHER THAN THE DATES STANDING STILL. The firm's own words on the mockup
+ * they drew: "completed notices are preserved; upcoming dates recalculated." Every notice after
+ * the demand asserts that a period has ELAPSED -- "the period given in our Section 129 notice has
+ * ended", "you were given 20 business days" -- so a hold can only ever make those sentences more
+ * true. Moving the remaining steps forward by the length of the hold is therefore honest, which
+ * is why it is safe here and was not safe for tracing (the firm start again there, because wrong
+ * contact details mean the notices may never have arrived).
+ *
+ * THE ARITHMETIC IS NOT IN HERE. workflow_run_holds records WHEN a run was held and when it was
+ * let go; how many business days that is belongs to workingDays.ts, which knows about Heritage
+ * Day. A second working-day calendar in SQL would be the one that is wrong in the year nobody
+ * checks -- the same reason planUnplannedRuns dates the steps rather than a trigger.
+ * ================================================================================ */
+
+/*
+ * ONLY A WRITTEN DISPUTE STOPS A SEQUENCE.
+ *
+ * THE FIRM: "I don't think verbal ones hold really anything. They need to put it in writing. A
+ * lot of people say a lot of things." And on the one verbal case that sounded legitimate -- a
+ * debtor asking for a document the firm has not got -- they closed it themselves: "they also have
+ * to put that in writing to request that. Then that will be a valid dispute. Because they might
+ * dispute something that's not on the documentation provided."
+ *
+ * So there is one rule and not two. A request for documents IS a dispute once it is in writing,
+ * and a verbal anything is logged, diarised and worked while the sequence runs on.
+ *
+ * FALSE BY DEFAULT, INCLUDING FOR THE 24 ALREADY HERE. Not one of them was raised against this
+ * question, so none of them can answer it -- and defaulting to true would silently hold sequences
+ * on the strength of a fact nobody recorded. The collector ticks it when they have the email.
+ */
+alter table public.account_queries
+  add column if not exists in_writing boolean not null default false;
+
+comment on column public.account_queries.in_writing is
+  'A dispute the debtor put in writing. Only a written one holds a workflow: "a lot of people say '
+  'a lot of things". A written request for documents counts, because what it disputes is what the '
+  'paperwork does not show.';
+
+/*
+ * 'held' JOINS THE STATE LIST, BESIDE 'left' AND NOT INSTEAD OF IT.
+ *
+ *   running   steps are still to come
+ *   held      stopped, nothing cancelled, and it will carry on where it stopped
+ *   finished  every step is sent, released or cancelled
+ *   left      it ended early and nothing more will ever go
+ *
+ * The difference between held and left is the whole change: left cancels what has not gone, held
+ * cancels nothing. A step cancelled cannot come back, and a promise broken after six weeks has to
+ * find its sequence where it left it.
+ */
+alter table public.workflow_runs drop constraint if exists workflow_runs_state_check;
+alter table public.workflow_runs
+  add constraint workflow_runs_state_check
+  check (state in ('running', 'held', 'finished', 'left'));
+
+/*
+ * ONE ROW PER HOLD, NOT A FLAG ON THE RUN.
+ *
+ * A flag would answer "is it held right now" and nothing else. Three things need the history:
+ *
+ *   - THE CLOCK. The remaining steps move forward by the total of every hold, so the run needs
+ *     all of them, not the last one.
+ *   - ONCE, NOT TWICE. The firm: "we can hold it maybe off for the first promise" -- so the
+ *     answer to "has a promise already held this run" has to survive the hold ending.
+ *   - THE SCREEN. The firm's own mockup has a "Past workflow history": paused, payment missed,
+ *     resumed, each with its date. That is this table, read back.
+ */
+create table if not exists public.workflow_run_holds (
+  id uuid primary key default gen_random_uuid(),
+  run_id uuid not null references public.workflow_runs (id) on delete cascade,
+
+  /*
+   * WHAT STOPPED IT. Two causes and they behave differently, which is why the column is a name
+   * rather than a boolean: a promise may hold a run once and never again, a written dispute may
+   * hold it whenever one is raised.
+   */
+  cause text not null check (cause in ('promise', 'dispute')),
+  /* The promise or the query itself, so the screen can link to the thing that caused it and the
+     resume can be driven by that row changing. No foreign key: the two causes live in different
+     tables and a cause row deleted must not take the history of the hold with it. */
+  cause_id uuid,
+
+  /* The firm's words, for the screen: "Paused after Day 1 due to a payment arrangement." */
+  reason text not null,
+
+  /* DATES, NOT TIMESTAMPS. A hold is counted in the firm's working days, and a hold that started
+     at 16:40 and ended at 09:15 two days later is two days, not one and a bit. */
+  started_on date not null default (now() at time zone 'Africa/Johannesburg')::date,
+  ended_on date,
+  /* Why it was let go: 'promise_broken', 'dispute_closed', or a person's own words. Null while
+     the hold is still on. */
+  ended_reason text,
+
+  started_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+/*
+ * ONE LIVE HOLD PER RUN. A run held twice over would count its clock twice and show two reasons,
+ * and there is no case for it: whichever event arrives second finds the run already held and
+ * leaves it alone. A PARTIAL index, so the history of ended holds is unlimited.
+ */
+create unique index if not exists workflow_run_holds_live_idx
+  on public.workflow_run_holds (run_id) where ended_on is null;
+
+/* "Has a promise already held this run" -- asked on every promise, on a table that grows. */
+create index if not exists workflow_run_holds_cause_idx
+  on public.workflow_run_holds (run_id, cause);
+
+comment on table public.workflow_run_holds is
+  'Every time a sequence was paused and let go again. The clock stops while a hold is open, so the '
+  'remaining steps move forward by the total of these -- counted in working days by the app, which '
+  'is the only place that knows about public holidays.';
+
+alter table public.workflow_run_holds enable row level security;
+grant select, insert, update, delete on public.workflow_run_holds to authenticated;
+
+/* The same rule the runs and steps beside it carry: everyone reads, because a collector holding
+   the file has to see why it stopped; anybody signed in may write, because a collector pausing
+   their own account is the ordinary case and the narrowing happens in the route. */
+drop policy if exists workflow_run_holds_select on public.workflow_run_holds;
+create policy workflow_run_holds_select on public.workflow_run_holds
+  for select to authenticated using (auth.uid() is not null);
+drop policy if exists workflow_run_holds_write on public.workflow_run_holds;
+create policy workflow_run_holds_write on public.workflow_run_holds
+  for all to authenticated using (auth.uid() is not null) with check (auth.uid() is not null);
+
+/*
+ * HOLDING A SEQUENCE, AND LETTING IT GO AGAIN.
+ *
+ * THE TWO HALVES OF WHAT workflow_exit_account WAS DOING TO EVERYTHING. It cancels what has not
+ * gone and hands the file back; that is an ENDING, and only two things are endings -- payment in
+ * full, and a dispute upheld. A promise and a written dispute stop the sequence without ending
+ * it, and the difference is that nothing is cancelled: a step cancelled cannot come back, and a
+ * promise broken after six weeks has to find its sequence where it left it.
+ *
+ * NEITHER OF THESE TOUCHES A DATE. How long a hold lasted in working days belongs to the app --
+ * workingDays.ts knows about Heritage Day and a second calendar in SQL would be the one that is
+ * wrong in the year nobody checks. These record WHEN; planUnplannedRuns moves the steps.
+ */
+create or replace function public.workflow_hold_account(
+  p_account_id uuid, p_cause text, p_reason text default null, p_cause_id uuid default null
+) returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_reason text;
+  v_held integer := 0;
+begin
+  v_reason := coalesce(p_reason, case p_cause
+    when 'promise' then 'A promise to pay was made'
+    when 'dispute' then 'A dispute was raised in writing'
+  end);
+  if v_reason is null then
+    raise exception 'Unknown workflow hold cause "%". It is one of promise, dispute.', p_cause;
+  end if;
+
+  /*
+   * ONCE PER RUN FOR A PROMISE, AND THAT IS THE FIRM'S RULE IN ONE CLAUSE.
+   *
+   * "People sometimes make a promise and then they break the promise, and then they make another
+   * promise and then they break that again. So if we stop it for all of that time, then that's a
+   * problem. Unless we can stop it only once. Not twice."
+   *
+   * The second promise is still recorded, still diarised and still worked -- it simply does not
+   * stop the sequence, because the debtor has already been told in writing that only payment
+   * will. A WRITTEN DISPUTE is not limited this way: a new objection is a new thing to answer,
+   * and the firm has to answer it before it can go on demanding.
+   */
+  with live as (
+    select r.id from public.workflow_runs r
+     where r.account_id = p_account_id
+       and r.state = 'running'
+       and (p_cause <> 'promise' or not exists (
+         select 1 from public.workflow_run_holds h
+          where h.run_id = r.id and h.cause = 'promise'))
+  ), opened as (
+    insert into public.workflow_run_holds (run_id, cause, cause_id, reason, started_by)
+    select live.id, p_cause, p_cause_id, v_reason, auth.uid() from live
+    /* A run already held is left alone rather than held twice: whichever event arrived second
+       finds it stopped, and two open holds would count the clock twice. */
+    on conflict do nothing
+    returning run_id
+  )
+  update public.workflow_runs r
+     set state = 'held'
+    from opened
+   where r.id = opened.run_id;
+
+  get diagnostics v_held = row_count;
+  return v_held;
+end $$;
+
+comment on function public.workflow_hold_account(uuid, text, text, uuid) is
+  'Stop a running sequence without cancelling anything. A promise may do this once per run, ever; '
+  'a written dispute whenever one is raised.';
+
+create or replace function public.workflow_resume_account(
+  p_account_id uuid, p_reason text default null
+) returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_resumed integer := 0;
+begin
+  /*
+   * CLOSE THE HOLD FIRST, THEN LET THE RUN GO. In this order because the hold's ended_on is what
+   * the app adds up to move the remaining steps: a run set running with its hold still open would
+   * be a sequence whose clock never restarted, and the next morning's sweep would send the step
+   * it was paused on.
+   */
+  update public.workflow_run_holds h
+     set ended_on = (now() at time zone 'Africa/Johannesburg')::date,
+         ended_reason = coalesce(p_reason, 'Resumed')
+    from public.workflow_runs r
+   where h.run_id = r.id
+     and r.account_id = p_account_id
+     and r.state = 'held'
+     and h.ended_on is null;
+
+  update public.workflow_runs
+     set state = 'running'
+   where account_id = p_account_id and state = 'held';
+
+  get diagnostics v_resumed = row_count;
+  return v_resumed;
+end $$;
+
+comment on function public.workflow_resume_account(uuid, text) is
+  'Let a held sequence go again. Nothing was cancelled, so it carries on where it stopped -- and '
+  'the remaining steps are re-dated by the app, forward by the working days the hold lasted.';
+
+revoke all on function public.workflow_hold_account(uuid, text, text, uuid) from public;
+revoke all on function public.workflow_resume_account(uuid, text) from public;
+grant execute on function public.workflow_hold_account(uuid, text, text, uuid) to authenticated;
+grant execute on function public.workflow_resume_account(uuid, text) to authenticated;
