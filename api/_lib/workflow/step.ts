@@ -6,8 +6,9 @@ import { computeBalance } from '../../../src/lib/accountBalance.js'
 import { planSend, type StepTemplate } from '../../../src/lib/workflowSend.js'
 import { letterToPdf, letterFilename } from '../../../src/lib/letterPdf.js'
 import { emailBodyHtml } from '../../../src/lib/emailStyle.js'
-import { A4_LETTERHEAD, type LetterDocument } from '../../../src/lib/letterDocument.js'
+import type { LetterDocument } from '../../../src/lib/letterDocument.js'
 import { charterFor } from './fonts.js'
+import { letterheadFor } from './letterhead.js'
 import { moneyZa } from './locale.js'
 import { toSettings as toFirmSettings } from '../../../src/lib/firmSettingsRow.js'
 import { notifyHeld } from './notify.js'
@@ -369,6 +370,10 @@ export async function runOneStep(
     account: {
       caseNumber: account.case_number ?? null,
       handoverDate: account.opening_as_at ?? null,
+      /* WHAT THE CLIENT HANDED US, which is neither the capital still outstanding nor the balance
+         owed today. Left off, {{balance_handover}} stood unresolved on every notice the runner
+         sent -- and on the summary-of-account email it is the first of the three figures. */
+      capitalHandedOver: Number(account.capital_handed_over ?? 0),
       paymentsToDate: balance.payments,
       listingDate: account.listing_date ?? null,
       listingReference: account.listing_reference ?? null,
@@ -498,14 +503,23 @@ export async function runOneStep(
      * Charter's four faces are fetched from the deployment's own origin -- see fonts.ts -- and a
      * failure falls back to Times rather than refusing, because a notice in the wrong serif went
      * out and a notice that would not attach did not.
+     *
+     * ON THE FIRM'S OWN PAPER, WHICH IT WAS NOT. This drew on A4_LETTERHEAD -- the page setup that
+     * RESERVES forty-three millimetres at the top FOR a letterhead -- and passed no letterhead to
+     * fill it. Every notice the morning run has sent went out with the firm's logo missing and a
+     * hole where it should have been, which is what the firm sent back: "fix it with the
+     * letterhead". The page now comes WITH the picture, because letterheads.ts's margins are the
+     * only thing keeping body text off the footer block drawn into the image.
      */
     const files = []
     if (plan.template?.attachment) {
+      const paper = await letterheadFor(admin)
       const bytes = await letterToPdf({
         doc: plan.template.attachment.doc,
-        page: A4_LETTERHEAD,
+        page: paper.page,
         filled: true,
         values,
+        letterhead: paper.image,
         charter: await charterFor(),
       })
       files.push({

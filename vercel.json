@@ -1,5 +1,8 @@
 {
   "regions": ["cdg1"],
+  "functions": {
+    "api/**/*.ts": { "includeFiles": "public/fonts/charter/*.ttf" }
+  },
   "rewrites": [
     { "source": "/((?!api/|assets/|brand/|favicon\\.svg).*)", "destination": "/index.html" }
   ],
