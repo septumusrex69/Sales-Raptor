@@ -83,6 +83,7 @@ import {
 } from '../../lib/accountRun.ts'
 import { startSentence, startShortLabel } from '../../lib/workflowStart.ts'
 import { liveArrangement, nextUnpaid } from '../../lib/ptpSchedule.ts'
+import { RepaymentCalculator } from '../../components/collections/RepaymentCalculator.tsx'
 import { todayIso } from '../../lib/reminderTime.ts'
 import { needsAttention } from '../../lib/runSteps.ts'
 import { debtorKey, type OtherAccount } from '../../lib/sameDebtor'
@@ -402,7 +403,13 @@ export function AccountDetail() {
         interest: ledgers.accruals.map((i) => ({ from: i.accruedOn, days: i.days, amount: i.amountAccrued })),
       },
     }
-    return buildStatement(input)
+    /*
+     * THE INPUT TRAVELS WITH THE STATEMENT, so the repayment calculator projects forward from the
+     * very assembly the statement was built on rather than from a second one. Assembled twice, the
+     * quotation a collector reads down the telephone and the balance printed beside it would drift
+     * -- and the drift would be invisible, because both would look like figures about this account.
+     */
+    return { ...buildStatement(input), input }
   }, [account, ledgers])
 
   const timeline = useMemo(
@@ -769,6 +776,8 @@ export function AccountDetail() {
       successRatio={account.ptpSuccessRatio}
       balance={b?.balance}
       settlement={b?.settlement}
+      /* The very assembly the statement above was built from -- see `position`. */
+      position={statement?.input ?? null}
     />
   )
   const disputesPanel = (
@@ -2026,7 +2035,7 @@ export function PaymentProgressBar({ progress }: { progress: PaymentProgress }) 
  * never touches a balance — it is kept or it is broken, and a person says which. Matching one
  * against an incoming payment is the collections engine's job, and that does not exist yet.
  */
-function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement }: {
+function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement, position }: {
   accountId: string
   promises: PromiseToPay[]
   userName: string | null
@@ -2040,6 +2049,16 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
   balance: number | undefined
   /** What it takes to close the account today, including the item 9 receipt fee on settling. */
   settlement: number | undefined
+  /**
+   * THE STATEMENT'S OWN ASSEMBLY, for the repayment calculator under the form.
+   *
+   * PASSED WHOLE AND ALREADY BUILT. The projection runs the same computeBalance the statement runs,
+   * period by period, so the quotation a collector reads down the telephone and the balance printed
+   * beside it are one piece of arithmetic. Reassembled here it would be a second opinion about the
+   * same money, and the drift would be invisible because both would look like figures about this
+   * account.
+   */
+  position: Omit<BalanceInput, 'accrueTo'> | null
 }) {
   /*
    * The arrangement is chosen first, and the amount follows from it.
@@ -2192,6 +2211,32 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
                 debtor&rsquo;s request &mdash; R50 excluding VAT, per occurrence.
               </p>
             </>
+          )}
+          {/*
+            WHAT THE OFFER ACTUALLY DOES, BEFORE IT IS RECORDED.
+            
+            THE FIRM ASKED FOR IT HERE: "the guy owes 10 000 rand, he wants to pay 500 rand a
+            month, take into account interest... how long will it take him?"
+            
+            IT READS THIS FORM rather than asking again, so the figures are about the arrangement
+            that is going to be saved -- a second set of inputs would let somebody quote one
+            arrangement and record a different one.
+          */}
+          {position && (
+            <RepaymentCalculator
+              account={position}
+              amount={Number(amount)}
+              schedule={arrangement && dueOn
+                ? {
+                  arrangement,
+                  dueOn,
+                  onLastDay: arrangement === 'monthly' && onLastDay,
+                  dayOfMonth: arrangement === 'monthly' && !onLastDay ? Number(dueOn.slice(8, 10)) : null,
+                  dayOfWeek: arrangement === 'weekly' ? isoWeekday(dueOn) : null,
+                }
+                : null}
+              money={formatMoney}
+            />
           )}
           <button type="submit" disabled={busy || !arrangement || !(Number(amount) > 0) || !dueOn || !!problem}
             className="w-full text-sm font-medium py-1.5 rounded-lg bg-brand-600 text-white disabled:opacity-50">
