@@ -249,7 +249,25 @@ ok('...preferring the one marked primary', /live\.find\(\(c\) => c\.isPrimary\)/
  * included, and the Monday a holiday moves to when it falls on a Sunday. A demand giving a debtor
  * less time than the Act does is a demand that can be set aside.
  */
-ok('the merge works out the date to respond by', /respondBy: respondBy\(input\.today\)/.test(merge))
+ok('the merge works out the date to respond by',
+  /respondBy: input\.respondByOverride \?\? respondBy\(input\.today\)/.test(merge))
+/*
+ * AND A DISPUTE MESSAGE MAY QUOTE A DIFFERENT DATE, which is why the line above is not simply
+ * respondBy(input.today) any more.
+ *
+ * While a section 129 is running the debtor has what is LEFT of ITS period, not a fresh ten days --
+ * disputeWindow works that out, with a floor of five -- and the acknowledgement has to quote the
+ * NOTICE's own date. Two dates days apart, each headed "respond by", is an ambiguity a debtor is
+ * entitled to resolve in their own favour.
+ *
+ * THE OVERRIDE IS FIRST AND THE TEN WORKING DAYS ARE THE FALLBACK, in that order: written the other
+ * way round the ?? never fires, because respondBy() always returns a date. Asserted as one regex
+ * above rather than two, so a rewrite that keeps both names and swaps them cannot pass.
+ */
+ok('...off the notice where the message is about a dispute',
+  /respondByOverride\?: string \| null/.test(merge))
+ok('...and disputeWindow is what decides it',
+  /disputeWindow decides it/.test(merge))
 ok('...counting ten of them', /addWorkingDays\(today, 10\)/.test(merge))
 /* From the library that knows the public holidays, never counted by hand -- and now imported by
    the assembly rather than by the page, since that is where the counting moved. */

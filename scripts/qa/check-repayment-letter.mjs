@@ -20,7 +20,7 @@ import { repaymentPlan, settlementLadder } from '../../src/lib/repaymentPlan.ts'
 import {
   canUseLetter, letterProblems, lettersText, PRINTER_FIELDS,
 } from '../../src/lib/letterDocument.ts'
-import { unknownFields, MERGE_FIELDS } from '../../src/lib/messageTemplates.ts'
+import { unknownFields } from '../../src/lib/messageTemplates.ts'
 
 let pass = 0
 const failures = []

@@ -378,6 +378,27 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
     { key: 'listing_reference', label: 'Our listing reference, to quote at a bureau', sample: 'BFL-2026-11482' },
     { key: 'bureaus_listed', label: 'Which bureaus it went to', sample: 'TransUnion, Experian and XDS' },
     /*
+     * THE DISPUTE, AND THE ONE FIELD OF THE FOUR THAT MUST NEVER REACH A DEBTOR.
+     *
+     * `dispute_days_left` is a COUNT OF WORKING DAYS WRITTEN OUT ("6 business days"), not a date,
+     * because that is how the firm's own dispute letters read. `disputeWindow` decides the number
+     * and {{respond_by}} carries the date it lands on, so the count and the date cannot disagree --
+     * which is the whole point of the override that feeds them both: while a section 129 is running
+     * the debtor has what is LEFT of ITS period, not a fresh ten days.
+     *
+     * `dispute_summary` IS THE COLLECTOR'S OWN NOTE, and it belongs in the internal notifications
+     * only -- the referral to the liaison, the follow-up, the escalation. It is what the collector
+     * wrote down about what the debtor alleges, in the firm's words rather than the debtor's, and a
+     * debtor reading the firm's working note on their own dispute is how a file ends up quoted back
+     * at the firm. Today the protection is structural: `planSend` resolves every recipient to
+     * `debtor.email`, so a template carrying this field cannot be a workflow node at all and is
+     * sent by hand by the person who wrote it.
+     */
+    { key: 'dispute_days_left', label: 'How long they have to send the documents', sample: '6 business days' },
+    { key: 'dispute_alleged_date', label: 'The day they said the account is disputed', sample: '21 September 2026' },
+    { key: 'dispute_received_date', label: 'The day the dispute arrived in writing', sample: '24 September 2026' },
+    { key: 'dispute_summary', label: 'What the collector wrote down about the dispute', sample: 'Says the account was settled in 2023.' },
+    /*
      * AND THE FIRM'S OWN DETAILS, which are not the agent's and not the client's. Raptor has no
      * table for them -- companies.banking_details is where REMITTANCE GOES, which is the opposite
      * direction from where a debtor pays -- so these resolve to nothing until it has one.
@@ -471,6 +492,13 @@ export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
      and these two are what was agreed to pay it off. Grouped apart so a writer reaching for "the
      amount" is not offered {{balance}} and {{ptp_amount}} side by side. */
   { title: 'The arrangement', keys: ['ptp_amount', 'ptp_date', 'ptp_paid'] },
+  /* APART FROM THE ACCOUNT, for two reasons. {{dispute_days_left}} is a count and {{respond_by}}
+     is a date, and offered side by side under one heading they read as alternatives rather than as
+     two halves of one period. And {{dispute_summary}} is the only field in the collections
+     vocabulary that is not written for the debtor to read, which is easier to remember while it is
+     sitting in a group of its own than while it is the fourteenth entry under "The account". */
+  { title: 'The dispute', keys: ['dispute_days_left', 'dispute_alleged_date', 'dispute_received_date',
+    'dispute_summary'] },
   { title: 'Their business', keys: ['company_name', 'service_interested'] },
   { title: 'The deal', keys: ['deal_name', 'deal_value'] },
   { title: 'The client', keys: ['client_name'] },
@@ -972,6 +1000,23 @@ export function mergeValuesFor(input: {
    */
   paymentReceived?: number | null
   /**
+   * THE DISPUTE, where the message is about one.
+   *
+   * OMITTED OR NULL ON EVERY ACCOUNT WITH NO DISPUTE, which is nearly all of them, and null leaves
+   * the placeholders standing -- an acknowledgement merged against an account with no dispute on it
+   * would otherwise tell a debtor they have until nothing to send their documents.
+   *
+   * `daysLeft` ARRIVES ALREADY WRITTEN OUT ("6 business days") rather than as a number, because
+   * `disputeWindow` decides the count and `disputeDaysPhrase` decides how it reads, singular at one
+   * included. A number here would be a second place that decides the wording of a statutory period.
+   */
+  dispute?: {
+    daysLeft: string | null
+    allegedOn: string | null
+    receivedOn: string | null
+    summary: string | null
+  } | null
+  /**
    * The firm's own details, PASSED WHOLE RATHER THAN FIELD BY FIELD.
    *
    * The shape is FirmSettings' -- same key names, every one optional but `firmName` -- and the
@@ -1093,6 +1138,14 @@ export function mergeValuesFor(input: {
        and prints R 0.00 on purpose -- there, zero is the answer to "what have they paid". */
     ptp_paid: input.paymentReceived === null || input.paymentReceived === undefined
       ? null : input.money(input.paymentReceived),
+    /* Straight through. The phrasing of the count is disputeWindow's, the two dates go through
+       longDate like every other date a debtor reads, and the summary is the collector's own words
+       untouched -- a renderer tidying up somebody's note about a disputed account would be
+       rewriting the firm's record of what was alleged. */
+    dispute_days_left: input.dispute?.daysLeft ?? null,
+    dispute_alleged_date: input.dispute?.allegedOn ? longDate(input.dispute.allegedOn) : null,
+    dispute_received_date: input.dispute?.receivedOn ? longDate(input.dispute.receivedOn) : null,
+    dispute_summary: input.dispute?.summary ?? null,
     position_as_at: input.positionAsAt ? longDate(input.positionAsAt) : null,
     firm_bank: bankLine(input.firm.trustBank, input.firm.trustBranchCode),
     firm_bank_name: some(input.firm.trustBank),

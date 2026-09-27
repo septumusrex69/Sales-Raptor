@@ -8181,3 +8181,491 @@ begin
 
   update public.workflow_versions set state = 'active', published_at = now() where id = v_draft;
 end $$;
+
+-- ============================================================================
+-- THE DISPUTE LIBRARY, PART 1 OF 3: the two notices that an account is DEEMED UNDISPUTED.
+--
+-- 33 templates the firm handed over as one set: these two letters, typeset from their own PDFs;
+-- seventeen emails, of which fourteen go to the debtor and three to staff; and fourteen SMSs.
+-- Only the two deemed-undisputed emails carry an attachment, each pointing at the notice for
+-- its own audience. The outcome emails carry no letter at all: they state the finding and
+-- nothing more, and the reasons behind it are the collector's to give, outside this workflow.
+--
+-- ONE CHANGE TO THE WORDING HANDED OVER, and it is the same one the arrangement set carried:
+-- every reference a debtor is told to quote is {{case_number}} and not {{reference}}. The
+-- firm's own instruction -- "if they use the client reference, it's more difficult to find" --
+-- and the book: the client's reference is used on more than one account 5 013 times over, so
+-- 21% of accounts cannot be identified by it.
+--
+-- THE DATE THE WINDOW CLOSED IS ONE FIELD, {{respond_by}}, QUOTED FOUR TIMES. The firm's PDF
+-- writes it out each time ("DUE BY 1 December 2026", "Because nothing was received by 1 December
+-- 2026", "before 1 December 2026"), and a notice that gives two different closing dates is a
+-- notice a debtor can argue with. What decides the value is disputeWindow, which returns the
+-- SECTION 129's own date while its period is still running rather than a fresh ten days -- so
+-- this notice and the demand it follows cannot disagree either.
+--
+-- ON CONFLICT DO NOTHING, WHICH IS THE HOUSE RULE. Re-running a seed must never revert an edit
+-- the firm has made in the Library -- their wording wins over ours, always.
+-- ============================================================================
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('letter', 'collections', 'individual', 'text', 'Notice that the account is deemed undisputed (individual)', null,
+  '{"defaults":{"font":"\"Charter\", \"Bitstream Charter\", Georgia, serif","size":10.5,"colour":"#1f2937","lineHeight":1.45},"runningFoot":"Deemed undisputed · Ref {{case_number}} · Page {{page}} of {{pages}}","blocks":[{"kind":"table","borders":"none","widths":[28,72],"rows":[[{"spans":[{"text":"DATE","bold":true}]},{"spans":[{"text":"{{today}}"}]}],[{"spans":[{"text":"OUR REFERENCE","bold":true}]},{"spans":[{"text":"{{case_number}}"}]}],[{"spans":[{"text":"ACCOUNT","bold":true}]},{"spans":[{"text":"{{account_number}}"}]}],[{"spans":[{"text":"DELIVERY","bold":true}]},{"spans":[{"text":"By email, with notification by SMS"}]}]]},{"kind":"paragraph","spans":[{"text":"{{debtor_name}}","bold":true}]},{"kind":"paragraph","spans":[{"text":"Identity number: {{debtor_id_masked}}"}]},{"kind":"heading","level":1,"spans":[{"text":"NOTICE THAT THE ACCOUNT IS DEEMED UNDISPUTED"}]},{"kind":"paragraph","spans":[{"text":"Dear {{debtor_name}} — we act on behalf of {{client_name}}, the creditor. On {{dispute_alleged_date}} you told us that this account was disputed. We asked for that dispute in writing. Nothing has reached us."}]},{"kind":"heading","level":2,"spans":[{"text":"What we asked for, and what we received"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"THE DISPUTE WE INVITED, AND NEVER RECEIVED","bold":true}]},{"kind":"paragraph","spans":[{"text":"We asked for the dispute in writing, with any documents supporting it, so that we could investigate it and give a written finding."}]},{"kind":"table","borders":"rows","widths":[34,66],"rows":[[{"spans":[{"text":"DISPUTE ALLEGED ON","bold":true}]},{"spans":[{"text":"{{dispute_alleged_date}}"}]}],[{"spans":[{"text":"WE ASKED FOR","bold":true}]},{"spans":[{"text":"The grounds in writing, with supporting documents"}]}],[{"spans":[{"text":"DUE BY","bold":true}]},{"spans":[{"text":"{{respond_by}}"}]}],[{"spans":[{"text":"RECEIVED","bold":true}]},{"spans":[{"text":"Nothing, as at the date of this letter"}]}],[{"spans":[{"text":"OUR CASE REFERENCE","bold":true}]},{"spans":[{"text":"{{case_number}}"}]}]]},{"kind":"heading","level":2,"spans":[{"text":"The account is deemed undisputed"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"Because nothing was received by {{respond_by}}, we deem this account to be undisputed and we proceed with the steps set out in our notice: the reporting of the default to the registered credit bureaus, and the enforcement of the agreement through our attorneys and the courts. The balance outstanding is {{balance}}, and interest continues to accrue at 2% per month."}]},{"kind":"heading","level":2,"spans":[{"text":"This does not close the door"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"If you send us the dispute in writing, with the documents supporting it, we will investigate it and give a written finding, whatever stage the account has reached. What it cannot do is undo steps already taken. That is why the time to raise it was before {{respond_by}}, and why it is still better raised today than next month."}]},{"kind":"paragraph","spans":[{"text":"Send it to {{collector_email}}, quoting case reference {{case_number}}."}]},{"kind":"heading","level":2,"spans":[{"text":"How to pay"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"PAYMENT MUST BE MADE INTO OUR LEGAL PRACTITIONER TRUST ACCOUNT","bold":true}]},{"kind":"paragraph","spans":[{"text":"A payment into our trust account is verified on the day it reaches us. Do not pay any other account."}]},{"kind":"table","borders":"rows","widths":[34,66],"rows":[[{"spans":[{"text":"BANK","bold":true}]},{"spans":[{"text":"{{firm_bank_name}}"}]}],[{"spans":[{"text":"ACCOUNT NAME","bold":true}]},{"spans":[{"text":"{{firm_bank_holder}}"}]}],[{"spans":[{"text":"BRANCH CODE","bold":true}]},{"spans":[{"text":"{{firm_bank_branch}}"}]}],[{"spans":[{"text":"ACCOUNT NUMBER","bold":true}]},{"spans":[{"text":"{{firm_bank_account}}"}]}],[{"spans":[{"text":"PAYMENT REFERENCE","bold":true}]},{"spans":[{"text":"{{case_number}}"}]}],[{"spans":[{"text":"PROOF OF PAYMENT","bold":true}]},{"spans":[{"text":"Email it to {{firm_email}} on the day you pay"}]}],[{"spans":[{"text":"QUESTIONS","bold":true}]},{"spans":[{"text":"Speak to {{collector_name}}, who handles this account, on {{firm_phone}}"}]}]]},{"kind":"paragraph","spans":[{"text":"We would still rather resolve this with you than proceed."}]},{"kind":"paragraph","spans":[{"text":"Yours faithfully"}],"keepWithNext":true},{"kind":"signature","widthMm":70,"spans":[{"text":"{{signatory_name}}\n{{signatory_title}}\nfor and on behalf of {{firm_name}}\nduly authorised agent of {{client_name}}"}]},{"kind":"paragraph","spans":[{"text":"Note on delivery. Sent by email, with notification by SMS. Proof of sending is retained on our file.","size":8.5}]}]}', 'letter-dispute-undisputed-individual', true)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('letter', 'collections', 'company', 'text', 'Notice that the account is deemed undisputed (company)', null,
+  '{"defaults":{"font":"\"Charter\", \"Bitstream Charter\", Georgia, serif","size":10.5,"colour":"#1f2937","lineHeight":1.45},"runningFoot":"Deemed undisputed · Ref {{case_number}} · Page {{page}} of {{pages}}","blocks":[{"kind":"table","borders":"none","widths":[28,72],"rows":[[{"spans":[{"text":"DATE","bold":true}]},{"spans":[{"text":"{{today}}"}]}],[{"spans":[{"text":"OUR REFERENCE","bold":true}]},{"spans":[{"text":"{{case_number}}"}]}],[{"spans":[{"text":"ACCOUNT","bold":true}]},{"spans":[{"text":"{{account_number}}"}]}],[{"spans":[{"text":"DELIVERY","bold":true}]},{"spans":[{"text":"By email, with notification by SMS"}]}]]},{"kind":"paragraph","spans":[{"text":"The Directors"}]},{"kind":"paragraph","spans":[{"text":"{{debtor_name}}","bold":true}]},{"kind":"paragraph","spans":[{"text":"Registration number: {{debtor_reg_no}}"}]},{"kind":"heading","level":1,"spans":[{"text":"NOTICE THAT THE ACCOUNT IS DEEMED UNDISPUTED"}]},{"kind":"paragraph","spans":[{"text":"Dear Sirs / Madams — we act on behalf of {{client_name}}, the creditor. On {{dispute_alleged_date}} the company told us that this account was disputed. We asked for that dispute in writing. Nothing has reached us."}]},{"kind":"heading","level":2,"spans":[{"text":"What we asked for, and what we received"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"THE DISPUTE WE INVITED, AND NEVER RECEIVED","bold":true}]},{"kind":"paragraph","spans":[{"text":"We asked for the dispute in writing, with any documents supporting it, so that we could investigate it and give a written finding."}]},{"kind":"table","borders":"rows","widths":[34,66],"rows":[[{"spans":[{"text":"DISPUTE ALLEGED ON","bold":true}]},{"spans":[{"text":"{{dispute_alleged_date}}"}]}],[{"spans":[{"text":"WE ASKED FOR","bold":true}]},{"spans":[{"text":"The grounds in writing, with supporting documents"}]}],[{"spans":[{"text":"DUE BY","bold":true}]},{"spans":[{"text":"{{respond_by}}"}]}],[{"spans":[{"text":"RECEIVED","bold":true}]},{"spans":[{"text":"Nothing, as at the date of this letter"}]}],[{"spans":[{"text":"OUR CASE REFERENCE","bold":true}]},{"spans":[{"text":"{{case_number}}"}]}]]},{"kind":"heading","level":2,"spans":[{"text":"The account is deemed undisputed"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"Because nothing was received by {{respond_by}}, we deem this account to be undisputed and we proceed with the steps set out in our notice: the reporting of the default to the registered credit bureaus, and the enforcement of the agreement through our attorneys and the courts. The balance outstanding is {{balance}}, and interest continues to accrue at 2% per month."}]},{"kind":"heading","level":2,"spans":[{"text":"This does not close the door"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"If the company sends us the dispute in writing, with the documents supporting it, we will investigate it and give a written finding, whatever stage the account has reached. What it cannot do is undo steps already taken. That is why the time to raise it was before {{respond_by}}, and why it is still better raised today than next month."}]},{"kind":"paragraph","spans":[{"text":"Send it to {{collector_email}}, quoting case reference {{case_number}}."}]},{"kind":"heading","level":2,"spans":[{"text":"How to pay"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"PAYMENT MUST BE MADE INTO OUR LEGAL PRACTITIONER TRUST ACCOUNT","bold":true}]},{"kind":"paragraph","spans":[{"text":"A payment into our trust account is verified on the day it reaches us. Do not pay any other account."}]},{"kind":"table","borders":"rows","widths":[34,66],"rows":[[{"spans":[{"text":"BANK","bold":true}]},{"spans":[{"text":"{{firm_bank_name}}"}]}],[{"spans":[{"text":"ACCOUNT NAME","bold":true}]},{"spans":[{"text":"{{firm_bank_holder}}"}]}],[{"spans":[{"text":"BRANCH CODE","bold":true}]},{"spans":[{"text":"{{firm_bank_branch}}"}]}],[{"spans":[{"text":"ACCOUNT NUMBER","bold":true}]},{"spans":[{"text":"{{firm_bank_account}}"}]}],[{"spans":[{"text":"PAYMENT REFERENCE","bold":true}]},{"spans":[{"text":"{{case_number}}"}]}],[{"spans":[{"text":"PROOF OF PAYMENT","bold":true}]},{"spans":[{"text":"Email it to {{firm_email}} on the day the company pays"}]}],[{"spans":[{"text":"QUESTIONS","bold":true}]},{"spans":[{"text":"Speak to {{collector_name}}, who handles this account, on {{firm_phone}}"}]}]]},{"kind":"paragraph","spans":[{"text":"We would still rather resolve this with the company than proceed."}]},{"kind":"paragraph","spans":[{"text":"Yours faithfully"}],"keepWithNext":true},{"kind":"signature","widthMm":70,"spans":[{"text":"{{signatory_name}}\n{{signatory_title}}\nfor and on behalf of {{firm_name}}\nduly authorised agent of {{client_name}}"}]},{"kind":"paragraph","spans":[{"text":"Note on delivery. Sent by email, with notification by SMS. Proof of sending is retained on our file.","size":8.5}]}]}', 'letter-dispute-undisputed-company', true)
+on conflict (seed_key) do nothing;
+
+-- ============================================================================
+-- THE DISPUTE LIBRARY, PART 2 OF 3: the seventeen emails.
+--
+-- Fourteen to the debtor, in individual and company pairs across the seven steps, and THREE TO
+-- STAFF -- audience null, not 'individual' or 'company', because they are about the FILE rather
+-- than about the debtor and the same note goes to the liaison whichever kind of debtor it is.
+--
+-- THOSE THREE ARE ALSO THE ONLY TEMPLATES IN THE LIBRARY THAT QUOTE {{dispute_summary}}, which is
+-- the collector's own note about what is alleged, and that is why none of them is wired up as a
+-- workflow node: planSend resolves every recipient to debtor.email, so a node carrying one of
+-- these would send the firm's working note to the person disputing the account. They are sent by
+-- hand until workflow_nodes can name somebody other than the debtor.
+--
+-- ONLY THE TWO DEEMED-UNDISPUTED EMAILS CARRY AN ATTACHMENT, each pointing at the notice for its
+-- own audience. The outcome emails carry no letter: they state the finding and nothing more.
+-- ============================================================================
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'individual', 'text', 'Dispute: send it in writing (individual)', 'Your dispute, what we need from you - case reference {{case_number}}',
+  'Dear {{debtor_name}}
+
+Case reference: {{case_number}}
+
+You told us that you dispute this account. So that we can investigate it, we need it from you in writing.
+
+Please send us:
+1. What you dispute - the amount, or that you are liable at all, and why.
+2. Anything that supports it - proof of payments made, a settlement letter, or correspondence with {{client_name}}.
+3. If this is not your account, a copy of your identity document so that we can check the account against you.
+
+Send it to {{collector_email}}, quoting case reference {{case_number}}. You have {{dispute_days_left}}, that is by {{respond_by}}.
+
+Please note that telling us you dispute the account does not, on its own, suspend anything. The account continues on its normal course, and the period in the Section 129 notice keeps running. Collection is suspended only once we have your dispute in writing.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-dispute-writing-individual', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'company', 'text', 'Dispute: send it in writing (company)', 'The company''s dispute, what we need - case reference {{case_number}}',
+  'To the directors of {{debtor_name}}
+
+Case reference: {{case_number}}
+Registration number: {{debtor_reg_no}}
+
+The company has told us that it disputes this account. So that we can investigate it, we need it in writing.
+
+Please send us:
+1. What is disputed - the amount, or that the company is liable at all, and why.
+2. Anything that supports it - proof of payment, the disputed invoices or statements, or correspondence with {{client_name}}.
+
+Send it to {{collector_email}}, quoting case reference {{case_number}}. The company has {{dispute_days_left}}, that is by {{respond_by}}.
+
+Please note that telling us the account is disputed does not, on its own, suspend anything. The account continues on its normal course. Collection is suspended only once we have the dispute in writing.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-dispute-writing-company', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'individual', 'text', 'Dispute: reminder (individual)', 'Dispute not yet received - case reference {{case_number}}',
+  'Dear {{debtor_name}}
+
+We have not yet received your dispute in writing on case reference {{case_number}}.
+
+Please send it to {{collector_email}}, with anything that supports it. You have {{dispute_days_left}} left, until {{respond_by}}.
+
+Until it reaches us the account continues on its normal course.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-dispute-reminder-individual', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'company', 'text', 'Dispute: reminder (company)', 'Dispute not yet received - case reference {{case_number}}',
+  'To the directors of {{debtor_name}}
+
+We have not yet received the company''s dispute in writing on case reference {{case_number}}.
+
+Please send it to {{collector_email}}, with anything that supports it. The company has {{dispute_days_left}} left, until {{respond_by}}.
+
+Until it reaches us the account continues on its normal course.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-dispute-reminder-company', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'individual', 'text', 'Dispute: last day to send it (individual)', 'Last day to send your dispute - case reference {{case_number}}',
+  'Dear {{debtor_name}}
+
+Tomorrow, {{respond_by}}, is the last day to send us your dispute in writing on case reference {{case_number}}.
+
+Send it to {{collector_email}}, with any documents supporting it.
+
+If nothing reaches us by then, we deem the account to be undisputed and the process continues: the reporting of your default to the credit bureaus, and enforcement through our attorneys.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-dispute-final-reminder-individual', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'company', 'text', 'Dispute: last day to send it (company)', 'Last day to send the dispute - case reference {{case_number}}',
+  'To the directors of {{debtor_name}}
+
+Tomorrow, {{respond_by}}, is the last day to send us the company''s dispute in writing on case reference {{case_number}}.
+
+Send it to {{collector_email}}, with any documents supporting it.
+
+If nothing reaches us by then, we deem the account to be undisputed and the process continues: the reporting of the company''s default to the credit bureaus, and enforcement through our attorneys.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-dispute-final-reminder-company', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'individual', 'text', 'Dispute: account deemed undisputed (individual)', 'Account deemed undisputed - case reference {{case_number}}',
+  'Dear {{debtor_name}}
+
+Case reference: {{case_number}}
+
+You told us you disputed this account, and we asked you to send it to us in writing by {{respond_by}}. Nothing has reached us.
+
+Attached is our notice that the account is deemed undisputed. We proceed with the steps set out in the Section 129 notice.
+
+If you send us your dispute and the documents supporting it, we will still investigate it and give you a written finding. It does not undo steps already taken.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-dispute-undisputed-individual', true,
+  (select id from public.message_templates where seed_key = 'letter-dispute-undisputed-individual'))
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'company', 'text', 'Dispute: account deemed undisputed (company)', 'Account deemed undisputed - case reference {{case_number}}',
+  'To the directors of {{debtor_name}}
+
+Case reference: {{case_number}}
+Registration number: {{debtor_reg_no}}
+
+The company told us this account was disputed, and we asked for that dispute in writing by {{respond_by}}. Nothing has reached us.
+
+Attached is our notice that the account is deemed undisputed. We proceed with the steps set out in our letter of demand.
+
+If the company sends us its dispute and the supporting documents, we will still investigate it and give a written finding. It does not undo steps already taken.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-dispute-undisputed-company', true,
+  (select id from public.message_templates where seed_key = 'letter-dispute-undisputed-company'))
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'individual', 'text', 'Dispute received (individual)', 'Dispute received - case reference {{case_number}}',
+  'Dear {{debtor_name}}
+
+Case reference: {{case_number}}
+Identity number: {{debtor_id_masked}}
+
+We have received your dispute regarding this account, and it is logged on your file.
+
+Collection on this account is suspended while we investigate. No further demands, notices or credit bureau steps are taken until we have given you our written finding.
+
+Your dispute has been escalated for investigation. We will revert to you in writing with our finding. If we need anything further from you, {{collector_name}} will ask for it.
+
+{{collector_name}} is handling your dispute:
+Direct line: {{collector_phone}}
+Office line: {{firm_phone}}
+Email: {{collector_email}}
+Office hours: {{firm_hours}}
+
+You can confirm that this email comes from us by calling our office on {{firm_phone}}, the number listed on {{firm_website}}.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-dispute-acknowledged-individual', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'company', 'text', 'Dispute received (company)', 'Dispute received - case reference {{case_number}}',
+  'To the directors of {{debtor_name}}
+
+Case reference: {{case_number}}
+Registration number: {{debtor_reg_no}}
+
+We have received the company''s dispute regarding this account, and it is logged on the file.
+
+Collection on this account is suspended while we investigate. No further demands, notices or credit bureau steps are taken until we have given our written finding.
+
+The dispute has been escalated for investigation. We will revert in writing with our finding. If we need anything further, {{collector_name}} will ask for it.
+
+{{collector_name}} is handling the dispute:
+Direct line: {{collector_phone}}
+Office line: {{firm_phone}}
+Email: {{collector_email}}
+Office hours: {{firm_hours}}
+
+You can confirm that this email comes from us by calling our office on {{firm_phone}}, the number listed on {{firm_website}}.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-dispute-acknowledged-company', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'individual', 'text', 'Dispute upheld (individual)', 'Outcome of your dispute - case reference {{case_number}}',
+  'Dear {{debtor_name}}
+
+Case reference: {{case_number}}
+
+We have investigated the dispute you raised on this account. The dispute is upheld.
+
+Collection on this account remains suspended while the outcome is given effect to. We have informed the creditor of the finding and await their instruction on the account.
+
+Where a default was reported on the amount in dispute, we attend to the correction of that record with the credit bureaus. We will confirm the outcome in writing. Nothing is required from you in the meantime.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-dispute-upheld-individual', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'company', 'text', 'Dispute upheld (company)', 'Outcome of the dispute - case reference {{case_number}}',
+  'To the directors of {{debtor_name}}
+
+Case reference: {{case_number}}
+Registration number: {{debtor_reg_no}}
+
+We have investigated the dispute raised on this account. The dispute is upheld.
+
+Collection on this account remains suspended while the outcome is given effect to. We have informed the creditor of the finding and await their instruction on the account.
+
+Where a default was reported on the amount in dispute, we attend to the correction of that record with the credit bureaus. We will confirm the outcome in writing. Nothing is required from the company in the meantime.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-dispute-upheld-company', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'individual', 'text', 'Dispute not accepted (individual)', 'Outcome of your dispute - case reference {{case_number}}',
+  'Dear {{debtor_name}}
+
+Case reference: {{case_number}}
+
+We have investigated the dispute you raised on this account. The dispute is not accepted, and the debt stands.
+
+The balance owing is {{balance}}.
+
+The suspension of collection falls away. You have 5 business days from the date of this email to pay {{balance}} or to agree an arrangement with {{collector_name}}, before the account continues from where it was paused.
+
+You may refer the matter to a debt counsellor, an alternative dispute resolution agent, an ombud with jurisdiction or a consumer court.
+
+Direct line: {{collector_phone}}
+Office line: {{firm_phone}}
+Email: {{collector_email}}
+Office hours: {{firm_hours}}
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-dispute-not-upheld-individual', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'company', 'text', 'Dispute not accepted (company)', 'Outcome of the dispute - case reference {{case_number}}',
+  'To the directors of {{debtor_name}}
+
+Case reference: {{case_number}}
+Registration number: {{debtor_reg_no}}
+
+We have investigated the dispute raised on this account. The dispute is not accepted, and the debt stands.
+
+The balance owing is {{balance}}.
+
+The suspension of collection falls away. The company has 5 business days from the date of this email to pay {{balance}} or to agree an arrangement with {{collector_name}}, before the account continues from where it was paused.
+
+Direct line: {{collector_phone}}
+Office line: {{firm_phone}}
+Email: {{collector_email}}
+Office hours: {{firm_hours}}
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-dispute-not-upheld-company', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', null, 'text', 'Internal: dispute referred to the liaison', 'Dispute referred to you: {{case_number}} - response needed by {{respond_by}}',
+  '{{liaison_name}},
+
+A dispute has been logged and referred to you for the client''s comment.
+
+Case reference: {{case_number}}
+Debtor: {{debtor_name}}
+Client: {{client_name}}
+Balance: {{balance}}
+Collector: {{collector_name}} ({{collector_phone}})
+Dispute received: {{dispute_received_date}}
+What is disputed: {{dispute_summary}}
+
+The debtor''s documents are on the file.
+
+Response needed by {{respond_by}}. Collection on this account is suspended until the written finding is issued, so the file does not move while this is open.
+
+Follow-ups are diarised for 3, 6 and 10 business days.', 'email-internal-dispute-referral', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', null, 'text', 'Internal: dispute still open', 'Dispute still open: {{case_number}} - {{debtor_name}}',
+  '{{liaison_name}},
+
+The dispute on {{case_number}} ({{debtor_name}}, {{client_name}}) is still open and collection remains suspended.
+
+What is disputed: {{dispute_summary}}
+Response needed by: {{respond_by}}
+
+If the client has responded, load their answer on the file so that the finding can be issued.', 'email-internal-dispute-followup', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', null, 'text', 'Internal: dispute open 10 days, escalated', 'Escalation: dispute open 10 days on {{case_number}}',
+  'The dispute on {{case_number}} ({{debtor_name}}, {{client_name}}) has been open for 10 business days without a finding.
+
+Liaison: {{liaison_name}}
+Collector: {{collector_name}}
+Balance: {{balance}}
+What is disputed: {{dispute_summary}}
+
+Collection has been suspended throughout. The debtor has been sent a holding message. A finding is now overdue.', 'email-internal-dispute-escalation', true,
+  null)
+on conflict (seed_key) do nothing;
+
+-- ============================================================================
+-- THE DISPUTE LIBRARY, PART 3 OF 3: the fourteen SMSs.
+--
+-- Seven steps in individual and company pairs. The three internal notifications have no SMS, and
+-- the email always sends five to ten minutes before the message that follows it.
+--
+-- THE CHARACTER COUNT ABOVE EACH ONE IS THE FIRM'S OWN, measured against "Mr Van Der Westhuizen"
+-- and a ten-character reference, so it is the worst case rather than a typical one. It is carried
+-- into the seed so that a rewording which crosses 160 characters shows up as a change to a number
+-- somebody wrote down, rather than as an extra segment on the debtor's bill under item 1(c).
+--
+-- GSM-7 THROUGHOUT, and that is what the absence of an em dash or a curly quote is doing here: one
+-- character outside the GSM alphabet drops the whole message to UCS-2 and cuts every segment from
+-- 160 characters to 70.
+-- ============================================================================
+
+-- 142 characters with a long debtor name and a ten-character reference: one segment.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'individual', 'text', 'Dispute: send it in writing (individual)', null,
+  '{{debtor_name}}, please send your dispute on matter {{case_number}} in writing to {{collector_email}} by {{respond_by}}. {{firm_phone}}', 'sms-dispute-writing-individual', true)
+on conflict (seed_key) do nothing;
+
+-- 141 characters with a long debtor name and a ten-character reference: one segment.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'company', 'text', 'Dispute: send it in writing (company)', null,
+  '{{debtor_name}}, please send the dispute on matter {{case_number}} in writing to {{collector_email}} by {{respond_by}}. {{firm_phone}}', 'sms-dispute-writing-company', true)
+on conflict (seed_key) do nothing;
+
+-- 138 characters with a long debtor name and a ten-character reference: one segment.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'individual', 'text', 'Dispute: reminder (individual)', null,
+  '{{debtor_name}}, we are still waiting for your written dispute on matter {{case_number}}. Email {{collector_email}}. {{firm_phone}}', 'sms-dispute-reminder-individual', true)
+on conflict (seed_key) do nothing;
+
+-- 137 characters with a long debtor name and a ten-character reference: one segment.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'company', 'text', 'Dispute: reminder (company)', null,
+  '{{debtor_name}}, we are still waiting for the written dispute on matter {{case_number}}. Email {{collector_email}}. {{firm_phone}}', 'sms-dispute-reminder-company', true)
+on conflict (seed_key) do nothing;
+
+-- 142 characters with a long debtor name and a ten-character reference: one segment.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'individual', 'text', 'Dispute: last day to send it (individual)', null,
+  '{{debtor_name}}, tomorrow is the last day to send your written dispute on matter {{case_number}} to {{collector_email}}. {{firm_phone}}', 'sms-dispute-final-reminder-individual', true)
+on conflict (seed_key) do nothing;
+
+-- 141 characters with a long debtor name and a ten-character reference: one segment.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'company', 'text', 'Dispute: last day to send it (company)', null,
+  '{{debtor_name}}, tomorrow is the last day to send the written dispute on matter {{case_number}} to {{collector_email}}. {{firm_phone}}', 'sms-dispute-final-reminder-company', true)
+on conflict (seed_key) do nothing;
+
+-- 145 characters with a long debtor name and a ten-character reference: one segment.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'individual', 'text', 'Dispute: account deemed undisputed (individual)', null,
+  '{{debtor_name}}, no written dispute received on matter {{case_number}}. The account is deemed undisputed and the process continues. {{firm_phone}}', 'sms-dispute-undisputed-individual', true)
+on conflict (seed_key) do nothing;
+
+-- 145 characters with a long debtor name and a ten-character reference: one segment.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'company', 'text', 'Dispute: account deemed undisputed (company)', null,
+  '{{debtor_name}}, no written dispute received on matter {{case_number}}. The account is deemed undisputed and the process continues. {{firm_phone}}', 'sms-dispute-undisputed-company', true)
+on conflict (seed_key) do nothing;
+
+-- 133 characters with a long debtor name and a ten-character reference: one segment.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'individual', 'text', 'Dispute received (individual)', null,
+  '{{debtor_name}}, we have received your dispute on matter {{case_number}}. Collection is suspended while we investigate. {{firm_phone}}', 'sms-dispute-acknowledged-individual', true)
+on conflict (seed_key) do nothing;
+
+-- 132 characters with a long debtor name and a ten-character reference: one segment.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'company', 'text', 'Dispute received (company)', null,
+  '{{debtor_name}}, we have received the dispute on matter {{case_number}}. Collection is suspended while we investigate. {{firm_phone}}', 'sms-dispute-acknowledged-company', true)
+on conflict (seed_key) do nothing;
+
+-- 113 characters with a long debtor name and a ten-character reference: one segment.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'individual', 'text', 'Dispute upheld (individual)', null,
+  '{{debtor_name}}, your dispute on matter {{case_number}} is upheld. We have emailed you the outcome. {{firm_phone}}', 'sms-dispute-upheld-individual', true)
+on conflict (seed_key) do nothing;
+
+-- 108 characters with a long debtor name and a ten-character reference: one segment.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'company', 'text', 'Dispute upheld (company)', null,
+  '{{debtor_name}}, the dispute on matter {{case_number}} is upheld. We have emailed the outcome. {{firm_phone}}', 'sms-dispute-upheld-company', true)
+on conflict (seed_key) do nothing;
+
+-- 120 characters with a long debtor name and a ten-character reference: one segment.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'individual', 'text', 'Dispute not accepted (individual)', null,
+  '{{debtor_name}}, your dispute on matter {{case_number}} was not accepted. We have emailed you the outcome. {{firm_phone}}', 'sms-dispute-not-upheld-individual', true)
+on conflict (seed_key) do nothing;
+
+-- 115 characters with a long debtor name and a ten-character reference: one segment.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'company', 'text', 'Dispute not accepted (company)', null,
+  '{{debtor_name}}, the dispute on matter {{case_number}} was not accepted. We have emailed the outcome. {{firm_phone}}', 'sms-dispute-not-upheld-company', true)
+on conflict (seed_key) do nothing;

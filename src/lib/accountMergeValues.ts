@@ -115,6 +115,23 @@ export function accountMergeValues(input: {
   nextInstalment?: { amount: number; dueOn: string } | null
   /** What a receipt confirms: the newest unreversed payment. See `ptp_paid` in messageTemplates. */
   paymentReceived?: number | null
+  /** The dispute this message is about, where it is about one. */
+  dispute?: {
+    daysLeft: string | null
+    allegedOn: string | null
+    receivedOn: string | null
+    summary: string | null
+  } | null
+  /**
+   * THE DATE THE MESSAGE'S OWN PERIOD RUNS TO, where it is not the ordinary one.
+   *
+   * `respondBy` below is ten working days from today, which is what a section 129 gives. A DISPUTE
+   * message is not that: while a demand is running the debtor has what is LEFT of ITS period, and
+   * the date quoted must be the notice's own -- two dates days apart, each headed "respond by", is
+   * an ambiguity a debtor is entitled to resolve in their own favour. disputeWindow decides it and
+   * this is how it reaches the merge.
+   */
+  respondByOverride?: string | null
 }): Record<string, string> {
   return Object.fromEntries(
     Object.entries(mergeValuesFor({
@@ -132,9 +149,10 @@ export function accountMergeValues(input: {
       debtorIdMasked: input.debtorIdNumber,
       positionAsAt: input.today,
       debtorAddress: addressOf(input.contacts),
-      respondBy: respondBy(input.today),
+      respondBy: input.respondByOverride ?? respondBy(input.today),
       nextInstalment: input.nextInstalment ?? null,
       paymentReceived: input.paymentReceived ?? null,
+      dispute: input.dispute ?? null,
       /* Passed whole. There is no list of the firm's fields here to fall behind the ones the
          library grew -- see mergeValuesFor, which takes FirmSettings' own shape. */
       firm: input.firm,
