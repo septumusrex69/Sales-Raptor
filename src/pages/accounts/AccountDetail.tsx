@@ -346,12 +346,29 @@ export function AccountDetail() {
      it, so the tab's mark and the words over the track can never disagree. */
   const waitingOnMe = runs.reduce((n, r) => n + needsAttention(r.steps).length, 0)
 
+  /*
+   * AND THE WORKFLOWS COME WITH EVERYTHING ELSE.
+   *
+   * THE FIRM: "the stuff comes once you refresh. It shouldn't be like that. It should load
+   * immediately and be available immediately. Otherwise you're missing things."
+   *
+   * This refetched the account, the ledgers, the workspace, the documents, the queries, the emails,
+   * the standing and the traces -- and not the runs. But recording a PROMISE starts the arrangement
+   * sequence and pauses the section 129; escalating a DISPUTE pauses it too; a PAYMENT can end it.
+   * Every one of those is an action taken from the row of buttons at the top of the account, and
+   * every one of them left the Workflow tab showing what was true a minute ago -- including the dot
+   * on the tab itself, which counts the steps waiting on a person.
+   *
+   * IT IS THE SAME loadRuns THE PANEL ALREADY USES for its own actions, so a release refreshes
+   * through one path and a promise through the other, and both end up at the same read.
+   */
   const reload = useCallback(async () => {
     if (!account) return
     const [a, l, w, d, q, e, st, tr] = await Promise.all([
       fetchAccount(account.id), fetchLedgers(account.id), fetchWorkspace(account.id),
       fetchDocuments(account.id), fetchQueries(account.id), fetchAccountEmails(account.id),
       fetchStanding(account.id), fetchTraces(account.id),
+      loadRuns(),
     ])
     if (a) setAccount(a)
     setLedgers(l)
@@ -361,7 +378,7 @@ export function AccountDetail() {
     setEmails(e)
     setStanding(st)
     setTraces(tr)
-  }, [account])
+  }, [account, loadRuns])
 
   const { busy: savingComment, run: runComment } = useWriter(reload)
   const { busy: queryBusy, run: runQuery } = useWriter(reload)

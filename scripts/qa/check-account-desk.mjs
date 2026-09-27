@@ -122,6 +122,30 @@ ok('the account screen never writes an allocation itself', !/assigned_to:/.test(
 ok('the account is re-read once it has been handed out',
   /setHandOut\(false\)[\s\S]{0,400}?await reload\(\)/.test(detail))
 
+/* ---------------- one refresh, everything on the account ---------------- */
+
+/*
+ * THE FIRM: "the stuff comes once you refresh. It shouldn't be like that. It should load
+ * immediately and be available immediately. Otherwise you're missing things."
+ *
+ * `reload` is the callback every action panel on the account is given -- the promise, the
+ * escalation, the payment, the note, the documents. It refetched the account, the ledgers, the
+ * workspace, the documents, the queries, the emails, the standing and the traces, and NOT the runs.
+ *
+ * WHICH IS THE ONE THING THOSE ACTIONS MOVE. Recording a promise starts the arrangement sequence
+ * and pauses the section 129. Escalating a dispute pauses it. A payment can end it. So a collector
+ * took an action, watched the panel above it update, and the Workflow tab went on showing what was
+ * true a minute ago -- including the dot on the tab, which counts what is waiting on a person.
+ *
+ * ASSERTED ON THE CALL AND ON THE DEPENDENCY, because a useCallback that closes over a stale
+ * loadRuns refetches nothing and the compiler says nothing about it.
+ */
+ok('a reload of the account brings its workflows with it', /loadRuns\(\),/.test(detail))
+ok('...and the callback is rebuilt when it changes', /\}, \[account, loadRuns\]\)/.test(detail))
+/* AND THE PANEL'S OWN ACTIONS STILL GO THROUGH THE SAME READ, so a release and a promise end up at
+   one function rather than two that can disagree about what the account is doing. */
+ok('...the same read the workflow panel uses for its own', /onChanged={loadRuns}/.test(detail))
+
 /* ------------------------------------------------ */
 
 for (const f of failures) console.error(`  ✗ ${f}`)
