@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { Check, MessageCircleQuestion, Plus, X } from 'lucide-react'
+import { Check, Mail, MessageCircleQuestion, Plus, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Card } from '../../components/ui/Card'
 import { formatMoney, formatDate } from '../../data/mockData'
 import { chargeMessage } from '../../lib/accountCharges'
 import {
-  closeQuery, isStale, markOutcomeDone, raiseQuery, updateQuery,
+  closeQuery, isStale, markDisputeReceived, markOutcomeDone, raiseQuery, updateQuery,
   stageForAssignee, QUERY_OUTCOME_LABEL, QUERY_EFFECT_LABEL, QUERY_EFFECT_HINT, QUERY_STAGE_LABEL,
   type AccountQuery, type QueryOutcome, type QueryEffect, type QueryStage,
 } from '../../lib/accountQueries'
@@ -283,6 +283,28 @@ function QueryCard({ query: q, accountId, accountLabel, users, actor, busy, run,
             <Check size={11} /> Resolve
           </button>
         </div>
+      )}
+
+      {/*
+        THE MOMENT THE WRITTEN DISPUTE ARRIVES, AND IT IS A BUTTON BECAUSE IT IS AN EVENT.
+        
+        THE FIRM: "we need a way to figure out, to start the dispute workflow from the moment that
+        we've received the email with the dispute." Pressing this ends the sequence that was asking
+        for it in writing -- its deemed-undisputed notice must never reach a debtor whose dispute
+        is on the firm's desk -- starts the real one, and stops the collection sequences until
+        there is a finding. All of it off one write; see markDisputeReceived.
+        
+        ONLY WHERE IT IS STILL BEING WAITED FOR. A dispute already in writing has nothing to
+        record, and one that is closed is over.
+      */}
+      {q.kind === 'dispute' && q.status !== 'closed' && !q.inWriting && (
+        <button disabled={busy}
+          onClick={() => run(() => markDisputeReceived(q.id, {
+            accountId, actorId: actor.id, actorName: actor.name,
+          }))}
+          className="w-full mt-1.5 text-[11px] font-medium py-1.5 rounded border border-[#c9a052] text-[var(--c-gold-deep)] bg-gold-50 hover:bg-gold-100 disabled:opacity-50 inline-flex items-center justify-center gap-1.5">
+          <Mail size={11} /> The dispute has arrived in writing
+        </button>
       )}
 
       {closing && (

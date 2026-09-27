@@ -12,6 +12,9 @@
  * ledger.
  */
 import { supabase } from './supabase'
+/* The firm's own day, not the server's. A dispute taken at one in the morning in Johannesburg is
+   eleven the previous night in UTC, and a date filed under yesterday is what a notice quotes. */
+const todayIso = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
 import { refreshNavCounts } from './navCounts'
 import { addNote, type AccountNote } from './accountWorkspace'
 import { chargeItem, type ChargeResult } from './accountCharges'
@@ -119,10 +122,26 @@ export interface AccountQuery {
   outcomeDone: boolean
   closedAt: string | null
   closedByName: string | null
+  /**
+   * WHICH STAGE THIS DISPUTE IS IN, which is one fact read two ways.
+   *
+   * `allegedOn` is the day the debtor SAID it and every dispute has one; `receivedOn` is the day
+   * it arrived in writing, and null there means the firm is still waiting. The sequence that is
+   * running follows from it -- see workflow_start_on_dispute -- and so does whether the collection
+   * sequences are stopped.
+   */
+  allegedOn: string | null
+  receivedOn: string | null
+  inWriting: boolean
 }
 
 const toQuery = (r: any): AccountQuery => ({
   id: r.id,
+  /* Hand-written mappers drop columns silently -- CLAUDE.md's own warning. check-dispute-stage
+     holds these three against the table. */
+  allegedOn: r.alleged_on ?? null,
+  receivedOn: r.received_on ?? null,
+  inWriting: !!r.in_writing,
   accountId: r.account_id ?? null,
   handoverId: r.handover_id ?? null,
   description: r.description,
@@ -392,7 +411,39 @@ export async function raiseQuery(input: {
    * debtor, and charging for it would not survive being asked about.
    */
   charge?: boolean
+  /**
+   * HOW THE DISPUTE REACHED US, AND IT DECIDES WHICH SEQUENCE ANSWERS IT.
+   *
+   * THE FIRM: "creating a dispute from what a debtor said doesn't do anything. It shouldn't have a
+   * workflow. But receiving an email with a written dispute, that... we need a way to start the
+   * dispute workflow from the moment that we've received the email with the dispute."
+   *
+   *   verbal   the debtor said it. `alleged_on` is set and nothing else: stage A, which starts
+   *            the sequence asking for it in writing by a date and, if nothing comes, sends the
+   *            deemed-undisputed notice.
+   *   written  we have it. `received_on` and `in_writing` as well: stage B, the real answer, and
+   *            the collection sequences stop until the firm has given its finding.
+   *
+   * THESE THREE COLUMNS WERE NEVER WRITTEN. Both dispute sequences existed, both were unreachable,
+   * and the firm raised a dispute and watched nothing happen. See workflow_start_on_dispute.
+   *
+   * NOT OFFERED ON THE OTHER TWO ESCALATIONS, and the database refuses them there anyway -- see
+   * account_queries_dates_only_on_dispute. Nobody alleges an agent asking for help.
+   */
+  reached?: 'verbal' | 'written'
+  /** The day the debtor said it, where that is not today -- a call taken at half past four and
+      logged the next morning. Defaults to today. */
+  allegedOn?: string | null
 }): Promise<{ query: AccountQuery; charge: ChargeResult | null }> {
+  const isDispute = (input.kind ?? 'dispute') === 'dispute'
+  /*
+   * ALLEGED IS ALWAYS SET ON A DISPUTE, WRITTEN OR NOT. A written dispute was alleged the day it
+   * arrived if it was never alleged before it, and the deemed-undisputed notice quotes the date --
+   * "On 5 October 2026 you told us that this account was disputed" -- so a null there is a
+   * {{brace}} on a notice. The column's own comment says the same.
+   */
+  const alleged = isDispute ? (input.allegedOn || todayIso()) : null
+  const written = isDispute && input.reached === 'written'
   const { data, error } = await supabase
     .from('account_queries')
     .insert({
@@ -409,6 +460,11 @@ export async function raiseQuery(input: {
       chase_on: input.chaseOn || null,
       raised_by: input.raisedBy ?? null,
       raised_by_name: input.raisedByName ?? null,
+      alleged_on: alleged,
+      /* BOTH, OR NEITHER. workflow_start_on_dispute reads either one, and a row carrying one of
+         them is a row that says the dispute both has and has not arrived. */
+      received_on: written ? todayIso() : null,
+      in_writing: written,
     })
     .select('*')
     .single()
@@ -552,6 +608,55 @@ export async function updateQuery(
       kind: 'query',
     })
   }
+  return toQuery(data)
+}
+
+/**
+ * THE WRITTEN DISPUTE HAS ARRIVED.
+ *
+ * THE FIRM: "we need a way to figure out, to start the dispute workflow from the moment that
+ * we've received the email with the dispute."
+ *
+ * THIS IS THAT MOMENT, AND IT IS THE ONLY THING IT DOES. Setting `received_on` and `in_writing` is
+ * what workflow_start_on_dispute reads: the sequence that was asking for the dispute in writing is
+ * ended -- its deemed-undisputed notice must never reach a debtor whose dispute is on the firm's
+ * desk -- the real one starts, and workflow_hold_account stops the collection sequences until the
+ * firm has given its finding. All of that happens in the database off this one write.
+ *
+ * BOTH COLUMNS TOGETHER, in one update, for the reason the cancelled arrangement writes its cause
+ * with its status: the trigger reads NEW, and a second update fires it against a row that still
+ * says the dispute has not arrived.
+ *
+ * DATED TODAY RATHER THAN TAKEN FROM THE CALLER. The day a document reached the firm is the day
+ * somebody opened it, and a back-dated receipt shortens a period the debtor is entitled to. If the
+ * firm ever needs to record a letter that sat in a mailbox over a weekend, that is a correction
+ * they make deliberately, not a default this hands anybody.
+ */
+export async function markDisputeReceived(
+  id: string,
+  context: { accountId: string | null; actorId: string | null; actorName: string | null },
+): Promise<AccountQuery> {
+  const { data, error } = await supabase
+    .from('account_queries')
+    .update({ received_on: todayIso(), in_writing: true })
+    .eq('id', id)
+    .select('*')
+    .single()
+  if (error) throw new Error(error.message)
+
+  /* ON THE ACCOUNT'S OWN TIMELINE, because this is the event that stops the collection sequences
+     and somebody reading the account tomorrow has to be able to see why. */
+  if (context.accountId) {
+    await addNote({
+      accountId: context.accountId,
+      body: 'The dispute was received in writing.',
+      authorName: context.actorName,
+      createdBy: context.actorId,
+      queryId: id,
+      kind: 'query',
+    })
+  }
+  await refreshNavCounts()
   return toQuery(data)
 }
 

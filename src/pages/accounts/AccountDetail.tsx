@@ -1348,7 +1348,9 @@ export function AccountDetail() {
           accountId={account.id}
           users={users}
           clientLiaison={clientLiaison}
-          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          /* teamId is what makes "your team leader" answerable rather than "every team leader in
+             the firm" -- see EscalateModal's own note. */
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null, teamId: currentUser?.teamId }}
           onClose={() => setDisputing(false)}
           onDone={reload}
         />

@@ -10278,3 +10278,113 @@ drop trigger if exists workflow_on_promise_cancelled on public.promises_to_pay;
 create trigger workflow_on_promise_cancelled
   after update of status on public.promises_to_pay
   for each row execute function public.workflow_on_promise_cancelled();
+
+
+-- ============================================================================
+-- A VERBAL DISPUTE AND A WRITTEN ONE ARE DIFFERENT EVENTS, AND EACH HAS ITS OWN SEQUENCE.
+--
+-- THE FIRM, HAVING RAISED ONE AND WATCHED NOTHING HAPPEN: "I also raised a dispute on this
+-- account now. It didn't start the workflow... it should have an option to say that this query was
+-- a verbal query by the debtor. And we should send an email... you stated that you have a dispute,
+-- please put your dispute in writing, you have until this time. It also should have an option to
+-- say that we've received a dispute. And that's when the real workflow starts. So creating a
+-- dispute from what a debtor said doesn't do anything. It shouldn't have a workflow. But receiving
+-- an email with a written dispute, that. So we need a way to start the dispute workflow from the
+-- moment that we've received the email with the dispute."
+--
+-- BOTH SEQUENCES ALREADY EXISTED AND NOTHING COULD REACH EITHER. `Dispute alleged` (trigger
+-- dispute_alleged) carries the firm's own "put it in writing by {{respond_by}}" wording and its
+-- deemed-undisputed notice; `Dispute` (trigger dispute_logged) is the real one. They had 0 runs
+-- and 1 run between them, because no trigger started them and the Escalate box never asked how the
+-- dispute had reached us -- so alleged_on, received_on and in_writing all stayed null.
+--
+-- THE TWO COLUMNS ALREADY SAID WHICH STAGE AN ACCOUNT IS IN: alleged_on with no received_on is
+-- stage A, the invitation to put it in writing; received_on is stage B, the real answer. This
+-- hangs the sequences on them.
+--
+-- ONCE PER LIVE RUN, NOT ONCE PER ACCOUNT EVER -- the same rule workflow_start_on_promise states,
+-- and for the same reason: a debtor who objects a second time is entitled to a second answer.
+-- ============================================================================
+create or replace function public.workflow_start_on_dispute() returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_kind text;
+begin
+  if new.kind <> 'dispute' or new.account_id is null then
+    return new;
+  end if;
+
+  /*
+   * WHICH SEQUENCE ANSWERS THIS DISPUTE, decided by the one fact that separates them: have we got
+   * it in writing? `in_writing` and `received_on` are the same answer from two directions -- the
+   * box sets both -- and either one on its own is enough here, because a row carrying only one of
+   * them is a row somebody wrote by hand and it still means the dispute arrived.
+   */
+  v_kind := case when new.in_writing or new.received_on is not null
+    then 'dispute_logged' else 'dispute_alleged' end;
+
+  /*
+   * ON AN UPDATE, ONLY WHEN THE ANSWER HAS CHANGED. A dispute is edited for a dozen reasons -- an
+   * owner, a chase date, a category -- and a sequence started on every one of them would be a
+   * second acknowledgement to the debtor for a field nobody changed.
+   */
+  if tg_op = 'UPDATE' then
+    if v_kind <> 'dispute_logged' then return new; end if;
+    if coalesce(old.in_writing, false) or old.received_on is not null then return new; end if;
+
+    /*
+     * AND THE INVITATION IS OVER. The alleged sequence exists to ask for the dispute in writing
+     * and, if nothing comes, to send the deemed-undisputed notice. It has come. Left running, that
+     * notice goes to a debtor whose written dispute is on the firm's desk -- which is the single
+     * worst thing in the sequence.
+     *
+     * A SENT STEP STAYS SENT, as everywhere: it is the record of a notice that reached a debtor.
+     */
+    with live as (
+      select r.id from public.workflow_runs r
+        join public.workflow_versions v on v.id = r.version_id
+       where r.account_id = new.account_id
+         and r.state in ('running', 'held')
+         and v.trigger_kind = 'dispute_alleged'
+    ), killed as (
+      update public.workflow_run_steps s
+         set state = 'cancelled', note = 'The dispute was received in writing'
+        from live
+       where s.run_id = live.id and s.state in ('pending', 'held')
+       returning s.id
+    )
+    update public.workflow_runs r
+       set state = 'left', left_reason = 'The dispute was received in writing', left_at = now()
+      from live
+     where r.id = live.id;
+  end if;
+
+  insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+  select new.account_id, v.id, (now() at time zone 'Africa/Johannesburg')::date, new.raised_by
+    from public.workflow_versions v
+   where v.state = 'active'
+     and v.trigger_kind = v_kind
+     and not exists (
+       select 1 from public.workflow_runs r
+        where r.account_id = new.account_id
+          and r.version_id = v.id
+          and r.state in ('running', 'held')
+     );
+
+  return new;
+end $$;
+
+comment on function public.workflow_start_on_dispute() is
+  'A dispute the debtor only SAID starts the sequence that asks for it in writing; one we have in '
+  'writing starts the real one and ends the invitation. The firm: "creating a dispute from what a '
+  'debtor said doesn''t do anything... but receiving an email with a written dispute, that."';
+
+revoke all on function public.workflow_start_on_dispute() from public;
+
+drop trigger if exists workflow_start_on_dispute on public.account_queries;
+create trigger workflow_start_on_dispute
+  after insert or update of in_writing, received_on on public.account_queries
+  for each row execute function public.workflow_start_on_dispute();

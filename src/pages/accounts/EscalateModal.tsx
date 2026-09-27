@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
+import { DictateButton } from '../../components/ui/Dictate'
 import { raiseQuery, stageForAssignee } from '../../lib/accountQueries'
 import {
   categoryExamples, explanationMissing,
@@ -43,7 +44,8 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
   users: User[]
   /** The liaison on this debtor's client, which is who a client query goes to by default. */
   clientLiaison: User | undefined
-  actor: { id: string | null; name: string | null }
+  /** The person escalating. `teamId` is what makes "my team leader" answerable -- see `mine`. */
+  actor: { id: string | null; name: string | null; teamId?: string }
   onClose: () => void
   onDone: () => Promise<void>
 }) {
@@ -52,21 +54,51 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
   const [description, setDescription] = useState('')
   const [category, setCategory] = useState('')
   const [chaseOn, setChaseOn] = useState('')
+  /*
+   * HOW IT REACHED US, AND IT IS THE FIELD THAT DECIDES WHAT HAPPENS NEXT.
+   *
+   * THE FIRM: "creating a dispute from what a debtor said doesn't do anything. It shouldn't have a
+   * workflow. But receiving an email with a written dispute, that." Verbal starts the sequence
+   * that asks for it in writing; written starts the real one and stops the collection sequences.
+   *
+   * VERBAL IS THE DEFAULT because it is what happens on a telephone, which is where nearly every
+   * dispute is first heard -- and it is the one that claims less: a dispute marked written that is
+   * not stops a statutory sequence on a document nobody has.
+   */
+  const [reached, setReached] = useState<'verbal' | 'written'>('verbal')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   /*
-   * Two rungs, and nothing else.
+   * THREE PEOPLE, AND THE FIRST OF THEM IS *MINE*.
    *
-   * An agent who cannot answer a dispute has exactly two people to give it to: the liaison who
-   * owns the client relationship, or a pre-legal team leader. The list used to be the whole staff,
-   * which invited a dispute to be handed to whoever came to mind first -- and that is how one ends
-   * up parked with somebody who has no standing to answer it.
+   * THE FIRM: "each person can only escalate it to their team leader or to the client liaison who
+   * is working on the file, or to the client liaison manager."
+   *
+   * IT OFFERED EVERY PRE-LEGAL TEAM LEADER IN THE FIRM, which is nearly the fault the list was
+   * narrowed from in the first place: a dispute handed to whoever came to mind first ends up
+   * parked with somebody who has no standing over the person who raised it. A team leader leads
+   * ONE team, and the one that can answer for this agent is the one whose team they are in.
+   *
+   * ABSENT RATHER THAN EMPTY where somebody has no team -- the call centre manager leads every
+   * team and belongs to none -- so the group simply does not appear rather than offering nobody.
    */
-  const teamLeaders = useMemo(
-    () => users.filter((u) => u.id !== clientLiaison?.id && u.role === 'Pre-legal Team Leader'),
+  const myLeaders = useMemo(
+    () => users.filter((u) => u.role === 'Pre-legal Team Leader'
+      && u.id !== clientLiaison?.id
+      && !!actor.teamId && u.teamId === actor.teamId),
+    [users, clientLiaison?.id, actor.teamId],
+  )
+  /*
+   * AND THE LIAISON MANAGER, who is the rung above the liaison: the person to take it to when the
+   * liaison who owns the client cannot answer it, or is the one being waited on.
+   */
+  const liaisonManagers = useMemo(
+    () => users.filter((u) => u.role === 'Liaison Manager' && u.id !== clientLiaison?.id),
     [users, clientLiaison?.id],
   )
+  /* What `Ask a team leader` suggests, and what the charge rule reads. */
+  const teamLeaders = myLeaders
 
   /*
    * Whether the debtor pays for this follows one question: did the dispute go to somebody else?
@@ -117,6 +149,9 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
         raisedBy: actor.id,
         raisedByName: actor.name,
         charge: chargeDebtor,
+        /* Only a dispute has a stage. raiseQuery ignores it on the other two and the database
+           refuses the dates there anyway -- nobody alleges an agent asking for help. */
+        reached: kind === 'dispute' ? reached : undefined,
       })
       await onDone()
       onClose()
@@ -162,6 +197,44 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
           ))}
         </fieldset>
 
+        {/*
+          HOW IT REACHED US, AND IT IS NOT A DETAIL: it decides which sequence answers the debtor.
+          
+          THE FIRM: "it should have an option to say that this query was a verbal query by the
+          debtor. And we should send an email... you stated that you have a dispute, please put
+          your dispute in writing, you have until this time. It also should have an option to say
+          that we've received a dispute. And that's when the real workflow starts."
+          
+          ONLY ON A DISPUTE. An agent asking a team leader for a decision was not alleged by
+          anybody, and the database refuses the dates on the other two escalations.
+          
+          EACH SAYS WHAT WILL HAPPEN, because one of them stops a statutory sequence and the other
+          does not, and that is not something to discover afterwards.
+        */}
+        {kind === 'dispute' && (
+          <fieldset className="space-y-1.5">
+            <legend className="text-sm font-medium text-slate-700 mb-1.5">How did it reach us?</legend>
+            {([
+              ['verbal', 'The debtor told us',
+                'We ask for it in writing, with a date to send it by. Collection carries on until it arrives.'],
+              ['written', 'We have it in writing',
+                'The real dispute sequence starts and the collection sequences stop until we have answered it.'],
+            ] as const).map(([value, label, what]) => (
+              <label key={value}
+                className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                  reached === value ? 'border-brand-500 bg-brand-50/50' : 'border-slate-200 hover:bg-slate-50'
+                }`}>
+                <input type="radio" name="dispute-reached" value={value} checked={reached === value}
+                  onChange={() => setReached(value)} className="mt-0.5" />
+                <span className="min-w-0">
+                  <span className="block text-sm text-slate-800">{label}</span>
+                  <span className="block text-[11px] text-slate-500">{what}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+        )}
+
         <label className="block">
           <span className="text-sm font-medium text-slate-700">Give it to</span>
           <select
@@ -175,12 +248,22 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
                 <option value={clientLiaison.id}>{clientLiaison.name} — looks after this client</option>
               </optgroup>
             )}
-            {teamLeaders.length > 0 && (
-              <optgroup label="Pre-legal team leaders">
-                {teamLeaders.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            {myLeaders.length > 0 && (
+              <optgroup label="Your team leader">
+                {myLeaders.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </optgroup>
+            )}
+            {liaisonManagers.length > 0 && (
+              <optgroup label="Liaison manager">
+                {liaisonManagers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
               </optgroup>
             )}
           </select>
+          {/* THE LIST IS SHORT ON PURPOSE and says so, or somebody hunts for a name that is not
+              there and concludes the screen is broken. */}
+          <span className="block text-[11px] text-slate-500 mt-1">
+            Your team leader, the liaison who looks after this client, or the liaison manager.
+          </span>
           {!clientLiaison && (
             <span className="block text-[11px] text-gold-600 mt-1">
               This client has no liaison set. Set one on the client record and it will be offered here.
@@ -189,10 +272,21 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
         </label>
 
         <label className="block">
-          <span className="text-sm font-medium text-slate-700">
-            {kind === 'dispute' ? 'What is the issue?'
-              : kind === 'help' ? 'What do you need decided?'
-              : 'Why has collecting run out of road?'}
+          <span className="flex items-baseline justify-between gap-3">
+            <span className="text-sm font-medium text-slate-700">
+              {kind === 'dispute' ? 'What is the issue?'
+                : kind === 'help' ? 'What do you need decided?'
+                : 'Why has collecting run out of road?'}
+            </span>
+            {/*
+              DICTATED, AT THE FIRM'S REQUEST: "if we raise a dispute, first of all, there should
+              be a dictate so you can speak to the dispute." This is written with the debtor still
+              on the telephone, and what they are actually objecting to is the whole of what a
+              liaison has to answer -- typed in a hurry it becomes "says he paid", which is not
+              something anybody can investigate. The same control the call note and the cancelled
+              arrangement use, so the language somebody dictates in is remembered once.
+            */}
+            <DictateButton size="small" value={description} onChange={setDescription} />
           </span>
           <textarea
             value={description}
@@ -220,10 +314,19 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
                 A taxonomy nobody can apply in five seconds gets applied wrongly. */}
             {examples && <span className="block text-[11px] text-slate-500 mt-1">{examples}</span>}
           </label>
+          {/*
+            "CHASE ON" READ AS CHASING THE CLIENT. The firm, looking at this box: "I don't know
+            what the chase the client means." It is not about the client at all -- it is the day
+            this escalation comes back to whoever raised it if nobody has answered it. Said in
+            those words instead.
+          */}
           <label className="block">
-            <span className="text-sm font-medium text-slate-700">Chase on</span>
+            <span className="text-sm font-medium text-slate-700">Follow it up on</span>
             <input type="date" value={chaseOn} min={TODAY} onChange={(e) => setChaseOn(e.target.value)}
               className="w-full mt-1 text-sm rounded-lg border border-slate-200 px-2.5 py-2" />
+            <span className="block text-[11px] text-slate-500 mt-1">
+              When this comes back to you if it has not been answered.
+            </span>
           </label>
         </div>
 
