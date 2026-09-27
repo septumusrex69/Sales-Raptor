@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { ArrowRight, GitBranch } from 'lucide-react'
 import { Card, CardHeader } from '../ui/Card'
 import { needsAttention, shapeOf, stepInFocus } from '../../lib/runSteps.ts'
+import { noticesOf } from '../../lib/stepPairs.ts'
 import { WorkflowTrack } from './WorkflowTrack.tsx'
 import { dayLabel, dayNumberOn } from '../../lib/workflowBuilder.ts'
 import { shortDate } from '../../lib/dateLabels.ts'
@@ -73,12 +74,20 @@ export function WorkflowNowPanel({ accountId, runs }: { accountId: string; runs:
                 <GitBranch size={13} className="mt-0.5 shrink-0 text-slate-400" />
                 <span className="min-w-0">{run.workflowName}</span>
               </p>
-              {/* WHERE IT IS, in the unit the run counts in. The same arithmetic the track's
-                  caret uses, so the two can never put today on opposite sides of a step. */}
+              {/*
+                WHERE IT IS, in the unit the run counts in. The same arithmetic the track's caret
+                uses, so the two can never put today on opposite sides of a step.
+                
+                COUNTED IN NOTICES, NOT IN ROWS, WHICH IS WHAT THE DOTS UNDER IT ARE. Raptor stores
+                a letter and the SMS behind it as two steps; the debtor received one notice, and
+                stepPairs is the one place that decides so. This line read "Day 0 of 6 steps" over
+                THREE dots -- the card and the track disagreeing about the length of the same
+                sequence, which is half of why the firm said it did not look right.
+              */}
               <p className="mt-0.5 text-[11px] text-slate-500 tabular-nums">
                 {dayLabel(dayNumberOn(run.startedOn, today, run.dayUnit), run.dayUnit)}
                 {' of '}
-                {run.steps.length} {run.steps.length === 1 ? 'step' : 'steps'}
+                {noticesOf(run.steps).length} {noticesOf(run.steps).length === 1 ? 'step' : 'steps'}
               </p>
               {/*
                 THE SEQUENCE ITSELF, filled behind and hollow ahead, with today's caret in it.

@@ -188,9 +188,19 @@ ok('...and coloured by what came before it', /noticeShape\(notices\[i - 1\]\) ==
  */
 ok('the track measures its own container', /@container/.test(track))
 ok('...and the name appears only where there is room for it', /hidden[^"]*@sm:block/.test(track))
-/* THE DAY NUMBER IS WHAT SURVIVES THE NARROW READING, because it is the one thing short enough
-   to sit under a dot — and two dots reading "1 1" are the email and the SMS that go together. */
-ok('the day number is always under the dot', /\{step\.day\}/.test(track))
+/*
+ * THE DAY NUMBER IS THE FIRM'S OWN WAY OF WRITING A CHART, AND IT BELONGS WHERE THE CHART IS.
+ *
+ * IT USED TO BE THE ONLY THING UNDER A DOT IN THE RAIL, because the dot's column was the width of
+ * the dot and nothing else fitted. On a section 129 it reads 1, 7, 12, 32, 39, 49 and is exactly
+ * right. On an ARRANGEMENT every step is dated off each instalment rather than off the run, so all
+ * three read 0 -- and the firm looked at "0 0 0" under three dots and said "this workflow now
+ * looks really small in here, the little things. I think we can make that look better."
+ *
+ * SO IT SITS BESIDE THE NAME NOW, where there is room for both and the name gives it meaning.
+ */
+ok('the day number is under the dot where the name is', /\{step\.day\}/.test(track))
+ok('...and only there', /hidden text-\[9px\] leading-none tabular-nums @sm:block/.test(track))
 
 /*
  * BIG ENOUGH TO PRESS, AND FILLING THE WIDTH IT IS GIVEN. The firm: "it could be maybe a little
@@ -201,14 +211,33 @@ ok('the day number is always under the dot', /\{step\.day\}/.test(track))
  */
 ok('the track wraps rather than scrolling', /flex flex-wrap items-start/.test(track)
   && !/overflow-x-auto/.test(track))
-ok('...and a dot is a fingertip, not a bead', /h-5 w-5 items-center justify-center/.test(track))
+ok('...and a dot is a fingertip, not a bead', /h-7 w-7 items-center justify-center/.test(track))
+/*
+ * AND THE TRACK FILLS THE RAIL RATHER THAN BUNCHING LEFT. Three dots at their own width took a
+ * third of the column and left the rest empty, which is the other half of what the firm was
+ * looking at. Each step after the first grows, so the connectors share what is left.
+ *
+ * CAPPED, or a two-step run draws one enormous line between two dots; and FIXED AGAIN WIDE, where
+ * the columns are 76px and hold a name and a date, and stretching would pull them apart.
+ */
+ok('the track stretches to fill the rail', /flex flex-1 items-start @sm:flex-none/.test(track))
+ok('...through the connector, which is what has the room to grow',
+  /max-w-16 flex-1 @sm:w-5 @sm:max-w-none @sm:flex-none/.test(track))
 
 /*
- * AND A DOT SAYS WHEN IT WENT, read rather than looked at. There is no room for a date under a
- * dot in the rail — it is twice the width — so the date rides on the label a long press reads
- * out, and "sent" and "due" are kept apart: printing them in the same words is how a step that
- * never went comes to look like one that did.
+ * AND A DOT SAYS WHEN IT WENT, IN WRITING, EVERYWHERE.
+ *
+ * THE DATE USED TO BE WIDE-ONLY, on the reasoning that there was no room for it under a dot in the
+ * rail -- true while the dot's column was the width of the dot. It is 44px now, which a date fits
+ * in, and the date is the one thing under a dot that always means something: "27 Sep · 1 Oct · 4
+ * Oct" is the question somebody opens this card to ask, where the day number it replaced read
+ * "0 0 0" on the firm's own arrangement.
+ *
+ * IT IS ALSO STILL IN THE WORDS a long press reads out, where "sent" and "due" are kept apart:
+ * printing them in the same words is how a step that never went comes to look like one that did.
  */
+ok('the date is under every dot, not only the wide ones',
+  /<span className="text-center text-\[10px\] leading-none text-slate-400 tabular-nums">/.test(track))
 check('a dot carries the date it went out',
   words(step({ state: 'sent', sentAt: '2026-09-25T08:00:00Z' })),
   'Section 129 — Sent, sent 25 Sep 2026')
@@ -278,6 +307,14 @@ ok('...and one layout for both', (track.match(/@sm:w-\[76px\]/g) ?? []).length =
 /* NOT WHERE THE PLAN FAILED. A run with no steps under a line reading "day 1 of 0 steps" is an
    empty track that reads as a broken screen rather than as the missing plan it is. */
 ok('...and no track on a run with no steps', /run\.steps\.length > 0 && \(/.test(nowCard))
+/*
+ * AND THE CARD COUNTS WHAT THE TRACK DRAWS. Raptor stores a letter and the SMS behind it as two
+ * steps; the debtor received one notice, and stepPairs is the one place that decides so. The card
+ * read "Day 0 of 6 steps" over THREE dots -- the card and the track disagreeing about the length
+ * of one sequence, which is half of why the firm said it did not look right.
+ */
+ok('the card counts in notices, as the track does', /noticesOf\(run\.steps\)\.length/.test(nowCard))
+ok('...rather than in stored rows', !/of '\}\s*\{run\.steps\.length\}/.test(nowCard))
 
 /* ------------------------------------------------------------------ */
 

@@ -114,7 +114,7 @@ export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
         because it is not a step and must not be counted as one -- and in gold, which is the
         colour the rest of Raptor uses for "this is where you are wanted".
       */}
-      <span aria-hidden className="mx-1 mt-[-2px] h-7 w-[2px] shrink-0 rounded-full bg-[var(--c-gold)]" />
+      <span aria-hidden className="mx-1 mt-[-2px] h-9 w-[2px] shrink-0 rounded-full bg-[var(--c-gold)]" />
     </li>
   )
   return (
@@ -143,7 +143,19 @@ export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
           return (
             <Fragment key={step.id}>
               {at === i && mark(`mark-${i}`)}
-              <li className="flex items-start">
+              {/*
+                THE TRACK FILLS THE RAIL RATHER THAN BUNCHING LEFT. Three dots at their own width
+                took a third of the column and left the rest empty, which is the other half of the
+                firm's "this workflow now looks really small in here". Each step after the first
+                grows, so the connectors share whatever room is left and the sequence reads across
+                the card -- and on a wrapped line the same rule fills that line too.
+                
+                CAPPED, so a two-step run does not draw one enormous line between two dots.
+                
+                ONLY IN THE RAIL. Wide, the columns are 76px and hold a name and a date under each
+                dot; stretching there would pull a labelled track apart.
+              */}
+              <li className="flex flex-1 items-start @sm:flex-none">
                 {/*
                   THE LINE BETWEEN, drawn by the step on its right rather than as its own element:
                   one connector per gap, and never a stray tail past the last dot. It is coloured
@@ -151,12 +163,12 @@ export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
                   happened.
                 */}
                 {i > 0 && (
-                  <span aria-hidden className={`mt-[9px] h-[2px] w-2 shrink-0 @sm:w-5 ${
+                  <span aria-hidden className={`mt-[13px] h-[2px] w-2 min-w-2 max-w-16 flex-1 @sm:w-5 @sm:max-w-none @sm:flex-none ${
                     noticeShape(notices[i - 1]) === 'sent' ? 'bg-[var(--color-positive)]/40' : 'bg-slate-200'
                   }`} />
                 )}
                 <Dot onSelect={onSelect} notice={notice} selected={selected}>
-                  <span className={`flex h-5 w-5 items-center justify-center gap-px rounded-full border-2
+                  <span className={`flex h-7 w-7 items-center justify-center gap-px rounded-full border-2
                     ${DOT[shape]} ${
                     selected ? 'ring-2 ring-navy-950/25 ring-offset-1' : 'group-hover:ring-2 group-hover:ring-slate-200'
                   }`}>
@@ -168,7 +180,7 @@ export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
                       which is what sent the firm looking for a way to make this smaller.
                     */}
                     {icons.map((Icon, n) => (
-                      <Icon key={n} size={icons.length > 1 ? 7 : 10}
+                      <Icon key={n} size={icons.length > 1 ? 9 : 13}
                         className={shape === 'waiting' || shape === 'cancelled' ? 'text-slate-400' : 'text-white'} />
                     ))}
                   </span>
@@ -179,7 +191,7 @@ export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
                     email and the SMS that go out together. The unit it counts in is spelled out
                     under the track and again in the detail, where there is room to write it.
                   */}
-                  <span className={`text-[9px] leading-none tabular-nums ${LABEL[shape]}`}>
+                  <span className={`hidden text-[9px] leading-none tabular-nums @sm:block ${LABEL[shape]}`}>
                     {step.day}
                   </span>
                   {/* THE NOTICE'S OWN NAME, which is the lead row's: "Section 129 / letter of
@@ -187,11 +199,22 @@ export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
                   <span className={`hidden text-center text-[10px] leading-tight @sm:line-clamp-2 @sm:block ${LABEL[shape]}`}>
                     {step.label}
                   </span>
-                  {/* AND THE DATE, WHERE THERE IS ROOM FOR IT. In the rail there is not -- a date
-                      is twice the width of a dot -- so there it is carried by the dot's own
-                      label, which a long press reads out, and spelled in full in the detail
-                      under the track. */}
-                  <span className="hidden text-center text-[9px] leading-none text-slate-400 tabular-nums @sm:block">
+                  {/*
+                    AND THE DATE, EVERYWHERE, BECAUSE IT IS THE ONE THAT ALWAYS MEANS SOMETHING.
+                    
+                    THE FIRM, LOOKING AT AN ARRANGEMENT'S TRACK IN THE RAIL: "this workflow now
+                    looks really small in here, the little things. I think we can make that look
+                    better." What was under those three dots was "0 0 0" -- the day number, which
+                    is the firm's own way of writing a chart and is exactly right on a section 129
+                    (1, 7, 12, 32, 39, 49) and worthless on an arrangement, where the steps are
+                    dated off each INSTALMENT and every one of them is day 0.
+                    
+                    THE DATE IS NEVER WORTHLESS. "27 Sep · 1 Oct · 4 Oct" is the question somebody
+                    opens this card to ask -- when is it going out -- and it is what the day
+                    number was standing in for while there was no room for it. There is room now:
+                    the dot's column is wide enough, and the track wraps.
+                  */}
+                  <span className="text-center text-[10px] leading-none text-slate-400 tabular-nums">
                     {shortDate(step.sentAt ? step.sentAt.slice(0, 10) : step.dueOn)}
                   </span>
                 </Dot>
@@ -233,7 +256,12 @@ function Dot({ notice, selected, onSelect, children }: {
   const shared = {
     title: said,
     'aria-label': said,
-    className: 'group flex w-5 shrink-0 flex-col items-center gap-0.5 @sm:w-[76px] @sm:gap-1',
+    /*
+     * WIDE ENOUGH FOR A DATE, WHICH IS WHAT THE RAIL PUTS UNDER A DOT NOW. It was the width of
+     * the dot itself -- twenty pixels -- which is why the only thing that fitted was a day
+     * number, and on an instalment-anchored sequence three of those read "0 0 0".
+     */
+    className: 'group flex w-11 shrink-0 flex-col items-center gap-1 @sm:w-[76px]',
   }
   if (!onSelect) return <span {...shared}>{children}</span>
   return (
