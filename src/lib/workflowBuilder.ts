@@ -35,8 +35,8 @@ import { addWorkingDays, workingDaysBetween } from './workingDays.js'
  */
 export type TriggerKind =
   | 'handover' | 'allocated' | 'promise_due' | 'promise_broken' | 'arrangement_broken'
-  | 'payment_received' | 'dispute_logged' | 'no_contact' | 'trace_returned' | 'callback'
-  | 'by_hand'
+  | 'payment_received' | 'dispute_alleged' | 'dispute_logged' | 'no_contact' | 'trace_returned'
+  | 'callback' | 'by_hand'
 
 export interface TriggerMeta {
   /** What the firm would call it, on the button. */
@@ -61,7 +61,16 @@ export const TRIGGERS: Record<TriggerKind, TriggerMeta> = {
   promise_broken: { label: 'A promise to pay is broken', dayZero: 'the day the promise was broken' },
   arrangement_broken: { label: 'An arrangement is broken', dayZero: 'the day the arrangement broke' },
   payment_received: { label: 'A payment comes in', dayZero: 'the day the payment was received' },
-  dispute_logged: { label: 'A dispute is raised', dayZero: 'the day the dispute was raised' },
+  /*
+   * ALLEGED AND RAISED ARE TWO DIFFERENT DAYS AND TWO DIFFERENT WORKFLOWS. The debtor SAYING the
+   * account is disputed suspends nothing; the dispute arriving IN WRITING is what stops collection.
+   * One trigger for each, so the sentence on the page says which of the two this chart starts on.
+   */
+  dispute_alleged: {
+    label: 'A debtor says an account is disputed',
+    dayZero: 'the day they said it',
+  },
+  dispute_logged: { label: 'A dispute is raised in writing', dayZero: 'the day it arrived in writing' },
   no_contact: { label: 'Nobody can be reached', dayZero: 'the day the last attempt failed' },
   trace_returned: { label: 'A trace comes back', dayZero: 'the day the trace came back' },
   callback: { label: 'A callback is asked for', dayZero: 'the day it was asked for' },
@@ -71,7 +80,8 @@ export const TRIGGERS: Record<TriggerKind, TriggerMeta> = {
 /** The order the buttons are offered in: a file's life, roughly, and by hand last. */
 export const TRIGGER_ORDER: TriggerKind[] = [
   'handover', 'allocated', 'promise_due', 'promise_broken', 'arrangement_broken',
-  'payment_received', 'dispute_logged', 'no_contact', 'trace_returned', 'callback', 'by_hand',
+  'payment_received', 'dispute_alleged', 'dispute_logged', 'no_contact', 'trace_returned',
+  'callback', 'by_hand',
 ]
 
 /**
@@ -81,8 +91,18 @@ export const TRIGGER_ORDER: TriggerKind[] = [
  * and eventually on a file's own timeline; written out at each of those it drifts, and a day
  * column labelled two ways is a day column nobody trusts.
  */
-export function dayZeroLabel(trigger: TriggerKind): string {
-  return `Day 0 is ${triggerMeta(trigger).dayZero}.`
+export function dayZeroLabel(trigger: TriggerKind, unit: DayUnit = 'calendar'): string {
+  /*
+   * THE NUMBER COMES FROM THE UNIT, and it did not -- which the firm read on their own dispute
+   * chart. "Day 0 is the day somebody started it" sat one line above "Day 1 is the day it starts,
+   * counting that day", in the same dark panel, about the same day. Two numbers for one day is a
+   * day column nobody trusts, which is the exact thing this sentence exists to prevent.
+   *
+   * CALENDAR IS 0-BASED AND BUSINESS IS 1-BASED, which is landsOn's rule and the firm's own: they
+   * write their charts day 1, day 7, day 12. Neither waits -- both name the day the thing was
+   * triggered -- and the whole job of this sentence is to say which number that day carries here.
+   */
+  return `Day ${unit === 'business' ? 1 : 0} is ${triggerMeta(trigger).dayZero}.`
 }
 
 /**

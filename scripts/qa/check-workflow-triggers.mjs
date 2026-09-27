@@ -25,7 +25,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  TRIGGERS, TRIGGER_ORDER, dayZeroLabel, landsOn, workflowProblems, canSave,
+  TRIGGERS, TRIGGER_ORDER, DAY_UNITS, dayZeroLabel, landsOn, workflowProblems, canSave,
 } from '../../src/lib/workflowBuilder.ts'
 import { isWorkingDay } from '../../src/lib/workingDays.ts'
 import { DIARY_KINDS } from '../../src/lib/diaryPriority.ts'
@@ -51,12 +51,37 @@ const inCode = Object.keys(TRIGGERS).sort()
  * THE DATABASE'S OWN LIST, read out of the CHECK constraint rather than written here a second
  * time. A copy in this file could agree with itself and disagree with the column.
  */
-const constraint = /trigger_kind text not null default '[a-z_]+'\s*\n\s*check \(trigger_kind in \(([\s\S]*?)\)\)/
-  .exec(schema)
-ok('the trigger column is a closed list in the database', constraint !== null)
+/*
+ * THE LAST DEFINITION, NOT THE FIRST, AND THIS CHECK LEARNED IT THE HARD WAY.
+ *
+ * schema.sql IS APPEND-ONLY, so the live constraint is the one written LAST -- CLAUDE.md says so
+ * about functions and it is just as true of a CHECK. This matched only the original
+ * `add column ... check (...)`, so when `dispute_alleged` was added by a later
+ * `drop constraint ... add constraint ...` the check went on comparing the code against the
+ * SUPERSEDED list and passed. The database took a value the app had never heard of, TRIGGERS had
+ * no entry for it, and triggerMeta fell back to "Somebody starts it on a file" -- which is what the
+ * firm read on a dispute workflow: a trigger sentence describing a different trigger entirely.
+ *
+ * BOTH SHAPES, because the column was declared one way and is amended another. Taken from the end
+ * so a fourth revision is picked up without touching this line again.
+ */
+const shapes = [
+  ...schema.matchAll(/check \(trigger_kind in \(([\s\S]*?)\)\)/g),
+]
+ok('the trigger column is a closed list in the database', shapes.length > 0)
+/* ASSERTED PRESENT BEFORE IT IS INDEXED, or a schema with no constraint at all reads as an empty
+   list -- and an empty list would make the comparison below fail for the wrong reason, or throw. */
+const constraint = shapes.length > 0 ? shapes[shapes.length - 1] : null
 const inDb = constraint
   ? [...constraint[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort()
   : []
+/* AND THE LIVE ONE IS NOT THE FIRST ONE, where the file has been revised. Said out loud so a
+   rewrite that goes back to reading the first match fails here rather than silently. */
+if (shapes.length > 1) {
+  const first = [...shapes[0][1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort()
+  ok(`the list read is the last of ${shapes.length}, not the first`,
+    JSON.stringify(first) !== JSON.stringify(inDb))
+}
 
 check('every trigger the code offers is one the database will take', inCode, inDb)
 check('...and the order the buttons are offered in covers all of them',
@@ -69,12 +94,58 @@ check('...with nothing listed twice', TRIGGER_ORDER.length, new Set(TRIGGER_ORDE
  * phrase somebody wrote. Held against DIARY_KINDS so a rename on one side is a failure here.
  */
 const diary = Object.keys(DIARY_KINDS)
+/* `dispute_alleged` and `dispute_logged` sit here for the same reason as each other: the diary's
+   own word is "dispute chase", which is the WORK that follows one. Neither the debtor saying it nor
+   the letter arriving is a diary kind -- they are the events that raise the chasing. */
 const NOT_IN_THE_DIARY = ['handover', 'allocated', 'arrangement_broken', 'payment_received',
-  'dispute_logged', 'trace_returned', 'by_hand']
+  'dispute_alleged', 'dispute_logged', 'trace_returned', 'by_hand']
 for (const t of TRIGGER_ORDER) {
   if (NOT_IN_THE_DIARY.includes(t)) continue
   ok(`"${t}" is the diary's own word for it`, diary.includes(t))
 }
+/* ---------------- the two sentences about day one must agree ---------------- */
+
+/*
+ * THE PANEL SAID BOTH, AND THE FIRM READ IT. On the dispute chart, one line above the other, in the
+ * same dark box, about the same day:
+ *
+ *     "Day 0 is the day somebody started it. Counted in business days."
+ *     "... Day 1 is the day it starts, counting that day."
+ *
+ * dayZeroLabel took the trigger and nothing else, so it printed "Day 0" whatever the chart counted
+ * in. Two numbers for one day is a day column nobody trusts, which is the whole thing that sentence
+ * exists to stop -- and it is worse than a plain error, because both halves are separately correct
+ * and the reader cannot tell which to believe.
+ *
+ * ASSERTED AGAINST THE UNIT'S OWN HINT, not against a number written here. The hint is the other
+ * sentence in that box; comparing them to a literal would let both drift together and still pass.
+ */
+for (const unit of ['business', 'calendar']) {
+  const first = Number(/Day (\d)/.exec(dayZeroLabel('by_hand', unit))?.[1])
+  const hint = Number(/Day (\d) is the day it starts/.exec(DAY_UNITS[unit].hint)?.[1])
+  ok(`the ${unit} hint says which day a chart starts on`, Number.isInteger(hint))
+  check(`...and the trigger sentence says the same day (${unit})`, first, hint)
+}
+/* AND THEY ARE DIFFERENT NUMBERS, or the assertion above passes on a version that forgot the unit
+   entirely and printed one number for both. */
+ok('the two units number the starting day differently',
+  dayZeroLabel('by_hand', 'business') !== dayZeroLabel('by_hand', 'calendar'))
+/* BUSINESS IS THE 1-BASED ONE -- the firm's own charts are written day 1, day 7, day 12 -- and
+   landsOn is where that is enforced. Named here so a swap of the two is a failure rather than a
+   pair of sentences that still agree with each other. */
+ok('a business chart starts on day 1', /Day 1 is/.test(dayZeroLabel('by_hand', 'business')))
+ok('...and a calendar chart on day 0', /Day 0 is/.test(dayZeroLabel('by_hand', 'calendar')))
+/*
+ * NEITHER OF THEM WAITS, which is what the firm actually asked: "there's no day one, there's only
+ * day zero... the moment something is triggered, it doesn't wait a day to happen." Both units name
+ * the trigger day; they only number it differently. Asserted on landsOn, which is the one place
+ * that decides it.
+ */
+for (const [unit, first] of [['business', 1], ['calendar', 0]]) {
+  check(`the first step of a ${unit} chart falls on the day it started`,
+    landsOn('2026-09-28', first, unit), '2026-09-28')
+}
+
 /*
  * `review` IS DELIBERATELY NOT A TRIGGER. CLAUDE.md: a routine review is the last rung and the
  * only diary kind with no event behind it. There is nothing for a workflow to wait for, so a

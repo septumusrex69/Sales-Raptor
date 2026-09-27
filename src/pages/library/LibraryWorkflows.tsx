@@ -290,8 +290,14 @@ function NewWorkflow({ onCancel, onCreated }: {
           ))}
         </div>
         {/* The consequence of the choice, said as the choice is made rather than discovered on
-            the day column later. */}
-        <p className="text-xs text-slate-500 mt-2">{dayZeroLabel(trigger)}</p>
+            the day column later.
+
+            CALENDAR, BECAUSE THAT IS WHAT A NEW VERSION IS. workflow_versions.day_unit defaults to
+            'calendar' and this form does not offer the choice -- the unit is picked afterwards, on
+            the workflow itself. Written out rather than left to the parameter's own default, so
+            the day this form grows a unit picker the compiler does not have to be the one to
+            notice. */}
+        <p className="text-xs text-slate-500 mt-2">{dayZeroLabel(trigger, 'calendar')}</p>
       </div>
       {error && <p className="text-sm text-rose-700">{error}</p>}
       <div className="flex items-center gap-2">

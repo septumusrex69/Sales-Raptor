@@ -63,7 +63,7 @@ export function WorkflowSchedule({
         </p>
         <p className="text-[15px] font-semibold text-white mt-1">{trigger.label}</p>
         <p className="text-[12px] text-white/50 mt-0.5">
-          {dayZeroLabel(workflow.version.trigger)}
+          {dayZeroLabel(workflow.version.trigger, workflow.version.dayUnit)}
           {' '}Counted in {DAY_UNITS[unit].label}.
         </p>
         {/* HOW TO COUNT THEM, in full, beside the unit rather than somewhere else on the page.
