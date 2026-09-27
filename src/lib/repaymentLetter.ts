@@ -110,6 +110,19 @@ export interface RepaymentLetterInput {
  */
 export function repaymentLetter(input: RepaymentLetterInput): LetterDocument {
   const { plan, money, each } = input
+  /*
+   * THE SAME FACT IN TWO GRAMMARS, BECAUSE THE PAGE NEEDS BOTH.
+   *
+   * `each` is the caller's own phrase and it is already right where it belongs -- "R500.00 a week"
+   * reads as a sentence. It does NOT read as a sentence anywhere else on the page: the summary row
+   * said "You would pay, a week", the ladder's column head said "EACH A WEEK", and the note under
+   * it said "asks for more a week". The firm read that column back as "each week total you pay"
+   * and said it did not look right, which it did not.
+   *
+   * SO THE BARE NOUN IS DERIVED HERE RATHER THAN ASKED FOR. One argument, one place it can be
+   * wrong -- and a caller cannot pass a frequency in one form and its noun in another.
+   */
+  const period = each.replace(/^an?\s+/i, '')
   const first = plan.rows[0]
   const last = plan.rows[plan.rows.length - 1]
   /* A simulation unless the caller says otherwise: the calculator is where this is sent from
@@ -201,7 +214,9 @@ export function repaymentLetter(input: RepaymentLetterInput): LetterDocument {
       widths: [55, 45],
       rows: [
         pair('Outstanding today', money(input.balanceToday)),
-        pair(`You would pay, ${each}`, money(first.amount)),
+        /* THE FREQUENCY TRAVELS WITH THE AMOUNT, not with the label. "You would pay, a week |
+           R 500,00" split one phrase across two columns and read as neither half of it. */
+        pair('Each payment', `${money(first.amount)} ${each}`),
         pair('Number of payments', String(plan.rows.length)),
         pair('Final payment', `${money(last.amount)} on ${longDate(last.dueOn)}`),
         pair('Total you would pay', money(plan.totalPaid), true),
@@ -224,6 +239,33 @@ export function repaymentLetter(input: RepaymentLetterInput): LetterDocument {
      */
     { kind: 'paragraph', spans: [{ text: 'Annexure B fees are excluded from every figure above.', size: 9 }] } as Block,
   ]
+
+  /*
+   * AND A ZERO IN THE INTEREST ROW IS SAID OUT LOUD, because a zero there has two meanings and
+   * only one of them is safe.
+   *
+   * THE FIRM READ THIS PAGE AND ASKED "NO INTEREST?" -- the right question, and the page gave them
+   * no way to answer it. An account with no rate, or with a rate and nothing posted for the accrual
+   * to run from, produces a schedule with no interest in it: that is correct, and it reads exactly
+   * like a schedule where the interest was forgotten. The collector's own panel has said this since
+   * it was built (see RepaymentCalculator) and the page that goes to the DEBTOR did not, which is
+   * the half a debtor could hold the firm to.
+   *
+   * IT IS ALSO WHAT EXPLAINS THE LADDER BELOW. With no interest running the only charge is the
+   * receipt fee, which is a flat share of whatever is paid -- so paying faster saves almost
+   * nothing, and "YOU SAVE R 17,29" beside a payment three times the size reads as an arithmetic
+   * mistake rather than as the consequence of a debt that is not growing.
+   */
+  if (!plan.interestRunning) {
+    blocks.push({
+      kind: 'paragraph',
+      spans: [{
+        text: 'No interest is running on this account, so no interest is included in any figure in '
+          + 'this document.',
+        size: 9,
+      }],
+    } as Block)
+  }
 
   /*
    * AND WHAT PAYING FASTER WOULD SAVE THEM, which is the reason this page exists at all.
@@ -257,7 +299,14 @@ export function repaymentLetter(input: RepaymentLetterInput): LetterDocument {
       rows: [
         [
           { spans: [{ text: 'PAYMENTS', bold: true }] },
-          { spans: [{ text: `EACH ${each.toUpperCase()}`, bold: true }] },
+          /*
+           * "EACH PAYMENT", NOT "EACH A WEEK", and the last row is why. Settling in full is ONE
+           * payment, and under a column headed EACH A WEEK its figure told a debtor that clearing
+           * the account costs R14 175,89 every week. The frequency is established twice above --
+           * in the summary row and in the sentence naming the offer -- so the column only has to
+           * be true on all five rows.
+           */
+          { spans: [{ text: 'EACH PAYMENT', bold: true }] },
           { spans: [{ text: 'TOTAL YOU PAY', bold: true }] },
           { spans: [{ text: 'YOU SAVE', bold: true }] },
         ],
@@ -290,9 +339,26 @@ export function repaymentLetter(input: RepaymentLetterInput): LetterDocument {
     blocks.push({
       kind: 'paragraph',
       spans: [{
-        text: 'Your own offer is the first line. Every line below it asks for more '
-          + `${each}: that is what makes it shorter, and it is where the saving comes from. `
-          + 'Interest runs on what is still owed, so every month the account stands costs you more.',
+        /* JOINED RATHER THAN CONCATENATED, so a sentence that does not apply leaves no gap and no
+           trailing space behind it. */
+        text: [
+          /* THE PERIOD IS THE ARRANGEMENT'S OWN, not "month". This sentence said "every month the
+             account stands" on a weekly arrangement whose own figures were weekly. */
+          'Your own offer is the first line. Every line below it asks for a bigger payment '
+            + `every ${period}: that is what makes it shorter, and it is where the saving comes `
+            + 'from.',
+          /* AND THE ROW THE COLUMN HEAD NO LONGER EXPLAINS. "EACH PAYMENT" is true of settling in
+             full and says nothing about it being a single one, which is the row's whole point. */
+          ...((input.faster as SettlementOption[]).some((o) => o.instalments === 1)
+            ? ['The last line is one payment that closes the account.'] : []),
+          /* AND THE SENTENCE ABOUT INTEREST ONLY WHERE THERE IS ANY. On an account that is not
+             accruing it contradicted the line four inches above it, which says in terms that no
+             interest is running -- and it is the half of the page a debtor is most likely to quote
+             back. What is still true there is that the saving is real, and the figures say it. */
+          ...(plan.interestRunning
+            ? [`Interest runs on what is still owed, so every ${period} the account stands costs `
+              + 'you more.'] : []),
+        ].join(' '),
         size: 9,
       }],
     })

@@ -275,9 +275,113 @@ for (const o of faster.filter((x) => !x.theirs)) {
   ok(`...which is not less than they offered (${o.instalments})`, o.each >= faster[0].each)
 }
 /* AND THE PAGE SAYS SO, rather than leaving a debtor to notice that every figure went up. */
-ok('the page says every line below asks for more', /asks for more a month/.test(withLadder))
+ok('the page says every line below asks for more',
+  /asks for a bigger payment every month/.test(withLadder))
 /* SETTLING IN ONE PAYMENT IS NOT "1 payments". */
 ok('one payment reads as settling now', /Settle now/.test(withLadder))
+
+/*
+ * ---------- THE COLUMN HEAD THAT TOLD A DEBTOR A SETTLEMENT WAS WEEKLY ----------
+ *
+ * The head was `EACH ${each.toUpperCase()}`, so a weekly arrangement drew "EACH A WEEK" -- and the
+ * last row of that column is the figure for settling in FULL, in one payment. The firm read it back
+ * as "each week total you pay" and said it did not look right: the page was telling a debtor that
+ * clearing the account costs fourteen thousand rand every week.
+ *
+ * ASSERTED IN BOTH DIRECTIONS, and the absence is the half that matters -- a head that is merely
+ * present tells us nothing about what else is printed beside the settlement figure.
+ */
+const weeklyLadderDoc = () => {
+  const acc = account()
+  const sched = { arrangement: 'weekly', dueOn: '2026-10-05', dayOfWeek: 1, dayOfMonth: null, onLastDay: false }
+  const p = repaymentPlan({ account: acc, instalment: 500, schedule: sched })
+  return {
+    plan: p,
+    text: lettersText(repaymentLetter({
+      plan: p, balanceToday: 10200, each: 'a week', money,
+      faster: settlementLadder({ account: acc, schedule: sched }, p),
+    })),
+  }
+}
+const weekly = weeklyLadderDoc()
+ok('the ladder has a column for what one payment would be', /EACH PAYMENT/.test(weekly.text))
+ok('...which never carries the frequency', !/EACH A WEEK|EACH A MONTH/i.test(weekly.text))
+ok('...and the monthly page says it the same way', /EACH PAYMENT/.test(withLadder))
+/* AND THE SETTLEMENT FIGURE IS STILL THERE. Renaming the head is only honest if the number it
+   heads survived -- a column emptied of its figures would pass the assertion above. */
+const settleNow = (weekly.plan.rows.length > 0
+  ? settlementLadder(
+    { account: account(), schedule: { arrangement: 'weekly', dueOn: '2026-10-05', dayOfWeek: 1, dayOfMonth: null, onLastDay: false } },
+    weekly.plan,
+  ).find((o) => o.instalments === 1)
+  : null)
+ok('...over the figure for settling in one payment',
+  settleNow !== null && settleNow !== undefined && weekly.text.includes(money(settleNow.each)))
+/* AND THE NOTE SAYS THAT ROW IS ONE PAYMENT, since the head no longer says anything about how
+   often. Without it the column is honest and silent, which on a five-row ladder is not enough. */
+ok('the note says the last line is a single payment',
+  /The last line is one payment that closes the account\./.test(weekly.text))
+
+/*
+ * THE PERIOD IN THE PROSE IS THE ARRANGEMENT'S OWN. "every month the account stands costs you more"
+ * was hard-coded, and printed under a table of weekly figures.
+ */
+ok('a weekly page talks in weeks', /every week the account stands/.test(weekly.text))
+ok('...and never in months', !/every month the account stands/.test(weekly.text))
+ok('a monthly page talks in months', /every month the account stands/.test(withLadder))
+
+/*
+ * ---------- A ZERO IN THE INTEREST ROW IS SAID OUT LOUD ----------
+ *
+ * THE FIRM READ A SIMULATION AND ASKED "NO INTEREST?" The account carried 24% a year and every
+ * figure on the page was capital and receipt fees, because openAccrual has nothing to run from
+ * until an accrual has been posted -- and 23 009 of the 23 781 accounts on the book are in that
+ * state. The arithmetic was right and the page gave nobody a way to know it.
+ *
+ * THE COLLECTOR'S PANEL HAS SAID THIS SINCE IT WAS BUILT and the page that goes to the DEBTOR did
+ * not, which is the half a debtor could hold the firm to: a quotation that silently omits interest
+ * is one the firm is stuck with.
+ */
+const NO_INTEREST = 'No interest is running on this account, so no interest is included in any '
+  + 'figure in this document.'
+const bare = account({
+  /* A new account, or one imported without its accrual history: a rate, and nothing posted. */
+  ledgers: { payments: [], fees: [], interest: [] },
+  inDuplum: false,
+})
+const barePlan = repaymentPlan({ account: bare, instalment: 500, schedule: monthly() })
+/* THE PREMISE FIRST. Asserted before the sentence, or a fixture that quietly started accruing
+   would make the absence below pass for the wrong reason. */
+ok('the bare account really is not accruing', !barePlan.interestRunning)
+check('...so every figure on it is capital and receipt fees', barePlan.totalInterest, 0)
+const bareText = lettersText(repaymentLetter({
+  plan: barePlan, balanceToday: 10000, each: 'a month', money,
+  faster: settlementLadder({ account: bare, schedule: monthly() }, barePlan),
+}))
+ok('a page with no interest in it says so', bareText.includes(NO_INTEREST))
+/*
+ * AND NOTHING ELSE ON IT CLAIMS THE OPPOSITE. The note under the ladder ended "Interest runs on
+ * what is still owed, so every week the account stands costs you more", which on a page that has
+ * just said no interest is running is the firm contradicting itself in two adjacent paragraphs --
+ * and a debtor would be entitled to pick whichever half suits them.
+ */
+ok('...and nothing under the ladder says interest is running',
+  !/Interest runs on what is still owed/.test(bareText))
+ok('...which an accruing page does say', /Interest runs on what is still owed/.test(withLadder))
+/* AND ONLY THERE. The same sentence on an accruing account is a lie in the debtor's favour, which
+   is still a lie -- and the row above it would contradict it on the same page. */
+ok('...and a page with interest in it does not', !withLadder.includes(NO_INTEREST))
+ok('the accruing fixture really is accruing', plan.interestRunning && plan.totalInterest > 0)
+
+/*
+ * ---------- THE FREQUENCY TRAVELS WITH THE AMOUNT ----------
+ *
+ * The summary row was labelled "You would pay, a week" with R 500.00 in the next column, which
+ * split one phrase across two cells and read as neither half.
+ */
+ok('the summary names the payment and how often it falls in one cell',
+  /R 500\.00 a week/.test(weekly.text))
+ok('...under a label that is not half a sentence', !/You would pay, a week/.test(weekly.text))
 /* AND IT IS ABSENT WHERE THERE IS NOTHING FASTER TO SHOW, rather than an empty table: a heading
    over nothing reads as a page that failed to load. */
 ok('no ladder, no heading', !/What it would cost to clear it sooner/.test(text))

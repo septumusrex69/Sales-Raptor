@@ -9978,3 +9978,36 @@ Yours faithfully
 {{collector_name}}
 {{firm_name}}', 'email-account-statement-company', true, null)
 on conflict (seed_key) do nothing;
+
+-- ============================================================================
+-- THE COVERING EMAIL DOES NOT OPEN BY RECALLING THE CALL.
+--
+-- THE FIRM, READING THE ONE THAT WENT OUT: "it says as per our conversation, just don't say, refer
+-- to the conversation. Just say like, please find the attached calculations for your convenience,
+-- something like that."
+--
+-- AND IT IS NOT ONLY A MATTER OF TONE. The simulation is sent from the calculator, which a
+-- collector opens while they are still working out what to ask for -- so the email goes out after a
+-- call, after an email, and sometimes before anyone has spoken to the debtor at all. "Following our
+-- conversation" asserts a conversation the firm may not be able to point to, on a document a
+-- debtor can be expected to keep.
+--
+-- WRITTEN AS A REPLACE ON THE ONE SENTENCE rather than a new body, because the rest of these two
+-- templates is the firm's own wording and a whole body restated here is a body that can silently
+-- lose a paragraph of it.
+-- ============================================================================
+update public.message_templates
+set body = replace(
+  body,
+  'Following our conversation, attached is a simulation of what it would cost to settle this account by paying',
+  'Please find attached, for your convenience, the calculations on this account: what it would cost to settle it by paying'
+)
+where seed_key = 'email-ptp-simulation-individual';
+
+update public.message_templates
+set body = replace(
+  body,
+  'Following our conversation, attached is a simulation of what it would cost to settle the company''s account by paying',
+  'Please find attached, for your convenience, the calculations on the company''s account: what it would cost to settle it by paying'
+)
+where seed_key = 'email-ptp-simulation-company';
