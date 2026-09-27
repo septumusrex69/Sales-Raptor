@@ -87,8 +87,15 @@ ok('...and says a fresh one can go later', /fresh\s+.?section 129 can be issued/
  * changed; upheld with the amount corrected -- in every one the debtor was in default and was
  * told so, which is what the notice had to do.
  */
+/* The window is wide enough to clear the comment that now sits between the condition and the call
+   -- and still narrow enough that deleting the call cannot be satisfied by a later one, because
+   every resume after this point in the function is an EXIT rather than a resume. */
 ok('nothing changed resumes it',
-  /in \('no_change', 'amount_changed'\)[\s\S]{0,200}?workflow_resume_account/.test(fn))
+  /in \('no_change', 'amount_changed'\)[\s\S]{0,400}?workflow_resume_account/.test(fn))
+/* AND IT NAMES ITS CAUSE. Answering the objection says nothing about a promise the debtor has
+   made, and a resume that lifted every hold let a section 129 carry on over a live arrangement. */
+ok('...lifting only the holds a dispute put there',
+  /workflow_resume_account\(new\.account_id, 'dispute_closed', 'dispute'\)/.test(fn))
 ok('...and so does a corrected amount', /'no_change', 'amount_changed'/.test(fn))
 /*
  * AND SO DOES AN UPHELD DISPUTE WITH NO EFFECT RECORDED, which is the safe direction and the one

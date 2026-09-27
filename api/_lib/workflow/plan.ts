@@ -39,7 +39,24 @@ export async function planUnplannedRuns(
   let query = admin
     .from('workflow_runs')
     .select('id, account_id, version_id, started_on, workflow_run_steps(id)')
-    .eq('state', 'running')
+    /*
+     * RUNNING OR HELD, AND THE `held` IS THE FIX.
+     *
+     * A run created by a database trigger arrives with NO STEPS -- the row is written in SQL and
+     * the dating happens here. If something stops it before this runs, it is held with nothing
+     * under it, and a filter of `running` alone never looks at it again: an empty sequence that
+     * can never do anything, on a screen that says it is paused.
+     *
+     * THE FIRM FOUND ONE. A promise created the arrangement sequence and the same promise held it
+     * a moment later, so it sat at 0 of 2 steps. The hold itself is fixed in
+     * workflow_hold_account, but this is the half that matters on its own: any hold landing on
+     * the day a run starts -- a written dispute the same morning as a handover -- does it again.
+     *
+     * DATING A HELD RUN IS SAFE. The steps are dated from `started_on`, and the resume re-dates
+     * whatever has not gone forward by the working days the hold lasted. A run held from its
+     * first day is simply one whose whole sequence moves when it is let go.
+     */
+    .in('state', ['running', 'held'])
     .order('created_at', { ascending: true })
     .limit(200)
   if (accountId) query = query.eq('account_id', accountId)

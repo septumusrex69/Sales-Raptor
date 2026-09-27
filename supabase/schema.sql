@@ -9106,3 +9106,243 @@ update public.workflow_nodes n
    and v.state = 'draft'
    and n.after_minutes is not null
    and n.needs_release = true;
+
+
+-- ============================================================================
+-- A PAUSE MUST NOT STOP THE SEQUENCE THAT EXISTS TO ANSWER IT, AND A RESUME MUST NOT LIFT A
+-- PAUSE IT KNOWS NOTHING ABOUT.
+--
+-- THE FIRM, LOOKING AT A TEST ACCOUNT: "explain to me what's going on here. I don't understand
+-- it." What they were reading was a Promise to pay sequence stamped "Paused -- A promise to pay
+-- was made". A run stopped by the very event that created it, with no steps under it, later
+-- released by an unrelated dispute being closed. Three faults, one screen.
+--
+--   1. workflow_start_on_promise creates the Promise to pay run, then workflow_exit_on_promise
+--      holds EVERY running run on the account -- including the one created a moment earlier for
+--      this same promise. (promise_starts_workflow sorts before workflow_exit_on_promise, so the
+--      run always exists by the time the hold runs.)
+--   2. It was held before anything planned it, and planUnplannedRuns only looked at runs that are
+--      RUNNING -- so it never got its steps. An empty sequence that can never do anything. Fixed
+--      in api/_lib/workflow/plan.ts, which now plans a held run too.
+--   3. workflow_resume_account closed every open hold on the account whatever its cause, so
+--      closing a dispute released a run a PROMISE had paused -- the hold's own ended_reason on
+--      that account reads 'dispute_closed' on a hold whose cause is 'promise'. A section 129
+--      carrying on while a live promise stands is the firm telling a debtor two things at once.
+--
+-- The four functions below are the LIVE definitions, read back out of staging with
+-- pg_get_functiondef so this file and the database cannot disagree about them.
+-- ============================================================================
+
+-- The old two-argument resume is dropped rather than left beside the new one: with a defaulted
+-- third argument the two would be ambiguous on every existing call, and Postgres would refuse them.
+drop function if exists public.workflow_resume_account(uuid, text);
+
+create or replace function public.workflow_hold_account(
+  p_account_id uuid, p_cause text, p_reason text default null, p_cause_id uuid default null
+) returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_held integer := 0;
+  v_reason text;
+begin
+  v_reason := coalesce(p_reason, case p_cause
+    when 'promise' then 'A promise to pay was made'
+    when 'dispute' then 'A dispute was raised in writing'
+  end);
+  if v_reason is null then
+    raise exception 'Unknown workflow hold cause "%". It is one of promise, dispute.', p_cause;
+  end if;
+
+  /*
+   * ONCE PER RUN FOR A PROMISE, AND THAT IS THE FIRM'S RULE IN ONE CLAUSE.
+   *
+   * "People sometimes make a promise and then they break the promise, and then they make another
+   * promise and then they break that again. So if we stop it for all of that time, then that's a
+   * problem. Unless we can stop it only once. Not twice."
+   *
+   * The second promise is still recorded, still diarised and still worked -- it simply does not
+   * stop the sequence, because the debtor has already been told in writing that only payment
+   * will. A WRITTEN DISPUTE is not limited this way: a new objection is a new thing to answer,
+   * and the firm has to answer it before it can go on demanding.
+   */
+  with live as (
+    select r.id from public.workflow_runs r
+     join public.workflow_versions v on v.id = r.version_id
+     where r.account_id = p_account_id
+       and r.state = 'running'
+       and (p_cause <> 'promise' or not exists (
+         select 1 from public.workflow_run_holds h
+          where h.run_id = r.id and h.cause = 'promise'))
+       /*
+        * AND NOT THE SEQUENCE THIS EVENT STARTED.
+        *
+        * A promise arrives, workflow_start_on_promise creates the arrangement sequence to confirm
+        * it in writing -- and a moment later this function stopped that sequence because a promise
+        * had been made. The confirmation the debtor was owed never went out, and the screen showed
+        * "Promise to pay -- Paused -- A promise to pay was made", which is a sentence with no
+        * meaning.
+        *
+        * MATCHED ON THE VERSION'S TRIGGER, not on when the run was created. "Started five seconds
+        * ago" is a guess about clocks; "this version exists to answer exactly this event" is a
+        * fact about the workflow, and it stays true if the run was created by a person pressing
+        * the button a minute before the promise was captured.
+        */
+       and v.trigger_kind <> case p_cause
+         when 'promise' then 'promise_due'
+         when 'dispute' then 'dispute_logged'
+       end
+  ), opened as (
+    insert into public.workflow_run_holds (run_id, cause, cause_id, reason, started_by)
+    select live.id, p_cause, p_cause_id, v_reason, auth.uid() from live
+    /* A run already held is left alone rather than held twice: whichever event arrived second
+       finds it stopped, and two open holds would count the clock twice. */
+    on conflict do nothing
+    returning run_id
+  )
+  update public.workflow_runs r
+     set state = 'held'
+    from opened
+   where r.id = opened.run_id;
+
+  get diagnostics v_held = row_count;
+  return v_held;
+end $$;
+
+comment on function public.workflow_hold_account(uuid, text, text, uuid) is
+  'Stop a running sequence without cancelling anything. A promise may do this once per run, ever; '
+  'a written dispute whenever one is raised. It never stops the sequence whose own trigger is this '
+  'event -- the arrangement confirmation a promise starts, or the acknowledgement a written '
+  'dispute starts.';
+
+create or replace function public.workflow_resume_account(
+  p_account_id uuid, p_reason text default null, p_cause text default null
+) returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_resumed integer := 0;
+begin
+  /*
+   * ONLY THE HOLDS THIS EVENT IS ABOUT.
+   *
+   * This closed every open hold on the account whatever had caused it, so a dispute being answered
+   * released a run that a PROMISE had stopped -- and the section 129 went on demanding payment
+   * from a debtor who had an arrangement the firm had accepted. On the firm's own test account the
+   * evidence is a hold whose cause is 'promise' and whose ended_reason reads 'dispute_closed'.
+   *
+   * NULL MEANS EVERY CAUSE, and it is not a loophole: that is a person pressing Resume, who is
+   * looking at the account and deciding it may go on. The triggers all name their cause.
+   */
+  update public.workflow_run_holds h
+     set ended_on = (now() at time zone 'Africa/Johannesburg')::date,
+         ended_reason = coalesce(p_reason, 'Resumed')
+    from public.workflow_runs r
+   where h.run_id = r.id
+     and r.account_id = p_account_id
+     and r.state = 'held'
+     and h.ended_on is null
+     and (p_cause is null or h.cause = p_cause);
+
+  /*
+   * AND A RUN GOES ONLY WHERE NOTHING ELSE IS STILL HOLDING IT.
+   *
+   * CLOSE THE HOLD FIRST, THEN LET THE RUN GO -- in this order because the hold's ended_on is what
+   * the app adds up to move the remaining steps: a run set running with its hold still open would
+   * be a sequence whose clock never restarted, and the next morning's sweep would send the step it
+   * was paused on.
+   *
+   * A run stopped by a promise AND by a written dispute has two open holds. Answering the dispute
+   * closes one of them and must not start the sequence again, because the promise is still live --
+   * which the old unconditional update did, and which is the same fault as the one above wearing a
+   * different hat.
+   */
+  update public.workflow_runs r
+     set state = 'running'
+   where r.account_id = p_account_id
+     and r.state = 'held'
+     and not exists (
+       select 1 from public.workflow_run_holds h
+        where h.run_id = r.id and h.ended_on is null
+     );
+
+  get diagnostics v_resumed = row_count;
+  return v_resumed;
+end $$;
+
+comment on function public.workflow_resume_account(uuid, text, text) is
+  'Let a held sequence go again. Nothing was cancelled, so it carries on where it stopped -- and '
+  'the remaining steps are re-dated by the app, forward by the working days the hold lasted. It '
+  'lifts only holds of the cause given, and a run with another hold still open stays held.';
+
+revoke all on function public.workflow_resume_account(uuid, text, text) from public;
+grant execute on function public.workflow_resume_account(uuid, text, text) to authenticated;
+
+-- ---------- AND THE TWO CALLERS NAME THEIR CAUSE ----------
+create or replace function public.workflow_resume_on_promise_broken() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+begin
+  if new.status = 'broken' and coalesce(old.status, '') <> 'broken' then
+    /* 'promise' ONLY: a broken promise says nothing about a dispute the firm has still to answer. */
+    perform public.workflow_resume_account(new.account_id, 'promise_broken', 'promise');
+  end if;
+  return new;
+end $$;
+
+create or replace function public.workflow_on_dispute_answered() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+declare v_upheld boolean;
+begin
+  if new.kind <> 'dispute' then return new; end if;
+
+  if new.in_writing and not coalesce(old.in_writing, false) and new.status <> 'closed' then
+    perform public.workflow_hold_account(
+      new.account_id, 'dispute', 'A dispute was raised in writing', new.id);
+    return new;
+  end if;
+
+  if new.status <> 'closed' or coalesce(old.status, '') = 'closed' then return new; end if;
+
+  v_upheld := new.outcome in ('valid', 'partly_valid');
+
+  /*
+   * THE SEQUENCE CARRIES ON unless the debt itself has gone. Not upheld; upheld with nothing
+   * changed; upheld with the amount corrected -- in every one of those the debtor was in default
+   * and was told so, which is what the notice had to do. The next notice quotes the corrected
+   * balance because every template merges it live.
+   *
+   * AN UPHELD DISPUTE WITH NO EFFECT RECORDED resumes too: that is the safe direction, and where
+   * the disputes answered before this column existed land.
+   */
+  if not v_upheld
+     or coalesce(new.outcome_effect, 'no_change') in ('no_change', 'amount_changed') then
+    /* 'dispute' ONLY: answering the objection says nothing about a promise the debtor has made,
+       and a section 129 carrying on over a live arrangement is the firm contradicting itself. */
+    perform public.workflow_resume_account(new.account_id, 'dispute_closed', 'dispute');
+    return new;
+  end if;
+
+  if new.outcome_effect = 'withdrawn' then
+    perform public.workflow_exit_account(
+      new.account_id, 'dispute', 'The client took the account back');
+    return new;
+  end if;
+
+  /*
+   * no_longer_in_arrears: the correction means there was no default to demand remedy of, so the
+   * notice asked for something that was not owed. It ends -- and it is marked re-issuable,
+   * because if this debtor falls into default later the firm needs a fresh section 129 and the
+   * once-per-account rule would otherwise refuse one for ever.
+   */
+  perform public.workflow_exit_account(
+    new.account_id, 'dispute', 'The account was not in arrears, so the demand fell away');
+  update public.workflow_runs
+     set reissue_allowed = true
+   where account_id = new.account_id
+     and state = 'left'
+     and left_reason = 'The account was not in arrears, so the demand fell away';
+  return new;
+end $$;

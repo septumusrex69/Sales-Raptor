@@ -135,6 +135,88 @@ const resume = schema.slice(schema.lastIndexOf('create or replace function publi
 ok('the database still does no day arithmetic',
   !/add_working_days|business_days|interval '1 day'/.test(resume.slice(0, 1600)))
 
+/* ---------------- a pause and the sequence that answers it ---------------- */
+
+/*
+ * THE FIRM, ON A TEST ACCOUNT: "explain to me what's going on here. I don't understand it."
+ *
+ * They were reading a Promise to pay sequence stamped "Paused -- A promise to pay was made": a run
+ * stopped by the very event that created it. workflow_start_on_promise makes the arrangement run,
+ * then workflow_exit_on_promise held EVERY running run on the account a moment later, that one
+ * included. The confirmation the debtor was owed never went out, and the sentence on the screen had
+ * no meaning.
+ *
+ * READ FROM THE LAST DEFINITION, because schema.sql is append-only and the live function is the one
+ * written last -- the trap CLAUDE.md names and the one check-workflow-triggers fell into this week.
+ */
+const hold = schema.slice(schema.lastIndexOf('create or replace function public.workflow_hold_account('))
+ok('the hold joins the version, so it can see what starts a run',
+  /join public\.workflow_versions v on v\.id = r\.version_id/.test(hold))
+ok('...and never stops the sequence whose own trigger is this event',
+  /v\.trigger_kind <> case p_cause/.test(hold))
+/* NAMED PAIRS, both of them: a promise must not stop the arrangement confirmation it started, and a
+   written dispute must not stop the acknowledgement it started. */
+ok('...a promise leaves the arrangement it started alone',
+  /when 'promise' then 'promise_due'/.test(hold))
+ok('...and a written dispute leaves its acknowledgement alone',
+  /when 'dispute' then 'dispute_logged'/.test(hold))
+/* AND THE FIRST PROMISE STILL STOPS EVERYTHING ELSE, once per run ever -- the firm's own rule, and
+   the thing the exclusion above must not have quietly widened. */
+ok('...while a promise still stops the sequences it is not answering',
+  /h\.cause = 'promise'/.test(hold) && /r\.state = 'running'/.test(hold))
+
+/*
+ * AND A RESUME LIFTS ONLY THE HOLD IT IS ABOUT.
+ *
+ * This closed every open hold on the account whatever had caused it, so answering a dispute
+ * released a run a PROMISE had stopped -- and the section 129 went on demanding payment from a
+ * debtor whose arrangement the firm had accepted. The evidence on the firm's own account was a hold
+ * whose cause is 'promise' and whose ended_reason reads 'dispute_closed'.
+ */
+ok('a resume closes only the holds of the cause it names',
+  /\(p_cause is null or h\.cause = p_cause\)/.test(resume))
+/*
+ * AND A RUN GOES ONLY WHERE NOTHING ELSE STILL HOLDS IT. A run stopped by a promise AND by a
+ * written dispute has two open holds; answering the dispute closes one and must not start the
+ * sequence again, because the promise is still live.
+ */
+ok('...and a run with another hold still open stays held',
+  /not exists \([\s\S]{0,160}h\.ended_on is null/.test(resume))
+/* THE TWO TRIGGERS NAME THEIR CAUSE, or the parameter above is a switch nothing ever throws. */
+ok('a broken promise resumes the promise holds only',
+  /workflow_resume_account\(new\.account_id, 'promise_broken', 'promise'\)/.test(schema))
+ok('...and an answered dispute the dispute holds only',
+  /workflow_resume_account\(new\.account_id, 'dispute_closed', 'dispute'\)/.test(schema))
+
+/*
+ * AND A RUN HELD BEFORE ANYBODY PLANNED IT STILL GETS ITS STEPS.
+ *
+ * A run created by a database trigger arrives with NO steps -- the row is written in SQL and the
+ * dating happens in the app. Held before that ran, and filtered on `running` alone, it was never
+ * looked at again: the firm's account carried an arrangement sequence at 0 of 2 steps, on a screen
+ * that said it was paused. The hold itself is fixed above; this is the half that stands on its own,
+ * because any hold landing on the day a run starts does the same thing.
+ */
+/*
+ * SLICED TO planUnplannedRuns, NOT THE WHOLE FILE. redateResumedRuns sits below it and filters on
+ * `running` quite correctly -- you only move the dates of a run that has been let go -- so a check
+ * reading the file whole fails on right code, which is what the first cut of this did.
+ */
+const planner = read('../../api/_lib/workflow/plan.ts')
+const planning = planner.slice(
+  planner.indexOf('export async function planUnplannedRuns('),
+  planner.indexOf('export async function redateResumedRuns('),
+)
+ok('planUnplannedRuns was found to read', planning.length > 0)
+ok('the planner dates a run that was stopped before it was planned',
+  /\.in\('state', \['running', 'held'\]\)/.test(planning))
+ok('...rather than only the ones still running',
+  !/\.eq\('state', 'running'\)/.test(planning))
+/* AND THE RE-DATER STILL DOES ONLY THE RUNNING ONES, which is the distinction: planning a held run
+   is dating a sequence that has not started moving; re-dating one would move a clock still stopped. */
+ok('...while the re-dater still touches only what is running',
+  /\.eq\('state', 'running'\)/.test(planner.slice(planner.indexOf('export async function redateResumedRuns('))))
+
 /* ------------------------------------------------------------------ */
 
 for (const f of failures) console.error(`  ✗ ${f}`)
