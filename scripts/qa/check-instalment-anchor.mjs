@@ -182,6 +182,65 @@ check('the sequence reads in date order, email before SMS', order.join('\n'), [
 ].join('\n'))
 
 /*
+ * AND A STEP WHOSE DAY HAD ALREADY PASSED IS CANCELLED, NEVER SENT.
+ *
+ * THE FIRM FOUND THIS ON THEIR FIRST ARRANGEMENT. Agreed on the 27th with the first payment due
+ * that same day: the reminder is two working days BEFORE each instalment, so it was dated the
+ * 23rd -- four days before the arrangement existed. The runner sends anything overdue, so the
+ * debtor got "your payment is due on 27 September", then "we confirm your arrangement", then
+ * "your payment is due today", inside twelve seconds. Three emails at R25 each, and the reminder
+ * arriving BEFORE the confirmation of the thing it was reminding them about.
+ *
+ * OVERDUE STILL SENDS EVERYWHERE ELSE and that rule is right where it applies: a final notice the
+ * firm is late with is still true, because the period it describes HAS elapsed. A reminder is the
+ * other shape -- "this is coming" is false the moment the day arrives.
+ */
+const sameDay = planRun({
+  nodes: NODES, dayUnit: 'calendar', startedOn: '2026-03-09',
+  /* The arrangement agreed on the 9th with the first payment due that day. */
+  instalments: THREE,
+})
+const reminder1 = sameDay.find((s) => s.nodeId === 'rem-email' && s.instalmentNo === 1)
+check('a reminder dated before the run began is cancelled', reminder1?.state, 'cancelled')
+check('...and says why, in the firm’s words', reminder1?.note,
+  'This date had already passed when the arrangement was agreed, so it was not sent.')
+check('...its SMS with it',
+  sameDay.find((s) => s.nodeId === 'rem-sms' && s.instalmentNo === 1)?.state, 'cancelled')
+/* STILL PLANNED, NOT DROPPED. The chart carries it greyed with the reason on it; left out, a
+   three-instalment arrangement would show eleven steps where the version says fourteen. */
+check('...but it is still on the chart', sameDay.length, 2 + 3 * 4)
+/* AND NOTHING ELSE IS TOUCHED. The message due ON the day is true and goes; so does every step of
+   the instalments still ahead. */
+check('the message due on the day still goes',
+  sameDay.find((s) => s.nodeId === 'due-email' && s.instalmentNo === 1)?.state, 'pending')
+check('...and so does the reminder for the next instalment',
+  sameDay.find((s) => s.nodeId === 'rem-email' && s.instalmentNo === 2)?.state, 'pending')
+check('...and the confirmation', sameDay.find((s) => s.nodeId === 'conf-email')?.state, 'pending')
+/*
+ * ONLY AN INSTALMENT STEP CAN LAND HERE, AND IT TAKES A MALFORMED NODE TO PROVE IT.
+ *
+ * A run-anchored day is counted from `startedOn` and cannot precede it, so on every workflow the
+ * firm has drawn the `instalmentNo > 0` term never decides anything -- which is exactly why a
+ * check that only walked normal data reported this guard as dead when it was deleted.
+ *
+ * A NEGATIVE DAY IS THE ONE CONSTRUCTION THAT REACHES IT. workflowProblems refuses one and the
+ * builder floors the box at zero, but the COLUMN is a plain integer and nothing in the database
+ * stops it -- so a bad row, an import or a hand-written migration can produce a step dated before
+ * its own run. Without the term, that step is silently cancelled: on the section 129 that is a
+ * statutory demand quietly not sent, on a chart that still shows eleven steps.
+ */
+const backdated = planRun({
+  nodes: [node({ id: 'impossible', ordinal: 9, day: -1 }), NODES[0]],
+  dayUnit: 'calendar', startedOn: '2026-03-02',
+})
+check('a run-anchored step really can be dated before its run',
+  backdated.find((s) => s.nodeId === 'impossible')?.dueOn, '2026-03-01')
+check('...and is NOT cancelled, because only an instalment date is the debtor’s',
+  backdated.find((s) => s.nodeId === 'impossible')?.state, 'pending')
+check('nothing dated off the run is ever cancelled this way',
+  planned.filter((s) => s.instalmentNo === 0 && s.state === 'cancelled').length, 0)
+
+/*
  * NO ARRANGEMENT IS SILENCE, NOT AN ERROR. There is no instalment to remind anybody of, and a step
  * dated off a date that does not exist would be a message quoting a blank amount. The run's own
  * steps still plan, which is what keeps the confirmation working on an account whose promise was

@@ -121,13 +121,42 @@ export function workflowStory(runs: AccountRun[]): StoryEvent[] {
   }
 
   /*
-   * NEWEST FIRST, AND TIES BROKEN THE SAME WAY EVERY TIME. Several events land on one day -- a
-   * promise captured and the sequence paused are the same afternoon -- and two rows that sort
-   * equal come back in whatever order the array happened to be in, which is how a pane reshuffles
-   * itself between two loads. The id is the tiebreak because it is the only thing that never
-   * moves; the contacts panel learned this the hard way.
+   * NEWEST FIRST, AND TIES BROKEN BY WHAT IS STILL RUNNING.
+   *
+   * SEVERAL EVENTS LAND ON ONE DAY and they are not equally interesting. The firm's own case is
+   * the one that showed it: an arrangement agreed this afternoon starts the Promise to pay AND
+   * pauses the section 129, both dated today -- and the pane put the PAUSED sequence on top,
+   * because the tiebreak was the event id and "hold:" sorts before "start:". The firm, reading
+   * it back: "I see a promise made like a PTP workflow in place. But I think that should be on
+   * top."
+   *
+   * THEY ARE RIGHT, AND THE RULE IS WHAT IS HAPPENING BEFORE WHAT HAS STOPPED. A sequence that
+   * started or resumed today is live and is the answer to "what is going on with this account";
+   * one that paused, left or finished the same day is the account's history, however recent.
+   *
+   * AND THE ID STILL BREAKS THE LAST TIE, because two events of the same rank on one day would
+   * otherwise come back in whatever order the array happened to be in -- which is how a pane
+   * reshuffles itself between two loads. It is the only thing here that never moves; the contacts
+   * panel learned that the hard way.
    */
-  return out.sort((a, b) => b.on.localeCompare(a.on) || a.id.localeCompare(b.id))
+  return out.sort((a, b) => (
+    b.on.localeCompare(a.on) || RANK[a.kind] - RANK[b.kind] || a.id.localeCompare(b.id)
+  ))
+}
+
+/**
+ * WHICH EVENT ON ONE DAY IS READ FIRST: the live ones, then the ones that stopped.
+ *
+ * `resumed` ABOVE `started` because on the day both happen, the resume is the newer fact about an
+ * older sequence -- a section 129 let go this morning is further along than a workflow that began
+ * this morning, and the pane is read to find out where things stand.
+ */
+const RANK: Record<StoryKind, number> = {
+  resumed: 0,
+  started: 1,
+  paused: 2,
+  left: 3,
+  finished: 4,
 }
 
 /** The last day anything actually happened on this run: the newest sent step, or the last hold. */

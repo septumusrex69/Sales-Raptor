@@ -13,6 +13,7 @@
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-workflow-story.mjs
  */
+
 import { readFileSync } from 'node:fs'
 import { workflowHeadline, workflowStory } from '../../src/lib/workflowStory.ts'
 
@@ -101,6 +102,42 @@ check('two events on one day come back in a fixed order',
     run({ id: 'b', workflowName: 'B', startedOn: '2026-09-24' }),
     run({ id: 'a', workflowName: 'A', startedOn: '2026-09-24' }),
   ]).map((e) => e.id))
+
+/*
+ * AND WHAT IS STILL RUNNING SORTS ABOVE WHAT HAS STOPPED, on a day that carries both.
+ *
+ * THE CASE IS THE FIRM'S OWN AND IT IS THE COMMONEST ONE THEY HAVE. An arrangement agreed this
+ * afternoon starts the Promise to pay AND pauses the section 129 -- two events, one day. The
+ * tiebreak was the event id, "hold:" sorts before "start:", and the pane put the PAUSED sequence
+ * on top. The firm, reading it back: "I see a promise made like a PTP workflow in place. But I
+ * think that should be on top."
+ *
+ * ASSERTED ON THE PAIR RATHER THAN ON THE RANK TABLE, because the table is an implementation of
+ * this and the question somebody asks is about the screen.
+ */
+const bothToday = workflowStory([
+  run({ id: 'r9', workflowName: 'Section 129', state: 'held', startedOn: '2026-09-25',
+    holds: [{ id: 'h9', cause: 'promise', reason: 'A promise to pay was made',
+      startedOn: '2026-09-27', endedOn: null, endedReason: null }] }),
+  run({ id: 'r8', workflowName: 'Promise to pay', state: 'running', startedOn: '2026-09-27' }),
+])
+check('the live sequence is read before the one that stopped the same day',
+  bothToday.filter((e) => e.on === '2026-09-27').map((e) => e.kind), ['started', 'paused'])
+check('...so the top of the rail is the arrangement', bothToday[0].runName, 'Promise to pay')
+/*
+ * A RESUME BEATS A START ON THE SAME DAY: a section 129 let go this morning is further along than
+ * a sequence that began this morning, and the pane is read to find out where things stand.
+ */
+check('a resume is read before a start',
+  workflowStory([
+    run({ id: 'r7', workflowName: 'Section 129', state: 'running', startedOn: '2026-09-20',
+      holds: [{ id: 'h7', cause: 'promise', reason: 'A promise to pay was made',
+        startedOn: '2026-09-22', endedOn: '2026-09-27', endedReason: 'broken' }] }),
+    run({ id: 'r6', workflowName: 'Dispute', state: 'running', startedOn: '2026-09-27' }),
+  ]).filter((e) => e.on === '2026-09-27').map((e) => e.kind), ['resumed', 'started'])
+/* AND THE ID STILL BREAKS THE LAST TIE, or a pane reshuffles itself between two loads. */
+check('two events of one kind on one day are still fixed',
+  sameDay.map((e) => e.id).join(), ['start:a', 'start:b'].join())
 
 /* ------------------------------------------------ the headline */
 
@@ -198,6 +235,29 @@ ok('...and what it does to the dates', /moves on by the working days the pause l
  * that is still true and still worth having.
  */
 ok('the runner’s accepted-name list is left alone', /export const EXIT_EVENTS/.test(store))
+
+/* ------------------------------------------------ a run with no steps yet */
+
+/*
+ * A RUN IS BORN WITH NO STEPS AND THAT LOOKS LIKE A BROKEN ONE.
+ *
+ * A database trigger creates it the moment an arrangement is agreed; dating the steps needs the
+ * working-day calendar, which lives in the app, so the app asks immediately and the gap is a few
+ * seconds. THE FIRM OPENED THE TAB INSIDE IT: "I don't see the others that's waiting, the other
+ * steps that are still waiting for." What they saw was a card headed "Promise to pay · Active"
+ * with nothing at all under it, which reads as a workflow that has started and does nothing.
+ *
+ * ONLY WHILE IT IS RUNNING. A finished or left run with no steps is the imported-handover case --
+ * the sequence was written after the account arrived -- where there is genuinely nothing to draw
+ * and nothing coming, and a line promising dates would be a lie.
+ */
+/* THE WHOLE CONDITION, FROM ITS OPENING BRACE. Matched on the tail alone, the assertion passes
+   on `{false && latest && run && ...}` -- a guard switched off and a check that never noticed. */
+ok('a run still being dated says so rather than drawing nothing',
+  /\{latest && run && run\.steps\.length === 0 && run\.state === 'running' && \(/.test(panel))
+ok('...in words that say what is happening', /Working out the dates/.test(panel))
+ok('...and a run with steps still draws its track',
+  /run\.steps\.length > 0 && <RunBlock/.test(panel))
 
 /* ------------------------------------------------------------------ */
 

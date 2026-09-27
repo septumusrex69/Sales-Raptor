@@ -524,6 +524,31 @@ ok('...and offered only on an account that has one',
   /dispute: disputeRes\.data[\s\S]{0,12}\? \{/.test(runner))
 
 
+/* ---------------- what the account's email list says it cost ---------------- */
+
+/*
+ * THE FILED EMAIL CARRIES WHAT THE ACCOUNT WAS ACTUALLY CHARGED, not the tariff price.
+ *
+ * The row has to be written the moment the message goes -- losing the record of a notice that
+ * reached a debtor is worse than any figure on it -- and the fee cannot be raised until the send
+ * has succeeded, so at that line the tariff is the best number available. It is not always the
+ * true one: in duplum caps the non-capital at the capital outstanding and item 1(c) caps SMSs at
+ * ten a month, and the engine lawfully returns less, or nothing.
+ *
+ * THE FIRM'S OWN ACCOUNT SHOWED IT. Three workflow emails read R25.00 each in the account's email
+ * list while the ledger beside them recorded R0.00 -- the account was at its in duplum ceiling.
+ * Two figures about one message, and the one on the screen was the wrong one.
+ */
+ok('the filed email is corrected to what was charged',
+  /charged_excl_vat: fee\.exclVat/.test(runner))
+ok('...only where the tariff and the fee differ',
+  /fee\.exclVat !== \(plan\.charge\?\.rand \?\? 0\)/.test(runner))
+/* AND THE ROW'S ID IS KEPT FOR IT. Without it the correction has nothing to aim at and the whole
+   branch is unreachable -- which would look exactly like working code. */
+ok('...against the row the send filed', /filedEmailId = \(filed\?\.id as string\) \?\? null/.test(runner))
+
+/* ------------------------------------------------------------------ */
+
 for (const f of failures) console.error(`  ✗ ${f}`)
 console.log(`check-workflow-transport: ${pass} passed, ${failures.length} failed`)
 process.exit(failures.length ? 1 : 0)

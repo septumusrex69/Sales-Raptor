@@ -465,6 +465,9 @@ export async function runOneStep(
   /* ---------- it goes ---------- */
 
   const sentAt = new Date().toISOString()
+  /* The account_emails row this send files, so the fee raised further down can correct the price
+     written on it. Null on an SMS, and on an email whose filing failed. */
+  let filedEmailId: string | null = null
   if (node.channel === 'sms') {
     /* Not null: planSend already refused with `no_address` if there were no number, and this is
        past that. Named here rather than resolved twice, so the number that was sent to and the
@@ -545,7 +548,7 @@ export async function runOneStep(
      * NEVER FAILS THE SEND. The message has gone and the fee is about to be raised; a red error
      * after a debtor has in fact been written to would be false.
      */
-    const { error: fileError } = await admin.from('account_emails').insert({
+    const { data: filed, error: fileError } = await admin.from('account_emails').insert({
       account_id: account.id,
       direction: 'out',
       debtor_address: pickContact(contacts, 'email'),
@@ -557,11 +560,20 @@ export async function runOneStep(
       /* The workflow did this, not a person -- and it says so, because "sent by Itumeleng" on a
          notice nobody typed would be wrong about who to ask. */
       sent_by_name: 'Workflow',
+      /*
+       * THE TARIFF PRICE FOR NOW, CORRECTED BELOW ONCE THE FEE IS ACTUALLY RAISED.
+       *
+       * The row is filed here because the message has just gone and losing the record of it is
+       * worse than any figure on it; the charge cannot happen yet, because it needs the send to
+       * have succeeded. So this is the best number available at this line -- and it is not always
+       * the true one, which is what `filedEmailId` is for.
+       */
       charged_excl_vat: plan.charge?.rand ?? 0,
-    })
+    }).select('id').maybeSingle()
     if (fileError) {
       console.error(`[workflow] ${step.id}: the notice went but was not filed: ${fileError.message}`)
     }
+    filedEmailId = (filed?.id as string) ?? null
   }
 
   /*
@@ -623,6 +635,25 @@ export async function runOneStep(
          make "what did the workflow charge this month" a question nothing can answer. */
       source: 'workflow',
     })
+  }
+
+  /*
+   * AND THE FILED EMAIL IS TOLD WHAT IT ACTUALLY COST.
+   *
+   * IT WAS WRITTEN WITH THE TARIFF PRICE, which is what the schedule says an email is worth and
+   * not always what the account was charged. The engine can lawfully return less or nothing at
+   * all: in duplum caps the non-capital at the capital outstanding, and item 1(c) caps SMSs at
+   * ten a month. On an account already at its ceiling every workflow email read R25.00 in the
+   * account's own email list while the ledger beside it recorded R0.00 -- two figures about one
+   * message, and the one on the screen was the wrong one.
+   *
+   * THE LEDGER IS THE TRUTH and this makes the list agree with it. Only where they differ, so the
+   * ordinary send is one write as before.
+   */
+  if (filedEmailId && fee && fee.exclVat !== (plan.charge?.rand ?? 0)) {
+    await admin.from('account_emails')
+      .update({ charged_excl_vat: fee.exclVat })
+      .eq('id', filedEmailId)
   }
 
   await admin.from('workflow_run_steps')

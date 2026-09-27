@@ -249,6 +249,24 @@ function StoryRow({ event, run, onSent }: {
         block under it read "Every step (0)" over an empty track, which is a control that opens
         nothing. Said by the card's own title and state instead.
       */}
+        {/*
+          EXCEPT WHILE IT IS BEING DATED, WHICH IS A DIFFERENT THING AND LOOKS THE SAME.
+          
+          A run is created by a database trigger the moment an arrangement is agreed, and it
+          arrives with NO STEPS: dating them needs the working-day calendar, which lives in the
+          app. The app asks for it immediately, so the gap is a few seconds -- and the firm opened
+          the tab inside it. What they saw was a card headed "Promise to pay · Active" with
+          nothing at all under it, which reads as a workflow that has started and does nothing.
+          
+          SAID RATHER THAN LEFT BLANK, and only for a run that is still going: a finished or left
+          run with no steps is the imported-handover case above, where there is genuinely nothing
+          to draw and nothing coming.
+        */}
+        {latest && run && run.steps.length === 0 && run.state === 'running' && (
+          <p className="mt-2 text-[12px] leading-snug text-slate-500">
+            Working out the dates. The steps appear here in a moment.
+          </p>
+        )}
       {latest && run && run.steps.length > 0 && <RunBlock run={run} onSent={onSent} />}
       </div>
     </li>

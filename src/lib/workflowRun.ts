@@ -132,6 +132,37 @@ export function planRun(input: {
        */
       state: 'pending',
       note: null,
+      /*
+       * A MESSAGE ABOUT A MOMENT THAT HAS ALREADY PASSED IS CANCELLED, NEVER SENT.
+       *
+       * THE FIRM FOUND THIS ON THEIR FIRST ARRANGEMENT. They agreed R x with the first payment due
+       * that same day; the reminder is two working days BEFORE each instalment, so it was dated
+       * four days earlier -- before the arrangement existed. The runner sends anything overdue, so
+       * the debtor received, inside twelve seconds: "your payment is due on 27 September", "we
+       * confirm your arrangement", and "your payment is due today". Three emails at R25 each, for
+       * one arrangement, in the wrong order -- the reminder arriving BEFORE the confirmation of the
+       * thing it was reminding them about.
+       *
+       * OVERDUE STILL SENDS EVERYWHERE ELSE, and that rule is right where it applies. A final
+       * notice the firm is late with is still true: the period it describes HAS elapsed, and the
+       * cron missing a night must not lose a statutory step. A reminder is the opposite shape --
+       * "this is coming" is false the moment the day arrives, and no amount of lateness makes it
+       * true again.
+       *
+       * SO IT IS CANCELLED RATHER THAN LEFT OUT. The chart still carries it, greyed, with the
+       * reason on it: the step existed and it did not go, which is the honest record. Dropped from
+       * the plan entirely, a three-instalment arrangement would quietly show eleven steps where the
+       * version says fourteen and nobody could tell which one was missing.
+       *
+       * ONLY AN INSTALMENT STEP CAN LAND HERE. A run-anchored day is counted from `startedOn` and
+       * cannot precede it; an instalment date is the debtor's and was set before we were asked.
+       */
+      ...(instalmentNo > 0 && dueOn < startedOn
+        ? {
+          state: 'cancelled' as RunStepState,
+          note: 'This date had already passed when the arrangement was agreed, so it was not sent.',
+        }
+        : {}),
     }))
 }
 
