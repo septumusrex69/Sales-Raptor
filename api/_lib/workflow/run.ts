@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { adminClient, requireCaller } from '../auth.js'
 import { todayInJohannesburg } from './locale.js'
 import { planUnplannedRuns, redateResumedRuns } from './plan.js'
+import { expireDefaultedPromises } from './promises.js'
 import { runOneStep, type DueStep } from './step.js'
 
 /**
@@ -91,7 +92,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const today = todayInJohannesburg()
 
   /*
-   * DATE WHATEVER HAS NOT BEEN DATED, FIRST. A run created by the allocation trigger has no steps
+   * END ANY 48 HOURS THAT HAVE RUN OUT, BEFORE ANYTHING ELSE IN THE PASS.
+   *
+   * ORDER IS LOAD-BEARING, AND IT IS THE SAME REASON THE RE-DATING SITS WHERE IT DOES. Breaking a
+   * promise fires workflow_resume_on_promise_broken, which lets the paused section 129 go; the
+   * re-dating below then moves whatever had not gone by the working days the hold lasted. Run
+   * after it, the resume would happen with nothing left in the pass to move the dates, and the
+   * next morning's sweep would find four notices overdue and send them at once -- which is the
+   * failure the pause exists to prevent.
+   */
+  const expired = await expireDefaultedPromises(admin, accountId)
+
+  /*
+   * DATE WHATEVER HAS NOT BEEN DATED, NEXT. A run created by the allocation trigger has no steps
    * at all until this happens -- so on a handover, planning and sending are the same pass and the
    * debtor hears from the firm within minutes rather than the next morning.
    */
@@ -205,6 +218,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     /* Runs dated on this pass, so a handover nudge can say "it started" rather than only
        "nothing was due" -- which is what an unplanned run looks like from the outside. */
     planned: planned.filter((p) => p.problem === null).length,
+    /* REPORTED FOR THE SAME REASON THE RE-DATING IS. An arrangement breaking is what lets a
+       statutory sequence go again, and "whose 48 hours ran out on Tuesday" is a question asked
+       long afterwards by somebody holding a file. */
+    expired: expired.length,
     /* REPORTED, because a pause moving dates is a thing somebody will be asked about. "Nine
        steps moved on Tuesday" is the answer to "why did the reminder go out in November". */
     redated: redated.reduce((n, r) => n + r.moved, 0),

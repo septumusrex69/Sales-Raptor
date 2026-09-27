@@ -94,18 +94,45 @@ export function instalmentCount(p: Arranged): number {
  * running five years is 260 instalments -- and exists for a row nobody has thought of.
  */
 export function instalmentSchedule(p: Arranged): Instalment[] {
-  const count = instalmentCount(p)
-  if (count === 0) return []
+  /*
+   * `dueOn` IS THE NEXT UNPAID INSTALMENT, NOT THE FIRST ONE, and this is the correction that
+   * matters most in this file.
+   *
+   * WHAT THE DATABASE ACTUALLY HOLDS. keepInstalment is the only thing that writes a live
+   * arrangement after it is agreed, and it does two things together: it counts one more instalment
+   * kept AND it moves `due_on` on to the next one. So a three-instalment arrangement with one
+   * payment behind it reads `instalments_kept = 1, due_on = <the SECOND date>`.
+   *
+   * WRITTEN THE OTHER WAY -- walk from `dueOn` as instalment 1, then skip `instalmentsKept` of
+   * them -- the count is applied TWICE. On that same arrangement the "next" instalment came back
+   * as the THIRD date: a reminder dated a month late, a receipt naming a payment the debtor had
+   * not reached, and on the final instalment a demand for money already paid. Nothing failed and
+   * no figure looked wrong on its own.
+   *
+   * SO THE WALK STARTS WHERE THE ROW SAYS IT IS and the NUMBERING carries the count instead. At
+   * `instalmentsKept = 0` -- every arrangement on the day it is agreed, which is when the planner
+   * dates the whole sequence -- the two readings are identical, which is why this was invisible.
+   */
+  const kept = Math.max(0, Math.floor(p.instalmentsKept))
+  const left = instalmentCount(p) - kept
+  if (left <= 0) return []
   const total = (p.totalPromised ?? 0) > 0 ? (p.totalPromised as number) : null
+  /* WHAT IS STILL OWED, not what was agreed. The remainder on the last instalment is worked out
+     from the part of the total that has not been paid, or a three-instalment arrangement with two
+     behind it would think it had the whole R7 500 left to spread. */
+  let paidOut = total === null ? 0 : Math.min(total, kept * p.amount)
   const out: Instalment[] = []
   let cursor: Recurring = p
-  let paidOut = 0
-  for (let n = 1; n <= Math.min(count, 600); n += 1) {
+  for (let n = 1; n <= Math.min(left, 600); n += 1) {
     /* THE REMAINDER ON THE LAST ONE. Only where a total is known, and only where it is actually
        smaller -- a total that divides exactly leaves the last instalment at the full amount. */
-    const left = total === null ? p.amount : Math.max(0, total - paidOut)
-    const amount = total === null ? p.amount : Math.min(p.amount, left)
-    out.push({ no: n, amount, dueOn: cursor.dueOn })
+    const owing = total === null ? p.amount : Math.max(0, total - paidOut)
+    const amount = total === null ? p.amount : Math.min(p.amount, owing)
+    /* NUMBERED AS THE FIRM COUNTS THEM, across the whole arrangement rather than across what is
+       left: the second instalment is instalment 2 on the notice whether or not the first was
+       paid, and a debtor reading "instalment 1" about their second payment would be right to
+       query it. */
+    out.push({ no: kept + n, amount, dueOn: cursor.dueOn })
     paidOut += amount
     const next = nextDueDate(cursor)
     if (!next) break
@@ -117,11 +144,14 @@ export function instalmentSchedule(p: Arranged): Instalment[] {
 /**
  * THE INSTALMENT EVERY ARRANGEMENT NOTICE IS ABOUT: the earliest one not yet paid.
  *
- * READ OFF instalmentsKept, which is a COUNT of payments and not a set of them. That is a real
- * limitation and it is the right one for this firm: an arrangement is paid in order, and a debtor
- * who pays the third instalment while owing the second has not paid the second. Counting forward
- * from what is kept is therefore the same answer as naming them individually, and it needs no
- * table of allocations to be right.
+ * READ OFF THE ROW'S OWN `dueOn`, which keepInstalment moves on with every payment, so the next
+ * unpaid instalment is simply the one the arrangement has got to. `instalmentsKept` gives it its
+ * NUMBER rather than its position -- see instalmentSchedule for the double-count that reading it
+ * as a position produced.
+ *
+ * AN ARRANGEMENT IS PAID IN ORDER, which is what makes a count enough. A debtor who pays the third
+ * instalment while owing the second has not paid the second, so there is no need for a table of
+ * allocations to say which ones are outstanding.
  *
  * NULL WHERE THE ARRANGEMENT IS FINISHED -- every instalment is paid -- and null is what leaves
  * {{ptp_amount}} standing as a placeholder rather than printing a gap. A notice about an
@@ -129,9 +159,10 @@ export function instalmentSchedule(p: Arranged): Instalment[] {
  * of Raptor stops one.
  */
 export function nextUnpaid(p: Arranged): Instalment | null {
-  const schedule = instalmentSchedule(p)
-  const kept = Math.max(0, Math.floor(p.instalmentsKept))
-  return schedule[kept] ?? null
+  /* THE FIRST ONE LEFT, because instalmentSchedule now starts where the row says the arrangement
+     has got to. It used to index `[instalmentsKept]` into a schedule that had already had the
+     kept ones taken off the front, which applied the count twice -- see the note there. */
+  return instalmentSchedule(p)[0] ?? null
 }
 
 /**

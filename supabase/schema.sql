@@ -9565,3 +9565,301 @@ Yours faithfully
 {{collector_name}}
 {{firm_name}}', 'email-ptp-simulation-company', true, null)
 on conflict (seed_key) do nothing;
+
+-- ============================================================================
+-- THE RECEIPT AND THE NOTICE OF DEFAULT, ON THEIR OWN EVENTS.
+--
+-- The other four steps of the firm's arrangement chart are dated: the confirmation off the run,
+-- the reminder and the day-of message off each instalment. These two are not dates at all, which
+-- is why they were deliberately left out of Promise to pay v3 -- a dated notice of default would
+-- go out to a debtor who paid on time, and a dated receipt would confirm a payment nobody made.
+--
+-- SO EACH IS ITS OWN WORKFLOW, STARTED BY THE THING THAT HAPPENED. That is the shape the system
+-- already has -- workflow_start_on_allocation and workflow_start_on_promise are the same pattern
+-- -- and it buys the whole runner: the planner, the audience split, the email-then-SMS pairing,
+-- the Annexure B charge, the Sent copy on the account and the held-step notification.
+-- ============================================================================
+
+-- ---------- 48 HOURS IS A STATE THE ARRANGEMENT IS IN, NOT A TIMER ----------
+--
+-- THE FIRM'S OWN DEFAULT LETTER PROMISES IT: "Payment of the missed {{ptp_amount}} must reach our
+-- trust account within 48 hours of the date of this letter. If it does, the arrangement continues
+-- on its existing terms and no further step is taken."
+--
+-- WHICH MEANS THE ARRANGEMENT IS STILL LIVE INSIDE THAT WINDOW, and that is not a nicety: the
+-- notice quotes {{ptp_amount}} and {{ptp_date}}, ptpSchedule reads those off the LIVE arrangement,
+-- and a promise marked `broken` is not one. Written the obvious way -- missed, so broken -- the
+-- notice of default would hold on its own merge fields, every time, for ever.
+--
+-- SO THERE ARE THREE STATES WHERE THERE WERE TWO. `open` is being kept; `defaulted` is the 48
+-- hours, where the terms still stand and a payment revives it; `broken` is what it becomes when
+-- the 48 hours pass without one. ptpSchedule.liveArrangement has read `open` OR `defaulted` since
+-- it was written, and accountWorkspace.PromiseStatus has listed all three -- the database is the
+-- half that was behind.
+--
+-- AND THE SECTION 129 STAYS PAUSED THROUGHOUT. workflow_resume_on_promise_broken fires on
+-- `broken` and on nothing else, so the sequence the arrangement paused resumes when the 48 hours
+-- are up rather than the moment an instalment is missed. Resuming on the miss would send the final
+-- notice to a debtor the firm has just told they have two days to put it right.
+alter table public.promises_to_pay drop constraint if exists promises_to_pay_status_check;
+alter table public.promises_to_pay add constraint promises_to_pay_status_check
+  check (status in ('open', 'defaulted', 'kept', 'broken', 'cancelled'));
+
+-- WHEN THE 48 HOURS STARTED, which is the only thing that can end them.
+--
+-- NOT resolved_at. A defaulted arrangement is not resolved -- that column means somebody closed
+-- the promise, and reading it as the start of a grace period would make every cancelled promise
+-- look like one mid-default.
+alter table public.promises_to_pay add column if not exists defaulted_at timestamptz;
+
+comment on column public.promises_to_pay.defaulted_at is
+  'When the arrangement fell into default and the 48 hours the firm''s notice promises began. '
+  'Null on every other status; cleared when a payment revives the arrangement.';
+
+-- STAMPED BY THE DATABASE, not by whoever writes the row.
+--
+-- Four places can move a promise -- the panel, the diary, an import, a correction -- and the one
+-- that forgot to set this would produce an arrangement stuck in default for ever, because the
+-- expiry has nothing to measure from.
+--
+-- CLEARED ONLY ON THE WAY BACK TO `open`. A revived arrangement carrying yesterday's stamp would
+-- be broken again by the next morning's sweep. A BROKEN one keeps it, because then it is the
+-- record of when the 48 hours the debtor was given actually began -- which is the question asked
+-- eighteen months later, and the answer is not on any other column.
+--
+-- NOT `update of status`, WHICH IS THE TRAP. The revival below changes NEW.status inside an
+-- UPDATE whose column list is (due_on, instalments_kept) -- a `update of status` trigger reads the
+-- STATEMENT's columns, not what another trigger did to the row, so it would not fire and the
+-- revived arrangement would keep its stamp.
+create or replace function public.stamp_promise_default() returns trigger
+language plpgsql security invoker set search_path to 'public' as $$
+begin
+  if new.status = 'defaulted' and coalesce(old.status, '') <> 'defaulted' then
+    new.defaulted_at := now();
+  elsif new.status = 'open' then
+    new.defaulted_at := null;
+  end if;
+  return new;
+end $$;
+
+-- NAMED SO IT RUNS SECOND. Postgres fires BEFORE row triggers in NAME order, and `revive` sorts
+-- before `stamp` -- which is the order this needs: the revival flips the status to `open` and the
+-- stamp then sees it and clears the date. Renamed the other way round, a revived arrangement would
+-- be stamped and then revived, and the sweep would break it the next morning.
+drop trigger if exists stamp_promise_default on public.promises_to_pay;
+create trigger stamp_promise_default
+  before insert or update on public.promises_to_pay
+  for each row execute function public.stamp_promise_default();
+
+-- ---------- THE NOTICE OF DEFAULT STARTS WHEN THE INSTALMENT IS MISSED ----------
+--
+-- ON `defaulted`, NOT ON `broken`, and the difference is the whole of the letter. The notice says
+-- the arrangement has lapsed AND that 48 hours will revive it; sent on `broken` it would be
+-- offering a debtor a window that had already shut.
+--
+-- ONCE PER LIVE RUN, like every other starter here: the partial unique index on workflow_runs
+-- allows one running run per account and version, so a second default on the same arrangement
+-- cannot double the notice. A debtor who defaults, revives and defaults again gets a second one,
+-- because by then the first run has finished.
+create or replace function public.workflow_start_on_promise_broken() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+begin
+  if new.status <> 'defaulted' or coalesce(old.status, '') = 'defaulted' then
+    return new;
+  end if;
+
+  insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+  select new.account_id, v.id, (now() at time zone 'Africa/Johannesburg')::date, new.resolved_by
+    from public.workflow_versions v
+   where v.state = 'active'
+     and v.trigger_kind = 'promise_broken'
+     and not exists (
+       select 1 from public.workflow_runs r
+        where r.account_id = new.account_id
+          and r.version_id = v.id
+          and r.state in ('running', 'held')
+     );
+  return new;
+end $$;
+
+comment on function public.workflow_start_on_promise_broken() is
+  'Starts the active promise_broken workflow the moment an arrangement falls into default -- not '
+  'when it is finally broken 48 hours later, because the notice it sends is the one offering '
+  'those 48 hours.';
+
+revoke all on function public.workflow_start_on_promise_broken() from public;
+
+drop trigger if exists workflow_start_on_promise_broken on public.promises_to_pay;
+create trigger workflow_start_on_promise_broken
+  after update of status on public.promises_to_pay
+  for each row execute function public.workflow_start_on_promise_broken();
+
+-- ---------- THE RECEIPT STARTS WHEN AN INSTALMENT IS CONFIRMED PAID ----------
+--
+-- NOT ON account_payments, WHICH IS THE OBVIOUS PLACE AND THE WRONG ONE.
+--
+-- The receipt says two things: what was received, and "Next payment: {{ptp_amount}} on
+-- {{ptp_date}}". Both of those come off ptpSchedule.nextUnpaid, which counts forward from
+-- instalments_kept -- and instalments_kept goes up when the collector confirms the instalment, not
+-- when the money lands. Started on the payment row, the run could be planned and sent in the
+-- minute between the two, and the receipt would quote as NEXT the instalment it was confirming.
+-- On a final instalment that is a demand for money the debtor has just paid.
+--
+-- SO IT STARTS ON THE CONFIRMATION, which is the firm saying "this instalment is paid" and the
+-- moment the boundary actually moves. {{ptp_paid}} reads the newest unreversed payment on the
+-- account, so the figure confirmed is the money that arrived.
+--
+-- TWO WAYS AN INSTALMENT IS CONFIRMED and both are here: a recurring arrangement counts one more
+-- and stays open, a once-off goes straight to `kept`. Written for one of them, half the book's
+-- arrangements would send no receipt at all.
+--
+-- A REVIVAL COUNTS. A defaulted arrangement whose missed instalment is paid comes back through
+-- exactly this path -- the debtor paid, so they get a receipt.
+create or replace function public.workflow_start_on_instalment_kept() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+begin
+  if not (
+    new.instalments_kept > coalesce(old.instalments_kept, 0)
+    or (new.status = 'kept' and coalesce(old.status, '') <> 'kept')
+  ) then
+    return new;
+  end if;
+
+  insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+  select new.account_id, v.id, (now() at time zone 'Africa/Johannesburg')::date, new.resolved_by
+    from public.workflow_versions v
+   where v.state = 'active'
+     and v.trigger_kind = 'payment_received'
+     and not exists (
+       select 1 from public.workflow_runs r
+        where r.account_id = new.account_id
+          and r.version_id = v.id
+          and r.state in ('running', 'held')
+     );
+  return new;
+end $$;
+
+comment on function public.workflow_start_on_instalment_kept() is
+  'Starts the active payment_received workflow when an arrangement instalment is confirmed paid. '
+  'On the confirmation rather than on the payment row, because the receipt quotes the NEXT '
+  'instalment and the boundary only moves when instalments_kept does.';
+
+revoke all on function public.workflow_start_on_instalment_kept() from public;
+
+drop trigger if exists workflow_start_on_instalment_kept on public.promises_to_pay;
+create trigger workflow_start_on_instalment_kept
+  after update on public.promises_to_pay
+  for each row execute function public.workflow_start_on_instalment_kept();
+
+-- ---------- AND A PAYMENT REVIVES A DEFAULTED ARRANGEMENT ----------
+--
+-- THE LETTER SAYS SO: "If it does, the arrangement continues on its existing terms and no further
+-- step is taken." The confirmation of the instalment is what says the money arrived, so this rides
+-- on the same event rather than on a second one that could disagree with it.
+--
+-- BEFORE, NOT AFTER, so the row that reaches the two starters above is already `open` -- and
+-- stamp_promise_default clears defaulted_at with it, because a revived arrangement carrying
+-- yesterday's stamp would be broken again by the next morning's sweep.
+create or replace function public.revive_promise_on_payment() returns trigger
+language plpgsql security invoker set search_path to 'public' as $$
+begin
+  if new.status = 'defaulted' and new.instalments_kept > coalesce(old.instalments_kept, 0) then
+    new.status := 'open';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists revive_promise_on_payment on public.promises_to_pay;
+create trigger revive_promise_on_payment
+  before update on public.promises_to_pay
+  for each row execute function public.revive_promise_on_payment();
+
+comment on function public.revive_promise_on_payment() is
+  'An instalment paid inside the 48 hours puts the arrangement back on its existing terms, which '
+  'is what the firm''s notice of default promises in those words.';
+
+-- ---------- THE TWO WORKFLOWS, AS DRAFTS ----------
+--
+-- SEEDED AS DRAFTS, like Standard Collections above: a published version is frozen by a trigger,
+-- so a workflow labelled active that anybody can still edit would be a label contradicting the
+-- rule underneath it. They publish with one press.
+--
+-- EACH IS TWO NODES ON DAY 0, and that is the whole shape. There is no sequence to lay out: the
+-- event decided when, so the only question left is what goes out and in which order -- the email,
+-- then the SMS that says it has been sent.
+do $$
+declare
+  v_wf uuid; v_ver uuid; v_phase uuid;
+begin
+  if not exists (select 1 from public.workflows where key = 'arrangement-receipt') then
+    insert into public.workflows (key, name, description, domain)
+    values ('arrangement-receipt', 'Arrangement payment received',
+      'Confirms an instalment and names the next one. Starts when a collector confirms the '
+      || 'instalment paid, which is the moment the next-instalment boundary moves.', 'collections')
+    returning id into v_wf;
+
+    insert into public.workflow_versions (workflow_id, version, state, trigger_kind, day_unit, trigger_note)
+    values (v_wf, 1, 'draft', 'payment_received', 'calendar',
+      'Starts itself when an arrangement instalment is confirmed paid -- not when the payment row '
+      || 'is written. The receipt quotes {{ptp_paid}} for what arrived and {{ptp_amount}} / '
+      || '{{ptp_date}} for the NEXT instalment, and that boundary only moves when the collector '
+      || 'confirms it. Both go out the same day, Day 0.')
+    returning id into v_ver;
+
+    insert into public.workflow_phases (version_id, ordinal, name, subtitle, from_day, to_day)
+    values (v_ver, 1, 'Receipt', 'What arrived, and what is next', 0, 0) returning id into v_phase;
+
+    insert into public.workflow_nodes (version_id, phase_id, key, kind, label, description, day,
+      ordinal, channel, template_id, template_company_id, after_minutes, needs_release, statutory)
+    select v_ver, v_phase, x.key, 'communication', x.label, x.descr, 0, x.ordinal, x.channel,
+      (select id from public.message_templates where seed_key = x.ind),
+      (select id from public.message_templates where seed_key = x.co),
+      x.after_minutes, false, false
+    from (values
+      ('ptp-receipt-email', 'Payment received',
+       'Confirms what arrived and names the next instalment. Nothing here asserts anything that '
+       || 'has not happened, so it goes out on its own.',
+       0, 'email', 'email-ptp-receipt-individual', 'email-ptp-receipt-company', null::integer),
+      ('ptp-receipt-sms', 'Payment received SMS',
+       'The text message behind it. Linked to the email, so it never arrives first.',
+       1, 'sms', 'sms-ptp-receipt-individual', 'sms-ptp-receipt-company', 7)
+    ) as x(key, label, descr, ordinal, channel, ind, co, after_minutes);
+  end if;
+
+  if not exists (select 1 from public.workflows where key = 'arrangement-default') then
+    insert into public.workflows (key, name, description, domain)
+    values ('arrangement-default', 'Notice of default on arrangement',
+      'Goes out the moment an instalment is missed, offering the 48 hours the firm''s own letter '
+      || 'promises. The email carries the notice of default as a PDF.', 'collections')
+    returning id into v_wf;
+
+    insert into public.workflow_versions (workflow_id, version, state, trigger_kind, day_unit, trigger_note)
+    values (v_wf, 1, 'draft', 'promise_broken', 'calendar',
+      'Starts itself the moment a collector marks an instalment missed and the arrangement falls '
+      || 'into DEFAULT -- not when it is finally broken 48 hours later, because the notice it '
+      || 'sends is the one offering those 48 hours. The section 129 it paused stays paused for the '
+      || 'whole window and resumes only if the money does not come.')
+    returning id into v_ver;
+
+    insert into public.workflow_phases (version_id, ordinal, name, subtitle, from_day, to_day)
+    values (v_ver, 1, 'Default', 'The arrangement has lapsed, and 48 hours to revive it', 0, 0)
+    returning id into v_phase;
+
+    insert into public.workflow_nodes (version_id, phase_id, key, kind, label, description, day,
+      ordinal, channel, template_id, template_company_id, after_minutes, needs_release, statutory)
+    select v_ver, v_phase, x.key, 'communication', x.label, x.descr, 0, x.ordinal, x.channel,
+      (select id from public.message_templates where seed_key = x.ind),
+      (select id from public.message_templates where seed_key = x.co),
+      x.after_minutes, false, false
+    from (values
+      ('ptp-default-email', 'Notice of default',
+       'Carries the notice of default as a PDF on the firm''s letterhead -- the email template '
+       || 'points at the letter, so the attachment cannot be forgotten. Says the arrangement has '
+       || 'lapsed and that payment within 48 hours revives it on its existing terms.',
+       0, 'email', 'email-ptp-default-individual', 'email-ptp-default-company', null::integer),
+      ('ptp-default-sms', 'Notice of default SMS',
+       'The text message behind it, which is what actually reaches a debtor inside 48 hours.',
+       1, 'sms', 'sms-ptp-default-individual', 'sms-ptp-default-company', 7)
+    ) as x(key, label, descr, ordinal, channel, ind, co, after_minutes);
+  end if;
+end $$;

@@ -2397,15 +2397,58 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
                   p.instalmentsKept > 0 ? `${p.instalmentsKept} paid so far` : null]
                   .filter(Boolean).join(' · ')}
               </p>
+              {/*
+                THE 48 HOURS, ON THE ROW, WHILE THEY ARE RUNNING.
+                
+                THE FIRM'S OWN NOTICE PROMISES THEM -- "payment within 48 hours and the arrangement
+                continues on its existing terms" -- and a collector ringing this debtor has to know
+                that the window is open, because it is the whole of what they have to offer. The
+                account also reads as still arranged throughout, which is correct and would
+                otherwise look like a mistake.
+              */}
+              {p.status === 'defaulted' && (
+                <p className="mt-1.5 rounded border border-negative-100 bg-white px-2 py-1 text-[11px] leading-snug text-negative-700">
+                  The arrangement has lapsed and the notice of default has gone. Payment of
+                  {' '}{formatMoney(p.amount)} within 48 hours puts it back on its existing terms.
+                  {' '}After that it breaks and the collection steps carry on.
+                </p>
+              )}
               <div className="flex gap-1.5 mt-2">
                 <button disabled={busy} onClick={() => run(() => keepInstalment(p, userId))}
                   className="flex-1 text-[11px] font-medium py-1 rounded border border-positive-100 text-positive-700 hover:bg-positive-50 disabled:opacity-50 inline-flex items-center justify-center gap-1">
-                  <Check size={11} /> {p.arrangement === 'once_off' ? 'Kept' : 'Instalment paid'}
+                  <Check size={11} /> {p.status === 'defaulted'
+                    ? 'Payment received'
+                    : p.arrangement === 'once_off' ? 'Kept' : 'Instalment paid'}
                 </button>
-                <button disabled={busy} onClick={() => run(() => resolvePromise(p.id, 'broken', userId))}
-                  className="flex-1 text-[11px] font-medium py-1 rounded border border-negative-100 text-negative-700 hover:bg-negative-50 disabled:opacity-50 inline-flex items-center justify-center gap-1">
-                  <XCircle size={11} /> Broken
-                </button>
+                {/*
+                  A MISSED PAYMENT GOES TO `defaulted`, NOT STRAIGHT TO `broken`, and this button is
+                  where the firm's 48 hours actually begin.
+                  
+                  IT IS ALSO WHAT SENDS THE NOTICE. workflow_start_on_promise_broken fires on this
+                  transition, so the press is the moment the debtor is told -- by email, with the
+                  notice of default attached, and by SMS behind it.
+                  
+                  WHY NOT `broken` HERE. A broken promise is not a live arrangement, so ptpSchedule
+                  would stop answering {{ptp_amount}} and {{ptp_date}} -- and the notice quoting the
+                  missed instalment would hold on its own merge fields. It would also resume the
+                  section 129 immediately, which means sending a final notice to somebody the firm
+                  has just given two days to put it right.
+                */}
+                {p.status !== 'defaulted' && (
+                  <button disabled={busy} onClick={() => run(() => resolvePromise(p.id, 'defaulted', userId))}
+                    className="flex-1 text-[11px] font-medium py-1 rounded border border-negative-100 text-negative-700 hover:bg-negative-50 disabled:opacity-50 inline-flex items-center justify-center gap-1">
+                    <XCircle size={11} /> Payment missed
+                  </button>
+                )}
+                {/* AND THE 48 HOURS CAN BE ENDED BY HAND. The sweep does it each morning, which is
+                    the right grain for a two-day window; a collector who has been told there is no
+                    money coming should not have to wait for it. */}
+                {p.status === 'defaulted' && (
+                  <button disabled={busy} onClick={() => run(() => resolvePromise(p.id, 'broken', userId))}
+                    className="flex-1 text-[11px] font-medium py-1 rounded border border-negative-100 text-negative-700 hover:bg-negative-50 disabled:opacity-50 inline-flex items-center justify-center gap-1">
+                    <XCircle size={11} /> Break it now
+                  </button>
+                )}
                 <button disabled={busy} onClick={() => run(() => resolvePromise(p.id, 'cancelled', userId))}
                   className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">
                   Cancel

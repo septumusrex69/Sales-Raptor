@@ -120,11 +120,19 @@ for (const [amount, total] of [[300, 1000], [2500, 7500], [999, 5000], [1234, 12
 
 /*
  * THE EARLIEST ONE NOT YET PAID, on all five steps. Each line below is one of the firm's notices.
+ *
+ * AND THE FIXTURES MOVE `dueOn` WITH THE COUNT, because that is what the database does.
+ * keepInstalment is the only thing that writes a live arrangement after it is agreed and it does
+ * both together -- one more counted, and `due_on` moved on to the next instalment. Fixtures that
+ * bumped the count and left the date alone described a row the firm's own code never writes, and
+ * they hid a double-count that dated every notice after the first payment a month late.
  */
+const paid = (n, dueOn) => ({ ...three, instalmentsKept: n, dueOn })
+
 check('nothing paid: the confirmation quotes instalment one',
   nextUnpaid(three), { no: 1, amount: 2500, dueOn: '2026-10-05' })
 check('one paid: the receipt quotes the next one',
-  nextUnpaid({ ...three, instalmentsKept: 1 }), { no: 2, amount: 2500, dueOn: '2026-11-05' })
+  nextUnpaid(paid(1, '2026-11-05')), { no: 2, amount: 2500, dueOn: '2026-11-05' })
 /*
  * AND THE DEFAULT LETTER QUOTES THE MISSED ONE. This is the assertion the whole file exists for:
  * one instalment paid, the second missed, and the letter that says "has not reached our trust
@@ -132,14 +140,34 @@ check('one paid: the receipt quotes the next one',
  * debtor does not owe yet.
  */
 check('one paid and the second missed: the default letter quotes the second',
-  nextUnpaid({ ...three, instalmentsKept: 1 }).dueOn, '2026-11-05')
+  nextUnpaid(paid(1, '2026-11-05')).dueOn, '2026-11-05')
+/*
+ * THE DOUBLE-COUNT, NAMED. `nextUnpaid` read `instalmentsKept` as a POSITION into a schedule that
+ * already started at the next unpaid instalment, so the count was applied twice: the arrangement
+ * above came back quoting 5 DECEMBER. A reminder a month late, a receipt naming a payment the
+ * debtor had not reached, and on a final instalment a demand for money already paid -- and every
+ * figure on its own looked right.
+ */
+check('...and never the one after it', nextUnpaid(paid(1, '2026-11-05')).dueOn !== '2026-12-05', true)
+check('two paid: the third', nextUnpaid(paid(2, '2026-12-05')), { no: 3, amount: 2500, dueOn: '2026-12-05' })
 /* FINISHED IS NULL, not the last instalment again. Null leaves {{ptp_amount}} standing as a
    placeholder, which is what stops a notice about an instalment that does not exist. */
-check('an arrangement paid up quotes nothing', nextUnpaid({ ...three, instalmentsKept: 3 }), null)
-check('...and so does one paid past its count', nextUnpaid({ ...three, instalmentsKept: 9 }), null)
+check('an arrangement paid up quotes nothing', nextUnpaid(paid(3, '2027-01-05')), null)
+check('...and so does one paid past its count', nextUnpaid(paid(9, '2027-01-05')), null)
 /* A negative or fractional count cannot index past the front of the schedule. */
 check('a nonsense kept count still lands on instalment one',
   nextUnpaid({ ...three, instalmentsKept: -2 }).no, 1)
+/*
+ * AND WHAT IS LEFT IS WORKED OUT FROM WHAT IS STILL OWED. R1 000 at R300 is four payments of
+ * R300, R300, R300 and R100; with two behind it there is R400 left, so the remainder still lands
+ * on the fourth. Measured against the whole R1 000 the last instalment would come back at R300 --
+ * a demand for R200 the debtor never agreed to, on the very last letter of the arrangement.
+ */
+const short = { ...three, amount: 300, totalPromised: 1000 }
+check('the remainder is measured against what is left, not what was agreed',
+  instalmentSchedule({ ...short, instalmentsKept: 2, dueOn: '2026-12-05' })
+    .map((i) => `${i.no}:${i.amount}`).join(' '),
+  '3:300 4:100')
 
 /*
  * IT IS A COUNT, NOT A CALENDAR. nextUnpaid does not care what today is -- an instalment overdue
@@ -148,7 +176,7 @@ check('a nonsense kept count still lands on instalment one',
  * function that reads the calendar, and it is a different question.
  */
 check('what has fallen due is the calendar’s question', instalmentsDue(three, '2026-11-06'), 2)
-check('...and what is unpaid is the arrangement’s', nextUnpaid({ ...three, instalmentsKept: 1 }).no, 2)
+check('...and what is unpaid is the arrangement’s', nextUnpaid(paid(1, '2026-11-05')).no, 2)
 
 /* ---------- which arrangement an account is on ---------- */
 
@@ -197,53 +225,68 @@ check('...whichever order the rows arrive in',
  * arrangement of ONE instalment -- so a three-instalment arrangement would stop sending reminders
  * after the first, and nothing anywhere would report it.
  */
+/*
+ * ONE INSTALMENT BEHIND IT, AND `due_on` MOVED ON WITH IT, which is the row keepInstalment
+ * actually writes: one more counted, and the date advanced to the next instalment. A fixture
+ * carrying the FIRST date beside a count of one describes a row the firm's own code never
+ * produces -- and it is what hid the double-count in nextUnpaid.
+ */
 const row = {
-  amount: '2500.00', due_on: '2026-10-05', arrangement: 'monthly', day_of_month: 5,
+  amount: '2500.00', due_on: '2026-11-05', arrangement: 'monthly', day_of_month: 5,
   on_last_day: false, day_of_week: null, instalments_kept: 1, total_promised: '7500.00',
 }
 check('a row maps to the arrangement it describes', arrangedFromRow(row), {
-  amount: 2500, dueOn: '2026-10-05', arrangement: 'monthly', dayOfMonth: 5, onLastDay: false,
+  amount: 2500, dueOn: '2026-11-05', arrangement: 'monthly', dayOfMonth: 5, onLastDay: false,
   dayOfWeek: null, instalmentsKept: 1, totalPromised: 7500,
 })
 /* NUMERIC ARRIVES AS A STRING from PostgREST, and '2500.00' * anything is what a missed Number()
    costs: the schedule would be NaN instalments long and every notice would hold. */
 check('...with numeric columns read as numbers', typeof arrangedFromRow(row).amount, 'number')
 check('...including the total', typeof arrangedFromRow(row).totalPromised, 'number')
-/* AND IT AGREES WITH THE SCHEDULE: one instalment kept, so the next is the second. */
+/* AND IT AGREES WITH THE SCHEDULE: one instalment kept, so the next is the second -- and it is
+   the date on the row, because the row is already standing at it. */
 check('a mapped row quotes the same instalment', nextUnpaidFromRow(row),
   { no: 2, amount: 2500, dueOn: '2026-11-05' })
+
 /*
- * EVERY COLUMN CHANGED, ONE AT A TIME, MUST CHANGE THE ANSWER -- a mapper that silently ignores a
- * column it was handed is the exact failure this is guarding, and it is invisible: the arrangement
- * still schedules, just wrongly.
+ * EVERY COLUMN CHANGED, ONE AT A TIME, MUST CHANGE THE SCHEDULE -- a mapper that silently ignores
+ * a column it was handed is the exact failure this is guarding, and it is invisible: the
+ * arrangement still schedules, just wrongly.
  *
- * CHANGED RATHER THAN DELETED, because two of these have real fallbacks and deleting them proves
- * nothing. `day_of_month` falls back to the day of `due_on` -- which for the 5th of October is the
- * 5th, the same answer -- and that fallback is correct, so the substitute here moves the day
- * instead. Found by this check failing on right code.
+ * ASSERTED ON THE WHOLE SCHEDULE, NOT ON nextUnpaid, AND THAT IS A REAL WEAKENING REPAIRED. The
+ * next unpaid instalment is now simply the date the row is standing at, so the recurrence
+ * columns -- the shape, the day of the month, the last-day flag -- cannot move it by construction:
+ * they decide where the instalments AFTER it fall. Left asserting on nextUnpaid, dropping
+ * `day_of_month` from the mapper would have gone unnoticed, which is the whole failure this loop
+ * exists for.
+ *
+ * CHANGED RATHER THAN DELETED, because some of these have real fallbacks and deleting them proves
+ * nothing. `day_of_month` falls back to the day of `due_on`, which is the same answer, so the
+ * substitute moves the day instead.
  */
+const scheduleOf = (r) => JSON.stringify(instalmentSchedule(arrangedFromRow(r)))
 for (const [k, v] of [
-  /* A different MONTH, not a different day of the same one: day_of_month sets where every later
-     instalment falls, so moving 5 October to 9 October moves instalment 1 and leaves instalment 2
-     on 5 November. Found by this check failing on right code. */
   ['amount', 1000], ['due_on', '2026-12-05'], ['arrangement', 'weekly'], ['day_of_month', 20],
-  ['on_last_day', true], ['instalments_kept', 2],
+  ['on_last_day', true], ['instalments_kept', 2], ['total_promised', 20000],
 ]) {
-  ok(`changing ${k} changes what is quoted`, JSON.stringify(nextUnpaidFromRow({ ...row, [k]: v }))
-    !== JSON.stringify(nextUnpaidFromRow(row)))
+  ok(`changing ${k} changes the schedule`, scheduleOf({ ...row, [k]: v }) !== scheduleOf(row))
 }
 /*
- * THE TWO THAT DO NOT MOVE THE NEXT INSTALMENT, asserted rather than left out, because both look
- * like bugs at a glance and neither is:
+ * AND THE THREE THAT DO NOT MOVE THE NEXT INSTALMENT, asserted rather than left out, because all
+ * three look like bugs at a glance and none is:
  *
- *   - `total_promised` sets HOW MANY instalments there are, not when any of them falls. Raising it
- *     from R7 500 to R20 000 makes a three-instalment arrangement an eight-instalment one, and the
- *     second instalment is still R2 500 on 5 November. It shows up in the COUNT, checked above, and
- *     in whether the arrangement reads as slow paying, checked below.
+ *   - the RECURRENCE decides where later instalments fall, never the one the arrangement is
+ *     standing at. A weekly arrangement whose next payment is 5 November still has it on 5
+ *     November; the sixth, the twelfth and the day of the month are the ones that move.
+ *   - `total_promised` sets HOW MANY instalments there are, not when the next one falls. Raising
+ *     it from R7 500 to R20 000 makes a three-instalment arrangement an eight-instalment one and
+ *     the next payment is still R2 500 on 5 November.
  *   - `day_of_week` is descriptive only: nextDueDate adds seven days to the previous date, so a
  *     weekly arrangement recurs on whatever day `due_on` is, and the column is what
  *     describeArrangement prints. Worth knowing before anybody relies on it to move a date.
  */
+check('the recurrence does not move the instalment already due',
+  nextUnpaidFromRow({ ...row, arrangement: 'weekly' }).dueOn, '2026-11-05')
 check('the total changes how many, not when the next one falls',
   nextUnpaidFromRow({ ...row, total_promised: 20000 }), nextUnpaidFromRow(row))
 check('...though it does change the count',
