@@ -61,11 +61,27 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
   const [showAll, setShowAll] = useState(false)
   const [saving, setSaving] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
+  /*
+   * A FIGURE TO TRY, WHICH IS NOT THE ONE BEING RECORDED.
+   *
+   * THE FIRM: "let's say Rita wants to negotiate and wants to know, oh, what would happen if I pay
+   * 3 000 rand a month? We have to give them that kind of... it'll be a nice tool."
+   *
+   * ITS OWN BOX RATHER THAN THE FORM'S. Answered by typing into the promise above, the collector
+   * would have to put a figure nobody has agreed into the field that RECORDS the arrangement -- and
+   * the one thing worse than not being able to answer the question is answering it and then saving
+   * it. Empty is the normal state and the panel follows the form; a figure here overrides the
+   * arithmetic and nothing else.
+   */
+  const [trying, setTrying] = useState('')
+  const tried = Number(trying.replace(/[^\d.]/g, ''))
+  const whatIf = trying.trim() !== '' && tried > 0 ? tried : null
+  const shown = whatIf ?? amount
 
   const plan = useMemo<RepaymentPlan | null>(() => {
-    if (!schedule || !(amount > 0)) return null
-    return repaymentPlan({ account, instalment: amount, schedule })
-  }, [account, amount, schedule])
+    if (!schedule || !(shown > 0)) return null
+    return repaymentPlan({ account, instalment: shown, schedule })
+  }, [account, shown, schedule])
 
   /*
    * WHAT THE SAME DEBT COSTS AT DIFFERENT SPEEDS, AND WHAT PAYING FASTER SAVES THEM.
@@ -142,7 +158,39 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
 
   return (
     <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5">
-      <p className="text-[11px] uppercase tracking-wide text-slate-400">If they pay this</p>
+      <p className="text-[11px] uppercase tracking-wide text-slate-400">
+        {whatIf === null ? 'If they pay this' : 'If they paid this instead'}
+      </p>
+      {/*
+        WHAT IF THEY PAID SOMETHING ELSE, on its own line under the heading.
+
+        NOT BESIDE IT. This panel lives in the account's right-hand column, which is about two
+        hundred pixels wide, and a heading sharing a row with a box wrapped to two lines around it.
+        Near the top rather than at the foot of the panel, because it is the question a collector is
+        asked mid-sentence on a call.
+      */}
+      <label className="mt-1 flex items-center justify-end gap-1 text-[11px] text-slate-400">
+        <span>Try a different amount</span>
+        <input
+          value={trying}
+          onChange={(e) => { setTrying(e.target.value) }}
+          inputMode="decimal"
+          placeholder={amount > 0 ? String(amount) : 'amount'}
+          aria-label="Try a different instalment"
+          className="w-16 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right tabular-nums text-slate-700 focus:border-[#c9a052] focus:outline-none"
+        />
+      </label>
+      {/*
+        AND IT SAYS SO, EVERY TIME. A panel quietly describing a figure that is not the one in the
+        form above it is how a collector reads out one arrangement and saves a different one -- and
+        the schedule button below would send the debtor the same mistake on the firm's letterhead.
+      */}
+      {whatIf !== null && (
+        <p className="mt-0.5 text-[11px] leading-snug text-[var(--c-gold-deep)]">
+          Working on {money(whatIf)} {each}. The arrangement being recorded above is still
+          {' '}{amount > 0 ? money(amount) : 'unset'}.
+        </p>
+      )}
 
       {/* THE HEADLINE IS THE SENTENCE SOMEBODY SAYS OUT LOUD, not a row of figures to interpret. */}
       {plan.outcome === 'settles' && (
@@ -156,7 +204,7 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
         <p className="mt-1 flex items-start gap-1.5 text-[13px] font-medium text-negative-700">
           <AlertTriangle size={13} className="mt-0.5 shrink-0" />
           <span>
-            {money(amount)} {each} does not cover the interest, so the account never clears.
+            {money(shown)} {each} does not cover the interest, so the account never clears.
             {plan.minimumInstalment ? ` Nothing below ${money(plan.minimumInstalment)} can.` : ''}
           </span>
         </p>
@@ -170,7 +218,7 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
             {schedule?.arrangement === 'once_off'
               ? `That leaves ${money(plan.leftOwing)} on the account.`
               : `After ${plan.rows.length} payments ${money(plan.leftOwing)} would still be owing.`}
-            {plan.belowTheInterest && ` ${money(amount)} ${each} does not cover the interest.`}
+            {plan.belowTheInterest && ` ${money(shown)} ${each} does not cover the interest.`}
           </span>
         </p>
       )}
@@ -241,7 +289,7 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
       */}
       {ladder.length > 0 && (
         <div className="mt-2 border-t border-slate-200 pt-2">
-          <p className="text-[11px] text-slate-500">If they paid it off faster</p>
+          <p className="text-[11px] text-slate-500">Their offer, and paying it off faster</p>
           {/* Named, so what it is survives being read out of context -- by a screen reader, and by
               the browser check that has to tell this table from the schedule below it. */}
           <table aria-label="What paying it off faster would cost"
@@ -256,12 +304,22 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
             </thead>
             <tbody>
               {ladder.map((o) => (
-                <tr key={o.instalments} className="text-slate-600">
-                  <td className="text-left">{o.instalments === 1 ? 'Settle now' : o.instalments}</td>
-                  <td className="text-right">{money(o.each)}</td>
-                  <td className="text-right">{money(o.totalPaid)}</td>
-                  {/* The one figure in the panel that is good news, and it is the debtor's. */}
-                  <td className="text-right font-medium text-positive-700">{money(o.saving)}</td>
+                /* THEIR OWN OFFER IS THE FIRST ROW AND IS MARKED AS THEIRS, which is what makes the
+                   rows under it a comparison rather than four figures the firm came up with. Same
+                   order and same anchor as the PDF the debtor is sent, so the collector is reading
+                   off the page in front of them. */
+                <tr key={o.instalments} className={o.theirs ? 'text-slate-800' : 'text-slate-600'}>
+                  <td className={`text-left ${o.theirs ? 'font-medium' : ''}`}>
+                    {o.theirs ? 'Their offer' : (o.instalments === 1 ? 'Settle now' : o.instalments)}
+                  </td>
+                  <td className={`text-right ${o.theirs ? 'font-medium' : ''}`}>{money(o.each)}</td>
+                  <td className={`text-right ${o.theirs ? 'font-medium' : ''}`}>{money(o.totalPaid)}</td>
+                  {/* The one figure in the panel that is good news, and it is the debtor's. A dash
+                      on their own row: a nought under "They save" reads as a saving of nothing
+                      rather than as the row everything else is measured from. */}
+                  <td className="text-right font-medium text-positive-700">
+                    {o.theirs ? '\u2014' : money(o.saving)}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -266,6 +266,27 @@ function draw(sheet: Sheet, op: DrawOp, k: {
   yPt: (mm: number) => number
   gaps?: FaceGaps
 }) {
+  /*
+   * THE RECTANGLE FIRST, because it is the one op with two colours and no single `colour` to read.
+   *
+   * pdf-lib's y IS THE BOTTOM EDGE while the layout measures from the top, so the conversion takes
+   * yMm + hMm. Got the wrong way round, a bar draws its own height above where it belongs -- which
+   * on a five-millimetre bar is a hairline out on the screen and a line of text out on paper.
+   */
+  if (op.op === 'rect') {
+    const f = op.fill ? hexToRgb(op.fill) : null
+    const b = op.stroke ? hexToRgb(op.stroke) : null
+    sheet.drawRectangle({
+      x: mmToPt(op.xMm),
+      y: k.yPt(op.yMm + op.hMm),
+      width: mmToPt(op.wMm),
+      height: mmToPt(op.hMm),
+      ...(f ? { color: k.rgb(f.r, f.g, f.b) } : {}),
+      ...(b ? { borderColor: k.rgb(b.r, b.g, b.b), borderWidth: mmToPt(op.strokeMm) } : {}),
+    })
+    return
+  }
+
   const c = hexToRgb(op.colour)
   if (op.op === 'text') {
     /* Cleaned again at the draw rather than trusted to have been cleaned upstream: this is the

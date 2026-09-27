@@ -48,7 +48,29 @@ export interface LineOp {
   colour: string
 }
 
-export type DrawOp = TextOp | LineOp
+/**
+ * A RECTANGLE, filled or outlined or both: the track and the fill of a drawn progress bar.
+ *
+ * ITS OWN OP RATHER THAN FOUR LINES. A filled bar drawn as lines is a bar drawn as hatching, and a
+ * five-millimetre one would need a couple of hundred of them; pdf-lib fills a rectangle in one
+ * operator either way.
+ *
+ * yMm IS THE TOP, like every other measurement here. PDF's own origin is the bottom of the page and
+ * the drawer converts -- which is exactly why this says which end it means.
+ */
+export interface RectOp {
+  op: 'rect'
+  xMm: number
+  yMm: number
+  wMm: number
+  hMm: number
+  /** Null for an outline with nothing in it -- which is what an empty bar's track is. */
+  fill: string | null
+  stroke: string | null
+  strokeMm: number
+}
+
+export type DrawOp = TextOp | LineOp | RectOp
 
 export interface PlannedPage {
   ops: DrawOp[]
@@ -84,6 +106,21 @@ const CELL_PAD_MM = 2
 const CELL_PAD_Y_MM = 1.4
 const RULE_MM = 0.2
 const RULE_COLOUR = '#d8dee6'
+/*
+ * THE DRAWN BAR, and the same four numbers the sheet's own CSS uses -- see the .ltr-bar rules in
+ * letterDocument.ts. Written in both places rather than shared because one is a CSS string and the
+ * other is millimetres of PDF, and check-page-editor holds them against each other.
+ *
+ * MONOCHROME, because a schedule gets photocopied: a bar that differs from its track only in hue
+ * disappears the first time it does. The track keeps a hairline border so the part NOT paid still
+ * reads as part of a bar rather than as white paper.
+ */
+const BAR_MM = 5
+const BAR_GAP_MM = 1.2
+const BAR_TRACK = '#eef1f5'
+const BAR_EDGE = '#9ca3af'
+const BAR_FILL = '#1f2937'
+const BAR_NOTE_SCALE = 0.86
 
 /* ------------------------------------------------------------------ words on a line */
 
@@ -292,6 +329,33 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
     if (b.kind === 'signature') return before + 10 + 2 + oneLine
     if (b.kind === 'spacer') return before + b.mm
     if (b.kind === 'pagebreak') return 0
+    /*
+     * A BAR HAS NO FIRST LINE: the whole of it or none of it. Split across a page boundary it is two
+     * half-bars, each of which reads as a complete bar at a different length -- which is worse than
+     * a wrong number, because the reader has no reason to doubt a picture.
+     */
+    /*
+     * A TABLE'S FIRST UNIT IS ITS HEADER PLUS TWO ROWS, not one line.
+     *
+     * Found on the firm's own repayment schedule: the heading rule reserved "two lines of whatever
+     * follows", the table's first line fitted, and page one ended with a column header and the
+     * debtor's own offer while the three faster options -- the whole reason the table exists -- were
+     * overleaf. The table case below refuses to strand its own header; this is the same fact said
+     * where the block BEFORE it can read it.
+     *
+     * A FLOOR, NOT A MEASUREMENT. This has no column widths, so it cannot wrap a cell -- it returns
+     * the least a row can be, which is exact for the single-line rows every table here has and too
+     * small for a wrapped one. Under-reserving pushes a break one row later; over-reserving would
+     * throw pages away on every letter the firm sends.
+     */
+    if (b.kind === 'table') {
+      const rowFloor = oneLine + CELL_PAD_Y_MM * 2
+      return before + rowFloor * (b.headerRow === true ? Math.min(3, b.rows.length) : 1)
+    }
+    if (b.kind === 'progress') {
+      return before + (b.label ? oneLine + BAR_GAP_MM : 0) + BAR_MM
+        + (b.note ? BAR_GAP_MM + oneLine * BAR_NOTE_SCALE : 0)
+    }
     return before + oneLine
   }
 
@@ -322,8 +386,19 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
          * reads as the end of the letter, and the reader turns the page having decided there is
          * nothing under it. Room is asked for the heading PLUS two lines of whatever follows.
          */
+        /*
+         * TWO LINES OF WHATEVER FOLLOWS, OR THE WHOLE OF ITS FIRST UNIT, whichever is the larger.
+         *
+         * IT USED TO BE firstUnitOf(next) * 2 AND THAT IS ONLY RIGHT FOR PROSE. "Two lines" is the
+         * rule -- a heading with one line under it still reads as the end of the letter -- and for a
+         * paragraph the first unit IS a line, so doubling it said exactly that. For a table, whose
+         * first unit is now a header and two rows, doubling it reserves six rows and throws away a
+         * third of a page whenever a section opens with one. Taking the larger keeps the prose case
+         * to the character and asks a structural block only for what it actually needs.
+         */
+        const under = Math.max(ptToMm(doc.defaults.size) * lineHeight * 2, firstUnitOf(next))
         room(lines.reduce((n, l) => n + l.heightMm, 0)
-          + (spacing?.after ?? HEADING_SPACE[block.level].after) + firstUnitOf(next) * 2)
+          + (spacing?.after ?? HEADING_SPACE[block.level].after) + under)
         if (number !== null && lines.length > 0) {
           room(lines[0].heightMm)
           at().ops.push({
@@ -397,11 +472,11 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
         let cx = left
         for (const w of widths) { xs.push(cx); cx += w }
 
-        block.rows.forEach((row, ri) => {
+        /* Every cell is wrapped first so the row's height is known before anything is drawn --
+           a row is kept whole across a page break, and half the legal-process table at the foot
+           of a page reads as two different statements. */
+        const measureRow = (row: typeof block.rows[number], ri: number) => {
           const headerRow = block.headerRow === true && ri === 0
-          /* Every cell is wrapped first so the row's height is known before anything is drawn --
-             a row is kept whole across a page break, and half the legal-process table at the foot
-             of a page reads as two different statements. */
           const cells = row.map((cell, ci) => wrap(
             pieces(
               fill(cell.spans).map((s) => (headerRow ? { ...s, bold: true } : s)),
@@ -411,8 +486,44 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
             lineHeight,
           ))
           const heights = cells.map((ls) => ls.reduce((n, l) => n + l.heightMm, 0))
-          const rowHeight = Math.max(...heights, ptToMm(base.sizePt) * lineHeight) + CELL_PAD_Y_MM * 2
-          room(rowHeight)
+          return {
+            cells,
+            rowHeight: Math.max(...heights, ptToMm(base.sizePt) * lineHeight) + CELL_PAD_Y_MM * 2,
+          }
+        }
+
+        /*
+         * A TABLE THAT IS AN ARGUMENT RATHER THAN A LIST asks for all of itself before it starts.
+         * See TableBlock.keepTogether: the repayment schedule's comparison is five rows that only
+         * mean anything read together, and split after the third a debtor turns the page having
+         * seen their own offer and the two smallest savings.
+         *
+         * `room` CARRIES ON IF IT CANNOT HAVE IT, which is what makes this safe on a table taller
+         * than a page: it moves to a fresh one and then breaks there as any other table would.
+         */
+        if (block.keepTogether) {
+          room(block.rows.reduce((n, r, ri) => n + measureRow(r, ri).rowHeight, 0))
+        }
+
+        block.rows.forEach((row, ri) => {
+          const headerRow = block.headerRow === true && ri === 0
+          const { cells, rowHeight } = measureRow(row, ri)
+          /*
+           * A HEADER ROW IS NOT LEFT ALONE AT THE FOOT OF A PAGE, and nor is it left with one row
+           * under it. Same argument as the heading rule above, found on the firm's own repayment
+           * schedule: the comparison table broke after its first line, so page one ended with the
+           * column headings and the debtor's OWN offer, and the three faster options -- the whole
+           * reason the table exists -- were overleaf. A header stranded like that does not read as a
+           * table continuing; it reads as a table of one row.
+           *
+           * TWO ROWS, NOT ONE. One is what was already happening. Measured rather than guessed at a
+           * number of millimetres, because a wrapped cell is three times the height of a plain one.
+           */
+          const keep = headerRow
+            ? rowHeight + block.rows.slice(1, 3)
+              .reduce((n, r, i) => n + measureRow(r, i + 1).rowHeight, 0)
+            : rowHeight
+          room(keep)
           const rowTop = y
           cells.forEach((lines, ci) => {
             y = rowTop + CELL_PAD_Y_MM
@@ -455,6 +566,57 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
         })
         y += 2
         drawLines(lines, left, textWidth, 'left')
+        y += spacing?.after ?? PARA_AFTER_MM
+        break
+      }
+      case 'progress': {
+        /*
+         * THE BAR ITSELF, which the firm asked for by name: "there should be an image. On the PDF
+         * created like an image." They had the percentage and said so -- "the percentage is nice" --
+         * and it was not what they meant.
+         *
+         * TWO RECTANGLES: the track, outlined and filled pale, then the paid part over it. Drawn in
+         * that order because the fill sits INSIDE the track's border -- the other way round the
+         * border would be drawn over the end of the fill and a full bar would read as slightly short.
+         */
+        const noteSize = doc.defaults.size * BAR_NOTE_SCALE
+        const labelLines = block.label
+          ? wrap(pieces(fill([{ text: block.label }]), base, measure), textWidth, lineHeight)
+          : []
+        const noteLines = block.note
+          ? wrap(pieces(fill([{ text: block.note }]).map((sp) => ({ ...sp, size: noteSize, colour: '#6b7280' })),
+            { ...base, sizePt: noteSize }, measure), textWidth, lineHeight)
+          : []
+        const labelH = labelLines.reduce((n, l) => n + l.heightMm, 0)
+        const noteH = noteLines.reduce((n, l) => n + l.heightMm, 0)
+        /* ROOM FOR ALL OF IT AT ONCE -- see firstUnitOf: half a bar is a bar at the wrong length. */
+        room(labelH + (block.label ? BAR_GAP_MM : 0) + BAR_MM + (block.note ? BAR_GAP_MM + noteH : 0))
+        if (labelLines.length > 0) {
+          drawLines(labelLines, left, textWidth, 'left')
+          y += BAR_GAP_MM
+        }
+        at().ops.push({
+          op: 'rect', xMm: left, yMm: y, wMm: textWidth, hMm: BAR_MM,
+          fill: BAR_TRACK, stroke: BAR_EDGE, strokeMm: RULE_MM,
+        })
+        /*
+         * NOTHING DRAWN AT NOUGHT, rather than a rectangle of no width. A zero-width fill is a
+         * hairline of ink at the left end of the track, which reads as a small payment where none
+         * has been made.
+         */
+        const share = Math.max(0, Math.min(1, block.fraction))
+        if (share > 0) {
+          at().ops.push({
+            op: 'rect', xMm: left + RULE_MM, yMm: y + RULE_MM,
+            wMm: (textWidth - RULE_MM * 2) * share, hMm: BAR_MM - RULE_MM * 2,
+            fill: BAR_FILL, stroke: null, strokeMm: 0,
+          })
+        }
+        y += BAR_MM
+        if (noteLines.length > 0) {
+          y += BAR_GAP_MM
+          drawLines(noteLines, left, textWidth, 'left')
+        }
         y += spacing?.after ?? PARA_AFTER_MM
         break
       }

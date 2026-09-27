@@ -313,6 +313,10 @@ function documentText(doc: LetterDocument): string {
   for (const b of doc.blocks) {
     if (b.kind === 'table') { for (const row of b.rows) for (const c of row) eat(c.spans) }
     else if (b.kind === 'list') { for (const item of b.items) eat(item) }
+    /* A DRAWN BAR HAS WORDS ROUND IT and they are not spans, so the fall-through below finds
+       nothing in them. A label reading "{{debtor_nme}} has paid" would otherwise pass the unfilled
+       check and reach a debtor with the braces still in it. */
+    else if (b.kind === 'progress') { out.push(b.label ?? '', b.note ?? '') }
     else eat((b as { spans?: { text: string }[] }).spans)
   }
   return out.join(' ')

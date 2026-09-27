@@ -15,6 +15,8 @@ import { nextUnpaidFromRow } from '../../../src/lib/ptpSchedule.js'
 import {
   disputeDaysPhrase, disputeWindow, noticeRespondBy,
 } from '../../../src/lib/disputeWindow.js'
+import { repaymentPlan, settlementLadder } from '../../../src/lib/repaymentPlan.js'
+import { repaymentLetter, repaymentLetterRefusal } from '../../../src/lib/repaymentLetter.js'
 
 /**
  * ONE STEP OF ONE RUN, DECIDED AND ACTED ON.
@@ -132,7 +134,7 @@ export async function runOneStep(
       ? admin.from('profiles').select('id, name, phone, email, whatsapp').eq('id', account.companies.account_owner_id).maybeSingle()
       : Promise.resolve({ data: null }),
     admin.from('message_templates')
-      .select('id, kind, subject, body, audience, name, attachment_id')
+      .select('id, kind, subject, body, audience, name, attachment_id, attaches_schedule')
       .in('id', [node.templateId, node.templateCompanyId].filter(Boolean) as string[]),
     ledgersFor(admin, account.id),
     /* Did the step this one follows actually go? Only asked where the node says it follows one --
@@ -226,22 +228,84 @@ export async function runOneStep(
     if (!r) return null
     return {
       id: r.id, kind: r.kind, subject: r.subject, body: r.body, audience: r.audience,
-      attachment: r.attachment_id
-        ? (attachments.get(r.attachment_id) ?? null)
-        : null,
+      /*
+       * THE SCHEDULE FIRST, where the wording asks for one. A row carrying both is not a case the
+       * library can produce -- the schedule is on two arrangement emails and neither names a letter
+       * -- and if it ever were, the built one is the one that is about THIS account.
+       *
+       * Handed over as a document rather than as bytes, exactly like a stored letter, so everything
+       * downstream is unchanged: planSend reads its merge fields, letterProblems refuses it if the
+       * account cannot fill them, and the same code draws the PDF.
+       */
+      attachment: r.attaches_schedule && scheduleDoc
+        ? { key: 'Payment arrangement schedule', doc: scheduleDoc }
+        : r.attachment_id
+          ? (attachments.get(r.attachment_id) ?? null)
+          : null,
     }
   }
 
-  /* THE BALANCE THE NOTICE QUOTES, through the one place that arithmetic lives. A second
-     implementation here would eventually disagree with the statement the debtor is holding. */
-  const balance = computeBalance({
+  /*
+   * THE ACCOUNT AS THE ARITHMETIC SEES IT, named once.
+   *
+   * The balance the notice quotes and the projection the repayment schedule is drawn from are the
+   * SAME position -- written out twice they would eventually disagree, and the two people who would
+   * compare them are the debtor holding the schedule and the collector reading the notice.
+   */
+  const position = {
     capitalHandedOver: Number(account.capital_handed_over ?? 0),
     handoverDate: account.opening_as_at ?? null,
     ledgers: ledgerRes,
     inDuplum: true,
     interestRateAnnual: account.interest_rate_annual ? Number(account.interest_rate_annual) : undefined,
-    accrueTo: today,
-  })
+  }
+  /* THE BALANCE THE NOTICE QUOTES, through the one place that arithmetic lives. A second
+     implementation here would eventually disagree with the statement the debtor is holding. */
+  const balance = computeBalance({ ...position, accrueTo: today })
+
+  /*
+   * THE ACCOUNT'S OWN REPAYMENT SCHEDULE, where the wording being sent carries one.
+   *
+   * THE FIRM: "put it in the emails for this payment arrangement schedule... maybe it just goes out
+   * automatically once the payment has been recorded." So the arrangement confirmation now leaves
+   * with a page showing what the arrangement will cost, what it would cost paid faster, and how far
+   * the debtor already is -- built here because it cannot be a stored template: its length is the
+   * answer. See message_templates.attaches_schedule.
+   *
+   * NULL RATHER THAN A HOLD WHERE IT CANNOT BE BUILT. Three honest cases -- no arrangement on the
+   * account, an offer that never clears it, one that outruns the horizon -- and in all three the
+   * confirmation itself is still true and worth sending. Holding the step would stop a debtor being
+   * told their arrangement is confirmed because an illustration of it could not be drawn.
+   *
+   * BUILT ONCE, whichever audience the node resolves to: the schedule is about the account and the
+   * money, and there is no individual and company version of arithmetic.
+   */
+  const scheduleDoc = (() => {
+    const promise = promiseRes.data
+    if (!promise || !promise.arrangement || !promise.due_on) return null
+    if (!(Number(promise.amount) > 0)) return null
+    const recurring = {
+      arrangement: promise.arrangement as 'once_off' | 'weekly' | 'monthly',
+      dueOn: promise.due_on as string,
+      dayOfMonth: (promise.day_of_month as number | null) ?? null,
+      onLastDay: Boolean(promise.on_last_day),
+      dayOfWeek: (promise.day_of_week as number | null) ?? null,
+    }
+    const plan = repaymentPlan({
+      account: position, instalment: Number(promise.amount), schedule: recurring,
+    })
+    /* The same refusal the collector's own panel shows, so a schedule the screen would not offer is
+       not one the runner quietly posts. */
+    if (repaymentLetterRefusal(plan) !== null) return null
+    return repaymentLetter({
+      plan,
+      money: moneyZa,
+      each: recurring.arrangement === 'weekly' ? 'a week' : 'a month',
+      balanceToday: balance.balance,
+      faster: settlementLadder({ account: position, schedule: recurring }, plan),
+      paidSoFar: balance.payments,
+    })
+  })()
 
   /*
    * HOW LONG THE DEBTOR HAS, worked out before the merge because two fields come out of it.
@@ -616,6 +680,9 @@ interface TemplateRow {
   subject: string | null; body: string
   audience: 'individual' | 'company' | null
   name: string; attachment_id: string | null
+  /** True where this wording carries the account's own repayment schedule. See the column's own
+      comment: it is built per account, so there is no template to point `attachment_id` at. */
+  attaches_schedule: boolean | null
 }
 
 /** The primary live contact of a kind, never a retired one -- the same rule as the address. */

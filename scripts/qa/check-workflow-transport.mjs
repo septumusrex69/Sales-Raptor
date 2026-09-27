@@ -357,6 +357,57 @@ ok('a sent step marks the account as worked', /\.update\(\{ last_action_at: toda
 ok('...dated in the firm’s own day', !/last_action_at: sentAt/.test(runner))
 
 
+/* ---------------- the arrangement confirmation carries the schedule ---------------- */
+
+/*
+ * THE FIRM: "put it in the emails for this payment arrangement schedule... maybe it just goes out
+ * automatically once the payment has been recorded."
+ *
+ * IT CANNOT BE A STORED LETTER, which is why none of this looks like the other attachment. A merge
+ * field is a scalar and the body of that document is a comparison whose ROWS are the answer -- so it
+ * is BUILT, per account, from the live arrangement, and message_templates.attaches_schedule is what
+ * says which wording carries one.
+ */
+/*
+ * ASSERTED ON THE USE AND ON THE SELECT, not on the word.
+ *
+ * A bare /attaches_schedule/ passed with the column dropped from the select AND the branch turned
+ * off, because the row TYPE still declares the field and its comment still names it -- a check
+ * satisfied by a type declaration and a comment about the thing it guards. That is the same trap
+ * the seed's own guard fell into, in a new place.
+ */
+ok('the runner asks the library which wording carries a schedule',
+  /select\('id, kind, subject, body, audience, name, attachment_id, attaches_schedule'\)/.test(runner))
+ok('...and branches on it when the attachment is chosen',
+  /attachment: r\.attaches_schedule && scheduleDoc/.test(runner))
+ok('...and builds it from the live arrangement', /const scheduleDoc = \(\(\) => \{/.test(runner))
+/*
+ * THE SAME POSITION THE NOTICE'S OWN BALANCE COMES FROM. Written out twice, the balance quoted in
+ * the email and the projection on the page attached to it would eventually disagree -- and the two
+ * people who would compare them are the debtor holding the schedule and the collector reading the
+ * email.
+ */
+ok('...off the same position the balance is', /const balance = computeBalance\(\{ \.\.\.position, accrueTo: today \}\)/.test(runner))
+ok('...and the ladder from the same position too',
+  /settlementLadder\(\{ account: position, schedule: recurring \}, plan\)/.test(runner))
+/*
+ * AND IT DOES NOT HOLD THE STEP WHERE IT CANNOT BE BUILT. Three honest cases -- no arrangement, an
+ * offer that never clears the account, one that outruns the horizon -- and in all three the
+ * confirmation itself is still true. Holding would stop a debtor being told their arrangement is
+ * confirmed because an illustration of it could not be drawn.
+ */
+ok('...returning nothing rather than holding the step',
+  /if \(repaymentLetterRefusal\(plan\) !== null\) return null/.test(runner))
+/* THE SAME REFUSAL THE COLLECTOR'S PANEL SHOWS, so a schedule the screen would not offer is not one
+   the runner quietly posts. */
+ok('...by the same rule the collector\u2019s own panel uses',
+  /repaymentLetterRefusal/.test(runner))
+/* HANDED OVER AS A DOCUMENT, not as bytes, so everything downstream is unchanged: planSend reads
+   its merge fields, letterProblems refuses it if the account cannot fill them, one code path draws
+   the PDF. */
+ok('...and handed over as a document, like any other attachment',
+  /\{ key: 'Payment arrangement schedule', doc: scheduleDoc \}/.test(runner))
+
 /* ---------------- the runner can answer a dispute message ---------------- */
 
 /*

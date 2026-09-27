@@ -444,29 +444,82 @@ export interface SettlementOption {
   totalPaid: number
   /** Interest plus receipt fees: what the debt costs over and above itself. */
   totalCost: number
-  /** What choosing this over their own offer saves them. Always positive. */
+  /** What choosing this over their own offer saves them. Nought on their own offer. */
   saving: number
+  /**
+   * TRUE ON THE ONE ROW THAT IS THE DEBTOR'S OWN OFFER, said back to them.
+   *
+   * THE FIRM: "I'll just put that one in the top, like what you have now, like it's 500 rand. And
+   * then say... 10 instalments, six instalments, three instalments, settle. So you're going from
+   * what they currently have, going up and down."
+   *
+   * IT IS THE ANCHOR AND WITHOUT IT THE LADDER IS A PRICE LIST. Four rows of figures a debtor did
+   * not ask for read as the firm pushing; the same four under the number they themselves said read
+   * as what their own offer costs and what each step up would save. The saving column is measured
+   * from this row, so the row it is measured from has to be on the page.
+   */
+  theirs?: boolean
 }
 
 export function settlementLadder(
   input: Omit<RepaymentInput, 'instalment'>,
   offer: RepaymentPlan,
-  counts: number[] = [1, 3, 6, 12],
+  /*
+   * THE FIRM'S OWN FOUR, IN THEIR OWN ORDER: "10 instalments, six instalments, three instalments,
+   * settle." Read downwards from what the debtor offered, which is why the list descends -- though
+   * it is sorted below anyway, so a caller writing them the other way round cannot invert the page.
+   */
+  counts: number[] = [10, 6, 3, 1],
 ): SettlementOption[] {
   /* Nothing to compare against: an offer that does not settle has no total to be measured. */
   if (offer.outcome !== 'settles' || offer.rows.length === 0) return []
+
+  /*
+   * THEIR OWN OFFER, FIRST, AND IT SAVES NOTHING -- which is the point of putting it there. Every
+   * other row's saving is the difference from this one, so a ladder that left it off would print
+   * four savings measured against a number the debtor cannot see.
+   */
+  const theirs: SettlementOption = {
+    instalments: offer.rows.length,
+    each: offer.rows[0].amount,
+    totalPaid: offer.totalPaid,
+    totalCost: roundToCents(offer.totalInterest + offer.totalReceiptFees),
+    saving: 0,
+    theirs: true,
+  }
+
   const out: SettlementOption[] = []
-  for (const n of counts) {
-    /* STRICTLY FASTER. Equal is their own offer said back to them, and slower is advice to pay
-       more in total. */
+  /* Slowest first, so the page reads down from their offer towards settling in full. */
+  for (const n of [...counts].sort((a, b) => b - a)) {
+    /* STRICTLY FASTER. Equal is their own offer said back to them -- which is the row above -- and
+       slower is advice to pay more in total. */
     if (n >= offer.rows.length) continue
     const each = instalmentToSettleIn(input, n)
     if (each === null) continue
+    /*
+     * AND NEVER LESS THAN THEY THEMSELVES OFFERED. The firm, of this ladder: "in this arrangement,
+     * it cannot be less than the amount has already been there."
+     *
+     * Fewer payments on the same debt always means a bigger one, so today this holds by
+     * arithmetic -- and it is written out anyway, because the thing it guards is not arithmetic. A
+     * count added to the list above, or a debtor whose "offer" is a single large payment, would
+     * otherwise put a SMALLER monthly figure in front of somebody the firm is trying to move
+     * upwards, and a debtor shown a cheaper month will take it.
+     */
+    if (each < theirs.each) continue
     const plan = repaymentPlan({ ...input, instalment: each, maxInstalments: n })
     if (plan.outcome !== 'settles') continue
     out.push({
       instalments: plan.rows.length,
-      each,
+      /*
+       * WHAT THEY WOULD ACTUALLY HAND OVER, off the projection -- not the figure the search landed
+       * on. The two are the same on every row but one: settling in a SINGLE payment, where the
+       * bisection returns the smallest whole rand that clears the account and the payment itself is
+       * trimmed to what is owed. Printed from the search the row read "EACH R 10 935.00, TOTAL
+       * R 10 934.40", which is a page telling a debtor the one payment is sixty cents more than the
+       * total of it.
+       */
+      each: plan.rows[0].amount,
       totalPaid: plan.totalPaid,
       totalCost: roundToCents(plan.totalInterest + plan.totalReceiptFees),
       /* Clamped at nought rather than allowed negative: a faster arrangement cannot cost more, and
@@ -475,5 +528,11 @@ export function settlementLadder(
       saving: Math.max(0, roundToCents(offer.totalPaid - plan.totalPaid)),
     })
   }
-  return out
+
+  /*
+   * NOTHING FASTER TO SHOW IS AN EMPTY LADDER, not a table of one row. A debtor already settling in
+   * a single payment would otherwise be handed a comparison of their own offer with itself, under a
+   * heading promising to show them what paying faster would save.
+   */
+  return out.length > 0 ? [theirs, ...out] : []
 }

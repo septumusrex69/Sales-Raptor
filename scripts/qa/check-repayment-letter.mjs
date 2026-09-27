@@ -126,11 +126,27 @@ const offDebt = Math.round((plan.totalPaid - plan.totalInterest - plan.totalRece
 check('what comes off the debt is what was owed', offDebt, 10200)
 ok('...and that line is on the page', text.includes(`Which leaves, off the debt`))
 
-/* EVERY ROW IS THERE, not a summary of them. A debtor asked to sign up to thirty-one payments is
-   entitled to see thirty-one payments. */
-for (const r of [plan.rows[0], plan.rows[15], plan.rows[plan.rows.length - 1]]) {
-  ok(`payment ${r.no} is on the schedule`, text.includes(money(r.balanceAfter)))
-}
+/*
+ * AND THE ROW-BY-ROW SCHEDULE IS GONE, WHICH THE FIRM ASKED FOR: "inside the schedule, I would
+ * remove all of that, that big thing where every single payment is shown."
+ *
+ * IT WAS THERE ON A REASONABLE ARGUMENT -- a debtor asked to agree to thirty-one payments is
+ * entitled to see thirty-one payments -- and the firm, who have the conversation, say it buries the
+ * page. Thirty-one rows of arithmetic between the offer and the comparison is where a reader stops,
+ * and the comparison is the half that changes what they do. The working is still on the collector's
+ * own panel, where the person who has to defend the figure can read it.
+ *
+ * ASSERTED BY THE HEADING AND BY A MIDDLE ROW'S FIGURE, in that order. The heading alone would pass
+ * on a table whose heading somebody renamed; a figure alone would be a coincidence away from
+ * passing, because a running balance can repeat a summary figure. Payment 16's closing balance
+ * appears nowhere else on the page.
+ */
+ok('the every-payment table is not on the schedule any more', !/Every payment/.test(text))
+ok('...not even a middle row of it', !text.includes(money(plan.rows[15].balanceAfter)))
+/* WHERE IT ENDS IS STILL ON THE PAGE, in the summary: the last payment and its date. Removing the
+   table must not remove the answer to "when am I finished", which is the question the debtor asked. */
+ok('the final payment is still named', text.includes(money(plan.rows[plan.rows.length - 1].amount)))
+ok('...with the day it falls', text.includes('Final payment'))
 /* The last row closes the account, which is the line the whole document exists to reach. */
 check('the last row leaves nothing owing', plan.rows[plan.rows.length - 1].balanceAfter, 0)
 
@@ -206,10 +222,27 @@ const withLadder = lettersText(repaymentLetter({
 }))
 ok('the page shows what clearing it sooner would cost', /What it would cost to clear it sooner/.test(withLadder))
 ok('...with a column for what they save', /YOU SAVE/.test(withLadder))
-for (const o of faster) {
+/*
+ * THEIR OWN OFFER IS THE FIRST LINE, which is what the firm asked for: "I'll just put that one in
+ * the top, like it's 500 rand. And then 10 instalments, six instalments, three instalments, settle."
+ * Without it the three rows below are a price list; with it they are what their own offer costs and
+ * what each step up would save.
+ */
+ok('their own offer is named on the ladder', /Your offer/.test(withLadder))
+ok('...and it is the instalment they actually offered',
+  withLadder.includes(money(faster[0].each)) && faster[0].theirs === true)
+/* A DASH ON THEIR OWN ROW, NOT R 0.00. A nought in a column headed YOU SAVE reads as a saving that
+   happens to be nothing; what is true is that it is the row everything else is measured from. */
+ok('...and saves nothing, said as a dash rather than a nought',
+  /\u2014/.test(withLadder))
+for (const o of faster.filter((x) => !x.theirs)) {
   ok(`...the saving on ${o.instalments} payments`, withLadder.includes(money(o.saving)))
   ok(`...and what each one would be`, withLadder.includes(money(o.each)))
+  /* THE FIRM'S RULE, ON THE PAGE: no line asks for less a month than they already offered. */
+  ok(`...which is not less than they offered (${o.instalments})`, o.each >= faster[0].each)
 }
+/* AND THE PAGE SAYS SO, rather than leaving a debtor to notice that every figure went up. */
+ok('the page says every line below asks for more', /asks for more a month/.test(withLadder))
 /* SETTLING IN ONE PAYMENT IS NOT "1 payments". */
 ok('one payment reads as settling now', /Settle now/.test(withLadder))
 /* AND IT IS ABSENT WHERE THERE IS NOTHING FASTER TO SHOW, rather than an empty table: a heading

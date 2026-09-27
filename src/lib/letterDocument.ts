@@ -125,6 +125,19 @@ export interface TableBlock {
    * strip at the top, `rows` for the banking details, `all` for the legal-process table.
    */
   borders?: 'none' | 'rows' | 'all'
+  /**
+   * DO NOT BREAK THIS TABLE ACROSS A PAGE.
+   *
+   * OFF BY DEFAULT, because most tables here are lists and a list that will not break is a list that
+   * throws away the bottom of a page. This is for the few that are an ARGUMENT: the repayment
+   * schedule's comparison is five rows that only mean something read together, and split after the
+   * third the debtor turns the page having seen their own offer and the two smallest savings.
+   *
+   * IT DOES NOT PROMISE THE IMPOSSIBLE. A table taller than a page still breaks -- see the layout:
+   * it asks for the room and carries on if it cannot have it, which is the same thing `room` does
+   * everywhere else rather than looping for ever.
+   */
+  keepTogether?: boolean
   spacing?: Spacing
 }
 
@@ -156,9 +169,37 @@ export interface PageBreakBlock {
   kind: 'pagebreak'
 }
 
+/**
+ * A DRAWN BAR: how far through something the reader is.
+ *
+ * THE FIRM ASKED FOR THE THING ITSELF, not the number: "there should be an image. On the PDF
+ * created like an image." They had the percentage already -- "the percentage is nice" -- and it was
+ * not what they meant by a progress bar.
+ *
+ * WHY IT IS A BLOCK AND NOT A PICTURE. An image would mean generating a raster, embedding it, and
+ * having it print at whatever resolution survived; and a bar made of block characters is not an
+ * option at all, because the repertoire a PDF in the standard faces may contain is Windows-1252 and
+ * the block characters are outside it. Two filled rectangles are exact at any size, weigh nothing,
+ * and are the same shape on the screen and on paper -- which is the only way the collector's panel
+ * and the debtor's letter can agree.
+ *
+ * MONOCHROME, DECIDED BY THE RENDERER RATHER THAN CARRIED HERE. A schedule gets photocopied and
+ * faxed, and a bar whose only difference from its track is hue disappears the first time it does.
+ * Keeping the colours out of the block also keeps this round trip small: a fraction and two strings.
+ */
+export interface ProgressBlock {
+  kind: 'progress'
+  /** 0..1. Clamped on the way in, so a renderer never has to defend against a bar 140% long. */
+  fraction: number
+  /** What the bar is about, drawn above it. */
+  label?: string
+  /** The figures, drawn under it. The bar is the picture; this is the evidence for it. */
+  note?: string
+}
+
 export type Block =
   | HeadingBlock | ParagraphBlock | ListBlock | TableBlock | SpacerBlock | SignatureBlock
-  | PageBreakBlock
+  | PageBreakBlock | ProgressBlock
 
 export const BLOCK_KINDS: Record<Block['kind'], { label: string; hint: string }> = {
   heading: { label: 'Heading', hint: 'A section title, numbered or not' },
@@ -168,6 +209,7 @@ export const BLOCK_KINDS: Record<Block['kind'], { label: string; hint: string }>
   spacer: { label: 'Space', hint: 'A gap, in millimetres' },
   signature: { label: 'Signature line', hint: 'A ruled line to sign above' },
   pagebreak: { label: 'Page break', hint: 'Start a new page here' },
+  progress: { label: 'Progress bar', hint: 'A drawn bar: how much has been paid' },
 }
 
 /* ------------------------------------------------------------------ the document */
@@ -302,6 +344,12 @@ export function lettersText(doc: LetterDocument): string {
     else if (b.kind === 'list') for (const item of b.items) out.push(spansText(item))
     else if (b.kind === 'signature') out.push(spansText(b.spans))
     else if (b.kind === 'table') for (const row of b.rows) for (const c of row) out.push(spansText(c.spans))
+    /* THE WORDS ROUND THE BAR ARE STILL WORDS, so the unknown-field scan sees them. A label
+       reading "{{debtor_nme}}% paid" would otherwise reach a debtor with the braces in it. */
+    else if (b.kind === 'progress') {
+      if (b.label) out.push(b.label)
+      if (b.note) out.push(b.note)
+    }
   }
   return out.join('\n')
 }
@@ -482,6 +530,18 @@ export function documentWithoutOptional(
       if (items.length > 0) blocks.push({ ...block, items })
       continue
     }
+    /*
+     * A DRAWN BAR HAS WORDS BUT NOT SPANS, and the cut applies to the words while the BAR ALWAYS
+     * STAYS. Everywhere else an emptied run takes its block with it; here it must not, because the
+     * bar is the content and the label is the caption on it. A schedule that lost its progress bar
+     * because the caption happened to quote an identity number would lose the one thing the firm
+     * asked for by name.
+     */
+    if (block.kind === 'progress') {
+      const word = (t?: string) => (t === undefined ? undefined : spanWithoutOptional(t, values))
+      blocks.push({ ...block, label: word(block.label), note: word(block.note) })
+      continue
+    }
     const spans = (block as { spans?: Span[] }).spans
     if (!spans) { blocks.push(block); continue }
     const done = cut(spans)
@@ -546,7 +606,10 @@ export function letterToHtml(doc: LetterDocument, input: {
           }).join('')
           return `<tr>${cells}</tr>`
         }).join('')
-        out.push(`<table class="ltr-t ltr-b-${b.borders ?? 'none'}"${attr}>`
+        /* `keepTogether` travels as data, for the reason `keepWithNext` does: it has no appearance
+           to be read back from, so the attribute IS the record of it. */
+        out.push(`<table class="ltr-t ltr-b-${b.borders ?? 'none'}"${attr}`
+          + `${b.keepTogether ? ' data-whole="1"' : ''}>`
           + (cols ? `<colgroup>${cols}</colgroup>` : '') + `<tbody>${rows}</tbody></table>`)
         break
       }
@@ -558,6 +621,31 @@ export function letterToHtml(doc: LetterDocument, input: {
           + `<div class="ltr-rule" style="width:${b.widthMm ?? 70}mm"></div>`
           + `<div>${inline(b.spans)}</div></div>`)
         break
+      case 'progress': {
+        /*
+         * TWO NESTED DIVS AND A DATA ATTRIBUTE, which is the whole bar.
+         *
+         * THE FRACTION IS CARRIED AS A NUMBER AND THE WIDTH IS A ROUNDING OF IT. The parse reads
+         * `data-fraction`, never the percentage: a width written to one decimal place and read back
+         * would return a DIFFERENT number from the one stored, and the round trip through the page
+         * editor has to be exact -- check-page-editor compares the document it drew with the
+         * document it read, block for block.
+         *
+         * AND THE WIDTH IS IN PER CENT, NOT MILLIMETRES, on purpose: mmOf reads only `mm`, which is
+         * what keeps the page layout's own pushes out of the saved document. A bar measured in
+         * millimetres would be the one element whose geometry could be mistaken for one.
+         */
+        const pc = Math.max(0, Math.min(1, b.fraction)) * 100
+        out.push(`<div class="ltr-bar" data-fraction="${b.fraction}"${attr}>`
+          /* Through `inline`, like every other run of words on the sheet, so a field in a bar's
+             caption is merged and escaped by the one code path that does it everywhere else. */
+          + (b.label ? `<div class="ltr-bar-label">${inline([{ text: b.label }])}</div>` : '')
+          + '<div class="ltr-bar-track">'
+          + `<div class="ltr-bar-fill" style="width:${pc.toFixed(2)}%"></div></div>`
+          + (b.note ? `<div class="ltr-bar-note">${inline([{ text: b.note }])}</div>` : '')
+          + '</div>')
+        break
+      }
       case 'pagebreak':
         /* break-before on the NEXT thing rather than break-after on this one: an empty div with
            break-after produces a trailing blank page in every browser that has ever printed. */
@@ -634,6 +722,15 @@ export function letterCss(doc: LetterDocument, page: PageSetup): string {
 .ltr-break { break-before: page; page-break-before: always; }
 .ltr-sig { margin: 0 0 3mm; }
 .ltr-rule { border-bottom: 0.3mm solid #4b5563; height: 10mm; margin-bottom: 1.5mm; }
+/* THE DRAWN BAR. Monochrome, because a schedule gets photocopied and a bar that differs from its
+   track only in hue disappears the first time it does -- and the track keeps a hairline border so
+   the UNPAID part of it is still visibly part of a bar rather than white paper. The two heights and
+   the border width are the same numbers letterLayout draws with, so the sheet and the PDF agree. */
+.ltr-bar { margin: 0 0 3mm; }
+.ltr-bar-label { margin-bottom: 1.2mm; }
+.ltr-bar-track { height: 5mm; border: 0.2mm solid #9ca3af; background: #eef1f5; }
+.ltr-bar-fill { height: 100%; background: #1f2937; }
+.ltr-bar-note { font-size: ${(d.size * 0.86).toFixed(1)}pt; color: #6b7280; margin-top: 1.2mm; }
 /* The running line sits BELOW the text, in the bottom margin, clear of the letterhead's own
    footer block. At the top it competed with the logo and pushed the date block down the page. */
 .ltr-running { font-size: ${(d.size * 0.78).toFixed(1)}pt; color: #6b7280; letter-spacing: .02em;
@@ -875,6 +972,16 @@ function styleProp(attrs: string, prop: string): string | null {
 const classOf = (attrs: string): string =>
   (/class\s*=\s*"([^"]*)"|class\s*=\s*'([^']*)'/i.exec(attrs)?.slice(1).find(Boolean) ?? '')
 
+/**
+ * ONE ATTRIBUTE'S VALUE, by name. Written beside classOf rather than generalised over it: `class`
+ * is asked for on nearly every element and is worth its own line, and this exists for `data-*`,
+ * which is how a drawn bar carries the one number it is.
+ */
+function attrValue(attrs: string, name: string): string {
+  const re = new RegExp(`${name}\\s*=\\s*"([^"]*)"|${name}\\s*=\\s*'([^']*)'`, 'i')
+  return re.exec(attrs)?.slice(1).find((v) => v !== undefined) ?? ''
+}
+
 function alignOf(attrs: string): Align | undefined {
   const a = styleProp(attrs, 'text-align')
   return a === 'center' || a === 'right' || a === 'justify' || a === 'left' ? a : undefined
@@ -926,6 +1033,49 @@ export function documentHtmlToBlocks(html: string): Block[] {
 
     /* A hard page break, which the renderer draws as an empty div. */
     if (cls.includes('ltr-break')) { out.push({ kind: 'pagebreak' }); continue }
+
+    /*
+     * A DRAWN BAR, READ BACK OFF ITS OWN ATTRIBUTE.
+     *
+     * BEFORE THE SPACER BRANCH, because that one claims any div it can read a height off, and it is
+     * ordered rather than narrowed: a check that the bar's div "is not a spacer" would be one more
+     * thing to remember the next time a div-shaped block is added.
+     *
+     * THE FRACTION COMES FROM data-fraction AND NEVER FROM THE FILL'S WIDTH. The width is written to
+     * two decimal places, so reading it back would return a different number from the one stored --
+     * and the page editor draws the document, reads it back and saves what it read, so "different"
+     * means the stored bar moves a little every time somebody opens the letter.
+     *
+     * AND AN UNREADABLE ONE IS STILL A BAR, at nought. The parse must be total: this element has
+     * already been claimed by the time the fraction is looked at, so returning nothing here would
+     * drop the bar and everything the author put in it.
+     */
+    if (cls.includes('ltr-bar')) {
+      const inner = topLevelBlocks(raw.inner)
+      const text = (want: string) => {
+        const el = inner.find((b) => classOf(b.attrs).includes(want))
+        if (!el) return undefined
+        const t = editableHtmlToSpans(el.inner).map((sp) => sp.text).join('')
+        /*
+         * AN EMPTY CAPTION IS NO CAPTION: stored as '' it would draw a blank line above the bar and
+         * come back as a caption that exists, which is a round trip that adds something.
+         *
+         * TRIMMED, NOT COMPARED TO ''. A browser that empties a caption leaves the div standing with
+         * a space or an &nbsp; in it, which is not '' and is not a caption either -- and that is the
+         * case the round trip actually produces, rather than the tidy empty string.
+         */
+        return t.trim() === '' ? undefined : t
+      }
+      const raw_f = Number(attrValue(raw.attrs, 'data-fraction'))
+      out.push({
+        kind: 'progress',
+        fraction: Number.isFinite(raw_f) ? Math.max(0, Math.min(1, raw_f)) : 0,
+        ...(text('ltr-bar-label') !== undefined ? { label: text('ltr-bar-label') } : {}),
+        ...(text('ltr-bar-note') !== undefined ? { note: text('ltr-bar-note') } : {}),
+        ...(spacing ? { spacing } : {}),
+      } as Block)
+      continue
+    }
 
     /* A spacer is an empty div with a height. Anything else empty is debris and is dropped. */
     if (raw.tag === 'div' && !cls.includes('ltr-sig')) {
@@ -999,6 +1149,7 @@ export function documentHtmlToBlocks(html: string): Block[] {
         ...(widths.length > 0 ? { widths } : {}),
         ...(headerRow ? { headerRow: true } : {}),
         ...(borders ? { borders } : {}),
+        ...(/\bdata-whole\b/.test(raw.attrs) ? { keepTogether: true } : {}),
         ...(spacing ? { spacing } : {}),
       })
       continue

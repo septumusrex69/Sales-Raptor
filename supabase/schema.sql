@@ -9019,3 +9019,59 @@ begin
     raise exception 'A message node has no template, so this version would send nothing.';
   end if;
 end $$;
+
+
+-- ============================================================================
+-- AN EMAIL MAY CARRY THE ACCOUNT'S OWN REPAYMENT SCHEDULE.
+--
+-- THE FIRM: "put it in the emails for this payment arrangement schedule... if a person has made a
+-- payment arrangement, maybe it just goes out automatically once the payment has been recorded."
+--
+-- A SECOND KIND OF ATTACHMENT, AND IT HAD TO BE. `attachment_id` says "this email posts THAT
+-- letter", and every letter it can name is a row in this table -- wording the firm wrote with
+-- {{fields}} in it. The repayment schedule cannot be one: a merge field is a scalar and the body of
+-- that document is a comparison whose ROWS are the answer, different on every account and different
+-- again the day a payment lands. It is built by repaymentLetter and it is built per account.
+--
+-- SO THE ROW SAYS WHICH EMAILS CARRY IT rather than naming a template. Two values, not a
+-- template_id, because there is nothing to point at.
+--
+-- NOT A NODE COLUMN, deliberately. workflow_nodes would have been the other place, and
+-- workflow_take_draft copies that table column by column and has dropped one three times --
+-- trigger_kind, the three node columns, then day_unit -- each time giving back a draft that looked
+-- right and meant something else. Nothing about "does this wording carry a schedule" belongs to a
+-- workflow anyway: the same email sent by hand should carry it too.
+--
+-- AND NOT STRING-MATCHED ON THE SEED KEY, which was the alternative and is the thing CLAUDE.md
+-- names: a workflow picking a statutory demand by matching words in its name.
+--
+-- FALSE EVERYWHERE ELSE. A section 129 does not carry a repayment schedule, and a default that let
+-- it would put one on a statutory demand the first time somebody forgot this column existed.
+-- ============================================================================
+alter table public.message_templates
+  add column if not exists attaches_schedule boolean not null default false;
+
+comment on column public.message_templates.attaches_schedule is
+  'True where this email carries the account''s own repayment schedule, built per account by '
+  'repaymentLetter. Separate from attachment_id, which names a stored letter: the schedule has no '
+  'stored form because its length is the answer. Ignored on anything but an email, and ignored '
+  'where the account has no arrangement that settles -- the email then goes without it.';
+
+-- A schedule is posted BY an email. A letter does not post itself and an SMS carries nothing.
+alter table public.message_templates drop constraint if exists message_templates_schedule_is_email;
+alter table public.message_templates add constraint message_templates_schedule_is_email
+  check (attaches_schedule = false or kind = 'email');
+
+-- ---------- AND THE TWO EMAILS THAT CARRY IT ----------
+--
+-- The arrangement confirmation, both audiences. It is the one message in the library sent at the
+-- moment an arrangement exists and before any of it has been paid, which is exactly when a schedule
+-- of what it will cost is worth reading.
+--
+-- AN UPDATE RATHER THAN A SEED, and it is not the thing the house rule forbids. The rule is that
+-- re-running a seed must never revert the firm's WORDING -- their words win over ours, always. This
+-- writes no wording: it sets a delivery flag on two rows the firm cannot see or edit, and leaves
+-- body, subject and name exactly as they are.
+update public.message_templates
+   set attaches_schedule = true
+ where seed_key in ('email-ptp-confirmed-individual', 'email-ptp-confirmed-company');

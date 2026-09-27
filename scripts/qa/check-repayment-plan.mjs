@@ -305,11 +305,38 @@ check('the floor is a whole rand', minimumInstalment(10000, 24) % 1, 0)
  */
 const ladder = settlementLadder({ account: account(), schedule: monthly() }, five)
 ok(`there are faster options to show (${ladder.length})`, ladder.length >= 3)
-check('...counted in payments', ladder.map((o) => o.instalments), [1, 3, 6, 12])
+/*
+ * THEIR OWN OFFER FIRST, THEN DOWN TO SETTLING IN FULL. The firm's own order: "I'll just put that
+ * one in the top, like it's 500 rand. And then 10 instalments, six instalments, three instalments,
+ * settle. So you're going from what they currently have, going up and down."
+ *
+ * THE ORDER IS PART OF THE ARGUMENT and not presentation. Read upwards -- settle, three, six, their
+ * offer -- the same four rows are a page that ends on the slowest and cheapest-per-month option,
+ * which is the one the firm is trying to move them off.
+ */
+check('...their own offer first, then down to settling in full',
+  ladder.map((o) => o.instalments), [31, 10, 6, 3, 1])
+check('...and exactly one row is marked as theirs',
+  ladder.filter((o) => o.theirs).map((o) => o.instalments), [31])
+/* THE ANCHOR ROW IS THEIR OFFER EXACTLY, not a re-derivation of it: every saving below is measured
+   from this total, so a row that quietly recomputed it would shift all four. */
+check('the anchor row is their offer, to the cent', ladder[0].totalPaid, five.totalPaid)
+check('...at the instalment they said', ladder[0].each, five.rows[0].amount)
+check('...and saves them nothing, because it is what they already offered', ladder[0].saving, 0)
+
+/*
+ * AND NOTHING ON THE LADDER ASKS FOR LESS A MONTH THAN THEY THEMSELVES OFFERED. The firm: "in this
+ * arrangement, it cannot be less than the amount has already been there." A debtor shown a smaller
+ * monthly figure on a page about paying faster will take the smaller figure.
+ */
+for (const o of ladder) {
+  ok(`${o.instalments} payments never asks for less a month than they offered (${o.each})`,
+    o.each >= ladder[0].each)
+}
 
 /* MEASURED AGAINST THEIR OWN OFFER. R500 a month costs R15 267; six payments cost R12 119; so the
    saving on that row is R3 148 and not some figure relative to another option on the table. */
-for (const o of ladder) {
+for (const o of ladder.filter((x) => !x.theirs)) {
   near(`${o.instalments} payments saves the difference from their own offer`,
     o.saving, five.totalPaid - o.totalPaid, 0.02)
   ok(`...and costs less in all than their offer (${o.instalments})`, o.totalPaid < five.totalPaid)
@@ -323,9 +350,11 @@ for (const o of ladder) {
 }
 /* FASTER IS CHEAPER, ALWAYS, which is the whole argument -- so the saving must fall as the number
    of payments rises, or the table is telling the debtor to take longer. */
+/* Read down the page, so each row saves MORE than the one above it -- starting from nought on their
+   own offer. Written the other way round the table would be telling the debtor to take longer. */
 for (let i = 1; i < ladder.length; i += 1) {
-  ok(`${ladder[i].instalments} payments saves less than ${ladder[i - 1].instalments}`,
-    ladder[i].saving < ladder[i - 1].saving)
+  ok(`${ladder[i].instalments} payments saves more than ${ladder[i - 1].instalments}`,
+    ladder[i].saving > ladder[i - 1].saving)
 }
 
 /*
@@ -335,7 +364,10 @@ for (let i = 1; i < ladder.length; i += 1) {
 const offeredSix = plan(2020)
 check('a debtor who offered six is shown nothing slower',
   settlementLadder({ account: account(), schedule: monthly() }, offeredSix).map((o) => o.instalments),
-  [1, 3])
+  [6, 3, 1])
+/* NOTHING FASTER IS AN EMPTY LADDER, NOT A TABLE OF ONE ROW. A debtor already settling in a single
+   payment would otherwise be handed a comparison of their own offer with itself, under a heading
+   promising to show them what paying faster would save. */
 check('...and one settling in a single payment is shown nothing at all',
   settlementLadder({ account: account(), schedule: monthly() }, plan(20000)).length, 0)
 /* NOTHING TO COMPARE AGAINST is an empty table rather than a wrong one: an offer that never clears

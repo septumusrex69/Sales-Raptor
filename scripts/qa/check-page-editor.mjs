@@ -408,6 +408,111 @@ ok('...after the block the caret is in, never inside it',
 ok('...while plain text still goes in the way the browser can undo',
   /execCommand\('insertText'/.test(editor))
 
+/* ---------------- the drawn bar ---------------- */
+
+/*
+ * THE FIRM ASKED FOR THE THING ITSELF: "the bar, it should be literally like a physical bar... not
+ * the percentage. The percentage is nice, but there should be an image."
+ *
+ * IT IS A BLOCK, SO IT HAS TO SURVIVE THE ROUND TRIP -- the sheet is drawn, read back and saved as
+ * what was read, so a bar the parse cannot see is a bar that disappears the first time somebody
+ * opens the letter in the Library. THE PARSE MUST BE TOTAL: an element nobody recognises does not
+ * just lose itself, it takes its contents with it, and this element has words inside it.
+ */
+{
+  const bar = {
+    kind: 'progress',
+    fraction: 0.42063492063492064,
+    label: 'What you have paid so far',
+    note: 'R 2 500.00 paid of R 12 700.00 \u00b7 20% of the account',
+  }
+  const doc = {
+    defaults: { font: 'Georgia, serif', size: 10.5, colour: '#1f2937', lineHeight: 1.45 },
+    blocks: [{ kind: 'paragraph', spans: [{ text: 'Dear {{debtor_name}}' }] }, bar,
+      { kind: 'progress', fraction: 0 }, { kind: 'progress', fraction: 1, label: 'Settled' }],
+  }
+  const drawn = letterToHtml(parseLetter(JSON.stringify(doc)), { filled: false, values: {} })
+  check('a drawn bar comes back as a bar', kinds(drawn), 'paragraph,progress,progress,progress')
+  /*
+   * READ DEFENSIVELY PAST THE SHAPE ASSERTION. CLAUDE.md's second trap, and it caught this file in
+   * the act: with the bar's parse branch deleted, back[1] is a paragraph and back[2] does not
+   * exist, so `back[2].fraction` threw a TypeError two lines below the check that should have
+   * REPORTED it -- and run-all reads the count, so the whole file printed nothing and was recorded
+   * as having asserted nothing rather than as having failed.
+   */
+  const at = (i) => documentHtmlToBlocks(drawn)[i] ?? {}
+  const back = documentHtmlToBlocks(drawn)
+  /*
+   * TO THE LAST DIGIT. The fraction is carried on data-fraction and the fill's WIDTH is a rounding
+   * of it -- read back off the width instead, every bar would move a little each time the letter
+   * was opened and saved, and nothing would ever report it.
+   */
+  check('...with the fraction it went in with', at(1).fraction, bar.fraction)
+  check('...and its words', [at(1).label, at(1).note], [bar.label, bar.note])
+  /* AN EMPTY CAPTION IS NO CAPTION, not an empty string: stored as '' it would draw a blank line
+     above the bar, which is a round trip that ADDS something -- see the idempotence rule below. */
+  check('a bar with no words has none', Object.keys(at(2)).sort(), ['fraction', 'kind'])
+  check('...and one is at nought', at(2).fraction, 0)
+  check('...and a full one is at one', at(3).fraction, 1)
+  /* IDEMPOTENT, like the blank paragraph: a letter that grows a little each time it is touched. */
+  let d = parseLetter(JSON.stringify(doc))
+  const seen = []
+  for (let i = 0; i < 3; i += 1) {
+    d = { ...d, blocks: documentHtmlToBlocks(letterToHtml(d, { filled: false, values: {} })) }
+    seen.push(JSON.stringify(d.blocks))
+  }
+  check('a bar is the same bar after three trips', [...new Set(seen)].length, 1)
+  /* OUT OF RANGE IS CLAMPED rather than drawn. A bar 140% long is a rectangle over the margin. */
+  const wild = documentHtmlToBlocks(
+    '<div class="ltr-bar" data-fraction="4.2"><div class="ltr-bar-track">'
+    + '<div class="ltr-bar-fill" style="width:420%"></div></div></div>')
+  check('a fraction past the end is clamped', (wild[0] ?? {}).fraction, 1)
+  /*
+   * AN EMPTY CAPTION ELEMENT IS NO CAPTION. Not the same case as a bar with no caption element at
+   * all -- which is the one above -- and it is the one the round trip can produce: a browser leaves
+   * an emptied div standing. Stored as '' it comes back as a caption that exists, so the bar draws a
+   * blank line above itself and grows one every time the letter is opened.
+   */
+  const hollow = documentHtmlToBlocks('<div class="ltr-bar" data-fraction="0.5">'
+    + '<div class="ltr-bar-label"></div><div class="ltr-bar-track"></div>'
+    + '<div class="ltr-bar-note">  </div></div>')
+  check('an emptied caption is dropped, not stored blank',
+    Object.keys(hollow[0] ?? {}).sort(), ['fraction', 'kind'])
+  /* AND AN UNREADABLE ONE IS STILL A BAR. By the time the fraction is looked at the element has
+     been claimed, so returning nothing would drop the bar AND the words inside it. */
+  const junk = documentHtmlToBlocks('<div class="ltr-bar" data-fraction="oops">'
+    + '<div class="ltr-bar-label">Paid</div></div>')
+  check('a bar with no readable fraction is a bar at nought',
+    [(junk[0] ?? {}).kind, (junk[0] ?? {}).fraction, (junk[0] ?? {}).label], ['progress', 0, 'Paid'])
+}
+
+/* ---------------- a table that is an argument ---------------- */
+
+/*
+ * keepTogether TRAVELS AS DATA, for the same reason keepWithNext does: it has no appearance to be
+ * read back from, so the attribute IS the record of it. Lost in the round trip, the repayment
+ * schedule's comparison table would start breaking across pages again the first time somebody
+ * opened it in the Library -- and it would break silently, because the document still parses.
+ */
+{
+  const doc = {
+    defaults: { font: 'Georgia, serif', size: 10.5, colour: '#1f2937', lineHeight: 1.45 },
+    blocks: [{
+      kind: 'table', borders: 'all', headerRow: true, keepTogether: true, widths: [50, 50],
+      rows: [[{ spans: [{ text: 'PAYMENTS' }] }, { spans: [{ text: 'EACH' }] }],
+        [{ spans: [{ text: 'Your offer' }] }, { spans: [{ text: 'R 500.00' }] }]],
+    }],
+  }
+  const back = documentHtmlToBlocks(letterToHtml(parseLetter(JSON.stringify(doc)), { filled: false, values: {} }))
+  check('a table that must not break says so after the trip', (back[0] ?? {}).keepTogether, true)
+  /* AND AN ORDINARY TABLE DOES NOT GAIN IT: most tables here are lists, and a list that will not
+     break throws away the bottom of a page. */
+  const plain = documentHtmlToBlocks(letterToHtml(
+    parseLetter(JSON.stringify({ ...doc, blocks: [{ ...doc.blocks[0], keepTogether: undefined }] })),
+    { filled: false, values: {} }))
+  check('...and an ordinary one still breaks', (plain[0] ?? {}).keepTogether, undefined)
+}
+
 /*
  * AND THE SELECTION IS WATCHED RATHER THAN SAMPLED. The first cut of this remembered the caret
  * from the sheet's own key and mouse events, so a selection made any other way was never seen —

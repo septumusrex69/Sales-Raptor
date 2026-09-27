@@ -115,11 +115,48 @@ try {
      * can see how fast they would pay it off and how much they would save -- kind of as a
      * motivational thing that they pay more faster." The saving is the column that does the work.
      */
-    t.ok('...and what paying faster would cost', /If they paid it off faster/.test(body))
+    t.ok('...and what paying faster would cost', /Their offer, and paying it off faster/.test(body))
     t.ok('...with a column for what they save', /They save/.test(body))
     t.ok('...settling now among the options', /Settle now/.test(body))
+    /*
+     * THEIR OWN OFFER IS THE FIRST ROW. The firm asked for the ladder read downwards from what the
+     * debtor said -- "I'll just put that one in the top, like it's 500 rand, and then 10
+     * instalments, six instalments, three instalments, settle" -- and without the anchor the rows
+     * under it are four figures the firm came up with rather than a comparison.
+     */
+    t.ok('...anchored on what they themselves offered', /Their offer/.test(body))
     const faster = await page.locator('table[aria-label="What paying it off faster would cost"] tbody tr').count()
-    t.ok(`...and several speeds to choose from (${faster})`, faster >= 3)
+    t.ok(`...and several speeds to choose from (${faster})`, faster >= 4)
+    /* ---------- trying a different figure, without recording it ---------- */
+    /*
+     * THE FIRM: "let's say Rita wants to negotiate and wants to know, oh, what would happen if I
+     * pay 3 000 rand a month? We have to give them that kind of... it'll be a nice tool."
+     *
+     * AND THE TWO THINGS THAT MAKE IT SAFE, both asserted here because only the page can show them:
+     * the panel recalculates, and the FORM does not move. Answered by typing into the promise
+     * itself, a collector would be putting a figure nobody agreed into the field that records the
+     * arrangement -- and the schedule button below would then send the debtor the same mistake on
+     * the firm's letterhead.
+     */
+    /* The promise's OWN amount box, which is the first decimal input on the form -- the same one
+       offer() fills. The what-if box is found by its label, so the two cannot be confused. */
+    const promiseAmount = page.locator('form input[inputmode="decimal"]').first()
+    const amountBefore = await promiseAmount.inputValue().catch(() => null)
+    await page.getByLabel('Try a different instalment').fill('3000')
+    const tried = await page.locator('body').innerText()
+    t.ok('a different figure can be tried without recording it',
+      /If they paid this instead/i.test(tried))
+    t.ok('...and the panel works on it', /R\s?3[\s ,]?000/.test(tried))
+    /* IT SAYS SO, EVERY TIME. A panel quietly describing a figure that is not the one in the form
+       above it is exactly the confusion this box could cause. */
+    t.ok('...saying plainly which figure is being recorded',
+      /arrangement being recorded above is still/i.test(tried))
+    const amountAfter = await promiseAmount.inputValue().catch(() => null)
+    t.ok(`...leaving the promise itself alone (${amountBefore} -> ${amountAfter})`,
+      amountBefore !== null && amountAfter === amountBefore)
+    await page.getByLabel('Try a different instalment').fill('')
+    t.ok('...and clearing it goes back to the offer',
+      /If they pay this/i.test(await page.locator('body').innerText()))
     await t.shot(page, '60-repayment-calculator')
     await context.close()
   }
