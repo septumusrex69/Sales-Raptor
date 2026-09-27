@@ -1,5 +1,8 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, ChevronDown, Info } from 'lucide-react'
+import { AlertTriangle, ChevronDown, FileDown, Info, Loader2 } from 'lucide-react'
+import { letterPdfBytes } from '../../lib/letterAttachment.ts'
+import { letterFilename } from '../../lib/letterPdf.ts'
+import { repaymentLetter, repaymentLetterRefusal } from '../../lib/repaymentLetter.ts'
 import type { BalanceInput } from '../../lib/accountBalance.ts'
 import type { Recurring } from '../../lib/arrangements.ts'
 import {
@@ -28,14 +31,25 @@ import { shortDate } from '../../lib/dateLabels.ts'
  * however the receipt fee is still applicable" -- is on the screen, because the number goes to a
  * debtor and an account that is charged for a call next week will not match it.
  */
-export function RepaymentCalculator({ account, amount, schedule, money }: {
+export function RepaymentCalculator({ account, amount, schedule, money, values, reference, balanceToday }: {
   /** The statement's own assembly, so this cannot be a second opinion about the same money. */
   account: Omit<BalanceInput, 'accrueTo'>
   amount: number
   schedule: Recurring | null
   money: (n: number) => string
+  /**
+   * The account's merge values, for the document. Same map every other letter is drawn with, so
+   * the trust account on this schedule is the trust account on the section 129.
+   */
+  values?: Record<string, string>
+  /** What the debtor knows the account by. Goes in the filename, not in the letter. */
+  reference?: string | null
+  /** What is owed today, printed at the top of the schedule so the debtor sees where it starts. */
+  balanceToday?: number
 }) {
   const [showAll, setShowAll] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [failed, setFailed] = useState<string | null>(null)
 
   const plan = useMemo<RepaymentPlan | null>(() => {
     if (!schedule || !(amount > 0)) return null
@@ -59,6 +73,45 @@ export function RepaymentCalculator({ account, amount, schedule, money }: {
 
   const rows = showAll ? plan.rows : plan.rows.slice(0, 3)
   const each = schedule?.arrangement === 'weekly' ? 'a week' : 'a month'
+  /*
+   * WHY THE DOCUMENT CANNOT BE MADE, or null where it can. A schedule with no end is not something
+   * to send anybody, and the button says which rather than being quietly absent -- a collector who
+   * cannot find it once stops looking for it.
+   */
+  const refusal = repaymentLetterRefusal(plan)
+
+  async function download() {
+    if (!plan || !values) return
+    setSaving(true); setFailed(null)
+    try {
+      const doc = repaymentLetter({
+        plan, money, each, balanceToday: balanceToday ?? plan.rows[0].balanceAfter + plan.rows[0].offDebt,
+      })
+      /*
+       * THROUGH letterPdfBytes, which is what draws every other letter this firm sends: it fetches
+       * the letterhead as bytes, embeds Charter, and refuses a document whose merge fields this
+       * account cannot fill. Drawn any other way this schedule would be the one PDF that does not
+       * come out on the firm's paper.
+       */
+      const bytes = await letterPdfBytes({
+        doc, scope: 'collections', values, filled: true, name: 'The repayment schedule',
+      })
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = letterFilename('Payment arrangement', reference ?? null)
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      /* The reason verbatim: "the repayment schedule was not attached: {{firm_bank}} cannot be
+         filled from this account" says what to go and fix, and a generic failure does not. */
+      setFailed(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5">
@@ -176,6 +229,30 @@ export function RepaymentCalculator({ account, amount, schedule, money }: {
               {showAll ? 'Show fewer' : `Every payment (${plan.rows.length})`}
             </button>
           )}
+        </div>
+      )}
+
+      {/*
+        AND THE DEBTOR CAN BE SENT IT. The firm: "even if possible, we can create a document that we
+        can send him." On the firm's letterhead, through the same letterPdfBytes every other notice
+        goes out on, and saying twice on its own face that it is an illustration rather than a
+        demand -- a page of figures on a letterhead is treated as binding unless it says otherwise.
+      */}
+      {values && (
+        <div className="mt-2 border-t border-slate-200 pt-2">
+          <button type="button" onClick={() => { void download() }} disabled={saving || refusal !== null}
+            title={refusal ?? 'A PDF on the firm’s letterhead, to send the debtor'}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
+              refusal !== null
+                ? 'cursor-not-allowed border-dashed border-slate-200 text-slate-300'
+                : 'border-[#c9a052] bg-white text-navy-950 hover:bg-gold-100'}`}>
+            {saving ? <Loader2 size={11} className="animate-spin" /> : <FileDown size={11} />}
+            Schedule as a PDF
+          </button>
+          {/* The reason it cannot be made, beside the button rather than in a tooltip only: on the
+              iPad the firm works on there is no hover to reveal one. */}
+          {refusal && <p className="mt-1 text-[11px] leading-snug text-slate-500">{refusal}</p>}
+          {failed && <p className="mt-1 text-[11px] leading-snug text-negative-700">{failed}</p>}
         </div>
       )}
 

@@ -778,6 +778,8 @@ export function AccountDetail() {
       settlement={b?.settlement}
       /* The very assembly the statement above was built from -- see `position`. */
       position={statement?.input ?? null}
+      letterValues={letterContext.values}
+      letterReference={letterContext.reference}
     />
   )
   const disputesPanel = (
@@ -2035,7 +2037,7 @@ export function PaymentProgressBar({ progress }: { progress: PaymentProgress }) 
  * never touches a balance — it is kept or it is broken, and a person says which. Matching one
  * against an incoming payment is the collections engine's job, and that does not exist yet.
  */
-function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement, position }: {
+function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement, position, letterValues, letterReference }: {
   accountId: string
   promises: PromiseToPay[]
   userName: string | null
@@ -2059,6 +2061,10 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
    * account.
    */
   position: Omit<BalanceInput, 'accrueTo'> | null
+  /** The account's merge values, for the schedule PDF. See RepaymentCalculator. */
+  letterValues: Record<string, string>
+  /** What the debtor knows the account by. Goes in the PDF's filename, not in the letter. */
+  letterReference: string | null
 }) {
   /*
    * The arrangement is chosen first, and the amount follows from it.
@@ -2236,6 +2242,11 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
                 }
                 : null}
               money={formatMoney}
+              /* The same merge values every other letter on this account is drawn with, so the
+                 trust account on this schedule is the trust account on the section 129. */
+              values={letterValues}
+              reference={letterReference}
+              balanceToday={balance}
             />
           )}
           <button type="submit" disabled={busy || !arrangement || !(Number(amount) > 0) || !dueOn || !!problem}

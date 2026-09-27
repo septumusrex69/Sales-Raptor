@@ -132,6 +132,60 @@ try {
     await context.close()
   }
 
+  /* ---------- the schedule as a document, on the firm's paper ---------- */
+  {
+    /*
+     * THE FIRM: "even if possible, we can create a document that we can send him."
+     *
+     * DOWNLOADED FOR REAL, not asserted as a button that exists. The document is BUILT rather than
+     * merged -- a table whose length is the answer cannot come out of a template -- so the only
+     * thing that proves it works is bytes arriving, drawn through the same letterPdfBytes every
+     * other notice this firm sends goes out on.
+     */
+    const { context, page } = await openPromiseForm(browser)
+    await offer(page, { shape: 'monthly', amount: 500, dueOn: '2026-10-05' })
+    const button = page.getByRole('button', { name: /Schedule as a PDF/ })
+    t.ok('the schedule can be sent to the debtor', await button.isVisible())
+    t.ok('...and is offered, not refused', await button.isEnabled())
+
+    const wait = page.waitForEvent('download', { timeout: 20000 })
+    await button.click()
+    const download = await wait
+    const name = download.suggestedFilename()
+    t.ok(`...arriving as a PDF (${name})`, /\.pdf$/.test(name))
+    /* NAMED FOR THE ACCOUNT. A collector with six of these in a downloads folder needs to know
+       which debtor each one is for without opening it. */
+    t.ok('...named for the arrangement', /payment.arrangement/i.test(name))
+
+    const path = await download.path()
+    const { readFileSync } = await import('node:fs')
+    const bytes = readFileSync(path)
+    t.ok(`...with real content (${(bytes.length / 1024).toFixed(1)} kB)`, bytes.length > 5000)
+    t.check('...that is actually a PDF', bytes.subarray(0, 4).toString(), '%PDF')
+    await context.close()
+  }
+
+  /* ---------- and refused where there is nothing to send ---------- */
+  {
+    /*
+     * A SCHEDULE WITH NO END IS NOT A DOCUMENT. The button is drawn and disabled with the reason
+     * beside it rather than quietly absent: a collector who cannot find it once stops looking.
+     */
+    const { context, page } = await openPromiseForm(browser)
+    await offer(page, { shape: 'monthly', amount: 150, dueOn: '2026-10-05' })
+    const button = page.getByRole('button', { name: /Schedule as a PDF/ })
+    t.ok('the button is still on the screen', await button.isVisible())
+    t.ok('...but cannot be pressed', await button.isDisabled())
+    /*
+     * THE REASON IS THE ONE FOR THIS ACCOUNT. In duplum is on here, as it is on the firm's own
+     * accounts, so R150 does not "never settle" -- the debt stops growing at the ceiling and would
+     * clear long after anybody cares. The refusal says what is true of it: there is no end to show.
+     */
+    t.ok('...and says why, beside it rather than only in a tooltip',
+      /no end to show/i.test(await page.locator('body').innerText()))
+    await context.close()
+  }
+
   /* ---------- the working, for a debtor who asks ---------- */
   {
     const { context, page } = await openPromiseForm(browser)
