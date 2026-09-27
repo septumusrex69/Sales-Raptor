@@ -211,11 +211,20 @@ ok('the fee is stamped with the action, not with the run', /at: new Date\(sentAt
 /* SEGMENTS ARE THE QUANTITY -- one row at the segment rate, not one row per segment, because a
    statement is read by a debtor. An email is priced per message, so one. */
 ok('an SMS is charged by its segments', /quantity: plan\.charge\.segments \?\? 1/.test(runner))
-/* AND THE TIMELINE REPORTS WHAT WAS ACTUALLY CHARGED, not the quote the step drawer shows: on an
-   account at the ceiling the note said "R25.00 raised" beside a fee row of nought. */
-ok('the note reads the engine\u2019s answer, not the quote',
-  /fee\.exclVat \+ fee\.vat/.test(runner))
-ok('...and says so when a notice earned nothing', /No charge: \$\{CHARGE_REFUSED/.test(runner))
+/*
+ * AND THE NOTE NO LONGER REPORTS THE CHARGE AT ALL -- see the timeline section below for the
+ * firm's rule and why this pair of assertions went with it.
+ *
+ * WHAT THEY GUARDED IS STILL GUARDED, in the place it belongs: the engine's own answer is what
+ * the runner carries on, and `filedEmailId` is drawn from `fee.exclVat` for the same reason those
+ * two existed -- the QUOTE and the CHARGE differ on an account at the in duplum ceiling, and
+ * anything reading the quote reports a fee the debtor was never asked for.
+ */
+ok('what the engine actually charged is what the runner carries on', /fee\.exclVat/.test(runner))
+/* COMMENTS STRIPPED FIRST, or the paragraph explaining why `plan.charge.rand` is only the quote
+   is itself read as a use of it. */
+const code = runner.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+ok('...rather than the quote the step drawer shows', !/plan\.charge\.rand/.test(code))
 
 /* ------------------------------------------------ the firm's day */
 
@@ -363,11 +372,35 @@ ok('...named as the workflow rather than as a person', /author_name: 'Workflow'/
 /* One timeline, not two -- the same table and source the by-hand debtor note uses. */
 ok('...on the same table everything else is on', /source: 'workflow',/.test(runner))
 /*
- * AND IT NAMES THE CHARGE. A fee the debtor will be asked to pay should be legible where the
- * action is, not only inside a total on the position panel.
+ * AND IT SAYS NOTHING ABOUT MONEY.
+ *
+ * THE FIRM'S STANDING RULE FOR A NOTE, AND THEY HAVE NOW GIVEN IT TWICE. First for a call --
+ * "don't have to say about the charges in the notes, it's on the transaction list", which
+ * check-calls.mjs records and asserts -- and then, looking at a workflow's own notes on their test
+ * account: "here in the notes you don't have to mention all the charges that were made."
+ *
+ * THIS CHECK USED TO ASSERT THE OPPOSITE, which is why it is worth saying why the rule wins. Every
+ * line read "Confirmation of arrangement SMS sent to 0832573344. R4.03 raised under item 1c." --
+ * one event written twice, because the fee is already its own entry on the same timeline and its
+ * own row on Transactions. Six notices in an afternoon made the timeline unreadable.
+ *
+ * AND NOTHING IS LOST. chargeItemWith writes the fee before the note is composed, and the
+ * statement draws a refused one as `fee-no-charge`, so "nothing was charged, the ceiling is
+ * reached" is still answerable on the page that exists to answer it.
+ *
+ * THE SAME PATTERN AS check-calls, deliberately: assert the ABSENCE of money words, because the
+ * natural thing for anyone touching this line later is to helpfully put the amount back.
  */
-ok('the note says what it cost',
-  /raised under item \$\{plan\.charge\?\.item \?\? ''\}/.test(runner))
+const note = runner.slice(runner.indexOf("from('account_notes').insert("), runner.indexOf('last_action_at'))
+ok('the note is composed here at all', note.length > 40 && /body: `/.test(note))
+for (const [what, re] of [
+  ['an amount', /R\$\{|\.toFixed\(2\)/],
+  ['an Annexure B item', /under item/i],
+  ['the word charged', /charged/i],
+  ['a reason nothing was charged', /No charge|ceiling|monthly limit|written off/i],
+]) {
+  ok(`...and it does not carry ${what}`, !re.test(note))
+}
 ok('...and says who it went to', /sent\$\{toWhom \? ` to \$\{toWhom\}` : ''\}/.test(runner))
 /* The same fallback the SMS send uses, or the note names a number the message did not go to. */
 ok('...falling back the way the SMS send does',

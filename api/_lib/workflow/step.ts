@@ -18,13 +18,6 @@ import {
   chargeItemWith, type ChargeDb, type ChargeResult,
 } from '../../../src/lib/chargeEngine.js'
 
-/** Why a message earned nothing, in the firm's words rather than the engine's enum. */
-const CHARGE_REFUSED: Record<Exclude<ChargeResult['reason'], 'charged'>, string> = {
-  'written-off': 'the account is written off',
-  'item-total-spent': 'this item has nothing left on it',
-  'monthly-limit': 'the monthly limit on this item is reached',
-  'at-ceiling': 'in duplum -- fees and interest are at the capital outstanding',
-}
 import {
   disputeDaysPhrase, disputeWindow, noticeRespondBy,
 } from '../../../src/lib/disputeWindow.js'
@@ -699,25 +692,21 @@ export async function runOneStep(
    * SAME TABLE AND SAME SOURCE AS EVERYTHING ELSE, so the collector reads one timeline rather
    * than two -- the reason the by-hand debtor note was put there too.
    *
-   * IT NAMES THE CHARGE. A fee the debtor will be asked to pay should be legible where the action
-   * is, not only in a total on the position panel.
-   */
-  /*
-   * WHAT WAS ACTUALLY CHARGED, not what was quoted.
+   * AND IT SAYS NOTHING ABOUT MONEY, which is the firm's standing rule for a note and was already
+   * law for a call: "don't have to say about the charges in the notes, it's on the transaction
+   * list." See check-calls.mjs, where the same instruction is recorded and asserted.
    *
-   * This printed plan.charge.rand -- the QUOTE the step drawer shows -- so on an account at the in
-   * duplum ceiling the timeline said "R25.00 raised" beside a fee row of nought. Now it reads the
-   * engine's own answer.
+   * THE FIRM SAID IT AGAIN, LOOKING AT A WORKFLOW'S OWN NOTES: "here in the notes you don't have
+   * to mention all the charges that were made." Every line on the timeline read "Confirmation of
+   * arrangement SMS sent to 0832573344. R4.03 raised under item 1c." -- which is one event
+   * written twice, because the fee is already its own line on the same timeline and its own row
+   * on Transactions.
    *
-   * AND IT SAYS WHEN NOTHING WAS CHARGED, rather than going quiet. A notice that earned the firm
-   * nothing is a fact a collector should be able to see on the account -- and "the ceiling" and
-   * "ten SMSs this month already" are different facts with different answers.
+   * THE FEE IS NOT LOST AND WAS NEVER ONLY HERE. chargeItemWith wrote it to account_fees before
+   * this line runs; the statement draws it as a `fee` line and a refused one as `fee-no-charge`,
+   * so "nothing was charged, the ceiling is reached" is still answerable -- on the page that
+   * exists to answer it.
    */
-  const charged = fee === null
-    ? ''
-    : fee.reason === 'charged'
-      ? ` R${(fee.exclVat + fee.vat).toFixed(2)} raised under item ${plan.charge?.item ?? ''}.`
-      : ` No charge: ${CHARGE_REFUSED[fee.reason]}.`
   /* The same fallback the SMS send itself uses, or the note names a number the message did not
      go to on an account whose only number is filed as a landline. */
   const toWhom = node.channel === 'sms'
@@ -725,7 +714,7 @@ export async function runOneStep(
     : pickContact(contacts, 'email')
   await admin.from('account_notes').insert({
     account_id: account.id,
-    body: `${node.label} sent${toWhom ? ` to ${toWhom}` : ''}.${charged}`,
+    body: `${node.label} sent${toWhom ? ` to ${toWhom}` : ''}.`,
     author_name: 'Workflow',
     created_by: releasedBy ?? null,
     source: 'workflow',

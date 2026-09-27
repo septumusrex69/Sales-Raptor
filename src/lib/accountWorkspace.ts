@@ -12,6 +12,7 @@
 import { supabase } from './supabase'
 import { normaliseRegistrationNumber, type DebtorKind } from './debtorIdentity.ts'
 import { nextDueDate, type Arrangement } from './arrangements'
+import type { CancelCause } from './promiseRules.ts'
 
 export {
   nextDueDate, describeArrangement, ARRANGEMENT_LABEL, WEEKDAYS, type Arrangement,
@@ -193,6 +194,17 @@ export interface PromiseToPay {
   dayOfWeek: number | null
   instalmentsKept: number
   totalPromised: number | null
+  /**
+   * WHY A CANCELLED ARRANGEMENT WAS CANCELLED. Null on every promise that was not.
+   *
+   * A CLOSED LIST BECAUSE IT DECIDES SOMETHING -- see the column's own comment and
+   * workflow_on_promise_cancelled. The firm: "if it's because of a dispute, a dispute should be
+   * raised. And if it's because the debtor just decided not to pay, then it should go back to the
+   * section 129."
+   */
+  cancelCause: CancelCause | null
+  /** What the collector wrote: what the debtor actually said. */
+  cancelReason: string | null
 }
 
 const toPromise = (r: any): PromiseToPay => ({
@@ -212,6 +224,10 @@ const toPromise = (r: any): PromiseToPay => ({
   dayOfWeek: r.day_of_week === null || r.day_of_week === undefined ? null : Number(r.day_of_week),
   instalmentsKept: Number(r.instalments_kept ?? 0),
   totalPromised: r.total_promised === null || r.total_promised === undefined ? null : Number(r.total_promised),
+  /* Hand-written mappers drop columns silently -- CLAUDE.md's own warning, and `diary_capacity`
+     sat undefined for months on exactly this. check-promise-cancel holds these two. */
+  cancelCause: (r.cancel_cause ?? null) as CancelCause | null,
+  cancelReason: r.cancel_reason ?? null,
 })
 
 /**
@@ -415,10 +431,36 @@ export async function resolvePromise(
   id: string,
   status: Exclude<PromiseStatus, 'open'>,
   resolvedBy: string | null,
+  /**
+   * WHY, AND ONLY A CANCELLATION HAS ONE.
+   *
+   * THE FIRM: "If the payment arrangement is cancelled, there should be a reason. So the person
+   * should write a reason, say why has it been cancelled."
+   *
+   * THE CAUSE IS NOT A NOTE. The database acts on it -- workflow_on_promise_cancelled ends the
+   * arrangement's own sequence either way and gives back the collection sequence the promise was
+   * holding for two of the three causes -- so it is a closed list and the column refuses a
+   * cancellation without one. See CANCEL_CHOICES.
+   *
+   * KEPT AND BROKEN DO NOT TAKE IT. A promise that was kept needs no explaining, and a broken one
+   * already has a notice of default that says what happened; a reason box on either would be a
+   * field people learn to leave blank, which is how the one that matters gets left blank too.
+   */
+  cancel?: { cause: CancelCause; reason: string } | null,
 ): Promise<PromiseToPay> {
   const { data, error } = await supabase
     .from('promises_to_pay')
-    .update({ status, resolved_at: new Date().toISOString(), resolved_by: resolvedBy })
+    .update({
+      status,
+      resolved_at: new Date().toISOString(),
+      resolved_by: resolvedBy,
+      /* Written in the SAME update as the status, which is what lets the trigger read the cause
+         off NEW: a second update would fire it with the column still null and the account would
+         stay paused on an arrangement that no longer exists. */
+      ...(status === 'cancelled' && cancel
+        ? { cancel_cause: cancel.cause, cancel_reason: cancel.reason.trim() || null }
+        : {}),
+    })
     .eq('id', id)
     .select('*')
     .single()

@@ -13,6 +13,8 @@
 import type { AccountLedgers } from './accountBook'
 import type { AccountContact, AccountNote, PromiseToPay } from './accountWorkspace'
 import { feeLabel } from './feeLabel.ts'
+import { describeArrangement } from './arrangements.ts'
+import { PROMISE_ENDED, promiseCancelWords } from './promiseRules.ts'
 
 export type TimelineKind = 'action' | 'payment' | 'note' | 'promise' | 'query' | 'main_comment'
 
@@ -299,18 +301,57 @@ export function buildTimeline(
   }
 
   for (const p of promises) {
+    /*
+     * AN ARRANGEMENT IS TWO EVENTS ON THE TIMELINE, NOT ONE ROW WEARING ITS LATEST STATUS.
+     *
+     * THE FIRM, LOOKING AT AN ACCOUNT WHERE THEY HAD JUST CANCELLED ONE: "I don't see that the
+     * payment arrangement has been created, I can only see that it's been cancelled." They were
+     * reading it correctly. There was ONE entry, dated the day the promise was made, carrying the
+     * CURRENT status as a chip -- so a cancelled arrangement read as an arrangement that had never
+     * existed, and a kept one read as though it had been kept the day it was agreed.
+     *
+     * THE TIMELINE IS THE RECORD OF CONTACT, and two things happened: the debtor undertook to pay,
+     * and later somebody closed that undertaking. They are days apart and often different people.
+     *
+     * THE FIRST ONE NO LONGER CARRIES THE VERDICT. `status: 'open'` on the entry dated the day it
+     * was made, whatever became of it -- because on that day it WAS open, and a chip saying
+     * "cancelled" beside "Promise to pay" is what made the two unreadable as one line.
+     */
     entries.push({
       id: `promise:${p.id}`,
       kind: 'promise',
       date: dayOf(p.createdAt),
       at: p.createdAt,
-      title: 'Promise to pay',
-      detail: [`due ${p.dueOn}`, p.method, p.notes].filter(Boolean).join(' · '),
+      title: 'Arrangement made',
+      detail: [`${describeArrangement(p)} · first payment ${p.dueOn}`, p.method, p.notes]
+        .filter(Boolean).join(' · '),
       amount: p.amount,
-      status: p.status,
+      status: 'open',
       // A promise is the single most important thing a collector produces. It never hides.
       automated: false,
     })
+    /*
+     * AND THE DAY IT ENDED, WHERE IT HAS. `resolvedAt` is written by resolvePromise and by the
+     * sweep, and it is null on a live one -- so nothing is invented for an arrangement still
+     * running, which is the common case and the one that must not grow a second line.
+     *
+     * THE REASON TRAVELS WITH IT. A cancellation now carries why (see promiseCancelWords), and
+     * that sentence is the whole point of the entry: "cancelled" alone is what the firm was
+     * complaining about one field further along.
+     */
+    if (p.resolvedAt && p.status !== 'open') {
+      entries.push({
+        id: `promise-end:${p.id}`,
+        kind: 'promise',
+        date: dayOf(p.resolvedAt),
+        at: p.resolvedAt,
+        title: PROMISE_ENDED[p.status] ?? 'Arrangement closed',
+        detail: promiseCancelWords(p),
+        amount: p.amount,
+        status: p.status,
+        automated: false,
+      })
+    }
   }
 
   return entries.sort((a, b) => {

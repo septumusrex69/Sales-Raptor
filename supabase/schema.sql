@@ -10126,3 +10126,155 @@ where seed_key = 'email-ptp-confirmed-company';
 update public.message_templates
 set attaches_schedule = false
 where seed_key in ('email-ptp-confirmed-individual', 'email-ptp-confirmed-company');
+
+
+-- ============================================================================
+-- A CANCELLED ARRANGEMENT SAYS WHY, AND THE ACCOUNT STAYS IN A WORKFLOW.
+--
+-- THE FIRM, HAVING CANCELLED ONE ON THEIR OWN TEST ACCOUNT: "I cancelled the payment arrangement
+-- but the workflow is still in motion... If the payment arrangement is cancelled, there should be
+-- a reason. So the person should write a reason, say why has it been cancelled. And if it's
+-- because of a dispute, a dispute should be raised. And if it's because the debtor just decided
+-- not to pay, then it should go back to the section 129. So that needs to be done and it can't go
+-- out of the workflow. It should be in a workflow. All accounts should be somewhere and somehow in
+-- a workflow."
+--
+-- THREE THINGS WERE WRONG AND THEY ARE ONE THING. `cancelled` was a status and nothing more: the
+-- arrangement's own sequence went on sending reminders about a payment nobody was going to make,
+-- the section 129 the promise had HELD stayed held for an arrangement that no longer existed, and
+-- the account had no record of why any of it happened. An account paused on a promise that has
+-- been cancelled is an account nothing will ever happen to again.
+--
+-- THE CAUSE IS A CLOSED LIST BECAUSE IT DECIDES SOMETHING. Free text would be a reason nobody can
+-- act on; these three each have an answer, and between them every account lands back inside a
+-- sequence:
+--
+--   disputed   the debtor says they do not owe it. A dispute is raised -- which starts the
+--              acknowledgement sequence and, where it is in writing, holds the rest.
+--   refusing   the debtor simply will not pay. The hold the promise put on the collection
+--              sequence is released and the section 129 goes on from where it stopped. This is
+--              the firm's "it should go back to the section 129", exactly.
+--   replaced   it was captured wrongly and a corrected one is being recorded. The hold STAYS,
+--              and the reason is not a nicety: workflow_hold_account lets a promise stop a run
+--              ONCE per run ever ("stop it only once. Not twice"), so releasing here and
+--              re-capturing would leave the section 129 running against a debtor who has an
+--              arrangement the firm has accepted.
+--
+-- AND THE REASON IN WORDS IS REQUIRED TOO. The cause says what to do; the sentence says what the
+-- debtor actually said, which is what the next person reads.
+-- ============================================================================
+
+alter table public.promises_to_pay
+  add column if not exists cancel_cause text,
+  add column if not exists cancel_reason text;
+
+alter table public.promises_to_pay
+  drop constraint if exists promises_to_pay_cancel_cause_check;
+alter table public.promises_to_pay
+  add constraint promises_to_pay_cancel_cause_check
+  check (cancel_cause is null or cancel_cause in ('disputed', 'refusing', 'replaced'));
+
+-- NOT VALID, DELIBERATELY. The arrangements already cancelled were cancelled before there was a
+-- question to answer, and inventing a cause for them would be writing history nobody witnessed.
+-- The constraint binds every cancellation from here on, which is what was asked for.
+alter table public.promises_to_pay
+  drop constraint if exists promises_cancelled_says_why;
+alter table public.promises_to_pay
+  add constraint promises_cancelled_says_why
+  check (status <> 'cancelled' or cancel_cause is not null) not valid;
+
+comment on column public.promises_to_pay.cancel_cause is
+  'Why a cancelled arrangement was cancelled, from a closed list, because it decides what happens '
+  'to the account next: disputed raises a dispute, refusing releases the collection sequence the '
+  'promise was holding, replaced keeps the hold for the corrected arrangement. Null on every '
+  'promise that was not cancelled.';
+
+comment on column public.promises_to_pay.cancel_reason is
+  'What the collector wrote: what the debtor actually said. The cause decides what the system '
+  'does; this is what the next person reads.';
+
+-- ---------- AND THE SEQUENCES FOLLOW ----------
+create or replace function public.workflow_on_promise_cancelled() returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_reason text;
+begin
+  if new.status <> 'cancelled' or coalesce(old.status, '') = 'cancelled' then
+    return new;
+  end if;
+
+  v_reason := 'The arrangement was cancelled'
+    || case new.cancel_cause
+         when 'disputed' then ': the debtor disputes the account'
+         when 'refusing' then ': the debtor will not pay'
+         when 'replaced' then ': it is being recorded again'
+         else ''
+       end;
+
+  /*
+   * ONE: THE ARRANGEMENT'S OWN SEQUENCE STOPS.
+   *
+   * Not workflow_exit_account, which ends EVERY live run on the account -- including the section
+   * 129 this is about to release. Only the sequence whose whole subject is the arrangement: its
+   * reminder, its payment-day message and its receipt are about an undertaking that no longer
+   * exists, and the firm watched one go on running after they cancelled.
+   *
+   * MATCHED ON THE VERSION'S TRIGGER, the same way workflow_hold_account decides which run not to
+   * hold: "this version exists to answer exactly this event" is a fact about the workflow, where
+   * "started recently" is a guess about clocks.
+   *
+   * AND A SENT STEP STAYS SENT. The confirmation reached the debtor; rewriting it would be
+   * rewriting the file an attorney reads eighteen months later.
+   */
+  with live as (
+    select r.id from public.workflow_runs r
+      join public.workflow_versions v on v.id = r.version_id
+     where r.account_id = new.account_id
+       and r.state in ('running', 'held')
+       and v.trigger_kind = 'promise_due'
+  ), killed as (
+    update public.workflow_run_steps s
+       set state = 'cancelled', note = v_reason
+      from live
+     where s.run_id = live.id and s.state in ('pending', 'held')
+     returning s.id
+  )
+  update public.workflow_runs r
+     set state = 'left', left_reason = v_reason, left_at = now()
+    from live
+   where r.id = live.id;
+
+  /*
+   * TWO: AND THE SEQUENCE THE PROMISE WAS HOLDING.
+   *
+   * RELEASED WHENEVER THE PROMISE IS GENUINELY GONE, which is both of the firm's cases: a debtor
+   * who disputes and a debtor who will not pay are each a reason for the collection sequence to
+   * go on -- the dispute will stop it again on its own terms if it is in writing, which is the
+   * firm's rule and not this one's business.
+   *
+   * KEPT ONLY FOR A REPLACEMENT, and that exception is the whole reason the third cause exists.
+   * See the note at the top: a promise may hold a run once per run ever, so releasing here and
+   * letting the corrected arrangement re-capture would leave a section 129 running against a
+   * debtor who is paying.
+   */
+  if new.cancel_cause is distinct from 'replaced' then
+    perform public.workflow_resume_account(new.account_id, v_reason, 'promise');
+  end if;
+
+  return new;
+end $$;
+
+comment on function public.workflow_on_promise_cancelled() is
+  'A cancelled arrangement ends its own sequence and, unless a corrected one is being recorded, '
+  'gives back the collection sequence the promise was holding. The firm: "it can''t go out of the '
+  'workflow. All accounts should be somewhere and somehow in a workflow."';
+
+revoke all on function public.workflow_on_promise_cancelled() from public;
+
+drop trigger if exists workflow_on_promise_cancelled on public.promises_to_pay;
+create trigger workflow_on_promise_cancelled
+  after update of status on public.promises_to_pay
+  for each row execute function public.workflow_on_promise_cancelled();

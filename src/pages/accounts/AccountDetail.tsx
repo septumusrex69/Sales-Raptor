@@ -29,6 +29,7 @@ import { buildTimeline, filterTimeline, groupByDay, type TimelineEntry } from '.
 import { isWrittenOff } from '../../lib/accountStatus'
 import { canFreezeAccounts, canHandOutAccounts, canViewClients } from '../../lib/permissions'
 import { HandOutModal } from './HandOutModal'
+import { CancelArrangementModal } from './CancelArrangementModal'
 import type { Selection } from '../../lib/accountAllocation'
 import { timeOnDesk } from '../../lib/dateLabels'
 import { styleFor, PROMISE_CHIP, PROMISE_WORDS } from './timelineStyle'
@@ -59,7 +60,7 @@ import { SmsModal } from './SmsModal'
 import { CallScriptModal } from './CallScriptModal'
 import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
 import { DiariseModal } from '../../components/diary/DiariseModal'
-import { fetchQueries, type AccountQuery } from '../../lib/accountQueries'
+import { fetchQueries, raiseQuery, type AccountQuery } from '../../lib/accountQueries'
 import {
   fetchAccountEmails, markRepliesRead, markRepliesUnread, recordSentEmail, replySubject,
   type AccountEmail,
@@ -2234,6 +2235,11 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
   const [dueOn, setDueOn] = useState('')
   const [onLastDay, setOnLastDay] = useState(false)
   const [charged, setCharged] = useState<string | null>(null)
+  /*
+   * WHICH ARRANGEMENT IS BEING CANCELLED, or null. See CancelArrangementModal for why cancelling
+   * is no longer one press: the cause decides what the account does next, so the box has to ask.
+   */
+  const [cancelling, setCancelling] = useState<PromiseToPay | null>(null)
   const { busy, err, run } = useWriter(onChange)
 
   /*
@@ -2508,7 +2514,14 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
                     <XCircle size={11} /> Break it now
                   </button>
                 )}
-                <button disabled={busy} onClick={() => run(() => resolvePromise(p.id, 'cancelled', userId))}
+                {/*
+                  NOT ONE PRESS ANY MORE. It was, and the firm found what that costs: the
+                  arrangement's own sequence went on reminding a debtor about a payment nobody was
+                  going to make, the section 129 the promise had paused stayed paused for an
+                  arrangement that no longer existed, and nothing recorded why. See
+                  CancelArrangementModal.
+                */}
+                <button disabled={busy} onClick={() => setCancelling(p)}
                   className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">
                   Cancel
                 </button>
@@ -2532,6 +2545,58 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
           </div>
         )}
       </div>
+
+      {/*
+        CANCELLING, AND THE THREE THINGS THAT FOLLOW FROM WHY.
+        
+        THE ORDER IS THE POINT. The arrangement is cancelled FIRST -- that write is what fires
+        workflow_on_promise_cancelled, which stops the arrangement's own sequence and hands back
+        the collection sequence the promise was holding. The dispute is raised after it, and only
+        after it succeeded: a dispute raised against an arrangement that is still live is a
+        contradiction on the file, and the firm's own rule is that a written dispute stops the
+        sequence, which cannot be decided while there is still a promise holding it.
+        
+        AND A DISPUTE THAT WILL NOT SAVE DOES NOT UNDO THE CANCELLATION. It is reported instead,
+        with the box still open -- the arrangement really is cancelled and saying otherwise would
+        be a lie about the file. The firm asked for the dispute to be raised; a collector told it
+        was not can raise it from Escalate, which is two inches away.
+      */}
+      {cancelling && (
+        <CancelArrangementModal
+          amount={`${formatMoney(cancelling.amount)} · ${describeArrangement(cancelling)}`}
+          onClose={() => setCancelling(null)}
+          onConfirm={async ({ cause, reason }) => {
+            try {
+              await resolvePromise(cancelling.id, 'cancelled', userId, { cause, reason })
+            } catch (e) {
+              return e instanceof Error ? e.message : String(e)
+            }
+            let problem: string | null = null
+            if (cause === 'disputed') {
+              try {
+                await raiseQuery({
+                  accountId,
+                  description: reason.trim(),
+                  kind: 'dispute',
+                  raisedBy: userId,
+                  raisedByName: userName,
+                  /* NOT CHARGED. Item 3 is for a dispute taken up with somebody else; one written
+                     down at the collector's own desk mid-call is the job. Same call recordOutcome
+                     makes, for the same reason. */
+                  charge: false,
+                })
+              } catch (e) {
+                problem = `The arrangement was cancelled, but the dispute was not raised: ${
+                  e instanceof Error ? e.message : String(e)}`
+              }
+            }
+            /* THE PAGE RELOADS EITHER WAY, because the cancellation landed and the panel beside
+               this box is still showing a live arrangement. */
+            await onChange()
+            return problem
+          }}
+        />
+      )}
     </Card>
   )
 }
