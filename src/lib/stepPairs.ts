@@ -54,26 +54,58 @@ export interface Notice {
  * many. The firm has drawn none, and this decides what happens the day they do.
  */
 export function noticesOf(steps: RunStep[]): Notice[] {
-  const out: Notice[] = []
-  /* The notice each day is still waiting for a follower, so a follower can find its lead without
-     scanning backwards and without assuming they are adjacent. */
-  const open = new Map<string, Notice>()
+  /*
+   * THREE PASSES, BECAUSE ONE PASS ASSUMED THE LEAD CAME FIRST.
+   *
+   * This read the steps in order and kept the notice each day was still waiting for a follower,
+   * which works only while the lead is seen before the SMS behind it. The firm's screen got them
+   * the other way round -- accountRun's sort had no third key, so a pair sharing a due date AND a
+   * day number came back in whatever order the database chose -- and the SMS, seen first with no
+   * notice open, became a step with nothing to follow. Every step of the section 129 drew twice,
+   * and the collapse the firm asked for ("so there'll be much less steps in here, it'll look
+   * smaller and better") silently stopped happening.
+   *
+   * THE SORT IS FIXED AND SO IS THIS, deliberately. One of them was the bug and the other is the
+   * reason it was invisible: a pairing that quietly gives up produces a chart that is merely
+   * LONGER, and nothing about a longer chart says anything is wrong.
+   *
+   * WHY THREE AND NOT TWO. Finding the leads first is not enough -- the notice OBJECT a follower
+   * attaches to has to exist before the follower is read, and built in input order it does not. So
+   * every lead's notice is made first, then the followers are attached, and only then is anything
+   * emitted. The emit is the pass that preserves the caller's order.
+   */
+
+  /* 1. Every lead gets its notice. The FIRST lead of a day is the one a follower may attach to:
+        two notices falling on one day would otherwise fight over the single SMS behind them. */
+  const noticeOf = new Map<string, Notice>()
+  const leadFor = new Map<string, Notice>()
   for (const step of steps) {
-    if (step.afterMinutes === null) {
-      const notice: Notice = { lead: step, follower: null, steps: [step] }
-      open.set(step.dueOn, notice)
-      out.push(notice)
-      continue
-    }
-    const waiting = open.get(step.dueOn)
-    if (waiting && waiting.follower === null) {
-      waiting.follower = step
-      waiting.steps.push(step)
-      open.delete(step.dueOn)
-      continue
-    }
-    /* Nothing to follow: draw it as its own step rather than losing it. */
-    out.push({ lead: step, follower: null, steps: [step] })
+    if (step.afterMinutes !== null) continue
+    const notice: Notice = { lead: step, follower: null, steps: [step] }
+    noticeOf.set(step.id, notice)
+    if (!leadFor.has(step.dueOn)) leadFor.set(step.dueOn, notice)
+  }
+
+  /* 2. Followers attach, wherever they were read. `attached` is what pass 3 uses to know a
+        follower has a home and must not be emitted a second time on its own. */
+  const attached = new Set<string>()
+  for (const step of steps) {
+    if (step.afterMinutes === null) continue
+    const lead = leadFor.get(step.dueOn)
+    if (!lead || lead.follower !== null) continue
+    lead.follower = step
+    lead.steps.push(step)
+    attached.add(step.id)
+  }
+
+  /* 3. Emitted in the order they arrived, so the track draws in whatever order the caller sorted.
+        A follower with nothing to follow stands alone rather than being dropped: it should not
+        happen, a version could be drawn that way, and a step that exists and is invisible is the
+        failure the whole track was built to stop. */
+  const out: Notice[] = []
+  for (const step of steps) {
+    if (attached.has(step.id)) continue
+    out.push(noticeOf.get(step.id) ?? { lead: step, follower: null, steps: [step] })
   }
   return out
 }
@@ -127,4 +159,17 @@ export function noticeChannels(notice: Notice): string[] {
 export function followerOf(steps: RunStep[], leadId: string): RunStep | null {
   const notice = noticesOf(steps).find((n) => n.lead.id === leadId)
   return notice?.follower ?? null
+}
+
+/**
+ * THE NOTICE AN SMS GOES BEHIND, given the SMS's own row. Null where it is not a follower.
+ *
+ * FOR THE BUTTON, and it is the other direction of the same fact. A follower cannot be sent on its
+ * own: planSend refuses it while the message it refers to has not gone, so a Send it now under it
+ * is a button that presses and says nothing changed -- which is what the firm pressed. Knowing the
+ * lead is what lets the card say which step to press instead.
+ */
+export function leadOf(steps: RunStep[], followerId: string): RunStep | null {
+  const notice = noticesOf(steps).find((n) => n.follower?.id === followerId)
+  return notice?.lead ?? null
 }

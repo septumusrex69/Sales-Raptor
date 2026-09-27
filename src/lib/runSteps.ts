@@ -48,6 +48,20 @@ export interface RunStep {
    * screen.
    */
   afterMinutes: number | null
+  /**
+   * WHERE THIS STEP SITS AMONG THE OTHERS FALLING DUE THE SAME DAY.
+   *
+   * THE ONLY THING THAT PUTS A NOTICE BEFORE THE SMS BEHIND IT. Two steps of one pair share a day
+   * number AND a due date, so a sort on those two alone leaves them in whatever order the database
+   * handed them over -- and the firm found what that costs: the section 129's SMS drawn to the LEFT
+   * of the section 129, the pair not collapsing into one dot at all, and the panel opening on the
+   * follower with a Send it now button that can never work, because the message it refers to has
+   * not gone.
+   *
+   * IT IS THE NODE'S OWN COLUMN, written when the workflow was built, and it already said the email
+   * is 0 and the SMS is 1. Nothing was wrong with the data; it simply was not being read.
+   */
+  ordinal: number
 }
 
 /**

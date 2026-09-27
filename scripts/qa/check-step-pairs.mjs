@@ -20,7 +20,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  followerOf, noticeChannels, noticeShape, noticesOf,
+  followerOf, leadOf, noticeChannels, noticeShape, noticesOf,
 } from '../../src/lib/stepPairs.ts'
 import { shapeOf } from '../../src/lib/runSteps.ts'
 
@@ -194,6 +194,84 @@ ok('...only once the notice itself has gone', /if \(outcome\.result === 'sent'\)
 ok('the press reports what went with it', /alsoSent:/.test(release) && /alsoHeld:/.test(release))
 /* One message's failure is not the other's: the notice HAS gone, and the press must say so. */
 ok('...and one failing does not undo the other', /companions\.push\(\{/.test(release))
+
+/* ---------------- the order the steps arrive in must not matter ---------------- */
+
+/*
+ * THE BUG THE FIRM FOUND, and it is the reason this block exists rather than a preference for
+ * robustness.
+ *
+ * accountRun sorted the run's steps by due date and then by day number -- and the two steps of a
+ * PAIR share both, so on exactly those two the comparison returned nought and the order was
+ * whatever PostgREST handed over. On their section 129 it handed the SMS over first. Reading in
+ * that order, the old one-pass noticesOf saw a follower with no notice open, called it a step with
+ * nothing to follow, and every step of the sequence drew TWICE.
+ *
+ * NOTHING REPORTED IT, which is the part worth guarding. A chart that fails to collapse is merely
+ * longer, and a longer chart looks like a longer workflow. What the firm actually noticed was three
+ * steps further on: the panel opened on the SMS and its Send it now button could not work.
+ */
+{
+  const lead = step({ id: 'e', label: 'Section 129', channel: 'email', afterMinutes: null })
+  const follower = step({ id: 's', label: 'Section 129 SMS', channel: 'sms', afterMinutes: 10 })
+  const one = noticesOf([lead, follower])
+  const other = noticesOf([follower, lead])
+  check('a notice and its SMS are one dot', one.length, 1)
+  check('...and still one dot read the other way round', other.length, 1)
+  /* THE LEAD IS THE NOTICE WHICHEVER ORDER THEY ARRIVE IN. Reversed, the SMS became the lead of a
+     dot of its own -- so the track drew it first and the panel offered it first. */
+  check('the notice is the lead, not the message behind it',
+    [one[0].lead.id, other[0].lead.id], ['e', 'e'])
+  check('...and the SMS is its follower both ways',
+    [one[0].follower?.id, other[0].follower?.id], ['s', 's'])
+  /* AND THE CALLER'S ORDER IS STILL THE ORDER DRAWN. Pairing must not quietly re-sort the track:
+     a chart redrawn in a different order from the list beneath it is two accounts of one sequence. */
+  const three = [
+    step({ id: 'a', dueOn: '2026-09-25', afterMinutes: null, label: 'First' }),
+    step({ id: 'b', dueOn: '2026-10-05', afterMinutes: null, label: 'Second' }),
+    step({ id: 'c', dueOn: '2026-10-12', afterMinutes: null, label: 'Third' }),
+  ]
+  check('the order the caller sorted is the order drawn',
+    noticesOf(three).map((n) => n.lead.id), ['a', 'b', 'c'])
+}
+
+/*
+ * AND THE SORT ITSELF, read back off the query that feeds all of this. The third key is what was
+ * missing; asserted on the source because only the browser could otherwise prove it, and by then
+ * the symptom is a chart nobody can tell is wrong.
+ */
+{
+  const run = read('../../src/lib/accountRun.ts')
+  ok('the run asks for the node ordinal', /workflow_nodes!inner\([^)]*\bordinal\b/.test(run))
+  ok('...carries it onto the step', /ordinal: s\.workflow_nodes\?\.ordinal \?\? 0/.test(run))
+  /*
+   * ALL THREE KEYS, IN THIS ORDER. Date, then the day number, then the ordinal -- and the ordinal
+   * last, because it only ever separates two steps that already agree about the day.
+   */
+  ok('...and sorts on it after the date and the day',
+    /a\.dueOn\.localeCompare\(b\.dueOn\) \|\| a\.day - b\.day \|\| a\.ordinal - b\.ordinal/.test(run))
+}
+
+/* ---------------- a follower knows what it is waiting for ---------------- */
+
+/*
+ * THE OTHER DIRECTION OF THE SAME FACT, and what the card under a held SMS needs.
+ *
+ * A follower cannot be sent on its own: planSend refuses it while the message it refers to has not
+ * gone. So a Send it now under one is a button that presses and reports that nothing changed --
+ * which is exactly what the firm pressed, twice, before asking why it was not working.
+ */
+{
+  const lead = step({ id: 'e', label: 'Section 129', afterMinutes: null })
+  const follower = step({ id: 's', label: 'Section 129 SMS', channel: 'sms', afterMinutes: 10 })
+  const steps = [lead, follower]
+  check('an SMS can name the notice it goes behind', leadOf(steps, 's')?.id, 'e')
+  check('...and the notice names the SMS behind it', followerOf(steps, 'e')?.id, 's')
+  /* NULL EACH WAY ROUND FOR A STEP THAT IS NEITHER, and null is not a failure: most steps of most
+     sequences are one message. */
+  check('a notice has no notice of its own', leadOf(steps, 'e'), null)
+  check('...and a lone step has neither', [leadOf([lead], 'e'), followerOf([lead], 'e')], [null, null])
+}
 
 /* ------------------------------------------------------------------ */
 

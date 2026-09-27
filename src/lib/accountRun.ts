@@ -70,7 +70,7 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
       workflow_versions!inner(day_unit, workflows!inner(name)),
       workflow_run_holds(id, cause, reason, started_on, ended_on, ended_reason),
       workflow_run_steps(id, due_on, state, note, sent_at,
-        workflow_nodes!inner(label, channel, day, needs_release, after_minutes))
+        workflow_nodes!inner(label, channel, day, ordinal, needs_release, after_minutes))
     `)
     .eq('account_id', accountId)
     .order('started_on', { ascending: false })
@@ -85,9 +85,20 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
     startedOn: r.started_on,
     dayUnit: (r.workflow_versions?.day_unit ?? 'calendar') as DayUnit,
     /*
-     * ORDERED BY THE DATE IT LANDS ON, then by the day number. Not by the order PostgREST handed
-     * them over, which is whatever the planner chose -- a sequence drawn out of order reads as a
-     * final notice before the reminder that precedes it.
+     * ORDERED BY THE DATE IT LANDS ON, THEN BY THE DAY NUMBER, THEN BY THE NODE'S OWN ORDINAL.
+     *
+     * THE THIRD KEY IS THE ONE THAT MATTERS AND IT WAS MISSING. Not by the order PostgREST handed
+     * them over, said the comment here -- but the two steps of a PAIR share a due date AND a day
+     * number, so on exactly those two the comparison returned nought and the order was whatever
+     * PostgREST felt like. The firm found all three ways that shows:
+     *
+     *   - the section 129's SMS drawn to the LEFT of the section 129 on the track;
+     *   - the pair not collapsing into one dot at all, because noticesOf reads a follower before
+     *     its lead as a step with nothing to follow -- so every step of the sequence drew twice;
+     *   - and the panel opening on the follower, whose Send it now button cannot work while the
+     *     message it refers to has not gone. They pressed it and were told nothing had changed.
+     *
+     * `ordinal` is the node column that has said which is which since the workflow was built.
      */
     steps: (r.workflow_run_steps ?? [])
       .map((s: any): RunStep => ({
@@ -95,6 +106,7 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
         label: s.workflow_nodes?.label ?? 'Step',
         channel: s.workflow_nodes?.channel ?? null,
         day: s.workflow_nodes?.day ?? 0,
+        ordinal: s.workflow_nodes?.ordinal ?? 0,
         needsRelease: Boolean(s.workflow_nodes?.needs_release),
         /* Null on a notice, a number on the SMS that goes out behind it. What pairs the two --
            see stepPairs.ts, and the runner's own use of it in step.ts. */
@@ -104,7 +116,9 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
         note: s.note ?? null,
         sentAt: s.sent_at ?? null,
       }))
-      .sort((a: RunStep, b: RunStep) => a.dueOn.localeCompare(b.dueOn) || a.day - b.day),
+      .sort((a: RunStep, b: RunStep) => (
+        a.dueOn.localeCompare(b.dueOn) || a.day - b.day || a.ordinal - b.ordinal
+      )),
     /* OLDEST FIRST, which is the order the history reads in and the order the clock adds them
        up in. PostgREST hands an embed over in no order at all. */
     holds: (r.workflow_run_holds ?? [])
