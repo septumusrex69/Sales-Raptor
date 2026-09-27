@@ -192,13 +192,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * precisely what the release guard refuses. So nothing is sent, and `firstStepOn` below is how
    * the screen says that instead of leaving the person to wonder.
    */
-  const { data: due } = await admin
+  const { data: dueRows } = await admin
     .from('workflow_run_steps')
-    .select('id, node_id, due_on, state, note, run_id, workflow_runs!inner(id, account_id, version_id, started_on, state)')
+    .select('id, node_id, due_on, state, note, run_id, workflow_nodes!inner(ordinal), workflow_runs!inner(id, account_id, version_id, started_on, state)')
     .eq('run_id', created.id)
     .in('state', ['pending', 'held'])
     .lte('due_on', today)
     .order('due_on', { ascending: true })
+
+  /*
+   * THE NOTICE BEFORE THE SMS BEHIND IT, AND THIS IS THE THIRD PLACE THAT NEEDED SAYING.
+   *
+   * THE FIRM, HAVING PRESSED THE BUTTON: "I also sent the section 129 number. It doesn't record
+   * the fees associated." The section 129 email went and its SMS did not -- so no item 1(c) was
+   * raised, because the message it would have been raised on never left.
+   *
+   * WHY: ordered by due_on alone, and the two steps of a pair share it, so the SMS was free to be
+   * attempted FIRST. planSend then refused it -- "the message before this one did not go" -- and
+   * marked it held. The email sent a moment later in the same loop and nothing came back for the
+   * SMS. The account still reads `sms-day-1` held with that note under an email stamped sent.
+   *
+   * The same key was missing in accountRun (the screen) and in run.ts (the morning sweep). Three
+   * places, one fact: `ordinal` is the node's own column and has said email-then-SMS since the
+   * workflow was built.
+   */
+  const due = ((dueRows ?? []) as unknown as (DueStep & { workflow_nodes?: { ordinal?: number } })[])
+    .sort((a, b) => (
+      a.due_on.localeCompare(b.due_on)
+      || (a.workflow_nodes?.ordinal ?? 0) - (b.workflow_nodes?.ordinal ?? 0)
+    ))
 
   /* The earliest date anything on this run is dated, read back from what the planner wrote rather
      than recomputed -- a second opinion about the date is how a button promises Monday for a
@@ -212,7 +234,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .maybeSingle()
 
   const outcome = { sent: 0, held: 0, stillHeld: 0, failed: 0, notes: [] as string[] }
-  for (const step of (due ?? []) as unknown as DueStep[]) {
+  for (const step of due as DueStep[]) {
     try {
       const what = await runOneStep(admin, step, today, caller.id)
       outcome[what.result] += 1

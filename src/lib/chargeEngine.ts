@@ -83,6 +83,14 @@ export interface ChargeInput {
   quantity?: number
   /** Defaults to now. Passed in by tests. */
   at?: Date
+  /**
+   * WHO RAISED IT: 'raptor' for a person doing something, 'workflow' for the sweep.
+   *
+   * Defaulted rather than required, because every caller but one is a person. The runner passes
+   * 'workflow' so that "what did the sequences charge this month" stays a question the ledger can
+   * answer -- it used to write its own row and stamped itself.
+   */
+  source?: 'raptor' | 'workflow'
 }
 
 /**
@@ -196,7 +204,7 @@ export async function chargeItemWith(db: ChargeDb, input: ChargeInput): Promise<
     // engine already excludes unbilled rows, and the timeline already draws them as "not charged".
     billed: exclVat > 0,
     incurred_at: at.toISOString(),
-    source: 'raptor',
+    source: input.source ?? 'raptor',
     created_by: input.createdBy ?? null,
   })
   if (error) throw new Error(error.message)

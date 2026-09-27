@@ -171,23 +171,51 @@ ok('...and holds rather than sending from somebody else’s name',
  * PRESENT first -- indexOf returns -1, so an order-only test passes vacuously the moment the
  * thing it orders is deleted.
  */
-const feeAt = runner.indexOf("from('account_fees').insert")
+const feeAt = runner.indexOf('chargeItemWith(')
 const sendAt = runner.indexOf('sendAsUser(admin,')
 const smsAt = runner.indexOf('await sendSms(')
 ok('a fee is raised at all', feeAt > 0)
 ok('...and something is actually sent', sendAt > 0 && smsAt > 0)
 ok('the fee is raised after the email has gone', feeAt > sendAt)
 ok('...and after the SMS has gone', feeAt > smsAt)
+
 /*
- * PRICED ON THE ACTION, NOT ON THE CRON. `incurred_at` carries the moment the step was sent, and
- * planSend priced the charge on the step's own due date. A fee stamped with whenever the runner
- * happened to wake would eventually be priced on one schedule and dated into another.
+ * AND IT GOES THROUGH THE CHARGE ENGINE, WHICH IS THE POINT OF THIS BLOCK NOW.
+ *
+ * THE FIRM: "I also sent the section 129 number. It doesn't record the fees associated." The fee
+ * WAS recorded -- and it was recorded wrong, because the runner wrote the row by hand. Four rules
+ * every other fee in Raptor obeys were simply absent:
+ *
+ *   VAT              never set, so it took the column default of nought while vat_rate said 15.
+ *                    R25.00 charged where the same email sent by hand charges R28.75. The firm's
+ *                    own money, on every message the runner has ever sent.
+ *   IN DUPLUM        recoverableFee trims the fee that crosses the s103(5) line and writes what
+ *                    follows at nought, not billed. Ignored.
+ *   THE MONTHLY CAP  item 1(c) is ten SMSs a month. Ignored.
+ *   THE TARIFF DATE  tariff_effective_from was null, so a fee could not be read back against the
+ *                    schedule it was priced on.
+ *
+ * ASSERTED AS AN ABSENCE TOO. A hand-written insert alongside the engine would raise the fee
+ * twice, and the one table nobody can correct afterwards is this one.
  */
-ok('the fee is stamped with the action, not with the run', /incurred_at: sentAt/.test(runner))
-/* segments is NOT NULL with a default, and an explicit null overrides a default. Probed against
-   staging: the email fee insert was refused outright. */
-ok('an email fee omits segments rather than passing null',
-  /plan\.charge\.segments === null \? \{\} : \{ segments/.test(runner))
+ok('the fee goes through the same engine as every other fee',
+  /chargeItemWith\(admin as unknown as ChargeDb, \{/.test(runner))
+ok('...and the runner no longer writes a fee row itself',
+  !/from\('account_fees'\)\.insert/.test(runner))
+/*
+ * PRICED ON THE ACTION, NOT ON THE CRON. The engine prices on scheduleFor(at), so `at` carries the
+ * moment the step was sent. A fee stamped with whenever the runner happened to wake would
+ * eventually be priced on one schedule and dated into another.
+ */
+ok('the fee is stamped with the action, not with the run', /at: new Date\(sentAt\)/.test(runner))
+/* SEGMENTS ARE THE QUANTITY -- one row at the segment rate, not one row per segment, because a
+   statement is read by a debtor. An email is priced per message, so one. */
+ok('an SMS is charged by its segments', /quantity: plan\.charge\.segments \?\? 1/.test(runner))
+/* AND THE TIMELINE REPORTS WHAT WAS ACTUALLY CHARGED, not the quote the step drawer shows: on an
+   account at the ceiling the note said "R25.00 raised" beside a fee row of nought. */
+ok('the note reads the engine\u2019s answer, not the quote',
+  /fee\.exclVat \+ fee\.vat/.test(runner))
+ok('...and says so when a notice earned nothing', /No charge: \$\{CHARGE_REFUSED/.test(runner))
 
 /* ------------------------------------------------ the firm's day */
 
@@ -338,7 +366,8 @@ ok('...on the same table everything else is on', /source: 'workflow',/.test(runn
  * AND IT NAMES THE CHARGE. A fee the debtor will be asked to pay should be legible where the
  * action is, not only inside a total on the position panel.
  */
-ok('the note says what it cost', /raised under item \$\{plan\.charge\.item\}/.test(runner))
+ok('the note says what it cost',
+  /raised under item \$\{plan\.charge\?\.item \?\? ''\}/.test(runner))
 ok('...and says who it went to', /sent\$\{toWhom \? ` to \$\{toWhom\}` : ''\}/.test(runner))
 /* The same fallback the SMS send uses, or the note names a number the message did not go to. */
 ok('...falling back the way the SMS send does',

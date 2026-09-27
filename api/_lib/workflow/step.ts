@@ -13,6 +13,17 @@ import { toSettings as toFirmSettings } from '../../../src/lib/firmSettingsRow.j
 import { notifyHeld } from './notify.js'
 import { nextUnpaidFromRow } from '../../../src/lib/ptpSchedule.js'
 import {
+  chargeItemWith, type ChargeDb, type ChargeResult,
+} from '../../../src/lib/chargeEngine.js'
+
+/** Why a message earned nothing, in the firm's words rather than the engine's enum. */
+const CHARGE_REFUSED: Record<Exclude<ChargeResult['reason'], 'charged'>, string> = {
+  'written-off': 'the account is written off',
+  'item-total-spent': 'this item has nothing left on it',
+  'monthly-limit': 'the monthly limit on this item is reached',
+  'at-ceiling': 'in duplum -- fees and interest are at the capital outstanding',
+}
+import {
   disputeDaysPhrase, disputeWindow, noticeRespondBy,
 } from '../../../src/lib/disputeWindow.js'
 import { repaymentPlan, settlementLadder } from '../../../src/lib/repaymentPlan.js'
@@ -536,21 +547,54 @@ export async function runOneStep(
    * nothing else, so there is no lead or deal this could reach -- said out loud because the next
    * person here will be looking at a campaign over a list.
    */
+  /*
+   * THROUGH THE CHARGE ENGINE, WHICH IS WHAT EVERY OTHER FEE IN RAPTOR GOES THROUGH.
+   *
+   * THE FIRM: "I also sent the section 129 number. It doesn't record the fees associated." The fee
+   * WAS recorded -- and it was recorded wrong, in four ways at once, because this wrote the row by
+   * hand instead of asking chargeItemWith:
+   *
+   *   NO VAT. `vat_amount` was never set, so it took the column default of nought while
+   *     `vat_rate` said 15. Every notice the workflow sent charged R25.00 where the same email sent
+   *     by hand charges R28.75. The firm's own money, on every message, since the runner was built.
+   *   NO IN DUPLUM CEILING. recoverableFee trims the fee that crosses the line and writes
+   *     everything after it at nought, not billed -- s103(5), and this ignored it.
+   *   NO MONTHLY CAP. Item 1(c) is ten SMSs a month; this would have raised an eleventh.
+   *   NO TARIFF DATE. `tariff_effective_from` was null, so a fee could not be read back against the
+   *     schedule it was priced on.
+   *
+   * THE ENGINE PRICES IT TOO, so plan.charge.rand is now only the QUOTE the step drawer shows. The
+   * two agree -- both call itemAmountFor on scheduleFor(the action's date) -- and where they differ
+   * it is because a cap bit, which is the engine being right.
+   *
+   * THE FEE IS STILL RAISED AFTER THE PROVIDER ACCEPTED, and in that order for the reason
+   * api/_lib/sms/send.ts gives: a fee for a message that never left is worse than a message with
+   * no fee. The first is a charge the firm cannot justify; the second is a bookkeeping gap.
+   *
+   * ON THE ACCOUNT, WHICH IS THE ONLY PLACE FEES ARE RAISED. A workflow runs on an account and on
+   * nothing else, so there is no lead or deal this could reach -- said out loud because the next
+   * person here will be looking at a campaign over a list.
+   */
+  let fee: ChargeResult | null = null
   if (plan.charge) {
-    await admin.from('account_fees').insert({
-      account_id: account.id,
+    fee = await chargeItemWith(admin as unknown as ChargeDb, {
+      accountId: account.id as string,
+      itemId: plan.charge.item,
+      /* The catalogue code the timeline draws an icon from, and what reconciliation groups on. It
+         was null on every workflow fee, which is why they had no icon. */
+      actionCode: node.channel === 'sms' ? 'sms' : 'email_out',
       description: node.label,
-      annexure_item: plan.charge.item,
-      amount_excl_vat: plan.charge.rand,
-      /* OMITTED ON AN EMAIL, not passed as null: `segments` is NOT NULL with a default of 1, and
-         an explicit null overrides a default rather than falling back to it. Probed -- the fee
-         insert was refused outright, which would have left a sent notice with no charge against
-         it, on the one table nobody can correct afterwards. */
-      ...(plan.charge.segments === null ? {} : { segments: plan.charge.segments }),
-      /* `incurred_at` is the column, and the ACTION's time is what goes in it -- the same date
-         planSend priced the charge on. A fee stamped with the moment the cron happened to run
-         would eventually be priced on one schedule and dated into another. */
-      incurred_at: sentAt,
+      /* SEGMENTS ARE THE QUANTITY. One row at the segment rate, not one row per segment -- a
+         statement is read by a debtor. Null on an email, which is priced per message, so one. */
+      quantity: plan.charge.segments ?? 1,
+      /* THE ACTION'S OWN MOMENT, not when the sweep happened to run: the engine prices on
+         scheduleFor(at), so a fee stamped with the cron's clock would eventually be priced on one
+         schedule and dated into another. */
+      at: new Date(sentAt),
+      createdBy: releasedBy ?? null,
+      /* WHICH FEES THE RUNNER RAISED stays answerable. The engine stamps 'raptor' by default,
+         which is right for a person doing something; these are the sweep, and losing that would
+         make "what did the workflow charge this month" a question nothing can answer. */
       source: 'workflow',
     })
   }
@@ -575,9 +619,22 @@ export async function runOneStep(
    * IT NAMES THE CHARGE. A fee the debtor will be asked to pay should be legible where the action
    * is, not only in a total on the position panel.
    */
-  const charged = plan.charge
-    ? ` R${plan.charge.rand.toFixed(2)} raised under item ${plan.charge.item}.`
-    : ''
+  /*
+   * WHAT WAS ACTUALLY CHARGED, not what was quoted.
+   *
+   * This printed plan.charge.rand -- the QUOTE the step drawer shows -- so on an account at the in
+   * duplum ceiling the timeline said "R25.00 raised" beside a fee row of nought. Now it reads the
+   * engine's own answer.
+   *
+   * AND IT SAYS WHEN NOTHING WAS CHARGED, rather than going quiet. A notice that earned the firm
+   * nothing is a fact a collector should be able to see on the account -- and "the ceiling" and
+   * "ten SMSs this month already" are different facts with different answers.
+   */
+  const charged = fee === null
+    ? ''
+    : fee.reason === 'charged'
+      ? ` R${(fee.exclVat + fee.vat).toFixed(2)} raised under item ${plan.charge?.item ?? ''}.`
+      : ` No charge: ${CHARGE_REFUSED[fee.reason]}.`
   /* The same fallback the SMS send itself uses, or the note names a number the message did not
      go to on an account whose only number is filed as a landline. */
   const toWhom = node.channel === 'sms'
