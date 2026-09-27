@@ -25,6 +25,8 @@
    transpile, which takes the route down before its first line runs. check-api-imports is what
    holds this. */
 import { smsCost } from './smsSegments.js'
+/* A .js specifier for the same reason as the line above: this one is reached from api/ too. */
+import { PTP_FREQUENCY, type Arrangement } from './arrangements.js'
 import type { DeskPosition } from './clientPosition.ts'
 
 /**
@@ -354,6 +356,23 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
     { key: 'ptp_amount', label: 'The next instalment under the arrangement', sample: 'R 2,500.00' },
     { key: 'ptp_date', label: 'The day that instalment is due', sample: '5 October 2026' },
     /*
+     * AND HOW OFTEN IT FALLS, WHICH IS THE FACT THAT MAKES IT AN ARRANGEMENT.
+     *
+     * THE FIRM, READING THE CONFIRMATION THAT WENT OUT: "it should be weekly monthly, like that
+     * should be disclosed." An amount and a date describe a single payment. The debtor on that
+     * email had agreed to R500 a WEEK against R13 347,31 outstanding, and nothing on the page said
+     * so -- the arrangement and a once-off promise to pay five hundred rand read identically.
+     *
+     * THE PHRASE IS arrangements.PTP_FREQUENCY'S, not a second wording here. Three notices will
+     * end up quoting it and a firm that describes one arrangement two ways is a firm a debtor can
+     * argue with.
+     *
+     * NOT OPTIONAL, for the reason above ptp_amount: an arrangement notice with the frequency
+     * dropped out of it is not a thinner notice, it is a demand for one payment. The placeholder
+     * stands and holds the step.
+     */
+    { key: 'ptp_frequency', label: 'How often the instalment falls', sample: 'every month' },
+    /*
      * AND WHAT WAS ACTUALLY RECEIVED, WHICH IS NOT THE SAME NUMBER.
      *
      * THE FIRM'S RECEIPT EMAIL ASKED FOR {{ptp_amount}} TWICE, meaning two different things in one
@@ -533,7 +552,7 @@ export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
   /* THE ARRANGEMENT IS ABOUT THE ARRANGEMENT, not about the account: the balance is what is owed
      and these two are what was agreed to pay it off. Grouped apart so a writer reaching for "the
      amount" is not offered {{balance}} and {{ptp_amount}} side by side. */
-  { title: 'The arrangement', keys: ['ptp_amount', 'ptp_date', 'ptp_paid'] },
+  { title: 'The arrangement', keys: ['ptp_amount', 'ptp_date', 'ptp_frequency', 'ptp_paid'] },
   /* APART FROM THE ARRANGEMENT, because a simulation is not one -- it is what an arrangement WOULD
      cost, sent while there is still nothing agreed. Grouped together so a writer reaching for the
      starting date of a live arrangement is not offered {{sim_start}} beside {{ptp_date}}. */
@@ -1043,6 +1062,18 @@ export function mergeValuesFor(input: {
    */
   nextInstalment?: { amount: number; dueOn: string } | null
   /**
+   * HOW OFTEN THE ARRANGEMENT FALLS: 'weekly', 'monthly' or 'once_off'.
+   *
+   * ITS OWN FIELD RATHER THAN A FOURTH PROPERTY ON nextInstalment, because it is a fact about the
+   * ARRANGEMENT and not about the instalment -- ptpSchedule returns instalments, and a shape bolted
+   * onto one of them would have to be carried through every function that makes one.
+   *
+   * NULL WHERE THERE IS NO LIVE ARRANGEMENT, like nextInstalment beside it, so the placeholder
+   * stands and a template that quotes the frequency cannot be sent off an account with nothing to
+   * quote.
+   */
+  arrangement?: Arrangement | null
+  /**
    * THE OFFER BEING SIMULATED, where this is a simulation rather than a notice.
    *
    * Absent on every other message, which is what leaves {{sim_frequency}} and {{sim_start}}
@@ -1194,6 +1225,9 @@ export function mergeValuesFor(input: {
        balance above them is. Two formats for two amounts in one letter reads as two systems. */
     ptp_amount: input.nextInstalment ? input.money(input.nextInstalment.amount) : null,
     ptp_date: input.nextInstalment ? longDate(input.nextInstalment.dueOn) : null,
+    /* The debtor's wording, decided once in arrangements.ts -- see PTP_FREQUENCY, and see
+       ARRANGEMENT_LABEL beside it for why the screen's wording is not this one. */
+    ptp_frequency: input.arrangement ? PTP_FREQUENCY[input.arrangement] : null,
     /* Null, not R 0.00, where nothing has been received: a receipt for nothing is not a receipt,
        and the standing placeholder is what stops it going out. `paid_to_date` is the opposite case
        and prints R 0.00 on purpose -- there, zero is the answer to "what have they paid". */

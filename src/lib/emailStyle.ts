@@ -108,12 +108,32 @@ export function emailBodyCss(s: EmailFace): Record<string, string> {
  *
  * AND IT ESCAPES. This did not, and a debtor called "Smit & Seun" put a raw ampersand into the
  * markup of a legal notice. Nothing typed into a message box can be allowed to become HTML.
+ *
+ * ONE PIECE OF MARKUP, AND **BOLD** IS ALL OF IT. The firm, of the arrangement confirmation:
+ * "something should be in bold if it could possibly be." Three facts on that email are the
+ * arrangement -- the instalment, the day it starts and what is still outstanding -- and in a wall
+ * of plain paragraphs they are indistinguishable from the paragraph about credit bureaus.
+ *
+ * WHY A CONVENTION IN THE TEXT RATHER THAN A RICH EDITOR. The templates are rows of plain text the
+ * firm writes and a collector can edit in the compose box; `**` is the one emphasis marker
+ * everybody already knows, it survives being copied between the two, and a template that never
+ * uses it is unchanged. `format` on the row stays 'text' because it still is text.
+ *
+ * NOTHING LEAKS TO A DEBTOR. sendAsUser posts `html` only -- there is no text/plain alternative --
+ * so an asterisk cannot reach an inbox. An SMS is a different path entirely and has no bold at
+ * all, which is why check-message-templates refuses `**` in an SMS body.
+ *
+ * APPLIED AFTER THE ESCAPE, DELIBERATELY, and only WITHIN one line. After, so a pair of asterisks
+ * around markup produces bold text reading "<b>now</b>" rather than bold markup. Within a line,
+ * so a single stray asterisk cannot reach across half a notice and swallow it -- an unmatched
+ * `**` stays exactly the two characters somebody typed.
  */
 export function emailBodyHtml(text: string): string {
   const esc = (s: string) => s
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const bold = (s: string) => s.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
   return text.trim()
     .split(/\n[ \t]*\n+/)
-    .map((block) => esc(block).replace(/\n/g, '<br>'))
+    .map((block) => bold(esc(block)).replace(/\n/g, '<br>'))
     .join('<br><br>')
 }

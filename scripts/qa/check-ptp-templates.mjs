@@ -72,8 +72,56 @@ function splitValues(text) {
   return out.map((v) => (v === 'null' ? null : v))
 }
 
+/*
+ * AND THEN EVERY UPDATE THAT FOLLOWED, IN FILE ORDER.
+ *
+ * schema.sql IS APPEND-ONLY, SO THE LAST WRITE IS THE LIVE ONE -- the same rule CLAUDE.md states
+ * for functions, and it applies to a template row for exactly the same reason. Reading only the
+ * `insert` left this check asserting against wording the firm had already had changed: the
+ * simulation email's opening line and the whole arrangement confirmation were both rewritten by
+ * later migrations, and the check went on validating the superseded copies and passing.
+ *
+ * THREE SHAPES, WHICH ARE THE THREE THE FILE USES: a whole new body, a `replace` of one sentence
+ * inside it, and a flag. Anything else is ignored rather than guessed at -- and the row it would
+ * have changed then fails the assertions below, which is the safe direction.
+ */
+function applyUpdates(text, rowsByKey) {
+  const re = /update public\.message_templates\s+set ([\s\S]*?)\s+where seed_key ([^;]*);/g
+  let m
+  while ((m = re.exec(text)) !== null) {
+    const [set, where] = [m[1], m[2]]
+    const keys = literalsIn(where)
+    const rows = keys.map((k) => rowsByKey.get(k)).filter(Boolean)
+    if (rows.length === 0) continue
+    const lit = literalsIn(set)
+    if (/^body\s*=\s*replace\(/.test(set) && lit.length === 2) {
+      for (const r of rows) r.body = (r.body ?? '').split(lit[0]).join(lit[1])
+    } else if (/^body\s*=/.test(set) && lit.length === 1) {
+      for (const r of rows) r.body = lit[0]
+    } else if (/^attaches_schedule\s*=/.test(set)) {
+      for (const r of rows) r.attaches_schedule = /=\s*true/.test(set) ? 'true' : 'false'
+    }
+  }
+}
+
+/* Every single-quoted literal in a fragment of SQL, '' unescaped. The same convention splitValues
+   above already knows about, and the only one these migrations use. */
+function literalsIn(text) {
+  const out = []
+  let cur = null
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i]
+    if (cur === null) { if (c === "'") cur = ''; continue }
+    if (c === "'" && text[i + 1] === "'") { cur += "'"; i += 1; continue }
+    if (c === "'") { out.push(cur); cur = null; continue }
+    cur += c
+  }
+  return out
+}
+
 const rows = rowsFrom(sql)
 const by = new Map(rows.map((r) => [r.seed_key, r]))
+applyUpdates(sql, by)
 
 /* Asserted present before anything about their contents, or a missing migration passes vacuously. */
 check('all 24 arrangement templates are in the schema', rows.length, 24)
@@ -168,7 +216,9 @@ ok('...and not an identity number',
  */
 for (const r of rows) {
   const wants = r.seed_key.startsWith('email-ptp-default-')
-  const has = (r.attachment_id ?? '') !== null && /seed_key = '?letter-ptp-default/.test(r.attachment_id ?? '')
+  /* The `?? ''` is what makes this safe on a row with no attachment; the `!== null` it used to be
+     ANDed with was always true, which is a dead conjunct sitting in front of the real assertion. */
+  const has = /seed_key = '?letter-ptp-default/.test(r.attachment_id ?? '')
   check(`${r.seed_key} ${wants ? 'attaches its letter' : 'attaches nothing'}`, has, wants)
   if (wants) {
     ok(`...the letter for its own audience`,
@@ -249,6 +299,87 @@ for (const key of EXPECTED.sms) {
   const cost = smsCost(merged)
   check(`...and GSM-7 once merged`, cost.offending, [])
   check(`...and one segment with a long name in it (${cost.units} units)`, cost.segments, 1)
+}
+
+/* ---------- what the confirmation has to say, in the firm's own words ---------- */
+
+/*
+ * THE FIRM READ THE ONE THAT WENT OUT ON RAP-123799 AND SENT IT BACK. What they asked for is
+ * asserted here rather than only written into the migration, because the next person to touch
+ * these two rows will be doing it from the seed insert six thousand lines up the file.
+ */
+for (const key of ['email-ptp-confirmed-individual', 'email-ptp-confirmed-company']) {
+  const r = need(key)
+  /* THE PREMISE FIRST: the check reads the seed insert and then the updates after it, so an
+     applyUpdates that quietly stopped working would leave every assertion below testing the
+     superseded body -- and the old body passes most of them. */
+  ok(`${key} is the rewritten body, not the seeded one`,
+    /in the following way\./.test(r.body))
+  /*
+   * "IT SHOULD BE WEEKLY MONTHLY, LIKE THAT SHOULD BE DISCLOSED." An amount and a date describe a
+   * single payment; the debtor on that email had agreed to R500 a WEEK against R13 347,31.
+   */
+  ok(`...and it says how often the instalment falls`, /\{\{ptp_frequency\}\}/.test(r.body))
+  /* "MENTION THE FIRST PAYMENT IS DUE ON THE 4TH OF OCTOBER" -- the date is labelled as the start
+     of something rather than as a due date standing on its own. */
+  ok(`...and names the date as the first payment`, /First payment: /.test(r.body))
+  ok(`...and still carries what is outstanding`, /\{\{balance\}\}/.test(r.body))
+  /*
+   * "SOMETHING SHOULD BE IN BOLD IF IT COULD POSSIBLY BE." The three figures that ARE the
+   * arrangement. See emailBodyHtml for the convention and for why no asterisk reaches an inbox.
+   */
+  for (const field of ['ptp_amount', 'ptp_date', 'balance']) {
+    ok(`...with {{${field}}} in bold`, r.body.includes(`**{{${field}}}**`))
+  }
+  /*
+   * "WE DON'T SAY WE AGREE TO THIS ACCOUNT." The firm's objection to the opening line: the debtor
+   * made an arrangement to pay, and the firm confirming an agreement "on your account" reads as
+   * the firm agreeing something about the DEBT.
+   */
+  ok(`...and does not put the firm on one side of an agreement`,
+    !/We confirm the payment arrangement agreed/.test(r.body))
+  ok(`...saying instead that the arrangement was made`,
+    /has|have/.test(r.body) && /made an arrangement to pay/.test(r.body))
+  /*
+   * AND THE HOLD IS NOT UNCONDITIONAL. "We hold the collection steps on your account unless
+   * instructed otherwise by a client, or our legal department" -- the firm's words. The account is
+   * somebody else's book, and a promise the firm cannot keep is one a debtor can hold it to.
+   */
+  ok(`...and the hold is subject to the client and the legal department`,
+    /unless our client or our legal department instructs us otherwise/.test(r.body))
+  /*
+   * "I DON'T THINK WE NEED TO PUT ANY ATTACHMENT." And the reason beyond taste: `total_promised` is
+   * null on an open-ended arrangement, so the projection the page drew -- 31 payments to 2 May
+   * 2027, R15 222,32 in all -- was headed "YOUR PAYMENT ARRANGEMENT: WHAT IT WILL COST" over
+   * figures nobody had agreed to.
+   */
+  check(`...and it carries no schedule`, r.attaches_schedule, 'false')
+}
+
+/*
+ * AND "FIRST PAYMENT" IS THE CONFIRMATION'S ALONE.
+ *
+ * {{ptp_date}} IS THE EARLIEST INSTALMENT NOT YET PAID, which MOVES as payments come in -- and
+ * that is exactly what the other four arrangement notices need. It reads as the FIRST one only
+ * because the confirmation goes out at the moment the arrangement is recorded, when nothing has
+ * been paid and instalments_kept is 0. On a reminder or a default the same label would name the
+ * third payment as the first.
+ *
+ * SO THE LABEL IS BOUNDED TO THE ONE NOTICE WHERE IT IS TRUE, rather than left as a phrase
+ * somebody copies into the next template that quotes a date.
+ */
+for (const r of rows) {
+  if (r.seed_key.startsWith('email-ptp-confirmed-')) continue
+  ok(`${r.seed_key} does not call the next instalment the first`, !/First payment/.test(r.body))
+}
+
+/*
+ * AND NO SMS CARRIES THE BOLD MARKER. An SMS has no bold at all: it goes out as the characters in
+ * the body, so `**` would reach a debtor as two asterisks -- and each one is a character counted
+ * against the 160 the segment is priced on under item 1(c).
+ */
+for (const key of EXPECTED.sms) {
+  ok(`${key} has no bold marker in it`, !need(key).body.includes('**'))
 }
 
 /* ------------------------------------------------------------------ */

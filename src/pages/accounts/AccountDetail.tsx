@@ -552,6 +552,17 @@ export function AccountDetail() {
          */
         nextInstalment: nextUnpaid(liveArrangement(workspace?.promises ?? [])),
         /*
+         * AND HOW OFTEN IT FALLS, OFF THE SAME ARRANGEMENT, UNDER THE SAME CONDITION.
+         *
+         * GATED ON THE INSTALMENT rather than on the arrangement being present, which is what makes
+         * the two impossible to disagree about. liveArrangement falls back to NO_ARRANGEMENT --
+         * whose shape is 'once_off' -- so an account with no arrangement asked directly would
+         * answer "as a single payment" beside a placeholder where the amount should be, and the
+         * notice would go out describing an arrangement nobody made.
+         */
+        arrangement: nextUnpaid(liveArrangement(workspace?.promises ?? []))
+          ? liveArrangement(workspace?.promises ?? []).arrangement : null,
+        /*
          * WHAT A RECEIPT CONFIRMS, off the same statement the balance beside it comes from -- so the
          * figure the debtor is thanked for and the balance under it cannot disagree.
          *

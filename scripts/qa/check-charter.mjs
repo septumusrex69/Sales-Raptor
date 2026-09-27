@@ -417,6 +417,48 @@ check('an ampersand in a debtor\'s name is not markup',
 check('...and nothing typed can become a tag',
   emailBodyHtml('pay <b>now</b>'), 'pay &lt;b&gt;now&lt;/b&gt;')
 
+/*
+ * ---------- ONE PIECE OF MARKUP, AND **BOLD** IS ALL OF IT ----------
+ *
+ * THE FIRM, OF THE ARRANGEMENT CONFIRMATION: "something should be in bold if it could possibly
+ * be." The three facts that ARE the arrangement -- the instalment, the day it starts and what is
+ * still outstanding -- sat in a column of plain paragraphs reading exactly like the paragraph
+ * about credit bureaus.
+ */
+check('a template can bold what the email is about',
+  emailBodyHtml('Amount: **R 500,00**'), 'Amount: <b>R 500,00</b>')
+check('...more than once on a line', emailBodyHtml('**a** and **b**'), '<b>a</b> and <b>b</b>')
+check('...and on consecutive lines, which is how the block is written',
+  emailBodyHtml('Amount: **R 500,00**\nDue: **4 October**'),
+  'Amount: <b>R 500,00</b><br>Due: <b>4 October</b>')
+/*
+ * AFTER THE ESCAPE, NEVER BEFORE IT. Applied to the raw text, a pair of asterisks around markup
+ * would produce bold MARKUP rather than bold text reading "<b>now</b>" -- which is the injection
+ * the escape exists to stop, reintroduced by the feature above it.
+ */
+check('...and it cannot be used to smuggle a tag in',
+  emailBodyHtml('**<b>now</b>**'), '<b>&lt;b&gt;now&lt;/b&gt;</b>')
+/*
+ * AND AN UNMATCHED PAIR IS TWO CHARACTERS SOMEBODY TYPED. Allowed to run across lines, one stray
+ * asterisk pair would swallow half a notice into a bold blob -- so the match stops at a newline
+ * and a lone `**` stays literal.
+ */
+check('a single stray marker is left alone', emailBodyHtml('2 ** 3 = 8'), '2 ** 3 = 8')
+/*
+ * AND TWO OF THEM ON DIFFERENT LINES ARE STILL TWO STRAYS, not one bold run swallowing the lines
+ * between. This is the case a match allowed to cross a newline gets wrong -- and the block on the
+ * confirmation is four label lines each carrying a pair, so one unclosed marker there would bold
+ * everything down to the next line that happened to have one.
+ */
+check('...and a marker cannot reach across a line',
+  emailBodyHtml('Amount: **R 500\nDue: 4 October** 2026'),
+  'Amount: **R 500<br>Due: 4 October** 2026')
+check('...nor across a paragraph',
+  emailBodyHtml('Amount: **R 500\n\nDue: 4 October** 2026'),
+  'Amount: **R 500<br><br>Due: 4 October** 2026')
+/* NOTHING EMPTY IS BOLDED: `****` is four characters, not an empty <b>. */
+check('an empty pair is not a tag', emailBodyHtml('****'), '****')
+
 const composer = readFileSync('src/components/ComposeEmailModal.tsx', 'utf8')
 ok('the compose box is typed in the firm\'s own face', /emailBodyCss\(firm\)/.test(composer))
 ok('...and that is on the message box, not on the dialog around it',

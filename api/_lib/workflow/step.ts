@@ -13,6 +13,7 @@ import { moneyZa } from './locale.js'
 import { toSettings as toFirmSettings } from '../../../src/lib/firmSettingsRow.js'
 import { notifyHeld } from './notify.js'
 import { nextUnpaidFromRow } from '../../../src/lib/ptpSchedule.js'
+import type { Arrangement } from '../../../src/lib/arrangements.js'
 import {
   chargeItemWith, type ChargeDb, type ChargeResult,
 } from '../../../src/lib/chargeEngine.js'
@@ -410,6 +411,17 @@ export async function runOneStep(
        default letter is the one that was MISSED, and is what makes "has not reached our trust
        account" a true sentence rather than a demand for money not yet owed. */
     nextInstalment: nextUnpaidFromRow(promiseRes.data),
+    /*
+     * AND HOW OFTEN IT FALLS -- "every week", "every month" -- which is what turns an amount and a
+     * date into an arrangement. The firm's confirmation read "Amount: R 500,00 / Due: 4 October"
+     * over a balance of R13 347,31, which describes a single payment.
+     *
+     * GATED ON THE INSTALMENT, exactly as the browser's copy is: the two answers come off the one
+     * promise row, so a notice cannot quote a weekly instalment under a monthly frequency, and an
+     * account with no arrangement answers null to both and holds the step.
+     */
+    arrangement: nextUnpaidFromRow(promiseRes.data)
+      ? ((promiseRes.data?.arrangement as Arrangement | null) ?? null) : null,
     /*
      * WHAT A RECEIPT CONFIRMS: the newest unreversed payment, off the ledger the balance above it
      * already came from -- so the figure the debtor is thanked for and the balance under it cannot

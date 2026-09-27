@@ -19,6 +19,7 @@
  * would make an unanswerable notice sendable.
  */
 import { mergeValuesFor, type Person, type TemplateAccount } from './messageTemplates.js'
+import type { Arrangement } from './arrangements.js'
 import { addWorkingDays } from './workingDays.js'
 import type { FirmSettings } from './firmSettings.js'
 
@@ -113,6 +114,15 @@ export function accountMergeValues(input: {
    * arrangement to quote, which is what holds the step instead of sending a blank amount.
    */
   nextInstalment?: { amount: number; dueOn: string } | null
+  /**
+   * HOW OFTEN THAT INSTALMENT FALLS, off the same promise row. See `ptp_frequency`.
+   *
+   * CARRIED DOWN RATHER THAN DERIVED, like the instalment above it. Both callers gate it on the
+   * instalment being there, so an account with no arrangement answers null to both and the notice
+   * holds -- rather than describing "a single payment", which is what the arrangement fallback's
+   * own shape would have said.
+   */
+  arrangement?: Arrangement | null
   /** What a receipt confirms: the newest unreversed payment. See `ptp_paid` in messageTemplates. */
   paymentReceived?: number | null
   /** The dispute this message is about, where it is about one. */
@@ -151,6 +161,7 @@ export function accountMergeValues(input: {
       debtorAddress: addressOf(input.contacts),
       respondBy: input.respondByOverride ?? respondBy(input.today),
       nextInstalment: input.nextInstalment ?? null,
+      arrangement: input.arrangement ?? null,
       paymentReceived: input.paymentReceived ?? null,
       dispute: input.dispute ?? null,
       /* Passed whole. There is no list of the firm's fields here to fall behind the ones the

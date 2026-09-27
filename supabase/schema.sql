@@ -10011,3 +10011,118 @@ set body = replace(
   'Please find attached, for your convenience, the calculations on the company''s account: what it would cost to settle it by paying'
 )
 where seed_key = 'email-ptp-simulation-company';
+
+-- ============================================================================
+-- THE ARRANGEMENT CONFIRMATION SAYS WHAT THE ARRANGEMENT IS.
+--
+-- THE FIRM, READING THE ONE THAT WENT OUT ON RAP-123799: "it should be weekly monthly, like that
+-- should be disclosed. Mention the first payment is due on the 4th of October. This is the total
+-- outstanding amount. Something should be in bold if it could possibly be."
+--
+-- FOUR CHANGES, AND THE FIRST IS THE ONE THAT MATTERS. "Amount: R 500,00 / Due: 4 October 2026 /
+-- Total outstanding: R 13 347,31" describes a single payment of five hundred rand against a debt
+-- of thirteen thousand. The debtor had agreed to R500 A WEEK, and the fact that made it an
+-- arrangement was the one fact the email left out. {{ptp_frequency}} is that fact, in the firm's
+-- own words, off the same promise row the amount and the date already come from.
+--
+-- THE THREE FIGURES ARE BOLD. See emailBodyHtml for why `**` and for why an asterisk cannot reach
+-- an inbox: they are what the email is about, and in a column of plain paragraphs they read as
+-- ordinary prose.
+--
+-- "WE DO NOT AGREE TO THE ACCOUNT." The firm's words. "We confirm the payment arrangement agreed
+-- on your account" puts the firm on one side of an agreement about the DEBT; what happened is that
+-- the debtor made an arrangement to pay it. So the opening line says that instead.
+--
+-- AND THE HOLD IS NOT UNCONDITIONAL. "While you keep to this arrangement, we hold the collection
+-- steps on your account" promised something the firm cannot promise on somebody else's book: the
+-- client whose account it is, or the firm's own legal department, can instruct otherwise. Also the
+-- firm's words.
+-- ============================================================================
+update public.message_templates
+set body = 'Dear {{debtor_name}}
+
+Case reference: {{case_number}}
+
+You have made an arrangement to pay your account with {{client_name}} in the following way.
+
+Amount: **{{ptp_amount}}**
+How often: {{ptp_frequency}}
+First payment: **{{ptp_date}}**
+Total outstanding: **{{balance}}**
+
+While you keep to this arrangement, we hold the collection steps on your account, unless our client or our legal department instructs us otherwise. That includes any credit bureau listing and any handover to our attorneys.
+
+How your payments are reported. Your payment record on this account is reported to the registered credit bureaus. That is not only whether you pay, but how you pay:
+
+- A missed payment is reported and counts against your credit profile.
+- A short payment, less than the agreed amount, is reported as a payment not met.
+- A late payment is reported as late, even if the full amount comes in afterwards.
+- An arrangement that takes more than six instalments to settle the account is reported as slow paying, which every credit provider who assesses you can see.
+
+Paying the agreed amount on the agreed date is what keeps your profile clean. The shorter the arrangement, the better your record reads.
+
+If a payment is not received, this arrangement lapses and the collection process continues from where it was paused.
+
+Please pay into our trust account using reference {{case_number}}. The details are in the notice we sent you, and we will confirm them by phone if you are unsure.
+
+{{collector_name}} handles your account: {{collector_phone}} / {{collector_email}} / {{firm_phone}}
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}'
+where seed_key = 'email-ptp-confirmed-individual';
+
+update public.message_templates
+set body = 'To the directors of {{debtor_name}}
+
+Case reference: {{case_number}}
+Registration number: {{debtor_reg_no}}
+
+The company has made an arrangement to pay its account with {{client_name}} in the following way.
+
+Amount: **{{ptp_amount}}**
+How often: {{ptp_frequency}}
+First payment: **{{ptp_date}}**
+Total outstanding: **{{balance}}**
+
+While the company keeps to this arrangement, we hold the collection steps on the account, unless our client or our legal department instructs us otherwise. That includes any credit bureau listing and any handover to our attorneys.
+
+How the company''s payments are reported. The company''s payment record on this account is reported to the registered credit bureaus against its registration number. That is not only whether it pays, but how it pays:
+
+- A missed payment is reported and counts against your credit profile.
+- A short payment, less than the agreed amount, is reported as a payment not met.
+- A late payment is reported as late, even if the full amount comes in afterwards.
+- An arrangement that takes more than six instalments to settle the account is reported as slow paying, which every credit provider who assesses you can see.
+
+Suppliers, lenders and landlords who assess the company see this record. The shorter the arrangement, the better it reads.
+
+If a payment is not received, this arrangement lapses and the collection process continues from where it was paused.
+
+Please pay into our trust account using reference {{case_number}}. The details are in the letter we sent you, and we will confirm them by phone if you are unsure.
+
+{{collector_name}} handles this account: {{collector_phone}} / {{collector_email}} / {{firm_phone}}
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}'
+where seed_key = 'email-ptp-confirmed-company';
+
+-- ---------- AND THE CONFIRMATION NO LONGER CARRIES THE SCHEDULE ----------
+--
+-- THE FIRM: "the payment arrangement schedule, I'm not sure if that's the best thing to put there.
+-- I don't think we need to put any attachment."
+--
+-- AND THERE IS A REASON BEYOND TASTE. `total_promised` is null on an open-ended arrangement -- R500
+-- a week until the account is paid -- so the arrangement itself promises an amount and a frequency
+-- and NOT a number of payments. repaymentPlan walks it to its end anyway, which is right for a
+-- projection and wrong for this attachment: the page went out headed "YOUR PAYMENT ARRANGEMENT:
+-- WHAT IT WILL COST", stating 31 payments running to 2 May 2027 and a total of R15 222,32, none of
+-- which the debtor agreed to. A projection presented as the agreement is the one thing a debtor
+-- could hold the firm to.
+--
+-- THE SCHEDULE ITSELF IS UNCHANGED AND STILL SENT -- from the calculator, mid-negotiation, headed
+-- PAYMENT SIMULATION, which is what it has always honestly been. This is one column, so it is one
+-- statement to put back.
+update public.message_templates
+set attaches_schedule = false
+where seed_key in ('email-ptp-confirmed-individual', 'email-ptp-confirmed-company');

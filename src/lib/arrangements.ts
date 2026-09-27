@@ -29,6 +29,27 @@ export const ARRANGEMENT_LABEL: Record<Arrangement, string> = {
   monthly: 'Monthly instalment',
 }
 
+/**
+ * THE SAME THREE, AS A DEBTOR IS TOLD THEM.
+ *
+ * THE FIRM, READING THEIR OWN ARRANGEMENT CONFIRMATION: "it should be weekly monthly, like that
+ * should be disclosed." The email said "Amount: R 500,00 / Due: 4 October 2026" over a balance of
+ * R13 347,31, which on its face is a single payment of five hundred rand against a debt of
+ * thirteen thousand -- the one fact that makes it an arrangement was the one fact missing.
+ *
+ * SEPARATE FROM ARRANGEMENT_LABEL BECAUSE THE READER IS. That one is the collector's: "Weekly
+ * instalment" is a category on a screen beside other categories. This one completes a sentence a
+ * debtor reads -- "Amount: R 500,00 every week" -- and "Weekly instalment" does not.
+ *
+ * A ONCE-OFF SAYS WHAT IT IS rather than leaving the line bare. "R 13 347,31 as a single payment"
+ * is the whole arrangement in four words; an empty frequency there reads as a field that failed.
+ */
+export const PTP_FREQUENCY: Record<Arrangement, string> = {
+  once_off: 'as a single payment',
+  weekly: 'every week',
+  monthly: 'every month',
+}
+
 export const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
 /**
