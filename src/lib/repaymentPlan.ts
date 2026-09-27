@@ -410,3 +410,70 @@ export function instalmentToSettleIn(
   }
   return hi
 }
+
+/**
+ * WHAT THE SAME DEBT COSTS AT DIFFERENT SPEEDS, AND WHAT PAYING FASTER SAVES.
+ *
+ * THE FIRM: "show how it would look like in, for example, settling this in three or four
+ * instalments and stuff like that... six instalments, three instalments... so that we can negotiate
+ * and the people can see how fast they would pay it off and how much they would save -- kind of as
+ * a motivational thing that they pay more faster."
+ *
+ * IT IS THE ARGUMENT, NOT THE ARITHMETIC. A debtor offering R500 a month hears "thirty-one
+ * payments" as a fact about the calendar. What changes the conversation is the second number:
+ * those thirty-one payments cost R15 267, and six payments cost R12 119 -- so paying faster is
+ * worth THREE THOUSAND RAND to them, not to the firm. That is a reason to stretch, and nobody has
+ * ever been able to put it in front of them.
+ *
+ * MEASURED AGAINST WHAT THEY THEMSELVES OFFERED, which is the only honest baseline. Against the
+ * slowest option on the table it would be a number the firm chose; against their own offer it is
+ * the difference between what they said and what is being suggested.
+ *
+ * ONLY FASTER THAN THE OFFER. Showing a debtor who offered six payments what twelve would cost is
+ * showing them how to pay less each month and more in all, which is not the conversation -- and
+ * an option that "saves" a negative amount reads as an invitation.
+ *
+ * EVERY ROW IS THE SAME PROJECTION, bisected to the rand by instalmentToSettleIn, so the ladder
+ * and the schedule drawn beside it cannot disagree about what a month costs.
+ */
+export interface SettlementOption {
+  /** How many payments it takes. 1 is settling in full. */
+  instalments: number
+  /** What each one would be. The last may be smaller; this is the regular amount. */
+  each: number
+  totalPaid: number
+  /** Interest plus receipt fees: what the debt costs over and above itself. */
+  totalCost: number
+  /** What choosing this over their own offer saves them. Always positive. */
+  saving: number
+}
+
+export function settlementLadder(
+  input: Omit<RepaymentInput, 'instalment'>,
+  offer: RepaymentPlan,
+  counts: number[] = [1, 3, 6, 12],
+): SettlementOption[] {
+  /* Nothing to compare against: an offer that does not settle has no total to be measured. */
+  if (offer.outcome !== 'settles' || offer.rows.length === 0) return []
+  const out: SettlementOption[] = []
+  for (const n of counts) {
+    /* STRICTLY FASTER. Equal is their own offer said back to them, and slower is advice to pay
+       more in total. */
+    if (n >= offer.rows.length) continue
+    const each = instalmentToSettleIn(input, n)
+    if (each === null) continue
+    const plan = repaymentPlan({ ...input, instalment: each, maxInstalments: n })
+    if (plan.outcome !== 'settles') continue
+    out.push({
+      instalments: plan.rows.length,
+      each,
+      totalPaid: plan.totalPaid,
+      totalCost: roundToCents(plan.totalInterest + plan.totalReceiptFees),
+      /* Clamped at nought rather than allowed negative: a faster arrangement cannot cost more, and
+         if rounding ever made it look like it did, "saves -R0.02" is not a sentence to put in
+         front of somebody being asked for money. */
+      saving: Math.max(0, roundToCents(offer.totalPaid - plan.totalPaid)),
+    })
+  }
+  return out
+}

@@ -110,9 +110,16 @@ try {
     t.ok('...and that the receipt fee is still charged', /receipt fee on each payment/i.test(body))
     /* OVER SIX INSTALMENTS IS SLOW PAYING, which is what the firm's own letters tell the debtor. */
     t.ok('...warning that it reads as slow paying', /slow paying/i.test(body))
-    /* THE COUNTER-OFFER: what to ask for instead. */
-    t.ok('...and what would clear it in six', /To clear it sooner/.test(body))
-    t.ok('...with an amount against it', /6\s*payments/.test(body))
+    /*
+     * THE COUNTER-OFFER, AND WHAT IT SAVES THEM. The firm: "so that we can negotiate and the people
+     * can see how fast they would pay it off and how much they would save -- kind of as a
+     * motivational thing that they pay more faster." The saving is the column that does the work.
+     */
+    t.ok('...and what paying faster would cost', /If they paid it off faster/.test(body))
+    t.ok('...with a column for what they save', /They save/.test(body))
+    t.ok('...settling now among the options', /Settle now/.test(body))
+    const faster = await page.locator('table[aria-label="What paying it off faster would cost"] tbody tr').count()
+    t.ok(`...and several speeds to choose from (${faster})`, faster >= 3)
     await t.shot(page, '60-repayment-calculator')
     await context.close()
   }
@@ -198,7 +205,9 @@ try {
     t.ok('the whole schedule is one press away', await every.isVisible())
     await every.click()
     await page.waitForTimeout(250)
-    const rows = await page.locator('form table tbody tr').count()
+    /* THE SCHEDULE'S OWN TABLE, named so it is not confused with the faster-options table above
+       it -- which is what a bare `form table` selector counted, and why this read 35. */
+    const rows = await page.locator('table[aria-label="Every payment of this arrangement"] tbody tr').count()
     t.check('...and it is the whole schedule', rows, 31)
     await context.close()
   }

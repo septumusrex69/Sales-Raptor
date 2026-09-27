@@ -24,7 +24,8 @@
  * end is not a document to send anybody.
  */
 import type { Block, LetterDocument } from './letterDocument.ts'
-import type { RepaymentPlan } from './repaymentPlan.ts'
+import type { RepaymentPlan, SettlementOption } from './repaymentPlan.ts'
+import { moneyProgress, progressPercent } from './paymentProgress.js'
 import { longDate } from './messageTemplates.js'
 
 /** The face the firm's own notices are set in. See charter.ts. */
@@ -66,6 +67,21 @@ export interface RepaymentLetterInput {
   balanceToday: number
   /** "a month" / "a week", already in the firm's words. */
   each: string
+  /**
+   * WHAT THE SAME DEBT COSTS AT DIFFERENT SPEEDS, and what paying faster saves them.
+   *
+   * THE FIRM: "show how it would look like in, for example, settling this in three or four
+   * instalments... so that we can negotiate and the people can see how fast they would pay it off
+   * and how much they would save -- kind of as a motivational thing that they pay more faster."
+   *
+   * PASSED IN RATHER THAN WORKED OUT HERE, like every other figure on this page: settlementLadder
+   * bisects the same projection the schedule below is drawn from, so the two cannot disagree about
+   * what a month costs. Empty is fine and common -- a debtor already settling in one payment has
+   * nothing faster to be shown.
+   */
+  faster?: SettlementOption[]
+  /** Payments received on the account, for the progress line. Omitted where none have been. */
+  paidSoFar?: number
   /** The caller's own money formatter, so this letter and the screen agree to the cent. */
   money: (n: number) => string
 }
@@ -145,6 +161,71 @@ export function repaymentLetter(input: RepaymentLetterInput): LetterDocument {
       }],
     },
   ]
+
+  /*
+   * HOW FAR THEY ALREADY ARE, where anything has been paid.
+   *
+   * THE FIRM: "how far are they with their payments? What is the progress and the percentage of
+   * what's been paid?" There is no bar to draw on a page -- the letter engine has no cell fill and
+   * the block characters that would fake one are outside Windows-1252, which is the whole
+   * repertoire a PDF in the standard faces may contain. So it is said in figures and a percentage,
+   * which is the substance of it; the collector's screen draws the bar.
+   *
+   * AGAINST EVERYTHING CHARGED, not the capital handed over. A debtor who has paid the capital and
+   * owes three thousand in interest is not finished, and a line reading 100% would tell them so.
+   *
+   * NOTHING PAID IS NOT PROGRESS, and is left off: "you have paid 0%" on a page asking somebody for
+   * money is a sentence that makes an arrangement less likely, not more.
+   */
+  if ((input.paidSoFar ?? 0) > 0) {
+    const m = moneyProgress({ payments: input.paidSoFar as number, balance: input.balanceToday })
+    blocks.push(h(2, 'What you have paid so far'))
+    blocks.push({
+      kind: 'table',
+      borders: 'rows',
+      widths: [55, 45],
+      rows: [
+        pair('Paid to date', money(m.recovered)),
+        pair('Charged in all, including interest and fees', money(m.charged)),
+        pair('Which is', `${progressPercent(m)}% of the account`, true),
+      ],
+    })
+  }
+
+  /*
+   * AND WHAT PAYING FASTER WOULD SAVE THEM, which is the reason this page exists at all.
+   *
+   * THE SAVING IS MEASURED AGAINST THEIR OWN OFFER, so it is the difference between what they said
+   * and what is being suggested rather than a number the firm chose. Only options FASTER than the
+   * offer appear: showing a debtor how to pay less each month and more in total is not a
+   * negotiation, it is an invitation.
+   */
+  if ((input.faster ?? []).length > 0) {
+    blocks.push(h(2, 'What it would cost to clear it sooner'))
+    blocks.push(p('The same account, paid off faster. Interest runs on what is still owed, so '
+      + 'every month it stands costs you more.'))
+    blocks.push({
+      kind: 'table',
+      borders: 'all',
+      widths: [22, 26, 26, 26],
+      headerRow: true,
+      rows: [
+        [
+          { spans: [{ text: 'PAYMENTS', bold: true }] },
+          { spans: [{ text: 'EACH', bold: true }] },
+          { spans: [{ text: 'TOTAL YOU PAY', bold: true }] },
+          { spans: [{ text: 'YOU SAVE', bold: true }] },
+        ],
+        ...(input.faster as SettlementOption[]).map((o) => [
+          { spans: [{ text: o.instalments === 1 ? 'Settle now' : String(o.instalments) }] },
+          { spans: [{ text: money(o.each) }] },
+          { spans: [{ text: money(o.totalPaid) }] },
+          /* The one figure on the page that is good news, and it is theirs. */
+          { spans: [{ text: money(o.saving), bold: true }] },
+        ]),
+      ],
+    })
+  }
 
   /*
    * THE FIRM'S OWN WARNING, WORD FOR WORD OFF THEIR ARRANGEMENT LETTERS, and only where it

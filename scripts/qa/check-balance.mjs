@@ -133,6 +133,70 @@ const empty = { payments: [], fees: [], interest: [] }
 
   const dates = s.lines.map((l) => l.date)
   check('lines are in date order', [...dates].sort().join() === dates.join() ? 1 : 0, 1)
+
+  /*
+   * AN ACTION THAT EARNED NOTHING IS ON THE STATEMENT, AT NOUGHT.
+   *
+   * THE FIRM: "it stops charging things... the last one was charged the 13th of September but a
+   * lot of things happened after that, now I can't see them... maybe we put it there and we have a
+   * zero charge that reflects on the statement."
+   *
+   * PAST THE ANNEXURE B CEILING EVERY FURTHER ACTION IS FREE, and the row is written at nought
+   * with `billed` false. The statement used to skip it, on the reasoning that it "belongs in the
+   * account's activity, not on a statement of what is owed" -- true about the BALANCE and wrong
+   * about the page: this is what a client reads to see what has been DONE, and a firm that emails
+   * a debtor eleven times past the ceiling and shows nothing after 13 September looks like a firm
+   * that stopped working.
+   */
+  const free = s.lines.filter((l) => l.kind === 'fee-no-charge')
+  check('an action past the ceiling is on the statement', free.length, 1)
+  check('...named for what it was', free[0]?.description === 'Phone Call' ? 1 : 0, 1)
+  /* AND IT MOVES NOTHING. The whole point is that the work shows and the balance does not budge --
+     which is also why the debits-less-credits assertion above still holds with it there. */
+  check('...charging nothing', free[0]?.debit ?? -1, 0)
+  check('...and crediting nothing', free[0]?.credit ?? -1, 0)
+  {
+    const at = s.lines.indexOf(free[0])
+    check('...leaving the balance exactly where it was',
+      free[0].balance, at > 0 ? s.lines[at - 1].balance : s.breakdown.capital)
+  }
+  /* A BILLED FEE IS STILL A FEE, or every charge on the book would quietly stop counting. */
+  const billed = s.lines.filter((l) => l.kind === 'fee')
+  check('the fees that did earn something are still fees', billed.length, 2)
+  check('...and still carry their charge', billed.reduce((t, l) => t + l.debit, 0), 32.78)
+}
+
+/*
+ * AND THE AMOUNT DECIDES WHICH IT IS, NOT THE `billed` FLAG BESIDE IT.
+ *
+ * Raptor's own rows keep the two in step -- chargeItem writes the recoverable amount and sets
+ * `billed` from whether it was above nought -- so a fixture built from those alone cannot tell a
+ * reading of one from a reading of the other. The MIGRATED book can disagree: a row may carry a
+ * figure and still be flagged unbilled.
+ *
+ * THE AMOUNT WINS THERE, and this check exists because the first cut of the no-charge line got it
+ * backwards. computeBalance sums every fee's amount without consulting the flag, which is correct
+ * under the imported-history rule -- Swordfish's figures are what the client was invoiced on -- so
+ * a line drawn at nought off the flag would be a row whose money the balance had already counted,
+ * and the statement would not add up to the figure at its own foot.
+ */
+{
+  const s = buildStatement({
+    capitalHandedOver: 1000, handoverDate: '2026-01-01',
+    ledgers: {
+      payments: [], interest: [],
+      fees: [{ date: '2026-02-01', description: 'Trace', exclVat: 25, vat: 3.75, billed: false }],
+    },
+  })
+  const line = s.lines.find((l) => l.description === 'Trace')
+  check('a migrated row carrying money is shown', line ? 1 : 0, 1)
+  check('...as a fee, because the balance counts it', line?.kind === 'fee' ? 1 : 0, 1)
+  check('...with its charge on it', line?.debit ?? -1, 28.75)
+  /* THE INVARIANT THAT CAUGHT IT: a statement whose lines do not add up to its own foot is the one
+     thing a statement may never be. */
+  const debits = s.lines.reduce((t, l) => t + l.debit - l.credit, 0)
+  check('...and the lines still add up to the balance', debits, s.breakdown.balance)
+  check('...which includes it', s.breakdown.balance, 1028.75)
 }
 
 /*

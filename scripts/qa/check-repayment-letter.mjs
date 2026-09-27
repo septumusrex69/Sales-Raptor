@@ -16,7 +16,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-repayment-letter.mjs
  */
 import { repaymentLetter, repaymentLetterRefusal } from '../../src/lib/repaymentLetter.ts'
-import { repaymentPlan } from '../../src/lib/repaymentPlan.ts'
+import { repaymentPlan, settlementLadder } from '../../src/lib/repaymentPlan.ts'
 import {
   canUseLetter, letterProblems, lettersText, PRINTER_FIELDS,
 } from '../../src/lib/letterDocument.ts'
@@ -190,6 +190,60 @@ ok('...and nothing is formatted any other way', !/R 15,267/.test(odd))
 ok('a weekly arrangement is described as weekly',
   /R 500\.00 a week/.test(lettersText(repaymentLetter({
     plan, balanceToday: 10200, each: 'a week', money,
+  }))))
+
+/* ---------- what paying faster would save, on the page ---------- */
+
+/*
+ * THE FIRM ASKED FOR THIS ON THE DOCUMENT, not only on the collector's screen: "so that we can
+ * negotiate and the people can see how fast they would pay it off and how much they would save --
+ * kind of as a motivational thing that they pay more faster." It is the one thing on the page that
+ * is good news, and it is the debtor's own money.
+ */
+const faster = settlementLadder({ account: account(), schedule: monthly() }, plan)
+const withLadder = lettersText(repaymentLetter({
+  plan, balanceToday: 10200, each: 'a month', money, faster,
+}))
+ok('the page shows what clearing it sooner would cost', /What it would cost to clear it sooner/.test(withLadder))
+ok('...with a column for what they save', /YOU SAVE/.test(withLadder))
+for (const o of faster) {
+  ok(`...the saving on ${o.instalments} payments`, withLadder.includes(money(o.saving)))
+  ok(`...and what each one would be`, withLadder.includes(money(o.each)))
+}
+/* SETTLING IN ONE PAYMENT IS NOT "1 payments". */
+ok('one payment reads as settling now', /Settle now/.test(withLadder))
+/* AND IT IS ABSENT WHERE THERE IS NOTHING FASTER TO SHOW, rather than an empty table: a heading
+   over nothing reads as a page that failed to load. */
+ok('no ladder, no heading', !/What it would cost to clear it sooner/.test(text))
+
+/* ---------- how far they already are ---------- */
+
+/*
+ * THE FIRM: "how far are they with their payments? What is the progress and the percentage of
+ * what's been paid?" There is no bar to draw on a page -- the letter engine has no cell fill, and
+ * the block characters that would fake one are outside Windows-1252, which is the whole repertoire
+ * a PDF in the standard faces may contain. So the figures and the percentage carry it.
+ */
+const withPaid = lettersText(repaymentLetter({
+  plan, balanceToday: 8300, each: 'a month', money, paidSoFar: 2000,
+}))
+ok('the page says what has been paid so far', /What you have paid so far/.test(withPaid))
+ok('...how much', withPaid.includes(money(2000)))
+/*
+ * AGAINST EVERYTHING CHARGED, not the capital handed over: a debtor who has paid the capital and
+ * owes three thousand in interest is not finished, and a line reading 100% would tell them so.
+ */
+ok('...against everything the account has been charged', withPaid.includes(money(10300)))
+ok('...as a percentage', /19% of the account/.test(withPaid))
+/*
+ * NOTHING PAID IS NOT PROGRESS, and is left off entirely. "You have paid 0%" on a page asking
+ * somebody for money makes an arrangement less likely, not more.
+ */
+ok('a debtor who has paid nothing is not told they are at nought',
+  !/What you have paid so far/.test(text))
+ok('...nor one whose payments are unknown',
+  !/What you have paid so far/.test(lettersText(repaymentLetter({
+    plan, balanceToday: 10200, each: 'a month', money, paidSoFar: 0,
   }))))
 
 /* ------------------------------------------------------------------ */

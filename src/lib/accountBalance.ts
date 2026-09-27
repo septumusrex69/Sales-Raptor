@@ -260,6 +260,23 @@ export type StatementKind =
   /** Interest since the last posting, computed to today and not yet charged. */
   | 'interest-accruing'
   | 'fee'
+  /**
+   * AN ACTION THAT EARNED NOTHING, and it is on the statement on purpose.
+   *
+   * THE FIRM: "it stops charging things... the last one was charged the 13th of September but a
+   * lot of things happened after that, now I can't see them. I don't know how we're going to
+   * report on that. Maybe we put it there and we have a zero charge that reflects on the
+   * statement."
+   *
+   * THEY ARE RIGHT AND THIS USED TO BE DROPPED. Past the Annexure B ceiling every further action
+   * is free -- recoverableFee trims the fee that crosses the line and everything after it earns
+   * nothing -- and the row IS written, at nought, with `billed` false. The statement then skipped
+   * it, on the reasoning that it "belongs in the account's activity, not on a statement of what is
+   * owed". Which is true about the BALANCE and wrong about the statement: this is the page a
+   * client reads to see what has been done, and a firm that emails a debtor eleven times after the
+   * ceiling and shows a client nothing after 13 September looks like a firm that stopped working.
+   */
+  | 'fee-no-charge'
   | 'receipt-fee'
   | 'payment'
 
@@ -356,15 +373,32 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
 
   for (const f of ledgers.fees) {
     if (stopAt && f.date > stopAt) continue
-    // An action taken past the Annexure B ceiling is real history and no charge. It belongs in
-    // the account's activity, not on a statement of what is owed.
-    if (!f.billed || f.exclVat + f.vat === 0) continue
+    /*
+     * AN ACTION PAST THE CEILING IS SHOWN AT NOUGHT RATHER THAN DROPPED. See `fee-no-charge`: the
+     * work happened and the client is entitled to see it, even though it earned nothing. It adds
+     * no debit, so the running balance does not move -- which is the honest picture, and the
+     * ceiling line below explains the run of them rather than leaving a column of zeros to be
+     * puzzled over.
+     */
+    /*
+     * THE AMOUNT DECIDES IT, NOT `billed`.
+     *
+     * computeBalance above sums every fee's exclVat + vat without consulting the flag, which is
+     * CORRECT under the imported-history rule: Swordfish's figures are what the client was
+     * invoiced on, so a migrated row carrying money is money owed whatever else it says. Keying
+     * the line off `billed` instead would draw a row at nought whose amount the balance had
+     * already counted -- a statement whose lines do not add up to the figure at the bottom, which
+     * is the one thing a statement may never be.
+     *
+     * FOUND BY WRITING THE OPPOSITE and watching "debits less credits equal the balance" fail.
+     */
+    const charged = roundToCents(f.exclVat + f.vat)
     pending.push({
       date: f.date,
-      kind: 'fee',
+      kind: charged > 0 ? 'fee' : 'fee-no-charge',
       at: f.at,
       description: feeLabel(f.description, f.segments),
-      debit: roundToCents(f.exclVat + f.vat),
+      debit: charged,
       credit: 0,
     })
   }
@@ -396,7 +430,8 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
    * statement, reissued, showing different intermediate figures.
    */
   const rank: Record<StatementKind, number> = {
-    handover: 0, interest: 1, 'interest-accruing': 1, fee: 2, payment: 3, 'receipt-fee': 4,
+    /* A no-charge action sits with the fees, because that is what it would have been. */
+    handover: 0, interest: 1, 'interest-accruing': 1, fee: 2, 'fee-no-charge': 2, payment: 3, 'receipt-fee': 4,
   }
   /*
    * Day, then kind, then the clock.

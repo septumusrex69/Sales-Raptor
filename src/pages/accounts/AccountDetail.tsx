@@ -776,6 +776,7 @@ export function AccountDetail() {
       successRatio={account.ptpSuccessRatio}
       balance={b?.balance}
       settlement={b?.settlement}
+      paidSoFar={b?.payments}
       /* The very assembly the statement above was built from -- see `position`. */
       position={statement?.input ?? null}
       letterValues={letterContext.values}
@@ -2037,7 +2038,7 @@ export function PaymentProgressBar({ progress }: { progress: PaymentProgress }) 
  * never touches a balance — it is kept or it is broken, and a person says which. Matching one
  * against an incoming payment is the collections engine's job, and that does not exist yet.
  */
-function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement, position, letterValues, letterReference }: {
+function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement, paidSoFar, position, letterValues, letterReference }: {
   accountId: string
   promises: PromiseToPay[]
   userName: string | null
@@ -2051,6 +2052,8 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
   balance: number | undefined
   /** What it takes to close the account today, including the item 9 receipt fee on settling. */
   settlement: number | undefined
+  /** Payments received, for the calculator's progress bar. Off the same breakdown as `balance`. */
+  paidSoFar: number | undefined
   /**
    * THE STATEMENT'S OWN ASSEMBLY, for the repayment calculator under the form.
    *
@@ -2253,6 +2256,9 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
               values={letterValues}
               reference={letterReference}
               balanceToday={balance}
+              /* What has already been paid, for the progress bar. The same figure the statement
+                 above shows, off the same breakdown. */
+              paidSoFar={paidSoFar}
             />
           )}
           <button type="submit" disabled={busy || !arrangement || !(Number(amount) > 0) || !dueOn || !!problem}
@@ -3133,7 +3139,8 @@ function StatementTable({ statement, account, breakdown }: {
             {statement.map((l, i) => (
               <tr key={i} className="border-b border-slate-50 last:border-0">
                 <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{formatDate(l.date)}</td>
-                <td className={`px-3 py-1.5 ${l.kind === 'payment' ? 'text-positive-700' : 'text-slate-700'}`}>
+                <td className={`px-3 py-1.5 ${l.kind === 'payment' ? 'text-positive-700'
+                  : l.kind === 'fee-no-charge' ? 'text-slate-500' : 'text-slate-700'}`}>
                   {l.description}
                   {l.kind === 'interest-accruing' && (
                     <span className="block text-[11px] text-slate-400">
@@ -3141,7 +3148,18 @@ function StatementTable({ statement, account, breakdown }: {
                     </span>
                   )}
                 </td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">{l.debit ? formatMoney(l.debit) : ''}</td>
+                {/*
+                  A CAPPED ACTION READS "no charge", NOT AS A BLANK.
+                  
+                  THE FIRM: "a lot of things happened after that, now I can't see them... maybe we
+                  put it there and we have a zero charge that reflects on the statement." Left
+                  blank it would read as a number somebody forgot to fill in, on the one page whose
+                  whole job is to be checkable; the words say the work happened and earned nothing.
+                */}
+                <td className={`px-3 py-1.5 text-right tabular-nums ${
+                  l.kind === 'fee-no-charge' ? 'text-slate-400' : 'text-slate-700'}`}>
+                  {l.kind === 'fee-no-charge' ? 'no charge' : l.debit ? formatMoney(l.debit) : ''}
+                </td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-positive-700">{l.credit ? formatMoney(l.credit) : ''}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums font-medium text-slate-900">{formatMoney(l.balance)}</td>
               </tr>

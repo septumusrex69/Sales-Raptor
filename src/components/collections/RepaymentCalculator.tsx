@@ -6,8 +6,9 @@ import { repaymentLetter, repaymentLetterRefusal } from '../../lib/repaymentLett
 import type { BalanceInput } from '../../lib/accountBalance.ts'
 import type { Recurring } from '../../lib/arrangements.ts'
 import {
-  instalmentToSettleIn, repaymentPlan, type RepaymentPlan,
+  repaymentPlan, settlementLadder, type RepaymentPlan,
 } from '../../lib/repaymentPlan.ts'
+import { moneyProgress, progressPercent } from '../../lib/paymentProgress.ts'
 import { shortDate } from '../../lib/dateLabels.ts'
 
 /**
@@ -31,7 +32,7 @@ import { shortDate } from '../../lib/dateLabels.ts'
  * however the receipt fee is still applicable" -- is on the screen, because the number goes to a
  * debtor and an account that is charged for a call next week will not match it.
  */
-export function RepaymentCalculator({ account, amount, schedule, money, values, reference, balanceToday }: {
+export function RepaymentCalculator({ account, amount, schedule, money, values, reference, balanceToday, paidSoFar }: {
   /** The statement's own assembly, so this cannot be a second opinion about the same money. */
   account: Omit<BalanceInput, 'accrueTo'>
   amount: number
@@ -46,6 +47,16 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
   reference?: string | null
   /** What is owed today, printed at the top of the schedule so the debtor sees where it starts. */
   balanceToday?: number
+  /**
+   * WHAT HAS ALREADY BEEN PAID ON THIS ACCOUNT, for the progress bar.
+   *
+   * THE FIRM: "how far are they with their payments? What is the progress and the percentage of
+   * what's been paid?" Measured against everything the account has been CHARGED -- capital,
+   * interest and fees -- rather than against the capital handed over, because a debtor who has
+   * paid the capital and owes three thousand in interest is not finished, and a bar that said
+   * 100% would tell them they were.
+   */
+  paidSoFar?: number
 }) {
   const [showAll, setShowAll] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -57,17 +68,29 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
   }, [account, amount, schedule])
 
   /*
-   * WHAT TO ASK FOR INSTEAD, and six is the number that matters: the firm's own letters tell the
-   * debtor that an arrangement running longer than six instalments is reported to the credit
-   * bureaus as slow paying. Each of these is the SAME projection bisected to the rand, so the
-   * counter-offer and the schedule beside it cannot disagree.
+   * WHAT THE SAME DEBT COSTS AT DIFFERENT SPEEDS, AND WHAT PAYING FASTER SAVES THEM.
+   *
+   * THE FIRM: "show how it would look like in, for example, settling this in three or four
+   * instalments... so that we can negotiate and the people can see how fast they would pay it off
+   * and how much they would save -- kind of as a motivational thing that they pay more faster."
+   *
+   * THE SAVING IS THE COLUMN THAT DOES THE WORK. "Thirty-one payments" is a fact about the
+   * calendar and a debtor hears it as one; "six payments and you keep three thousand rand" is a
+   * reason to stretch, and it is their money rather than the firm's.
    */
-  const targets = useMemo(() => {
-    if (!schedule || schedule.arrangement === 'once_off') return []
-    return [6, 12, 24].map((n) => ({
-      n, rand: instalmentToSettleIn({ account, schedule }, n),
-    })).filter((t): t is { n: number; rand: number } => t.rand !== null)
-  }, [account, schedule])
+  const ladder = useMemo(() => {
+    if (!schedule || !plan || schedule.arrangement === 'once_off') return []
+    return settlementLadder({ account, schedule }, plan)
+  }, [account, schedule, plan])
+
+  /*
+   * HOW FAR THE DEBTOR ALREADY IS. Null where nothing has been paid: see hasProgress -- an empty
+   * bar is a graphic whose only message is "you have paid nothing", which the figures below say
+   * already and better.
+   */
+  const progress = paidSoFar !== undefined && paidSoFar > 0 && balanceToday !== undefined
+    ? moneyProgress({ payments: paidSoFar, balance: balanceToday })
+    : null
 
   if (!plan) return null
 
@@ -86,6 +109,10 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
     try {
       const doc = repaymentLetter({
         plan, money, each, balanceToday: balanceToday ?? plan.rows[0].balanceAfter + plan.rows[0].offDebt,
+        /* The same two the screen is showing, so the page the debtor reads and the panel the
+           collector quoted from are one set of figures. */
+        faster: ladder,
+        paidSoFar,
       })
       /*
        * THROUGH letterPdfBytes, which is what draws every other letter this firm sends: it fetches
@@ -149,6 +176,33 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
       )}
 
       {/*
+        HOW FAR THEY ALREADY ARE, where there is anything to show.
+
+        NOTHING PAID IS NOT PROGRESS -- an empty bar on every account in the book is a thing people
+        stop seeing, and on an account that has paid nothing the figures below already say so. The
+        bar is measured against everything CHARGED rather than the capital handed over, so interest
+        accruing moves it BACKWARDS, which is true and is exactly what a debtor paying the minimum
+        needs to see.
+      */}
+      {progress !== null && (
+        <div className="mt-2">
+          <div className="flex items-baseline justify-between text-[11px]">
+            <span className="text-slate-500">Paid so far</span>
+            <span className="tabular-nums text-slate-600">
+              <span className="font-medium text-slate-800">{money(progress.recovered)}</span>
+              {' of '}{money(progress.charged)}
+              {' \u00b7 '}<span className="font-medium">{progressPercent(progress)}%</span>
+            </span>
+          </div>
+          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-200"
+            role="img" aria-label={`${progressPercent(progress)}% of this account has been paid`}>
+            <div className="h-full rounded-full bg-[var(--color-positive)]"
+              style={{ width: `${progressPercent(progress)}%` }} />
+          </div>
+        </div>
+      )}
+
+      {/*
         THE THREE FIGURES THAT MAKE THE CASE. What they hand over in all, and how much of it never
         touches the debt -- which is the part a debtor has never been shown and the part that makes
         a shorter arrangement worth agreeing to.
@@ -180,19 +234,38 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
         </p>
       )}
 
-      {/* WHAT TO ASK FOR INSTEAD. The half of the conversation that turns a report into a
-          negotiation, and the reason six is first. */}
-      {targets.length > 0 && (
+      {/*
+        WHAT TO ASK FOR INSTEAD, AND WHAT IT SAVES THEM. The half of the conversation that turns a
+        report into a negotiation -- and the saving is measured against what the debtor themselves
+        offered, which is the only baseline that is not a number the firm chose.
+      */}
+      {ladder.length > 0 && (
         <div className="mt-2 border-t border-slate-200 pt-2">
-          <p className="text-[11px] text-slate-500">To clear it sooner</p>
-          <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
-            {targets.map((t) => (
-              <li key={t.n} className="text-[11px] text-slate-600">
-                <span className="font-medium tabular-nums text-slate-800">{money(t.rand)}</span>
-                {' '}&rarr; {t.n} payments
-              </li>
-            ))}
-          </ul>
+          <p className="text-[11px] text-slate-500">If they paid it off faster</p>
+          {/* Named, so what it is survives being read out of context -- by a screen reader, and by
+              the browser check that has to tell this table from the schedule below it. */}
+          <table aria-label="What paying it off faster would cost"
+            className="mt-1 w-full text-[11px] tabular-nums">
+            <thead>
+              <tr className="text-slate-400">
+                <th className="text-left font-normal">Payments</th>
+                <th className="text-right font-normal">Each</th>
+                <th className="text-right font-normal">Total</th>
+                <th className="text-right font-normal">They save</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ladder.map((o) => (
+                <tr key={o.instalments} className="text-slate-600">
+                  <td className="text-left">{o.instalments === 1 ? 'Settle now' : o.instalments}</td>
+                  <td className="text-right">{money(o.each)}</td>
+                  <td className="text-right">{money(o.totalPaid)}</td>
+                  {/* The one figure in the panel that is good news, and it is the debtor's. */}
+                  <td className="text-right font-medium text-positive-700">{money(o.saving)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -200,7 +273,8 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
           collector should not have to say "the system worked it out". */}
       {plan.rows.length > 0 && (
         <div className="mt-2 border-t border-slate-200 pt-2">
-          <table className="w-full text-[11px] tabular-nums">
+          <table aria-label="Every payment of this arrangement"
+            className="w-full text-[11px] tabular-nums">
             <thead>
               <tr className="text-slate-400">
                 <th className="text-left font-normal">Due</th>

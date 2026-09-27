@@ -21,6 +21,7 @@
  */
 import {
   MAX_INSTALMENTS, NO_FURTHER_FEES, instalmentToSettleIn, minimumInstalment, repaymentPlan,
+  settlementLadder,
 } from '../../src/lib/repaymentPlan.ts'
 import { computeBalance } from '../../src/lib/accountBalance.ts'
 import { coveredTo } from '../../src/lib/interestAccrual.ts'
@@ -290,6 +291,61 @@ ok('...and a bigger debt needs more', minimumInstalment(20000, 24) > minimumInst
 ok('...and a higher rate needs more', minimumInstalment(10000, 36) > minimumInstalment(10000, 24))
 /* Rounded UP to the rand: it is read out over a telephone, and R225.42 invites an offer of R225. */
 check('the floor is a whole rand', minimumInstalment(10000, 24) % 1, 0)
+
+/* ---------- what paying faster would save them ---------- */
+
+/*
+ * THE FIRM: "show how it would look like in, for example, settling this in three or four
+ * instalments... so that we can negotiate and the people can see how fast they would pay it off
+ * and how much they would save -- kind of as a motivational thing that they pay more faster."
+ *
+ * THE SAVING IS THE COLUMN THAT DOES THE WORK, and it is the one that can be wrong in a way nobody
+ * notices: measured against the wrong baseline it is a number the firm chose rather than the
+ * difference between what the debtor said and what is being suggested.
+ */
+const ladder = settlementLadder({ account: account(), schedule: monthly() }, five)
+ok(`there are faster options to show (${ladder.length})`, ladder.length >= 3)
+check('...counted in payments', ladder.map((o) => o.instalments), [1, 3, 6, 12])
+
+/* MEASURED AGAINST THEIR OWN OFFER. R500 a month costs R15 267; six payments cost R12 119; so the
+   saving on that row is R3 148 and not some figure relative to another option on the table. */
+for (const o of ladder) {
+  near(`${o.instalments} payments saves the difference from their own offer`,
+    o.saving, five.totalPaid - o.totalPaid, 0.02)
+  ok(`...and costs less in all than their offer (${o.instalments})`, o.totalPaid < five.totalPaid)
+  /* EVERY ROW IS THE SAME PROJECTION. A ladder computed by some other arithmetic would put one
+     number on the negotiating table and a different one on the schedule beside it. */
+  const p = plan(o.each, account(), monthly(), { maxInstalments: o.instalments })
+  check(`...and is the same projection as the schedule (${o.instalments})`, p.outcome, 'settles')
+  near(`...to the cent (${o.instalments})`, p.totalPaid, o.totalPaid, 0.02)
+  near(`...cost of credit is interest plus fees (${o.instalments})`,
+    o.totalCost, o.totalPaid - (five.totalPaid - five.totalInterest - five.totalReceiptFees), 0.05)
+}
+/* FASTER IS CHEAPER, ALWAYS, which is the whole argument -- so the saving must fall as the number
+   of payments rises, or the table is telling the debtor to take longer. */
+for (let i = 1; i < ladder.length; i += 1) {
+  ok(`${ladder[i].instalments} payments saves less than ${ladder[i - 1].instalments}`,
+    ladder[i].saving < ladder[i - 1].saving)
+}
+
+/*
+ * ONLY FASTER THAN THE OFFER. Showing a debtor who offered six payments what twelve would cost is
+ * showing them how to pay less each month and more in all, which is not a negotiation.
+ */
+const offeredSix = plan(2020)
+check('a debtor who offered six is shown nothing slower',
+  settlementLadder({ account: account(), schedule: monthly() }, offeredSix).map((o) => o.instalments),
+  [1, 3])
+check('...and one settling in a single payment is shown nothing at all',
+  settlementLadder({ account: account(), schedule: monthly() }, plan(20000)).length, 0)
+/* NOTHING TO COMPARE AGAINST is an empty table rather than a wrong one: an offer that never clears
+   the account has no total to measure a saving from. */
+check('an offer that never settles has no ladder',
+  settlementLadder({ account: account({ inDuplum: false }), schedule: monthly() },
+    plan(150, account({ inDuplum: false }))).length, 0)
+/* A SAVING IS NEVER NEGATIVE. Rounding cannot make a faster arrangement look dearer, and "saves
+   -R0.02" is not a sentence to put in front of somebody being asked for money. */
+ok('no saving is negative', ladder.every((o) => o.saving >= 0))
 
 /* ------------------------------------------------------------------ */
 
