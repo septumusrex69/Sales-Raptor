@@ -13,6 +13,8 @@
  */
 import { supabase } from './supabase'
 import type { DayUnit } from './workflowBuilder.ts'
+import { firstStepOn } from './workflowStart.ts'
+import { todayIso } from './reminderTime.ts'
 import type { RunStep, RunStepState } from './runSteps.ts'
 
 /**
@@ -197,12 +199,36 @@ export interface StartableWorkflow {
   name: string
   /** The firm's own sentence about when it should be started. Shown, never interpreted. */
   note: string | null
+  /** How this version's day numbers count, which is what decides whether "now" means today. */
+  dayUnit: DayUnit
+  /**
+   * THE DAY THE FIRST NOTICE WOULD GO IF IT WERE STARTED TODAY.
+   *
+   * CARRIED ON THE OFFER, so the button can say it BEFORE the press rather than the screen
+   * explaining it afterwards. The firm pressed start on a Sunday and read "the first step goes out
+   * now"; the run was dated correctly and the sentence was a lie. A date on the offer is the only
+   * version of this that is true on a weekend.
+   */
+  firstStepOn: string
+  /**
+   * WHETHER THE FIRST STEP WAITS FOR A PERSON, which decides whether starting it out of hours sends
+   * anything at all or merely queues a press.
+   *
+   * THE PRESS THAT STARTS A RUN LIFTS `needsRelease` FOR WHAT IS DUE THAT DAY -- the person looked,
+   * and they pressed a button that said what it sends. Started on a Sunday there is nothing due
+   * that day, so nothing is lifted: the sweep on the Monday morning finds a statutory demand that
+   * waits for a person and holds it, and somebody presses Send on the day. That is right, and it is
+   * not what "it starts on Monday" leads anybody to expect, so the button says it.
+   */
+  firstStepNeedsRelease: boolean
 }
 
 export async function fetchStartableWorkflows(accountId: string): Promise<StartableWorkflow[]> {
   const [versions, runs] = await Promise.all([
     supabase.from('workflow_versions')
-      .select('id, trigger_note, workflows!inner(name)')
+      /* day_unit and the nodes' day numbers, because when the first notice goes is arithmetic on
+         both and the answer belongs on the button rather than in a surprise afterwards. */
+      .select('id, trigger_note, day_unit, workflows!inner(name), workflow_nodes(day, needs_release)')
       .eq('state', 'active')
       .eq('trigger_kind', 'by_hand'),
     supabase.from('workflow_runs').select('version_id, reissue_allowed').eq('account_id', accountId),
@@ -215,14 +241,36 @@ export async function fetchStartableWorkflows(accountId: string): Promise<Starta
   for (const r of (runs.data ?? []) as { version_id: string; reissue_allowed: boolean }[]) {
     if (!r.reissue_allowed) been.add(r.version_id)
   }
+  const today = todayIso()
   /* eslint-disable-next-line @typescript-eslint/no-explicit-any -- rows arrive as untyped JSON. */
   return (versions.data ?? [] as any[])
     .filter((v: any) => !been.has(v.id))
-    .map((v: any) => ({
-      versionId: v.id as string,
-      name: (v.workflows?.name as string) ?? 'Workflow',
-      note: (v.trigger_note as string) ?? null,
-    }))
+    .map((v: any) => {
+      const unit = ((v.day_unit as DayUnit) ?? 'calendar')
+      /*
+       * THE LOWEST DAY ON THE CHART, READ RATHER THAN ASSUMED. It is 1 on every business-day
+       * sequence the firm has drawn and 0 on the calendar ones -- but a version whose first step
+       * is day 3 must not have a button under it saying the demand goes out today, and the
+       * difference between "assumed 1" and "read off the nodes" is exactly that case.
+       *
+       * A version with no nodes at all cannot send anything; it is dated as day 1 so the sentence
+       * falls back to the ordinary one rather than to NaN.
+       */
+      const nodes = (v.workflow_nodes as { day: number; needs_release: boolean }[] | null) ?? []
+      const days = nodes.map((n) => n.day)
+      const first = days.length > 0 ? Math.min(...days) : (unit === 'business' ? 1 : 0)
+      return {
+        versionId: v.id as string,
+        name: (v.workflows?.name as string) ?? 'Workflow',
+        note: (v.trigger_note as string) ?? null,
+        dayUnit: unit,
+        firstStepOn: firstStepOn(today, first, unit),
+        /* ANY NODE ON THE FIRST DAY, not all of them: the section 129's day 1 is the letter and the
+           SMS together and both carry it, but a day where one of two needs a press is still a day
+           that ends in a press. */
+        firstStepNeedsRelease: nodes.some((n) => n.day === first && n.needs_release),
+      }
+    })
 }
 
 /**
@@ -243,6 +291,14 @@ export async function startWorkflow(accessToken: string, accountId: string, vers
   sent: number
   held: number
   notes: string[]
+  /**
+   * THE DAY THE FIRST STEP IS DATED, AS THE PLANNER DATED IT.
+   *
+   * The offer carried a prediction of this; the server sends back the fact. They agree unless the
+   * press crossed midnight in Johannesburg, and where they differ it is this one that is true --
+   * so the screen reports the run's own date rather than what the button guessed.
+   */
+  firstStepOn: string | null
 }> {
   const res = await fetch('/api/workflow/start', {
     method: 'POST',
@@ -251,7 +307,7 @@ export async function startWorkflow(accessToken: string, accountId: string, vers
   })
   const body = (await res.json().catch(() => ({}))) as {
     ok?: boolean; error?: string; workflow?: string; startedOn?: string
-    sent?: number; held?: number; stillHeld?: number; notes?: string[]
+    sent?: number; held?: number; stillHeld?: number; notes?: string[]; firstStepOn?: string | null
   }
   if (!res.ok || !body.ok) throw new Error(body.error ?? 'The workflow could not be started.')
   return {
@@ -260,5 +316,6 @@ export async function startWorkflow(accessToken: string, accountId: string, vers
     sent: body.sent ?? 0,
     held: (body.held ?? 0) + (body.stillHeld ?? 0),
     notes: body.notes ?? [],
+    firstStepOn: body.firstStepOn ?? null,
   }
 }

@@ -25,7 +25,28 @@ const VERSION = {
   id: VERSION_ID,
   trigger_note: 'Started by the collector once the file is ready: address confirmed, no dispute, no arrangement.',
   workflows: { name: 'Section 129 / letter of demand' },
+  /*
+   * BUSINESS DAYS AND A DAY-1 FIRST STEP, which is the firm's own chart and the reason this file
+   * has to pin the clock. The button says when the first notice goes, and on a business-day
+   * sequence that is today only if today is a working day -- the firm pressed it on a Sunday, read
+   * "the first step goes out now", and nothing went. Left off the fixture the version reads as
+   * calendar day 0 and the weekend case can never arise here, which is a check that passes because
+   * it is testing nothing.
+   */
+  day_unit: 'business',
+  workflow_nodes: [
+    /* Day 1 is the demand and it waits for a person, which is the firm's own chart -- and it is
+       what makes "it starts on Monday" and "it sends on Monday" two different sentences. */
+    { day: 1, needs_release: true },
+    { day: 7, needs_release: false },
+    { day: 12, needs_release: false },
+  ],
 }
+
+/* A Wednesday and the Sunday the firm pressed it. Fixed with page.clock so the wording under the
+   button is decided by the fixture rather than by the day the suite happens to run. */
+const WEDNESDAY = '2026-09-30T09:00:00Z'
+const SUNDAY = '2026-09-27T19:00:00Z'
 
 /** The panel after the sequence has started: day 1 sent, day 7 waiting. */
 const RUN_AFTER = [{
@@ -56,7 +77,7 @@ const RUN_AFTER = [{
  * endpoint is stubbed rather than reached: this is the browser half, and what the server does
  * with a live promise is decided in api/_lib/workflow/start.ts and checked beside it.
  */
-async function openAccount(browser, { runs = [], versions = [VERSION], start = null }) {
+async function openAccount(browser, { runs = [], versions = [VERSION], start = null, now = WEDNESDAY, tab = true }) {
   const handlers = [
     [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [PROFILE] })],
     [(u) => /\/rest\/v1\/companies/.test(u), () => ({ body: [COMPANY] })],
@@ -64,7 +85,9 @@ async function openAccount(browser, { runs = [], versions = [VERSION], start = n
     [(u) => /\/rest\/v1\/workflow_versions/.test(u), () => ({ body: versions })],
     [(u) => /\/rest\/v1\/workflow_runs/.test(u), () => ({ body: runs })],
   ]
-  const { context, page } = await signedInPage(browser, PROFILE, handlers, [])
+  /* THE DAY, FIXED BEFORE ANY APP CODE RUNS -- the wording under the button depends on it, and
+     the session's own expiry is dated from the same clock or the page is the login screen. */
+  const { context, page } = await signedInPage(browser, PROFILE, handlers, [], { now })
   if (start) {
     await page.route('**/api/workflow/start', async (route) => {
       await route.fulfill({
@@ -84,8 +107,15 @@ async function openAccount(browser, { runs = [], versions = [VERSION], start = n
      * workflows. And current ones." It was a card in the account's two-hundred-pixel rail, which
      * is what every compromise in the track was paying for.
      */
-  await page.getByRole('button', { name: /^Workflow/ }).first().click({ timeout: 20000 })
-  await page.waitForTimeout(400)
+  if (tab) {
+    await page.getByRole('button', { name: /^Workflow/ }).first().click({ timeout: 20000 })
+  } else {
+    /* The Overview, where the action row is. Waited for the tab strip all the same, because that
+       is the first thing drawn once the account is loaded -- and the offers the row reads arrive
+       on a query of their own after it. */
+    await page.getByRole('button', { name: /^Workflow/ }).first().waitFor({ timeout: 20000 })
+  }
+  await page.waitForTimeout(600)
   return { context, page }
 }
 
@@ -180,6 +210,73 @@ try {
     const { context, page } = await openAccount(browser, { runs: RUN_AFTER, versions: [] })
     t.check('no offer where nothing is published for a person to start',
       await page.getByRole('button', { name: /Start:/ }).count(), 0)
+    await context.close()
+  }
+
+  /* ---------- pressed on a Sunday, when nothing can go out ---------- */
+  {
+    /*
+     * THE BUG THE FIRM FOUND. "It said it started, but when is it going to send out the SMS and the
+     * letter? I thought it does that immediately." Day 1 of a business-day sequence normalises
+     * forward to the Monday, so the demand is dated tomorrow and nothing is sent -- correctly, and
+     * the release guard refuses a step before its due_on for exactly that reason. The button had
+     * promised otherwise.
+     */
+    const { context, page } = await openAccount(browser, { runs: [], now: SUNDAY })
+    await page.getByRole('button', { name: /Start: Section 129/ }).click()
+    const body = await page.locator('body').innerText()
+    t.ok('on a Sunday the question does not claim anything goes out now', !/goes out now/.test(body))
+    t.ok('...it says nothing goes out today', /Nothing goes out today/.test(body))
+    /* WITH THE DATE IN IT. "Not today" is the complaint; a date is the answer to it. */
+    t.ok('...naming the working day it starts on', /Monday 28 Sep 2026/.test(body))
+    /* AND WHAT HAPPENS THAT MORNING. The start press lifts needs_release for what is due that day
+       and nothing is due, so the Monday sweep holds the demand for a press. */
+    t.ok('...and that the demand still waits for a person', /waits for a person/.test(body))
+    /* AND THE BUTTON SAYS THE SAME THING ITS SENTENCE DOES -- it is the half somebody presses. */
+    t.check('...and the press does not say send',
+      await page.getByRole('button', { name: /Yes, send it now/ }).count(), 0)
+    t.ok('...it says start', await page.getByRole('button', { name: /Yes, start it/ }).isVisible())
+    await context.close()
+  }
+
+  /* ---------- the 129 in the action row, beside the other two workflows ---------- */
+  {
+    /*
+     * THE FIRM PUT IT THERE: "on this page where the account is, I think we should have like
+     * something here that says, like start the section 129... I think 129, promise to pay and
+     * escalate is kind of like, it's three workflows actually, so they should be together."
+     *
+     * THE ROW IS ON THE OVERVIEW, so this case does not open the tab first -- which is the whole
+     * point of the button.
+     */
+    const { context, page } = await openAccount(browser, { runs: [], tab: false })
+    const row = page.getByRole('button', { name: /^Section 129$/ })
+    t.ok('the action row offers the section 129', await row.isVisible())
+    /* GROUPED WITH THE OTHER TWO. Asserted as the order of the row's own text rather than as
+       pixels: Promise to Pay, Escalate, then this. */
+    const labels = await page.locator('button').allInnerTexts()
+    const at = (re) => labels.findIndex((l) => re.test(l.trim()))
+    t.ok('...after Promise to Pay', at(/^Promise to Pay$/) >= 0 && at(/^Section 129$/) > at(/^Promise to Pay$/))
+    t.ok('...and after Escalate', at(/^Escalate$/) >= 0 && at(/^Section 129$/) > at(/^Escalate$/))
+    /*
+     * AND IT DOES NOT CONFIRM IT ITSELF. The second press and its wording are legal wording; asked
+     * in two places it becomes two wordings. The row opens the tab's card.
+     */
+    await row.click()
+    await page.waitForTimeout(500)
+    const body = await page.locator('body').innerText()
+    t.ok('...and pressing it opens the question on the Workflow tab',
+      /Start Section 129 \/ letter of demand\?/.test(body))
+    t.ok('...with the same sentence under it', /first step goes out now/.test(body))
+    t.ok('...and a way out', await page.getByRole('button', { name: 'Not yet' }).isVisible())
+    await context.close()
+  }
+  {
+    /* NOTHING IN THE ROW WHERE THERE IS NOTHING TO START. A permanently dashed "Section 129" on
+       every account that has been through one is noise in the row that must stay trustworthy. */
+    const { context, page } = await openAccount(browser, { runs: RUN_AFTER, tab: false })
+    t.check('the row has no 129 on an account that has been through it',
+      await page.getByRole('button', { name: /^Section 129$/ }).count(), 0)
     await context.close()
   }
 } catch (e) {

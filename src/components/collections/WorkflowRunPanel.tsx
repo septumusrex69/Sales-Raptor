@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, Clock, History, Loader2, Minus, Pause, Play, Send, XCircle } from 'lucide-react'
 import { Card } from '../ui/Card'
 import { WorkflowTrack } from './WorkflowTrack'
@@ -13,6 +13,7 @@ import {
   workflowHeadline, workflowStory, type StoryEvent, type StoryKind, type WorkflowHeadline,
 } from '../../lib/workflowStory.ts'
 import { todayIso } from '../../lib/reminderTime.ts'
+import { startSentence } from '../../lib/workflowStart.ts'
 
 /**
  * THE WORKFLOW TAB — WHAT IS RUNNING ON THIS DEBTOR, AND WHAT HAS ALREADY RUN.
@@ -37,13 +38,28 @@ import { todayIso } from '../../lib/reminderTime.ts'
  * panel that fetched its own runs could not put a mark on the tab that opens it. The account
  * page reads them once, for the badge and for this.
  */
-export function WorkflowRunPanel({ accountId, runs, offers, error, onChanged }: {
+export function WorkflowRunPanel({ accountId, runs, offers, error, onChanged, askingFor, onAsked }: {
   accountId: string
   runs: AccountRun[]
   /** The workflows a person may start here. Empty is the ordinary case. */
   offers: StartableWorkflow[]
   error: string | null
   onChanged: () => Promise<void>
+  /**
+   * A VERSION THE ACTION ROW ALREADY ASKED TO START, OPENED HERE RATHER THAN CONFIRMED THERE.
+   *
+   * THE FIRM PUT A SECTION 129 BUTTON IN THE ACCOUNT'S ACTION ROW -- "129, promise to pay and
+   * escalate is kind of like, it's three workflows actually, so they should be together" -- and a
+   * statutory demand needs the second press that says what will happen. That press exists here
+   * and the words on it are legal wording; asked in two places it becomes two wordings, and the
+   * day they differ is the day somebody sends a notice on the strength of the softer one.
+   *
+   * SO THE ROW'S BUTTON OPENS THIS ONE. It switches to this tab and names the version; the card
+   * below opens itself, and the only sentence anybody confirms is the one written once.
+   */
+  askingFor?: string | null
+  /** Cleared once this pane has taken it, so re-opening the tab does not re-open the question. */
+  onAsked?: () => void
 }) {
   const head = workflowHeadline(runs)
   const story = workflowStory(runs)
@@ -84,7 +100,8 @@ export function WorkflowRunPanel({ accountId, runs, offers, error, onChanged }: 
           <Heading>{runs.length === 0 ? 'Nothing has started yet' : 'Start another'}</Heading>
           <div className="mt-3 space-y-2">
             {offers.map((w) => (
-              <StartWorkflow key={w.versionId} accountId={accountId} offer={w} onStarted={onChanged} />
+              <StartWorkflow key={w.versionId} accountId={accountId} offer={w} onStarted={onChanged}
+                asked={askingFor === w.versionId} onAsked={onAsked} />
             ))}
           </div>
         </section>
@@ -348,15 +365,35 @@ function weekdayOf(iso: string): string {
  * clock. The second press says what will happen in the firm's own words rather than asking
  * "are you sure", which is a question nobody reads.
  */
-function StartWorkflow({ accountId, offer, onStarted }: {
+function StartWorkflow({ accountId, offer, onStarted, asked, onAsked }: {
   accountId: string
   offer: StartableWorkflow
   onStarted: () => Promise<void>
+  /** The action row asked for this one. Opens the question rather than answering it. */
+  asked?: boolean
+  onAsked?: () => void
 }) {
   const { session } = useAuth()
   const [asking, setAsking] = useState(false)
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
+  /*
+   * OPENED FROM THE ACTION ROW, and taken off the parent the moment it is.
+   *
+   * AN EFFECT, NOT A RENDER-TIME CALL. Opening this card is one setState on this component and
+   * clearing the request is another on its PARENT, and React refuses the second during a render --
+   * "cannot update a component while rendering a different component". So both happen after the
+   * commit.
+   *
+   * CLEARED UPWARD ON PURPOSE: without it the request stays on the account and every return to
+   * this tab re-asks a question about a statutory demand somebody already answered.
+   */
+  useEffect(() => {
+    if (!asked) return
+    setAsking(true)
+    setFailed(null)
+    onAsked?.()
+  }, [asked, onAsked])
 
   async function go() {
     if (!session?.access_token) return
@@ -390,9 +427,14 @@ function StartWorkflow({ accountId, offer, onStarted }: {
   return (
     <div className="rounded-lg border border-[var(--c-gold-deep)]/30 bg-gold-50 px-3 py-2">
       <p className="text-[12px] font-medium text-navy-950">Start {offer.name}?</p>
+      {/*
+        WHAT WILL HAPPEN, AND ON WHICH DAY. This said "the first step goes out now" on every press,
+        which is false on a weekend -- the firm started a section 129 on a Sunday and then asked
+        "when is it going to send out the SMS and the letter? I thought it does that immediately."
+        startSentence names the date when the answer is not today. See src/lib/workflowStart.ts.
+      */}
       <p className="text-[11px] text-slate-600 mt-0.5 leading-snug">
-        The first step goes out now, and everything after it is dated from today. Later steps that
-        say something has already happened still wait for you.
+        {startSentence(todayIso(), offer.firstStepOn, offer.dayUnit, offer.firstStepNeedsRelease)}
       </p>
       {/* The firm's own sentence about when this should be started, where they wrote it. */}
       {offer.note && <p className="text-[11px] text-slate-500 mt-1 leading-snug">{offer.note}</p>}
@@ -403,7 +445,9 @@ function StartWorkflow({ accountId, offer, onStarted }: {
             bg-white px-2.5 py-1 text-[11px] font-medium text-navy-950
             hover:bg-gold-100 disabled:opacity-40">
           {busy ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
-          Yes, send it now
+          {/* The button says the same thing its sentence does. "Yes, send it now" on a Sunday was
+              the other half of the lie, and it is the half somebody presses. */}
+          {offer.firstStepOn <= todayIso() ? 'Yes, send it now' : 'Yes, start it'}
         </button>
         <button type="button" onClick={() => setAsking(false)} disabled={busy}
           className="text-[11px] font-medium text-slate-500 hover:text-slate-700 disabled:opacity-40">

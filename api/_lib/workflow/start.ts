@@ -28,6 +28,14 @@ import { mayActOnAccount } from './who.js'
  * summons on day 49 still wait for their own press, because each asserts a fact that has to be
  * true before it is said.
  *
+ * EXCEPT ON A DAY THE OFFICE IS SHUT, WHEN NOTHING GOES AND THE PRESS SAYS SO. A business-day
+ * sequence does not begin on a Saturday: landsOn normalises the start forward, day 1 is the next
+ * working day, and the release guard refuses a step before its due_on because "sent early" on a
+ * statutory interval is a misrepresentation. The firm hit this on a Sunday -- "it said it started,
+ * but when is it going to send out the SMS and the letter? I thought it does that immediately" --
+ * and the bug was the sentence on the button, not the dates. `firstStepOn` in the response is the
+ * fix's other half: the run reports the day its first notice is dated, so a screen can name it.
+ *
  * WHAT IT REFUSES, AND WHY EACH ONE. A live promise or an open dispute are precisely the two
  * events that take an account OUT of a workflow (workflow_exit_on_promise, workflow_exit_on_dispute
  * in the schema) -- so starting one on top of either would issue a demand to somebody the firm has
@@ -175,6 +183,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * AND WHAT IS DUE TODAY GOES NOW. Only this run's steps -- an account may have a handover run
    * of its own sitting held on something, and starting the section 129 is not a decision about
    * that one.
+   *
+   * WHICH ON A WEEKEND IS NOTHING, AND THAT IS CORRECT. The firm pressed start on a Sunday and
+   * asked "when is it going to send out the SMS and the letter? I thought it does that
+   * immediately." A business-day sequence normalises its start forward to the Monday, so day 1 --
+   * the demand itself -- is dated tomorrow and `lte('due_on', today)` matches nothing. Sending
+   * anyway would put a statutory notice out before the day the interval is counted from, which is
+   * precisely what the release guard refuses. So nothing is sent, and `firstStepOn` below is how
+   * the screen says that instead of leaving the person to wonder.
    */
   const { data: due } = await admin
     .from('workflow_run_steps')
@@ -183,6 +199,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .in('state', ['pending', 'held'])
     .lte('due_on', today)
     .order('due_on', { ascending: true })
+
+  /* The earliest date anything on this run is dated, read back from what the planner wrote rather
+     than recomputed -- a second opinion about the date is how a button promises Monday for a
+     notice dated Tuesday. */
+  const { data: firstRow } = await admin
+    .from('workflow_run_steps')
+    .select('due_on')
+    .eq('run_id', created.id)
+    .order('due_on', { ascending: true })
+    .limit(1)
+    .maybeSingle()
 
   const outcome = { sent: 0, held: 0, stillHeld: 0, failed: 0, notes: [] as string[] }
   for (const step of (due ?? []) as unknown as DueStep[]) {
@@ -203,6 +230,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     runId: created.id,
     workflow: version.workflows?.name ?? 'Workflow',
     startedOn: today,
+    firstStepOn: (firstRow as { due_on?: string } | null)?.due_on ?? null,
     planProblem: problem,
     ...outcome,
   })

@@ -81,6 +81,8 @@ import { WorkflowNowPanel } from '../../components/collections/WorkflowNowPanel'
 import {
   fetchAccountRuns, fetchStartableWorkflows, type AccountRun, type StartableWorkflow,
 } from '../../lib/accountRun.ts'
+import { startSentence, startShortLabel } from '../../lib/workflowStart.ts'
+import { todayIso } from '../../lib/reminderTime.ts'
 import { needsAttention } from '../../lib/runSteps.ts'
 import { debtorKey, type OtherAccount } from '../../lib/sameDebtor'
 import { fetchOtherAccounts } from '../../lib/accountBook'
@@ -311,6 +313,14 @@ export function AccountDetail() {
    */
   const [runs, setRuns] = useState<AccountRun[]>([])
   const [startable, setStartable] = useState<StartableWorkflow[]>([])
+  /*
+   * A WORKFLOW THE ACTION ROW ASKED TO START, HANDED TO THE TAB THAT CONFIRMS IT.
+   *
+   * The row's button is a shortcut, not a second place to issue a statutory demand -- the second
+   * press and the sentence on it live in WorkflowRunPanel, written once. Empty string means "take
+   * me there" with no version named, which is what several offers on one account come to.
+   */
+  const [askStart, setAskStart] = useState<string | null>(null)
   const [runsError, setRunsError] = useState<string | null>(null)
 
   const loadRuns = useCallback(async () => {
@@ -994,6 +1004,8 @@ export function AccountDetail() {
         debtorKind={account.debtorKind}
         onTraced={reload}
         onUpload={() => setTracing(true)}
+        startable={startable}
+        onStartWorkflow={(versionId) => { setTab('Workflow'); setAskStart(versionId || null) }}
       />
 
 
@@ -1043,7 +1055,8 @@ export function AccountDetail() {
 
       {tab === 'Workflow' && (
         <WorkflowRunPanel accountId={account.id} runs={runs} offers={startable}
-          error={runsError} onChanged={loadRuns} />
+          error={runsError} onChanged={loadRuns}
+          askingFor={askStart} onAsked={() => setAskStart(null)} />
       )}
 
       {tab === 'Transactions' && (
@@ -1362,7 +1375,7 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onScript, onDiarise, accountId, actor, idNumber, debtorKind, onTraced, onUpload }: {
+function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onScript, onDiarise, accountId, actor, idNumber, debtorKind, onTraced, onUpload, startable, onStartWorkflow }: {
   /** Copied to the clipboard when XDS opens, once it is checked — see TraceButton. */
   idNumber: string | null
   /** Which number that field is meant to hold: an ID, or a registration number. */
@@ -1388,6 +1401,15 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
   onTraced: () => Promise<void>
   /** Offered the moment the search comes back, which is when the PDFs are on the machine. */
   onUpload: () => void
+  /**
+   * THE WORKFLOWS A PERSON MAY START HERE, WHICH IN PRACTICE IS THE SECTION 129.
+   *
+   * THE FIRM PUT IT IN THIS ROW: "where would we fit in 129? Like I think 129, promise to pay and
+   * escalate is kind of like, it's three workflows actually, so they should be together."
+   */
+  startable: StartableWorkflow[]
+  /** Goes to the Workflow tab and opens the confirmation there. See WorkflowRunPanel.askingFor. */
+  onStartWorkflow: (versionId: string) => void
 }) {
   const soon = 'Not built yet — needs a provider connected and a decision on whether it charges the debtor.'
   return (
@@ -1432,6 +1454,38 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
       */}
       <Action icon={ShieldAlert} label="Escalate" onClick={onDispute}
         title="Raise a dispute, ask a team leader, or recommend it for litigation" />
+      {/*
+        AND THE THIRD OF THE THREE, BESIDE THE OTHER TWO.
+        
+        THE FIRM, HAVING JUST STARTED ONE FROM THE WORKFLOW TAB: "on this page where the account
+        is, I think we should have like something here that says, like start the section 129...
+        where would we fit in 129? Like I think 129, promise to pay and escalate is kind of like,
+        it's three workflows actually, so they should be together."
+        
+        THEY ARE RIGHT ABOUT WHY. A promise, an escalation and a section 129 are the three things a
+        collector does that change what the SYSTEM will do next on its own -- the first two stop a
+        sequence and the third starts one. Every other button in the row is one message to one
+        debtor. So the grouping is the firm's reading of their own work, not a tidy-up.
+        
+        NOTHING WHERE THERE IS NOTHING TO START, rather than a button that is always there and
+        usually dead. This is the row's own rule -- a disabled button is dashed and carries its
+        reason -- but the reason here is never about this debtor: the section 129 is missing from
+        the row because the account has already been through it, and a permanently dashed "Section
+        129" on the thousands of accounts that have is noise in the one place that must stay
+        trustworthy. The Workflow tab carries the run and says what happened to it.
+        
+        SEVERAL ON OFFER IS ONE BUTTON TO THE TAB. Two by-hand sequences is a choice, and a choice
+        belongs where both are written out with the firm's own note under each.
+      */}
+      {startable.length === 1 && startable[0] && (
+        <Action icon={Gavel} label={startShortLabel(startable[0].name)}
+          onClick={() => onStartWorkflow(startable[0]!.versionId)}
+          title={`Start ${startable[0].name} \u2014 ${startSentence(todayIso(), startable[0].firstStepOn, startable[0].dayUnit, startable[0].firstStepNeedsRelease)}`} />
+      )}
+      {startable.length > 1 && (
+        <Action icon={Gavel} label="Start workflow" onClick={() => onStartWorkflow('')}
+          title={`${startable.length} sequences can be started on this account`} />
+      )}
       <TraceButton accountId={accountId} actor={actor} debtorKind={debtorKind} idNumber={idNumber}
         className={`${ACTION_BASE} ${ACTION_ENABLED}`}
         onDone={onTraced} onUpload={onUpload} />

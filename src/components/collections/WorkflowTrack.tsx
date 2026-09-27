@@ -1,4 +1,4 @@
-import { Fragment } from 'react'
+import { Fragment, type ReactNode } from 'react'
 import { Mail, MessageSquare, Phone } from 'lucide-react'
 import { shortDate } from '../../lib/dateLabels.ts'
 import {
@@ -69,7 +69,19 @@ const LABEL: Record<StepShape, string> = {
 export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
   steps: RunStep[]
   selectedId: string | null
-  onSelect: (id: string) => void
+  /**
+   * WHAT PRESSING A DOT DOES, OR NOTHING AT ALL.
+   *
+   * OMITTED ON THE OVERVIEW'S SUMMARY CARD, and the dots are then drawn as text rather than as
+   * buttons. That is the house rule about the action row applied to a track: "a button that looks
+   * live and swallows the click teaches people not to trust the row". The card has one link on it,
+   * Open, and it goes to the tab where the steps can actually be worked -- so a dot there is
+   * something to READ, and drawing it as a button would be eleven promises the card cannot keep.
+   *
+   * The words survive either way: `title` and `aria-label` carry them on the span as they do on
+   * the button, which is what makes the summary reading honest rather than merely quieter.
+   */
+  onSelect?: (id: string) => void
   /**
    * The firm's today, or null on a run that is over.
    *
@@ -124,11 +136,7 @@ export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
                     shapeOf(steps[i - 1]) === 'sent' ? 'bg-[var(--color-positive)]/40' : 'bg-slate-200'
                   }`} />
                 )}
-                <button type="button" onClick={() => onSelect(step.id)}
-                  title={words(step)}
-                  aria-label={words(step)}
-                  aria-current={selected ? 'step' : undefined}
-                  className="group flex w-5 shrink-0 flex-col items-center gap-0.5 @sm:w-[76px] @sm:gap-1">
+                <Dot onSelect={onSelect} step={step} selected={selected}>
                   <span className={`flex h-5 w-5 items-center justify-center rounded-full border-2
                     ${DOT[shape]} ${
                     selected ? 'ring-2 ring-navy-950/25 ring-offset-1' : 'group-hover:ring-2 group-hover:ring-slate-200'
@@ -159,7 +167,7 @@ export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
                   <span className="hidden text-center text-[9px] leading-none text-slate-400 tabular-nums @sm:block">
                     {shortDate(step.sentAt ? step.sentAt.slice(0, 10) : step.dueOn)}
                   </span>
-                </button>
+                </Dot>
               </li>
             </Fragment>
           )
@@ -167,5 +175,36 @@ export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
         {at === steps.length && mark('mark-end')}
       </ol>
     </div>
+  )
+}
+
+/**
+ * ONE DOT, PRESSABLE OR NOT, WITH THE SAME BOX EITHER WAY.
+ *
+ * ONE ELEMENT, TWO TAGS. The class list is the track's layout -- the dot's width, the gap under
+ * it, the container-query column -- and written out twice for the button and the span it would
+ * drift, which on a wrapped track is dots that no longer line up between the two screens that
+ * draw them.
+ *
+ * `group` STAYS ON BOTH, because the hover ring inside is written against it; on the span there is
+ * no hover to catch, which is the point.
+ */
+function Dot({ step, selected, onSelect, children }: {
+  step: RunStep
+  selected: boolean
+  onSelect?: (id: string) => void
+  children: ReactNode
+}) {
+  const shared = {
+    title: words(step),
+    'aria-label': words(step),
+    className: 'group flex w-5 shrink-0 flex-col items-center gap-0.5 @sm:w-[76px] @sm:gap-1',
+  }
+  if (!onSelect) return <span {...shared}>{children}</span>
+  return (
+    <button type="button" onClick={() => onSelect(step.id)}
+      aria-current={selected ? 'step' : undefined} {...shared}>
+      {children}
+    </button>
   )
 }

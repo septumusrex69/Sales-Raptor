@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { ArrowRight, GitBranch } from 'lucide-react'
 import { Card, CardHeader } from '../ui/Card'
 import { needsAttention, shapeOf, stepInFocus } from '../../lib/runSteps.ts'
+import { WorkflowTrack } from './WorkflowTrack.tsx'
 import { dayLabel, dayNumberOn } from '../../lib/workflowBuilder.ts'
 import { shortDate } from '../../lib/dateLabels.ts'
 import { todayIso } from '../../lib/reminderTime.ts'
@@ -26,6 +27,23 @@ import type { AccountRun } from '../../lib/accountRun.ts'
  * workflow" on twenty-three thousand accounts pushes the figures down the page to say nothing.
  * A run that has FINISHED is not drawn either: what the debtor was sent is history, and history
  * lives on the tab.
+ *
+ * AND IT CARRIES THE DOTS, WHICH THE FIRM ASKED FOR BACK. Reading the four lines this card had:
+ * "I did like the other one though, where you could see the little things... And this is the
+ * current work, you know, just to show where it is in the current workflow, not the previous
+ * workflows. And to show that it's been going out or not gone out."
+ *
+ * TWO NARROWINGS IN THAT SENTENCE AND BOTH ARE THE POINT. The track here is the CURRENT run only
+ * -- the tab keeps the history, and a rail that drew every run a debtor has been through would be
+ * three tracks deep on an account that has had a handover and a section 129. And it is READ, not
+ * worked: the dots are not buttons here (see WorkflowTrack's `onSelect`), because the card's one
+ * promise is the Open link and eleven pressable dots that only lead to the same tab is ten
+ * promises it does not keep.
+ *
+ * WHAT IT ADDS OVER THE LINE UNDER IT is the shape of the whole sequence: "Next: Final notice, 13
+ * Oct" says what is next and nothing about what has gone, which on the morning after a section 129
+ * was started is precisely the question -- "when is it going to send out the SMS and the letter?"
+ * Filled dots answer it at a glance.
  */
 export function WorkflowNowPanel({ accountId, runs }: { accountId: string; runs: AccountRun[] }) {
   const live = runs.filter((r) => r.state === 'running')
@@ -62,6 +80,18 @@ export function WorkflowNowPanel({ accountId, runs }: { accountId: string; runs:
                 {' of '}
                 {run.steps.length} {run.steps.length === 1 ? 'step' : 'steps'}
               </p>
+              {/*
+                THE SEQUENCE ITSELF, filled behind and hollow ahead, with today's caret in it.
+                Only where there are steps: a run whose planning failed has none, and an empty
+                track under a card that says "Business day 1 of 0 steps" reads as a broken screen
+                rather than as the missing plan it is -- that sentence is the honest one, and the
+                tab carries the reason.
+              */}
+              {run.steps.length > 0 && (
+                <div className="mt-2">
+                  <WorkflowTrack steps={run.steps} selectedId={null} today={today} />
+                </div>
+              )}
               {/*
                 AND THE ONE SENTENCE SOMEBODY ACTS ON. What has stopped comes first: that is the
                 reason the notification sent them to this account, and it must not need a tab to

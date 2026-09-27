@@ -58,9 +58,15 @@ const PROJECT_REF = new URL(SUPABASE_URL).hostname.split('.')[0]
  * server-side, and there is no server here. So an unsigned token with the right claims is enough
  * to get past the auth gate and onto the screen under test.
  */
-function fakeSession(userId, email) {
+function fakeSession(userId, email, nowMs = Date.now()) {
   const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url')
-  const exp = Math.floor(Date.now() / 1000) + 3600
+  /*
+   * AN HOUR FROM THE BROWSER'S CLOCK, WHICH IS NOT ALWAYS THE REAL ONE. A test that pins the date
+   * (see `now` on signedInPage) and leaves this at the real Date.now() seeds a session that has
+   * already expired by the pinned day, and the page under test is the login screen -- which is how
+   * this was found: a fixed date three days out timed out waiting for a tab that was never drawn.
+   */
+  const exp = Math.floor(nowMs / 1000) + 3600
   const token = [
     b64({ alg: 'HS256', typ: 'JWT' }),
     b64({ sub: userId, email, role: 'authenticated', aud: 'authenticated', exp, iat: exp - 3600 }),
@@ -136,17 +142,30 @@ export async function stubSupabase(page, handlers, seen) {
   })
 }
 
-/** A browser already signed in as `profile`, with the stub in place. */
-export async function signedInPage(browser, profile, handlers, seen) {
+/**
+ * A browser already signed in as `profile`, with the stub in place.
+ *
+ * `now` FIXES THE BROWSER'S DATE, for the screens whose words depend on which day it is -- the
+ * button that starts a workflow says when the first notice goes, and on a business-day sequence
+ * that is "now" on a Wednesday and "Monday" on a Sunday. Left unset the real clock is used, which
+ * is right for every other file: pinning a date a test does not care about is a second thing that
+ * can go wrong.
+ *
+ * setFixedTime, NOT clock.install: it pins Date.now() and new Date() and leaves setTimeout alone.
+ * React's own timers are how the page loads at all, and a frozen timer queue is a blank screen.
+ */
+export async function signedInPage(browser, profile, handlers, seen, { now = null } = {}) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
   const page = await context.newPage()
   await stubSupabase(page, handlers, seen)
+  const nowMs = now === null ? Date.now() : new Date(now).getTime()
+  if (now !== null) await page.clock.setFixedTime(new Date(nowMs))
 
   // Seeded before any app code runs, so AuthContext finds a session on its first look rather
   // than flashing the login page and redirecting.
   await context.addInitScript(
     ([key, session]) => { try { window.localStorage.setItem(key, session) } catch { /* ignore */ } },
-    [`sb-${PROJECT_REF}-auth-token`, JSON.stringify(fakeSession(profile.id, profile.email))],
+    [`sb-${PROJECT_REF}-auth-token`, JSON.stringify(fakeSession(profile.id, profile.email, nowMs))],
   )
   return { context, page }
 }

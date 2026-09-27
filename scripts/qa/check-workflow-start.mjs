@@ -166,8 +166,19 @@ ok('...and never inserts a run itself', !/from\('workflow_runs'\)[\s\S]{0,120}?i
  * firm's own words rather than "are you sure", which is a question nobody reads.
  */
 ok('the panel asks before it sends', /const \[asking, setAsking\]/.test(panel))
-ok('...saying what goes out now', /The first step goes out now/.test(panel))
-ok('...and that the later ones still wait', /still wait for you/.test(panel))
+/*
+ * AND WHAT IT SAYS COMES FROM startSentence, NOT FROM THE PANEL.
+ *
+ * IT USED TO SAY "the first step goes out now" ON EVERY PRESS, which is false on a weekend: a
+ * business-day sequence normalises its start forward, so the demand is dated Monday and nothing
+ * goes. The firm hit it -- "it said it started, but when is it going to send out the SMS and the
+ * letter? I thought it does that immediately." The wording is now arithmetic, and it lives in one
+ * file because the action row's button makes the same promise. See check-workflow-start-day.mjs.
+ */
+ok('...in words that know which day it is',
+  /startSentence\(todayIso\(\), offer\.firstStepOn, offer\.dayUnit/.test(panel))
+ok('...and does not hard-code the sentence any more', !/The first step goes out now/.test(
+  panel.replace(/\/\*[\s\S]*?\*\//g, '')))
 ok('...with the firm’s own note on when to start it', /\{offer\.note\}/.test(panel))
 /* The server's sentence, verbatim: "there is a live promise to pay on this account" says what to
    go and look at, and a generic failure sends somebody to ask somebody else. */

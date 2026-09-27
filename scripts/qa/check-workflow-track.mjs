@@ -163,7 +163,9 @@ ok('...and one still to come is hollow', /waiting: 'bg-white border-slate-300'/.
  * unreadable to anybody using a screen reader.
  */
 ok('a dot is a button', /<button type="button" onClick=\{\(\) => onSelect\(step\.id\)\}/.test(track))
-ok('...that says its step, its state and its date in words', /aria-label=\{words\(step\)\}/.test(track))
+/* Carried on the shared props object rather than on the button, so the read-only reading on the
+   Overview card keeps the words it draws as a colour. See the Overview section below. */
+ok('...that says its step, its state and its date in words', /'aria-label': words\(step\)/.test(track))
 /*
  * THE CONNECTOR IS COLOURED BY THE STEP BEFORE IT, so the filled part of the line is the part
  * that has happened — and it is drawn by the step on its RIGHT, which is what stops a stray tail
@@ -232,6 +234,43 @@ ok('...read from the one function that decides it', /needsAttention\(run\.steps\
  */
 ok('a row of the list selects the step rather than repeating it',
   /onClick=\{onSelect\}/.test(panel) && !/\{step\.note\}[\s\S]{0,400}\{step\.note\}/.test(panel))
+
+/* ------------------------------------------------ and the same track, read-only, on the Overview */
+
+/*
+ * THE FIRM ASKED FOR THE DOTS BACK ON THE DEBTOR'S PAGE. Reading the four lines the summary card
+ * had been reduced to: "I did like the other one though, where you could see the little things...
+ * And this is the current work, you know, just to show where it is in the current workflow, not
+ * the previous workflows. And to show that it's been going out or not gone out."
+ *
+ * TWO NARROWINGS IN THAT SENTENCE AND BOTH ARE THE POINT: the CURRENT run only, and READ rather
+ * than worked.
+ */
+const nowCard = read('../../src/components/collections/WorkflowNowPanel.tsx')
+ok('the overview card draws the track', /<WorkflowTrack steps=\{run\.steps\}/.test(nowCard))
+/* THE CURRENT RUN ONLY. The tab keeps the history; a rail drawing every run a debtor has been
+   through is three tracks deep on an account with a handover and a section 129 behind it. */
+ok('...of the running sequences only',
+  /const live = runs\.filter\(\(r\) => r\.state === 'running'\)/.test(nowCard)
+  && /live\.map\(\(run\)/.test(nowCard))
+/*
+ * AND THE DOTS ARE NOT BUTTONS THERE. The house rule about the action row, applied to a track: "a
+ * button that looks live and swallows the click teaches people not to trust the row". The card has
+ * one promise on it, the Open link, and eleven pressable dots that all lead to the same tab is ten
+ * promises it does not keep.
+ */
+ok('...with nothing to press', !/onSelect=/.test(nowCard))
+ok('...which the track draws as text rather than as a dead button', /if \(!onSelect\) return <span/.test(track))
+/* THE WORDS SURVIVE EITHER WAY, which is what makes the quiet reading honest rather than merely
+   quieter: title and aria-label are on the shared object, not on the button. */
+ok('...carrying the same words on the span as on the button',
+  /const shared = \{[\s\S]{0,200}?'aria-label': words\(step\)/.test(track))
+/* ONE CLASS LIST FOR BOTH TAGS. Written out twice it drifts, and on a wrapped track the failure is
+   dots that no longer line up between the two screens that draw them. */
+ok('...and one layout for both', (track.match(/@sm:w-\[76px\]/g) ?? []).length === 1)
+/* NOT WHERE THE PLAN FAILED. A run with no steps under a line reading "day 1 of 0 steps" is an
+   empty track that reads as a broken screen rather than as the missing plan it is. */
+ok('...and no track on a run with no steps', /run\.steps\.length > 0 && \(/.test(nowCard))
 
 /* ------------------------------------------------------------------ */
 
