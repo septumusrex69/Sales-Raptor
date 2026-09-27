@@ -9,6 +9,7 @@
  * Run: node --experimental-strip-types --import ./scripts/qa/tsresolve.mjs \
  *        scripts/qa/check-calls.mjs
  */
+import { readFileSync } from 'node:fs'
 import {
   consultationNote, dialledNote, noAnswerNote,
   ATTEMPT_DESCRIPTION, ATTEMPT_ITEM_ID, CONSULTATION_DESCRIPTION, CONSULTATION_ITEM_ID,
@@ -23,6 +24,8 @@ const check = (name, actual, expected) => {
   if (a === e) pass++
   else failures.push(`${name}\n     expected ${e}\n     actual   ${a}`)
 }
+
+const ok = (name, actual) => check(name, actual, true)
 
 const item = (id) => ANNEXURE_B_2026.items.find((i) => i.id === id)
 
@@ -112,6 +115,51 @@ check('the statement line is the gazette’s own word', CONSULTATION_DESCRIPTION
 check('and a call that rang out says plainly what it was', ATTEMPT_DESCRIPTION, 'Telephone call')
 check('the two statement lines are distinguishable',
   ATTEMPT_DESCRIPTION === CONSULTATION_DESCRIPTION, false)
+
+/* ---------------- what the collector is asked after the call ---------------- */
+
+/*
+ * THE BOX WHERE THE CONSULTATION IS WRITTEN, which is the field in Raptor with the best claim to
+ * being dictated: the collector has just put the receiver down, the conversation is still in
+ * their head, and typing it out is the step that gets skipped -- leaving a R60 fee with no
+ * evidence behind it, the one kind nobody can defend when it is queried.
+ */
+const button = readFileSync(new URL('../../src/pages/accounts/CallButton.tsx', import.meta.url), 'utf8')
+ok('what was said can be dictated', /<DictateButton size="small" value={comment} onChange={setComment} \/>/.test(button))
+/* THE SAME CONTROL THE NOTE AND COMPOSE BOXES USE, so the language somebody dictates in is
+   remembered once across all of them rather than three times. */
+ok('...through the one dictate control', /from '\.\.\/\.\.\/components\/ui\/Dictate'/.test(button))
+
+/*
+ * AND THE SAME WORDS CAN BECOME THE MAIN COMMENT. The firm asked for it here because this is
+ * where the sentence gets written: the main comment is "the two lines the next person needs" and
+ * the last call is usually exactly that, but it lives four inches up the page from this box.
+ */
+ok('the call can be made the main comment too', /Also make this the main comment/.test(button))
+/*
+ * OFF EVERY TIME, NEVER REMEMBERED. saveMainComment REPLACES what is there and puts the old one
+ * on the timeline -- a tick that defaulted on, or that stuck between calls, would quietly
+ * overwrite a carefully written summary with "left a message" on the next call that rang out.
+ */
+ok('...starting off', /const \[alsoMain, setAlsoMain\] = useState\(false\)/.test(button))
+ok('...and cleared when the next call is placed', /setAlsoMain\(false\)/.test(button))
+/*
+ * AFTER THE CALL IS RECORDED, NEVER INSTEAD OF IT. The consultation and its fee are the thing
+ * that must not be lost; written first, a failure would leave the fee with no note behind it.
+ */
+const atRecord = button.indexOf('await recordNoAnswer(')
+const atMain = button.indexOf('await saveMainComment(')
+ok('the call is recorded before the main comment is touched', atRecord > 0 && atMain > atRecord)
+/*
+ * AND IT DOES NOT FAIL THE CALL. The call went, the fee is raised and the note is on the timeline
+ * either way; a red error over all of that because one more field would not save would be a lie
+ * about what happened.
+ */
+ok('...and a main comment that will not save does not fail the call',
+  /catch \(e\) \{\s*console\.error\('\[call\] the call was recorded but the main comment was not:'/.test(button))
+/* NOTHING IS WRITTEN FROM AN EMPTY BOX: the main comment is cleared by an empty string, so an
+   unticked-but-empty note would wipe the top of the account. */
+ok('...and an empty note never replaces one', /if \(alsoMain && comment\.trim\(\)\)/.test(button))
 
 console.log(`\n${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  FAIL ${f}`)

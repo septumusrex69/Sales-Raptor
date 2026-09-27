@@ -3,6 +3,8 @@ import { Loader2, Phone } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { PhoneLink } from '../../components/PhoneLink'
 import { callOutcome, recordConsultation, recordDial, recordNoAnswer } from '../../lib/accountCalls'
+import { saveMainComment } from '../../lib/accountWorkspace'
+import { DictateButton } from '../../components/ui/Dictate'
 import { scheduleFor } from '../../lib/annexureB'
 import type { ChargeResult } from '../../lib/accountCharges'
 
@@ -47,6 +49,15 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
   /** What BuzzBox saw: true it connected, false it never did, null nothing reported. */
   const [connected, setConnected] = useState<boolean | null>(null)
   const [comment, setComment] = useState('')
+  /**
+   * Put the same words at the top of the account as well.
+   *
+   * OFF EVERY TIME THE BOX OPENS, never remembered. The main comment is overwritten rather than
+   * appended to, so a tick that stuck would replace a carefully written summary with "left a
+   * message" on the next call that rang out -- and the collector who set it three calls ago would
+   * have no idea why.
+   */
+  const [alsoMain, setAlsoMain] = useState(false)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -61,6 +72,7 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
   async function dialled(call: { from: string; to: string; viaPabx: boolean }) {
     setError(null)
     setComment('')
+    setAlsoMain(false)
     setChoosing(false)
     setStatus(null)
 
@@ -128,10 +140,35 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
         await recordNoAnswer({ accountId, number: asking, comment, actor })
         setStatus('Voicemail or no answer · no consultation')
       }
+      /*
+       * AND THE SAME WORDS AS THE MAIN COMMENT, where the collector ticked the box.
+       *
+       * THE FIRM ASKED FOR IT HERE because this is where the sentence gets written. The main
+       * comment is "the two lines the next person needs" and the most recent call is usually
+       * exactly that -- but it lives at the top of the account, four inches and a scroll away
+       * from the box somebody has just typed into, so in practice it went stale.
+       *
+       * AFTER THE CALL IS RECORDED, NEVER INSTEAD OF IT. The consultation and its fee are the
+       * thing that must not be lost; the main comment is a convenience on top. Written first, a
+       * failure here would leave a fee with no note behind it -- the one kind nobody can defend
+       * when it is queried.
+       *
+       * AND IT DOES NOT FAIL THE CALL. The call went, the fee is raised and the note is on the
+       * timeline either way; a red error over all of that because one more field would not save
+       * would be a lie about what happened.
+       */
+      if (alsoMain && comment.trim()) {
+        try {
+          await saveMainComment(accountId, comment, actor.id, actor.name)
+        } catch (e) {
+          console.error('[call] the call was recorded but the main comment was not:', e)
+        }
+      }
       setAsking(null)
       setAnsweredCallId(null)
       setConnected(null)
       setComment('')
+      setAlsoMain(false)
       await onDone()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -212,9 +249,26 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
             so make that obligatory". A R60 consultation with nothing written about it is a fee
             with no evidence behind it -- the one kind nobody can defend when it is queried.
           */}
-          <label className="block mt-3">
-            <span className="text-sm font-medium text-slate-700">What was said?</span>
+          <div className="mt-3">
+            <div className="flex items-baseline justify-between gap-3">
+              <label htmlFor="what-was-said" className="text-sm font-medium text-slate-700">
+                What was said?
+              </label>
+              {/*
+                DICTATED, BECAUSE THIS IS THE BOX SOMEBODY FILLS WITH A PHONE IN THEIR HAND.
+                
+                The firm asked for it here by name, and it is the field in Raptor with the best
+                claim to it: the collector has just put the receiver down, the conversation is
+                still in their head, and typing it out is the step that gets skipped -- which
+                leaves a R60 consultation with no evidence behind it.
+                
+                The same control the note box and the compose box use, so the language somebody
+                dictates in is remembered once across all of them.
+              */}
+              <DictateButton size="small" value={comment} onChange={setComment} />
+            </div>
             <textarea
+              id="what-was-said"
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               rows={3}
@@ -222,6 +276,29 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
               placeholder="Needed before a consultation can be charged."
               className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-1 resize-none focus:outline-none focus:ring-2 focus:ring-brand-100"
             />
+          </div>
+          {/*
+            AND THE SAME WORDS AT THE TOP OF THE ACCOUNT, if they are worth it.
+            
+            THE MAIN COMMENT IS "the two lines the next person needs" and the last call is usually
+            exactly that. It sits four inches up the page from this box, so the person best placed
+            to write it is the one least likely to go and do it.
+            
+            OFF BY DEFAULT, on purpose. The main comment is OVERWRITTEN -- saveMainComment replaces
+            it and puts the old one on the timeline -- so a tick that defaulted on would quietly
+            replace a carefully written summary with "left a message" on every call that rang out.
+            It is offered, not assumed.
+          */}
+          <label className="mt-2.5 flex items-start gap-2 cursor-pointer">
+            <input type="checkbox" checked={alsoMain}
+              onChange={(e) => setAlsoMain(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-[#c9a052] focus:ring-[#c9a052]" />
+            <span className="text-[13px] leading-snug text-slate-600">
+              Also make this the main comment
+              <span className="block text-[11px] text-slate-400">
+                Replaces what is at the top of the account. The one it replaces goes on the timeline.
+              </span>
+            </span>
           </label>
           {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
           <p className="text-xs text-slate-400 mt-3">
