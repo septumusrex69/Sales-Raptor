@@ -12,6 +12,9 @@ import { moneyZa } from './locale.js'
 import { toSettings as toFirmSettings } from '../../../src/lib/firmSettingsRow.js'
 import { notifyHeld } from './notify.js'
 import { nextUnpaidFromRow } from '../../../src/lib/ptpSchedule.js'
+import {
+  disputeDaysPhrase, disputeWindow, noticeRespondBy,
+} from '../../../src/lib/disputeWindow.js'
 
 /**
  * ONE STEP OF ONE RUN, DECIDED AND ACTED ON.
@@ -119,7 +122,8 @@ export async function runOneStep(
 
   const node = toNode(nodeRow)
 
-  const [contactsRes, collectorRes, liaisonRes, templatesRes, ledgerRes, priorRes, promiseRes] = await Promise.all([
+  const [contactsRes, collectorRes, liaisonRes, templatesRes, ledgerRes, priorRes, promiseRes,
+    disputeRes, noticesRes] = await Promise.all([
     admin.from('account_contacts').select('kind, value, is_primary, retired_at').eq('account_id', account.id),
     account.assigned_to
       ? admin.from('profiles').select('id, name, phone, email, whatsapp').eq('id', account.assigned_to).maybeSingle()
@@ -155,6 +159,45 @@ export async function runOneStep(
       .select('amount, due_on, arrangement, day_of_month, on_last_day, day_of_week, instalments_kept, total_promised')
       .eq('account_id', account.id).in('status', ['open', 'defaulted'])
       .order('created_at', { ascending: false }).limit(1).maybeSingle(),
+    /*
+     * THE OPEN DISPUTE, WHICH IS WHAT THE FOUR {{dispute_*}} FIELDS COME FROM.
+     *
+     * READ FOR EVERY STEP, for the same reason the arrangement above is: a section 129 does not
+     * quote these fields and the read costs one indexed row, against the alternative of the runner
+     * having to know which node belongs to which sequence before it can decide what to load.
+     *
+     * THE NEWEST OPEN ONE. A closed dispute is a finding already given, and a message about it
+     * would quote a window that ran out; `alleged_on desc` rather than raised_at, because the
+     * notice quotes the day the debtor SAID it and that is the date this is about.
+     *
+     * kind = 'dispute' AND NOT THE OTHER TWO. account_queries also carries 'help' -- an agent asking
+     * a team leader -- and 'litigation'. Neither is something a debtor alleged, and merging either
+     * into a notice would tell a debtor their account is disputed because a collector asked for
+     * supervision.
+     */
+    admin.from('account_queries')
+      .select('description, alleged_on, received_on')
+      .eq('account_id', account.id).eq('kind', 'dispute').neq('status', 'closed')
+      .order('alleged_on', { ascending: false, nullsFirst: false })
+      .limit(1).maybeSingle(),
+    /*
+     * THE STATUTORY NOTICES ALREADY SENT ON THIS ACCOUNT, and their own periods, which is what the
+     * dispute window is measured against.
+     *
+     * STATUTORY ONLY, and that is the filter that matters. A dispute message must not reset the
+     * clock the section 129 started -- but nor may the dispute REQUEST become the notice the next
+     * one is measured against, and it declares a ten-day period of its own. `statutory` is the
+     * column that separates "a notice the Act or the mandate requires" from a letter the firm chose
+     * to send, so it is the one asked here.
+     *
+     * ACROSS EVERY RUN ON THE ACCOUNT, not only this one: the demand and the dispute sequence are
+     * two different runs by design, and the window belongs to the account rather than to a run.
+     */
+    admin.from('workflow_run_steps')
+      .select('sent_at, workflow_nodes!inner(deadline_days, deadline_unit, statutory), workflow_runs!inner(account_id)')
+      .eq('workflow_runs.account_id', account.id)
+      .eq('workflow_nodes.statutory', true)
+      .eq('state', 'sent'),
   ])
 
   const collector = collectorRes.data
@@ -199,6 +242,27 @@ export async function runOneStep(
     interestRateAnnual: account.interest_rate_annual ? Number(account.interest_rate_annual) : undefined,
     accrueTo: today,
   })
+
+  /*
+   * HOW LONG THE DEBTOR HAS, worked out before the merge because two fields come out of it.
+   *
+   * Computed even where there is no dispute -- disputeWindow is arithmetic on two dates and costs
+   * nothing -- and then offered only where there is one, so the 'fresh' ten days of an account
+   * with no demand cannot leak onto a notice that is not about a dispute at all.
+   */
+  const window = disputeWindow(today, noticeRespondBy(
+    ((noticesRes.data ?? []) as unknown as NoticeStepRow[]).flatMap((r) => {
+      /* A step with no sent_at is not a sent step, whatever its state column says. */
+      const sentOn = r.sent_at ? r.sent_at.slice(0, 10) : null
+      if (!sentOn) return []
+      const n = oneOf(r.workflow_nodes)
+      return [{
+        sentOn,
+        deadlineDays: n?.deadline_days ?? null,
+        deadlineUnit: n?.deadline_unit ?? null,
+      }]
+    }),
+  ))
 
   const values = accountMergeValues({
     account: {
@@ -247,6 +311,32 @@ export async function runOneStep(
      * received_at, so the last is the newest.
      */
     paymentReceived: ledgerRes.payments.at(-1)?.amount ?? null,
+    /*
+     * THE DISPUTE, AND THE DATE ITS MESSAGES QUOTE.
+     *
+     * `daysLeft` ARRIVES AS A PHRASE, not a number: disputeDaysPhrase decides how a period reads,
+     * singular included, and a second place deciding that is a template that says "6 business days
+     * days".
+     *
+     * AND THE WINDOW IS COMPUTED ONCE FOR BOTH. `respondByOverride` and `daysLeft` come out of the
+     * same disputeWindow call, so the count and the date cannot disagree -- which is the whole
+     * point of the override: while a demand is running the debtor has what is LEFT of ITS period
+     * and must be given ITS date, and two dates days apart under one heading is an ambiguity a
+     * debtor is entitled to resolve in their own favour.
+     *
+     * NULL WHERE THERE IS NO DISPUTE, which leaves the placeholders standing and holds the step --
+     * correct, because a dispute message merged against an account with no dispute on it would tell
+     * a debtor they have until nothing to send their documents.
+     */
+    dispute: disputeRes.data
+      ? {
+        daysLeft: disputeDaysPhrase(window.days),
+        allegedOn: disputeRes.data.alleged_on ?? null,
+        receivedOn: disputeRes.data.received_on ?? null,
+        summary: disputeRes.data.description ?? null,
+      }
+      : null,
+    respondByOverride: disputeRes.data ? window.respondBy : null,
   })
 
   const contacts = (contactsRes.data ?? []) as ContactRow[]
@@ -499,6 +589,28 @@ function debtorNameOf(account: Record<string, unknown>): string | null {
 interface ContactRow {
   kind: string; value: string | null; is_primary: boolean | null; retired_at: string | null
 }
+/**
+ * A SENT STATUTORY STEP AND THE PERIOD ITS NODE DECLARED, which is what the dispute window is
+ * measured against. The embedded node comes back as an object on a !inner join, and PostgREST types
+ * it as unknown, so it is named here rather than cast at the call site.
+ */
+interface NoticeStepRow {
+  sent_at: string | null
+  /*
+   * ONE OR MANY, AND THE CODE MUST NOT CARE WHICH. PostgREST returns a single OBJECT for a
+   * many-to-one embed like a step's node, while the untyped client infers an array -- so a type that
+   * commits to either is wrong somewhere, and a cast would be a guess about the shape rather than a
+   * statement about it. `oneOf` below reads both, which also survives the day this becomes a
+   * to-many join.
+   */
+  workflow_nodes: NoticeNode | NoticeNode[] | null
+}
+interface NoticeNode {
+  deadline_days: number | null
+  deadline_unit: 'calendar' | 'business' | null
+}
+const oneOf = (v: NoticeNode | NoticeNode[] | null): NoticeNode | null =>
+  (Array.isArray(v) ? (v[0] ?? null) : v)
 interface TemplateRow {
   id: string; kind: 'sms' | 'email' | 'call_script' | 'letter'
   subject: string | null; body: string

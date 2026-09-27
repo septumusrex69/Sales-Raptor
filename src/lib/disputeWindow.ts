@@ -116,3 +116,59 @@ export function remindsAt(days: number): number | null {
   if (days <= 3) return null
   return Math.floor(days / 2)
 }
+
+/**
+ * A NOTICE THAT HAS GONE OUT AND THE PERIOD IT GAVE THE DEBTOR.
+ *
+ * `deadlineDays` and `deadlineUnit` are the NODE's, not this file's: workflow_nodes separates "when
+ * the step runs" from "the period this step gives the debtor" precisely so that the ten business
+ * days of a section 129 are declared once, on the notice itself. Read from there rather than
+ * assumed, a firm that revises its own chart to eleven days does not have to find this file too.
+ */
+export interface SentNotice {
+  /** The day it actually went out, which is not the day it was due. */
+  sentOn: string
+  /** Null where the node declares no period, which is most steps: a reminder gives no deadline. */
+  deadlineDays: number | null
+  deadlineUnit: 'calendar' | 'business' | null
+}
+
+/**
+ * THE DATE THE LIVE DEMAND RUNS TO, off the notices already sent on the account.
+ *
+ * THE LATEST OF THEM WINS, and that is the decision in this function. An account can carry a
+ * section 129 sent on day 1 and a final notice sent on day 12, each with its own period; the clock
+ * a debtor is actually running against is the one that ends last. Taking the FIRST would hand a
+ * debtor who disputed after the final notice a window that closed weeks ago, and the floor would
+ * then quietly give them five days -- a fair answer arrived at by ignoring the notice they are
+ * holding.
+ *
+ * A PERIOD OF ZERO OR LESS IS NOT A PERIOD, and a step with no `deadlineDays` gave the debtor
+ * nothing to respond within, so neither counts. Null where there is nothing to count, which is
+ * what disputeWindow reads as "no demand has gone out" -- the ten-day case.
+ *
+ * NOT A DATABASE QUERY. The caller finds the account's sent steps; this decides what they mean.
+ */
+export function noticeRespondBy(notices: SentNotice[]): string | null {
+  let latest: string | null = null
+  for (const n of notices) {
+    if (n.deadlineDays === null || n.deadlineDays <= 0) continue
+    /* Business is the statutory clock and calendar is the debtor's. "20" means two different dates,
+       and on a statutory period that is a notice to be served again -- so the unit is honoured and
+       an absent one is read as business, which is what every notice in the firm's chart is. */
+    const on = n.deadlineUnit === 'calendar'
+      ? addCalendarDays(n.sentOn, n.deadlineDays)
+      : addWorkingDays(n.sentOn, n.deadlineDays)
+    if (latest === null || on > latest) latest = on
+  }
+  return latest
+}
+
+/* Local rather than imported: workingDays.ts is about the office's calendar and this is the
+   debtor's, which does not stop on a Saturday. Written out so the two cannot be confused at the
+   call site above. */
+function addCalendarDays(from: string, days: number): string {
+  const d = new Date(`${from}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}

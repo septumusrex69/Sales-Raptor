@@ -357,6 +357,60 @@ ok('a sent step marks the account as worked', /\.update\(\{ last_action_at: toda
 ok('...dated in the firm’s own day', !/last_action_at: sentAt/.test(runner))
 
 
+/* ---------------- the runner can answer a dispute message ---------------- */
+
+/*
+ * THE FOUR {{dispute_*}} FIELDS ARE ANSWERED BY THE RUNNER, OR THE DISPUTE WORKFLOW HOLDS ON EVERY
+ * STEP -- silently, and in the safe direction, which is why nothing would report it. An unresolved
+ * field leaves its braces standing and planSend refuses to send, so a dispute sequence with none of
+ * this wired would look exactly like a workflow waiting on a collector.
+ */
+ok('the runner reads the account’s open dispute', /from\('account_queries'\)/.test(runner))
+ok('...the newest one, by the day the debtor alleged it',
+  /order\('alleged_on', \{ ascending: false/.test(runner))
+/* A closed dispute is a finding already given, and a message about it would quote a window that ran
+   out weeks ago. */
+ok('...and never a closed one', /neq\('status', 'closed'\)/.test(runner))
+/* 'help' is an agent asking a team leader and 'litigation' is the firm deciding whether to sue.
+   Merging either into a notice would tell a debtor their account is disputed because a collector
+   asked for supervision. */
+ok('...and only a dispute, not the other two escalations',
+  /eq\('kind', 'dispute'\)/.test(runner))
+/*
+ * AND THE WINDOW IS MEASURED AGAINST THE STATUTORY NOTICES ONLY. Two failures sit either side of
+ * this one line. Without the filter, the dispute REQUEST -- which declares a ten-business-day period
+ * of its own -- becomes the notice the next window is measured against, so every dispute resets its
+ * own clock. Without the query at all, disputeWindow sees no notice and hands a debtor a fresh ten
+ * days in the middle of a running section 129, extending a period the Act fixed.
+ */
+ok('...and the statutory notices already sent, for the window',
+  /eq\('workflow_nodes\.statutory', true\)/.test(runner))
+ok('...only the ones that actually went', /eq\('state', 'sent'\)/.test(runner))
+ok('...across every run on the account, not only this one',
+  /eq\('workflow_runs\.account_id', account\.id\)/.test(runner))
+/*
+ * ONE CALL, BOTH FIELDS. The count and the date come out of the same disputeWindow result, so they
+ * cannot disagree -- and disagreeing is the failure that matters: "you have 6 business days, that is
+ * by [a date ten days out]" is an ambiguity a debtor is entitled to resolve in their own favour.
+ */
+ok('the window is worked out once', /const window = disputeWindow\(/.test(runner))
+ok('...and the count and the date both come off it',
+  /daysLeft: disputeDaysPhrase\(window\.days\)/.test(runner)
+  && /respondByOverride: disputeRes\.data \? window\.respondBy : null/.test(runner))
+/* THE PHRASE IS NOT BUILT HERE. disputeDaysPhrase owns how a period reads, singular included; a
+   second place deciding it is a template that says "6 business days days". */
+ok('...with the phrasing left to the one place that decides it',
+  /*
+   * COMMENTS STRIPPED FIRST, which is the trap CLAUDE.md names in reverse: the comment ABOVE the
+   * call explains the rule in the very words this looks for, so read raw it fails on correct code.
+   */
+  !/business day/.test(runner.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')))
+/* AND THE OVERRIDE IS OFFERED ONLY WHERE THERE IS A DISPUTE, or the 'fresh' ten days of an account
+   with no demand would leak onto the respond-by of a notice that is not about a dispute at all. */
+ok('...and offered only on an account that has one',
+  /dispute: disputeRes\.data[\s\S]{0,12}\? \{/.test(runner))
+
+
 for (const f of failures) console.error(`  ✗ ${f}`)
 console.log(`check-workflow-transport: ${pass} passed, ${failures.length} failed`)
 process.exit(failures.length ? 1 : 0)

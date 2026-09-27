@@ -8669,3 +8669,353 @@ insert into public.message_templates (kind, scope, audience, format, name, subje
 values ('sms', 'collections', 'company', 'text', 'Dispute not accepted (company)', null,
   '{{debtor_name}}, the dispute on matter {{case_number}} was not accepted. We have emailed the outcome. {{firm_phone}}', 'sms-dispute-not-upheld-company', true)
 on conflict (seed_key) do nothing;
+
+-- ============================================================================
+-- A DISPUTE HAS TWO DATES, AND THEY ARE THE TWO STAGES.
+--
+-- The firm's dispute workflow turns on a distinction the record could not hold: a dispute ALLEGED
+-- is not a dispute RECEIVED.
+--
+--   ALLEGED     the debtor said it, usually on the telephone. Nothing stops. The firm's own
+--               wording: "telling us you dispute the account does not, on its own, suspend
+--               anything. The account continues on its normal course, and the period in the
+--               Section 129 notice keeps running."
+--   RECEIVED    it arrived in writing. NOW collection is suspended, the account goes on hold at
+--               the node it stopped at, and the file goes to the liaison for the client's comment.
+--
+-- raised_at CANNOT STAND FOR EITHER. It is when the ROW was created, which is when a collector got
+-- round to logging it -- and the two differ by a day whenever somebody takes a call at half past
+-- four. The notice quotes the day the debtor SAID it ("On 5 October 2026 you told us that this
+-- account was disputed"), so that date is evidence and cannot be the row's own clock.
+--
+-- AND received_on IS WHAT DECIDES WHICH STAGE AN ACCOUNT IS IN. Null means stage A is running and
+-- the reminders are going out; a date means stage A's remaining steps are cancelled and collection
+-- is suspended. One nullable date rather than a status column, because a second status beside the
+-- one this table already has is two things to keep in step.
+--
+-- BACKFILLED TO raised_at RATHER THAN LEFT NULL, for the 25 disputes already on the book: every one
+-- of them was raised because something arrived, and a null alleged_on would print "{{...}}" on any
+-- notice quoting it. received_on is deliberately NOT backfilled -- guessing that every existing
+-- dispute came in writing would put accounts into a stage B hold nobody put them in.
+-- ============================================================================
+alter table public.account_queries
+  add column if not exists alleged_on date,
+  add column if not exists received_on date;
+
+update public.account_queries
+   set alleged_on = (raised_at at time zone 'Africa/Johannesburg')::date
+ where kind = 'dispute' and alleged_on is null;
+
+comment on column public.account_queries.alleged_on is
+  'The day the debtor SAID the account is disputed, which the deemed-undisputed notice quotes. Not '
+  'raised_at: that is when somebody logged it. Null on a help or litigation escalation, which '
+  'nobody alleges.';
+comment on column public.account_queries.received_on is
+  'The day the dispute arrived IN WRITING, or null while only alleged. Null is stage A -- nothing '
+  'is suspended and the reminders run; a date is stage B -- collection is suspended until the '
+  'written finding.';
+
+-- A date cannot be set on an escalation that is not a dispute, for the same reason `category`
+-- cannot: neither means anything about an agent asking a team leader what to do.
+alter table public.account_queries drop constraint if exists account_queries_dates_only_on_dispute;
+alter table public.account_queries add constraint account_queries_dates_only_on_dispute
+  check (kind = 'dispute' or (alleged_on is null and received_on is null));
+
+-- AND IT CANNOT HAVE ARRIVED BEFORE IT WAS ALLEGED. A debtor who sends the letter first is alleged
+-- and received on the same day, which this allows; the other way round is a typo, and it would make
+-- the notice read "On 8 October you told us" above "received on 5 October".
+alter table public.account_queries drop constraint if exists account_queries_received_after_alleged;
+alter table public.account_queries add constraint account_queries_received_after_alleged
+  check (received_on is null or alleged_on is null or received_on >= alleged_on);
+
+create index if not exists account_queries_alleged_idx
+  on public.account_queries (account_id, alleged_on desc)
+  where kind = 'dispute' and status <> 'closed';
+
+
+-- ---------- AND STAGE A NEEDS A TRIGGER OF ITS OWN ----------
+--
+-- `dispute_logged` was already in the closed list and it is stage B: the written dispute is logged,
+-- collection stops. Stage A starts on something else entirely -- the collector flagging that the
+-- debtor has ALLEGED one -- and firing stage B's trigger for it would suspend collection on an
+-- allegation, which is the one thing the firm's own wording promises it does not do.
+--
+-- A CLOSED LIST, and this entry earns its place by the same rule as the rest: it is an event Raptor
+-- records. alleged_on is now that record.
+alter table public.workflow_versions drop constraint if exists workflow_versions_trigger_kind_check;
+alter table public.workflow_versions add constraint workflow_versions_trigger_kind_check
+  check (trigger_kind in (
+    'handover', 'allocated', 'promise_due', 'promise_broken', 'arrangement_broken',
+    'payment_received', 'dispute_alleged', 'dispute_logged', 'no_contact', 'trace_returned',
+    'callback', 'by_hand'
+  ));
+
+
+-- ============================================================================
+-- THE DISPUTE WORKFLOW, AS TWO DRAFTS. NOTHING HERE IS ACTIVATED.
+--
+-- The firm: "show me the nodes before you enable anything." So both versions go in as drafts, the
+-- existing skeleton is left exactly as it is, and no account can be started on either.
+--
+-- TWO WORKFLOWS AND NOT ONE, because they start on different events and do opposite things:
+--
+--   Dispute alleged   the collector flags that the debtor SAID it. Nothing is suspended. The
+--                     collections workflow keeps running and these messages are added alongside it.
+--   Dispute received  it arrived in writing. NOW collection is suspended and the file goes to the
+--                     liaison.
+--
+-- One workflow cannot be both, because a run is started by one trigger and every step in it is
+-- dated from that one start. A debtor who never sends the letter never reaches stage B at all, and a
+-- debtor who sends it on day 3 leaves stage A with five steps to cancel.
+--
+-- STAGE C -- THE FINDING -- IS DELIBERATELY NOT HERE, and this is a limit of the engine rather than
+-- an omission. The outcome is a BRANCH: upheld, upheld in part, not accepted, three different pairs
+-- of messages. workflow_connections carries a label and nothing else -- there is no condition on a
+-- connection and the runner is dated, not conditional -- so a version containing all three pairs
+-- would send all three. The outcome messages therefore belong on the RECORDING of the outcome, the
+-- way workflow_start_on_promise hangs off a promise being written, and that is the next piece.
+-- Published as a workflow instead, a debtor whose dispute was upheld would also be told it was not.
+-- ============================================================================
+do $$
+declare
+  v_workflow uuid;
+  v_draft uuid;
+  v_phase uuid;
+begin
+  -- ---------- STAGE A: alleged, and not yet in writing ----------
+  insert into public.workflows (key, name, description, domain)
+  values ('dispute-alleged', 'Dispute alleged',
+    'The debtor has said the account is disputed but nothing has arrived in writing. Nothing is '
+    'suspended: this runs alongside the collections workflow and asks for the grounds, twice, '
+    'before the account is deemed undisputed.',
+    'collections')
+  on conflict (key) do nothing;
+
+  select w.id into v_workflow from public.workflows w where w.key = 'dispute-alleged';
+
+  insert into public.workflow_versions (workflow_id, version, state, trigger_kind, day_unit, trigger_note)
+  values (
+    v_workflow,
+    (select coalesce(max(version), 0) + 1 from public.workflow_versions where workflow_id = v_workflow),
+    'draft',
+    'dispute_alleged',
+    /*
+     * BUSINESS DAYS, because the window this sequence measures is the section 129's and that is
+     * business days -- the firm, of the demand sequence: "this is all working days, not normal days."
+     */
+    'business',
+    /*
+     * THE ONE THING THAT MUST BE BUILT BEFORE THIS IS PUBLISHED, written where whoever publishes it
+     * will read it. The days below are the FULL TEN-BUSINESS-DAY window -- the case where no demand
+     * has gone out. Where one has, disputeWindow gives the debtor what is LEFT of its period, as
+     * little as five days, and a run whose steps are dated 1 / 6 / 10 / 12 would then send the
+     * reminder after the window closed and deem the account undisputed a week late. The steps have
+     * to be dated from the window the run starts with, which the planner cannot do yet: it dates
+     * every step from the run and the node day alone.
+     */
+    'Started when a collector flags that the debtor has alleged a dispute. The day numbers below '
+    'are the full ten-business-day window, which is right only where no Section 129 or letter of '
+    'demand has gone out. Where one is running the debtor has what is left of ITS period -- as few '
+    'as five days -- and the steps must be dated from that window before this is published.'
+  )
+  returning id into v_draft;
+
+  insert into public.workflow_phases (version_id, name, ordinal, from_day, to_day)
+  values (v_draft, 'Getting it in writing', 0, 1, 12)
+  returning id into v_phase;
+
+  insert into public.workflow_nodes (
+    version_id, phase_id, key, kind, label, description, day, ordinal, channel,
+    deadline_days, deadline_unit, needs_release, after_minutes, statutory,
+    template_id, template_company_id, x, y
+  ) values
+  (
+    v_draft, v_phase, 'dispute-writing-email', 'communication',
+    'Send it in writing',
+    'Asks for the grounds and the documents, and says in terms what an allegation does not do: '
+    'the account continues on its normal course and the period in the Section 129 keeps running. '
+    'Collection is suspended only once the dispute is in writing.',
+    1, 0, 'email',
+    /*
+     * THE PERIOD THIS STEP GIVES THE DEBTOR, which is the window -- and it is NOT a statutory
+     * notice. That distinction is load-bearing: noticeRespondBy() measures the dispute window
+     * against the STATUTORY notices on the account, so a request for documents that declared
+     * itself one would become the demand the window is measured against, and every dispute would
+     * reset its own clock.
+     */
+    10, 'business', false, null, false,
+    (select id from public.message_templates where seed_key = 'email-dispute-writing-individual'),
+    (select id from public.message_templates where seed_key = 'email-dispute-writing-company'),
+    60, 60
+  ),
+  (
+    v_draft, v_phase, 'dispute-writing-sms', 'communication',
+    'Send it in writing SMS',
+    'Points at the email and the address to send the dispute to, so it must land after it.',
+    /* SEVEN MINUTES: the firm's rule at every step is "the email sends 5 to 10 minutes before the
+       SMS", and after_minutes is what pairs these two rows into one step of their chart. */
+    1, 1, 'sms', null, null, false, 7, false,
+    (select id from public.message_templates where seed_key = 'sms-dispute-writing-individual'),
+    (select id from public.message_templates where seed_key = 'sms-dispute-writing-company'),
+    60, 200
+  ),
+  (
+    v_draft, v_phase, 'dispute-reminder-email', 'communication',
+    'Reminder',
+    'Half the window, rounded down. Says what is still outstanding and that the account continues '
+    'on its normal course until it arrives.',
+    /* HALF THE WINDOW, ROUNDED DOWN: five business days into a ten-day window, and day 1 is the day
+       the request went out, so that is day 6. remindsAt() is where the arithmetic lives. */
+    6, 0, 'email', null, null, false, null, false,
+    (select id from public.message_templates where seed_key = 'email-dispute-reminder-individual'),
+    (select id from public.message_templates where seed_key = 'email-dispute-reminder-company'),
+    360, 60
+  ),
+  (
+    v_draft, v_phase, 'dispute-reminder-sms', 'communication',
+    'Reminder SMS',
+    'Says we are still waiting, which is only true if the reminder before it went.',
+    6, 1, 'sms', null, null, false, 7, false,
+    (select id from public.message_templates where seed_key = 'sms-dispute-reminder-individual'),
+    (select id from public.message_templates where seed_key = 'sms-dispute-reminder-company'),
+    360, 200
+  ),
+  (
+    v_draft, v_phase, 'dispute-final-reminder-email', 'communication',
+    'Last day',
+    'One business day before the window closes. It says "tomorrow", so the date it is sent on is '
+    'part of what makes it true.',
+    /* THE WINDOW CLOSES ON DAY 11 -- day 1 plus ten business days -- so one business day before it
+       is day 10. Sent a day later, "tomorrow" would name the day after the deadline. */
+    10, 0, 'email', null, null, false, null, false,
+    (select id from public.message_templates where seed_key = 'email-dispute-final-reminder-individual'),
+    (select id from public.message_templates where seed_key = 'email-dispute-final-reminder-company'),
+    660, 60
+  ),
+  (
+    v_draft, v_phase, 'dispute-final-reminder-sms', 'communication',
+    'Last day SMS',
+    'Also says "tomorrow", and follows the email that says it.',
+    10, 1, 'sms', null, null, false, 7, false,
+    (select id from public.message_templates where seed_key = 'sms-dispute-final-reminder-individual'),
+    (select id from public.message_templates where seed_key = 'sms-dispute-final-reminder-company'),
+    660, 200
+  ),
+  (
+    v_draft, v_phase, 'dispute-undisputed-email', 'communication',
+    'Deemed undisputed',
+    'Carries the notice on the letterhead. It asserts that nothing has reached us, so a person '
+    'confirms it before it goes.',
+    /*
+     * THE DAY AFTER THE WINDOW CLOSES, and it WAITS FOR A PERSON. This is the same rule the credit
+     * bureau listing and the intended summons are held by: the notice states a fact about the world
+     * -- "nothing has reached us" -- and an email that arrived in a spam folder on the last
+     * afternoon would make it untrue. needs_release is written on the NODE, so the library's chart
+     * shows it; the runner marks the step held on the morning it falls due, out of a reason true
+     * that morning, rather than the planner marking it on day one.
+     */
+    12, 0, 'email', null, null, true, null, false,
+    (select id from public.message_templates where seed_key = 'email-dispute-undisputed-individual'),
+    (select id from public.message_templates where seed_key = 'email-dispute-undisputed-company'),
+    960, 60
+  ),
+  (
+    v_draft, v_phase, 'dispute-undisputed-sms', 'communication',
+    'Deemed undisputed SMS',
+    'Says no written dispute was received. It goes with the release of the notice above it, never '
+    'on its own.',
+    /* NOT ITSELF MARKED needs_release: after_minutes already holds it until the email has gone, and
+       releasing the notice sends its companion with it. Marked as well, a collector would have to
+       press twice for one step of the firm's chart. */
+    12, 1, 'sms', null, null, false, 7, false,
+    (select id from public.message_templates where seed_key = 'sms-dispute-undisputed-individual'),
+    (select id from public.message_templates where seed_key = 'sms-dispute-undisputed-company'),
+    960, 200
+  );
+
+  /* Refuse rather than leave a draft that would send nothing -- the fault the skeleton below has. */
+  if exists (
+    select 1 from public.workflow_nodes n
+     where n.version_id = v_draft and n.channel is not null
+       and (n.template_id is null or n.template_company_id is null)
+  ) then
+    raise exception 'A message node has no template, so this version would send nothing.';
+  end if;
+
+  -- ---------- STAGE B: received in writing ----------
+  --
+  -- A NEW VERSION OF THE WORKFLOW THAT ALREADY EXISTS. 'Dispute' version 1 is ACTIVE and it is a
+  -- skeleton: five nodes, not one template between them, two of which are communication nodes that
+  -- would send nothing at all -- exactly the state Promise to pay version 1 was in. It is left
+  -- alone here rather than archived, because archiving it is enabling this one, and that is the
+  -- firm's call to make after they have read the nodes.
+  select w.id into v_workflow from public.workflows w where w.key = 'dispute';
+  if v_workflow is null then
+    raise exception 'The Dispute workflow is not there.';
+  end if;
+
+  insert into public.workflow_versions (workflow_id, version, state, trigger_kind, day_unit, trigger_note)
+  values (
+    v_workflow,
+    (select coalesce(max(version), 0) + 1 from public.workflow_versions where workflow_id = v_workflow),
+    'draft',
+    'dispute_logged',
+    'business',
+    /*
+     * WHAT THIS VERSION DOES NOT CARRY, written down where it will be read. The firm's chart has
+     * four more steps at day 0, 3, 6 and 10: the referral to the liaison and three follow-ups,
+     * each with a task and a calendar entry. None of them is a message to the debtor, and the
+     * runner only sends -- planSend resolves every recipient to debtor.email and there is no branch
+     * for a step that is WORK. Seeded as nodes they would hold for ever, and a run with a step that
+     * can never complete never reaches `finished`.
+     *
+     * THEY BELONG ON THE DISPUTE RECORD, which already has the column for it: account_queries
+     * carries `chase_on`, and its own comment says "the thing that kills a query is nobody noticing
+     * it went quiet". The three follow-ups are chase dates and diary entries on the liaison, and the
+     * three internal emails are sent from them by the person who owns the file.
+     */
+    'Started when the written dispute is logged. Collection is suspended and the collections '
+    'workflow holds at the node it stopped at. The referral to the liaison and the three follow-ups '
+    'are chase dates and diary entries on the dispute record, not steps here: the runner sends '
+    'messages to debtors and cannot raise work for a person.'
+  )
+  returning id into v_draft;
+
+  insert into public.workflow_phases (version_id, name, ordinal, from_day, to_day)
+  values (v_draft, 'Acknowledging it', 0, 1, 1)
+  returning id into v_phase;
+
+  insert into public.workflow_nodes (
+    version_id, phase_id, key, kind, label, description, day, ordinal, channel,
+    deadline_days, deadline_unit, needs_release, after_minutes, statutory,
+    template_id, template_company_id, x, y
+  ) values
+  (
+    v_draft, v_phase, 'dispute-acknowledged-email', 'communication',
+    'Dispute received',
+    'Says it is logged, that collection is suspended while it is investigated, and who is handling '
+    'it. It asks for nothing further: the collector asks if anything is needed.',
+    1, 0, 'email', null, null, false, null, false,
+    (select id from public.message_templates where seed_key = 'email-dispute-acknowledged-individual'),
+    (select id from public.message_templates where seed_key = 'email-dispute-acknowledged-company'),
+    60, 60
+  ),
+  (
+    v_draft, v_phase, 'dispute-acknowledged-sms', 'communication',
+    'Dispute received SMS',
+    'Says the dispute has been received and collection is suspended, so it follows the email that '
+    'says the same thing at length.',
+    1, 1, 'sms', null, null, false, 7, false,
+    (select id from public.message_templates where seed_key = 'sms-dispute-acknowledged-individual'),
+    (select id from public.message_templates where seed_key = 'sms-dispute-acknowledged-company'),
+    60, 200
+  );
+
+  if exists (
+    select 1 from public.workflow_nodes n
+     where n.version_id = v_draft and n.channel is not null
+       and (n.template_id is null or n.template_company_id is null)
+  ) then
+    raise exception 'A message node has no template, so this version would send nothing.';
+  end if;
+end $$;

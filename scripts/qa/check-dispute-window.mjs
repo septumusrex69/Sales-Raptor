@@ -19,7 +19,8 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-dispute-window.mjs
  */
 import {
-  DISPUTE_WINDOW_DAYS, DISPUTE_WINDOW_FLOOR, disputeDaysPhrase, disputeWindow, remindsAt,
+  DISPUTE_WINDOW_DAYS, DISPUTE_WINDOW_FLOOR, disputeDaysPhrase, disputeWindow, noticeRespondBy,
+  remindsAt,
 } from '../../src/lib/disputeWindow.ts'
 import { addWorkingDays, isWorkingDay, workingDaysBetween } from '../../src/lib/workingDays.ts'
 
@@ -163,6 +164,71 @@ for (const n of [4, 5, 6, 8, 10, 20]) {
 for (const d of [0, 6, 12, 60]) {
   ok(`a real window always gets its reminder (day ${d})`,
     remindsAt(disputeWindow(addWorkingDays(ISSUED, d), NOTICE_BY).days) !== null)
+}
+
+/* ---------------- which notice the window is measured against ---------------- */
+
+/*
+ * THE DATE THE LIVE DEMAND RUNS TO, OFF THE STEPS THAT ACTUALLY WENT OUT.
+ *
+ * This is the input to everything above, so getting it wrong does not produce a wrong count -- it
+ * produces a confident count against the wrong notice. Four things are asserted and each is a
+ * decision rather than arithmetic.
+ */
+/* NOTHING SENT IS NULL, which is what disputeWindow reads as the ten-day case. Asserted first, or
+   a function that always returned null would pass every assertion below by agreeing there is no
+   notice. */
+check('an account with no notices has no window to measure against', noticeRespondBy([]), null)
+const S129 = { sentOn: '2026-10-05', deadlineDays: 10, deadlineUnit: 'business' }
+check('a section 129 runs ten business days from the day it went out',
+  noticeRespondBy([S129]), addWorkingDays('2026-10-05', 10))
+/* AND THE PERIOD IS THE NODE'S, NOT TEN HARD-WIRED HERE: a chart revised to eleven days moves the
+   date without anybody editing this file. */
+check('...or eleven, if that is what the notice says',
+  noticeRespondBy([{ ...S129, deadlineDays: 11 }]), addWorkingDays('2026-10-05', 11))
+/* THE LATEST OF THEM WINS. An account carrying a section 129 and a final notice is running against
+   the one that ends LAST; the first would be a window that closed weeks ago, and the floor would
+   then hand the debtor five days -- a fair answer reached by ignoring the notice in their hand. */
+const FINAL = { sentOn: '2026-10-20', deadlineDays: 7, deadlineUnit: 'business' }
+check('the notice that ends last is the one the debtor is running against',
+  noticeRespondBy([S129, FINAL]), addWorkingDays('2026-10-20', 7))
+check('...whichever order they are read in',
+  noticeRespondBy([FINAL, S129]), addWorkingDays('2026-10-20', 7))
+/* A STEP THAT GAVE THE DEBTOR NOTHING TO RESPOND WITHIN DOES NOT COUNT. Most steps are like this --
+   a reminder declares no deadline -- and counted as zero-day periods they would each land a
+   respond-by on the day they were sent, and the latest of those would win. */
+check('a step with no period of its own is not a notice',
+  noticeRespondBy([{ sentOn: '2026-11-30', deadlineDays: null, deadlineUnit: null }]), null)
+check('...nor is one with a period of zero',
+  noticeRespondBy([{ sentOn: '2026-11-30', deadlineDays: 0, deadlineUnit: 'business' }]), null)
+check('...and one of them cannot outrank a real notice',
+  noticeRespondBy([S129, { sentOn: '2026-11-30', deadlineDays: null, deadlineUnit: null }]),
+  addWorkingDays('2026-10-05', 10))
+/* CALENDAR IS THE DEBTOR'S CLOCK AND BUSINESS IS THE STATUTORY ONE, and "10" means two different
+   dates. A unit ignored here would put the section 129's own window two days early. */
+const cal = noticeRespondBy([{ sentOn: '2026-10-05', deadlineDays: 10, deadlineUnit: 'calendar' }])
+check('a calendar period counts weekends in', cal, '2026-10-15')
+ok('...which is not the same date as ten business days', cal !== addWorkingDays('2026-10-05', 10))
+/* An absent unit reads as business, because every notice in the firm\'s chart is. */
+check('a notice that does not say which unit is read as business days',
+  noticeRespondBy([{ sentOn: '2026-10-05', deadlineDays: 10, deadlineUnit: null }]),
+  addWorkingDays('2026-10-05', 10))
+
+/*
+ * AND THE TWO HALVES MEET: the firm's own worked example, end to end. A section 129 issued on
+ * 5 October 2026 with ten business days on it, and a debtor who alleges a dispute on day 4, is
+ * given 6 business days to the notice's own date -- computed here from the STEP rather than from a
+ * date typed into the test.
+ */
+{
+  const by = noticeRespondBy([S129])
+  /* Four business days after the notice went out, which is how the firm counts in the sentence
+     this example comes from: ten days on the notice, four gone, six left. */
+  const day4 = addWorkingDays('2026-10-05', 4)
+  const w = disputeWindow(day4, by)
+  check('the firm\'s example, from the notice that was sent', [w.days, w.respondBy, w.basis],
+    [6, by, 'notice'])
+  check('...and it reads as six business days', disputeDaysPhrase(w.days), '6 business days')
 }
 
 /* ------------------------------------------------------------------ */
