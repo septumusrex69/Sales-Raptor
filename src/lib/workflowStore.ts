@@ -8,7 +8,7 @@
  */
 import { supabase } from './supabase'
 import type {
-  Channel, DayUnit, DeadlineUnit, NodeKind, TriggerKind, Workflow, WorkflowConnection,
+  Channel, DayUnit, DeadlineUnit, NodeAnchor, NodeKind, TriggerKind, Workflow, WorkflowConnection,
   WorkflowNode, WorkflowPhase, VersionState,
 } from './workflowBuilder.ts'
 import { sequenceLine } from './workflowBuilder.ts'
@@ -44,6 +44,11 @@ const toNode = (r: any): WorkflowNode => ({
   x: r.x,
   y: r.y,
   ordinal: r.ordinal,
+  /* Which clock the step is on. A row whose anchor is absent reads as 'run', which is what every
+     node drawn before instalment anchoring existed is — and what the column defaults to. */
+  anchor: (r.anchor ?? 'run') as NodeAnchor,
+  anchorOffset: r.anchor_offset ?? null,
+  anchorUnit: (r.anchor_unit ?? null) as DayUnit | null,
 })
 
 const toConnection = (r: any): WorkflowConnection => ({
@@ -87,7 +92,7 @@ export async function fetchWorkflows(): Promise<WorkflowSummary[]> {
     .select(`id, key, name, description,
       workflow_versions(id, version, state, trigger_kind, day_unit,
         workflow_phases(id, ordinal, name, subtitle, from_day, to_day),
-        workflow_nodes(id, phase_id, key, kind, label, day, channel, after_minutes, ordinal))`)
+        workflow_nodes(id, phase_id, key, kind, label, day, channel, after_minutes, ordinal, anchor, anchor_offset, anchor_unit))`)
     .order('name')
   if (error) throw new Error(error.message)
   return (data ?? []).map((r: any) => {
@@ -152,7 +157,7 @@ export async function fetchWorkflow(key: string, versionId?: string): Promise<Wo
       .select('id, ordinal, name, subtitle, from_day, to_day')
       .eq('version_id', chosen.id).order('ordinal'),
     supabase.from('workflow_nodes')
-      .select('id, phase_id, key, kind, label, description, day, deadline_days, deadline_unit, channel, template_id, template_company_id, after_minutes, needs_release, statutory, assign_to, x, y, ordinal')
+      .select('id, phase_id, key, kind, label, description, day, deadline_days, deadline_unit, channel, template_id, template_company_id, after_minutes, needs_release, statutory, assign_to, x, y, ordinal, anchor, anchor_offset, anchor_unit')
       .eq('version_id', chosen.id).order('day').order('ordinal'),
     supabase.from('workflow_connections')
       .select('id, from_node_id, to_node_id, to_workflow_id, label')

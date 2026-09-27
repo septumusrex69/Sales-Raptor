@@ -13,7 +13,7 @@
  * (an absolute day, a wait after completion, and a next step) and any two of those can disagree
  * silently; this is the same shape with the disagreement made illegal.
  */
-import { addWorkingDays, workingDaysBetween } from './workingDays.js'
+import { addWorkingDays, subtractWorkingDays, workingDaysBetween } from './workingDays.js'
 
 /* ---------------------------------------------------------------- what starts it */
 
@@ -195,6 +195,34 @@ export interface WorkflowNode {
   x: number | null
   y: number | null
   ordinal: number
+  /**
+   * WHICH CLOCK THIS STEP IS ON — the run's, or the arrangement's instalments.
+   *
+   * 'run' on everything that is not an arrangement reminder, which is where `day` above is read
+   * and what every workflow drawn before this one meant. 'instalment' ignores `day` for dating
+   * and reads the two fields below instead, and the planner writes ONE STEP PER INSTALMENT.
+   *
+   * `day` IS STILL SET ON AN INSTALMENT NODE, and it is a SORT POSITION rather than a date: it is
+   * where the card sits on the chart among the run-anchored steps. Reading it as a date on such a
+   * node is the mistake this pair of columns exists to make impossible.
+   */
+  anchor: NodeAnchor
+  /**
+   * How far from the instalment, signed, with 0 meaning the instalment date itself.
+   *
+   * NOT COUNTED LIKE `day`. See landsOnInstalment: -2 is two days before, +3 is three days after,
+   * and there is no 1-based inclusive day one because there is no press to be day one.
+   */
+  anchorOffset: number | null
+  /**
+   * Calendar or working days for the offset, ON THE NODE rather than taken from the version.
+   *
+   * The firm's arrangement chart is "two WORKING days before" on a sequence whose own day numbers
+   * are calendar days — the confirmation goes out the moment the arrangement is recorded, which
+   * is Day 0, and the firm has already sent back a screen that called that Day 1. One version,
+   * two clocks, so two units.
+   */
+  anchorUnit: DayUnit | null
 }
 
 export interface WorkflowPhase {
@@ -273,6 +301,44 @@ export function dayLabel(day: number, unit: DayUnit): string {
   return `${DAY_UNITS[unit].short} ${day}`
 }
 
+/**
+ * WHAT THE DAY BADGE SAYS ON A STEP THAT IS NOT DATED OFF THE RUN.
+ *
+ * "EACH PAYMENT", never a day number, because there is no single day to print: the reminder on a
+ * three-instalment arrangement is three dates. A badge reading "Day 0" beside an arrangement
+ * reminder is the same class of mistake as the column names CLAUDE.md opens with -- it describes
+ * how the row is stored instead of answering what the reader asked, and here it also happens to
+ * be false on two of the three instalments.
+ *
+ * NULL ON A RUN-ANCHORED STEP, so the caller keeps using dayLabel and nothing about the chart the
+ * firm already reads changes.
+ */
+export function anchorBadge(node: Pick<WorkflowNode, 'anchor'>): string | null {
+  return node.anchor === 'instalment' ? 'Each payment' : null
+}
+
+/**
+ * THE OFFSET AS A SENTENCE: "2 working days before each payment".
+ *
+ * THE FIRM'S OWN WORDS FOR THEIR ARRANGEMENT CHART -- "the reminder before, two days before, the
+ * reminder on the date" -- and "payment" rather than "instalment" because that is the word they
+ * use when they are talking to the debtor about it.
+ *
+ * ON THE DAY, NOT "0 DAYS BEFORE". Zero is the instalment date itself and the message due then
+ * says "your payment is due today"; printed as a distance of nought it reads as a step somebody
+ * forgot to fill in.
+ */
+export function anchorPhrase(node: Pick<WorkflowNode, 'anchor' | 'anchorOffset' | 'anchorUnit'>): string | null {
+  if (node.anchor !== 'instalment') return null
+  const offset = node.anchorOffset ?? 0
+  if (offset === 0) return 'on the day of each payment'
+  const n = Math.abs(offset)
+  const unit = node.anchorUnit === 'business'
+    ? (n === 1 ? 'working day' : 'working days')
+    : (n === 1 ? 'day' : 'days')
+  return `${n} ${unit} ${offset < 0 ? 'before' : 'after'} each payment`
+}
+
 /** "Business day 5 \u2013 12". The phase bar's range, carrying the same unit as the cards under it. */
 export function dayRangeLabel(from: number, to: number, unit: DayUnit): string {
   return `${DAY_UNITS[unit].short} ${from} \u2013 ${to}`
@@ -323,6 +389,54 @@ export function landsOn(
   /* addWorkingDays(x, 0) is "the next working day on or after x", which is the normalisation. */
   const start = addWorkingDays(from, 0, holidays)
   return addWorkingDays(start, day - 1, holidays)
+}
+
+/**
+ * WHICH CLOCK A STEP IS ON.
+ *
+ * 'run' is every step this system has ever had: a day number counted from the day the run
+ * started, which is exactly right for a section 129 because every date in that sequence is
+ * measured from the demand.
+ *
+ * 'instalment' is the shape an ARRANGEMENT has and the section 129 does not. The firm, reading
+ * the arrangement sequence back: "it says that the payment, the PTP workflow is only one step.
+ * What about the reminder before, two days before, the reminder on the date?" They are right, and
+ * the reason it was one step is that a day number counted off the run start can name only ONE
+ * date — and a three-instalment arrangement needs the reminder on three of them. A node anchored
+ * to the instalment is planned once PER INSTALMENT instead.
+ */
+export type NodeAnchor = 'run' | 'instalment'
+
+/**
+ * WHEN AN INSTALMENT-ANCHORED STEP LANDS: a signed distance from a date the DEBTOR chose.
+ *
+ * NOT `landsOn`, AND THE DIFFERENCE IS THE POINT OF HAVING TWO FUNCTIONS. `landsOn` resolves the
+ * firm's own chart number, which is 1-based and inclusive on a business sequence because day 1 is
+ * the press. There is no press here and no day one: the arrangement says R2 500 on the 5th, and
+ * the reminder is two working days before THAT. So 0 is the instalment date itself, -2 is two
+ * days earlier and +3 is three days later, with no clamping and no off-by-one to remember.
+ *
+ * ZERO IS NEVER NORMALISED, not even onto a Monday, and that is deliberate. The message due on
+ * the day says "your payment of R2 500 is due today"; moved off a Saturday onto the Monday it
+ * says "today" two days after the day. The debtor's clock does not stop when the office shuts —
+ * the same rule deadline_unit is here for — and an instalment date is the debtor's.
+ *
+ * BEFORE AND AFTER ARE DIFFERENT WALKS, because working days are not symmetric: two working days
+ * before Monday the 8th is Thursday the 4th, and there is no arithmetic that gets there by adding
+ * a negative to `addWorkingDays`, whose own contract floors at zero.
+ */
+export function landsOnInstalment(
+  dueOn: string, offset: number, unit: DayUnit, holidays: Record<string, string> = {},
+): string {
+  if (offset === 0) return dueOn
+  if (unit === 'calendar') {
+    const d = new Date(`${dueOn}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() + offset)
+    return d.toISOString().slice(0, 10)
+  }
+  return offset < 0
+    ? subtractWorkingDays(dueOn, -offset, holidays)
+    : addWorkingDays(dueOn, offset, holidays)
 }
 
 /**

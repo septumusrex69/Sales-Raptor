@@ -194,7 +194,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    */
   const { data: dueRows } = await admin
     .from('workflow_run_steps')
-    .select('id, node_id, due_on, state, note, run_id, workflow_nodes!inner(ordinal), workflow_runs!inner(id, account_id, version_id, started_on, state)')
+    .select('id, node_id, due_on, state, note, run_id, instalment_no, workflow_nodes!inner(ordinal), workflow_runs!inner(id, account_id, version_id, started_on, state)')
     .eq('run_id', created.id)
     .in('state', ['pending', 'held'])
     .lte('due_on', today)
@@ -220,6 +220,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .sort((a, b) => (
       a.due_on.localeCompare(b.due_on)
       || (a.workflow_nodes?.ordinal ?? 0) - (b.workflow_nodes?.ordinal ?? 0)
+      /* And the instalment last, so two of one node's instalment steps coming due together --
+         which needs a rewritten arrangement to happen at all -- still go in the debtor's order. */
+      || (a.instalment_no ?? 0) - (b.instalment_no ?? 0)
     ))
 
   /* The earliest date anything on this run is dated, read back from what the planner wrote rather

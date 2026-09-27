@@ -21,7 +21,8 @@
  *
  * Pure: no database, no clock, no network. What it returns is what gets inserted.
  */
-import { landsOn, type DayUnit, type WorkflowNode } from './workflowBuilder.js'
+import { landsOn, landsOnInstalment, type DayUnit, type WorkflowNode } from './workflowBuilder.js'
+import type { Instalment } from './ptpSchedule.js'
 
 export type RunStepState = 'pending' | 'held' | 'sent' | 'cancelled' | 'failed'
 
@@ -32,7 +33,31 @@ export interface PlannedStep {
   state: RunStepState
   /** Why it is held, in the words the person who has to act on it will read. */
   note: string | null
+  /**
+   * THE INSTALMENT THIS STEP IS DATED OFF, 1-based, or 0 where it is dated off the run.
+   *
+   * It is the step's IDENTITY as well as its date, which is why it is on the row and not derived:
+   * one node now produces several steps and (run_id, node_id, instalment_no) is what keeps two
+   * planners racing each other from doubling them.
+   *
+   * WHAT THE NOTICE QUOTES IS A DIFFERENT QUESTION and is deliberately not this. `nextUnpaid` —
+   * the earliest instalment not yet paid — decides that on the morning the message goes, and
+   * ptpSchedule explains why one definition is right on all five notices. The two agree while the
+   * arrangement is being kept; where they differ the debtor is behind, and a reminder that quotes
+   * the instalment they actually owe is the one to send.
+   */
+  instalmentNo: number
 }
+
+/**
+ * HOW MANY INSTALMENTS ARE WORTH DATING UP FRONT.
+ *
+ * Five years of monthly instalments, which is past anything the firm writes — their own letters
+ * report more than six as SLOW PAYING to the bureaus. It is a bound rather than a rule: the steps
+ * are dated when the run starts, and an arrangement long enough to reach this will have been
+ * rewritten several times (each rewrite is a new promise and a new run) before it does.
+ */
+export const PLANNED_INSTALMENTS = 60
 
 /**
  * Every step of a run, dated.
@@ -45,14 +70,47 @@ export function planRun(input: {
   nodes: WorkflowNode[]
   dayUnit: DayUnit
   startedOn: string
+  /**
+   * THE ARRANGEMENT'S INSTALMENTS, where the version has a step anchored to one.
+   *
+   * EMPTY IS NOT AN ERROR, IT IS SILENCE. A version with instalment-anchored reminders planned on
+   * an account with no live arrangement produces no reminder steps at all — which is right: there
+   * is no instalment to remind anybody of, and a step dated off a date that does not exist would
+   * be a message quoting a blank amount. The run's own steps still plan.
+   */
+  instalments?: Instalment[]
   holidays?: Record<string, string>
 }): PlannedStep[] {
-  const { nodes, dayUnit, startedOn, holidays = {} } = input
-  return [...nodes]
-    .sort((a, b) => a.day - b.day || a.ordinal - b.ordinal)
-    .map((node) => ({
+  const { nodes, dayUnit, startedOn, instalments = [], holidays = {} } = input
+  /*
+   * ONE STEP PER INSTALMENT, FLATTENED BEFORE ANYTHING IS SORTED.
+   *
+   * SORTED BY THE DATE AND THEN THE ORDINAL, no longer by the day number — because on an
+   * instalment node the day number is a position on the chart and not a date, so comparing it
+   * against a run-anchored node's day would interleave the reminder for instalment 5 with the
+   * confirmation. The dates are already resolved by this point and `landsOn` is monotonic in the
+   * day, so sorting on them puts every run-anchored step exactly where the old sort had it.
+   */
+  return nodes
+    .flatMap((node) => {
+      if (node.anchor !== 'instalment') {
+        return [{ node, dueOn: landsOn(startedOn, node.day, dayUnit, holidays), instalmentNo: 0 }]
+      }
+      const offset = node.anchorOffset ?? 0
+      const unit = node.anchorUnit ?? dayUnit
+      return instalments.slice(0, PLANNED_INSTALMENTS).map((i) => ({
+        node,
+        dueOn: landsOnInstalment(i.dueOn, offset, unit, holidays),
+        instalmentNo: i.no,
+      }))
+    })
+    .sort((a, b) => (
+      a.dueOn.localeCompare(b.dueOn) || a.node.ordinal - b.node.ordinal || a.instalmentNo - b.instalmentNo
+    ))
+    .map(({ node, dueOn, instalmentNo }) => ({
       nodeId: node.id,
-      dueOn: landsOn(startedOn, node.day, dayUnit, holidays),
+      dueOn,
+      instalmentNo,
       /*
        * PENDING, EVEN WHERE IT WAITS FOR A PERSON — and it used to be born `held`.
        *

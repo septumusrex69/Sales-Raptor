@@ -245,11 +245,21 @@ ok('...and one failing does not undo the other', /companions\.push\(\{/.test(rel
   ok('the run asks for the node ordinal', /workflow_nodes!inner\([^)]*\bordinal\b/.test(run))
   ok('...carries it onto the step', /ordinal: s\.workflow_nodes\?\.ordinal \?\? 0/.test(run))
   /*
-   * ALL THREE KEYS, IN THIS ORDER. Date, then the day number, then the ordinal -- and the ordinal
-   * last, because it only ever separates two steps that already agree about the day.
+   * THREE KEYS, AND THE DAY NUMBER IS NO LONGER ONE OF THEM. Date, then the ordinal, then the
+   * instalment.
+   *
+   * WHY THE DAY WENT. It was never doing any work here -- the date is resolved FROM the day, so
+   * two steps agreeing about the date already agree about the day -- and once a step can be
+   * anchored to an instalment it is actively wrong: `day` on such a node is a position on the
+   * chart rather than a date, so comparing it against a run-anchored node's day interleaves the
+   * reminder for instalment 5 with the confirmation.
+   *
+   * THE ORDINAL IS STILL THE KEY THIS BLOCK EXISTS FOR, and it still separates the two steps of a
+   * pair, which share a date. The instalment is last, for the same reason the ordinal used to be:
+   * it only ever separates steps that already agree about everything before it.
    */
-  ok('...and sorts on it after the date and the day',
-    /a\.dueOn\.localeCompare\(b\.dueOn\) \|\| a\.day - b\.day \|\| a\.ordinal - b\.ordinal/.test(run))
+  ok('...and sorts on it after the date, with the instalment last',
+    /a\.dueOn\.localeCompare\(b\.dueOn\) \|\| a\.ordinal - b\.ordinal \|\| a\.instalmentNo - b\.instalmentNo/.test(run))
 }
 
 /* ---------------- a follower knows what it is waiting for ---------------- */

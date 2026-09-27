@@ -50,7 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: row, error } = await admin
     .from('workflow_run_steps')
-    .select('id, node_id, due_on, state, note, run_id, workflow_runs!inner(id, account_id, version_id, started_on, state)')
+    .select('id, node_id, due_on, state, note, run_id, instalment_no, workflow_runs!inner(id, account_id, version_id, started_on, state)')
     .eq('id', stepId)
     .maybeSingle()
   if (error) {
@@ -153,9 +153,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (outcome.result === 'sent') {
     const { data: behind } = await admin
       .from('workflow_run_steps')
-      .select('id, node_id, due_on, state, note, run_id, workflow_nodes!inner(after_minutes), workflow_runs!inner(id, account_id, version_id, started_on, state)')
+      .select('id, node_id, due_on, state, note, run_id, instalment_no, workflow_nodes!inner(after_minutes), workflow_runs!inner(id, account_id, version_id, started_on, state)')
       .eq('run_id', step.run_id)
       .eq('due_on', step.due_on)
+      /* AND THE SAME INSTALMENT, or releasing one arrangement notice would drag another
+         instalment's SMS out behind it -- see slotOf in stepPairs.ts for the day they collide. */
+      .eq('instalment_no', step.instalment_no ?? 0)
       .neq('id', step.id)
       .in('state', ['pending', 'held'])
       .not('workflow_nodes.after_minutes', 'is', null)

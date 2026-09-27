@@ -59,6 +59,22 @@ export interface DueStep {
   /** The reason already on it, if it is already held. What a new reason is compared against. */
   note: string | null
   run_id: string
+  /**
+   * WHICH INSTALMENT OF THE ARRANGEMENT THIS STEP IS ABOUT -- 0 where it is about the run.
+   *
+   * READ FOR ONE THING ONLY: finding the message this one goes out behind. Two steps of a pair
+   * share a date AND an instalment, and on a weekly arrangement two DIFFERENT instalments' steps
+   * can share the date, so the date alone would pair an SMS with the wrong email.
+   *
+   * WHAT THE NOTICE QUOTES IS NOT THIS. {{ptp_amount}} and {{ptp_date}} come from nextUnpaid --
+   * the earliest instalment not yet paid, decided on the morning the message goes -- which is the
+   * one definition ptpSchedule argues is right on all five arrangement notices. A step dated off
+   * instalment 3 while instalment 2 is still owed should quote the one the debtor owes.
+   *
+   * OPTIONAL BECAUSE THE RELEASE ROUTE READS ONE STEP BY ID and its select is the narrow one; an
+   * absent column reads as 0, which is what every step planned before instalments existed is.
+   */
+  instalment_no?: number
   workflow_runs: { id: string; account_id: string; version_id: string; started_on: string }
 }
 
@@ -113,7 +129,7 @@ export async function runOneStep(
 
   const [nodeRes, accountRes, firmRes] = await Promise.all([
     admin.from('workflow_nodes')
-      .select('id, phase_id, key, kind, label, description, day, deadline_days, deadline_unit, channel, template_id, template_company_id, after_minutes, needs_release, statutory, assign_to, x, y, ordinal')
+      .select('id, phase_id, key, kind, label, description, day, deadline_days, deadline_unit, channel, template_id, template_company_id, after_minutes, needs_release, statutory, assign_to, x, y, ordinal, anchor, anchor_offset, anchor_unit')
       .eq('id', step.node_id).maybeSingle(),
     admin.from('debtor_accounts')
       .select('*, companies(name, account_owner_id)')
@@ -152,8 +168,13 @@ export async function runOneStep(
        `afterMinutes` is what carries that, and the handover SMS is the reason it exists. */
     node.afterMinutes === null
       ? Promise.resolve({ data: null })
+      /* THE SAME DAY AND THE SAME INSTALMENT. The date alone was enough while every step was
+         dated off the run; on a weekly arrangement the default three working days after
+         instalment 1 and the reminder two working days before instalment 2 share a Thursday, and
+         this SMS would then be waiting on the wrong email -- see slotOf in stepPairs.ts. */
       : admin.from('workflow_run_steps').select('state')
-        .eq('run_id', step.run_id).eq('due_on', step.due_on).neq('id', step.id)
+        .eq('run_id', step.run_id).eq('due_on', step.due_on)
+        .eq('instalment_no', step.instalment_no ?? 0).neq('id', step.id)
         .order('state').limit(1).maybeSingle(),
     /*
      * THE LIVE ARRANGEMENT, WHICH IS WHAT {{ptp_amount}} AND {{ptp_date}} COME FROM.
@@ -841,5 +862,11 @@ function toNode(r: Record<string, unknown>) {
     x: (r.x as number) ?? null,
     y: (r.y as number) ?? null,
     ordinal: (r.ordinal as number) ?? 0,
+    /* Which clock dated the step. Nothing here READS it -- what a notice quotes is the earliest
+       unpaid instalment, decided by nextUnpaid on the morning it goes -- but the mapper lists
+       every column by hand, and CLAUDE.md's standing hazard is the one it leaves out. */
+    anchor: (r.anchor as never) ?? 'run',
+    anchorOffset: (r.anchor_offset as number) ?? null,
+    anchorUnit: (r.anchor_unit as never) ?? null,
   }
 }

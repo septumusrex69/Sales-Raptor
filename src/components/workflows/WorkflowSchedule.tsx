@@ -1,8 +1,8 @@
 import type React from 'react'
 import { ArrowRight } from 'lucide-react'
 import {
-  CHANNELS, DAY_UNITS, NODE_KINDS, dayLabel, dayZeroLabel, landsOn, nodesOfPhase, orderedNodes,
-  triggerMeta, type Workflow, type WorkflowNode, type WorkflowProblem,
+  CHANNELS, DAY_UNITS, NODE_KINDS, anchorBadge, anchorPhrase, dayLabel, dayZeroLabel, landsOn,
+  nodesOfPhase, orderedNodes, triggerMeta, type Workflow, type WorkflowNode, type WorkflowProblem,
 } from '../../lib/workflowBuilder.ts'
 import { ENDS_IT, PAUSES_IT } from '../../lib/workflowRun.ts'
 import { shortDate } from '../../lib/dateLabels.ts'
@@ -173,7 +173,7 @@ function ScheduleRow({ node, ordinal, spread, unit, from, workflow, selected, on
             line up down the rail and the intervals can be read off the gaps. */}
         <span className="shrink-0 w-[104px] rounded-lg bg-navy-950 px-2 py-1 text-center
           text-[11px] font-semibold uppercase tracking-wide text-white tabular-nums">
-          {spread ? dayLabel(node.day, unit) : `Step ${ordinal}`}
+          {anchorBadge(node) ?? (spread ? dayLabel(node.day, unit) : `Step ${ordinal}`)}
         </span>
 
         <span className="min-w-0 flex-1">
@@ -198,7 +198,12 @@ function ScheduleRow({ node, ordinal, spread, unit, from, workflow, selected, on
           )}
           {spread && (
             <span className="w-[68px] text-right text-[11px] text-slate-400 tabular-nums">
-              {shortDate(landsOn(from, node.day, unit))}
+              {/* A DASH, NOT A DATE, on a step anchored to the instalments. The column answers
+                  "when would this land if it started today", and on a reminder that is one date
+                  per instalment of an arrangement this account may not even have -- so there is
+                  no honest single date to draw, and landsOn(from, node.day) would draw the day
+                  the run STARTED, because `day` on such a node is a chart position. */}
+              {node.anchor === 'instalment' ? '\u2014' : shortDate(landsOn(from, node.day, unit))}
             </span>
           )}
         </span>
@@ -215,6 +220,11 @@ function secondLine(node: WorkflowNode, phase: string | undefined): string {
   const parts: string[] = []
   if (node.channel) parts.push(CHANNELS[node.channel])
   else parts.push(NODE_KINDS[node.kind].label)
+  /* WHEN, ON A STEP WHOSE "WHEN" IS ONE DATE PER INSTALMENT. The badge says which clock ("Each
+     payment"); this says the distance -- "2 working days before each payment" -- which is the fact
+     the firm asked about and the only place on the row it can be written out. */
+  const anchored = anchorPhrase(node)
+  if (anchored) parts.push(anchored)
   /* The DEBTOR's clock, which is not the firm's -- "twenty business days to respond" is the
      period this step gives them, not when the next step runs. */
   if (node.deadlineDays !== null && node.deadlineUnit !== null) {

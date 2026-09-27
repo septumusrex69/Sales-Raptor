@@ -62,6 +62,16 @@ export interface RunStep {
    * is 0 and the SMS is 1. Nothing was wrong with the data; it simply was not being read.
    */
   ordinal: number
+  /**
+   * WHICH INSTALMENT THIS STEP IS ABOUT — 1-based, or 0 where it is about the run.
+   *
+   * WITHOUT IT THE TRACK LIES BY REPETITION. An arrangement of three instalments plans the
+   * reminder three times and the day-of message three times, every one of them labelled
+   * "Arrangement reminder"; six identical dots with six different dates reads as a sequence
+   * somebody has duplicated by mistake. The number is the whole difference between them, so it
+   * goes in the words rather than only in the dates.
+   */
+  instalmentNo: number
 }
 
 /**
@@ -150,7 +160,21 @@ export function words(step: RunStep): string {
   const when = step.sentAt
     ? `sent ${shortDate(step.sentAt.slice(0, 10))}`
     : `due ${shortDate(step.dueOn)}`
-  return `${step.label} — ${RUN_STEP_WORDS[step.state].label}, ${when}`
+  return `${stepName(step)} — ${RUN_STEP_WORDS[step.state].label}, ${when}`
+}
+
+/**
+ * THE STEP'S NAME, WITH THE INSTALMENT IN IT WHERE THERE IS ONE.
+ *
+ * "Arrangement reminder · instalment 2", because the label alone is the same on every instalment
+ * and the firm's own arrangement sequence plans four of them per instalment. A MIDDLE DOT rather
+ * than brackets, which is how the rest of Raptor joins a thing to which one of it this is.
+ *
+ * ITS OWN FUNCTION so the track, the detail panel and the screen-reader label cannot disagree
+ * about what a step is called — three places drew it from `label` before this existed.
+ */
+export function stepName(step: RunStep): string {
+  return step.instalmentNo > 0 ? `${step.label} · instalment ${step.instalmentNo}` : step.label
 }
 
 export function markerIndex(steps: RunStep[], today: string): number {

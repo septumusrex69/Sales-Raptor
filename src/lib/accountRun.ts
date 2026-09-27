@@ -69,7 +69,7 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
       id, state, left_reason, started_on,
       workflow_versions!inner(day_unit, workflows!inner(name)),
       workflow_run_holds(id, cause, reason, started_on, ended_on, ended_reason),
-      workflow_run_steps(id, due_on, state, note, sent_at,
+      workflow_run_steps(id, due_on, state, note, sent_at, instalment_no,
         workflow_nodes!inner(label, channel, day, ordinal, needs_release, after_minutes))
     `)
     .eq('account_id', accountId)
@@ -107,6 +107,9 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
         channel: s.workflow_nodes?.channel ?? null,
         day: s.workflow_nodes?.day ?? 0,
         ordinal: s.workflow_nodes?.ordinal ?? 0,
+        /* Which instalment of the arrangement this one is about, or 0 on a step dated off the
+           run. What tells four identical reminders apart -- see stepName in runSteps.ts. */
+        instalmentNo: s.instalment_no ?? 0,
         needsRelease: Boolean(s.workflow_nodes?.needs_release),
         /* Null on a notice, a number on the SMS that goes out behind it. What pairs the two --
            see stepPairs.ts, and the runner's own use of it in step.ts. */
@@ -116,8 +119,12 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
         note: s.note ?? null,
         sentAt: s.sent_at ?? null,
       }))
+      /* AND THE DAY NUMBER IS NO LONGER A TIE-BREAK WORTH HAVING ON AN INSTALMENT STEP, where it
+         is a position on the chart rather than a date -- so the date leads, then the node's own
+         ordinal, then the instalment. Two steps of one pair still share a date and are still
+         separated by the ordinal, which is the fix this sort was written for. */
       .sort((a: RunStep, b: RunStep) => (
-        a.dueOn.localeCompare(b.dueOn) || a.day - b.day || a.ordinal - b.ordinal
+        a.dueOn.localeCompare(b.dueOn) || a.ordinal - b.ordinal || a.instalmentNo - b.instalmentNo
       )),
     /* OLDEST FIRST, which is the order the history reads in and the order the clock adds them
        up in. PostgREST hands an embed over in no order at all. */

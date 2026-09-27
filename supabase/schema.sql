@@ -9346,3 +9346,149 @@ begin
      and left_reason = 'The account was not in arrears, so the demand fell away';
   return new;
 end $$;
+
+-- ---------- A STEP THAT IS ABOUT AN INSTALMENT, NOT ABOUT THE RUN ----------
+--
+-- THE FIRM, READING THE ARRANGEMENT SEQUENCE BACK: "it says that the payment, the PTP workflow is
+-- only one step. What about the reminder before, two days before, the reminder on the date?"
+--
+-- THEY ARE RIGHT AND THE REASON IT WAS ONE STEP IS THIS COLUMN'S ABSENCE. `workflow_nodes.day` is
+-- an absolute day counted from the day the run started -- which is exactly what a section 129
+-- needs, because every date in that sequence is measured from the demand. An arrangement is the
+-- other shape entirely: the confirmation is dated from the run, and the reminder, the day-of
+-- message, the receipt and the notice of default are dated from EACH INSTALMENT. On a three
+-- instalment arrangement the reminder is three different dates, and a day number counted off the
+-- run start can only say one of them.
+--
+-- SO A NODE NOW SAYS WHICH CLOCK IT IS ON. 'run' is every node that has ever existed and keeps
+-- reading `day`; 'instalment' reads `anchor_offset` instead, and the planner writes ONE STEP PER
+-- INSTALMENT from it.
+--
+-- THE OFFSET IS SIGNED AND ZERO MEANS THE DAY ITSELF, which is NOT how `day` counts and is the
+-- one thing to be careful of here. `day` is the firm's chart number -- 1-based and inclusive on a
+-- business sequence, so day 1 is the day of the press. `anchor_offset` is a plain distance from a
+-- date the debtor chose: -2 is two days before the instalment, 0 is the instalment date, +3 is
+-- three days after. There is no "day 0 problem" to work around because there is no day one.
+--
+-- AND IT CARRIES ITS OWN UNIT rather than borrowing the version's. The firm's arrangement chart is
+-- "two WORKING days before" on a version whose own day numbers are calendar days -- the
+-- confirmation goes out the moment the arrangement is recorded, which is Day 0, and the firm has
+-- already sent back a screen that called that Day 1. One version, two clocks, so two units.
+alter table public.workflow_nodes
+  add column if not exists anchor text not null default 'run'
+    check (anchor in ('run', 'instalment')),
+  add column if not exists anchor_offset integer,
+  add column if not exists anchor_unit text
+    check (anchor_unit is null or anchor_unit in ('calendar', 'business'));
+
+alter table public.workflow_nodes drop constraint if exists workflow_nodes_anchor_check;
+alter table public.workflow_nodes add constraint workflow_nodes_anchor_check
+  check (anchor = 'run' or (anchor_offset is not null and anchor_unit is not null));
+
+comment on column public.workflow_nodes.anchor is
+  'Which clock this step is on: ''run'' dates it from the day the run started using `day`, '
+  '''instalment'' dates it from each instalment of the live arrangement using `anchor_offset`, '
+  'and the planner writes one step per instalment.';
+comment on column public.workflow_nodes.anchor_offset is
+  'Signed distance from the instalment date, in `anchor_unit`. -2 is two days before, 0 is the '
+  'instalment day itself, +3 is three days after. Unlike `day` it is not 1-based.';
+comment on column public.workflow_nodes.anchor_unit is
+  'Calendar or working days for `anchor_offset`, carried here rather than taken from the '
+  'version: the firm''s arrangement reminders are working days on a calendar-day version.';
+
+-- WHICH INSTALMENT A STEP IS ABOUT, AND WHY THE UNIQUE KEY HAD TO GROW.
+--
+-- (run_id, node_id) was unique, and plan.ts leans on it: two planners racing -- the app nudging
+-- while the cron sweeps -- are refused by the database rather than discovered at month end. One
+-- node now legitimately produces several steps, so the instalment number joins the key and that
+-- protection is kept exactly as it was.
+--
+-- ZERO, NOT NULL, for a step that is about no instalment. A unique index treats two nulls as
+-- different values, so a nullable column here would quietly re-open the door the constraint
+-- exists to hold shut.
+alter table public.workflow_run_steps
+  add column if not exists instalment_no integer not null default 0;
+
+alter table public.workflow_run_steps drop constraint if exists workflow_run_steps_run_id_node_id_key;
+alter table public.workflow_run_steps drop constraint if exists workflow_run_steps_run_node_instalment_key;
+alter table public.workflow_run_steps add constraint workflow_run_steps_run_node_instalment_key
+  unique (run_id, node_id, instalment_no);
+
+comment on column public.workflow_run_steps.instalment_no is
+  'The instalment this step is dated off, 1-based, or 0 where it is dated off the run. It is the '
+  'step''s identity and its date; what the notice QUOTES is still the earliest unpaid instalment '
+  'on the morning it goes, which is ptpSchedule.nextUnpaid and the same rule on all five notices.';
+
+-- ---------- workflow_take_draft, with the three new columns ----------
+--
+-- CLAUDE.md, ON THIS FUNCTION: it copies a version column by column and has dropped one three
+-- times -- trigger_kind, then the three node columns, then day_unit -- each time giving back a
+-- draft that looked right and meant something else. Dropped here, a draft of the arrangement
+-- sequence would come back with every reminder re-anchored to the run: one reminder before the
+-- first instalment and then silence, on a chart that still says five steps.
+create or replace function public.workflow_take_draft(p_version uuid)
+returns uuid
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare
+  v_workflow uuid;
+  v_next integer;
+  v_draft uuid;
+begin
+  select workflow_id into v_workflow from public.workflow_versions where id = p_version;
+  if v_workflow is null then raise exception 'No such workflow version.'; end if;
+
+  select id into v_draft from public.workflow_versions
+   where workflow_id = v_workflow and state = 'draft' limit 1;
+  if v_draft is not null then return v_draft; end if;
+
+  select coalesce(max(version), 0) + 1 into v_next
+    from public.workflow_versions where workflow_id = v_workflow;
+
+  insert into public.workflow_versions (
+    workflow_id, version, state, created_by, trigger_kind, trigger_note, day_unit)
+  select v_workflow, v_next, 'draft', auth.uid(), o.trigger_kind, o.trigger_note, o.day_unit
+    from public.workflow_versions o where o.id = p_version
+  returning id into v_draft;
+
+  create temp table _phase_map (old uuid, new uuid) on commit drop;
+  create temp table _node_map (old uuid, new uuid) on commit drop;
+
+  insert into public.workflow_phases (version_id, ordinal, name, subtitle, from_day, to_day)
+  select v_draft, ordinal, name, subtitle, from_day, to_day
+    from public.workflow_phases where version_id = p_version order by ordinal;
+  insert into _phase_map
+  select o.id, n.id from public.workflow_phases o
+    join public.workflow_phases n on n.version_id = v_draft and n.ordinal = o.ordinal
+   where o.version_id = p_version;
+
+  insert into public.workflow_nodes (
+    version_id, phase_id, key, kind, label, description, day, deadline_days, deadline_unit,
+    channel, template_id, template_company_id, after_minutes, needs_release,
+    statutory, assign_to, x, y, ordinal, anchor, anchor_offset, anchor_unit)
+  select v_draft, m.new, o.key, o.kind, o.label, o.description, o.day, o.deadline_days,
+         o.deadline_unit, o.channel, o.template_id, o.template_company_id, o.after_minutes,
+         o.needs_release, o.statutory, o.assign_to, o.x, o.y, o.ordinal,
+         o.anchor, o.anchor_offset, o.anchor_unit
+    from public.workflow_nodes o
+    left join _phase_map m on m.old = o.phase_id
+   where o.version_id = p_version;
+  insert into _node_map
+  select o.id, n.id from public.workflow_nodes o
+    join public.workflow_nodes n on n.version_id = v_draft and n.key = o.key
+   where o.version_id = p_version;
+
+  insert into public.workflow_connections (version_id, from_node_id, to_node_id, to_workflow_id, label)
+  select v_draft, f.new, t.new, o.to_workflow_id, o.label
+    from public.workflow_connections o
+    join _node_map f on f.old = o.from_node_id
+    left join _node_map t on t.old = o.to_node_id
+   where o.version_id = p_version;
+
+  return v_draft;
+end;
+$$;
+
+grant execute on function public.workflow_take_draft(uuid) to authenticated;

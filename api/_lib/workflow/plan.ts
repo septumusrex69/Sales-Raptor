@@ -2,6 +2,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { planRun } from '../../../src/lib/workflowRun.js'
 import { heldDays, movedOn, type HoldPeriod } from '../../../src/lib/workflowHold.js'
 import { landsOn, type DayUnit, type WorkflowNode } from '../../../src/lib/workflowBuilder.js'
+import {
+  instalmentSchedule, liveArrangement, type Arranged, type Instalment,
+} from '../../../src/lib/ptpSchedule.js'
 
 /**
  * DATING THE STEPS OF A RUN THAT HAS JUST STARTED.
@@ -112,7 +115,7 @@ export async function redateResumedRuns(
     .select(`id, started_on, version_id,
       workflow_versions!inner(day_unit),
       workflow_run_holds!inner(started_on, ended_on),
-      workflow_run_steps(id, due_on, state, workflow_nodes!inner(day, ordinal))`)
+      workflow_run_steps(id, due_on, state, workflow_nodes!inner(day, ordinal, anchor))`)
     .eq('state', 'running')
     .limit(200)
   if (accountId) query = query.eq('account_id', accountId)
@@ -132,6 +135,18 @@ export async function redateResumedRuns(
     let moved = 0
     for (const step of (run.workflow_run_steps ?? []) as any[]) {
       if (step.state !== 'pending' && step.state !== 'held') continue
+      /*
+       * AN INSTALMENT DATE IS THE DEBTOR'S, SO A PAUSE ON OUR SIDE DOES NOT MOVE IT.
+       *
+       * Everything else here moves by the working days the hold lasted, because those dates are
+       * intervals the FIRM is running: ten business days to answer a section 129 cannot run while
+       * the sequence is paused. An arrangement reminder is the opposite — the debtor said R2 500
+       * on the 5th, and the 5th does not become the 12th because a dispute held the run for a
+       * week. Re-dated off `started_on` it would be worse than merely late: `day` on an
+       * instalment node is a chart position, so every reminder would be rewritten to the day the
+       * run began.
+       */
+      if (step.workflow_nodes?.anchor === 'instalment') continue
       const should = movedOn(
         landsOnFor(run.started_on, step.workflow_nodes?.day ?? 0, unit), lost, unit,
       )
@@ -156,7 +171,7 @@ async function planOne(admin: SupabaseClient, run: RunRow): Promise<PlannedRun> 
   const [{ data: version }, { data: nodes }] = await Promise.all([
     admin.from('workflow_versions').select('id, day_unit').eq('id', run.version_id).maybeSingle(),
     admin.from('workflow_nodes')
-      .select('id, day, ordinal, needs_release, statutory')
+      .select('id, day, ordinal, needs_release, statutory, anchor, anchor_offset, anchor_unit')
       .eq('version_id', run.version_id),
   ])
   if (!version) return { runId: run.id, steps: 0, problem: 'The version this run follows is gone.' }
@@ -183,6 +198,44 @@ async function planOne(admin: SupabaseClient, run: RunRow): Promise<PlannedRun> 
     unit,
   )
 
+  /*
+   * THE INSTALMENTS, AND ONLY WHERE A NODE ASKS FOR THEM.
+   *
+   * Read lazily because most versions have no instalment-anchored step and a section 129 has no
+   * business querying the promises table to be dated. Where one does, the arrangement is read at
+   * the moment the run is planned — which is the same moment the promise created it — so the
+   * dates on the steps are the dates on the arrangement the debtor agreed to.
+   *
+   * IT IS THE LIVE ARRANGEMENT, NOT THE ONE THAT STARTED THE RUN. `liveArrangement` picks the
+   * newest of the open-or-defaulted ones, which is the rule ptpSchedule already states for every
+   * notice merged on this account; reading the promise by id would date a run off an arrangement
+   * that has since been rewritten.
+   */
+  let instalments: Instalment[] = []
+  if (nodes.some((n) => n.anchor === 'instalment')) {
+    const { data: promises } = await admin.from('promises_to_pay')
+      .select('amount, due_on, arrangement, day_of_month, on_last_day, day_of_week, '
+        + 'instalments_kept, total_promised, status, created_at')
+      .eq('account_id', run.account_id)
+    instalments = instalmentSchedule(liveArrangement(
+      /* CAST BECAUSE THE SELECT IS BUILT FROM TWO STRING PIECES and PostgREST's types can only
+         infer a row from a literal one. Every field is read through the coercions below anyway,
+         which is the same care arrangedFromRow takes for the same columns on the browser side. */
+      ((promises ?? []) as unknown as Record<string, unknown>[]).map((r) => ({
+        amount: Number(r.amount ?? 0),
+        dueOn: (r.due_on as string) ?? '',
+        arrangement: (r.arrangement as Arranged['arrangement']) ?? 'once_off',
+        dayOfMonth: r.day_of_month === null ? null : Number(r.day_of_month),
+        onLastDay: Boolean(r.on_last_day),
+        dayOfWeek: r.day_of_week === null ? null : Number(r.day_of_week),
+        instalmentsKept: Number(r.instalments_kept ?? 0),
+        totalPromised: r.total_promised === null ? null : Number(r.total_promised),
+        status: (r.status as string) ?? '',
+        createdAt: (r.created_at as string) ?? '',
+      })),
+    ))
+  }
+
   const planned = planRun({
     /* Only what planRun reads. The rest of a WorkflowNode is about how it is drawn and what it
        sends, neither of which decides a date. */
@@ -192,9 +245,13 @@ async function planOne(admin: SupabaseClient, run: RunRow): Promise<PlannedRun> 
       ordinal: (n.ordinal as number) ?? 0,
       needsRelease: Boolean(n.needs_release),
       statutory: Boolean(n.statutory),
+      anchor: (n.anchor as 'run' | 'instalment') ?? 'run',
+      anchorOffset: (n.anchor_offset as number | null) ?? null,
+      anchorUnit: (n.anchor_unit as DayUnit | null) ?? null,
     })) as unknown as WorkflowNode[],
     dayUnit: unit,
     startedOn: run.started_on,
+    instalments,
   })
 
   /*
@@ -204,7 +261,14 @@ async function planOne(admin: SupabaseClient, run: RunRow): Promise<PlannedRun> 
    */
   const { error } = await admin.from('workflow_run_steps').insert(
     planned.map((s) => ({
-      run_id: run.id, node_id: s.nodeId, due_on: movedOn(s.dueOn, lost, unit), state: s.state, note: s.note,
+      run_id: run.id,
+      node_id: s.nodeId,
+      instalment_no: s.instalmentNo,
+      /* THE HOLD MOVES OUR DATES, NOT THE DEBTOR'S — the same split redateResumedRuns makes, and
+         for the same reason: the 5th of the month does not move because the run was paused. */
+      due_on: s.instalmentNo === 0 ? movedOn(s.dueOn, lost, unit) : s.dueOn,
+      state: s.state,
+      note: s.note,
     })),
   )
   if (error) {

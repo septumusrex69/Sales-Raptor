@@ -53,6 +53,20 @@ export interface Notice {
  * stands on its own, because a dot that silently swallows a third message is worse than a dot too
  * many. The firm has drawn none, and this decides what happens the day they do.
  */
+/**
+ * WHAT COUNTS AS "THE SAME MOMENT IN THE SEQUENCE": the date AND the instalment.
+ *
+ * THE DATE ALONE WAS ENOUGH WHILE EVERY STEP WAS DATED OFF THE RUN, because two steps of one run
+ * sharing a due date were always the two halves of one notice. An arrangement breaks that: on a
+ * WEEKLY arrangement the notice of default three working days after instalment 1 and the reminder
+ * two working days before instalment 2 land on the same Thursday. Paired on the date alone the
+ * default's SMS would attach to the reminder's email -- one dot claiming to be a notice the debtor
+ * never got, and the other message left orphaned beside it.
+ *
+ * TWO STEPS OF A PAIR ALWAYS SHARE BOTH, so adding the instalment narrows nothing that was right.
+ */
+const slotOf = (step: RunStep): string => `${step.dueOn}#${step.instalmentNo}`
+
 export function noticesOf(steps: RunStep[]): Notice[] {
   /*
    * THREE PASSES, BECAUSE ONE PASS ASSUMED THE LEAD CAME FIRST.
@@ -83,7 +97,7 @@ export function noticesOf(steps: RunStep[]): Notice[] {
     if (step.afterMinutes !== null) continue
     const notice: Notice = { lead: step, follower: null, steps: [step] }
     noticeOf.set(step.id, notice)
-    if (!leadFor.has(step.dueOn)) leadFor.set(step.dueOn, notice)
+    if (!leadFor.has(slotOf(step))) leadFor.set(slotOf(step), notice)
   }
 
   /* 2. Followers attach, wherever they were read. `attached` is what pass 3 uses to know a
@@ -91,7 +105,7 @@ export function noticesOf(steps: RunStep[]): Notice[] {
   const attached = new Set<string>()
   for (const step of steps) {
     if (step.afterMinutes === null) continue
-    const lead = leadFor.get(step.dueOn)
+    const lead = leadFor.get(slotOf(step))
     if (!lead || lead.follower !== null) continue
     lead.follower = step
     lead.steps.push(step)

@@ -133,7 +133,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    */
   let query = admin
     .from('workflow_run_steps')
-    .select('id, node_id, due_on, state, note, run_id, workflow_nodes!inner(ordinal), workflow_runs!inner(id, account_id, version_id, started_on, state)')
+    .select('id, node_id, due_on, state, note, run_id, instalment_no, workflow_nodes!inner(ordinal), workflow_runs!inner(id, account_id, version_id, started_on, state)')
     .in('state', ['pending', 'held'])
     .lte('due_on', today)
     .eq('workflow_runs.state', 'running')
@@ -169,6 +169,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .sort((a, b) => (
       a.due_on.localeCompare(b.due_on)
       || (a.workflow_nodes?.ordinal ?? 0) - (b.workflow_nodes?.ordinal ?? 0)
+      /* And the instalment last, so two of one node's instalment steps coming due together --
+         which needs a rewritten arrangement to happen at all -- still go in the debtor's order. */
+      || (a.instalment_no ?? 0) - (b.instalment_no ?? 0)
     )) as DueStep[]
   /* `held` is a NEW hold or one whose reason changed; `stillHeld` is one that has not moved.
      Counted apart because the first is news and the second is the state of the floor -- a run
