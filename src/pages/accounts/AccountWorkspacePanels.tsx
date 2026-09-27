@@ -10,11 +10,12 @@ import type { DebtorAccount } from '../../lib/accountBook'
 import { fullDebtorName } from '../../lib/debtorName.ts'
 import { identityProblem, kindFromIdentity } from '../../lib/debtorIdentity.ts'
 import {
-  addContact, deleteDocument, documentUrl, retireContact, saveDebtorIdentity, saveDebtorPreferences,
+  addContact, deleteDocument, openDocument, retireContact, saveDebtorIdentity, saveDebtorPreferences,
   updateContact, uploadDocument, verifyContact, CONTACT_KINDS, DOCUMENT_KINDS, TRACE_KIND,
   dialableNumber,
   type AccountContact, type AccountDocument, type ContactKind, type Workspace,
 } from '../../lib/accountWorkspace'
+import { chargeMessage, PERUSAL_ITEM_ID } from '../../lib/accountCharges.ts'
 import { DictateButton } from '../../components/ui/Dictate'
 import { contactWhat, contactsByPerson, otherPeople } from '../../lib/contactPeople.ts'
 import type { TraceItem } from '../../lib/traceStore.ts'
@@ -880,6 +881,10 @@ export function DocumentsPanel({ accountId, documents, onChange, userId, userNam
   const [uploading, setUploading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [opening, setOpening] = useState<string | null>(null)
+  /* WHAT THE LAST PERUSAL EARNED, or null. Shown only where something was actually charged: "no
+     charge, it has already been charged once today" is the ordinary case and a line saying so on
+     every document anybody opens is a line people stop reading. */
+  const [charged, setCharged] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<AccountDocument | null>(null)
 
   async function onPick(files: FileList | null) {
@@ -888,7 +893,12 @@ export function DocumentsPanel({ accountId, documents, onChange, userId, userNam
     try {
       // One at a time, in order, so a failure names the file that failed.
       for (const file of Array.from(files)) {
-        await uploadDocument({ accountId, file, kind, uploadedBy: userId, uploadedByName: userName })
+        const { charge } = await uploadDocument({
+          accountId, file, kind, uploadedBy: userId, uploadedByName: userName,
+        })
+        /* THE LAST ONE WINS, which on a multi-file pick is the honest answer: the perusal is once
+           a day, so the first file earns it and the rest are recorded free. */
+        setCharged(charge && charge.reason === 'charged' ? chargeMessage(charge, PERUSAL_ITEM_ID) : null)
       }
       await onChange()
     } catch (e) {
@@ -899,10 +909,17 @@ export function DocumentsPanel({ accountId, documents, onChange, userId, userNam
     }
   }
 
+  /*
+   * OPENING A DOCUMENT IS A PERUSAL OF DOCUMENTS, once a day -- the firm's rule, and the same fee
+   * saving one raises. openDocument signs the address and charges it; the cap is in the engine, so
+   * this press is refused most days and says so rather than going quiet.
+   */
   async function open(doc: AccountDocument) {
     setOpening(doc.id); setErr(null)
     try {
-      window.open(await documentUrl(doc.storagePath), '_blank', 'noopener')
+      const { url, charge } = await openDocument(doc, userId)
+      window.open(url, '_blank', 'noopener')
+      setCharged(charge && charge.reason === 'charged' ? chargeMessage(charge, PERUSAL_ITEM_ID) : null)
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -938,6 +955,13 @@ export function DocumentsPanel({ accountId, documents, onChange, userId, userNam
       </div>
 
       {err && <p className="text-sm text-negative-700 mb-3">{err}</p>}
+      {/*
+        WHAT THE PERUSAL EARNED, where it earned anything. The firm's rule is one a day, so most
+        presses are refused and say nothing -- a line reading "no charge, already charged today" on
+        every document anybody opens is a line people stop reading, and the transaction list is
+        where the whole day's fees are answerable anyway.
+      */}
+      {charged && <p className="text-xs text-[var(--c-green)] mb-3">{charged}</p>}
 
       {documents.length === 0 ? (
         <p className="text-sm text-slate-400 py-8 text-center">

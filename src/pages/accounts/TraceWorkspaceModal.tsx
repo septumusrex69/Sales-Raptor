@@ -147,7 +147,8 @@ export function TraceWorkspaceModal({ traces, openId, onOpen, actor, onClose, on
         answer is to open the tab first and point it at the URL when it arrives, not to hand out
         an address that is not signed.
       */
-      window.open(await traceReportUrl(trace.documentId), '_blank', 'noopener')
+      /* THE ACCOUNT, so the perusal lands on it. The firm: "this includes a trace." */
+      window.open(await traceReportUrl(trace.documentId, trace.accountId), '_blank', 'noopener')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally { setOpening(false) }

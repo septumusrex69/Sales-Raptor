@@ -10,6 +10,7 @@
  * about a phone number without being wrong about a balance.
  */
 import { supabase } from './supabase'
+import { chargePerusal, type ChargeResult } from './accountCharges.ts'
 import { normaliseRegistrationNumber, type DebtorKind } from './debtorIdentity.ts'
 import { nextDueDate, type Arrangement } from './arrangements'
 import type { CancelCause } from './promiseRules.ts'
@@ -593,7 +594,7 @@ export async function uploadDocument(input: {
   kind?: string | null
   uploadedBy?: string | null
   uploadedByName?: string | null
-}): Promise<AccountDocument> {
+}): Promise<{ document: AccountDocument; charge: ChargeResult | null }> {
   const safe = input.file.name.replace(/[^\w.\-() ]+/g, '_').slice(0, 120)
   const path = `${input.accountId}/${crypto.randomUUID()}-${safe}`
 
@@ -623,7 +624,32 @@ export async function uploadDocument(input: {
     await supabase.storage.from(BUCKET).remove([path])
     throw new Error(error.message)
   }
-  return toDocument(data)
+  /*
+   * AND SAVING IT IS A PERUSAL OF DOCUMENTS, once a day. The firm's rule, and the fee is raised
+   * AFTER the row lands: a document that would not save has not been perused, and charging for it
+   * first is how a debtor pays for a file nobody has.
+   */
+  const charge = await chargePerusal({ accountId: input.accountId, createdBy: input.uploadedBy })
+  return { document: toDocument(data), charge }
+}
+
+/**
+ * OPENING ONE, WHICH IS THE SAME FEE AS SAVING ONE.
+ *
+ * THE FIRM: "any time anybody saves a document or opens a document, but limited to one a day."
+ *
+ * ITS OWN FUNCTION RATHER THAN A FLAG ON documentUrl, because documentUrl is also how a signed
+ * address is got for something that is not a perusal at all -- and a charge that depends on a
+ * caller remembering to pass `true` is a charge that is raised inconsistently.
+ *
+ * THE URL FIRST. A document that cannot be opened has not been perused.
+ */
+export async function openDocument(
+  doc: { accountId: string; storagePath: string },
+  by: string | null,
+): Promise<{ url: string; charge: ChargeResult | null }> {
+  const url = await documentUrl(doc.storagePath)
+  return { url, charge: await chargePerusal({ accountId: doc.accountId, createdBy: by }) }
 }
 
 /**

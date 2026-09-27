@@ -21,3 +21,55 @@ export type { ChargeResult } from './chargeEngine.ts'
 export function chargeItem(input: ChargeInput): Promise<ChargeResult> {
   return chargeItemWith(supabase, input)
 }
+
+/**
+ * A PERUSAL OF DOCUMENTS, ONCE A DAY.
+ *
+ * THE FIRM: "we should add a fee perusal of documents. This is any time anybody saves a document
+ * or opens a document, but limited to one a day. So one charge a day. Can't be more than one
+ * perusal of documents in a day. This includes a trace and everything else."
+ *
+ * ONE FUNCTION SO THE THREE PLACES CANNOT NAME IT THREE WAYS. Saving a document, opening one and
+ * reading a trace report are the same fee, and a description written out at each call site is how
+ * one statement comes to carry "Perusal", "Perusal of documents" and "Document opened" for one
+ * kind of work.
+ *
+ * THE ONCE-A-DAY IS NOT HERE. It is DAILY_LIMIT, read by the engine, for the same reason the
+ * monthly allowances are: a cap enforced at the call site is a cap the next call site forgets.
+ * Every one of these calls goes out expecting to be refused most days, and `reason` says which.
+ *
+ * NEVER THROWS. A document has to save and a document has to open; a fee that will not write is
+ * something to report afterwards, not a reason to refuse somebody the file they asked for. Null
+ * is what the caller gets, and the caller says so.
+ */
+export async function chargePerusal(input: {
+  accountId: string
+  createdBy?: string | null
+  at?: Date
+}): Promise<ChargeResult | null> {
+  try {
+    return await chargeItem({
+      accountId: input.accountId,
+      itemId: PERUSAL_ITEM_ID,
+      actionCode: 'perusal',
+      description: PERUSAL_DESCRIPTION,
+      createdBy: input.createdBy ?? null,
+      at: input.at,
+    })
+  } catch (e) {
+    console.error('[perusal] the document was handled but the fee was not raised:', e)
+    return null
+  }
+}
+
+/**
+ * Item 3, "other necessary expenses not specifically provided for".
+ *
+ * NOT A GUESS. `perusal` has been mapped to item 3 since the import, with four schedules of rates
+ * behind it -- see actionTariff.ts, where the mapping is recorded with its evidence -- and raising
+ * a dispute has charged exactly this pair all along.
+ */
+export const PERUSAL_ITEM_ID = '3'
+
+/** What the debtor reads on the statement. The firm's own words for it. */
+export const PERUSAL_DESCRIPTION = 'Perusal of documents'

@@ -54,6 +54,7 @@ import { isWrittenOff } from './accountStatus.js'
  * into the function, and its own note says exactly why this is not toISOString().
  */
 import { todayIso } from './reminderTime.js'
+import { DAILY_LIMIT, type ActionCode } from './actionTariff.js'
 import {
   itemAmountFor, itemTotalRemaining, monthlyLimit, monthlyRoom, recoverableFee, roundToCents,
   scheduleFor,
@@ -64,7 +65,7 @@ export interface ChargeResult {
   exclVat: number
   vat: number
   /** Why nothing was charged, for showing to the person who did the work. */
-  reason: 'charged' | 'written-off' | 'item-total-spent' | 'monthly-limit' | 'at-ceiling'
+  reason: 'charged' | 'written-off' | 'item-total-spent' | 'monthly-limit' | 'daily-limit' | 'at-ceiling'
 }
 
 export interface ChargeInput {
@@ -176,7 +177,48 @@ export async function chargeItemWith(db: ChargeDb, input: ChargeInput): Promise<
     room = monthlyRoom(limit, count ?? 0)
   }
 
-  const recoverable = !closed && room > 0 ? recoverableFee(asked, towardsCeiling, capital, schedule) : 0
+  /*
+   * AND THE DAY'S ALLOWANCE, FOR THE ONE ACTION THAT HAS ONE.
+   *
+   * THE FIRM, OF A PERUSAL OF DOCUMENTS: "limited to one a day. So one charge a day. Can't be more
+   * than one perusal of documents in a day. This includes a trace and everything else."
+   *
+   * COUNTED ON THE ACTION CODE, which is what makes "and everything else" true: opening a
+   * document, saving one, reading a trace report and handing a dispute to a liaison are all
+   * `perusal`, so they share the day rather than each having one.
+   *
+   * ONLY CHARGES THAT EARNED SOMETHING COUNT, exactly as the monthly allowance works: a perusal
+   * recorded at nought took nothing from the debtor, so it cannot be the reason the next one goes
+   * unrecovered.
+   *
+   * THE DAY IS THE ONE THE PERSON IS IN, NOT THE SERVER'S. The window runs from local midnight to
+   * local midnight, which for everybody who raises a perusal is Johannesburg -- the charge is made
+   * from the browser, by somebody who has just opened a document. Built from the same clock the
+   * rest of the app calls `today`, rather than from a timezone written out here, so the two cannot
+   * disagree about which day a fee belongs to. A boundary read in the wrong zone is a second
+   * charge on a debtor who was perused once.
+   */
+  const perDay = DAILY_LIMIT[input.actionCode as ActionCode]
+  let dayRoom = Infinity
+  if (perDay !== undefined) {
+    const dayStart = new Date(at)
+    dayStart.setHours(0, 0, 0, 0)
+    const dayEnd = new Date(dayStart)
+    dayEnd.setDate(dayEnd.getDate() + 1)
+    const { count, error: dayError } = await db
+      .from('account_fees')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', input.accountId)
+      .eq('action_code', input.actionCode)
+      .eq('billed', true)
+      .gte('incurred_at', dayStart.toISOString())
+      .lt('incurred_at', dayEnd.toISOString())
+    if (dayError) throw new Error(dayError.message)
+    dayRoom = Math.max(0, perDay - (count ?? 0))
+  }
+
+  const recoverable = !closed && room > 0 && dayRoom > 0
+    ? recoverableFee(asked, towardsCeiling, capital, schedule) : 0
 
   const exclVat = roundToCents(recoverable)
   const vat = roundToCents(exclVat * VAT_RATE)
@@ -184,8 +226,9 @@ export async function chargeItemWith(db: ChargeDb, input: ChargeInput): Promise<
     exclVat > 0 ? 'charged'
       : closed ? 'written-off'
         : room <= 0 ? 'monthly-limit'
-          : remainingOnItem <= 0 ? 'item-total-spent'
-            : 'at-ceiling'
+          : dayRoom <= 0 ? 'daily-limit'
+            : remainingOnItem <= 0 ? 'item-total-spent'
+              : 'at-ceiling'
 
   const { error } = await db.from('account_fees').insert({
     account_id: input.accountId,
@@ -260,6 +303,11 @@ export function chargeMessage(r: ChargeResult, itemId: string): string {
   }
   if (r.reason === 'monthly-limit') {
     return `No charge: item ${itemId} has already been charged its maximum for this month. It is recorded, and the allowance resets next month.`
+  }
+  /* THE FIRM'S OWN RULE RATHER THAN THE GAZETTE'S, so the sentence says so: a perusal is charged
+     once a day however many documents are opened, and the work is still written down. */
+  if (r.reason === 'daily-limit') {
+    return 'No charge: this has already been charged once today. It is recorded, and it can be charged again tomorrow.'
   }
   return 'No charge: the account is at the Annexure B fee ceiling.'
 }

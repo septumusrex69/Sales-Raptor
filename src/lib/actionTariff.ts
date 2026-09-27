@@ -117,6 +117,34 @@ export interface TariffSchedule {
  * and not the Magistrates' Courts tariff for those years; no action in the book is old enough
  * for the difference to bite.
  */
+/**
+ * HOW OFTEN AN ACTION MAY BE CHARGED IN ONE DAY, or absent where nothing limits it.
+ *
+ * ONE ENTRY, AND IT IS THE FIRM'S OWN RULE: "we should add a fee perusal of documents. This is any
+ * time anybody saves a document or opens a document, but limited to one a day. So one charge a
+ * day. Can't be more than one perusal of documents in a day. This includes a trace and everything
+ * else."
+ *
+ * A NARROWING, NOT A NEW FEE. `perusal` has been item 3 with four schedules of rates since the
+ * import, and raising a dispute has charged it all along. What it never had was a limit -- item 3
+ * is gazetted as "a total amount of R25,00" for the whole account and the firm instructed on 9
+ * September that it is charged per occurrence instead (ENFORCE_ITEM_TOTALS), which left nothing at
+ * all between a collector and a fee every time they opened a PDF. One a day is the firm putting
+ * that boundary back where they want it.
+ *
+ * COUNTED ON THE ACTION, NOT ON THE ITEM, and that is the whole of "this includes a trace and
+ * everything else": a document opened, a document saved, a trace report read and a dispute handed
+ * to a liaison are one kind of work to the gazette and one kind of work to the firm, so they share
+ * the day's allowance rather than each having their own.
+ *
+ * PER CALENDAR DAY IN THE FIRM'S OWN TIMEZONE. An action at one in the morning in Johannesburg is
+ * eleven the previous night in UTC, and a day boundary read in the wrong zone is a second charge
+ * on a debtor who was only ever perused once.
+ */
+export const DAILY_LIMIT: Partial<Record<ActionCode, number>> = {
+  perusal: 1,
+}
+
 export const TARIFF_HISTORY: TariffSchedule[] = [
   {
     effectiveFrom: '2026-03-06',
