@@ -1155,8 +1155,28 @@ export function AccountDetail() {
       />
 
       {tab === 'Workflow' && (
+        /*
+         * `reload`, NOT `loadRuns`, AND THE DIFFERENCE IS EVERY OTHER PANEL ON THIS PAGE.
+         *
+         * THE FIRM: "when I started the workflow for the section 129, the charges didn't go... it
+         * didn't show it immediately." The charges HAD gone -- R25 under item 1(a) and R3.50 under
+         * item 1(c), both on the account within five seconds. What had not happened is this: the
+         * panel refreshed the RUNS and nothing else, so the transactions list, the balance, the
+         * settlement figure, the emails tab and the timeline all went on showing the account as it
+         * was before the demand was issued.
+         *
+         * A WORKFLOW ACTION IS NOT A WORKFLOW-ONLY ACTION. Starting a sequence or releasing a held
+         * step sends an email, sends an SMS, raises two Annexure B fees, files a Sent copy and
+         * writes a note. Six panels move; one was being told.
+         *
+         * THIS IS THE OTHER DIRECTION OF A BUG ALREADY FIXED ONCE. `reload` was made to include
+         * loadRuns so that recording a promise refreshed this tab. The reverse -- this tab
+         * refreshing everything else -- is the same fault seen from the other end, and it was left
+         * standing. The two now go through one function, which is the only arrangement where they
+         * cannot drift apart again.
+         */
         <WorkflowRunPanel accountId={account.id} runs={runs} offers={startable}
-          error={runsError} onChanged={loadRuns}
+          error={runsError} onChanged={reload}
           askingFor={askStart} onAsked={() => setAskStart(null)} />
       )}
 

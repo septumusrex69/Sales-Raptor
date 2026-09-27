@@ -116,7 +116,22 @@ ok('...and nothing at all where no sequence is running',
   && /if \(live\.length === 0\) return null/.test(now))
 /* One function decides "what next" for both, or the rail and the tab name different steps. */
 ok('...reading the step in focus from the one function that decides it', /stepInFocus\(run\.steps\)/.test(now))
-ok('...which actually draws the panel', /tab === 'Workflow' && \(\s*<WorkflowRunPanel/.test(account))
+/*
+ * AND THE TAB ACTUALLY DRAWS THE PANEL.
+ *
+ * ASSERTED AS PRESENCE THEN ORDER, not as adjacency. This required the opening brace and the tag
+ * to touch, so the first explanatory comment written between them failed a check on correct code
+ * -- and the reflex when that happens is to delete the comment, which is the wrong half to lose.
+ * CLAUDE.md's first trap is the same shape: indexOf returns -1, so an order-only assertion passes
+ * vacuously once the thing it orders is gone. Both ends are checked before they are compared.
+ */
+const tabAt = account.indexOf("tab === 'Workflow' &&")
+/* THE WHOLE TAG, with the boundary after it: `indexOf('<WorkflowRunPanel')` matches the prefix of
+   a renamed `<WorkflowRunPanelX`, so the assertion passed on a component that does not exist. */
+const panelAt = account.search(/<WorkflowRunPanel[\s/>]/)
+ok('the Workflow tab is a branch on this page', tabAt > 0)
+ok('...and the panel is what it draws', panelAt > 0)
+ok('...in that order', tabAt > 0 && panelAt > tabAt)
 
 /* ------------------------------------------------ once, not every morning */
 

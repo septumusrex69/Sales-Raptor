@@ -142,9 +142,26 @@ ok('the account is re-read once it has been handed out',
  */
 ok('a reload of the account brings its workflows with it', /loadRuns\(\),/.test(detail))
 ok('...and the callback is rebuilt when it changes', /\}, \[account, loadRuns\]\)/.test(detail))
-/* AND THE PANEL'S OWN ACTIONS STILL GO THROUGH THE SAME READ, so a release and a promise end up at
-   one function rather than two that can disagree about what the account is doing. */
-ok('...the same read the workflow panel uses for its own', /onChanged={loadRuns}/.test(detail))
+
+/*
+ * AND IT GOES THE OTHER WAY TOO, WHICH WAS THE HALF LEFT STANDING.
+ *
+ * THE FIRM, ON THE SAME COMPLAINT A SECOND TIME: "when I started the workflow for the section 129,
+ * the charges didn't go... it didn't show it immediately." The charges HAD gone -- R25 under item
+ * 1(a) and R3.50 under item 1(c), both on the account within five seconds of the press. What had
+ * not happened is that the panel refreshed the RUNS and nothing else, so the transactions list,
+ * the balance, the settlement figure, the emails tab and the timeline all went on describing an
+ * account to which no demand had been issued.
+ *
+ * A WORKFLOW ACTION IS NOT A WORKFLOW-ONLY ACTION. Starting a sequence or releasing a held step
+ * sends an email, sends an SMS, raises two Annexure B fees, files a Sent copy and writes a note.
+ * Six panels move and one was being told.
+ *
+ * SO BOTH DIRECTIONS GO THROUGH `reload`, which is the only arrangement where they cannot drift
+ * apart again -- fixing one end and leaving the other is exactly what happened here.
+ */
+ok('...and a workflow action refreshes the whole account', /onChanged={reload}/.test(detail))
+ok('...not only its own runs', !/onChanged={loadRuns}/.test(detail))
 
 /* ------------------------------------------------ */
 
