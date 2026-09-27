@@ -166,6 +166,10 @@ const person = {
   debtorKind: 'individual', debtorTitle: 'Mr', debtorFirstName: 'Johannes',
   debtorSurname: 'Buitendag', accountNumber: 'ACF10085', clientReference: 'GPS3/10103',
   capitalOutstanding: 31900, preferredLanguage: null,
+  /* What the client handed us, which is none of the other money on this fixture: {{capital}} is
+     what is still outstanding and {{balance}} is everything owed today. A summary of account
+     opens with this one, and it is the only figure on it that never moves. */
+  capitalHandedOver: 52000,
 }
 check('a person is addressed by title and surname', addressAs(person), 'Mr Buitendag')
 check('...by surname alone where no title is held',

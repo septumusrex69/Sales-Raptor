@@ -9863,3 +9863,118 @@ begin
     ) as x(key, label, descr, ordinal, channel, ind, co, after_minutes);
   end if;
 end $$;
+
+-- ---------- The covering emails for a summary and a statement of account ----------
+--
+-- THE FIRM WROTE THE FIRST ONE OUT and asked for the second on the same inspiration. They are two
+-- answers to two questions a debtor asks: where do I stand, and show me the working.
+--
+-- {{balance_handover}} IS A NEW FIELD AND IS NOT {{capital}} OR {{balance}}. The three figures in
+-- the middle of this email only read as a story if the first one never moves: what was handed to
+-- us, what has been paid since, what is still owing. {{capital}} falls as payments are allocated
+-- and {{balance}} is everything owed today, so either in that first line would make the arithmetic
+-- on the page disagree with itself.
+--
+-- THE ATTACHMENT IS BUILT, NOT STORED, so attachment_id stays null: a statement's LENGTH is the
+-- answer -- ninety-six lines on one account and four on another -- and no stored letter can hold
+-- that. The account screen draws it and attaches it, the way the payment simulation does.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'individual', 'text', 'Summary of account (individual)',
+  'Summary of account attached - case reference {{case_number}}',
+  'Dear {{debtor_name}}
+
+Case reference: {{case_number}}
+
+Attached is a summary of your account with {{client_name}} as it stands on {{position_as_at}}.
+
+It shows what was handed to us, what you have paid since, and what is still owing:
+
+Handed over: {{balance_handover}}
+Paid so far: {{paid_to_date}}
+Balance now owing: {{balance}}
+
+The summary sets out how that balance is made up - interest, fees and expenses, VAT and any adjustments - and carries the trust account details for payment. Please use reference {{case_number}} when you pay.
+
+If anything in it does not agree with your own record, tell us in writing and we will check it.
+
+Yours faithfully
+
+{{collector_name}}
+{{firm_name}}', 'email-account-summary-individual', true, null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'company', 'text', 'Summary of account (company)',
+  'Summary of account attached - case reference {{case_number}}',
+  'To the directors of {{debtor_name}}
+
+Case reference: {{case_number}}
+Registration number: {{debtor_reg_no}}
+
+Attached is a summary of the company''s account with {{client_name}} as it stands on {{position_as_at}}.
+
+It shows what was handed to us, what has been paid since, and what is still owing:
+
+Handed over: {{balance_handover}}
+Paid so far: {{paid_to_date}}
+Balance now owing: {{balance}}
+
+The summary sets out how that balance is made up - interest, fees and expenses, VAT and any adjustments - and carries the trust account details for payment. Please use reference {{case_number}} when the company pays.
+
+If anything in it does not agree with the company''s own record, tell us in writing and we will check it.
+
+Yours faithfully
+
+{{collector_name}}
+{{firm_name}}', 'email-account-summary-company', true, null)
+on conflict (seed_key) do nothing;
+
+-- THE STATEMENT IS THE WORKING, AND ITS EMAIL SAYS SO RATHER THAN REPEATING THE FIGURES. The
+-- summary's three lines are the point of the summary; on a statement they are the first page of
+-- the attachment, and an email that lists them again is an email nobody reads to the end.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'individual', 'text', 'Statement of account (individual)',
+  'Statement of account attached - case reference {{case_number}}',
+  'Dear {{debtor_name}}
+
+Case reference: {{case_number}}
+
+Attached is a full statement of your account with {{client_name}} as it stands on {{position_as_at}}.
+
+It sets out every movement on the account in date order - the amount handed to us, every fee and expense charged, the interest raised, and every payment received - with a running balance so that each figure can be traced. The balance now owing is {{balance}}.
+
+A line showing no charge is work done on the account that earned nothing, because the ceiling set by Annexure B to the Debt Collectors Act 114 of 1998 for this debt had been reached. It is shown so that the record of what was done is complete.
+
+The trust account details for payment are on the last page. Please use reference {{case_number}} when you pay.
+
+If anything in it does not agree with your own record, tell us in writing and we will check it.
+
+Yours faithfully
+
+{{collector_name}}
+{{firm_name}}', 'email-account-statement-individual', true, null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'company', 'text', 'Statement of account (company)',
+  'Statement of account attached - case reference {{case_number}}',
+  'To the directors of {{debtor_name}}
+
+Case reference: {{case_number}}
+Registration number: {{debtor_reg_no}}
+
+Attached is a full statement of the company''s account with {{client_name}} as it stands on {{position_as_at}}.
+
+It sets out every movement on the account in date order - the amount handed to us, every fee and expense charged, the interest raised, and every payment received - with a running balance so that each figure can be traced. The balance now owing is {{balance}}.
+
+A line showing no charge is work done on the account that earned nothing, because the ceiling set by Annexure B to the Debt Collectors Act 114 of 1998 for this debt had been reached. It is shown so that the record of what was done is complete.
+
+The trust account details for payment are on the last page. Please use reference {{case_number}} when the company pays.
+
+If anything in it does not agree with the company''s own record, tell us in writing and we will check it.
+
+Yours faithfully
+
+{{collector_name}}
+{{firm_name}}', 'email-account-statement-company', true, null)
+on conflict (seed_key) do nothing;

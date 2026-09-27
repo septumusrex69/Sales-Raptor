@@ -291,6 +291,20 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
     { key: 'balance', label: 'Balance outstanding', sample: 'R 48,250.00' },
     { key: 'capital', label: 'Capital outstanding', sample: 'R 31,900.00' },
     /*
+     * WHAT THE CLIENT HANDED US, WHICH IS NONE OF THE THREE FIGURES BESIDE IT.
+     *
+     * {{capital}} is the capital STILL OUTSTANDING -- it falls as payments are allocated to it --
+     * and {{balance}} is everything owed today including interest and fees. Neither answers the
+     * question the summary of account opens with, which is what the debt WAS when it arrived:
+     * "Handed over: R6 000,00 / Paid so far: R1 000,00 / Balance now owing: R5 741,30" only reads
+     * as a story if the first figure never moves.
+     *
+     * IT IS ALSO THE BASE OF TWO CEILINGS. In duplum caps the non-capital at the capital
+     * outstanding at default, and the Annexure B items 1-7 cap is the capital or R1 225, whichever
+     * is lower -- so a debtor asking why a fee was charged at R3.00 is asking about this number.
+     */
+    { key: 'balance_handover', label: 'What the client handed over to us', sample: 'R 52,000.00' },
+    /*
      * THE FIELDS A LETTER NEEDS AND AN SMS NEVER DID.
      *
      * A section 129 notice has to identify the debtor, the agreement and the creditor well enough
@@ -514,7 +528,8 @@ export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
     'debtor_reg_no'] },
   { title: 'The person', keys: ['contact_name', 'contact_first_name'] },
   { title: 'The account', keys: ['case_number', 'reference', 'account_number', 'handover_date',
-    'paid_to_date', 'listing_date', 'listing_reference', 'bureaus_listed', 'balance', 'capital', 'position_as_at', 'respond_by'] },
+    'paid_to_date', 'listing_date', 'listing_reference', 'bureaus_listed', 'balance_handover',
+    'balance', 'capital', 'position_as_at', 'respond_by'] },
   /* THE ARRANGEMENT IS ABOUT THE ARRANGEMENT, not about the account: the balance is what is owed
      and these two are what was agreed to pay it off. Grouped apart so a writer reaching for "the
      amount" is not offered {{balance}} and {{ptp_amount}} side by side. */
@@ -891,6 +906,8 @@ export interface TemplateAccount {
   accountNumber: string | null
   clientReference: string | null
   capitalOutstanding: number
+  /** What the client handed us. Fixed at the handover; see {{balance_handover}}. */
+  capitalHandedOver: number
   preferredLanguage: string | null
 }
 
@@ -1122,6 +1139,9 @@ export function mergeValuesFor(input: {
     client_name: (input.clientName ?? '').trim() || null,
     balance: input.balance === null ? null : input.money(input.balance),
     capital: input.money(a.capitalOutstanding),
+    /* Never derived from the balance: it is a fact about the day the account arrived, and the
+       only figure on the summary of account that does not move. */
+    balance_handover: input.money(a.capitalHandedOver),
     agent_name: (input.agentName ?? '').trim() || null,
     /*
      * THE FIRM'S NUMBER WHERE THE PERSON HAS NONE. The firm, told that not one of the fifty live

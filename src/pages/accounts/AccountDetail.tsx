@@ -84,6 +84,7 @@ import {
 import { startSentence, startShortLabel } from '../../lib/workflowStart.ts'
 import { liveArrangement, nextUnpaid } from '../../lib/ptpSchedule.ts'
 import { RepaymentCalculator } from '../../components/collections/RepaymentCalculator.tsx'
+import { AccountDocuments } from '../../components/collections/AccountDocuments.tsx'
 import { todayIso } from '../../lib/reminderTime.ts'
 import { needsAttention } from '../../lib/runSteps.ts'
 import { debtorKey, type OtherAccount } from '../../lib/sameDebtor'
@@ -505,6 +506,9 @@ export function AccountDetail() {
         account: {
           caseNumber: account.caseNumber,
           handoverDate: account.handoverDate,
+          /* What the client gave us, which is neither the capital still outstanding nor the
+             balance owed today -- the one figure on a summary of account that never moves. */
+          capitalHandedOver: account.capitalHandedOver,
           paymentsToDate: account.paymentsToDate,
           listingDate: account.listingDate,
           listingReference: account.listingReference,
@@ -1157,7 +1161,31 @@ export function AccountDetail() {
       )}
 
       {tab === 'Transactions' && (
-        <Card><StatementTable statement={statement?.lines ?? []} account={account} breakdown={b} /></Card>
+        <Card>
+          <StatementTable statement={statement?.lines ?? []} account={account} breakdown={b}
+            handedOver={account.capitalHandedOver}
+            /* The day the figures were struck, printed on the page. The same one the statement
+               above was computed to, so the PDF and the table cannot disagree about "as at". */
+            asAt={dayKey(new Date())}
+            money={formatMoney}
+            values={letterContext.values}
+            reference={letterContext.reference}
+            audience={account.debtorKind}
+            /* The firm's own word for where the account stands -- derived, never stored. */
+            status={DESK_POSITIONS[position]?.label ?? null}
+            /*
+             * THE PRESS THAT EMAILS ONE. The control draws the PDF and merges the firm's covering
+             * wording; this opens the one compose box on the account with both already on the
+             * message, so it goes out through the collector's own mailbox, is filed on the
+             * account and is charged item 1(a) by the path that charges every other email.
+             */
+            onEmail={(doc) => {
+              startCompose()
+              setSimulation({ ...doc, values: letterContext.values })
+              setComposeTo(emailContact?.value ?? '')
+            }}
+          />
+        </Card>
       )}
 
       {tab === 'Emails' && (
@@ -3255,21 +3283,43 @@ function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName, on
  * Deliberately plain — printable as it stands, no colour carrying meaning that would be lost in
  * black and white.
  */
-function StatementTable({ statement, account, breakdown }: {
+function StatementTable({
+  statement, account, breakdown, handedOver, asAt, money, values, reference, audience, status, onEmail,
+}: {
   statement: StatementLine[]
   account: DebtorAccount
   breakdown: BalanceBreakdown | undefined
+  /** Everything the two documents beside the Print button are drawn from. See AccountDocuments. */
+  handedOver: number
+  asAt: string
+  money: (n: number) => string
+  values?: Record<string, string>
+  reference?: string | null
+  audience?: 'individual' | 'company' | null
+  status?: string | null
+  onEmail?: React.ComponentProps<typeof AccountDocuments>['onEmail']
 }) {
   if (statement.length === 0) return <p className="text-sm text-slate-400 py-6 text-center">Nothing has happened on this account.</p>
   return (
     <>
-      <div className="flex items-center justify-between mb-3 print:hidden">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3 print:hidden">
         <p className="text-xs text-slate-400">
           {statement.length} movements. Every line traces to a payment, a fee or an accrual.
         </p>
-        <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-          <Printer size={13} /> Print
-        </button>
+        {/*
+          THE TWO DOCUMENTS BESIDE THE PRINT BUTTON, which is exactly where the firm drew them:
+          "summary or statement", pencilled over this row. Print puts the TABLE on paper; these
+          two put the firm's own letterhead on it and can go to the debtor.
+        */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <AccountDocuments
+            breakdown={breakdown} lines={statement} handedOver={handedOver} asAt={asAt}
+            money={money} values={values} reference={reference} audience={audience}
+            status={status} onEmail={onEmail} />
+          <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+            <Printer size={13} /> Print
+          </button>
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
