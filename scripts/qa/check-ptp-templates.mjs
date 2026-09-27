@@ -1,11 +1,11 @@
 /**
- * THE 22 PAYMENT ARRANGEMENT TEMPLATES, HELD AGAINST WHAT THE FIRM HANDED OVER.
+ * THE 24 PAYMENT ARRANGEMENT TEMPLATES, HELD AGAINST WHAT THE FIRM HANDED OVER.
  *
  * READ OUT OF THE MIGRATION, not out of the database: a check that queried staging would pass on a
  * row somebody edited in the Library and fail on a laptop with no network. The migration is the
  * record, and it is what a fresh environment is built from.
  *
- * WHAT WOULD BREAK WITHOUT THIS. The set is 22 templates in five matched pairs across two
+ * WHAT WOULD BREAK WITHOUT THIS. The set is 24 templates in six matched pairs across two
  * audiences, and every one of the failures it guards is silent: a letter whose blocks do not parse
  * renders as nothing; an email with no subject cannot be saved at all; an SMS carrying a character
  * outside GSM-7 halves every segment and doubles what the debtor is charged under item 1(c); and a
@@ -28,12 +28,12 @@ function check(name, actual, expected) {
 }
 const ok = (name, actual) => check(name, actual, true)
 /* schema.sql is the record. An argument points the same logic at a migration not yet applied, which
-   is how these 22 were validated before they were written to staging. */
+   is how these were validated before they were written to staging. */
 const sql = readFileSync(process.argv[2] ?? new URL('../../supabase/schema.sql', import.meta.url), 'utf8')
 
 /*
  * THE ROWS, PARSED OUT OF THE MIGRATION'S OWN INSERTS. Read rather than re-listed here: a second
- * copy of 22 bodies in a check file is 22 bodies that can disagree with the ones that shipped.
+ * copy of 24 bodies in a check file is 24 bodies that can disagree with the ones that shipped.
  */
 function rowsFrom(text) {
   const out = []
@@ -76,7 +76,7 @@ const rows = rowsFrom(sql)
 const by = new Map(rows.map((r) => [r.seed_key, r]))
 
 /* Asserted present before anything about their contents, or a missing migration passes vacuously. */
-check('all 22 arrangement templates are in the schema', rows.length, 22)
+check('all 24 arrangement templates are in the schema', rows.length, 24)
 /*
  * AND READ DEFENSIVELY PAST IT. CLAUDE.md's second trap, seen here already: indexing a row that is
  * not there throws a TypeError two lines below the check that should have REPORTED it, so a deleted
@@ -86,7 +86,15 @@ const need = (key) => by.get(key) ?? { seed_key: key, body: '', subject: null, k
 
 const EXPECTED = {
   letter: ['letter-ptp-default-individual', 'letter-ptp-default-company'],
-  email: ['confirmed', 'reminder', 'due-today', 'receipt', 'default']
+  /*
+   * SIX EMAIL PAIRS, AND THE SIXTH IS NOT PART OF THE SEQUENCE. The five above ride on the
+   * arrangement's own workflow; `simulation` is the covering note for the payment simulation and
+   * goes out BEFORE there is an arrangement at all -- the firm: "this is before you conclude the
+   * payment arrangement." It is held to the same rules as the rest because every failure they
+   * guard is the same one: an email with no subject cannot be saved, and a merge field nobody
+   * offers resolves to a literal {{brace}} in front of a debtor.
+   */
+  email: ['confirmed', 'reminder', 'due-today', 'receipt', 'default', 'simulation']
     .flatMap((s) => [`email-ptp-${s}-individual`, `email-ptp-${s}-company`]),
   sms: ['confirmed', 'reminder', 'due-today', 'receipt', 'default']
     .flatMap((s) => [`sms-ptp-${s}-individual`, `sms-ptp-${s}-company`]),

@@ -63,6 +63,21 @@ const pair = (label: string, value: string, bold = false) => [
 
 export interface RepaymentLetterInput {
   plan: RepaymentPlan
+  /**
+   * WHETHER THIS IS AN OFFER BEING WEIGHED UP OR AN ARRANGEMENT THAT HAS BEEN AGREED.
+   *
+   * ONE DOCUMENT, TWO MOMENTS, AND THE WORDS HAVE TO SAY WHICH. The firm: "this is before you
+   * conclude the payment arrangement" -- so from the calculator it is a SIMULATION, sent mid
+   * negotiation, and calling it a schedule would hand a debtor a page of figures that reads as
+   * settled. It goes out again with the confirmation email once the arrangement is recorded, and
+   * there the opposite is true: that one IS the schedule, and "simulation" would read as though
+   * the firm had not yet agreed to what it had just agreed to.
+   *
+   * THE ANNEXURE B EXCLUSION IS ON BOTH, because it is a fact about the ARITHMETIC rather than
+   * about the moment -- neither version includes the fees this account will be charged as the
+   * work is done. See the note at the top.
+   */
+  purpose?: 'simulation' | 'schedule'
   /** What is owed today, before any of this. Printed so the debtor can see where it starts. */
   balanceToday: number
   /** "a month" / "a week", already in the firm's words. */
@@ -97,6 +112,10 @@ export function repaymentLetter(input: RepaymentLetterInput): LetterDocument {
   const { plan, money, each } = input
   const first = plan.rows[0]
   const last = plan.rows[plan.rows.length - 1]
+  /* A simulation unless the caller says otherwise: the calculator is where this is sent from
+     nearly every time, and the safer of the two readings is the one that claims less. */
+  const simulating = input.purpose !== 'schedule'
+  const title = simulating ? 'Payment simulation' : 'Payment arrangement schedule'
 
   const blocks: Block[] = [
     {
@@ -110,15 +129,62 @@ export function repaymentLetter(input: RepaymentLetterInput): LetterDocument {
       ],
     },
     { kind: 'paragraph', spans: [{ text: '{{debtor_name}}', bold: true }] },
-    h(1, 'WHAT THIS PAYMENT ARRANGEMENT WOULD COST'),
     /*
-     * THE FIRST CAVEAT, IN THE OPENING SENTENCE rather than in small print at the end. A debtor
-     * given a page of figures on a firm's letterhead will treat it as settled unless the very
-     * first thing they read says otherwise.
+     * THE IDENTITY NUMBER AS A PARAGRAPH OF ITS OWN, which is how all four of the firm's notices
+     * carry it -- and the reason it can be here at all is documentWithoutOptional: 97% of the book
+     * has no ID number, so the block leaves with the field rather than printing braces at a debtor.
      */
-    p(`This sets out what it would cost to settle your account with {{client_name}} by paying `
-      + `${money(first.amount)} ${each}, starting ${longDate(first.dueOn)}. It is an illustration `
-      + 'of the arrangement we discussed, not a demand and not an agreement.'),
+    p('Identity number: {{debtor_id_masked}}'),
+    h(1, simulating
+      ? 'PAYMENT SIMULATION: WHAT AN ARRANGEMENT WOULD COST'
+      : 'YOUR PAYMENT ARRANGEMENT: WHAT IT WILL COST'),
+    /*
+     * THE NOTE AT THE TOP, AND THE COVERING EMAIL SENDS THE DEBTOR TO IT BY NAME: "Please read the
+     * note at the top of it." So it is a heading and three sentences in the first third of page
+     * one, not small print at the end.
+     *
+     * THE ANNEXURE B LINE IS THE ONE THAT MATTERS AND IT WAS NOT THERE. Every figure on this page
+     * is capital, interest and the receipt fee on each payment -- and nothing else. The Act's
+     * prescribed fees for the work done on the account (calls, letters, emails, SMSs, traces) are
+     * raised as that work happens and are not in any total here. A debtor handed "Total you would
+     * pay R 609,76" on the firm's letterhead, who then receives an account for more, has been
+     * misled by a document the firm wrote -- and the firm's own covering email says this four
+     * times, which is how seriously they take it.
+     */
+    h(2, simulating
+      ? 'THIS IS A SIMULATION, NOT A STATEMENT OF YOUR ACCOUNT'
+      : 'THIS IS NOT A STATEMENT OF YOUR ACCOUNT'),
+    p(simulating
+      ? 'It shows what it would look like if you paid different amounts towards this account, so '
+        + 'that you can see what a longer or shorter arrangement would cost you.'
+      : 'It sets out what the arrangement you have agreed will cost if it is kept exactly as '
+        + 'agreed.'),
+    {
+      kind: 'paragraph',
+      spans: [
+        {
+          text: 'The fees prescribed in Annexure B to the Debt Collectors Act 114 of 1998 are '
+            + 'not included in these figures.',
+          bold: true,
+        },
+        {
+          text: ' Those fees are charged on the account as the collection work is done, and they '
+            + 'will be added. The amount you actually pay will therefore be higher than the '
+            + 'amounts shown here.',
+        },
+      ],
+    } as Block,
+    p(simulating
+      ? 'This is not a demand, not an agreement and not a statement of account.'
+      : 'This is not a demand and not a statement of account.'),
+    /*
+     * AND THEN THE SENTENCE THAT SAYS WHAT IS ACTUALLY BEING PROPOSED. Kept after the note rather
+     * than before it, which is the order the firm drew: a debtor given a page of figures on a
+     * firm's letterhead treats it as settled unless the very first thing they read says otherwise.
+     */
+    p(`Dear {{debtor_name}} \u2014 this shows what it would cost to settle your account with `
+      + `{{client_name}} by paying ${money(first.amount)} ${each}, starting `
+      + `${longDate(first.dueOn)}${(input.faster ?? []).length > 0 ? ', and what it would cost to clear it sooner' : ''}.`),
 
     h(2, 'In summary'),
     /*
@@ -151,7 +217,12 @@ export function repaymentLetter(input: RepaymentLetterInput): LetterDocument {
      * this table. The comparison further down says the same thing in the same words and has the
      * figures beside it, so on the page it read as the document repeating itself -- and the
      * duplicate was four lines the letter could not afford.
+     *
+     * WHAT DOES SIT HERE IS THE EXCLUSION, AGAIN, IN ONE LINE. The note at the top says it in
+     * full; this is the row of totals somebody photographs and sends to their spouse, and it has
+     * to carry the qualification on its own rather than rely on a paragraph two inches above it.
      */
+    { kind: 'paragraph', spans: [{ text: 'Annexure B fees are excluded from every figure above.', size: 9 }] } as Block,
   ]
 
   /*
@@ -287,6 +358,55 @@ export function repaymentLetter(input: RepaymentLetterInput): LetterDocument {
       + 'assesses you can see. A shorter arrangement reads better on your profile.'))
   }
 
+  /*
+   * WHAT THE FIGURES DO NOT INCLUDE, SPELLED OUT, and this is the section the covering email is
+   * pointing at when it says the amount actually paid will be higher.
+   *
+   * THREE THINGS, IN DESCENDING CERTAINTY. The Annexure B fees are certain -- they are being
+   * charged already. Further collection work is likely and unquantifiable, which is worth saying
+   * plainly rather than leaving the debtor to infer from a total that looks exact. Legal costs are
+   * conditional and may never arise, so they are named last and without a figure.
+   *
+   * AND THE ASSUMPTION GOES HERE RATHER THAN IN A SECTION OF ITS OWN. `plan.assumption` is the
+   * firm's own condition -- "in a world where no fees accumulate, however the receipt fee is still
+   * applicable" -- and it is the positive half of this list: what IS in the arithmetic. Read apart
+   * from the exclusions it was a sentence nobody could place; read under them it is the line that
+   * closes the question.
+   */
+  blocks.push(h(2, 'What these figures do not include'))
+  blocks.push({
+    kind: 'list',
+    ordered: false,
+    items: [
+      [
+        { text: 'Annexure B fees.', bold: true },
+        {
+          text: ' The Debt Collectors Act 114 of 1998 prescribes what a debt collector may charge '
+            + 'for the work done on an account: calls, letters, emails, SMSs, traces and the like. '
+            + 'Those fees are raised on the account as that work happens, and they are not in any '
+            + 'figure in this document.',
+        },
+      ],
+      [
+        { text: 'Further collection costs.', bold: true },
+        {
+          text: ' The figures assume no further work is charged over the life of the arrangement, '
+            + 'which is unlikely if the arrangement runs for months.',
+        },
+      ],
+      [{ text: 'Legal costs, if the account goes further.' }],
+    ],
+  } as Block)
+  blocks.push(p('Because of that, the total you actually pay will be higher than the total shown '
+    + 'here. ' + plan.assumption))
+  if (plan.hitInDuplum) {
+    /* Where the ceiling binds, the debtor is entitled to know that it is what is holding the
+       figures down -- and that it is the law doing it rather than the firm's goodwill. */
+    blocks.push(p('Interest and fees on this account have reached the limit set by section 103(5) '
+      + 'of the National Credit Act, which is the capital outstanding when the account was handed '
+      + 'to us. They do not grow beyond it.'))
+  }
+
   blocks.push(h(2, 'How to pay'))
   blocks.push({
     kind: 'table',
@@ -303,24 +423,16 @@ export function repaymentLetter(input: RepaymentLetterInput): LetterDocument {
   })
 
   /*
-   * THE SECOND CAVEAT, AND THE ONE THAT MATTERS MOST. The figures are exact arithmetic on stated
-   * assumptions, and both of those are worth saying: exact, so a debtor can check them, and on
-   * assumptions, so nobody treats them as a balance. `plan.assumption` is the same sentence the
-   * screen shows the collector, so the debtor and the person who quoted them are reading one thing.
+   * THE LAST WORD, UNHEADED AND DIRECTLY UNDER THE BANK DETAILS. It used to be a section called
+   * "What this does not do", which put a heading between the debtor and the one sentence that
+   * decides whether they think they have an arrangement. Unheaded it is read as part of the page
+   * rather than as a clause somebody can skip -- and its two halves are now the only ones left
+   * here, the assumption having moved up to sit with the exclusions it belongs beside.
    */
-  blocks.push(h(2, 'What this does not do'))
-  blocks.push(p('These figures are worked out exactly, on two assumptions. ' + plan.assumption))
-  blocks.push(p('They are not a statement of your account and they do not replace one. Nothing '
-    + 'here changes what you owe, and an arrangement only exists once it has been agreed with us '
-    + 'and confirmed in writing. If a payment is missed the arrangement lapses and these figures '
-    + 'no longer apply.'))
-  if (plan.hitInDuplum) {
-    /* Where the ceiling binds, the debtor is entitled to know that it is what is holding the
-       figures down -- and that it is the law doing it rather than the firm's goodwill. */
-    blocks.push(p('Interest and fees on this account have reached the limit set by section 103(5) '
-      + 'of the National Credit Act, which is the capital outstanding when the account was handed '
-      + 'to us. They do not grow beyond it.'))
-  }
+  blocks.push(p('These figures are not a statement of your account and do not replace one. Nothing '
+    + 'here changes what you owe, and an arrangement exists only once it is agreed with us and '
+    + 'confirmed in writing. If a payment is missed the arrangement lapses and these figures no '
+    + 'longer apply.'))
 
   blocks.push({ kind: 'paragraph', spans: [{ text: 'Yours faithfully' }], keepWithNext: true })
   blocks.push({
@@ -334,7 +446,10 @@ export function repaymentLetter(input: RepaymentLetterInput): LetterDocument {
 
   return {
     defaults: { font: CHARTER, size: 10.5, colour: '#1f2937', lineHeight: 1.45 },
-    runningFoot: 'Payment arrangement illustration · Ref {{case_number}} · Page {{page}} of {{pages}}',
+    /* THE FOOT NAMES THE DOCUMENT, and it is the one place the two purposes have to differ on
+       every page: a printed page that has come away from its first sheet still has to say whether
+       the figures on it were agreed or were being weighed up. */
+    runningFoot: `${title} \u00b7 Ref {{case_number}} \u00b7 Page {{page}} of {{pages}}`,
     blocks,
   }
 }

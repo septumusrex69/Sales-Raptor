@@ -35,12 +35,52 @@ const ACCOUNT = {
 }
 const ACCRUALS = [{ accrued_on: '2026-09-01', days: 29, amount_accrued: 200 }]
 
+/* The firm's own row, so the simulation has a trust account to name and letterPdfBytes does not
+   refuse it for a field this account cannot fill. */
+const FIRM = [{
+  firm_name: 'Bredell Ferreira',
+  trust_bank: 'Standard Bank',
+  trust_branch_code: '051001',
+  trust_account_name: 'Bredell Ferreira Trust',
+  trust_account_number: '01 234 5678',
+  trust_account_type: 'Legal Practitioner Trust Account',
+  phone: '015 291 1234',
+  email: 'info@bredellferreira.co.za',
+  signatory_name: 'J Bredell',
+  signatory_title: 'Duly authorised legal representative',
+  email_font: 'Georgia, "Times New Roman", Times, serif',
+  email_size_pt: '10.5',
+  updated_at: '2026-09-01T08:00:00Z',
+}]
+
+/*
+ * THE COVERING EMAIL, AS THE MIGRATION WROTE IT -- the three fields it quotes are the point.
+ * {{ptp_amount}}, {{sim_frequency}} and {{sim_start}} describe an arrangement that does not exist
+ * on this account, so nothing here can answer them except the calculator handing up the figures it
+ * is showing. If that stops happening the box opens with braces in the middle of a sentence, which
+ * is what this fixture exists to catch.
+ */
+const TEMPLATES = [{
+  id: 'aaaaaaaa-0000-4000-8000-00000000ab01',
+  scope: 'collections', kind: 'email', audience: 'individual', name: 'Payment simulation (individual)',
+  subject: 'Payment simulation attached - case reference {{case_number}}',
+  format: 'text',
+  body: 'Dear {{debtor_name}}\n\nFollowing our conversation, attached is a simulation of what it '
+    + 'would cost to settle this account by paying {{ptp_amount}} {{sim_frequency}}, starting '
+    + '{{sim_start}}.\n\nPlease read the note at the top of it.',
+  position: null, language: 'en', active: true, attachment_id: null,
+  seed_key: 'email-ptp-simulation-individual', updated_at: '2026-09-01T08:00:00Z',
+}]
+
 async function openPromiseForm(browser) {
   const handlers = [
     [(u) => u.includes('/rest/v1/profiles'), () => ({ body: [PROFILE] })],
     [(u) => u.includes('/rest/v1/companies'), () => ({ body: [COMPANY] })],
     [(u) => u.includes('/rest/v1/debtor_accounts'), () => ({ body: [ACCOUNT] })],
     [(u) => u.includes('/rest/v1/account_interest_accruals'), () => ({ body: ACCRUALS })],
+    [(u) => u.includes('/rest/v1/firm_settings'), () => ({ body: FIRM })],
+    [(u) => u.includes('/rest/v1/message_templates'), () => ({ body: TEMPLATES })],
+    [(u) => u.includes('/rest/v1/letterheads'), () => ({ body: [] })],
   ]
   const { context, page } = await signedInPage(browser, PROFILE, handlers, [])
   for (let i = 0; i < 60; i += 1) {
@@ -188,7 +228,7 @@ try {
      */
     const { context, page } = await openPromiseForm(browser)
     await offer(page, { shape: 'monthly', amount: 500, dueOn: '2026-10-05' })
-    const button = page.getByRole('button', { name: /Schedule as a PDF/ })
+    const button = page.getByRole('button', { name: /Download it/ })
     t.ok('the schedule can be sent to the debtor', await button.isVisible())
     t.ok('...and is offered, not refused', await button.isEnabled())
 
@@ -199,13 +239,85 @@ try {
     t.ok(`...arriving as a PDF (${name})`, /\.pdf$/.test(name))
     /* NAMED FOR THE ACCOUNT. A collector with six of these in a downloads folder needs to know
        which debtor each one is for without opening it. */
-    t.ok('...named for the arrangement', /payment.arrangement/i.test(name))
+    t.ok('...named for the simulation', /payment.simulation/i.test(name))
 
     const path = await download.path()
     const { readFileSync } = await import('node:fs')
     const bytes = readFileSync(path)
     t.ok(`...with real content (${(bytes.length / 1024).toFixed(1)} kB)`, bytes.length > 5000)
     t.check('...that is actually a PDF', bytes.subarray(0, 4).toString(), '%PDF')
+    await context.close()
+  }
+
+  /* ---------- and emailed to the debtor, with the firm's own covering words ---------- */
+  {
+    /*
+     * THE FIRM: "if you click on that, it sends it to the debtor as an email and it charges it as
+     * well. So you can send it from the emails or you can send it from the promise to pay section."
+     *
+     * IT OPENS THE COMPOSE BOX RATHER THAN SENDING SILENTLY, and that is the whole design: the
+     * account's own box sends through the collector's mailbox, files the message and raises item
+     * 1(a). A second sender in this panel would be a second place that has to remember the R25.
+     *
+     * WHAT ONLY A BROWSER CAN PROVE. The wording quotes three fields nothing on this account can
+     * answer -- there is no arrangement yet, which is the point of a simulation -- so they are
+     * merged from the figures the panel is showing and handed across with the PDF. Held in a unit
+     * check, every part of that would pass while the box opened empty.
+     */
+    const { context, page } = await openPromiseForm(browser)
+    await offer(page, { shape: 'monthly', amount: 500, dueOn: '2026-10-05' })
+    const send = page.getByRole('button', { name: /Email the simulation/ })
+    t.ok('the simulation can be emailed to the debtor', await send.isVisible())
+    t.ok('...and is offered, not refused', await send.isEnabled())
+    /* WHAT IT COSTS, SAID BEFORE THE PRESS. Every other control in Raptor that raises an Annexure B
+       fee says so, because a collector deciding whether to send is deciding whether to charge. */
+    const panel = await page.locator('body').innerText()
+    t.ok('...saying what it will cost', /charged R25 under item 1\(a\)/.test(panel))
+    t.ok('...and that nothing goes until Send is pressed', /Nothing is sent until you press Send/.test(panel))
+
+    await send.click()
+    /* The box, with the firm's subject line on it. */
+    const subject = page.getByLabel(/^Subject/i).or(page.locator('input[name="subject"]')).first()
+    await subject.waitFor({ timeout: 20000 })
+    t.ok('the compose box opens on the firm’s own covering email',
+      /Payment simulation attached/.test(await subject.inputValue()))
+
+    /* READ OUT OF THE BOX ITSELF, not off the page. The body is a textarea, and its contents are a
+       value rather than text -- an innerText assertion here passes on an empty box. */
+    const composed = await page.locator('form textarea').first().inputValue()
+    /*
+     * THE THREE FIELDS, MERGED. This is the assertion the whole feature hangs on: nothing on this
+     * account has an arrangement, so if the calculator stopped handing its figures across, the
+     * debtor would receive "paying {{ptp_amount}} {{sim_frequency}}, starting {{sim_start}}".
+     */
+    t.ok('...with the instalment merged in', /paying R.?500/.test(composed))
+    t.ok(`...and how often (${/paying[^,]*,[^,]*/.exec(composed)?.[0] ?? "?"})`, /500[\s\S]{0,40}a month/.test(composed))
+    t.ok('...and when it would start', /starting 5 October 2026/.test(composed))
+    t.ok('...and no placeholder left standing', !/\{\{sim_|\{\{ptp_amount/.test(composed))
+    /* AND THE DOCUMENT IS ALREADY ON THE MESSAGE. A covering email that says "attached is a
+       simulation" and attaches nothing is a worse message than one that says nothing at all. */
+    t.ok('...and the simulation already attached',
+      await page.getByRole('button', { name: /Remove Payment-simulation.*\.pdf/i }).isVisible())
+    /*
+     * AND THE BOX KEEPS THE SIMULATION'S OWN FIGURES, which is what the letterContext override in
+     * AccountDetail is for and the only way to see that it matters.
+     *
+     * NOTHING ON THIS ACCOUNT ANSWERS {{sim_frequency}} OR {{sim_start}} -- there is no
+     * arrangement, which is the point of a simulation -- so a collector who reaches for the
+     * template picker after the box has opened would, without the override, re-merge the same
+     * wording against the bare account and replace three merged figures with three placeholders.
+     * That is one press away from being sent.
+     */
+    await page.getByRole('button', { name: 'Use a template' }).first().click()
+    await page.waitForTimeout(600)
+    await page.getByRole('button', { name: /Payment simulation/ }).first().click()
+    await page.waitForTimeout(1500)
+    const repicked = await page.locator('form textarea').first().inputValue()
+    t.ok('re-picking the template keeps the simulation’s own figures',
+      /starting 5 October 2026/.test(repicked))
+    t.ok('...rather than putting the placeholders back',
+      !/\{\{sim_|\{\{ptp_amount/.test(repicked))
+    await t.shot(page, '70-simulation-composed')
     await context.close()
   }
 
@@ -217,9 +329,13 @@ try {
      */
     const { context, page } = await openPromiseForm(browser)
     await offer(page, { shape: 'monthly', amount: 150, dueOn: '2026-10-05' })
-    const button = page.getByRole('button', { name: /Schedule as a PDF/ })
+    const button = page.getByRole('button', { name: /Download it/ })
     t.ok('the button is still on the screen', await button.isVisible())
     t.ok('...but cannot be pressed', await button.isDisabled())
+    /* AND SO IS THE SEND, for the same reason and at the same moment. A page that cannot be drawn
+       is not one to email either, and the two refusing apart is how one of them gets pressed. */
+    const cannotSend = page.getByRole('button', { name: /Email the simulation/ })
+    t.ok('...and neither can the email', await cannotSend.isDisabled())
     /*
      * THE REASON IS THE ONE FOR THIS ACCOUNT. In duplum is on here, as it is on the firm's own
      * accounts, so R150 does not "never settle" -- the debt stops growing at the ceiling and would

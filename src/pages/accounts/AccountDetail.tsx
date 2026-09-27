@@ -178,6 +178,29 @@ export function AccountDetail() {
    * original quoted under it.
    */
   const [forwardOf, setForwardOf] = useState<AccountEmail | null>(null)
+  /**
+   * A PAYMENT SIMULATION ON ITS WAY OUT, where the calculator has just drawn one.
+   *
+   * THE FIRM: "if you click on that, it sends it to the debtor as an email and it charges it as
+   * well. So you can send it from the emails or you can send it from the promise to pay section."
+   *
+   * IT GOES OUT THROUGH THE COMPOSE BOX, which is the sentence to hold on to. That box sends
+   * through the collector's own mailbox, files the message on the account and raises item 1(a) --
+   * so the simulation is charged by exactly the thing that charges every other email, rather than
+   * by a second sender that would have to remember the R25 on its own.
+   *
+   * IT CARRIES ITS OWN MERGE VALUES. {{ptp_amount}}, {{sim_frequency}} and {{sim_start}} describe
+   * an arrangement that does not exist yet -- "this is before you conclude the payment
+   * arrangement" -- so nothing on the account can answer them and the calculator hands them up
+   * with the figures it was showing.
+   */
+  const [simulation, setSimulation] = useState<{
+    file: { filename: string; contentType: string; size: number; content: string }
+    values: Record<string, string>
+    subject: string
+    body: string
+    missing: string[]
+  } | null>(null)
 
   /**
    * Clear whatever the last message left behind, before opening the composer again.
@@ -190,6 +213,9 @@ export function AccountDetail() {
     setReplyTo(null)
     setForwardOf(null)
     setComposeCc('')
+    /* Cleared with everything else. Left behind, the next ordinary email to this debtor would
+       open with a simulation attached to it -- the exact class of bug this function exists for. */
+    setSimulation(null)
   }
 
   // The action bar drives the panels below it rather than opening modals of its own: "Add Note"
@@ -798,6 +824,24 @@ export function AccountDetail() {
       position={statement?.input ?? null}
       letterValues={letterContext.values}
       letterReference={letterContext.reference}
+      audience={account.debtorKind}
+      /*
+       * THE PRESS THAT EMAILS A SIMULATION, owned here rather than in the panel.
+       *
+       * The calculator draws the PDF and merges the firm's own covering wording; this opens the
+       * one compose box on the account with both already on the message. So the simulation goes
+       * out through the collector's own mailbox, is filed on the account and is charged item 1(a)
+       * by exactly the path that charges every other email -- and a person reads it before it
+       * goes, which for a page of figures reaching a debtor mid-negotiation is the point.
+       *
+       * ADDRESSED TO THE DEBTOR, not to whoever was last composed to. Empty where the account has
+       * no email address, which leaves the box asking rather than quietly sending to nobody.
+       */
+      onEmailSimulation={(sim) => {
+        startCompose()
+        setSimulation(sim)
+        setComposeTo(emailContact?.value ?? '')
+      }}
     />
   )
   const disputesPanel = (
@@ -1334,22 +1378,31 @@ export function AccountDetail() {
       {composeTo !== null && (
         <ComposeEmailModal
           to={composeTo}
-          letterContext={letterContext}
+          /* THE SIMULATION'S FIGURES WIN WHILE ONE IS ATTACHED, so a letter picked afterwards is
+             merged against the same offer the covering email quotes rather than against an
+             account that has no arrangement on it yet. */
+          letterContext={simulation
+            ? { ...letterContext, values: simulation.values }
+            : letterContext}
           recipients={(workspace?.contacts ?? [])
             .filter((c) => c.kind === 'email' && !c.retiredAt)
             .map((c) => ({ email: c.value, label: c.label ?? undefined }))}
-          initialSubject={forwardOf
-            ? forwardSubject(forwardOf.subject)
-            : replyTo
-              ? replySubject(replyTo.subject)
-              : `Account ${account.accountNumber ?? ''} - ${name}`.trim()}
+          initialSubject={simulation
+            ? simulation.subject
+            : forwardOf
+              ? forwardSubject(forwardOf.subject)
+              : replyTo
+                ? replySubject(replyTo.subject)
+                : `Account ${account.accountNumber ?? ''} - ${name}`.trim()}
           /*
            * A FORWARD IS THE ONE THAT CARRIES THE ORIGINAL. A reply does not, and that is a
            * decision explained below. A forward has to: the person receiving it was not in the
            * conversation, so without the original quoted under it they are reading an answer to
            * a question they never saw.
            */
-          initialBody={forwardOf
+          initialBody={simulation
+            ? simulation.body
+            : forwardOf
             ? forwardBody(
               {
                 fromName: forwardOf.direction === 'in' ? forwardOf.sentByName : (currentUser?.name ?? null),
@@ -1364,6 +1417,16 @@ export function AccountDetail() {
             : undefined}
           initialCc={composeCc}
           /*
+           * THE SIMULATION, ALREADY DRAWN AND ALREADY ON THE MESSAGE. It cannot come through the
+           * template picker like every other attachment: a stored letter is merged against the
+           * account, and this one is ARITHMETIC whose length is the answer -- only the calculator
+           * has the figures. Removable in the box like anything else.
+           */
+          initialAttachments={simulation ? [simulation.file] : undefined}
+          /* And whatever the firm's own covering template asked for that this account could
+             not answer, named rather than left standing in the middle of a sentence. */
+          initialMissing={simulation?.missing}
+          /*
            * No quoted history, on a reply or anything else. The box starts empty.
            *
            * Quoting looked helpful and was not. A debtor's reply already carries their own
@@ -1372,7 +1435,9 @@ export function AccountDetail() {
            * word. The message being answered is on the page behind this modal anyway.
            */
           inReplyTo={replyTo?.messageId ?? null}
-          contextNote={`Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). Their reply comes back to this account on its own and is charged R13 under item 6.`}
+          contextNote={simulation
+            ? `The payment simulation is attached. Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). It is a simulation, so nothing is recorded as an arrangement until you record one.`
+            : `Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). Their reply comes back to this account on its own and is charged R13 under item 6.`}
           onClose={() => { setComposeTo(null); startCompose() }}
           onSent={(rawSubject, bodyText, messageId, from) => {
             const to = composeTo
@@ -2055,7 +2120,7 @@ export function PaymentProgressBar({ progress }: { progress: PaymentProgress }) 
  * never touches a balance — it is kept or it is broken, and a person says which. Matching one
  * against an incoming payment is the collections engine's job, and that does not exist yet.
  */
-function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement, paidSoFar, position, letterValues, letterReference }: {
+function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement, paidSoFar, position, letterValues, letterReference, audience, onEmailSimulation }: {
   accountId: string
   promises: PromiseToPay[]
   userName: string | null
@@ -2085,6 +2150,15 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
   letterValues: Record<string, string>
   /** What the debtor knows the account by. Goes in the PDF's filename, not in the letter. */
   letterReference: string | null
+  /** Which half of the covering email the debtor gets. See RepaymentCalculator. */
+  audience?: 'individual' | 'company' | null
+  /**
+   * THE CALCULATOR'S SIMULATION, ON ITS WAY TO THE COMPOSE BOX.
+   *
+   * PASSED STRAIGHT THROUGH, because the box it opens belongs to the page above this panel: one
+   * compose modal on the account, one place that sends, one place that raises item 1(a).
+   */
+  onEmailSimulation?: React.ComponentProps<typeof RepaymentCalculator>['onEmail']
 }) {
   /*
    * The arrangement is chosen first, and the amount follows from it.
@@ -2276,6 +2350,20 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
               /* What has already been paid, for the progress bar. The same figure the statement
                  above shows, off the same breakdown. */
               paidSoFar={paidSoFar}
+              /* Which half of the covering email the debtor gets -- "Dear" against "To the
+                 directors of", the same split as every other collections template. */
+              audience={audience}
+              /*
+               * AND THE PRESS THAT SENDS IT. The calculator draws the PDF and merges the firm's
+               * own covering wording; this opens the compose box with both already on it, so what
+               * goes out is read by a person before it goes and is charged by the one path that
+               * charges every email on this account.
+               *
+               * TO THE DEBTOR'S OWN ADDRESS, not to whoever was last composed to. Empty where the
+               * account has none, which leaves the box asking for it rather than silently
+               * addressing a simulation to nobody.
+               */
+              onEmail={onEmailSimulation}
             />
           )}
           <button type="submit" disabled={busy || !arrangement || !(Number(amount) > 0) || !dueOn || !!problem}

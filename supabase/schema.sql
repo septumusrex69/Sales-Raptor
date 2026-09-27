@@ -9492,3 +9492,76 @@ end;
 $$;
 
 grant execute on function public.workflow_take_draft(uuid) to authenticated;
+
+-- ---------- The covering email for a payment simulation ----------
+--
+-- THE FIRM WROTE THIS ONE OUT and it goes with the document the calculator builds. Their own note
+-- on when it is sent: "this is before you conclude the payment arrangement" -- so it is the only
+-- collections email in the library that is about something that has not happened.
+--
+-- IT QUOTES {{ptp_amount}} FOR THE INSTALMENT, at the firm's instruction, and two fields of its
+-- own for the rest. See MERGE_FIELDS: {{sim_start}} is where the projection begins and never moves,
+-- which is what makes it a different fact from {{ptp_date}} -- the earliest instalment not yet paid,
+-- which moves as payments come in.
+--
+-- AND IT HOLDS IF IT IS PICKED COLD. Nothing on an account answers {{sim_frequency}} or
+-- {{sim_start}} unless a simulation is being sent, so choosing this template in the compose box on
+-- its own reports them as missing -- which is the right answer, because the attachment it promises
+-- can only be built where the figures are.
+--
+-- THE CASE NUMBER, NOT THE CLIENT'S REFERENCE. The firm's draft merged {{reference}} under a line
+-- labelled "Case reference", and in Raptor's vocabulary those are two different numbers: the case
+-- number is ours and unique, the client's reference is not -- 5 013 of them are used on more than
+-- one account. The attached document quotes the case number as its PAYMENT REFERENCE, and a
+-- covering email quoting a different number from its own attachment is how a payment is allocated
+-- to the wrong file.
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'individual', 'text', 'Payment simulation (individual)',
+  'Payment simulation attached - case reference {{case_number}}',
+  'Dear {{debtor_name}}
+
+Case reference: {{case_number}}
+
+Following our conversation, attached is a simulation of what it would cost to settle this account by paying {{ptp_amount}} {{sim_frequency}}, starting {{sim_start}}.
+
+It is a simulation, not a demand, an agreement or a statement of your account. It shows what different payment amounts would look like side by side, so that you can see what a longer arrangement costs against a shorter one.
+
+Please read the note at the top of it. The fees prescribed in Annexure B to the Debt Collectors Act 114 of 1998 are not included in any of the figures. Those fees are charged on the account as the collection work is done, so the amount you actually pay will be higher than the totals shown.
+
+If one of the options works for you, call {{collector_name}} and we will set it up. An arrangement only exists once it is agreed with us and confirmed in writing.
+
+Direct line: {{collector_phone}}
+Office line: {{firm_phone}}
+Email: {{collector_email}}
+
+Yours faithfully
+
+{{collector_name}}
+{{firm_name}}', 'email-ptp-simulation-individual', true, null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'company', 'text', 'Payment simulation (company)',
+  'Payment simulation attached - case reference {{case_number}}',
+  'To the directors of {{debtor_name}}
+
+Case reference: {{case_number}}
+Registration number: {{debtor_reg_no}}
+
+Following our conversation, attached is a simulation of what it would cost to settle the company''s account by paying {{ptp_amount}} {{sim_frequency}}, starting {{sim_start}}.
+
+It is a simulation, not a demand, an agreement or a statement of the account. It shows what different payment amounts would look like side by side, so that the company can see what a longer arrangement costs against a shorter one.
+
+Please read the note at the top of it. The fees prescribed in Annexure B to the Debt Collectors Act 114 of 1998 are not included in any of the figures. Those fees are charged on the account as the collection work is done, so the amount actually paid will be higher than the totals shown.
+
+If one of the options works for the company, call {{collector_name}} and we will set it up. An arrangement only exists once it is agreed with us and confirmed in writing.
+
+Direct line: {{collector_phone}}
+Office line: {{firm_phone}}
+Email: {{collector_email}}
+
+Yours faithfully
+
+{{collector_name}}
+{{firm_name}}', 'email-ptp-simulation-company', true, null)
+on conflict (seed_key) do nothing;

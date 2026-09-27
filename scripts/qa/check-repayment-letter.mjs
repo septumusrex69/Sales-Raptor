@@ -84,20 +84,53 @@ ok('it is set in Charter', /Charter/.test(doc.defaults.font))
 /* ---------- what the page claims about itself ---------- */
 
 /*
- * IT SAYS IT IS AN ILLUSTRATION IN THE OPENING SENTENCE, not in small print at the end. A debtor
+ * IT SAYS WHAT IT IS IN A NOTE AT THE TOP, not in small print at the end -- and the firm's own
+ * covering email sends the debtor there by name: "Please read the note at the top of it." A debtor
  * given a page of figures on a firm's letterhead treats it as settled unless the first thing they
  * read says otherwise.
  */
-ok('the first paragraph says it is not a demand', /not a demand and not an agreement/.test(text))
-ok('...and calls it an illustration', /illustration of the arrangement we discussed/.test(text))
-const opening = lettersText({ ...doc, blocks: doc.blocks.slice(0, 5) })
-ok('...and it is in the OPENING, not the small print', /not a demand/.test(opening))
+ok('it calls itself a simulation in the heading',
+  /PAYMENT SIMULATION: WHAT AN ARRANGEMENT WOULD COST/.test(text))
+ok('the note says it is not a statement of the account',
+  /THIS IS A SIMULATION, NOT A STATEMENT OF YOUR ACCOUNT/.test(text))
+ok('...and not a demand or an agreement either',
+  /not a demand, not an agreement and not a statement of account/.test(text))
+/*
+ * THE ANNEXURE B EXCLUSION, WHICH IS THE ONE THAT COSTS MONEY TO GET WRONG.
+ *
+ * Every figure on the page is capital, interest and the receipt fee on each payment -- and nothing
+ * else. The Act's prescribed fees for the work done on the account are raised as that work happens
+ * and are in no total here. A debtor handed "Total you would pay R 609,76" who then receives an
+ * account for more has been misled by a document the firm wrote, and the firm's own covering email
+ * says so four times.
+ */
+ok('the note excludes the Annexure B fees',
+  /fees prescribed in Annexure B to the Debt Collectors Act 114 of 1998 are not included/.test(text))
+ok('...and says the amount actually paid will be higher',
+  /amount you actually pay will therefore be higher/.test(text))
+/* AND AGAIN UNDER THE TOTALS, because that table is the part somebody photographs. */
+ok('...and the summary carries it on its own',
+  /Annexure B fees are excluded from every figure above/.test(text))
+/* THE NOTE IS AT THE TOP. The block window is generous because the address table, the name and the
+   identity paragraph come first; it is still nowhere near the small print. */
+const opening = lettersText({ ...doc, blocks: doc.blocks.slice(0, 8) })
+ok('...and it is in the OPENING, not the small print',
+  /not a demand, not an agreement/.test(opening))
+ok('...with the Annexure B exclusion up there too',
+  /Annexure B/.test(opening))
+
+/* AND A SECTION SPELLING OUT WHAT IS LEFT OUT, which is what the covering email points at. */
+ok('it lists what the figures do not include', /What these figures do not include/.test(text))
+ok('...naming the Act by name', /Debt Collectors Act 114 of 1998 prescribes what a debt collector may charge/.test(text))
+ok('...and the collection work that has not happened yet',
+  /assume no further work is charged over the life of the arrangement/.test(text))
+ok('...and legal costs', /Legal costs, if the account goes further/.test(text))
 
 /* AND AGAIN AT THE END, where somebody who read only the figures will land. */
 ok('it says an arrangement exists only once confirmed in writing',
-  /only exists once it has been agreed with us and confirmed in writing/.test(text))
+  /an arrangement exists only once it is agreed with us and confirmed in writing/.test(text))
 ok('...that it is not a statement of the account',
-  /not a statement of your account/.test(text))
+  /not a statement of your account and do not replace one/.test(text))
 ok('...and that a missed payment ends it', /If a payment is missed the arrangement lapses/.test(text))
 
 /*
@@ -278,6 +311,41 @@ ok('...nor one whose payments are unknown',
   !/What you have paid so far/.test(lettersText(repaymentLetter({
     plan, balanceToday: 10200, each: 'a month', money, paidSoFar: 0,
   }))))
+
+/* ---------- one document, two moments ---------- */
+
+/*
+ * THE SAME PAGE GOES OUT TWICE AND THE WORDS HAVE TO SAY WHICH TIME IT IS.
+ *
+ * From the calculator it is a SIMULATION -- the firm: "this is before you conclude the payment
+ * arrangement" -- and calling it a schedule would hand a debtor a page of figures that reads as
+ * settled. It goes again behind the confirmation email once the arrangement is recorded, and there
+ * the opposite is true: "simulation" would read as though the firm had not yet agreed to what it
+ * had just agreed to.
+ */
+const agreed = repaymentLetter({ plan, balanceToday: 10200, each: 'a month', money, purpose: 'schedule' })
+const agreedText = lettersText(agreed)
+ok('the confirmation copy is a schedule, not a simulation',
+  /YOUR PAYMENT ARRANGEMENT: WHAT IT WILL COST/.test(agreedText))
+ok('...and never calls itself a simulation', !/simulation/i.test(agreedText))
+ok('...and the running foot says so on every page',
+  /^Payment arrangement schedule /.test(agreed.runningFoot ?? ''))
+ok('the calculator copy is a simulation', /^Payment simulation /.test(doc.runningFoot ?? ''))
+/* A SIMULATION UNLESS THE CALLER SAYS OTHERWISE, which is the safer of the two readings: it is the
+   one that claims less, and it is what the calculator sends nearly every time. */
+ok('...which is what an unmarked one is',
+  (repaymentLetter({ plan, balanceToday: 10200, each: 'a month', money }).runningFoot ?? '')
+    === (repaymentLetter({ plan, balanceToday: 10200, each: 'a month', money, purpose: 'simulation' }).runningFoot ?? ''))
+/*
+ * BUT THE EXCLUSION IS ON BOTH. It is a fact about the ARITHMETIC rather than about the moment --
+ * neither version includes the fees the account will be charged as the work is done -- and a
+ * confirmed arrangement is the one a debtor is MORE likely to treat as the final figure.
+ */
+ok('the Annexure B exclusion is on the confirmation copy too',
+  /fees prescribed in Annexure B to the Debt Collectors Act 114 of 1998 are not included/.test(agreedText))
+ok('...including the line under the totals',
+  /Annexure B fees are excluded from every figure above/.test(agreedText))
+ok('...and the section spelling it out', /What these figures do not include/.test(agreedText))
 
 /* ------------------------------------------------------------------ */
 

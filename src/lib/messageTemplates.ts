@@ -359,6 +359,33 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
      */
     { key: 'ptp_paid', label: 'The payment just received', sample: 'R 2,500.00' },
     /*
+     * AND THE TWO FIELDS OF A SIMULATION, WHICH IS AN ARRANGEMENT THAT DOES NOT EXIST YET.
+     *
+     * THE FIRM: "this is before you conclude the payment arrangement." The covering email goes out
+     * while the collector is still negotiating -- "attached is a simulation of what it would cost
+     * to settle this account by paying {{ptp_amount}} {{sim_frequency}}, starting {{sim_start}}" --
+     * so there is no promise on the account to read any of it off.
+     *
+     * THE INSTALMENT REUSES {{ptp_amount}}, at the firm's own instruction, and that is the right
+     * call rather than a saving: it is the same fact in the same words, and a second field meaning
+     * "the amount, but hypothetically" is one more thing for somebody to pick wrongly on a
+     * template. What fills it is the figure in the calculator rather than the next unpaid
+     * instalment -- the caller decides which, and on a simulation there is no arrangement for
+     * nextUnpaid to read.
+     *
+     * {{sim_start}} IS NOT {{ptp_date}} AND MUST NOT BECOME IT. ptp_date is the earliest instalment
+     * not yet paid, so on a live arrangement it MOVES as payments come in -- which is exactly what
+     * every one of the five arrangement notices needs. A simulation's start date is where the
+     * projection begins and never moves; merged from ptp_date, a simulation re-sent a month later
+     * would quote a different starting date over the same totals.
+     *
+     * NEITHER IS OPTIONAL. An optional field takes its LINE with it, and the firm's rule for that
+     * is a fact the book cannot answer on most accounts. "paying R 2,500.00 , starting" is not a
+     * thinner sentence, it is a broken one, and the placeholder standing is what holds the message.
+     */
+    { key: 'sim_frequency', label: 'How often the simulated payment would be made', sample: 'a month' },
+    { key: 'sim_start', label: 'The day the simulated payments would start', sample: '5 October 2026' },
+    /*
      * THE FIVE THE LETTERS NEED AND THE SMSs NEVER DID.
      *
      * `handover_date` is the first station on the notice's timeline -- "account handed to us" --
@@ -492,6 +519,10 @@ export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
      and these two are what was agreed to pay it off. Grouped apart so a writer reaching for "the
      amount" is not offered {{balance}} and {{ptp_amount}} side by side. */
   { title: 'The arrangement', keys: ['ptp_amount', 'ptp_date', 'ptp_paid'] },
+  /* APART FROM THE ARRANGEMENT, because a simulation is not one -- it is what an arrangement WOULD
+     cost, sent while there is still nothing agreed. Grouped together so a writer reaching for the
+     starting date of a live arrangement is not offered {{sim_start}} beside {{ptp_date}}. */
+  { title: 'The payment simulation', keys: ['sim_frequency', 'sim_start'] },
   /* APART FROM THE ACCOUNT, for two reasons. {{dispute_days_left}} is a count and {{respond_by}}
      is a date, and offered side by side under one heading they read as alternatives rather than as
      two halves of one period. And {{dispute_summary}} is the only field in the collections
@@ -995,6 +1026,16 @@ export function mergeValuesFor(input: {
    */
   nextInstalment?: { amount: number; dueOn: string } | null
   /**
+   * THE OFFER BEING SIMULATED, where this is a simulation rather than a notice.
+   *
+   * Absent on every other message, which is what leaves {{sim_frequency}} and {{sim_start}}
+   * unresolved so the two of them hold a template that has no business quoting them. The caller
+   * passes `nextInstalment` alongside it with the figure being TRIED rather than the one owed --
+   * on a simulation there is no arrangement for nextUnpaid to read, and the firm's own wording
+   * reuses {{ptp_amount}} for it.
+   */
+  simulation?: { frequency: string; startOn: string } | null
+  /**
    * THE PAYMENT A RECEIPT IS ABOUT: the newest unreversed payment on the account, or null where
    * there is none. See `ptp_paid` above for why it cannot be the instalment amount.
    */
@@ -1138,6 +1179,13 @@ export function mergeValuesFor(input: {
        and prints R 0.00 on purpose -- there, zero is the answer to "what have they paid". */
     ptp_paid: input.paymentReceived === null || input.paymentReceived === undefined
       ? null : input.money(input.paymentReceived),
+    /* NULL EVERYWHERE EXCEPT ON A SIMULATION, which is the only thing that has these -- and null is
+       what leaves the placeholder standing rather than sending a debtor a sentence with a gap in
+       it. The frequency arrives already in the firm's own words ("a month", "a week"), the same
+       phrase the calculator on the screen is using, so the page and the covering email cannot
+       describe one offer two ways. */
+    sim_frequency: some(input.simulation?.frequency),
+    sim_start: input.simulation?.startOn ? longDate(input.simulation.startOn) : null,
     /* Straight through. The phrasing of the count is disputeWindow's, the two dates go through
        longDate like every other date a debtor reads, and the summary is the collector's own words
        untouched -- a renderer tidying up somebody's note about a disputed account would be

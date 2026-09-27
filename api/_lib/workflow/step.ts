@@ -331,6 +331,11 @@ export async function runOneStep(
     if (repaymentLetterRefusal(plan) !== null) return null
     return repaymentLetter({
       plan,
+      /* A SCHEDULE HERE, NOT A SIMULATION, and it is the only caller that says so. This one rides
+         with the CONFIRMATION -- the arrangement has been agreed and recorded, and a page headed
+         "payment simulation" would read as the firm still weighing up what it had just agreed to.
+         The calculator's copy goes out mid-negotiation and is the other one. */
+      purpose: 'schedule',
       money: moneyZa,
       each: recurring.arrangement === 'weekly' ? 'a week' : 'a month',
       balanceToday: balance.balance,

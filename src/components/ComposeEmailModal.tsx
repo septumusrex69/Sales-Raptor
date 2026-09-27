@@ -42,6 +42,8 @@ export function ComposeEmailModal({
   letterContext,
   initialSubject,
   initialBody,
+  initialAttachments,
+  initialMissing,
   quotedHtml,
   contextNote,
   inReplyTo,
@@ -100,6 +102,30 @@ export function ComposeEmailModal({
    * quoting it again opened the box with two layers of "> " before the agent typed anything.
    */
   initialBody?: string
+  /**
+   * FILES THE BOX OPENS WITH, already drawn.
+   *
+   * FOR THE ONE DOCUMENT THAT CANNOT BE PICKED FROM THE LIBRARY. Every other attachment here is a
+   * stored letter merged against the account, and the picker handles those. A payment simulation
+   * is built out of ARITHMETIC -- its length is the answer -- and the only screen that has the
+   * figures is the calculator beside the promise form. So the calculator draws the PDF and opens
+   * this box with it already on the message, rather than this box learning how to run a
+   * projection.
+   *
+   * SEEDED, NOT LOCKED. It goes into the same `files` list as everything else, which means it can
+   * be removed like everything else -- a collector who opens the box, decides the figures are
+   * wrong and writes an ordinary email instead must not be left attaching a simulation they no
+   * longer mean.
+   */
+  initialAttachments?: Attached[]
+  /**
+   * Fields the caller's own merge could not fill, where it merged the wording itself.
+   *
+   * SEEDED FOR THE SAME REASON THE PICKER SETS IT: a covering email arriving with "{{sim_start}}"
+   * in the middle of a sentence reads as a mistake somebody made rather than as a field the app
+   * could not answer, and the difference is whether the collector fixes it or sends it.
+   */
+  initialMissing?: string[]
   /**
    * The original, as MARKUP, to be sent underneath whatever is typed.
    *
@@ -183,11 +209,13 @@ export function ComposeEmailModal({
   useEffect(() => { void fetchFirmSettings().then(setFirm) }, [])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [files, setFiles] = useState<Attached[]>([])
+  /* Seeded from the caller and then owned here. The initialiser runs once, so a re-render cannot
+     put a removed attachment back on the message. */
+  const [files, setFiles] = useState<Attached[]>(initialAttachments ?? [])
   /* Named once, when the template lands — not recomputed as the writer edits, because they may
      well be typing the missing figure in by hand and a warning that will not go away is one
      people learn to look past. */
-  const [missing, setMissing] = useState<string[]>([])
+  const [missing, setMissing] = useState<string[]>(initialMissing ?? [])
   /* Non-null while the letter a chosen template carries is being drawn into a PDF. The pick is
      not finished until it is: a covering email that says "please find attached" and attaches
      nothing is worse than no template at all. */

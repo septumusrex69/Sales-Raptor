@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, ChevronDown, FileDown, Info, Loader2 } from 'lucide-react'
+import { AlertTriangle, ChevronDown, FileDown, Info, Loader2, Mail } from 'lucide-react'
 import { letterPdfBytes } from '../../lib/letterAttachment.ts'
-import { letterFilename } from '../../lib/letterPdf.ts'
+import { letterFilename, toBase64 } from '../../lib/letterPdf.ts'
 import { repaymentLetter, repaymentLetterRefusal } from '../../lib/repaymentLetter.ts'
 import type { BalanceInput } from '../../lib/accountBalance.ts'
 import type { Recurring } from '../../lib/arrangements.ts'
@@ -10,6 +10,9 @@ import {
 } from '../../lib/repaymentPlan.ts'
 import { moneyProgress, progressPercent } from '../../lib/paymentProgress.ts'
 import { shortDate } from '../../lib/dateLabels.ts'
+import { fetchLibrary } from '../../lib/templateLibrary.ts'
+import { longDate, renderTemplate } from '../../lib/messageTemplates'
+import type { AttachedFile } from '../../lib/letterAttachment.ts'
 
 /**
  * WHAT THE OFFER ON THE TABLE ACTUALLY DOES, WHILE THE COLLECTOR IS STILL ON THE CALL.
@@ -32,7 +35,7 @@ import { shortDate } from '../../lib/dateLabels.ts'
  * however the receipt fee is still applicable" -- is on the screen, because the number goes to a
  * debtor and an account that is charged for a call next week will not match it.
  */
-export function RepaymentCalculator({ account, amount, schedule, money, values, reference, balanceToday, paidSoFar }: {
+export function RepaymentCalculator({ account, amount, schedule, money, values, reference, balanceToday, paidSoFar, audience, onEmail }: {
   /** The statement's own assembly, so this cannot be a second opinion about the same money. */
   account: Omit<BalanceInput, 'accrueTo'>
   amount: number
@@ -57,9 +60,39 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
    * 100% would tell them they were.
    */
   paidSoFar?: number
+  /** Which half of the library the covering email comes from. Undefined falls back to the
+      individual wording, which is what 97% of the book is. */
+  audience?: 'individual' | 'company' | null
+  /**
+   * SEND IT TO THE DEBTOR, rather than download it and attach it by hand.
+   *
+   * THE FIRM: "if you click on that, it sends it to the debtor as an email and it charges it as
+   * well. So you can send it from the emails or you can send it from the promise to pay section."
+   *
+   * HANDED UP RATHER THAN SENT FROM HERE, and the difference is where the fee is raised. The
+   * account's own compose box already sends through the collector's mailbox, files the message on
+   * the account and charges item 1(a) -- one path, one charge, one record. A second sender here
+   * would be a second place that has to remember the R25, and the one that forgot it would be the
+   * one nobody was watching.
+   *
+   * SO THIS OPENS THE BOX WITH EVERYTHING IN IT: the wording merged from the firm's own template,
+   * and the simulation already drawn and attached. The collector reads it and presses Send, which
+   * is right for a page of figures going to a debtor mid-negotiation -- and is one press, not
+   * eleven.
+   */
+  onEmail?: (sim: {
+    file: AttachedFile
+    /** The account's values with the three the simulation answers overlaid. See simValues. */
+    values: Record<string, string>
+    subject: string
+    body: string
+    /** Fields the firm's template asked for that nothing could fill. Shown, never swallowed. */
+    missing: string[]
+  }) => void
 }) {
   const [showAll, setShowAll] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [sending, setSending] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
   /*
    * A FIGURE TO TRY, WHICH IS NOT THE ONE BEING RECORDED.
@@ -119,40 +152,128 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
    */
   const refusal = repaymentLetterRefusal(plan)
 
+  /*
+   * THE THREE FIELDS A SIMULATION ANSWERS AND NOTHING ELSE ON THE ACCOUNT CAN.
+   *
+   * The firm: "this is before you conclude the payment arrangement" -- so there is no promise on
+   * the account for mergeValuesFor to read, and {{ptp_amount}} would stand unresolved on the very
+   * email that is about it. These are the figures being TRIED, which is what the collector is
+   * talking about on the call.
+   *
+   * {{ptp_amount}} IS REUSED RATHER THAN DUPLICATED, at the firm's instruction. It is the same
+   * fact in the same words; a second field meaning "the amount, but hypothetically" is one more
+   * thing to pick wrongly on a template.
+   *
+   * AND `money` IS THE CALLER'S, the one every other figure in this panel and on the PDF goes
+   * through -- so the amount in the covering email and the amount in the attachment are formatted
+   * by one function and cannot read as two systems.
+   */
+  const simValues = values && plan ? {
+    ...values,
+    ptp_amount: money(plan.rows[0].amount),
+    sim_frequency: each,
+    sim_start: longDate(plan.rows[0].dueOn),
+  } : null
+
+  /* Built in one place and drawn twice -- downloaded, and attached to the covering email. Written
+     out at both, the page the collector checks and the page the debtor receives could differ. */
+  function simulation() {
+    if (!plan) return null
+    return repaymentLetter({
+      plan, money, each, balanceToday: balanceToday ?? plan.rows[0].balanceAfter + plan.rows[0].offDebt,
+      /* The same two the screen is showing, so the page the debtor reads and the panel the
+         collector quoted from are one set of figures. */
+      faster: ladder,
+      paidSoFar,
+    })
+  }
+
+  /*
+   * THROUGH letterPdfBytes, which is what draws every other letter this firm sends: it fetches
+   * the letterhead as bytes, embeds Charter, and refuses a document whose merge fields this
+   * account cannot fill. Drawn any other way this simulation would be the one PDF that does not
+   * come out on the firm's paper.
+   */
+  async function simulationPdf(): Promise<Uint8Array | null> {
+    const doc = simulation()
+    if (!doc || !simValues) return null
+    return letterPdfBytes({
+      doc, scope: 'collections', values: simValues, filled: true, name: 'The payment simulation',
+    })
+  }
+
   async function download() {
     if (!plan || !values) return
     setSaving(true); setFailed(null)
     try {
-      const doc = repaymentLetter({
-        plan, money, each, balanceToday: balanceToday ?? plan.rows[0].balanceAfter + plan.rows[0].offDebt,
-        /* The same two the screen is showing, so the page the debtor reads and the panel the
-           collector quoted from are one set of figures. */
-        faster: ladder,
-        paidSoFar,
-      })
-      /*
-       * THROUGH letterPdfBytes, which is what draws every other letter this firm sends: it fetches
-       * the letterhead as bytes, embeds Charter, and refuses a document whose merge fields this
-       * account cannot fill. Drawn any other way this schedule would be the one PDF that does not
-       * come out on the firm's paper.
-       */
-      const bytes = await letterPdfBytes({
-        doc, scope: 'collections', values, filled: true, name: 'The repayment schedule',
-      })
+      const bytes = await simulationPdf()
+      if (!bytes) return
       const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }))
       const a = document.createElement('a')
       a.href = url
-      a.download = letterFilename('Payment arrangement', reference ?? null)
+      a.download = letterFilename('Payment simulation', reference ?? null)
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
     } catch (e) {
-      /* The reason verbatim: "the repayment schedule was not attached: {{firm_bank}} cannot be
+      /* The reason verbatim: "the payment simulation was not attached: {{firm_bank}} cannot be
          filled from this account" says what to go and fix, and a generic failure does not. */
       setFailed(e instanceof Error ? e.message : String(e))
     } finally {
       setSaving(false)
+    }
+  }
+
+  /**
+   * THE SAME DOCUMENT, ON ITS WAY TO THE DEBTOR.
+   *
+   * THE WORDING IS THE FIRM'S OWN TEMPLATE, merged here rather than typed by the collector: it is
+   * the message that tells the debtor this is a simulation, that an arrangement exists only once
+   * it is confirmed in writing, and that the Annexure B fees are not in any of the figures. A
+   * collector writing that from memory on a call will leave out the third one.
+   *
+   * THE AUDIENCE PICKS THE HALF, like every other collections template -- "Dear" against "To the
+   * directors of", an identity number against a registration number.
+   *
+   * IT DOES NOT SEND. See onEmail: the account's compose box is the one path that sends through
+   * the collector's mailbox, files the message and raises item 1(a), and a second sender here
+   * would be a second place that has to remember the R25.
+   */
+  async function emailIt() {
+    if (!plan || !simValues || !onEmail) return
+    setSending(true); setFailed(null)
+    try {
+      const wanted = audience === 'company'
+        ? 'email-ptp-simulation-company'
+        : 'email-ptp-simulation-individual'
+      const template = (await fetchLibrary('collections')).find((t) => t.seedKey === wanted)
+      if (!template) {
+        setFailed('The covering email for a payment simulation is not in the library.')
+        return
+      }
+      const bytes = await simulationPdf()
+      if (!bytes) return
+      const subject = renderTemplate(template.subject, simValues)
+      const body = renderTemplate(template.body, simValues)
+      onEmail({
+        file: {
+          filename: letterFilename('Payment simulation', reference ?? null),
+          contentType: 'application/pdf',
+          size: bytes.length,
+          content: toBase64(bytes),
+        },
+        values: simValues,
+        subject: subject.text,
+        body: body.text,
+        /* Both halves, deduplicated: an unresolved field in the subject is as bad as one in the
+           body, and the box warns once rather than twice about the same key. */
+        missing: [...new Set([...subject.missing, ...body.missing])],
+      })
+    } catch (e) {
+      setFailed(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSending(false)
     }
   }
 
@@ -372,15 +493,48 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
       */}
       {values && (
         <div className="mt-2 border-t border-slate-200 pt-2">
-          <button type="button" onClick={() => { void download() }} disabled={saving || refusal !== null}
-            title={refusal ?? 'A PDF on the firm’s letterhead, to send the debtor'}
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
-              refusal !== null
-                ? 'cursor-not-allowed border-dashed border-slate-200 text-slate-300'
-                : 'border-[#c9a052] bg-white text-navy-950 hover:bg-gold-100'}`}>
-            {saving ? <Loader2 size={11} className="animate-spin" /> : <FileDown size={11} />}
-            Schedule as a PDF
-          </button>
+          {/*
+            TWO WAYS OUT OF THIS PANEL, AND THE FIRM ASKED FOR THE SECOND: "if you click on that, it
+            sends it to the debtor as an email and it charges it as well."
+
+            EMAIL FIRST, because it is the one they will press. The download is what a collector
+            uses to read the page before they send it, or to give it to somebody over a counter.
+
+            BOTH REFUSED FOR THE SAME REASON AND AT THE SAME MOMENT. A simulation that never
+            settles the account is not a document to download OR to send, and a button offered and
+            then refused is worse than one that is not there.
+          */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {onEmail && (
+              <button type="button" onClick={() => { void emailIt() }} disabled={sending || saving || refusal !== null}
+                title={refusal ?? 'Opens an email to the debtor with the simulation attached'}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
+                  refusal !== null
+                    ? 'cursor-not-allowed border-dashed border-slate-200 text-slate-300'
+                    : 'border-[#c9a052] bg-navy-950 text-white hover:bg-navy-900'}`}>
+                {sending ? <Loader2 size={11} className="animate-spin" /> : <Mail size={11} />}
+                Email the simulation
+              </button>
+            )}
+            <button type="button" onClick={() => { void download() }} disabled={saving || sending || refusal !== null}
+              title={refusal ?? 'A PDF on the firm’s letterhead, to send the debtor'}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
+                refusal !== null
+                  ? 'cursor-not-allowed border-dashed border-slate-200 text-slate-300'
+                  : 'border-[#c9a052] bg-white text-navy-950 hover:bg-gold-100'}`}>
+              {saving ? <Loader2 size={11} className="animate-spin" /> : <FileDown size={11} />}
+              Download it
+            </button>
+          </div>
+          {/* WHAT THE PRESS COSTS, SAID BEFORE IT. Every other place in Raptor that raises an
+              Annexure B fee says so on the control, because a collector deciding whether to send
+              something is deciding whether to charge a debtor for it. */}
+          {onEmail && refusal === null && (
+            <p className="mt-1 text-[11px] leading-snug text-slate-500">
+              The email is charged R25 under item 1(a), like any other. Nothing is sent until you
+              press Send.
+            </p>
+          )}
           {/* The reason it cannot be made, beside the button rather than in a tooltip only: on the
               iPad the firm works on there is no hover to reveal one. */}
           {refusal && <p className="mt-1 text-[11px] leading-snug text-slate-500">{refusal}</p>}
