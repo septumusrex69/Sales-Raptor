@@ -8016,3 +8016,168 @@ values ('sms', 'collections', 'company', 'text', 'Arrangement lapsed (company)',
   '{{debtor_name}}, {{ptp_amount}} was not received on {{ptp_date}}. Arrangement on {{case_number}} lapsed. Pay within 48 hours. {{firm_phone}}', 'sms-ptp-default-company', true)
 on conflict (seed_key) do nothing;
 
+
+
+-- ============================================================================
+-- A PROMISE STARTS THE ARRANGEMENT WORKFLOW, THE WAY AN ALLOCATION STARTS THE HANDOVER.
+--
+-- THE FIRM, HAVING RECORDED ONE: "I've recorded a promise now on Stella Artwa, but it didn't
+-- trigger the workflow and what was necessary for the workflows."
+--
+-- THEY WERE RIGHT AND THE HALF THAT WORKED HID THE HALF THAT DID NOT. Recording the promise DID
+-- pause the section 129 -- workflow_pause_on_promise fired and the run went to `held` -- so the
+-- screen changed and something clearly happened. What did not happen is the arrangement's own
+-- sequence, because NOTHING IN THE SYSTEM STARTED A `promise_due` WORKFLOW. Only two trigger
+-- kinds could ever begin: `allocated`, which workflow_start_on_allocation starts in here, and
+-- `by_hand`, which the collector's button starts through api/_lib/workflow/start. `promise_due`
+-- and `dispute_logged` were vocabulary with nothing behind them -- a version could be published
+-- against either and would sit there for ever.
+--
+-- ONCE PER LIVE ARRANGEMENT, NOT ONCE PER ACCOUNT EVER, and that is the one line where this
+-- deliberately differs from the allocation trigger beside it. A handover happens to an account
+-- once; an arrangement happens as often as a debtor makes one. A debtor who broke an arrangement
+-- in March and agrees a new one in August must be sent the new confirmation -- so the guard is a
+-- LIVE run rather than any run, which is also exactly what the partial unique index on
+-- workflow_runs already enforces. Written the other way, the second arrangement would be silent.
+--
+-- INSERT ONLY. An arrangement is agreed once; editing the row afterwards is a correction to what
+-- was agreed, not a new agreement, and a second confirmation email off a typo being fixed is a
+-- second promise in the debtor's inbox.
+-- ============================================================================
+create or replace function public.workflow_start_on_promise()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  /* Only a live one. A promise recorded already kept or already broken is history being written
+     down -- an import, a correction -- and history does not send anybody an email. */
+  if new.status <> 'open' then
+    return new;
+  end if;
+
+  insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+  select new.account_id, v.id, (now() at time zone 'Africa/Johannesburg')::date, new.created_by
+    from public.workflow_versions v
+   where v.state = 'active'
+     and v.trigger_kind = 'promise_due'
+     and not exists (
+       select 1 from public.workflow_runs r
+        where r.account_id = new.account_id
+          and r.version_id = v.id
+          and r.state in ('running', 'held')
+     );
+
+  return new;
+end $$;
+
+comment on function public.workflow_start_on_promise() is
+  'Starts the active promise_due workflow when an arrangement is agreed. Once per LIVE run, not '
+  'once per account ever: a debtor who agrees a second arrangement is entitled to a second '
+  'confirmation.';
+
+revoke all on function public.workflow_start_on_promise() from public;
+
+drop trigger if exists promise_starts_workflow on public.promises_to_pay;
+create trigger promise_starts_workflow
+  after insert on public.promises_to_pay
+  for each row execute function public.workflow_start_on_promise();
+
+
+-- ============================================================================
+-- THE ARRANGEMENT WORKFLOW GETS THE WORDING THE FIRM WROTE FOR IT.
+--
+-- VERSION 1 WAS A SKELETON and it would have started and sent nothing. Its four nodes -- "Promise
+-- recorded", "Reminder the day before", "Payment due", "Outcome review" -- carried NO templates at
+-- all, because they were seeded to demonstrate the pause-and-resume scenarios before the firm had
+-- written any arrangement wording. Starting that version on a promise would have created a run of
+-- four review steps and put nothing in front of the debtor, which reads on screen exactly like a
+-- workflow that is working.
+--
+-- SO VERSION 2 IS THE FIRM'S OWN FIRST STEP: "On capture -- Confirmation of arrangement --
+-- email-ptp-confirmed-{audience}, then sms-ptp-confirmed-{audience}." The email goes first and the
+-- SMS follows it, which is their rule for every sequence they have drawn.
+--
+-- ONLY THAT STEP, AND THE REASON IS HONEST RATHER THAN CONVENIENT. The other four steps of the
+-- firm's chart -- the reminder two business days before, the one on the day, the receipt, the
+-- notice of default three business days after -- are dated from EACH INSTALMENT, not from the day
+-- the run starts, and a day number counted off the run cannot express that. A node anchored to an
+-- instalment is the next piece of work. Published with those steps dated off the run instead, a
+-- three-instalment arrangement would send one reminder and then go quiet.
+--
+-- A NEW VERSION RATHER THAN AN EDIT, because refuse_frozen_workflow stops a published version's
+-- nodes being changed -- which is the point of publishing one: what a file went through is a
+-- question an attorney asks eighteen months later. Created as a draft, filled, then activated.
+--
+-- AND THE OLD ONE IS ARCHIVED BEFORE THE NEW ONE IS PUBLISHED, not after: workflow_versions_one_active
+-- allows exactly one active version per workflow, so the other order is refused by the database.
+-- ============================================================================
+do $$
+declare
+  v_workflow uuid;
+  v_draft uuid;
+  v_phase uuid;
+begin
+  select w.id into v_workflow from public.workflows w where w.name = 'Promise to pay';
+  if v_workflow is null then
+    raise exception 'The Promise to pay workflow is not there.';
+  end if;
+
+  insert into public.workflow_versions (workflow_id, version, state, trigger_kind, day_unit, trigger_note)
+  values (
+    v_workflow,
+    (select coalesce(max(version), 0) + 1 from public.workflow_versions where workflow_id = v_workflow),
+    'draft',
+    'promise_due',
+    /* CALENDAR, because day 0 means "the day the arrangement was agreed" and nothing here counts
+       office days. The instalment-anchored steps will bring their own unit with them. */
+    'calendar',
+    'Starts itself the moment an arrangement is recorded on the account.'
+  )
+  returning id into v_draft;
+
+  insert into public.workflow_phases (version_id, name, ordinal, from_day, to_day)
+  values (v_draft, 'Confirming the arrangement', 0, 0, 0)
+  returning id into v_phase;
+
+  insert into public.workflow_nodes (
+    version_id, phase_id, key, kind, label, description, day, ordinal, channel,
+    needs_release, after_minutes, statutory, template_id, template_company_id
+  ) values
+  (
+    v_draft, v_phase, 'ptp-confirmed-email', 'communication',
+    'Confirmation of arrangement',
+    'Confirms the amount and the date, says the collection steps are held while it is kept, and '
+    'tells the debtor how the payments are reported to the credit bureaus.',
+    0, 0, 'email', false, null, false,
+    (select id from public.message_templates where seed_key = 'email-ptp-confirmed-individual'),
+    (select id from public.message_templates where seed_key = 'email-ptp-confirmed-company')
+  ),
+  (
+    v_draft, v_phase, 'ptp-confirmed-sms', 'communication',
+    'Confirmation of arrangement SMS',
+    'Says the arrangement is confirmed, so it must land after the email that confirms it.',
+    /* SEVEN MINUTES: the firm's rule is "the email sends 5 to 10 minutes before the SMS at every
+       step", and this is what pairs the two rows into one step of their chart. */
+    0, 1, 'sms', false, 7, false,
+    (select id from public.message_templates where seed_key = 'sms-ptp-confirmed-individual'),
+    (select id from public.message_templates where seed_key = 'sms-ptp-confirmed-company')
+  );
+
+  /* Refuse rather than publish a version that would send nothing -- the exact fault version 1 had. */
+  if exists (
+    select 1 from public.workflow_nodes n
+     where n.version_id = v_draft and n.channel is not null
+       and (n.template_id is null or n.template_company_id is null)
+  ) then
+    raise exception 'A message node has no template, so this version would send nothing.';
+  end if;
+
+  /* ARCHIVED, NOT DELETED: two runs of it exist and a run points at the version it followed. */
+  update public.workflow_versions
+     set state = 'archived'
+   where workflow_id = v_workflow and id <> v_draft and state = 'active';
+
+  update public.workflow_versions set state = 'active', published_at = now() where id = v_draft;
+end $$;

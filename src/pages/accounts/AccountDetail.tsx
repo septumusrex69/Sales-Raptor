@@ -2073,6 +2073,9 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
    * whole debt or a monthly instalment, so it could neither fill it in nor object to it. Asked
    * this way round a once-off can quote itself, and an instalment can be held to the balance.
    */
+  /* The caller's own session, so the confirmation is sent as them rather than waiting for the
+     morning sweep. See recordPromise's `accessToken`. */
+  const { session } = useAuth()
   const [arrangement, setArrangement] = useState<Arrangement | ''>('')
   const [amount, setAmount] = useState('')
   const [dueOn, setDueOn] = useState('')
@@ -2103,6 +2106,9 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
         dayOfMonth: arrangement === 'monthly' && !onLastDay ? Number(dueOn.slice(8, 10)) : null,
         dayOfWeek: arrangement === 'weekly' ? isoWeekday(dueOn) : null,
         actor: { id: userId, name: userName },
+        /* So the confirmation goes out on the press rather than on the morning sweep -- the
+           database starts the run, and this is what dates it and sends what is due. */
+        accessToken: session?.access_token ?? null,
       })
       message = chargeMessage(charge, PROMISE_ITEM_ID)
     })

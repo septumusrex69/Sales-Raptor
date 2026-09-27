@@ -51,8 +51,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const accountId = typeof (req.body ?? {}).accountId === 'string'
     ? ((req.body as { accountId: string }).accountId)
     : undefined
+  /*
+   * AND A MISSING SECRET IS NOT A PASS.
+   *
+   * THIS READ `!cronSecret || ...`, so an environment with CRON_SECRET unset treated EVERY caller
+   * as the timer: an unauthenticated POST to this route would date and send every due step on the
+   * whole book. CRON_SECRET is unset on the deployment today, which makes that a live hole rather
+   * than a theoretical one, and the fallback was the wrong way round -- an unconfigured
+   * environment should refuse more, not less.
+   *
+   * WITHOUT THE SECRET, ONLY A SESSION AND ONLY ONE ACCOUNT. The sweep stops until somebody sets
+   * it, which is visible and mendable; the app's own nudge -- a handover, an arrangement just
+   * agreed -- keeps working, because it carries a session and names its account. Setting
+   * CRON_SECRET restores the sweep and nothing else changes.
+   */
   const cronSecret = process.env.CRON_SECRET
-  const isCron = !cronSecret || req.headers.authorization === `Bearer ${cronSecret}`
+  const isCron = Boolean(cronSecret) && req.headers.authorization === `Bearer ${cronSecret}`
   if (!isCron) {
     const caller = await requireCaller(req, admin)
     if (!caller) {
@@ -60,7 +74,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return
     }
     if (!accountId) {
-      res.status(400).json({ error: 'Say which account. Only the timer sweeps the whole book.' })
+      res.status(400).json({
+        error: cronSecret
+          ? 'Say which account. Only the timer sweeps the whole book.'
+          : 'Say which account. The timer cannot sweep the book until CRON_SECRET is set.',
+      })
       return
     }
   }
