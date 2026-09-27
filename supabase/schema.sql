@@ -7617,3 +7617,93 @@ begin
      and left_reason = 'The amount was corrected, so the demand has to be re-issued';
   return new;
 end $$;
+
+/* ================================================================================
+ * A CORRECTED AMOUNT DOES NOT VOID THE DEMAND. THE DEFAULT DOES.
+ *
+ * THIS REVERSES THE DEFINITION ABOVE, and the firm was right to push back: "if the section 129
+ * stays in place, I believe. Tell me if you're right, because the guy disputed it. The dispute was
+ * right. The amount was changed, but everything else still stays in place."
+ *
+ * WHY THEY ARE RIGHT. Section 129(1)(a) requires notice of the DEFAULT and the proposal to refer
+ * the matter to a debt counsellor, ADR agent, consumer court or ombud. The amount is not the
+ * statutory content -- most notices state one, but that is not what makes the notice good, and
+ * the case law everyone cites (Sebola, Kubyana) is about DELIVERY rather than quantum. So where
+ * the debtor was in default either way and only the figure moved, the notice did its job: it told
+ * them they were in default and offered the routes out.
+ *
+ * WHERE IT DOES FALL AWAY IS NARROWER, and it is now its own answer: if the correction means
+ * there was NO DEFAULT -- the arrears were miscalculated and the debtor was up to date -- then
+ * the notice demanded remedy of something that was not owed. That one ends the sequence, and
+ * marks it re-issuable so a fresh demand can go if they default later.
+ *
+ * AND THE BALANCE LOOKS AFTER ITSELF. Every notice merges {{balance}} live, so a sequence that
+ * resumes on a corrected figure quotes the corrected figure from the next notice onward.
+ *
+ * WHAT THE FIRM SAID HAPPENS NEXT: "now the amount has been changed and the person should make an
+ * arrangement." Which is the promise rule doing its work -- an arrangement holds the sequence
+ * again, once, and the debtor is paying rather than being demanded at.
+ * ================================================================================ */
+alter table public.account_queries drop constraint if exists account_queries_outcome_effect_check;
+alter table public.account_queries
+  add constraint account_queries_outcome_effect_check
+  check (outcome_effect is null or outcome_effect in (
+    'no_change', 'withdrawn', 'amount_changed', 'no_longer_in_arrears'));
+
+comment on column public.account_queries.outcome_effect is
+  'What an upheld dispute did to the ACCOUNT. no_change and amount_changed both RESUME -- the '
+  'demand was good either way, because what a section 129 has to say is that the debtor is in '
+  'default, not what the figure is. withdrawn and no_longer_in_arrears end it.';
+
+create or replace function public.workflow_on_dispute_answered() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+declare v_upheld boolean;
+begin
+  if new.kind <> 'dispute' then return new; end if;
+
+  if new.in_writing and not coalesce(old.in_writing, false) and new.status <> 'closed' then
+    perform public.workflow_hold_account(
+      new.account_id, 'dispute', 'A dispute was raised in writing', new.id);
+    return new;
+  end if;
+
+  if new.status <> 'closed' or coalesce(old.status, '') = 'closed' then return new; end if;
+
+  v_upheld := new.outcome in ('valid', 'partly_valid');
+
+  /*
+   * THE SEQUENCE CARRIES ON unless the debt itself has gone. Not upheld; upheld with nothing
+   * changed; upheld with the amount corrected -- in every one of those the debtor was in default
+   * and was told so, which is what the notice had to do. The next notice quotes the corrected
+   * balance because every template merges it live.
+   *
+   * AN UPHELD DISPUTE WITH NO EFFECT RECORDED resumes too: that is the safe direction, and where
+   * the disputes answered before this column existed land.
+   */
+  if not v_upheld
+     or coalesce(new.outcome_effect, 'no_change') in ('no_change', 'amount_changed') then
+    perform public.workflow_resume_account(new.account_id, 'dispute_closed');
+    return new;
+  end if;
+
+  if new.outcome_effect = 'withdrawn' then
+    perform public.workflow_exit_account(
+      new.account_id, 'dispute', 'The client took the account back');
+    return new;
+  end if;
+
+  /*
+   * no_longer_in_arrears: the correction means there was no default to demand remedy of, so the
+   * notice asked for something that was not owed. It ends -- and it is marked re-issuable,
+   * because if this debtor falls into default later the firm needs a fresh section 129 and the
+   * once-per-account rule would otherwise refuse one for ever.
+   */
+  perform public.workflow_exit_account(
+    new.account_id, 'dispute', 'The account was not in arrears, so the demand fell away');
+  update public.workflow_runs
+     set reissue_allowed = true
+   where account_id = new.account_id
+     and state = 'left'
+     and left_reason = 'The account was not in arrears, so the demand fell away';
+  return new;
+end $$;

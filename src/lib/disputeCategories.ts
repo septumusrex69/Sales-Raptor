@@ -112,33 +112,48 @@ export const QUERY_OUTCOME_LABEL: Record<QueryOutcome, string> = {
 
 /**
  * WHAT AN UPHELD DISPUTE DID TO THE ACCOUNT, which is not the same question as whether it was
- * valid — and the firm named all three: "either the account can be withdrawn or the account can
- * stay with new terms and conditions... or the dispute can be valid but nothing changes."
+ * valid — and the firm named them: "either the account can be withdrawn or the account can stay
+ * with new terms and conditions. So, for example, the handover amount can change... or the
+ * dispute can be valid but nothing changes."
  *
- * IT DECIDES WHAT HAPPENS TO THE SEQUENCE, which is why it is a stored answer and not a sentence
- * typed in the box beside it. Nothing changed and the section 129 resumes; the client takes the
- * account back and it ends; the amount changed and it ends AND has to be issued again, because a
- * demand stating a figure the firm has since conceded was wrong never started a good clock.
+ * TWO OF THE FOUR CARRY ON AND TWO END IT, and which is which turns on ONE question: is the
+ * debtor still in default?
+ *
+ * A CORRECTED AMOUNT DOES NOT VOID THE DEMAND, and this reverses what was built first. Section
+ * 129(1)(a) requires notice of the DEFAULT and the proposal to refer the matter to a debt
+ * counsellor, ADR agent, consumer court or ombud. The amount is not the statutory content — most
+ * notices state one, but that is not what makes the notice good, and the case law everyone cites
+ * is about DELIVERY rather than quantum. The firm pushed back and were right: "the guy disputed
+ * it, the dispute was right, the amount was changed, but everything else still stays in place."
+ *
+ * AND THE BALANCE LOOKS AFTER ITSELF: every notice merges {{balance}} live, so a sequence that
+ * resumes on a corrected figure quotes the corrected figure from the next notice onward.
  */
-export type QueryEffect = 'no_change' | 'withdrawn' | 'amount_changed'
+export type QueryEffect = 'no_change' | 'amount_changed' | 'no_longer_in_arrears' | 'withdrawn'
 
 /**
  * THE WORDS AVOID A COLLISION THAT WOULD COST A DEMAND. `outcome` already has a 'withdrawn' and
  * it means the DEBTOR withdrew the dispute — the opposite of the firm's "the account can be
  * withdrawn". Two withdrawns on one screen is how somebody ends a sequence that should have
  * resumed, so neither of these says the word on its own.
+ *
+ * ORDERED COMMONEST FIRST, which is also safest first: the two that carry on, then the two that
+ * end it.
  */
 export const QUERY_EFFECT_LABEL: Record<QueryEffect, string> = {
   no_change: 'Nothing changes on the account',
+  amount_changed: 'The amount is corrected — still in arrears',
+  no_longer_in_arrears: 'The correction clears the arrears',
   withdrawn: 'The client takes the account back',
-  amount_changed: 'The amount is corrected',
 }
 
 export const QUERY_EFFECT_HINT: Record<QueryEffect, string> = {
   no_change: 'The debt stands. Any sequence that was paused carries on where it stopped.',
+  amount_changed: 'The section 129 stands — it said the debtor was in default, which was true, '
+    + 'and every notice after it quotes the corrected balance. The sequence carries on.',
+  no_longer_in_arrears: 'There was no default to demand remedy of, so the sequence ends. A fresh '
+    + 'section 129 can be issued if this account falls into arrears again.',
   withdrawn: 'Nothing more is ever sent. Everything still to come is cancelled.',
-  amount_changed: 'The sequence ends and a fresh section 129 can be issued on the new figure — '
-    + 'the one already sent quoted an amount the firm has now corrected.',
 }
 
 /* ---------- what kind of escalation this is ---------- */

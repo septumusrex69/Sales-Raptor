@@ -45,8 +45,14 @@ const fn = schema.slice(fnAt, schema.indexOf('$$;', fnAt) + 3)
 
 /* ------------------------------------------------ the three endings */
 
-check('there are three answers and no more',
-  Object.keys(QUERY_EFFECT_LABEL).join(','), 'no_change,withdrawn,amount_changed')
+/*
+ * FOUR ANSWERS, AND WHICH IS WHICH TURNS ON ONE QUESTION: is the debtor still in default?
+ * Ordered commonest first, which is also safest first -- the two that carry on, then the two
+ * that end it.
+ */
+check('there are four answers and no more',
+  Object.keys(QUERY_EFFECT_LABEL).join(','),
+  'no_change,amount_changed,no_longer_in_arrears,withdrawn')
 
 /*
  * NEITHER LABEL SAYS "WITHDRAWN" ON ITS OWN, and that is deliberate. `outcome` already has a
@@ -62,12 +68,28 @@ ok('...and does not collide with the debtor withdrawing the dispute',
    statutory sequence resumes, ends, or has to be issued again. */
 ok('nothing-changed says the sequence carries on', /carries on where it stopped/.test(QUERY_EFFECT_HINT.no_change))
 ok('...taking the account back says nothing more is sent', /Nothing more is ever sent/.test(QUERY_EFFECT_HINT.withdrawn))
-ok('...and a corrected amount says a fresh one can go', /fresh section 129 can be issued/.test(QUERY_EFFECT_HINT.amount_changed))
+/*
+ * A CORRECTED AMOUNT DOES NOT VOID THE DEMAND, and this reverses what was built first. Section
+ * 129(1)(a) requires notice of the DEFAULT and the proposal to refer the matter on; the amount is
+ * not the statutory content. The firm pushed back and were right: "the guy disputed it, the
+ * dispute was right, the amount was changed, but everything else still stays in place."
+ */
+ok('...a corrected amount says the demand stands', /section 129 stands/.test(QUERY_EFFECT_HINT.amount_changed))
+ok('...and that the next notices quote the new figure', /quotes the corrected balance/.test(QUERY_EFFECT_HINT.amount_changed))
+/* AND THE NARROW CASE WHERE IT DOES FALL AWAY: no default, so nothing to demand remedy of. */
+ok('...while clearing the arrears ends it', /no default to demand remedy of/.test(QUERY_EFFECT_HINT.no_longer_in_arrears))
+ok('...and says a fresh one can go later', /fresh\s+.?section 129 can be issued/.test(QUERY_EFFECT_HINT.no_longer_in_arrears))
 
 /* ------------------------------------------------ what the database does with them */
 
+/*
+ * THE SEQUENCE CARRIES ON UNLESS THE DEBT ITSELF HAS GONE. Not upheld; upheld with nothing
+ * changed; upheld with the amount corrected -- in every one the debtor was in default and was
+ * told so, which is what the notice had to do.
+ */
 ok('nothing changed resumes it',
-  /coalesce\(new\.outcome_effect, 'no_change'\) = 'no_change'[\s\S]{0,160}?workflow_resume_account/.test(fn))
+  /in \('no_change', 'amount_changed'\)[\s\S]{0,200}?workflow_resume_account/.test(fn))
+ok('...and so does a corrected amount', /'no_change', 'amount_changed'/.test(fn))
 /*
  * AND SO DOES AN UPHELD DISPUTE WITH NO EFFECT RECORDED, which is the safe direction and the one
  * the 11 already-answered disputes land in. Resuming a sequence that should have ended is visible
@@ -77,12 +99,15 @@ ok('...and so does one answered before the question existed', /coalesce\(new\.ou
 ok('the client taking it back ends it',
   /'withdrawn' then[\s\S]{0,200}?workflow_exit_account/.test(fn))
 ok('...in the firm’s words', /The client took the account back/.test(fn))
-ok('a corrected amount ends it too', /The amount was corrected, so the demand has to be re-issued/.test(fn))
+/* NO DEFAULT, NOTHING TO DEMAND REMEDY OF -- the one case where the notice does fall away. */
+ok('clearing the arrears ends it', /The account was not in arrears, so the demand fell away/.test(fn))
 ok('...and marks it for re-issue', /set reissue_allowed = true/.test(fn))
 /* ONLY THE RUNS THIS ENDED. Marked by account alone it would reopen a sequence that ended on
    payment in full months ago. */
 ok('...only the runs this ending ended',
-  /set reissue_allowed = true[\s\S]{0,200}?left_reason = 'The amount was corrected/.test(fn))
+  /set reissue_allowed = true[\s\S]{0,220}?left_reason = 'The account was not in arrears/.test(fn))
+/* AND A CORRECTED AMOUNT NO LONGER ENDS ANYTHING, which is what this reversed. */
+ok('a corrected amount ends nothing', !/The amount was corrected, so the demand has to be re-issued/.test(fn))
 
 /* ------------------------------------------------ and the fresh one can actually be started */
 
