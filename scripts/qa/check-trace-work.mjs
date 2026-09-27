@@ -429,8 +429,12 @@ ok('...labelled as one', /as next of kin/.test(workspace))
  * label, where nothing could group by it and a company's contacts were a flat run of numbers with
  * names buried in their captions. See check-contact-people.
  */
-ok('...filed under their own name', /personName: asNextOfKin \? item\.value : subjectName/.test(data))
-ok('...with the relationship as their role', /personRole: asNextOfKin \? 'Next of kin' : null/.test(data))
+ok('...filed under their own name',
+  /personName: item\.kind === 'link' \? item\.value : \(asNextOfKin \? item\.value : subjectName\)/.test(data))
+ok('...with the relationship as their role', /personRole: asNextOfKin \? 'Next of kin'/.test(data))
+/* AND ON A NUMBER RATHER THAN ON THEIR NAME. A linked person's finding carries the name in `value`
+   and the number in `label`; saved that way round the account held names nobody could dial. */
+ok('...on the number they were linked through', /value: linkedTo \?\? item\.value/.test(data))
 /*
  * NEVER PRIMARY FROM HERE. Which number a collector rings first is a decision about the whole
  * account, taken on the contact list where all of them are visible — not a side effect of

@@ -248,6 +248,36 @@ export function contactKindFor(kind: TraceItemKind): 'mobile' | 'phone' | 'work'
 }
 
 /**
+ * WHAT SAVING THIS FINDING WILL PUT ON THE ACCOUNT, in the words the account will use.
+ *
+ * THE FIRM: "here by the trace, it's also important to notify when you save something, what is
+ * it? Is it a work number? Is it the additional number? Is it an additional email? Is it a house
+ * number?" The button said "Save" and the row said nothing, so whether a number was about to land
+ * as a work line or a home line was a thing you found out afterwards by reading the contact list.
+ *
+ * THE SAME WORDS contactWhat GIVES, because it is the same fact and a reader meets it twice --
+ * once on the button and once on the row it produces. Two vocabularies for one thing is how "Home"
+ * and "Landline" end up on one screen.
+ *
+ * A LINKED PERSON IS THE ONE THAT IS NOT ITS OWN KIND: it lands as that person and their number,
+ * so the button says the person rather than the shape of the row.
+ */
+export function savesAs(item: TraceItem): string {
+  if (item.kind === 'link') {
+    return linkedNumber(item.label) ? 'a person and their number' : 'a linked person'
+  }
+  const word: Partial<Record<TraceItemKind, string>> = {
+    mobile: 'a mobile number',
+    phone: 'a home number',
+    work: 'a work number',
+    email: 'an email address',
+    address: 'an address',
+    employer: 'an employer',
+  }
+  return word[item.kind] ?? 'a contact'
+}
+
+/**
  * Whether a finding may be put on the account's principal details.
  *
  * NOT ONE RULED OUT, and not one already there. The first is the point of recording an outcome at

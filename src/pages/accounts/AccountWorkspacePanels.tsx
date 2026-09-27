@@ -16,7 +16,7 @@ import {
   type AccountContact, type AccountDocument, type ContactKind, type Workspace,
 } from '../../lib/accountWorkspace'
 import { DictateButton } from '../../components/ui/Dictate'
-import { contactsByPerson, otherPeople } from '../../lib/contactPeople.ts'
+import { contactWhat, contactsByPerson, otherPeople } from '../../lib/contactPeople.ts'
 import type { TraceItem } from '../../lib/traceStore.ts'
 
 /** Surfaces a failed write instead of leaving a button that silently did nothing. */
@@ -691,6 +691,23 @@ function ContactValue({ contact, userId, busy, run, onOpen }: {
         )}
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
+        {/*
+          WHAT IT IS, BEFORE WHOSE IT IS.
+          
+          THE FIRM, READING THREE IDENTICAL ROWS UNDER "OTHER NUMBERS": "is it a work number? Is
+          it the additional number? Is it a house number? ... I mean these other numbers, it could
+          just be an alternative number, you know." Two of those three were WORK lines and one was
+          a HOME line -- recorded correctly when each was saved off the trace, and never drawn.
+          
+          A CHIP RATHER THAN MORE GREY TEXT, because the label beside it is free text and the kind
+          is not: one is "Mother", the other is one of seven words, and a reader has to be able to
+          tell which is which at a glance. See contactWhat.
+        */}
+        {contactWhat(contact) && (
+          <span className="text-[10px] px-1.5 rounded bg-slate-100 text-slate-500 shrink-0">
+            {contactWhat(contact)}
+          </span>
+        )}
         {contact.label && <span className="text-[11px] text-slate-400">{contact.label}</span>}
         {/*
           None of these are hover-only. The tablets this is worked on have no hover, so a control

@@ -93,10 +93,14 @@ ok('...and adding a contact can set it', /person_name: input\.personName/.test(w
  * label because there was nowhere else for it, and a label is free text that nothing can group by
  * — so a company's contacts were a flat run of numbers with names buried in their captions.
  */
+/* A LINKED PERSON IS THE THIRD CASE AND IT CAME LATER: their number is the contact and their
+   name is the person, so a next of kin is dialable rather than a name in a value column. See
+   check-contact-kinds for why -- the firm's "I've verified next of kins and I don't see anybody
+   here". The rule guarded here is unchanged: whose it is goes in the COLUMN, never the caption. */
 ok('a promoted finding records whose it is',
-  /personName: asNextOfKin \? item\.value : subjectName/.test(traceData))
+  /personName: item\.kind === 'link' \? item\.value : \(asNextOfKin \? item\.value : subjectName\)/.test(traceData))
 /* A next of kin is their own person, and their role is the relationship. */
-ok('...and a next of kin is filed as one', /personRole: asNextOfKin \? 'Next of kin' : null/.test(traceData))
+ok('...and a next of kin is filed as one', /personRole: asNextOfKin \? 'Next of kin'/.test(traceData))
 
 /* ---------- and the panel reads as a company rather than a person ---------- */
 

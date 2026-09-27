@@ -65,3 +65,37 @@ export function contactsByPerson(contacts: AccountContact[]): ContactPerson[] {
 export function otherPeople(contacts: AccountContact[]): ContactPerson[] {
   return contactsByPerson(contacts).filter((g) => g.person !== null)
 }
+
+/**
+ * WHAT A CONTACT IS, IN ONE WORD.
+ *
+ * THE FIRM, LOOKING AT AN ACCOUNT'S "OTHER NUMBERS": "it's also important to notify when you save
+ * something, what is it? Is it a work number? Is it the additional number? Is it an additional
+ * email? Is it a house number? ... I mean these other numbers, it could just be an alternative
+ * number, you know."
+ *
+ * THEY WERE READING THREE IDENTICAL ROWS. On their own account those three numbers are two WORK
+ * lines and a HOME line -- the kind was recorded correctly when each was saved off the trace, and
+ * then never drawn. A list that knows a number is a work line and does not say so is a list that
+ * costs somebody a call to a switchboard at eight in the evening.
+ *
+ * THE PERSON'S ROLE WINS WHERE THERE IS ONE. "Next of kin" says more about a number than "Mobile"
+ * does, and it is the one that stops a collector opening a call to somebody's sister as though
+ * she were the debtor.
+ *
+ * 'other' HAS NO WORD OF ITS OWN. It is the kind a thing gets when nothing else fits, so printing
+ * "Other" beside it tells a reader precisely what they already knew; null leaves the row alone.
+ */
+const KIND_WORD: Record<AccountContact['kind'], string | null> = {
+  mobile: 'Mobile',
+  phone: 'Home',
+  work: 'Work',
+  email: 'Email',
+  address: 'Address',
+  employer: 'Employer',
+  other: null,
+}
+
+export function contactWhat(contact: Pick<AccountContact, 'kind' | 'personRole'>): string | null {
+  return contact.personRole?.trim() || KIND_WORD[contact.kind]
+}

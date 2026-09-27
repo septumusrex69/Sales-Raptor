@@ -289,12 +289,34 @@ export async function addContact(input: {
   personRole?: string | null
   isPrimary?: boolean
 }): Promise<AccountContact> {
+  const value = input.value.trim()
+  /*
+   * THE SAME NUMBER IS NOT TWO NUMBERS.
+   *
+   * THE FIRM, LOOKING AT AN ACCOUNT: "this, the same number, was put in as the alternative number
+   * in this one." 0832573344 was on the account twice -- once as the primary mobile and once
+   * beside it -- so the panel drew "Mobile (Primary)" and "Alternative number" over one line, and
+   * a collector who rang the alternative when the mobile did not answer rang the same phone.
+   *
+   * MATCHED ON THE DIGITS, NOT ON THE TEXT. "083 257 3344" and "0832573344" are one line; only a
+   * comparison that ignores spaces, brackets and dashes can say so. An email is matched
+   * case-insensitively for the same reason, and an address is left alone -- two ways of writing
+   * one street are a judgement nobody should make automatically.
+   *
+   * THE ONE ALREADY THERE IS RETURNED rather than an error raised. Every caller is somebody
+   * saving a number they have just found, and "that is already on the account" is not a failure
+   * -- it is the answer. A RETIRED one is not in the way: somebody putting back a number the firm
+   * stopped using has decided it is good again, and the new row carries that decision.
+   */
+  const same = await existingContact(input.accountId, input.kind, value)
+  if (same) return same
+
   const { data, error } = await supabase
     .from('account_contacts')
     .insert({
       account_id: input.accountId,
       kind: input.kind,
-      value: input.value.trim(),
+      value,
       label: input.label?.trim() || null,
       person_name: input.personName?.trim() || null,
       person_role: input.personRole?.trim() || null,
@@ -304,6 +326,41 @@ export async function addContact(input: {
     .single()
   if (error) throw new Error(error.message)
   return toContact(data)
+}
+
+/**
+ * The live contact of this kind already holding this value, or null.
+ *
+ * COMPARED HERE RATHER THAN IN SQL, and the reason is the comparison itself: the digits of a
+ * phone number are what make two of them the same, and no index on `value` can see that. The
+ * account's own contacts are a handful of rows, so reading them and comparing is exact and cheap.
+ */
+async function existingContact(
+  accountId: string, kind: ContactKind, value: string,
+): Promise<AccountContact | null> {
+  const { data, error } = await supabase
+    .from('account_contacts')
+    .select('*').eq('account_id', accountId).eq('kind', kind).is('retired_at', null)
+  if (error) throw new Error(error.message)
+  const mine = sameValue(kind, value)
+  return (data ?? []).map(toContact).find((c) => sameValue(kind, c.value) === mine) ?? null
+}
+
+/**
+ * The form of a value that decides whether two of them are the same thing.
+ *
+ * A NUMBER IS ITS DIGITS, with a leading 27 read as the 0 it stands for -- "+27 83 257 3344" and
+ * "0832573344" are one telephone. An address is ITSELF: two ways of writing one street is a
+ * judgement for the person looking at them, not for a comparison that would quietly swallow a
+ * flat number.
+ */
+function sameValue(kind: ContactKind, value: string): string {
+  if (kind === 'email') return value.trim().toLowerCase()
+  if (kind === 'mobile' || kind === 'phone' || kind === 'work') {
+    const digits = value.replace(/[^\d]/g, '')
+    return digits.startsWith('27') && digits.length === 11 ? `0${digits.slice(2)}` : digits
+  }
+  return value.trim()
 }
 
 /** Confirming a number reaches the debtor. Recorded with who and when, since it decays. */

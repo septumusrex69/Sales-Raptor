@@ -7,7 +7,7 @@ import { Modal } from '../../components/ui/Modal'
 import { PhoneLink } from '../../components/PhoneLink'
 import {
   OUTCOME_OPTIONS, TRACE_CATEGORIES, TRACE_SORTS, canPromote, categoryById, categoryCounts,
-  linkedHow, linkedNumber, outcomeTone, pageOf, riskTone, workRows,
+  linkedHow, linkedNumber, outcomeTone, pageOf, riskTone, savesAs, workRows,
   type FiledTrace, type OutcomeFilter, type OutcomeTone, type TraceCategoryId,
   type TraceItem, type TraceItemKind, type TraceOutcome, type TraceRow, type TraceSort,
 } from '../../lib/traceStore.ts'
@@ -519,9 +519,17 @@ function Row({ row, category, worked, busy, onOutcome, onPromote }: {
           </span>
         ) : savable ? (
           <div className="inline-flex items-center gap-1.5">
+            {/*
+              THE BUTTON SAYS WHAT IT WILL SAVE IT AS. The firm: "it's also important to notify
+              when you save something, what is it? Is it a work number? Is it an additional email?
+              Is it a house number?" It said "Save", and which of those a number became was
+              something you found out afterwards by reading the contact list. See savesAs, which
+              speaks the same vocabulary the account's own rows do.
+            */}
             <button type="button" onClick={() => onPromote(false)} disabled={busy}
+              title={`Save it on the account as ${savesAs(row.items[0])}`}
               className="inline-flex items-center gap-1 text-sm font-medium px-2.5 py-1.5 rounded-lg border border-gold-500 text-navy-950 hover:bg-gold-50">
-              <Plus size={13} /> Save
+              <Plus size={13} /> Save as {savesAs(row.items[0])}
             </button>
             {/*
               A RELATIVE GOES ON AS A NEXT OF KIN, labelled. The firm asked for it in those words,

@@ -6,7 +6,7 @@
 import { supabase } from './supabase'
 import { addContact, documentUrl } from './accountWorkspace'
 import {
-  contactKindFor,
+  contactKindFor, linkedHow, linkedNumber,
   type FiledTrace, type TraceItem, type TraceItemKind, type TraceOutcome,
 } from './traceStore.ts'
 
@@ -143,13 +143,39 @@ export async function promoteTraceItem(input: {
    * and their role is the relationship — which is what stops somebody opening the call as though
    * they were talking to the debtor.
    */
+  /*
+   * A PERSON IS A NAME AND A NUMBER, AND THE NUMBER IS WHAT A CONTACT HOLDS.
+   *
+   * THE FIRM: "now here I've verified next of kins and I don't like see anybody here." They were
+   * right, and the rows say why: four contacts of kind `other` whose VALUE is "Elise Ferreira"
+   * and whose label is "Telephone · 0832537190". A linked person's finding carries the name in
+   * `value` and the number in `label`, and this saved them exactly that way round -- so the
+   * account's contact list held four names nobody can dial, and `otherPeople` (which groups on
+   * person_name) could not see them at all because plain Save left person_name null.
+   *
+   * SO A LINKED PERSON IS TURNED THE RIGHT WAY UP HERE: their number becomes the contact, their
+   * name becomes person_name, and what the bureau said connects them becomes their role. That is
+   * what makes them appear under the debtor's details as a person, and what stops a collector
+   * opening a call to somebody's sister as though she were the debtor.
+   *
+   * AND THE NEXT-OF-KIN BUTTON NOW ONLY SETS THE ROLE. Both buttons produce a real, dialable
+   * contact; pressing the second one says what the relationship is rather than being the only way
+   * to get a usable row.
+   *
+   * WHERE THERE IS NO NUMBER IN THE LABEL the finding stays as it was -- a person linked through
+   * an address or an identity number is worth recording and there is nothing to ring.
+   */
+  const linkedTo = item.kind === 'link' ? linkedNumber(item.label) : null
+  const personKind = linkedTo ? 'phone' : 'other'
   const contact = await addContact({
     accountId,
-    kind: asNextOfKin ? 'other' : contactKindFor(item.kind),
-    value: item.value,
-    personName: asNextOfKin ? item.value : subjectName,
-    personRole: asNextOfKin ? 'Next of kin' : null,
-    label: asNextOfKin ? item.label : item.label,
+    kind: item.kind === 'link' ? personKind : (asNextOfKin ? 'other' : contactKindFor(item.kind)),
+    value: linkedTo ?? item.value,
+    personName: item.kind === 'link' ? item.value : (asNextOfKin ? item.value : subjectName),
+    personRole: asNextOfKin ? 'Next of kin'
+      : item.kind === 'link' ? (linkedHow(item.label) ?? 'Linked person')
+        : null,
+    label: item.label,
     /*
      * NEVER PRIMARY FROM HERE. Which number a collector rings first is a decision about the whole
      * account, made on the contact list where all of them are visible together — not a side
