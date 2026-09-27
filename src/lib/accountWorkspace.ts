@@ -155,7 +155,24 @@ const toNote = (r: any): AccountNote => ({
   source: r.source ?? 'manual',
 })
 
-export type PromiseStatus = 'open' | 'kept' | 'broken' | 'cancelled'
+/**
+ * WHAT HAS BECOME OF A PROMISE.
+ *
+ * `defaulted` IS THE 48 HOURS THE FIRM'S OWN DEFAULT LETTER PROMISES, and it is a state rather than
+ * a timer for a reason worth writing down. The letter says: "payment of the missed amount must
+ * reach our trust account within 48 hours of the date of this letter. If it does, the arrangement
+ * continues on its existing terms and no further step is taken."
+ *
+ * SO THE ARRANGEMENT HAS NOT BROKEN WHEN THAT LETTER GOES. `broken` is what releases the hold on
+ * the collections sequence -- the listing, the attorneys -- and marking it broken on the day the
+ * letter is sent would let the very next morning's sweep do the thing the letter said would not
+ * happen for two days. If the letter promises 48 hours and the listing goes out in 12, the firm has
+ * broken a promise in writing, and that is what the Council for Debt Collectors acts on.
+ *
+ * It becomes `kept` on a payment inside the window, on the arrangement's existing terms, and
+ * `broken` only once the 48 hours lapse unpaid.
+ */
+export type PromiseStatus = 'open' | 'defaulted' | 'kept' | 'broken' | 'cancelled'
 
 export interface PromiseToPay {
   id: string

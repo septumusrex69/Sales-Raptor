@@ -322,6 +322,24 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
     { key: 'respond_by', label: 'The date the debtor must answer by, written out', sample: '5 October 2026' },
     { key: 'position_as_at', label: 'The date the balance was struck', sample: '18 September 2026' },
     /*
+     * THE ARRANGEMENT'S NEXT INSTALMENT, WHICH IS ONE PAIR OF FIELDS AND NOT FIVE.
+     *
+     * ALL FIVE ARRANGEMENT NOTICES QUOTE AN AMOUNT AND A DATE -- the confirmation, the reminder two
+     * business days out, the one on the day, the receipt and the notice of default -- and they all
+     * mean THE EARLIEST INSTALMENT NOT YET PAID. That one definition is right on every step, which
+     * is what makes two fields enough: on a receipt the payment just allocated has moved the
+     * boundary, so it reads as the next one; on a default the missed instalment is still the
+     * earliest unpaid one, which is what makes "{{ptp_amount}}, due on {{ptp_date}}, has not
+     * reached our trust account" a true sentence. ptpSchedule.nextUnpaid is that definition.
+     *
+     * NOT OPTIONAL, EITHER OF THEM. An optional field is one whose LINE may leave with it, and the
+     * firm's rule for that is a fact the book cannot answer on most accounts -- 97% have no
+     * identity number. An arrangement notice with no amount on it is not a thinner notice, it is a
+     * demand for an unstated sum: the placeholder must stand and hold the step.
+     */
+    { key: 'ptp_amount', label: 'The next instalment under the arrangement', sample: 'R 2,500.00' },
+    { key: 'ptp_date', label: 'The day that instalment is due', sample: '5 October 2026' },
+    /*
      * THE FIVE THE LETTERS NEED AND THE SMSs NEVER DID.
      *
      * `handover_date` is the first station on the notice's timeline -- "account handed to us" --
@@ -430,6 +448,10 @@ export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
   { title: 'The person', keys: ['contact_name', 'contact_first_name'] },
   { title: 'The account', keys: ['case_number', 'reference', 'account_number', 'handover_date',
     'paid_to_date', 'listing_date', 'listing_reference', 'bureaus_listed', 'balance', 'capital', 'position_as_at', 'respond_by'] },
+  /* THE ARRANGEMENT IS ABOUT THE ARRANGEMENT, not about the account: the balance is what is owed
+     and these two are what was agreed to pay it off. Grouped apart so a writer reaching for "the
+     amount" is not offered {{balance}} and {{ptp_amount}} side by side. */
+  { title: 'The arrangement', keys: ['ptp_amount', 'ptp_date'] },
   { title: 'Their business', keys: ['company_name', 'service_interested'] },
   { title: 'The deal', keys: ['deal_name', 'deal_value'] },
   { title: 'The client', keys: ['client_name'] },
@@ -913,6 +935,19 @@ export function mergeValuesFor(input: {
   respondBy?: string | null
   positionAsAt?: string | null
   /**
+   * THE INSTALMENT THE ARRANGEMENT NOTICES ARE ABOUT: the earliest one not yet paid.
+   *
+   * PASSED IN RATHER THAN DERIVED HERE, because working it out needs the promise and this function
+   * is given the ACCOUNT. ptpSchedule.nextUnpaid is the one place the answer is decided; a second
+   * derivation here would be a second opinion about a figure that goes on a letter with a 48-hour
+   * ultimatum under it.
+   *
+   * NULL ON EVERY ACCOUNT WITH NO LIVE ARRANGEMENT, which is nearly all of them, and null leaves
+   * both placeholders standing -- so a template that quotes them cannot be sent off an account
+   * that has no arrangement to quote.
+   */
+  nextInstalment?: { amount: number; dueOn: string } | null
+  /**
    * The firm's own details, PASSED WHOLE RATHER THAN FIELD BY FIELD.
    *
    * The shape is FirmSettings' -- same key names, every one optional but `firmName` -- and the
@@ -1024,6 +1059,11 @@ export function mergeValuesFor(input: {
     debtor_id_masked: a.debtorKind === 'company' ? null : maskSaId(input.debtorIdMasked),
     debtor_reg_no: a.debtorKind === 'company' ? some(input.debtorIdMasked) : null,
     respond_by: input.respondBy ? longDate(input.respondBy) : null,
+    /* Written out like every other date a debtor reads -- "5 October 2026", not 2026-10-05 -- and
+       through the caller's own `money`, so the arrangement's figures are formatted exactly as the
+       balance above them is. Two formats for two amounts in one letter reads as two systems. */
+    ptp_amount: input.nextInstalment ? input.money(input.nextInstalment.amount) : null,
+    ptp_date: input.nextInstalment ? longDate(input.nextInstalment.dueOn) : null,
     position_as_at: input.positionAsAt ? longDate(input.positionAsAt) : null,
     firm_bank: bankLine(input.firm.trustBank, input.firm.trustBranchCode),
     firm_bank_name: some(input.firm.trustBank),

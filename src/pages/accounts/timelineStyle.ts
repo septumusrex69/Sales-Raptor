@@ -105,7 +105,26 @@ export function styleFor(entry: TimelineEntry): TimelineStyle {
 /** Chip colours for a promise's outcome, in the same family. */
 export const PROMISE_CHIP: Record<string, string> = {
   open: 'bg-gold-100 text-gold-600',
+  /* GOLD AND NOT RED. `defaulted` is the 48 hours the firm's own default letter promises, and in
+     that window the arrangement is still on its existing terms -- a payment revives it. Drawn as a
+     broken arrangement it would read as over, on the two days it is most worth a phone call. */
+  defaulted: 'bg-gold-100 text-[var(--c-gold-deep)] font-medium',
   kept: 'bg-positive-100 text-positive-700',
   broken: 'bg-negative-100 text-negative-700',
   cancelled: 'bg-slate-100 text-slate-500',
+}
+
+/**
+ * WHAT A PROMISE'S STATE IS CALLED ON A SCREEN, in the firm's words rather than the column's.
+ *
+ * `defaulted` is the one that needed saying: the chip printed the column, and "defaulted" tells a
+ * collector the arrangement is gone when what is actually true is that the debtor has two days to
+ * revive it. The words are the ones the letter uses, so the screen and the notice agree.
+ */
+export const PROMISE_WORDS: Record<string, string> = {
+  open: 'open',
+  defaulted: '48 hours to pay',
+  kept: 'kept',
+  broken: 'broken',
+  cancelled: 'cancelled',
 }

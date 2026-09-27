@@ -99,6 +99,20 @@ export function accountMergeValues(input: {
   /** The day the notice goes out, as a yyyy-mm-dd key. Taken, never read off a clock. */
   today: string
   money: (amount: number) => string
+  /**
+   * THE ACCOUNT'S LIVE ARRANGEMENT, where it has one, and the arrangement notices are the only
+   * templates that quote it.
+   *
+   * WHICH INSTALMENT IS DECIDED BY ptpSchedule.nextUnpaid AND NOWHERE ELSE -- the earliest one not
+   * yet paid, which is the confirmation's first, a reminder's upcoming one, a receipt's following
+   * one and a default letter's MISSED one, all from the same rule. This layer only carries the
+   * answer down, exactly as it carries the balance rather than computing it.
+   *
+   * OMITTED OR NULL ON AN ACCOUNT WITH NO ARRANGEMENT, which is nearly all of them, and both
+   * placeholders then stand: an arrangement notice cannot be merged against an account that has no
+   * arrangement to quote, which is what holds the step instead of sending a blank amount.
+   */
+  nextInstalment?: { amount: number; dueOn: string } | null
 }): Record<string, string> {
   return Object.fromEntries(
     Object.entries(mergeValuesFor({
@@ -117,6 +131,7 @@ export function accountMergeValues(input: {
       positionAsAt: input.today,
       debtorAddress: addressOf(input.contacts),
       respondBy: respondBy(input.today),
+      nextInstalment: input.nextInstalment ?? null,
       /* Passed whole. There is no list of the firm's fields here to fall behind the ones the
          library grew -- see mergeValuesFor, which takes FirmSettings' own shape. */
       firm: input.firm,

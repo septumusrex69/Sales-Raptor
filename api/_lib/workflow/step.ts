@@ -11,6 +11,7 @@ import { charterFor } from './fonts.js'
 import { moneyZa } from './locale.js'
 import { toSettings as toFirmSettings } from '../../../src/lib/firmSettingsRow.js'
 import { notifyHeld } from './notify.js'
+import { nextUnpaidFromRow } from '../../../src/lib/ptpSchedule.js'
 
 /**
  * ONE STEP OF ONE RUN, DECIDED AND ACTED ON.
@@ -118,7 +119,7 @@ export async function runOneStep(
 
   const node = toNode(nodeRow)
 
-  const [contactsRes, collectorRes, liaisonRes, templatesRes, ledgerRes, priorRes] = await Promise.all([
+  const [contactsRes, collectorRes, liaisonRes, templatesRes, ledgerRes, priorRes, promiseRes] = await Promise.all([
     admin.from('account_contacts').select('kind, value, is_primary, retired_at').eq('account_id', account.id),
     account.assigned_to
       ? admin.from('profiles').select('id, name, phone, email, whatsapp').eq('id', account.assigned_to).maybeSingle()
@@ -137,6 +138,23 @@ export async function runOneStep(
       : admin.from('workflow_run_steps').select('state')
         .eq('run_id', step.run_id).eq('due_on', step.due_on).neq('id', step.id)
         .order('state').limit(1).maybeSingle(),
+    /*
+     * THE LIVE ARRANGEMENT, WHICH IS WHAT {{ptp_amount}} AND {{ptp_date}} COME FROM.
+     *
+     * READ FOR EVERY STEP, NOT ONLY THE ARRANGEMENT'S OWN. A section 129 template does not quote
+     * these fields, so on the collections sequence this row is fetched and unused -- one indexed
+     * read against one account, against the alternative of the runner having to know which node
+     * belongs to which sequence in order to decide what to load. Guessing that wrong is a notice
+     * held on a placeholder it could have answered.
+     *
+     * `defaulted` COUNTS AS LIVE. It is the 48 hours the default letter promises, during which the
+     * arrangement is still on its existing terms and a payment revives it -- so the letter and the
+     * SMS that go out in that window must still be able to quote the instalment that was missed.
+     */
+    admin.from('promises_to_pay')
+      .select('amount, due_on, arrangement, day_of_month, on_last_day, day_of_week, instalments_kept, total_promised')
+      .eq('account_id', account.id).in('status', ['open', 'defaulted'])
+      .order('created_at', { ascending: false }).limit(1).maybeSingle(),
   ])
 
   const collector = collectorRes.data
@@ -218,6 +236,10 @@ export async function runOneStep(
     firm: toFirmSettings(firm as never),
     today,
     money: moneyZa,
+    /* THE EARLIEST INSTALMENT NOT YET PAID, decided by ptpSchedule and nowhere else -- which on a
+       default letter is the one that was MISSED, and is what makes "has not reached our trust
+       account" a true sentence rather than a demand for money not yet owed. */
+    nextInstalment: nextUnpaidFromRow(promiseRes.data),
   })
 
   const contacts = (contactsRes.data ?? []) as ContactRow[]

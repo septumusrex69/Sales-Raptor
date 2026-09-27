@@ -31,7 +31,7 @@ import { canFreezeAccounts, canHandOutAccounts, canViewClients } from '../../lib
 import { HandOutModal } from './HandOutModal'
 import type { Selection } from '../../lib/accountAllocation'
 import { timeOnDesk } from '../../lib/dateLabels'
-import { styleFor, PROMISE_CHIP } from './timelineStyle'
+import { styleFor, PROMISE_CHIP, PROMISE_WORDS } from './timelineStyle'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
 import { EscalateModal } from './EscalateModal'
@@ -82,6 +82,7 @@ import {
   fetchAccountRuns, fetchStartableWorkflows, type AccountRun, type StartableWorkflow,
 } from '../../lib/accountRun.ts'
 import { startSentence, startShortLabel } from '../../lib/workflowStart.ts'
+import { liveArrangement, nextUnpaid } from '../../lib/ptpSchedule.ts'
 import { todayIso } from '../../lib/reminderTime.ts'
 import { needsAttention } from '../../lib/runSteps.ts'
 import { debtorKey, type OtherAccount } from '../../lib/sameDebtor'
@@ -486,6 +487,16 @@ export function AccountDetail() {
         firm,
         today: dayKey(new Date()),
         money: formatMoney,
+        /*
+         * THE INSTALMENT THE ARRANGEMENT NOTICES QUOTE: the earliest one not yet paid, decided by
+         * ptpSchedule and nowhere else. `PromiseToPay` satisfies `Arranged` structurally -- same
+         * eight names -- so there is no mapper here to fall behind the columns.
+         *
+         * `defaulted` COUNTS AS LIVE, because it is the 48 hours the default letter promises: the
+         * arrangement is still on its existing terms in that window and a payment revives it, so a
+         * collector composing inside it must be able to quote the instalment that was missed.
+         */
+        nextInstalment: nextUnpaid(liveArrangement(workspace?.promises ?? [])),
       })
       : {},
   /* Before the early returns below, because a hook cannot run conditionally -- which is also why
@@ -493,8 +504,10 @@ export function AccountDetail() {
   /* `users` and client.accountOwnerId are in here because the collector and the liaison are read
      out of them: left off, a letter keeps naming whoever held the account before it was handed
      on, which is the one failure these fields exist to prevent. */
+  /* `promises` is in here because the arrangement's own two fields are read out of it: left off,
+     a reminder keeps quoting the instalment that was next before the last payment landed. */
   }), [account, statement?.breakdown?.balance, client?.name, client?.accountOwnerId, users,
-    workspace?.contacts,
+    workspace?.contacts, workspace?.promises,
     currentUser?.name, currentUser?.phone, currentUser?.email, currentUser?.whatsapp, firm])
 
 
@@ -1802,7 +1815,13 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
 }
 
 function PromiseChip({ status }: { status: string }) {
-  return <span className={`text-[10px] px-1.5 py-0.5 rounded ml-1.5 align-middle ${PROMISE_CHIP[status] ?? ''}`}>{status}</span>
+  /* The firm's word for the state, not the column's -- see PROMISE_WORDS. Falls back to the column
+     so a state nobody has named yet is visible rather than blank. */
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded ml-1.5 align-middle ${PROMISE_CHIP[status] ?? ''}`}>
+      {PROMISE_WORDS[status] ?? status}
+    </span>
+  )
 }
 
 /**
@@ -2025,8 +2044,15 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
   const [charged, setCharged] = useState<string | null>(null)
   const { busy, err, run } = useWriter(onChange)
 
-  const outstanding = promises.filter((p) => p.status === 'open')
-  const past = promises.filter((p) => p.status !== 'open')
+  /*
+   * A DEFAULTED ARRANGEMENT IS STILL OUTSTANDING, NOT PAST. It is the 48 hours the default letter
+   * gives, the arrangement is still on its existing terms, and a payment inside the window revives
+   * it -- so it belongs in the list a collector works, not in the history below it. Filed as past,
+   * the two days when a phone call is worth most are the two days it is off the screen.
+   */
+  const live = (s: string) => s === 'open' || s === 'defaulted'
+  const outstanding = promises.filter((p) => live(p.status))
+  const past = promises.filter((p) => !live(p.status))
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
