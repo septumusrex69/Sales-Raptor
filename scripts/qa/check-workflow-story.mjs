@@ -15,7 +15,7 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { workflowHeadline, workflowStory } from '../../src/lib/workflowStory.ts'
+import { isCurrentState, railEvents, workflowHeadline, workflowStory } from '../../src/lib/workflowStory.ts'
 
 let pass = 0
 const failures = []
@@ -28,6 +28,7 @@ const ok = (name, actual) => check(name, actual, true)
 const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
 
 const panel = read('../../src/components/collections/WorkflowRunPanel.tsx')
+const storyLib = read('../../src/lib/workflowStory.ts')
 
 const step = (over) => ({
   id: 's', label: 'Section 129', channel: 'email', dueOn: '2026-09-21',
@@ -189,7 +190,12 @@ ok('only the current-state card carries the track',
    row with no steps -- the sequence was written after the account arrived -- and the block under
    it read "Every step (0)" over an empty track, which is a control that opens nothing. */
 ok('...and a run with no steps draws no track at all', /run\.steps\.length > 0 && <RunBlock/.test(panel))
-ok('...decided by one function', /function isCurrentState/.test(panel))
+/* DECIDED BY ONE FUNCTION, WHICH NOW LIVES BESIDE THE STORY rather than inside the panel --
+   railEvents has to ask the same question, and a rule a check cannot import is a rule that
+   drifts. The panel imports it. */
+ok('...decided by one function', /export function isCurrentState/.test(storyLib))
+ok('...and the panel asks that one', /isCurrentState\(run, event\)/.test(panel)
+  && /isCurrentState[\s\S]{0,120}?from '\.\.\/\.\.\/lib\/workflowStory\.ts'/.test(panel))
 /*
  * AND THAT CARD IS TITLED WITH THE RUN, not the event, or it says the state twice — "Section 129
  * paused" beside a chip reading "Paused", which is what the first build did.
@@ -200,6 +206,103 @@ ok('the live card is titled with the run and chipped with the state',
 /* Both halves read the SAME stream, reversed, so they cannot disagree about what happened. */
 ok('the history is the same stream, oldest first', /\[\.\.\.story\]\.reverse\(\)/.test(panel))
 ok('...under the firm’s own heading', /Past workflow history/.test(panel))
+
+/* ------------------------------------------------ the rail does not say it twice */
+
+/*
+ * THE FIRM, READING THE PANE BACK: "the order of how things lie here doesn't make sense to me.
+ * Like, it says letter of demand started, but why is it necessary to have like two of these
+ * things? Because it's already there."
+ *
+ * EVERYTHING ON THEIR ACCOUNT HAPPENED ON ONE DAY, so the rail drew a bare "Section 129 / letter
+ * of demand started" row and, below it, the Section 129 card with a Paused chip whose own second
+ * line reads "Started 27 Sep 2026 · paused since 27 Sep 2026". The same fact in the same date
+ * group, twice. The Handover did it too.
+ */
+/* SENT THE SAME DAY THEY STARTED, which is what makes this the firm's account: everything on it
+   happened on 27 September. lastTouched dates an ending by its newest sent step, so a fixture
+   whose step went out a week before the run began would date the ending into that week and the
+   fold would correctly leave the start alone -- proving nothing. */
+const onDay = (id) => step({ id, sentAt: '2026-09-27T18:30:00Z', dueOn: '2026-09-27' })
+const oneDayRuns = [
+  { id: 'r-promise', workflowName: 'Promise to pay', state: 'running', leftReason: null,
+    startedOn: '2026-09-27', dayUnit: 'calendar', steps: [onDay('a')], holds: [] },
+  { id: 'r-129', workflowName: 'Section 129', state: 'held', leftReason: null,
+    startedOn: '2026-09-27', dayUnit: 'business', steps: [onDay('b')],
+    holds: [{ id: 'h1', cause: 'promise', reason: 'A promise to pay was made', startedOn: '2026-09-27', endedOn: null }] },
+  { id: 'r-hand', workflowName: 'Handover', state: 'finished', leftReason: null,
+    startedOn: '2026-09-27', dayUnit: 'calendar', steps: [onDay('c')], holds: [] },
+]
+const wholeStory = workflowStory(oneDayRuns)
+const rail = railEvents(wholeStory, oneDayRuns)
+/* THE PREMISE FIRST: the stream really does carry the echoes, or the fold below proves nothing. */
+check('the stream carries a start for every run', wholeStory.filter((e) => e.kind === 'started').length, 3)
+check('...five rows in all', wholeStory.length, 5)
+/* AND THE RAIL DRAWS THREE: one card per sequence, and no bare "started" beside any of them. */
+check('the rail folds the rows that echo the card beside them', rail.length, 3)
+check('...leaving one row per run',
+  rail.map((e) => e.runId).sort().join(','), 'r-129,r-hand,r-promise')
+/*
+ * AND EVERY ROW LEFT IS A CARD. This is the assertion that says the fold took the right ones: a
+ * fold that removed a run's CURRENT state would make the sequence vanish from the pane, track,
+ * held steps, Send it now button and all.
+ */
+for (const e of rail) {
+  const run = oneDayRuns.find((r) => r.id === e.runId)
+  ok(`${e.runId} is still on the rail as its current state`, isCurrentState(run, e))
+}
+/*
+ * ONLY THE SAME DAY. A sequence that started in March and paused in May is two facts on two days
+ * and both belong on the rail -- that is the shape the firm drew, and folding it would lose the
+ * day the sequence began.
+ */
+const spread = [{
+  ...oneDayRuns[1], startedOn: '2026-03-02',
+  holds: [{ id: 'h2', cause: 'promise', reason: 'A promise to pay was made', startedOn: '2026-05-11', endedOn: null }],
+}]
+const apart = railEvents(workflowStory(spread), spread)
+check('a start on another day stays on the rail', apart.length, 2)
+check('...with the pause above it', apart.map((e) => e.kind).join(','), 'paused,started')
+/*
+ * AND NOTHING BUT A START IS EVER FOLDED. A pause and a resume on one day are two real facts about
+ * an account -- the firm's own case, where an arrangement is agreed and then cancelled the same
+ * afternoon -- and collapsing those would hide why a sequence moved.
+ */
+const oneDayResume = [{
+  ...oneDayRuns[1], state: 'running', startedOn: '2026-03-02',
+  holds: [{ id: 'h3', cause: 'promise', reason: 'A promise to pay was made', startedOn: '2026-05-11', endedOn: '2026-05-11' }],
+}]
+const resumedRail = railEvents(workflowStory(oneDayResume), oneDayResume)
+check('a pause and a resume on one day are both kept',
+  resumedRail.map((e) => e.kind).join(','), 'resumed,paused,started')
+
+/*
+ * THE HISTORY IS NOT FOLDED AND MUST NOT BE. It is a log, one line per event, collapsed until
+ * somebody opens it -- and "started, then paused" on one day is exactly what a log is for.
+ */
+/* ASSERTED ON WHAT IS HANDED TO IT, not on what it calls the prop inside itself -- the component
+   names it `story` either way, so reading its body cannot tell the two streams apart. */
+ok('the history below is handed the unfolded stream', /<PastHistory story=\{story\}/.test(panel))
+ok('...and the rail draws the folded one', /\{rail\.map\(\(e\) =>/.test(panel))
+ok('...which are two different lists', /const rail = railEvents\(story, runs\)/.test(panel))
+
+/*
+ * AND THE ROW A RUN STANDS ON IS NEVER FOLDED, WHATEVER SHARES ITS DAY.
+ *
+ * NOT REACHABLE FROM CONSISTENT DATA, which is why it is written down. A `running` run whose
+ * current event is its start has no other event that day -- an open hold would make it `held`. But
+ * a half-applied resume leaves exactly this row behind: state running, hold still open. Folded
+ * there, the sequence would vanish from the pane -- track, held steps, Send it now and all -- on
+ * the one account where somebody is looking for it.
+ */
+const halfResumed = [{
+  id: 'r-odd', workflowName: 'Section 129', state: 'running', leftReason: null,
+  startedOn: '2026-09-27', dayUnit: 'business', steps: [onDay('d')],
+  holds: [{ id: 'h4', cause: 'promise', reason: 'A promise to pay was made', startedOn: '2026-09-27', endedOn: null }],
+}]
+const oddRail = railEvents(workflowStory(halfResumed), halfResumed)
+ok('a run whose current state IS its start keeps that row',
+  oddRail.some((e) => e.kind === 'started' && isCurrentState(halfResumed[0], e)))
 
 /* ------------------------------------------------ ends it vs pauses it */
 

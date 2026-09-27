@@ -10,7 +10,8 @@ import { RUN_STEP_WORDS, needsAttention, shapeOf, stepInFocus, type RunStep } fr
 import { dayLabel, dayNumberOn } from '../../lib/workflowBuilder.ts'
 import { shortDate } from '../../lib/dateLabels.ts'
 import {
-  workflowHeadline, workflowStory, type StoryEvent, type StoryKind, type WorkflowHeadline,
+  isCurrentState, railEvents, workflowHeadline, workflowStory,
+  type StoryEvent, type StoryKind, type WorkflowHeadline,
 } from '../../lib/workflowStory.ts'
 import { todayIso } from '../../lib/reminderTime.ts'
 import { startSentence } from '../../lib/workflowStart.ts'
@@ -63,7 +64,12 @@ export function WorkflowRunPanel({ accountId, runs, offers, error, onChanged, as
   onAsked?: () => void
 }) {
   const head = workflowHeadline(runs)
+  /*
+   * TWO READINGS OF ONE STREAM. The rail draws what is happening and folds the rows that echo the
+   * card beside them; the history below is the log and keeps every event. See railEvents.
+   */
   const story = workflowStory(runs)
+  const rail = railEvents(story, runs)
   const byId = new Map(runs.map((r) => [r.id, r]))
 
   return (
@@ -84,9 +90,9 @@ export function WorkflowRunPanel({ accountId, runs, offers, error, onChanged, as
         the same section 129 is a third row on the day it was let go. workflowStory makes that
         stream; this draws it.
       */}
-      {story.length > 0 && (
+      {rail.length > 0 && (
         <ol className="mt-5 space-y-4">
-          {story.map((e) => (
+          {rail.map((e) => (
             <StoryRow key={e.id} event={e} run={byId.get(e.runId) ?? null} onSent={onChanged} />
           ))}
         </ol>
@@ -271,29 +277,6 @@ function StoryRow({ event, run, onSent }: {
       </div>
     </li>
   )
-}
-
-/**
- * Is this event where the run stands today?
- *
- * ASKED OF THE EVENT AND THE RUN TOGETHER, because the same run appears several times on the
- * rail and exactly one of those appearances is the current one. A held run's latest event is the
- * hold that has not ended; a running one's is its most recent resume, or its start if it has
- * never been held.
- */
-export function isCurrentState(run: AccountRun, event: StoryEvent): boolean {
-  if (run.state === 'held') return event.kind === 'paused' && isLatestHoldEvent(run, event)
-  if (run.state === 'left') return event.kind === 'left'
-  if (run.state === 'finished') return event.kind === 'finished'
-  /* running: the last resume, or the start where nothing ever held it. */
-  const ended = run.holds.filter((h) => h.endedOn)
-  if (ended.length === 0) return event.kind === 'started'
-  return event.id === `release:${ended[ended.length - 1].id}`
-}
-
-function isLatestHoldEvent(run: AccountRun, event: StoryEvent): boolean {
-  const open = run.holds.find((h) => !h.endedOn)
-  return open ? event.id === `hold:${open.id}` : false
 }
 
 function StateChip({ state }: { state: string }) {

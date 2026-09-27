@@ -170,6 +170,82 @@ function lastTouched(run: AccountRun): string | null {
   return all.length > 0 ? all[all.length - 1] : null
 }
 
+/*
+ * MOVED HERE FROM THE PANEL, because railEvents below has to ask it. It was always a rule about a
+ * story and a run rather than about a component, and a rule a check cannot import is a rule that
+ * drifts.
+ */
+/**
+ * Is this event where the run stands today?
+ *
+ * ASKED OF THE EVENT AND THE RUN TOGETHER, because the same run appears several times on the
+ * rail and exactly one of those appearances is the current one. A held run's latest event is the
+ * hold that has not ended; a running one's is its most recent resume, or its start if it has
+ * never been held.
+ */
+export function isCurrentState(run: AccountRun, event: StoryEvent): boolean {
+  if (run.state === 'held') return event.kind === 'paused' && isLatestHoldEvent(run, event)
+  if (run.state === 'left') return event.kind === 'left'
+  if (run.state === 'finished') return event.kind === 'finished'
+  /* running: the last resume, or the start where nothing ever held it. */
+  const ended = run.holds.filter((h) => h.endedOn)
+  if (ended.length === 0) return event.kind === 'started'
+  return event.id === `release:${ended[ended.length - 1].id}`
+}
+
+function isLatestHoldEvent(run: AccountRun, event: StoryEvent): boolean {
+  const open = run.holds.find((h) => !h.endedOn)
+  return open ? event.id === `hold:${open.id}` : false
+}
+
+/**
+ * THE RAIL'S OWN ROWS: the story, with the ones that say nothing the card beside them does not.
+ *
+ * THE FIRM, READING THE PANE BACK: "the order of how things lie here doesn't make sense to me.
+ * Like, it says letter of demand started, but why is it necessary to have like two of these
+ * things? Because it's already there."
+ *
+ * WHAT THEY WERE LOOKING AT. Everything on that account happened on one day, so the rail drew a
+ * bare "Section 129 / letter of demand started" row and, two rows below it, the Section 129 card
+ * with a Paused chip -- whose own second line reads "Started 27 Sep 2026 · paused since 27 Sep
+ * 2026". The same fact, in the same date group, twice. The Handover did it too: "Handover
+ * started", then "Handover · Finished".
+ *
+ * WHY THE RAIL IS STILL ONE ROW PER EVENT. When a sequence starts in March and pauses in May,
+ * those are two facts on two days and both belong on the rail -- that is the shape the firm drew
+ * and it is right. It is only the SAME DAY that turns the second row into an echo, because the
+ * card already prints the day it started.
+ *
+ * SO THE FOLD IS NARROW: a `started` row goes only where another event for the same run falls on
+ * the same day. Nothing else is touched -- a pause and a resume on one day are two real facts and
+ * stay two rows.
+ *
+ * AND NEVER THE ROW THAT IS THE RUN'S CURRENT STATE, whatever else shares its day. That row is
+ * the one carrying the track, the held steps and the Send it now button; folded away, the
+ * sequence would vanish from the pane entirely.
+ *
+ * THE HISTORY BELOW THE RAIL IS NOT FOLDED and must not be. It is a log, one line per event,
+ * collapsed until somebody opens it -- and "started, then paused" on one day is exactly what a
+ * log is for. PastHistory reads the full story; this is only what the rail draws.
+ */
+export function railEvents(story: StoryEvent[], runs: AccountRun[]): StoryEvent[] {
+  const byId = new Map(runs.map((r) => [r.id, r]))
+  /* The days on which each run has an event that is NOT its start. */
+  const elsewhere = new Map<string, Set<string>>()
+  for (const e of story) {
+    if (e.kind === 'started') continue
+    const days = elsewhere.get(e.runId) ?? new Set<string>()
+    days.add(e.on)
+    elsewhere.set(e.runId, days)
+  }
+  return story.filter((e) => {
+    if (e.kind !== 'started') return true
+    const run = byId.get(e.runId)
+    if (run && isCurrentState(run, e)) return true
+    return !elsewhere.get(e.runId)?.has(e.on)
+  })
+}
+
 /**
  * The three facts the strip across the top of the firm's mockup carries: what is running, what is
  * paused, and what happens next.
