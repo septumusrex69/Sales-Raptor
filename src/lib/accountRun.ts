@@ -70,7 +70,7 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
       workflow_versions!inner(day_unit, workflows!inner(name)),
       workflow_run_holds(id, cause, reason, started_on, ended_on, ended_reason),
       workflow_run_steps(id, due_on, state, note, sent_at,
-        workflow_nodes!inner(label, channel, day, needs_release))
+        workflow_nodes!inner(label, channel, day, needs_release, after_minutes))
     `)
     .eq('account_id', accountId)
     .order('started_on', { ascending: false })
@@ -96,6 +96,9 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
         channel: s.workflow_nodes?.channel ?? null,
         day: s.workflow_nodes?.day ?? 0,
         needsRelease: Boolean(s.workflow_nodes?.needs_release),
+        /* Null on a notice, a number on the SMS that goes out behind it. What pairs the two --
+           see stepPairs.ts, and the runner's own use of it in step.ts. */
+        afterMinutes: s.workflow_nodes?.after_minutes ?? null,
         dueOn: s.due_on,
         state: s.state as RunStepState,
         note: s.note ?? null,

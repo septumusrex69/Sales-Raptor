@@ -38,6 +38,16 @@ export interface RunStep {
    * which is what pressing it actually does.
    */
   needsRelease: boolean
+  /**
+   * HOW LONG AFTER THE NOTICE THIS ONE FOLLOWS, or null where it IS the notice.
+   *
+   * THE FIRM'S RULE FOR EVERY SEQUENCE THEY HAVE DRAWN: "the email sends 5 to 10 minutes before
+   * the SMS at every step." So a step of the firm's chart is actually two rows -- the notice and
+   * the text message telling the debtor to go and read it -- and this is the column that says
+   * which is which. The runner already reads it that way; stepPairs.ts is the same rule for the
+   * screen.
+   */
+  afterMinutes: number | null
 }
 
 /**

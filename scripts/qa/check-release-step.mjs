@@ -211,7 +211,15 @@ ok('the panel offers to send a held step', /releaseStep\(session\.access_token, 
  * -- so there it offers to try again, which is what happens.
  */
 ok('...saying "Send it now" only where a person is what it waits for',
-  /step\.needsRelease \? 'Send it now' : 'Try again'/.test(panel))
+  /step\.needsRelease\s*\n?\s*\?[\s\S]{0,140}'Send it now'\)?\s*\n?\s*: 'Try again'/.test(panel))
+/*
+ * AND IT SAYS WHEN THE PRESS SENDS TWO THINGS. The firm: "you need to send the SMS manually... even
+ * after you've sent this 129." A step of their chart is a notice AND the text behind it, and one
+ * press now sends both -- so a button that does two things while saying one is the quiet dishonesty
+ * that has somebody pressing it twice, looking for the SMS.
+ */
+ok('...and says so where an SMS goes with it',
+  /followerOf\(run\.steps, step\.id\) \? 'Send it and the SMS' : 'Send it now'/.test(panel))
 ok('...which means the panel knows which kind of hold it is',
   /needsRelease: Boolean\(s\.workflow_nodes\?\.needs_release\)/.test(store))
 /* A run the account has already left sends nothing more, so it offers nothing. */

@@ -165,14 +165,21 @@ ok('...and one still to come is hollow', /waiting: 'bg-white border-slate-300'/.
 ok('a dot is a button', /<button type="button" onClick=\{\(\) => onSelect\(step\.id\)\}/.test(track))
 /* Carried on the shared props object rather than on the button, so the read-only reading on the
    Overview card keeps the words it draws as a colour. See the Overview section below. */
-ok('...that says its step, its state and its date in words', /'aria-label': words\(step\)/.test(track))
+ok('...that says its step, its state and its date in words', /'aria-label': said/.test(track))
+/*
+ * AND BOTH MESSAGES OF A STEP ARE IN THOSE WORDS, because one dot now stands for two rows -- the
+ * notice and the SMS behind it. A dot drawn half-gold whose label mentions only the letter would be
+ * announcing the half that is fine to the one person who cannot see the colour.
+ */
+ok('...for every message the step carries',
+  /const said = notice\.steps\.map\(\(s\) => words\(s\)\)\.join/.test(track))
 /*
  * THE CONNECTOR IS COLOURED BY THE STEP BEFORE IT, so the filled part of the line is the part
  * that has happened — and it is drawn by the step on its RIGHT, which is what stops a stray tail
  * hanging off the last dot.
  */
 ok('the line between is drawn once per gap', /\{i > 0 && \(/.test(track))
-ok('...and coloured by what came before it', /shapeOf\(steps\[i - 1\]\) === 'sent'/.test(track))
+ok('...and coloured by what came before it', /noticeShape\(notices\[i - 1\]\) === 'sent'/.test(track))
 
 /*
  * IT CHANGES WITH THE ROOM IT IS GIVEN — a container query, not the page's width, because this
@@ -194,7 +201,7 @@ ok('the day number is always under the dot', /\{step\.day\}/.test(track))
  */
 ok('the track wraps rather than scrolling', /flex flex-wrap items-start/.test(track)
   && !/overflow-x-auto/.test(track))
-ok('...and a dot is a fingertip, not a bead', /h-5 w-5 items-center justify-center rounded-full/.test(track))
+ok('...and a dot is a fingertip, not a bead', /h-5 w-5 items-center justify-center/.test(track))
 
 /*
  * AND A DOT SAYS WHEN IT WENT, read rather than looked at. There is no room for a date under a
@@ -264,7 +271,7 @@ ok('...which the track draws as text rather than as a dead button', /if \(!onSel
 /* THE WORDS SURVIVE EITHER WAY, which is what makes the quiet reading honest rather than merely
    quieter: title and aria-label are on the shared object, not on the button. */
 ok('...carrying the same words on the span as on the button',
-  /const shared = \{[\s\S]{0,200}?'aria-label': words\(step\)/.test(track))
+  /const shared = \{[\s\S]{0,200}?'aria-label': said/.test(track))
 /* ONE CLASS LIST FOR BOTH TAGS. Written out twice it drifts, and on a wrapped track the failure is
    dots that no longer line up between the two screens that draw them. */
 ok('...and one layout for both', (track.match(/@sm:w-\[76px\]/g) ?? []).length === 1)

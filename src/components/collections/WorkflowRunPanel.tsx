@@ -14,6 +14,7 @@ import {
 } from '../../lib/workflowStory.ts'
 import { todayIso } from '../../lib/reminderTime.ts'
 import { startSentence } from '../../lib/workflowStart.ts'
+import { followerOf } from '../../lib/stepPairs.ts'
 
 /**
  * THE WORKFLOW TAB — WHAT IS RUNNING ON THIS DEBTOR, AND WHAT HAS ALREADY RUN.
@@ -675,7 +676,15 @@ function StepDetail({ step, run, live, onSent }: {
             bg-white px-2.5 py-1 text-[11px] font-medium text-navy-950
             hover:bg-gold-100 disabled:opacity-40">
           {busy ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
-          {step.needsRelease ? 'Send it now' : 'Try again'}
+          {/*
+            AND IT SAYS WHEN THE PRESS SENDS TWO THINGS. The firm: "you need to send the SMS
+            manually... even after you've sent this 129." One press now sends the notice and the
+            text behind it -- and a button that does two things while saying one is the kind of
+            quiet dishonesty that has somebody pressing it twice.
+          */}
+          {step.needsRelease
+            ? (followerOf(run.steps, step.id) ? 'Send it and the SMS' : 'Send it now')
+            : 'Try again'}
         </button>
       )}
     </div>

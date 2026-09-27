@@ -1,9 +1,8 @@
 import { Fragment, type ReactNode } from 'react'
 import { Mail, MessageSquare, Phone } from 'lucide-react'
 import { shortDate } from '../../lib/dateLabels.ts'
-import {
-  markerIndex, shapeOf, words, type RunStep, type StepShape,
-} from '../../lib/runSteps.ts'
+import { markerIndex, words, type RunStep, type StepShape } from '../../lib/runSteps.ts'
+import { noticeChannels, noticeShape, noticesOf, type Notice } from '../../lib/stepPairs.ts'
 
 /**
  * THE SEQUENCE AS A ROW OF DOTS, WHICH IS HOW THE FIRM DRAWS IT.
@@ -91,7 +90,22 @@ export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
    */
   today: string | null
 }) {
-  const at = today === null ? -1 : markerIndex(steps, today)
+  /*
+   * ONE DOT PER STEP OF THE FIRM'S CHART, not per row of the table.
+   *
+   * THE FIRM, LOOKING AT AN ELEVEN-DOT SECTION 129: "there'll be much less steps in here. You
+   * know, it'll look smaller and better." Their chart has six steps; Raptor stores eleven because
+   * every step is a letter AND the SMS that follows it. Two rows is right in the database and two
+   * dots is wrong on a screen -- the debtor received one notice. See stepPairs.ts.
+   */
+  const notices = noticesOf(steps)
+  /*
+   * TODAY IS PLACED AGAINST THE LEADS, so the caret falls between notices rather than inside one.
+   * Computed off the same markerIndex the list uses, fed the rows it is allowed to fall between --
+   * a caret that could land between a letter and its own SMS would be marking a boundary that is
+   * five minutes wide.
+   */
+  const at = today === null ? -1 : markerIndex(notices.map((n) => n.lead), today)
   const mark = (key: string) => (
     <li key={key} className="flex items-start" aria-label="Today">
       {/*
@@ -117,10 +131,15 @@ export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
         and reads as a continuation rather than a new sequence -- and no tail hangs off the end.
       */}
       <ol className="flex flex-wrap items-start gap-y-2">
-        {steps.map((step, i) => {
-          const shape = shapeOf(step)
-          const Icon = CHANNELS[step.channel ?? '']
-          const selected = step.id === selectedId
+        {notices.map((notice, i) => {
+          const step = notice.lead
+          const shape = noticeShape(notice)
+          /* Every channel the step goes out on, in the order they go: an envelope and a speech
+             bubble together are what "one notice and the text behind it" looks like. */
+          const icons = noticeChannels(notice).map((c) => CHANNELS[c]).filter(Boolean)
+          /* Selected when EITHER row is the one in focus, so opening the SMS from the drop-down
+             still lights the dot its notice is drawn as. */
+          const selected = notice.steps.some((s) => s.id === selectedId)
           return (
             <Fragment key={step.id}>
               {at === i && mark(`mark-${i}`)}
@@ -133,19 +152,25 @@ export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
                 */}
                 {i > 0 && (
                   <span aria-hidden className={`mt-[9px] h-[2px] w-2 shrink-0 @sm:w-5 ${
-                    shapeOf(steps[i - 1]) === 'sent' ? 'bg-[var(--color-positive)]/40' : 'bg-slate-200'
+                    noticeShape(notices[i - 1]) === 'sent' ? 'bg-[var(--color-positive)]/40' : 'bg-slate-200'
                   }`} />
                 )}
-                <Dot onSelect={onSelect} step={step} selected={selected}>
-                  <span className={`flex h-5 w-5 items-center justify-center rounded-full border-2
+                <Dot onSelect={onSelect} notice={notice} selected={selected}>
+                  <span className={`flex h-5 w-5 items-center justify-center gap-px rounded-full border-2
                     ${DOT[shape]} ${
                     selected ? 'ring-2 ring-navy-950/25 ring-offset-1' : 'group-hover:ring-2 group-hover:ring-slate-200'
                   }`}>
-                    {/* The channel inside the dot, where there is one -- an email and an SMS on
-                        the same day are two dots that otherwise look identical, and they are the
-                        pair the firm's sequences are built out of. */}
-                    {Icon && <Icon size={10} className={shape === 'waiting' || shape === 'cancelled'
-                      ? 'text-slate-400' : 'text-white'} />}
+                    {/*
+                      EVERY CHANNEL THIS STEP GOES OUT ON, inside the one dot. An envelope beside a
+                      speech bubble is what the firm's chart means by a step: the notice, and the
+                      text message telling the debtor to go and read it. Drawn as two dots they
+                      were identical apart from the icon and the day number under each read "1 1",
+                      which is what sent the firm looking for a way to make this smaller.
+                    */}
+                    {icons.map((Icon, n) => (
+                      <Icon key={n} size={icons.length > 1 ? 7 : 10}
+                        className={shape === 'waiting' || shape === 'cancelled' ? 'text-slate-400' : 'text-white'} />
+                    ))}
                   </span>
                   {/*
                     THE DAY NUMBER, WHICH IS HOW THE FIRM WRITES THEIR OWN CHART. It is the one
@@ -157,6 +182,8 @@ export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
                   <span className={`text-[9px] leading-none tabular-nums ${LABEL[shape]}`}>
                     {step.day}
                   </span>
+                  {/* THE NOTICE'S OWN NAME, which is the lead row's: "Section 129 / letter of
+                      demand" rather than that and "Section 129 / letter of demand SMS" beside it. */}
                   <span className={`hidden text-center text-[10px] leading-tight @sm:line-clamp-2 @sm:block ${LABEL[shape]}`}>
                     {step.label}
                   </span>
@@ -172,7 +199,7 @@ export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
             </Fragment>
           )
         })}
-        {at === steps.length && mark('mark-end')}
+        {at === notices.length && mark('mark-end')}
       </ol>
     </div>
   )
@@ -189,15 +216,23 @@ export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
  * `group` STAYS ON BOTH, because the hover ring inside is written against it; on the span there is
  * no hover to catch, which is the point.
  */
-function Dot({ step, selected, onSelect, children }: {
-  step: RunStep
+function Dot({ notice, selected, onSelect, children }: {
+  notice: Notice
   selected: boolean
   onSelect?: (id: string) => void
   children: ReactNode
 }) {
+  const step = notice.lead
+  /*
+   * BOTH MESSAGES IN THE WORDS, because the dot now stands for both. "Section 129 - Sent, sent 27
+   * Sep 2026. Section 129 SMS - Waiting on you" is what somebody using a screen reader, or a long
+   * press on the iPad, has to hear -- a dot drawn half-gold whose label mentions only the letter
+   * would be announcing the half that is fine.
+   */
+  const said = notice.steps.map((s) => words(s)).join('. ')
   const shared = {
-    title: words(step),
-    'aria-label': words(step),
+    title: said,
+    'aria-label': said,
     className: 'group flex w-5 shrink-0 flex-col items-center gap-0.5 @sm:w-[76px] @sm:gap-1',
   }
   if (!onSelect) return <span {...shared}>{children}</span>

@@ -127,5 +127,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * which planSend decides and which is CLAUDE.md's rule about the action's date.
    */
   const outcome = await runOneStep(admin, step, today, caller.id)
-  res.status(200).json({ ok: true, ...outcome })
+
+  /*
+   * AND THE SMS THAT GOES WITH IT, ON THE SAME PRESS.
+   *
+   * THE FIRM: "you need to send the SMS manually, all right? And you need to, even after you've
+   * sent this 129." Their chart has six steps and Raptor stored eleven, because every step is a
+   * notice AND the text message telling the debtor to go and read it -- so releasing the letter
+   * left the SMS sitting there needing a second press, on a screen that had just said the step was
+   * done. Six steps on the chart and eleven presses in the work.
+   *
+   * THE PAIRING RULE IS THE RUNNER'S OWN, and it is why no column was added for this: a step whose
+   * node carries `after_minutes` follows the one on the same day that does not, which is exactly
+   * how planSend already decides whether the message before this one went out.
+   *
+   * ONLY AFTER THE LETTER ACTUALLY WENT. The SMS says "we have emailed you"; sending it behind a
+   * letter that held would tell the debtor to go and read something that was never sent. planSend
+   * would refuse it anyway on `afterStepSent` -- this is the same rule, applied before the attempt
+   * rather than after it, so the outcome reported is the truth rather than a second failure.
+   *
+   * AND PENDING COUNTS, NOT ONLY HELD. The follower is usually pending: the morning sweep passed
+   * over it because the letter it follows was still waiting for a person. It is the same press.
+   */
+  const companions: typeof outcome[] = []
+  if (outcome.result === 'sent') {
+    const { data: behind } = await admin
+      .from('workflow_run_steps')
+      .select('id, node_id, due_on, state, note, run_id, workflow_nodes!inner(after_minutes), workflow_runs!inner(id, account_id, version_id, started_on, state)')
+      .eq('run_id', step.run_id)
+      .eq('due_on', step.due_on)
+      .neq('id', step.id)
+      .in('state', ['pending', 'held'])
+      .not('workflow_nodes.after_minutes', 'is', null)
+      .order('due_on', { ascending: true })
+    for (const s of (behind ?? []) as unknown as DueStep[]) {
+      try {
+        companions.push(await runOneStep(admin, s, today, caller.id))
+      } catch (e) {
+        /* One message's failure is not the other's: the notice HAS gone, and saying so while
+           reporting what happened to the SMS is the honest account of the press. */
+        companions.push({
+          result: 'failed',
+          note: e instanceof Error ? e.message : String(e),
+        } as typeof outcome)
+      }
+    }
+  }
+
+  res.status(200).json({
+    ok: true,
+    ...outcome,
+    /* What went with it, so the screen can say "the notice and the SMS went" rather than leaving
+       somebody to wonder whether the second one is still waiting. */
+    alsoSent: companions.filter((c) => c.result === 'sent').length,
+    alsoHeld: companions.filter((c) => c.result !== 'sent').length,
+    alsoNotes: companions.filter((c) => c.result !== 'sent').map((c) => c.note).filter(Boolean),
+  })
 }
