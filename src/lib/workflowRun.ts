@@ -133,15 +133,31 @@ export function planRun(input: {
       state: 'pending',
       note: null,
       /*
-       * A MESSAGE ABOUT A MOMENT THAT HAS ALREADY PASSED IS CANCELLED, NEVER SENT.
+       * NOTHING ABOUT AN INSTALMENT IS SENT ON OR BEFORE THE DAY THE ARRANGEMENT WAS AGREED.
        *
-       * THE FIRM FOUND THIS ON THEIR FIRST ARRANGEMENT. They agreed R x with the first payment due
-       * that same day; the reminder is two working days BEFORE each instalment, so it was dated
-       * four days earlier -- before the arrangement existed. The runner sends anything overdue, so
-       * the debtor received, inside twelve seconds: "your payment is due on 27 September", "we
-       * confirm your arrangement", and "your payment is due today". Three emails at R25 each, for
-       * one arrangement, in the wrong order -- the reminder arriving BEFORE the confirmation of the
+       * TWO RULES THAT TURNED OUT TO BE ONE, and the firm gave them in that order.
+       *
+       * FIRST, A MOMENT THAT HAS ALREADY PASSED. They agreed R x with the first payment due that
+       * same day; the reminder goes two working days BEFORE each instalment, so it was dated four
+       * days earlier -- before the arrangement existed. The runner sends anything overdue, so the
+       * debtor received, inside twelve seconds: "your payment is due on 27 September", "we confirm
+       * your arrangement", and "your payment is due today". Three emails at R25 each, for one
+       * arrangement, in the wrong order -- the reminder arriving BEFORE the confirmation of the
        * thing it was reminding them about.
+       *
+       * THEN THE DAY ITSELF, which the firm ruled on next: "if a payment is due today, the same
+       * day arrangement, then it's not necessary to send two SMSs... in fact, you don't even have
+       * to send one, because you get sent the payment arrangement confirmation letter and the
+       * SMS." The debtor has just agreed the terms in conversation and been sent them in writing;
+       * a third message the same afternoon saying the payment is due today tells them nothing they
+       * were not told twice already, and costs them an SMS segment under item 1(c).
+       *
+       * SO THE COMPARISON IS `<=` AND THE REASON IS THE SAME REASON: on the day an arrangement is
+       * agreed, everything the instalment steps have to say has already been said by the
+       * confirmation. A day later it has not been -- the firm: "if the payment is due tomorrow or
+       * for the next day, then the confirmation email is enough, and then on the next day it will
+       * be reminded" -- so tomorrow's day-of message still goes, and where the reminder itself
+       * falls in the future all three go, which is the ordinary case.
        *
        * OVERDUE STILL SENDS EVERYWHERE ELSE, and that rule is right where it applies. A final
        * notice the firm is late with is still true: the period it describes HAS elapsed, and the
@@ -149,18 +165,22 @@ export function planRun(input: {
        * "this is coming" is false the moment the day arrives, and no amount of lateness makes it
        * true again.
        *
-       * SO IT IS CANCELLED RATHER THAN LEFT OUT. The chart still carries it, greyed, with the
-       * reason on it: the step existed and it did not go, which is the honest record. Dropped from
-       * the plan entirely, a three-instalment arrangement would quietly show eleven steps where the
-       * version says fourteen and nobody could tell which one was missing.
+       * CANCELLED RATHER THAN LEFT OUT. The chart still carries it, greyed, with the reason on it:
+       * the step existed and it did not go, which is the honest record. Dropped from the plan
+       * entirely, a three-instalment arrangement would quietly show eleven steps where the version
+       * says fourteen and nobody could tell which one was missing.
        *
-       * ONLY AN INSTALMENT STEP CAN LAND HERE. A run-anchored day is counted from `startedOn` and
-       * cannot precede it; an instalment date is the debtor's and was set before we were asked.
+       * ONLY AN INSTALMENT STEP CAN LAND HERE. A run-anchored day is counted from `startedOn`, so
+       * the confirmation itself is never caught by this; an instalment date is the debtor's and
+       * was set before we were asked.
        */
-      ...(instalmentNo > 0 && dueOn < startedOn
+      ...(instalmentNo > 0 && dueOn <= startedOn
         ? {
           state: 'cancelled' as RunStepState,
-          note: 'This date had already passed when the arrangement was agreed, so it was not sent.',
+          note: dueOn < startedOn
+            ? 'This date had already passed when the arrangement was agreed, so it was not sent.'
+            : 'The arrangement was agreed on this day and the confirmation of it said so, so this '
+              + 'was not sent as well.',
         }
         : {}),
     }))

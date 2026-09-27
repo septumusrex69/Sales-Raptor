@@ -206,16 +206,64 @@ check('...and says why, in the firm’s words', reminder1?.note,
   'This date had already passed when the arrangement was agreed, so it was not sent.')
 check('...its SMS with it',
   sameDay.find((s) => s.nodeId === 'rem-sms' && s.instalmentNo === 1)?.state, 'cancelled')
-/* STILL PLANNED, NOT DROPPED. The chart carries it greyed with the reason on it; left out, a
-   three-instalment arrangement would show eleven steps where the version says fourteen. */
-check('...but it is still on the chart', sameDay.length, 2 + 3 * 4)
-/* AND NOTHING ELSE IS TOUCHED. The message due ON the day is true and goes; so does every step of
-   the instalments still ahead. */
-check('the message due on the day still goes',
-  sameDay.find((s) => s.nodeId === 'due-email' && s.instalmentNo === 1)?.state, 'pending')
-check('...and so does the reminder for the next instalment',
+
+/*
+ * AND SO IS THE MESSAGE DUE ON THE DAY THE ARRANGEMENT WAS AGREED.
+ *
+ * THE FIRM RULED ON THIS AFTER SEEING THE FIRST ONE: "if a payment is due today, the same day
+ * arrangement, then it's not necessary to send two SMSs... in fact, you don't even have to send
+ * one, because you get sent the payment arrangement confirmation letter and the SMS."
+ *
+ * THE DEBTOR HAS ALREADY BEEN TOLD TWICE -- in the conversation that agreed the terms, and in the
+ * confirmation that put them in writing an hour later. A third message the same afternoon saying
+ * the payment is due today adds nothing and costs them a segment under item 1(c).
+ */
+const dueToday = sameDay.find((s) => s.nodeId === 'due-email' && s.instalmentNo === 1)
+check('the day-of message is cancelled on a same-day arrangement', dueToday?.state, 'cancelled')
+check('...and says why, in the firm’s words', dueToday?.note,
+  'The arrangement was agreed on this day and the confirmation of it said so, so this was not '
+  + 'sent as well.')
+check('...its SMS with it',
+  sameDay.find((s) => s.nodeId === 'due-sms' && s.instalmentNo === 1)?.state, 'cancelled')
+/* STILL PLANNED, NOT DROPPED. The chart carries them greyed with the reason on each; left out, a
+   three-instalment arrangement would show ten steps where the version says fourteen. */
+check('...but they are still on the chart', sameDay.length, 2 + 3 * 4)
+/* AND NOTHING BEYOND THAT DAY IS TOUCHED. */
+check('the reminder for the next instalment still goes',
   sameDay.find((s) => s.nodeId === 'rem-email' && s.instalmentNo === 2)?.state, 'pending')
-check('...and the confirmation', sameDay.find((s) => s.nodeId === 'conf-email')?.state, 'pending')
+check('...and the confirmation itself', sameDay.find((s) => s.nodeId === 'conf-email')?.state, 'pending')
+
+/*
+ * THE OTHER TWO CASES THE FIRM SPELLED OUT, AND THEY ARE THE SAME RULE READ A DAY AND FOUR DAYS
+ * LATER. Held as whole days rather than as one boundary, because the three sentences they gave
+ * are three sentences a collector will be asked about.
+ */
+
+/* "IF THE PAYMENT IS DUE TOMORROW... THE CONFIRMATION EMAIL IS ENOUGH, AND THEN ON THE NEXT DAY
+   IT WILL BE REMINDED." The reminder is still in the past and goes; the day-of message is not. */
+const tomorrow = planRun({
+  nodes: NODES, dayUnit: 'calendar', startedOn: '2026-03-08',
+  instalments: [{ no: 1, amount: 2500, dueOn: '2026-03-09' }],
+})
+check('an instalment due tomorrow still gets its message on the day',
+  tomorrow.find((s) => s.nodeId === 'due-email')?.state, 'pending')
+check('...dated the day it falls', tomorrow.find((s) => s.nodeId === 'due-email')?.dueOn, '2026-03-09')
+check('...while its reminder, two working days back, is still in the past',
+  tomorrow.find((s) => s.nodeId === 'rem-email')?.state, 'cancelled')
+check('...leaving the confirmation as the only thing that goes today',
+  tomorrow.filter((s) => s.dueOn === '2026-03-08' && s.state === 'pending').length, 2)
+
+/* "IF THE SMS IS FOR TWO DAYS BEFORE, THEN YOU CAN SEND THE REMINDER AND THE CONFIRMATION AND
+   THEN A REMINDER ON THE DAY." The ordinary arrangement: all three go. */
+const roomy = planRun({
+  nodes: NODES, dayUnit: 'calendar', startedOn: '2026-03-02',
+  instalments: [{ no: 1, amount: 2500, dueOn: '2026-03-09' }],
+})
+check('an instalment a week out sends all three', roomy.filter((s) => s.state === 'pending').length, 6)
+check('...the confirmation today', roomy.find((s) => s.nodeId === 'conf-email')?.dueOn, '2026-03-02')
+check('...the reminder two working days before it', roomy.find((s) => s.nodeId === 'rem-email')?.dueOn, '2026-03-05')
+check('...and the day-of message on the day', roomy.find((s) => s.nodeId === 'due-email')?.dueOn, '2026-03-09')
+check('...with nothing cancelled at all', roomy.filter((s) => s.state === 'cancelled').length, 0)
 /*
  * ONLY AN INSTALMENT STEP CAN LAND HERE, AND IT TAKES A MALFORMED NODE TO PROVE IT.
  *
