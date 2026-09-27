@@ -340,6 +340,25 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
     { key: 'ptp_amount', label: 'The next instalment under the arrangement', sample: 'R 2,500.00' },
     { key: 'ptp_date', label: 'The day that instalment is due', sample: '5 October 2026' },
     /*
+     * AND WHAT WAS ACTUALLY RECEIVED, WHICH IS NOT THE SAME NUMBER.
+     *
+     * THE FIRM'S RECEIPT EMAIL ASKED FOR {{ptp_amount}} TWICE, meaning two different things in one
+     * message: "We confirm receipt of {{ptp_amount}}" and, four lines down, "Next payment:
+     * {{ptp_amount}} on {{ptp_date}}". Under the one definition the other two fields have -- the
+     * earliest instalment NOT YET PAID -- the payment just allocated has already moved that
+     * boundary, so the first line would have confirmed receipt of the instalment still owing. On an
+     * arrangement whose last instalment is the remainder that is a receipt for R2 500 against a
+     * payment of R100.
+     *
+     * SO THE RECEIPT IS ITS OWN FIELD. The alternative was dropping the amount from the firm's
+     * first line, which makes a receipt that does not say what was received.
+     *
+     * IT IS THE NEWEST UNREVERSED PAYMENT ON THE ACCOUNT, which is what a receipt is about, and it
+     * is read from the ledger the notice's balance already comes from -- so the figure confirmed and
+     * the balance under it cannot disagree. A REVERSED payment is not a receipt.
+     */
+    { key: 'ptp_paid', label: 'The payment just received', sample: 'R 2,500.00' },
+    /*
      * THE FIVE THE LETTERS NEED AND THE SMSs NEVER DID.
      *
      * `handover_date` is the first station on the notice's timeline -- "account handed to us" --
@@ -451,7 +470,7 @@ export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
   /* THE ARRANGEMENT IS ABOUT THE ARRANGEMENT, not about the account: the balance is what is owed
      and these two are what was agreed to pay it off. Grouped apart so a writer reaching for "the
      amount" is not offered {{balance}} and {{ptp_amount}} side by side. */
-  { title: 'The arrangement', keys: ['ptp_amount', 'ptp_date'] },
+  { title: 'The arrangement', keys: ['ptp_amount', 'ptp_date', 'ptp_paid'] },
   { title: 'Their business', keys: ['company_name', 'service_interested'] },
   { title: 'The deal', keys: ['deal_name', 'deal_value'] },
   { title: 'The client', keys: ['client_name'] },
@@ -948,6 +967,11 @@ export function mergeValuesFor(input: {
    */
   nextInstalment?: { amount: number; dueOn: string } | null
   /**
+   * THE PAYMENT A RECEIPT IS ABOUT: the newest unreversed payment on the account, or null where
+   * there is none. See `ptp_paid` above for why it cannot be the instalment amount.
+   */
+  paymentReceived?: number | null
+  /**
    * The firm's own details, PASSED WHOLE RATHER THAN FIELD BY FIELD.
    *
    * The shape is FirmSettings' -- same key names, every one optional but `firmName` -- and the
@@ -1064,6 +1088,11 @@ export function mergeValuesFor(input: {
        balance above them is. Two formats for two amounts in one letter reads as two systems. */
     ptp_amount: input.nextInstalment ? input.money(input.nextInstalment.amount) : null,
     ptp_date: input.nextInstalment ? longDate(input.nextInstalment.dueOn) : null,
+    /* Null, not R 0.00, where nothing has been received: a receipt for nothing is not a receipt,
+       and the standing placeholder is what stops it going out. `paid_to_date` is the opposite case
+       and prints R 0.00 on purpose -- there, zero is the answer to "what have they paid". */
+    ptp_paid: input.paymentReceived === null || input.paymentReceived === undefined
+      ? null : input.money(input.paymentReceived),
     position_as_at: input.positionAsAt ? longDate(input.positionAsAt) : null,
     firm_bank: bankLine(input.firm.trustBank, input.firm.trustBranchCode),
     firm_bank_name: some(input.firm.trustBank),

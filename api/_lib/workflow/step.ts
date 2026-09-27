@@ -240,6 +240,13 @@ export async function runOneStep(
        default letter is the one that was MISSED, and is what makes "has not reached our trust
        account" a true sentence rather than a demand for money not yet owed. */
     nextInstalment: nextUnpaidFromRow(promiseRes.data),
+    /*
+     * WHAT A RECEIPT CONFIRMS: the newest unreversed payment, off the ledger the balance above it
+     * already came from -- so the figure the debtor is thanked for and the balance under it cannot
+     * disagree. `ledgersFor` has already dropped the reversed ones, and they are ordered by
+     * received_at, so the last is the newest.
+     */
+    paymentReceived: ledgerRes.payments.at(-1)?.amount ?? null,
   })
 
   const contacts = (contactsRes.data ?? []) as ContactRow[]

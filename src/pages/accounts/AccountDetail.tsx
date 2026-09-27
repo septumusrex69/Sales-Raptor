@@ -497,6 +497,17 @@ export function AccountDetail() {
          * collector composing inside it must be able to quote the instalment that was missed.
          */
         nextInstalment: nextUnpaid(liveArrangement(workspace?.promises ?? [])),
+        /*
+         * WHAT A RECEIPT CONFIRMS, off the same statement the balance beside it comes from -- so the
+         * figure the debtor is thanked for and the balance under it cannot disagree.
+         *
+         * THE PAYMENT LINE, NOT THE RECEIPT-FEE LINE BESIDE IT. A payment carries two statement
+         * lines on purpose: the payment and the Annexure B item 8 receipt fee it attracts. They are
+         * different transactions with different payers, and thanking a debtor for the fee would be
+         * a receipt for the wrong number.
+         */
+        paymentReceived: [...(statement?.lines ?? [])]
+          .filter((l) => l.kind === 'payment').at(-1)?.credit ?? null,
       })
       : {},
   /* Before the early returns below, because a hook cannot run conditionally -- which is also why
@@ -506,7 +517,7 @@ export function AccountDetail() {
      on, which is the one failure these fields exist to prevent. */
   /* `promises` is in here because the arrangement's own two fields are read out of it: left off,
      a reminder keeps quoting the instalment that was next before the last payment landed. */
-  }), [account, statement?.breakdown?.balance, client?.name, client?.accountOwnerId, users,
+  }), [account, statement?.breakdown?.balance, statement?.lines, client?.name, client?.accountOwnerId, users,
     workspace?.contacts, workspace?.promises,
     currentUser?.name, currentUser?.phone, currentUser?.email, currentUser?.whatsapp, firm])
 

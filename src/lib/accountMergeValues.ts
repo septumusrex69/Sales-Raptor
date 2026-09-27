@@ -113,6 +113,8 @@ export function accountMergeValues(input: {
    * arrangement to quote, which is what holds the step instead of sending a blank amount.
    */
   nextInstalment?: { amount: number; dueOn: string } | null
+  /** What a receipt confirms: the newest unreversed payment. See `ptp_paid` in messageTemplates. */
+  paymentReceived?: number | null
 }): Record<string, string> {
   return Object.fromEntries(
     Object.entries(mergeValuesFor({
@@ -132,6 +134,7 @@ export function accountMergeValues(input: {
       debtorAddress: addressOf(input.contacts),
       respondBy: respondBy(input.today),
       nextInstalment: input.nextInstalment ?? null,
+      paymentReceived: input.paymentReceived ?? null,
       /* Passed whole. There is no list of the firm's fields here to fall behind the ones the
          library grew -- see mergeValuesFor, which takes FirmSettings' own shape. */
       firm: input.firm,

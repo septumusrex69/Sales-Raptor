@@ -7707,3 +7707,312 @@ begin
      and left_reason = 'The account was not in arrears, so the demand fell away';
   return new;
 end $$;
+
+
+-- ============================================================================
+-- THE PAYMENT ARRANGEMENT LIBRARY: 22 templates the firm handed over as one set.
+--
+-- Two letters typeset from the firm's own PDFs, ten emails and ten SMSs. Only the two
+-- default emails carry an attachment, and each points at the letter for its own audience.
+--
+-- ONE DELIBERATE CHANGE TO THE WORDING HANDED OVER, and it is on every template: every
+-- reference the debtor is told to quote is {{case_number}} and not {{reference}}. The firm's
+-- own earlier instruction -- "if they use the client reference, it's more difficult to find" --
+-- and the book: the client's reference is used on more than one account 5 013 times over, so
+-- 21% of accounts cannot be identified by it. All 24 collections templates already quote ours.
+-- Left as handed over, a debtor would be given one reference in the letter and a different one
+-- in the email covering it, on the same day, for the same payment.
+--
+-- AND ONE FIELD THE SET NEEDED: {{ptp_paid}}. The receipt asked for {{ptp_amount}} twice,
+-- meaning two different things -- "We confirm receipt of" and "Next payment" -- and under the
+-- one definition the other fields have (the earliest instalment NOT YET PAID) the payment just
+-- allocated has already moved that boundary.
+--
+-- ON CONFLICT DO NOTHING, WHICH IS THE HOUSE RULE AND NOT A SHORTCUT. Re-running a seed must
+-- never revert an edit the firm has made in the Library -- their wording wins over ours, always.
+-- These first went in with an upsert that replaced the body, which check-message-templates
+-- refused: it counts the guarded inserts against the total, and it also greps this file for the
+-- offending clause -- so naming it even in a comment fails the check, which is the trap that
+-- check names in its own words and caught here in reverse.
+-- ============================================================================
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('letter', 'collections', 'individual', 'text', 'Notice of default on payment arrangement (individual)', null,
+  '{"defaults":{"font":"\"Charter\", \"Bitstream Charter\", Georgia, serif","size":10.5,"colour":"#1f2937","lineHeight":1.45},"runningFoot":"Default on payment arrangement · Ref {{case_number}} · Page {{page}} of {{pages}}","blocks":[{"kind":"table","borders":"none","widths":[28,72],"rows":[[{"spans":[{"text":"DATE","bold":true}]},{"spans":[{"text":"{{today}}"}]}],[{"spans":[{"text":"OUR REFERENCE","bold":true}]},{"spans":[{"text":"{{case_number}}"}]}],[{"spans":[{"text":"ACCOUNT","bold":true}]},{"spans":[{"text":"{{account_number}}"}]}],[{"spans":[{"text":"DELIVERY","bold":true}]},{"spans":[{"text":"By email, with notification by SMS"}]}]]},{"kind":"paragraph","spans":[{"text":"{{debtor_name}}","bold":true}]},{"kind":"paragraph","spans":[{"text":"Identity number: {{debtor_id_masked}}"}]},{"kind":"heading","level":1,"spans":[{"text":"NOTICE OF DEFAULT ON YOUR PAYMENT ARRANGEMENT"}]},{"kind":"paragraph","spans":[{"text":"Dear {{debtor_name}} — we act on behalf of {{client_name}}, the creditor. The payment due in terms of your arrangement has not reached our trust account, and the arrangement has lapsed."}]},{"kind":"heading","level":2,"spans":[{"text":"The payment that was missed"}],"numbered":true},{"kind":"table","borders":"all","widths":[50,50],"rows":[[{"spans":[{"text":"THE PAYMENT THAT WAS NOT RECEIVED","bold":true}]},{"spans":[{"text":""}]}],[{"spans":[{"text":"AMOUNT DUE","bold":true}]},{"spans":[{"text":"{{ptp_amount}}"}]}],[{"spans":[{"text":"DATE IT WAS DUE","bold":true}]},{"spans":[{"text":"{{ptp_date}}"}]}],[{"spans":[{"text":"RECEIVED","bold":true}]},{"spans":[{"text":"Nothing"}]}],[{"spans":[{"text":"PAID SO FAR","bold":true}]},{"spans":[{"text":"{{paid_to_date}}"}]}],[{"spans":[{"text":"STILL OUTSTANDING","bold":true}]},{"spans":[{"text":"{{balance}}","bold":true}]}]],"headerRow":true},{"kind":"paragraph","spans":[{"text":"Our records were checked on the date of this letter and no payment had reached our trust account.","size":9}]},{"kind":"heading","level":2,"spans":[{"text":"What this means"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"While you kept to the arrangement we held the collection steps on your account. That hold has now fallen away, and the collection process continues from the point at which it was paused. Depending on where your account stood, the next steps are the final notice, the reporting of your default to the credit bureaus, and the handover of your file to one of our attorneys to enforce the agreement."}]},{"kind":"paragraph","spans":[{"text":"Interest continues to accrue at 2% per month on the amount outstanding.","size":9}]},{"kind":"heading","level":2,"spans":[{"text":"How your payments are reported"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"Your payment record on this account is reported to the registered credit bureaus. That is not only whether you pay, but how you pay."}]},{"kind":"table","borders":"all","widths":[26,74],"rows":[[{"spans":[{"text":"WHAT IS REPORTED, AND HOW IT READS","bold":true}]},{"spans":[{"text":""}]}],[{"spans":[{"text":"Missed payment","bold":true}]},{"spans":[{"text":"Reported to the registered credit bureaus and counted against the profile."}]}],[{"spans":[{"text":"Short payment","bold":true}]},{"spans":[{"text":"A payment of less than the agreed amount is reported as a payment not met."}]}],[{"spans":[{"text":"Late payment","bold":true}]},{"spans":[{"text":"Reported as late, even where the full amount arrives afterwards."}]}],[{"spans":[{"text":"Slow paying","bold":true}]},{"spans":[{"text":"An arrangement that takes more than six instalments to settle the account is reported as slow paying, which every credit provider who assesses you can see."}]}]],"headerRow":true},{"kind":"paragraph","spans":[{"text":"Paying the agreed amount on the agreed date is what keeps a profile clean. The shorter the arrangement, the better the record reads.","size":9}]},{"kind":"heading","level":2,"spans":[{"text":"You have 48 hours to revive the arrangement"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"Payment of the missed {{ptp_amount}} must reach our trust account within 48 hours of the date of this letter.","bold":true},{"text":" If it does, the arrangement continues on its existing terms and no further step is taken."}]},{"kind":"list","ordered":false,"items":[[{"text":"Pay the missed {{ptp_amount}} within 48 hours. ","bold":true},{"text":"Use reference {{case_number}}, and email proof of payment on the day you pay."}],[{"text":"Or speak to {{collector_name}} today ","bold":true},{"text":"about what you can realistically manage, so that a new arrangement can be put in place and confirmed in writing."}],[{"text":"Or settle the account. ","bold":true},{"text":"Payment of {{balance}} ends the matter."}]]},{"kind":"paragraph","spans":[{"text":"If the 48 hours pass without payment, the hold on your account falls away for good and we proceed with the steps above: your default is reported to the registered credit bureaus, and the process under the Section 129 notice continues, through our attorneys and the courts, to recover the full amount owing."}]},{"kind":"heading","level":2,"spans":[{"text":"How to pay"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"PAYMENT MUST BE MADE INTO OUR LEGAL PRACTITIONER TRUST ACCOUNT","bold":true}]},{"kind":"paragraph","spans":[{"text":"A payment into our trust account is verified on the day it reaches us. Do not pay any other account."}]},{"kind":"table","borders":"rows","widths":[34,66],"rows":[[{"spans":[{"text":"BANK","bold":true}]},{"spans":[{"text":"{{firm_bank_name}}"}]}],[{"spans":[{"text":"ACCOUNT NAME","bold":true}]},{"spans":[{"text":"{{firm_bank_holder}}"}]}],[{"spans":[{"text":"BRANCH CODE","bold":true}]},{"spans":[{"text":"{{firm_bank_branch}}"}]}],[{"spans":[{"text":"ACCOUNT NUMBER","bold":true}]},{"spans":[{"text":"{{firm_bank_account}}"}]}],[{"spans":[{"text":"PAYMENT REFERENCE","bold":true}]},{"spans":[{"text":"{{case_number}}"}]}],[{"spans":[{"text":"PROOF OF PAYMENT","bold":true}]},{"spans":[{"text":"Email it to {{firm_email}} on the day you pay"}]}],[{"spans":[{"text":"QUESTIONS","bold":true}]},{"spans":[{"text":"Speak to {{collector_name}}, who handles this account, on {{firm_phone}}"}]}]]},{"kind":"paragraph","spans":[{"text":"We look forward to hearing from you before the next step is taken."}]},{"kind":"paragraph","spans":[{"text":"Yours faithfully"}],"keepWithNext":true},{"kind":"signature","widthMm":70,"spans":[{"text":"{{signatory_name}}\n{{signatory_title}}\nfor and on behalf of {{firm_name}}\nduly authorised agent of {{client_name}}"}]},{"kind":"paragraph","spans":[{"text":"Note on delivery. Sent by email, with notification by SMS. Proof of sending is retained on our file.","size":8.5}]}]}', 'letter-ptp-default-individual', true)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('letter', 'collections', 'company', 'text', 'Notice of default on payment arrangement (company)', null,
+  '{"defaults":{"font":"\"Charter\", \"Bitstream Charter\", Georgia, serif","size":10.5,"colour":"#1f2937","lineHeight":1.45},"runningFoot":"Default on payment arrangement · Ref {{case_number}} · Page {{page}} of {{pages}}","blocks":[{"kind":"table","borders":"none","widths":[28,72],"rows":[[{"spans":[{"text":"DATE","bold":true}]},{"spans":[{"text":"{{today}}"}]}],[{"spans":[{"text":"OUR REFERENCE","bold":true}]},{"spans":[{"text":"{{case_number}}"}]}],[{"spans":[{"text":"ACCOUNT","bold":true}]},{"spans":[{"text":"{{account_number}}"}]}],[{"spans":[{"text":"DELIVERY","bold":true}]},{"spans":[{"text":"By email, with notification by SMS"}]}]]},{"kind":"paragraph","spans":[{"text":"The Directors"}]},{"kind":"paragraph","spans":[{"text":"{{debtor_name}}","bold":true}]},{"kind":"paragraph","spans":[{"text":"Registration number: {{debtor_reg_no}}"}]},{"kind":"heading","level":1,"spans":[{"text":"NOTICE OF DEFAULT ON THE COMPANY''S PAYMENT ARRANGEMENT"}]},{"kind":"paragraph","spans":[{"text":"Dear Sirs / Madams — we act on behalf of {{client_name}}, the creditor. The payment due in terms of the company''s arrangement has not reached our trust account, and the arrangement has lapsed."}]},{"kind":"heading","level":2,"spans":[{"text":"The payment that was missed"}],"numbered":true},{"kind":"table","borders":"all","widths":[50,50],"rows":[[{"spans":[{"text":"THE PAYMENT THAT WAS NOT RECEIVED","bold":true}]},{"spans":[{"text":""}]}],[{"spans":[{"text":"AMOUNT DUE","bold":true}]},{"spans":[{"text":"{{ptp_amount}}"}]}],[{"spans":[{"text":"DATE IT WAS DUE","bold":true}]},{"spans":[{"text":"{{ptp_date}}"}]}],[{"spans":[{"text":"RECEIVED","bold":true}]},{"spans":[{"text":"Nothing"}]}],[{"spans":[{"text":"PAID SO FAR","bold":true}]},{"spans":[{"text":"{{paid_to_date}}"}]}],[{"spans":[{"text":"STILL OUTSTANDING","bold":true}]},{"spans":[{"text":"{{balance}}","bold":true}]}]],"headerRow":true},{"kind":"paragraph","spans":[{"text":"Our records were checked on the date of this letter and no payment had reached our trust account.","size":9}]},{"kind":"heading","level":2,"spans":[{"text":"What this means"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"While the company kept to the arrangement we held the collection steps on the account. That hold has now fallen away, and the collection process continues from the point at which it was paused. Depending on where the account stood, the next steps are the final notice, the reporting of the company''s default to the credit bureaus against its registration number, and the handover of the file to one of our attorneys, beginning with a demand in terms of Section 345 of the Companies Act 61 of 1973."}]},{"kind":"paragraph","spans":[{"text":"Interest continues to accrue at 2% per month on the amount outstanding.","size":9}]},{"kind":"heading","level":2,"spans":[{"text":"How the company''s payments are reported"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"The company''s payment record on this account is reported to the registered credit bureaus against its registration number. That is not only whether it pays, but how it pays."}]},{"kind":"table","borders":"all","widths":[26,74],"rows":[[{"spans":[{"text":"WHAT IS REPORTED, AND HOW IT READS","bold":true}]},{"spans":[{"text":""}]}],[{"spans":[{"text":"Missed payment","bold":true}]},{"spans":[{"text":"Reported to the registered credit bureaus and counted against the profile."}]}],[{"spans":[{"text":"Short payment","bold":true}]},{"spans":[{"text":"A payment of less than the agreed amount is reported as a payment not met."}]}],[{"spans":[{"text":"Late payment","bold":true}]},{"spans":[{"text":"Reported as late, even where the full amount arrives afterwards."}]}],[{"spans":[{"text":"Slow paying","bold":true}]},{"spans":[{"text":"An arrangement that takes more than six instalments to settle the account is reported as slow paying, which every credit provider who assesses you can see."}]}]],"headerRow":true},{"kind":"paragraph","spans":[{"text":"Suppliers, lenders and landlords who assess the company see this record. The shorter the arrangement, the better it reads.","size":9}]},{"kind":"heading","level":2,"spans":[{"text":"The company has 48 hours to revive the arrangement"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"Payment of the missed {{ptp_amount}} must reach our trust account within 48 hours of the date of this letter.","bold":true},{"text":" If it does, the arrangement continues on its existing terms and no further step is taken."}]},{"kind":"list","ordered":false,"items":[[{"text":"Pay the missed {{ptp_amount}} within 48 hours. ","bold":true},{"text":"Use reference {{case_number}}, and email proof of payment on the day the company pays."}],[{"text":"Or send {{collector_name}} a written proposal today, ","bold":true},{"text":"with amounts and dates, so that a new arrangement can be confirmed in writing."}],[{"text":"Or settle the account. ","bold":true},{"text":"Payment of {{balance}} ends the matter."}]]},{"kind":"paragraph","spans":[{"text":"If the 48 hours pass without payment, the hold on the account falls away for good and we proceed with the steps above: the company''s default is reported to the registered credit bureaus against its registration number, and the file goes to our attorneys to recover the full amount owing."}]},{"kind":"heading","level":2,"spans":[{"text":"How to pay"}],"numbered":true},{"kind":"paragraph","spans":[{"text":"PAYMENT MUST BE MADE INTO OUR LEGAL PRACTITIONER TRUST ACCOUNT","bold":true}]},{"kind":"paragraph","spans":[{"text":"A payment into our trust account is verified on the day it reaches us. Do not pay any other account."}]},{"kind":"table","borders":"rows","widths":[34,66],"rows":[[{"spans":[{"text":"BANK","bold":true}]},{"spans":[{"text":"{{firm_bank_name}}"}]}],[{"spans":[{"text":"ACCOUNT NAME","bold":true}]},{"spans":[{"text":"{{firm_bank_holder}}"}]}],[{"spans":[{"text":"BRANCH CODE","bold":true}]},{"spans":[{"text":"{{firm_bank_branch}}"}]}],[{"spans":[{"text":"ACCOUNT NUMBER","bold":true}]},{"spans":[{"text":"{{firm_bank_account}}"}]}],[{"spans":[{"text":"PAYMENT REFERENCE","bold":true}]},{"spans":[{"text":"{{case_number}}"}]}],[{"spans":[{"text":"PROOF OF PAYMENT","bold":true}]},{"spans":[{"text":"Email it to {{firm_email}} on the day the company pays"}]}],[{"spans":[{"text":"QUESTIONS","bold":true}]},{"spans":[{"text":"Speak to {{collector_name}}, who handles this account, on {{firm_phone}}"}]}]]},{"kind":"paragraph","spans":[{"text":"We look forward to hearing from the company before the next step is taken."}]},{"kind":"paragraph","spans":[{"text":"Yours faithfully"}],"keepWithNext":true},{"kind":"signature","widthMm":70,"spans":[{"text":"{{signatory_name}}\n{{signatory_title}}\nfor and on behalf of {{firm_name}}\nduly authorised agent of {{client_name}}"}]},{"kind":"paragraph","spans":[{"text":"Note on delivery. Sent by email, with notification by SMS. Proof of sending is retained on our file.","size":8.5}]}]}', 'letter-ptp-default-company', true)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'individual', 'text', 'Arrangement confirmed (individual)', 'Payment arrangement confirmed - case reference {{case_number}}',
+  'Dear {{debtor_name}}
+
+Case reference: {{case_number}}
+
+We confirm the payment arrangement agreed on your account with {{client_name}}.
+
+Amount: {{ptp_amount}}
+Due: {{ptp_date}}
+Total outstanding: {{balance}}
+
+While you keep to this arrangement, we hold the collection steps on your account. That includes any credit bureau listing and any handover to our attorneys.
+
+How your payments are reported. Your payment record on this account is reported to the registered credit bureaus. That is not only whether you pay, but how you pay:
+
+- A missed payment is reported and counts against your credit profile.
+- A short payment, less than the agreed amount, is reported as a payment not met.
+- A late payment is reported as late, even if the full amount comes in afterwards.
+- An arrangement that takes more than six instalments to settle the account is reported as slow paying, which every credit provider who assesses you can see.
+
+Paying the agreed amount on the agreed date is what keeps your profile clean. The shorter the arrangement, the better your record reads.
+
+If a payment is not received, this arrangement lapses and the collection process continues from where it was paused.
+
+Please pay into our trust account using reference {{case_number}}. The details are in the notice we sent you, and we will confirm them by phone if you are unsure.
+
+{{collector_name}} handles your account: {{collector_phone}} / {{collector_email}} / {{firm_phone}}
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-ptp-confirmed-individual', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'company', 'text', 'Arrangement confirmed (company)', 'Payment arrangement confirmed - case reference {{case_number}}',
+  'To the directors of {{debtor_name}}
+
+Case reference: {{case_number}}
+Registration number: {{debtor_reg_no}}
+
+We confirm the payment arrangement agreed on the company''s account with {{client_name}}.
+
+Amount: {{ptp_amount}}
+Due: {{ptp_date}}
+Total outstanding: {{balance}}
+
+While the company keeps to this arrangement, we hold the collection steps on the account. That includes any credit bureau listing and any handover to our attorneys.
+
+How the company''s payments are reported. The company''s payment record on this account is reported to the registered credit bureaus against its registration number. That is not only whether it pays, but how it pays:
+
+- A missed payment is reported and counts against your credit profile.
+- A short payment, less than the agreed amount, is reported as a payment not met.
+- A late payment is reported as late, even if the full amount comes in afterwards.
+- An arrangement that takes more than six instalments to settle the account is reported as slow paying, which every credit provider who assesses you can see.
+
+Suppliers, lenders and landlords who assess the company see this record. The shorter the arrangement, the better it reads.
+
+If a payment is not received, this arrangement lapses and the collection process continues from where it was paused.
+
+Please pay into our trust account using reference {{case_number}}. The details are in the letter we sent you, and we will confirm them by phone if you are unsure.
+
+{{collector_name}} handles this account: {{collector_phone}} / {{collector_email}} / {{firm_phone}}
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-ptp-confirmed-company', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'individual', 'text', 'Arrangement reminder (individual)', 'Payment due {{ptp_date}} - case reference {{case_number}}',
+  'Dear {{debtor_name}}
+
+A reminder that {{ptp_amount}} is due on {{ptp_date}} in terms of your arrangement on case reference {{case_number}}.
+
+Please use reference {{case_number}} when you pay, so that it is allocated to your account on the day it reaches us.
+
+Payments on this account are reported to the registered credit bureaus. A payment that is late, short or missed is reported as such.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-ptp-reminder-individual', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'company', 'text', 'Arrangement reminder (company)', 'Payment due {{ptp_date}} - case reference {{case_number}}',
+  'To the directors of {{debtor_name}}
+
+A reminder that {{ptp_amount}} is due on {{ptp_date}} in terms of the company''s arrangement on case reference {{case_number}}.
+
+Please use reference {{case_number}} when the company pays, so that it is allocated on the day it reaches us.
+
+Payments on this account are reported to the registered credit bureaus against the company''s registration number. A payment that is late, short or missed is reported as such.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-ptp-reminder-company', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'individual', 'text', 'Arrangement payment due today (individual)', 'Payment due today - case reference {{case_number}}',
+  'Dear {{debtor_name}}
+
+{{ptp_amount}} is due today in terms of your arrangement on case reference {{case_number}}.
+
+Please pay into our trust account using reference {{case_number}}, and email proof of payment to {{firm_email}} today.
+
+A payment that is late, short or missed is reported to the registered credit bureaus.
+
+If you have already paid, thank you, and please ignore this message.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-ptp-due-today-individual', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'company', 'text', 'Arrangement payment due today (company)', 'Payment due today - case reference {{case_number}}',
+  'To the directors of {{debtor_name}}
+
+{{ptp_amount}} is due today in terms of the company''s arrangement on case reference {{case_number}}.
+
+Please pay into our trust account using reference {{case_number}}, and email proof of payment to {{firm_email}} today.
+
+A payment that is late, short or missed is reported to the registered credit bureaus.
+
+If the payment has already been made, thank you, and please ignore this message.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-ptp-due-today-company', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'individual', 'text', 'Arrangement payment received (individual)', 'Payment received - case reference {{case_number}}',
+  'Dear {{debtor_name}}
+
+We confirm receipt of {{ptp_paid}} on case reference {{case_number}}, allocated to your account with {{client_name}}.
+
+Paid to date: {{paid_to_date}}
+Balance outstanding: {{balance}}
+Next payment: {{ptp_amount}} on {{ptp_date}}
+
+Thank you. The arrangement continues to hold the collection steps on your account.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-ptp-receipt-individual', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'company', 'text', 'Arrangement payment received (company)', 'Payment received - case reference {{case_number}}',
+  'To the directors of {{debtor_name}}
+
+We confirm receipt of {{ptp_paid}} on case reference {{case_number}}, allocated to the company''s account with {{client_name}}.
+
+Paid to date: {{paid_to_date}}
+Balance outstanding: {{balance}}
+Next payment: {{ptp_amount}} on {{ptp_date}}
+
+Thank you. The arrangement continues to hold the collection steps on the account.
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-ptp-receipt-company', true,
+  null)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'individual', 'text', 'Arrangement lapsed (individual)', 'Arrangement lapsed, 48 hours to pay - case reference {{case_number}}',
+  'Dear {{debtor_name}}
+
+Case reference: {{case_number}}
+
+{{ptp_amount}}, due on {{ptp_date}}, has not reached our trust account, and your arrangement has lapsed.
+
+Attached is our notice of the default and of the consequences that follow it. Please read it.
+
+You have 48 hours from the date of that letter to pay the missed {{ptp_amount}} before the proceedings set out in it commence.
+
+Pay into our trust account using reference {{case_number}}. The details are in the letter.
+
+{{collector_name}}: {{collector_phone}} / {{collector_email}}
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-ptp-default-individual', true,
+  (select id from public.message_templates where seed_key = 'letter-ptp-default-individual'))
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active, attachment_id)
+values ('email', 'collections', 'company', 'text', 'Arrangement lapsed (company)', 'Arrangement lapsed, 48 hours to pay - case reference {{case_number}}',
+  'To the directors of {{debtor_name}}
+
+Case reference: {{case_number}}
+Registration number: {{debtor_reg_no}}
+
+{{ptp_amount}}, due on {{ptp_date}}, has not reached our trust account, and the company''s arrangement has lapsed.
+
+Attached is our notice of the default and of the consequences that follow it. Please read it.
+
+You have 48 hours from the date of that letter to pay the missed {{ptp_amount}} before the proceedings set out in it commence.
+
+Pay into our trust account using reference {{case_number}}. The details are in the letter.
+
+{{collector_name}}: {{collector_phone}} / {{collector_email}}
+
+Yours faithfully
+{{collector_name}}
+{{firm_name}}', 'email-ptp-default-company', true,
+  (select id from public.message_templates where seed_key = 'letter-ptp-default-company'))
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'individual', 'text', 'Arrangement confirmed (individual)', null,
+  '{{debtor_name}}, your arrangement on matter {{case_number}} is confirmed: {{ptp_amount}} by {{ptp_date}}. {{firm_phone}}, {{firm_name}}', 'sms-ptp-confirmed-individual', true)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'company', 'text', 'Arrangement confirmed (company)', null,
+  '{{debtor_name}}, the arrangement on matter {{case_number}} is confirmed: {{ptp_amount}} by {{ptp_date}}. {{firm_phone}}', 'sms-ptp-confirmed-company', true)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'individual', 'text', 'Arrangement reminder (individual)', null,
+  '{{debtor_name}}, reminder: {{ptp_amount}} is due on {{ptp_date}} on matter {{case_number}}. Ref {{case_number}} when you pay. {{firm_phone}}', 'sms-ptp-reminder-individual', true)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'company', 'text', 'Arrangement reminder (company)', null,
+  '{{debtor_name}}, reminder: {{ptp_amount}} is due on {{ptp_date}} on matter {{case_number}}. Use ref {{case_number}}. {{firm_phone}}', 'sms-ptp-reminder-company', true)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'individual', 'text', 'Arrangement payment due today (individual)', null,
+  '{{debtor_name}}, {{ptp_amount}} on matter {{case_number}} is due today. Use ref {{case_number}}. {{firm_phone}}, {{firm_name}}', 'sms-ptp-due-today-individual', true)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'company', 'text', 'Arrangement payment due today (company)', null,
+  '{{debtor_name}}, {{ptp_amount}} on matter {{case_number}} is due today. Use ref {{case_number}}. {{firm_phone}}', 'sms-ptp-due-today-company', true)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'individual', 'text', 'Arrangement payment received (individual)', null,
+  '{{debtor_name}}, thank you. {{ptp_paid}} received on matter {{case_number}}. Next payment {{ptp_date}}. {{firm_phone}}, {{firm_name}}', 'sms-ptp-receipt-individual', true)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'company', 'text', 'Arrangement payment received (company)', null,
+  '{{debtor_name}}, thank you. {{ptp_paid}} received on matter {{case_number}}. Next payment {{ptp_date}}. {{firm_phone}}', 'sms-ptp-receipt-company', true)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'individual', 'text', 'Arrangement lapsed (individual)', null,
+  '{{debtor_name}}, {{ptp_amount}} due on {{ptp_date}} was not received. Your arrangement on {{case_number}} has lapsed. Pay within 48 hours. {{firm_phone}}', 'sms-ptp-default-individual', true)
+on conflict (seed_key) do nothing;
+
+insert into public.message_templates (kind, scope, audience, format, name, subject, body, seed_key, active)
+values ('sms', 'collections', 'company', 'text', 'Arrangement lapsed (company)', null,
+  '{{debtor_name}}, {{ptp_amount}} was not received on {{ptp_date}}. Arrangement on {{case_number}} lapsed. Pay within 48 hours. {{firm_phone}}', 'sms-ptp-default-company', true)
+on conflict (seed_key) do nothing;
+
