@@ -221,13 +221,27 @@ function secondLine(node: WorkflowNode, phase: string | undefined): string {
     parts.push(`${node.deadlineDays} ${node.deadlineUnit === 'business' ? 'business days' : 'days'} to respond`)
   }
   /*
+   * "GOES WITH THE ONE BEFORE", AND NOT A NUMBER OF MINUTES.
+   *
+   * THE FIRM: "SMSs and emails should go out at the same time, because the one refers to the other
+   * one... the SMSs are linked to the emails, always."
+   *
+   * THE MINUTES WERE NEVER KEPT. `after_minutes` is tested for `=== null` in every place that
+   * reads it -- the runner, the release, the pairing -- and the number itself is never a delay
+   * anywhere. So a chart reading "10 min after the one before" was promising a gap nothing
+   * implements and the firm does not want, on rows that in fact go out in the same sweep.
+   *
+   * THE COLUMN STAYS, because its real job is the one the firm just described: this message is
+   * LINKED to the one before it. That is what pairs the two into one step, what makes one press
+   * send both, and what stops an SMS saying "we have emailed you" going out on its own.
+   *
    * `typeof === 'number'`, NOT `!== null`. A row whose after_minutes column is absent rather
    * than null arrives as undefined, which is not null -- and every step on the chart then read
    * "undefined min after the one before". Visible only in the browser, which is where it was
    * caught: the rule checks all passed.
    */
   if (typeof node.afterMinutes === 'number') {
-    parts.push(`${node.afterMinutes} min after the one before`)
+    parts.push('goes with the one before it')
   }
   if (phase) parts.push(phase)
   return parts.join(' · ')

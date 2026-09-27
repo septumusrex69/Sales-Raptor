@@ -448,16 +448,28 @@ export function sequenceLine(workflow: Workflow): string {
   const steps = orderedNodes(workflow)
   if (steps.length === 0) return 'Nothing in it yet'
   /*
-   * THE GAP IS PART OF THE SEQUENCE. The firm's rule and the reason afterMinutes exists: the
-   * handover SMS says "we emailed you", so it goes five to ten minutes AFTER the email. A list
-   * showing "Email, SMS" and hiding that is a list showing two things that could happen in
-   * either order.
+   * THE LINK IS PART OF THE SEQUENCE, AND IT IS A LINK RATHER THAN A GAP.
+   *
+   * THE FIRM: "SMSs and emails should go out at the same time, because the one refers to the other
+   * one... the SMSs are linked to the emails, always."
+   *
+   * This read "Email, 10 min, SMS" and the minutes were never kept: every place that reads
+   * afterMinutes tests it for `=== null`, and the number is a delay nowhere -- the two rows go out
+   * in the same sweep. So the list promised a gap nothing implements and the firm does not want.
+   *
+   * WHAT IT STILL HAS TO SAY is that the second is not free-standing. "Email, SMS" alone is a list
+   * of two things that could happen in either order; "Email + SMS" is one step of the firm's chart,
+   * which is what these two rows are.
    */
   const parts: string[] = []
   for (const n of steps) {
+    const label = n.channel ? CHANNELS[n.channel] : NODE_KINDS[n.kind].label
     /* typeof, not !== null: an absent column arrives as undefined and printed itself. */
-    if (typeof n.afterMinutes === 'number' && parts.length > 0) parts.push(`${n.afterMinutes} min`)
-    parts.push(n.channel ? CHANNELS[n.channel] : NODE_KINDS[n.kind].label)
+    if (typeof n.afterMinutes === 'number' && parts.length > 0) {
+      parts[parts.length - 1] = `${parts[parts.length - 1]} + ${label}`
+      continue
+    }
+    parts.push(label)
   }
   /* "End" rather than trailing off, because whether a workflow stops or hands on is the thing
      somebody is checking. */

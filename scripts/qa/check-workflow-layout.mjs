@@ -81,18 +81,41 @@ check('a single-phase workflow is summarised by what it actually sends',
     [node({ id: 'a', phaseId: 'p1', channel: 'email', ordinal: 1 }),
       node({ id: 'b', phaseId: 'p1', channel: 'sms', afterMinutes: 7, ordinal: 2 })],
   )),
-  'Email → 7 min → SMS → End')
+  'Email + SMS → End')
 
 /*
  * AND THE GAP IS PART OF IT. The firm's rule and the reason afterMinutes exists: the handover SMS
  * says "we emailed you", so a line reading "Email, SMS" is a line showing two things that could
  * happen in either order.
  */
-ok('...including the wait between them', /7 min/.test(sequenceLine(wf(
+/*
+ * AND THAT THE SECOND ONE GOES WITH THE FIRST -- said as a LINK, not as a number of minutes.
+ *
+ * THE FIRM: "SMSs and emails should go out at the same time, because the one refers to the other
+ * one... the SMSs are linked to the emails, always."
+ *
+ * The chart used to read "7 min after the one before", and the minutes were never kept: every
+ * place that reads after_minutes tests it for `=== null` and the number itself is a delay nowhere.
+ * So the line promised a gap nothing implements, on two rows that go out in the same sweep.
+ *
+ * ASSERTED IN BOTH DIRECTIONS -- the link is said, and no number of minutes is -- because half of
+ * this would pass on a line that said both.
+ */
+const linked = sequenceLine(wf(
   [phase('p1', 1, 'Handover')],
   [node({ id: 'a', phaseId: 'p1', channel: 'email', ordinal: 1 }),
     node({ id: 'b', phaseId: 'p1', channel: 'sms', afterMinutes: 7, ordinal: 2 })],
-))))
+))
+ok('...drawing the pair as one step', /Email \+ SMS/.test(linked))
+ok('...and never quoting a wait in minutes', !/\bmin\b/.test(linked))
+/* AND THE SCHEDULE SAYS THE SAME THING IN ITS OWN WORDS. Two screens, one fact: the list row
+   collapses the pair into "Email + SMS" and the schedule spells out that the second goes with the
+   first. Read off `rail`, the component this file already has in hand, because that line is
+   built in the render. */
+ok('the schedule says the SMS goes with the notice',
+  /goes with the one before it/.test(rail))
+ok('...rather than promising a gap in minutes',
+  !/\$\{node\.afterMinutes\} min/.test(rail))
 /*
  * AN ABSENT COLUMN IS NOT A ZERO. A row whose after_minutes is missing arrives as undefined,
  * which is not null -- and every step on the chart read "undefined min after the one before".

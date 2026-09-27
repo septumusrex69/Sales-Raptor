@@ -357,6 +357,39 @@ ok('a sent step marks the account as worked', /\.update\(\{ last_action_at: toda
 ok('...dated in the firm’s own day', !/last_action_at: sentAt/.test(runner))
 
 
+/* ---------------- the notice and its SMS go out together ---------------- */
+
+/*
+ * THE FIRM: "SMSs and emails should go out at the same time, because the one refers to the other
+ * one. You're just putting more manual work in for the person. This is supposed to be set and go."
+ *
+ * THE SWEEP ORDERED ONLY BY due_on, and the two steps of a pair share it -- so the database was
+ * free to hand the SMS over first. Attempted in that order the SMS says "we have emailed you"
+ * about an email that has not gone, planSend refuses it on `afterStepSent`, and it is marked HELD.
+ * The email then sends a moment later in the SAME sweep and nothing goes back for the SMS: it sits
+ * waiting for a person until somebody presses it. A debtor with the letter and no text, and a
+ * collector with a press to make that nobody asked for.
+ *
+ * THE ORDINAL IS THE KEY, the same one accountRun was missing -- one bug in the screen and one in
+ * the runner, the same shape, found in the same week.
+ */
+ok('the sweep asks for the node ordinal', /workflow_nodes!inner\(ordinal\)/.test(runner))
+ok('...and attempts the notice before the SMS behind it',
+  /a\.due_on\.localeCompare\(b\.due_on\)[\s\S]{0,120}workflow_nodes\?\.ordinal/.test(runner))
+/*
+ * AND THE MINUTES ARE NOT A WAIT ANYWHERE, which is what makes "at the same time" true rather than
+ * aspirational. after_minutes is read in exactly one way -- is it null -- and the number is never
+ * compared to a clock. Asserted as an absence, because the failure would be somebody implementing
+ * the delay the column's name suggests and splitting every pair across a gap the firm does not
+ * want.
+ */
+ok('the runner never waits out the minutes on the column',
+  !/afterMinutes\s*[*><]|setTimeout|after_minutes\s*[*><]/.test(runner))
+/* ONE PRESS SENDS BOTH, and the companion is run AS THE CALLER -- without that it would hit its own
+   waits-for-a-person refusal and hold, which is the two presses the firm is complaining about. */
+ok('a release sends the SMS behind the notice as the same person',
+  /runOneStep\(admin, s, today, caller\.id\)/.test(read('api/_lib/workflow/release.ts')))
+
 /* ---------------- the arrangement confirmation carries the schedule ---------------- */
 
 /*

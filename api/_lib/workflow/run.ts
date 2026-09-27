@@ -133,7 +133,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    */
   let query = admin
     .from('workflow_run_steps')
-    .select('id, node_id, due_on, state, note, run_id, workflow_runs!inner(id, account_id, version_id, started_on, state)')
+    .select('id, node_id, due_on, state, note, run_id, workflow_nodes!inner(ordinal), workflow_runs!inner(id, account_id, version_id, started_on, state)')
     .in('state', ['pending', 'held'])
     .lte('due_on', today)
     .eq('workflow_runs.state', 'running')
@@ -146,7 +146,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const steps = (due ?? []) as unknown as DueStep[]
+  /*
+   * THE NOTICE BEFORE THE SMS BEHIND IT, IN THE SWEEP AS WELL AS ON THE SCREEN.
+   *
+   * THE FIRM: "SMSs and emails should go out at the same time, because the one refers to the other
+   * one. You're just putting more manual work in for the person."
+   *
+   * ORDERED ONLY BY due_on ABOVE, and the two steps of a pair share it -- so the database was free
+   * to hand the SMS over first. Attempted in that order the SMS says "we have emailed you" about an
+   * email that has not gone, planSend refuses it on `afterStepSent`, and it is marked HELD. The
+   * email then sends a moment later in the same sweep and nothing goes back for the SMS: it sits
+   * waiting for a person until somebody presses it, which is precisely the manual work the firm is
+   * describing. One press, one morning, and a debtor who got the letter and no text.
+   *
+   * SORTED HERE RATHER THAN IN THE QUERY, because ordering a top-level row by an embedded column is
+   * PostgREST-version-dependent and this is at most two hundred rows already in hand.
+   *
+   * `ordinal` IS THE NODE'S OWN COLUMN and has said email-then-SMS since the workflow was built --
+   * the same key accountRun was missing, found in the same week, in the other half of the system.
+   */
+  const steps = ((due ?? []) as unknown as (DueStep & { workflow_nodes?: { ordinal?: number } })[])
+    .sort((a, b) => (
+      a.due_on.localeCompare(b.due_on)
+      || (a.workflow_nodes?.ordinal ?? 0) - (b.workflow_nodes?.ordinal ?? 0)
+    )) as DueStep[]
   /* `held` is a NEW hold or one whose reason changed; `stillHeld` is one that has not moved.
      Counted apart because the first is news and the second is the state of the floor -- a run
      reporting "held: 40" every morning would read as forty things going wrong daily. */

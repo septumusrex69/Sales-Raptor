@@ -9075,3 +9075,34 @@ alter table public.message_templates add constraint message_templates_schedule_i
 update public.message_templates
    set attaches_schedule = true
  where seed_key in ('email-ptp-confirmed-individual', 'email-ptp-confirmed-company');
+
+
+-- ============================================================================
+-- AN SMS NEVER ASKS FOR A PRESS OF ITS OWN.
+--
+-- THE FIRM: "SMSs and emails should go out at the same time, because the one refers to the other
+-- one. You're just putting more manual work in for the person. This is supposed to be set and go."
+--
+-- `needs_release` ON A FOLLOWER IS ALWAYS A SECOND PRESS FOR ONE STEP OF THE FIRM'S CHART. The
+-- notice is what a person decides about -- the credit bureau listing asserts a default HAS been
+-- reported, the summons that a file HAS gone to the attorneys, and neither may go until it is true.
+-- The SMS behind it asserts nothing of its own: it says "we have emailed you", which is either true
+-- because the email went or refused because it did not. There is nothing left for a person to
+-- decide by the time it runs.
+--
+-- IT ALREADY BEHAVED THIS WAY ON THE PRESS. api/_lib/workflow/release runs the companion as the
+-- CALLER, so releasing the notice lifts the follower's gate too and both go. What the column was
+-- still doing was offering the follower its own button on the screen -- and the firm pressed it,
+-- on a step that can never send alone, and were told the reason had not changed.
+--
+-- THE DRAFT ONLY. Version 1 is active and frozen, which is the point of publishing one: what a file
+-- went through is a question an attorney asks eighteen months later. These three rows are on
+-- version 2, which is a draft, and publishing it is the firm's own decision.
+-- ============================================================================
+update public.workflow_nodes n
+   set needs_release = false
+  from public.workflow_versions v
+ where v.id = n.version_id
+   and v.state = 'draft'
+   and n.after_minutes is not null
+   and n.needs_release = true;
