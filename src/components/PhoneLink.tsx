@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Phone, PhoneCall } from 'lucide-react'
 import { useBuzzBox } from '../store/BuzzBoxContext'
 import { useAppStore } from '../store/AppStore'
+import { RecordActionNote } from './record/RecordShell'
 import type { ID } from '../types'
 
 /** What to write on the timeline once a call is placed — which record it belongs to, and how to name it. */
@@ -38,6 +39,21 @@ interface PhoneLinkProps {
    * are not block-level. The number chooser looked exactly that broken.
    */
   block?: boolean
+  /**
+   * This link is one button in a row of them, so its status must not change the row's shape.
+   *
+   * THE ROW STRETCHES TO ITS TALLEST CHILD. While a dial is going out this component prints a line
+   * under the button -- "Ringing extension 201, pick up to connect" -- and in the account page's
+   * action row that line made every other button on the line taller and pushed the wrap, for the
+   * five seconds it lasts. The comment above `busyContent` was already halfway to this: it keeps
+   * the LABEL from changing width mid-click for the same reason, and then the line underneath
+   * changed the height instead.
+   *
+   * OPT-IN RATHER THAN ALWAYS, because the fifteen other places this is used are inline in a
+   * sentence or a table cell, where the status pushing its own line down is right and floating it
+   * over the next row is not. Only the account row asks for it. See RecordActionNote.
+   */
+  inActionRow?: boolean
 }
 
 /**
@@ -49,7 +65,7 @@ interface PhoneLinkProps {
  * the record it was placed from, so a rep's dialled calls stop depending on them remembering
  * to log them afterwards.
  */
-export function PhoneLink({ number, className = '', iconSize = 13, children, log, onDialled, block = false }: PhoneLinkProps) {
+export function PhoneLink({ number, className = '', iconSize = 13, children, log, onDialled, block = false, inActionRow = false }: PhoneLinkProps) {
   const { canDial, status, dial } = useBuzzBox()
   const { addActivity } = useAppStore()
   const [state, setState] = useState<{ kind: 'idle' } | { kind: 'dialling' } | { kind: 'ringing' } | { kind: 'error'; message: string }>({ kind: 'idle' })
@@ -114,20 +130,31 @@ export function PhoneLink({ number, className = '', iconSize = 13, children, log
   }
 
   const title = `Call via BuzzBox — rings your extension ${status?.extension} first, then dials ${number}`
+  const said = state.kind === 'dialling'
+    ? <span className="text-[11px] text-slate-400">Asking BuzzBox…</span>
+    : state.kind === 'ringing'
+      ? <span className="text-[11px] text-[var(--c-green)]">Ringing extension {status?.extension} — pick up to connect</span>
+      : state.kind === 'error'
+        ? <span className="text-[11px] text-red-600">{state.message}</span>
+        : null
+  const dialButton = (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={state.kind === 'dialling'}
+      title={title}
+      className={`${className} disabled:opacity-60 text-left ${dialling && children ? 'animate-pulse' : ''}`}
+    >
+      {dialling ? busyContent : content}
+    </button>
+  )
+  /* In a row of buttons the status floats under this one; everywhere else it pushes its own line
+     down, which is what reads correctly inside a sentence or a table cell. See `inActionRow`. */
+  if (inActionRow) return <RecordActionNote note={said}>{dialButton}</RecordActionNote>
   return (
     <span className={`${block ? 'flex w-full' : 'inline-flex'} flex-col items-start min-w-0`}>
-      <button
-        type="button"
-        onClick={handleClick}
-        disabled={state.kind === 'dialling'}
-        title={title}
-        className={`${className} disabled:opacity-60 text-left ${dialling && children ? 'animate-pulse' : ''}`}
-      >
-        {dialling ? busyContent : content}
-      </button>
-      {state.kind === 'dialling' && <span className="text-[11px] text-slate-400">Asking BuzzBox…</span>}
-      {state.kind === 'ringing' && <span className="text-[11px] text-[var(--c-green)]">Ringing extension {status?.extension} — pick up to connect</span>}
-      {state.kind === 'error' && <span className="text-[11px] text-red-600">{state.message}</span>}
+      {dialButton}
+      {said}
     </span>
   )
 }

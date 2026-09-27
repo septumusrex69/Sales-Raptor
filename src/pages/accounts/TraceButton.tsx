@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, Loader2, Search } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
+import { RecordActionNote } from '../../components/record/RecordShell'
 import { recordTrace, XDS_PORTAL_URL } from '../../lib/accountTrace'
 import { searchKeyProblem, traceSearchKey } from '../../lib/traceStore.ts'
 import { isValidSaId } from '../../lib/newDebtor'
@@ -117,23 +118,24 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
   }
 
   return (
-    <span className="inline-flex flex-col items-start">
-      <button type="button" onClick={open} title="Open XDS and record a credit bureau search — Annexure B item 4(c)" className={className}>
-        <Search size={14} /> {label ?? 'Trace'}
-      </button>
-
-      {/*
-        Straight after the charge, while the downloads are still in the corner of the screen. The
-        line stays for ten seconds and then clears itself, same as the charge it sits beside.
-      */}
-      {result && (
+    /*
+      THE TWO LINES BELOW THIS BUTTON ARE WHAT MADE THE ACTION ROW RAGGED.
+      
+      They sat in the flow, so recording a trace made this column two lines taller than every
+      button beside it -- which stretched the whole line and pushed the wrap. RecordActionNote
+      hangs them under the button instead: same words, same place on the screen, and the row does
+      not move. See RecordActions for what the firm was looking at when they said so.
+    */
+    <RecordActionNote note={result && (
+      <>
+        {/*
+          Straight after the charge, while the downloads are still in the corner of the screen. The
+          line stays for ten seconds and then clears itself, same as the charge it sits beside.
+        */}
         <button type="button" onClick={onUpload}
           className="text-[11px] font-medium text-[var(--c-steel)] hover:underline text-left">
           Upload what it found
         </button>
-      )}
-
-      {result && (
         <span className={`text-[11px] ${result.charge.reason === 'charged' ? 'text-[var(--c-green)]' : 'text-slate-500'}`}>
           {result.charge.reason === 'charged'
             ? `XDS opened · ${result.count > 1 ? `${result.count} searches · ` : ''}charged R${result.charge.exclVat.toFixed(2)} + VAT`
@@ -141,7 +143,11 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
               ? 'Recorded · no charge (account written off)'
               : 'Recorded · no charge (fee ceiling)'}
         </span>
-      )}
+      </>
+    )}>
+      <button type="button" onClick={open} title="Open XDS and record a credit bureau search — Annexure B item 4(c)" className={className}>
+        <Search size={14} /> {label ?? 'Trace'}
+      </button>
 
       {asking && (
         <Modal title="How many traces did you do?" onClose={() => setAsking(false)} width={460}>
@@ -203,6 +209,6 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
           </div>
         </Modal>
       )}
-    </span>
+    </RecordActionNote>
   )
 }

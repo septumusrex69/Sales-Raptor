@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, Phone } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
+import { RecordActionNote } from '../../components/record/RecordShell'
 import { PhoneLink } from '../../components/PhoneLink'
 import { callOutcome, recordConsultation, recordDial, recordNoAnswer } from '../../lib/accountCalls'
 import { saveMainComment } from '../../lib/accountWorkspace'
@@ -178,7 +179,18 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
   }
 
   return (
-    <span className="inline-flex flex-col items-start">
+    /*
+      THE LINE THIS BUTTON REPORTS IN -- "consultation recorded", or why it could not be -- hangs
+      under the button rather than sitting in the action row's flow. In the flow it made this
+      column taller than every button beside it and moved the row for the seconds the message
+      lasts. See RecordActions.
+    */
+    <RecordActionNote note={(status || error) && (
+      <>
+        {status && <span className="text-[11px] text-[var(--c-green)]">{status}</span>}
+        {error && <span className="text-[11px] text-negative-700">{error}</span>}
+      </>
+    )}>
       {/*
         One number rings straight away; several ask first.
 
@@ -186,7 +198,7 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
         every number goes out through exactly the same path, tel: fallback and all.
       */}
       {numbers.length <= 1 ? (
-        <PhoneLink number={numbers[0]?.value ?? ''} className={className} iconSize={14}
+        <PhoneLink number={numbers[0]?.value ?? ''} className={className} iconSize={14} inActionRow
           onDialled={(c) => void dialled(c)}>
           <Phone size={14} /> Call
         </PhoneLink>
@@ -196,9 +208,6 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
           <Phone size={14} /> Call
         </button>
       )}
-
-      {status && <span className="text-[11px] text-[var(--c-green)]">{status}</span>}
-      {error && <span className="text-[11px] text-negative-700">{error}</span>}
 
       {choosing && (
         <Modal title="Which number?" onClose={() => setChoosing(false)} width={440}>
@@ -323,6 +332,6 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
           </div>
         </Modal>
       )}
-    </span>
+    </RecordActionNote>
   )
 }

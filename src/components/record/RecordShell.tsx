@@ -139,9 +139,58 @@ export function RecordAction({ icon: Icon, label, onClick, title, primary, dange
   )
 }
 
-/** Everything you can do, in one row that wraps rather than scrolling the page sideways. */
+/**
+ * Everything you can do, in one row that wraps rather than scrolling the page sideways.
+ *
+ * `items-start` IS LOAD-BEARING AND WAS MISSING. A flex line stretches its children to the height
+ * of the tallest by default, and three of the buttons in this row are not plain buttons -- Call,
+ * Trace and the dial link inside Call each hang a line of status under themselves after they are
+ * used. So the moment a collector recorded a trace, that column became 66px tall and every OTHER
+ * button on the line stretched to match it: a row of tall boxes with their labels floating in the
+ * middle, beside a Call button that stayed 38px because its own wrapper is a column. The firm,
+ * looking at it: "all these things bigger, smaller."
+ *
+ * NOTHING STRETCHES NOW. Every button in the row is its own natural height on every page, whatever
+ * else is on the line with it -- and the status lines are taken out of the flow as well (see
+ * RecordActionNote), so using a button cannot change the shape of the row it is in.
+ */
 export function RecordActions({ children }: { children: ReactNode }) {
-  return <div className="flex flex-wrap gap-2">{children}</div>
+  /* data-qa because this is a geometry rule and only a real browser can check it: e2e measures
+     every button in the row and holds them to one height. See account-templates.mjs. */
+  return <div data-qa="record-actions" className="flex flex-wrap items-start gap-2">{children}</div>
+}
+
+/**
+ * A button in that row that also says what just happened.
+ *
+ * WHAT THIS IS FOR: Call raises an item 7 consultation and Trace raises an item 4(c) search, and
+ * both report it -- "XDS opened, 2 searches, charged R32.00 + VAT" -- because a fee raised with no
+ * visible confirmation is a fee somebody raises twice. The line is right: it is where it sat that
+ * was wrong.
+ *
+ * THE NOTE IS OUT OF THE FLOW, which is the whole point. In the flow it made its own column two
+ * lines taller than the buttons beside it, which pushed the wrap and moved every button after it
+ * down the page for the ten seconds the message lasts. A confirmation that rearranges the row it
+ * is confirming is worse than no confirmation. Hung from `top-full` it floats under its own button
+ * and the row never moves.
+ *
+ * WIDE ENOUGH TO READ AND NARROW ENOUGH TO STAY ON THE PAGE: `w-max` so a short line is not
+ * stretched to the button's width, capped against the viewport so a long error cannot run off the
+ * right edge of a tablet.
+ */
+export function RecordActionNote({ note, children }: { note?: ReactNode; children: ReactNode }) {
+  return (
+    /* `shrink-0`, not `min-w-0`: in a row that WRAPS, a button that does not fit belongs on the
+       next line, not squeezed narrower than its own label. */
+    <span className="relative inline-flex flex-col items-start shrink-0">
+      {children}
+      {note != null && (
+        <span className="absolute top-full left-0 z-20 mt-1 flex w-max max-w-[min(22rem,calc(100vw-3rem))] flex-col items-start gap-0.5">
+          {note}
+        </span>
+      )}
+    </span>
+  )
 }
 
 /**

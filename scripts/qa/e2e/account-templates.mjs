@@ -171,6 +171,59 @@ try {
   t.ok('the account opens', up)
   await page.waitForTimeout(2500)
 
+  /* ---------- the row of things you can do, which has to be ONE row of ONE size ---------- */
+
+  /*
+   * THE FIRM, LOOKING AT THIS ROW: "all these things bigger, smaller." They were right and the
+   * cause was a missing `items-start`: a flex line stretches its children to its tallest, and
+   * three buttons in this row hang a line of status under themselves after they are used -- so
+   * recording a trace made that column 66px and every other button on the line stretched to match
+   * it, labels floating in the middle of tall boxes.
+   *
+   * ONLY A BROWSER CAN SEE THIS. It is the whole reason this layer exists: the markup was right,
+   * every button was in the bundle, and the row was the wrong shape. Measured rather than read.
+   */
+  const row = page.locator('[data-qa="record-actions"]').first()
+  t.ok('the account has a row of actions', await row.isVisible())
+  const buttons = await row.evaluate((el) => Array.from(el.children).map((child) => {
+    /* A child is either the button itself or a wrapper holding it plus a floating note. The
+       BUTTON is what has to match, so measure the button wherever it is. */
+    const btn = child.matches('button, a') ? child : child.querySelector('button, a')
+    return btn ? { label: (btn.textContent ?? '').trim(), h: Math.round(btn.getBoundingClientRect().height) } : null
+  }).filter(Boolean))
+  /* ASSERTED PRESENT BEFORE ANYTHING ABOUT THEIR SIZES. An empty row makes "every height is the
+     same" true and meaningless -- CLAUDE.md's first trap, in its browser form. */
+  t.ok(`...with the buttons in it (${buttons.length})`, buttons.length >= 8)
+  const heights = [...new Set(buttons.map((b) => b.h))]
+  t.check(`...every one of them the same height (${heights.join(', ')}px)`, heights.length, 1)
+
+  /*
+   * AND THEY STAY THAT HEIGHT WITH SOMETHING TALL BESIDE THEM, which is the rule rather than the
+   * symptom.
+   *
+   * WHY A TALL ELEMENT IS PUT THERE ON PURPOSE. What actually made the row ragged was a collector
+   * recording a trace: two lines of status appeared under that button and every other button on
+   * the line grew to match. Driving a real trace here would take the XDS modal, a count and a POST
+   * -- and would test the trace, not the row. The row's rule is simply "a tall child does not
+   * change the others", so the check states exactly that.
+   *
+   * WITHOUT THIS THE ASSERTION ABOVE IS VACUOUS: nothing in this fixture's row is tall, so every
+   * button is 38px whether or not the row stretches, and deleting `items-start` would pass.
+   */
+  await row.evaluate((el) => {
+    const tall = document.createElement('div')
+    tall.id = 'qa-tall'
+    tall.style.cssText = 'height:64px;width:1px'
+    el.appendChild(tall)
+  })
+  const stretched = await row.evaluate((el) => Array.from(el.querySelectorAll(':scope > * button, :scope > button, :scope > a'))
+    .map((b) => Math.round(b.getBoundingClientRect().height)))
+  await row.evaluate((el) => el.querySelector('#qa-tall')?.remove())
+  const grew = stretched.filter((h) => h !== heights[0])
+  t.check(`...even with something tall on the line (${[...new Set(stretched)].join(', ')}px)`,
+    grew.length, 0)
+  await t.shot(page, '79-account-actions')
+
   /* ---------- the SMS box ---------- */
 
   const smsButton = page.getByRole('button', { name: 'SMS', exact: true }).first()
