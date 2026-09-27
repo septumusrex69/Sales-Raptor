@@ -213,29 +213,27 @@ try {
     await context.close()
   }
 
-  /* ---------- pressed on a Sunday, when nothing can go out ---------- */
+  /* ---------- pressed on a Sunday, which now sends ---------- */
   {
     /*
-     * THE BUG THE FIRM FOUND. "It said it started, but when is it going to send out the SMS and the
-     * letter? I thought it does that immediately." Day 1 of a business-day sequence normalises
-     * forward to the Monday, so the demand is dated tomorrow and nothing is sent -- correctly, and
-     * the release guard refuses a step before its due_on for exactly that reason. The button had
-     * promised otherwise.
+     * THE FIRM'S CORRECTION, IN A BROWSER. They pressed a section 129 on a Sunday, were told the
+     * demand would go on the Monday, and said: "if you issue the section 129, it should be done
+     * immediately. Shouldn't wait one day."
+     *
+     * SO DAY 1 IS THE PRESS AND NOT A CHART DAY. This case previously asserted the opposite -- that
+     * the question named the Monday and the button read "Yes, start it" -- and both were correct
+     * for the behaviour of the day and wrong about what the firm wanted. Kept rather than deleted,
+     * because the Sunday press is exactly the case that was wrong and the one worth holding here.
      */
     const { context, page } = await openAccount(browser, { runs: [], now: SUNDAY })
     await page.getByRole('button', { name: /Start: Section 129/ }).click()
     const body = await page.locator('body').innerText()
-    t.ok('on a Sunday the question does not claim anything goes out now', !/goes out now/.test(body))
-    t.ok('...it says nothing goes out today', /Nothing goes out today/.test(body))
-    /* WITH THE DATE IN IT. "Not today" is the complaint; a date is the answer to it. */
-    t.ok('...naming the working day it starts on', /Monday 28 Sep 2026/.test(body))
-    /* AND WHAT HAPPENS THAT MORNING. The start press lifts needs_release for what is due that day
-       and nothing is due, so the Monday sweep holds the demand for a press. */
-    t.ok('...and that the demand still waits for a person', /waits for a person/.test(body))
-    /* AND THE BUTTON SAYS THE SAME THING ITS SENTENCE DOES -- it is the half somebody presses. */
-    t.check('...and the press does not say send',
-      await page.getByRole('button', { name: /Yes, send it now/ }).count(), 0)
-    t.ok('...it says start', await page.getByRole('button', { name: /Yes, start it/ }).isVisible())
+    t.ok('a Sunday press says the first step goes out now', /first step goes out now/.test(body))
+    t.ok('...and does not put it off to a working day', !/Nothing goes out today/.test(body))
+    t.ok('...nor name the Monday', !/Monday 28 Sep 2026/.test(body))
+    /* THE BUTTON SAYS THE SAME THING ITS SENTENCE DOES -- it is the half somebody presses. */
+    t.ok('...and the press says send', await page.getByRole('button', { name: /Yes, send it now/ }).isVisible())
+    t.check('...not merely start', await page.getByRole('button', { name: /Yes, start it/ }).count(), 0)
     await context.close()
   }
 

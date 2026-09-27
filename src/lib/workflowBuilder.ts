@@ -266,10 +266,25 @@ export function dayRangeLabel(from: number, to: number, unit: DayUnit): string {
  *   - BUSINESS is 1-BASED AND INCLUSIVE. Day 1 is the day the workflow starts, because that is
  *     how the firm writes their own chart: "the clerk triggers the section 129, workflow starts,
  *     that's day one." So day 7 is the seventh working day counting that one, not seven days
- *     later. A start that lands on a Saturday moves to the Monday first -- a workflow does not
- *     begin on a day the office is shut.
+ *     later.
  *   - CALENDAR is 0-BASED, which is what every workflow written before this meant, and changing
  *     it would silently move every step of one already drawn.
+ *
+ * DAY 1 IS THE DAY IT STARTS EVEN WHEN THE OFFICE IS SHUT, and that sentence is the whole of a
+ * change the firm asked for after watching a section 129 start on a Sunday: "if you issue the
+ * section 129, it should be done immediately. Shouldn't wait one day."
+ *
+ * THEY ARE RIGHT, AND THE REASON IS WHAT DAY 1 IS. Every other day on the chart is an OFFICE day
+ * -- a clerk does something, a notice goes out of a working mailbox, a period runs. Day 1 is not
+ * that: it is the PRESS, a human act that happens whenever the person decides the file is ready,
+ * and the firm's own rule for the sequence is that the press IS the issuing ("the moment the
+ * section 129 is sent out via email, that is when the workflow is triggered"). Normalising it
+ * forward made the system wait a day to do the thing the person had just done.
+ *
+ * SO ONLY DAY 1 ESCAPES THE CALENDAR. Day 2 and everything after it are still counted off the
+ * first WORKING day on or after the start, so every interval on the chart keeps the length it
+ * had -- a start on a Saturday still puts day 7 exactly where it was. The only date that moves
+ * is the first one, and it moves onto the day somebody actually pressed the button.
  */
 export function landsOn(
   from: string, day: number, unit: DayUnit, holidays: Record<string, string> = {},
@@ -279,9 +294,15 @@ export function landsOn(
     d.setUTCDate(d.getUTCDate() + day)
     return d.toISOString().slice(0, 10)
   }
+  /*
+   * DAY 1 IS THE PRESS, UNNORMALISED. See above: the person did the thing, so the date is the day
+   * they did it. Clamped at 1 because a business chart has no day 0 -- the day box floors there,
+   * and a step typed as 0 would otherwise read as happening before the workflow started.
+   */
+  if (day <= 1) return from
   /* addWorkingDays(x, 0) is "the next working day on or after x", which is the normalisation. */
   const start = addWorkingDays(from, 0, holidays)
-  return addWorkingDays(start, Math.max(0, day - 1), holidays)
+  return addWorkingDays(start, day - 1, holidays)
 }
 
 /**
@@ -294,8 +315,10 @@ export function landsOn(
  * of one — which is why it lives here, beside landsOn, rather than in the panel that draws it.
  *
  * THE INVERSE HOLDS IN BOTH UNITS: dayNumberOn(from, landsOn(from, n)) === n. Business is
- * 1-based and inclusive, so the day a run starts is day 1 and a Saturday start normalises
- * forward to the Monday, exactly as landsOn does. Calendar is 0-based, unchanged.
+ * 1-based and inclusive, so the day a run starts is day 1 -- including a Saturday, which is the
+ * day the press happened. `date <= start` is what carries that here: a Sunday start normalises to
+ * the Monday, the Sunday is before it, and the answer is day 1, exactly as landsOn now says.
+ * Calendar is 0-based, unchanged.
  *
  * BEFORE THE RUN STARTED IT IS 0 in calendar days and 1 in business days — the first day of the
  * chart, because a business run cannot have a day before its first.

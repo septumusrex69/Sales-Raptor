@@ -45,14 +45,48 @@ const MONDAY = '2026-09-28'
 const HERITAGE = '2026-09-24'
 const WEDNESDAY = '2026-09-30'
 
-check('a business day 1 pressed on a Sunday lands on the Monday',
-  firstStepOn(SUNDAY, 1, 'business'), MONDAY)
-check('...and on a working day it lands on that day',
+/*
+ * DAY 1 IS THE DAY IT STARTS, INCLUDING A SUNDAY, and that is the firm's own correction after
+ * watching a section 129 start on one: "if you issue the section 129, it should be done
+ * immediately. Shouldn't wait one day."
+ *
+ * WHY DAY 1 AND NOTHING ELSE. Every other day on the chart is an OFFICE day -- a clerk acts, a
+ * notice leaves a working mailbox, a period runs. Day 1 is the PRESS, and the firm's rule for this
+ * sequence is that the press IS the issuing. Normalising it forward made the system wait a day to
+ * do the thing the person had just done.
+ */
+check('a business day 1 pressed on a Sunday is that Sunday',
+  firstStepOn(SUNDAY, 1, 'business'), SUNDAY)
+check('...and on a working day it is still that day',
   firstStepOn(WEDNESDAY, 1, 'business'), WEDNESDAY)
-/* A PUBLIC HOLIDAY IS NOT A WEEKEND AND IS TREATED THE SAME. Heritage Day 2026 is a Thursday, so
-   day 1 pressed on it is the Friday — a check written only against Saturdays would pass on code
-   that ignored holidays entirely. */
-check('...a public holiday moves it on as well', firstStepOn(HERITAGE, 1, 'business'), '2026-09-25')
+check('...and on a public holiday it is that holiday',
+  firstStepOn(HERITAGE, 1, 'business'), HERITAGE)
+/*
+ * AND EVERY LATER DAY IS STILL AN OFFICE DAY, counted off the first working day on or after the
+ * start -- so every interval keeps the length it had and only the FIRST date moved. These four are
+ * the dates the firm was looking at on their own screen when they asked for this.
+ */
+check('day 7 off a Sunday press is unchanged', firstStepOn(SUNDAY, 7, 'business'), '2026-10-06')
+check('...and day 12', firstStepOn(SUNDAY, 12, 'business'), '2026-10-13')
+check('...and day 39, the credit bureau listing', firstStepOn(SUNDAY, 39, 'business'), '2026-11-19')
+check('...and day 49, the intended summons', firstStepOn(SUNDAY, 49, 'business'), '2026-12-03')
+/*
+ * A PUBLIC HOLIDAY IS SKIPPED FOR THE LATER DAYS TOO, not only a weekend: Heritage Day 2026 is a
+ * Thursday, and a check written against Saturdays alone would pass on code that ignored holidays.
+ *
+ * AND THIS IS WHERE THE SEAM SHOWS, so it is asserted rather than left to be discovered. Pressed on
+ * Heritage Day, day 1 is the Thursday (the press) and day 2 is the MONDAY -- the Friday belongs to
+ * no day number at all. That gap is the price of keeping every later interval exactly where the
+ * firm charted it: day 2 counts off the first working day as it always did, so days 7, 12, 39 and
+ * 49 have not moved by an hour. Making day 2 the Friday instead would pull the whole statutory
+ * chart a day earlier, which is not what was asked for and not something to do by accident.
+ *
+ * IN PRACTICE THERE IS NO SEAM: a press on a working day has day 1 and day 2 adjacent, as before.
+ */
+check('day 2 off a public holiday is the next working day after it',
+  firstStepOn(HERITAGE, 2, 'business'), '2026-09-28')
+check('...and day 2 off an ordinary Wednesday is the Thursday',
+  firstStepOn(WEDNESDAY, 2, 'business'), '2026-10-01')
 /* Calendar day 0 is the day it starts, unchanged, which is what every workflow drawn before the
    unit existed meant. */
 check('a calendar day 0 is today, weekend or not', firstStepOn(SUNDAY, 0, 'calendar'), SUNDAY)
@@ -78,6 +112,12 @@ ok('on a working day it says the first step goes out now', /first step goes out 
    steps that assert something has already happened still wait for a person. */
 ok('...and that the later steps still wait for you', /still wait for you/.test(now))
 
+/*
+ * A BUSINESS CHART WHOSE FIRST STEP IS DAY 1 CAN NO LONGER REACH THIS WORDING, because day 1 is now
+ * the press. It is still reached by a chart whose first step is day 2 or later, and by a calendar
+ * chart that starts later, so the sentence is kept and tested rather than deleted along with the
+ * one case that used to produce it.
+ */
 const shut = startSentence(SUNDAY, MONDAY, 'business')
 ok('on a Sunday it does not say anything goes out now', !/goes out now/.test(shut))
 ok('...it says nothing goes out today', /Nothing goes out today/.test(shut))

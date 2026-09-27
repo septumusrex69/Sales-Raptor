@@ -146,12 +146,35 @@ check('...a public holiday is not one of the days', landsOn('2026-09-23', 2, 'bu
 check('...nor is a weekend', landsOn('2026-09-23', 3, 'business'), '2026-09-28')
 
 /*
- * A WORKFLOW DOES NOT BEGIN ON A DAY THE OFFICE IS SHUT. Started on a Saturday, day 1 is the
- * Monday -- otherwise the whole chart is dated from a day nobody worked.
+ * A WORKFLOW BEGINS ON THE DAY SOMEBODY STARTED IT, EVEN IF THE OFFICE IS SHUT.
+ *
+ * THE FIRM, HAVING PRESSED A SECTION 129 ON A SUNDAY AND BEEN TOLD IT WOULD GO MONDAY: "if you
+ * issue the section 129, it should be done immediately. Shouldn't wait one day."
+ *
+ * THIS ASSERTION USED TO SAY THE OPPOSITE, and the reasoning it carried -- "otherwise the whole
+ * chart is dated from a day nobody worked" -- was right about the CHART and wrong about day 1. Day
+ * 1 is not a chart day, it is the press: a human act, on whatever day the person decides the file
+ * is ready, and the firm's rule for this sequence is that the press IS the issuing.
  */
-check('a workflow started on a Saturday has its day 1 on the Monday',
-  landsOn('2026-09-26', 1, 'business'), '2026-09-28')
-ok('...and every business day of a workflow is a working day',
+check('a workflow started on a Saturday has its day 1 on that Saturday',
+  landsOn('2026-09-26', 1, 'business'), '2026-09-26')
+/*
+ * AND THE CHART IS STILL DATED FROM A WORKING DAY. Only day 1 escapes the calendar; day 2 onwards
+ * counts off the first working day on or after the start exactly as it always did, which is what
+ * keeps every statutory interval the length the firm charted -- day 7 off this Saturday is still
+ * Tuesday 6 October.
+ *
+ * SO THERE IS A ONE-DAY SEAM AFTER A WEEKEND PRESS, and it is asserted rather than left to be
+ * found: day 1 is the Saturday and day 2 is the TUESDAY, with the Monday belonging to no day
+ * number. Making day 2 the Monday would pull the whole chart a day earlier, which is not what was
+ * asked for. A press on a working day has no seam at all.
+ */
+check('...while day 2 is the day after the first working day',
+  landsOn('2026-09-26', 2, 'business'), '2026-09-29')
+check('...and day 7 has not moved', landsOn('2026-09-26', 7, 'business'), '2026-10-06')
+ok('...and every LATER business day of a workflow is a working day',
+  [2, 7, 12, 32, 39, 49].every((d) => isWorkingDay(landsOn('2026-09-26', d, 'business'))))
+ok('...including one started on a working day, day 1 and all',
   [1, 7, 12, 32, 39, 49].every((d) => isWorkingDay(landsOn('2026-09-23', d, 'business'))))
 
 /*
