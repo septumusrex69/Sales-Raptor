@@ -195,9 +195,18 @@ ok('a payment can only be split once',
  * imported history one table along: what has been invoiced stays as invoiced, and a correction is
  * a negative line in the NEXT run. Both the count-back and the delete have to be scoped, or the
  * capital is restored for a row that is never removed and the account gains money out of nowhere.
+ *
+ * INVOICED, NOT MERELY IN A RUN. From the 11th of a month until somebody presses Approve, every
+ * allocation in the cycle carries a payover_run_id; guarded on that, setting a missing commission
+ * rate would have replayed nothing and the draft would have stayed wrong until the next month.
  */
 check('a replay leaves an invoiced allocation alone',
-  (replay.match(/a\.payover_run_id is null/g) ?? []).length, 2)
+  (replay.match(/not public\.allocation_is_invoiced\(a\.payover_run_id\)/g) ?? []).length, 2)
+/* AND LEAVES ITS PAYMENT ALONE WITH IT -- the fee delete and the replay loop. Calling
+   allocate_payment on a payment whose allocation survived is refused by the one-per-payment index,
+   which would take the reversal that triggered the replay down with it. */
+check('...and does not redo the payment underneath it',
+  (replay.match(/not public\.payment_is_invoiced\(p\.id\)/g) ?? []).length, 2)
 
 /*
  * AND IT LEAVES THE REVERSED PAYMENT'S CANCELLED FEE ON THE LEDGER. The delete exists so the

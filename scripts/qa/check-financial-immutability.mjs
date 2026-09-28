@@ -47,6 +47,16 @@ const LEDGERS = [
   'payment_allocations',
   'account_fees',
   'account_interest_accruals',
+  /*
+   * AND THE FIFTH: THE LINES OF A PAYOVER RUN.
+   *
+   * They arrived with the Finance module and they belong in this set for the same reason as the
+   * other four -- once a run is approved its lines ARE the remittance advice a client was paid
+   * on, and decision 6 says a later correction is a negative line in the NEXT run rather than an
+   * edit to this one. A trigger refuses an edit to an approved run's lines; this is the second
+   * lock, and the one that holds even for a draft nobody has approved yet.
+   */
+  'payover_run_lines',
 ]
 
 for (const table of LEDGERS) {
@@ -92,7 +102,7 @@ if (failures.length) {
 }
 console.log(`${pass} passed, 0 failed`)
 console.log(`
-The four money ledgers can be read and written to and never changed or deleted -- enforced by
+The five money ledgers can be read and written to and never changed or deleted -- enforced by
 policies that are ABSENT rather than by policies that refuse, which is why it is worth a check:
 the next person to add a policy block has nothing to trip over. Searched over the whole of
 schema.sql, because it is append-only and a later migration lands at the end.`)
